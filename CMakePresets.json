@@ -1,0 +1,204 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 30,
+    "patch": 0
+  },
+
+  "configurePresets": [
+    {
+      "name": "clang",
+      "hidden": true,
+      "displayName": "clang (base)",
+      "description": "What the three clang presets share. clang is a choice of default, not a requirement: it is the toolchain the warning set is tuned against. Any other compiler is one cache variable away (-DCMAKE_C_COMPILER=gcc or cl). Presets only state what DIFFERS from the option defaults in CMakeLists.txt.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+
+    {
+      "name": "clang-debug",
+      "inherits": "clang",
+      "displayName": "Clang Debug",
+      "description": "Unoptimized, every check compiled in, debug logging and gem hot reload on. This is the config where a new warning is cheapest to fix.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MG_DEBUG_ENABLED": "ON",
+        "MG_HOT_RELOAD_GEMS": "ON"
+      }
+    },
+
+    {
+      "name": "clang-optimized",
+      "inherits": "clang",
+      "displayName": "Clang Optimized",
+      "description": "Release code generation with the assertions left in -- the config to develop and profile against. 'Optimized' is not a build type CMake ships, so its flags are spelled out here; -g costs nothing at runtime and makes a firing assert land on a line number.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Optimized",
+        "CMAKE_C_FLAGS_OPTIMIZED": "-O2 -g -DNDEBUG",
+        "CMAKE_MAP_IMPORTED_CONFIG_OPTIMIZED": "Optimized;RelWithDebInfo;Release;"
+      }
+    },
+
+    {
+      "name": "clang-release",
+      "inherits": "clang",
+      "displayName": "Clang Release",
+      "description": "What ships. Asserts compiled out, logging down to what a user could act on, and no memory ledger -- which also takes the bookkeeping header off every allocation. MG_WERROR is off here and only here: a new compiler's new warning must not be what stops a release.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MG_WERROR": "OFF",
+        "MG_ASSERT_ENABLED": "OFF",
+        "MG_INFO_ENABLED": "OFF",
+        "MG_TRACK_MEMORY": "OFF"
+      }
+    },
+
+    {
+      "name": "msvc",
+      "hidden": true,
+      "displayName": "MSVC (base)",
+      "description": "What the three MSVC presets share, mirroring the clang base. cl.exe is found on PATH rather than by absolute path, so these must be configured from a Developer Command Prompt or an IDE toolchain that has run vcvarsall -- Ninja does not set up the MSVC environment itself, unlike the Visual Studio generators. The warning set is already spelled for cl in cmake/MagicCompiler.cmake, which also hard-fails without /Zc:preprocessor: the argument-count dispatch in asserts.h and list.h does not survive the traditional preprocessor.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "MG_CLANG_TIDY": "OFF"
+      }
+    },
+
+    {
+      "name": "msvc-debug",
+      "inherits": "msvc",
+      "displayName": "MSVC Debug",
+      "description": "The clang-debug settings under cl: every check compiled in, debug logging and gem hot reload on.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "MG_DEBUG_ENABLED": "ON",
+        "MG_HOT_RELOAD_GEMS": "ON"
+      }
+    },
+
+    {
+      "name": "msvc-optimized",
+      "inherits": "msvc",
+      "displayName": "MSVC Optimized",
+      "description": "clang-optimized under cl: release code generation with the assertions left in. 'Optimized' is not a build type CMake ships, so its flags are spelled out here in MSVC's dialect -- /Zi is -g, and the linker needs /debug of its own to emit the PDB the compiler's debug info goes into.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Optimized",
+        "CMAKE_C_FLAGS_OPTIMIZED": "/O2 /Zi /DNDEBUG",
+        "CMAKE_EXE_LINKER_FLAGS_OPTIMIZED": "/debug /INCREMENTAL:NO",
+        "CMAKE_SHARED_LINKER_FLAGS_OPTIMIZED": "/debug /INCREMENTAL:NO",
+        "CMAKE_MAP_IMPORTED_CONFIG_OPTIMIZED": "Optimized;RelWithDebInfo;Release;"
+      }
+    },
+
+    {
+      "name": "msvc-release",
+      "inherits": "msvc",
+      "displayName": "MSVC Release",
+      "description": "What ships, built by cl. Asserts compiled out, logging down to what a user could act on, no memory ledger, and MG_WERROR off for the same reason it is off in clang-release.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MG_WERROR": "OFF",
+        "MG_ASSERT_ENABLED": "OFF",
+        "MG_INFO_ENABLED": "OFF",
+        "MG_TRACK_MEMORY": "OFF"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug",
+      "displayName": "Clang Debug"
+    },
+    {
+      "name": "clang-optimized",
+      "configurePreset": "clang-optimized",
+      "displayName": "Clang Optimized"
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release",
+      "displayName": "Clang Release"
+    },
+    {
+      "name": "msvc-debug",
+      "configurePreset": "msvc-debug",
+      "displayName": "MSVC Debug"
+    },
+    {
+      "name": "msvc-optimized",
+      "configurePreset": "msvc-optimized",
+      "displayName": "MSVC Optimized"
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc-release",
+      "displayName": "MSVC Release"
+    }
+  ],
+
+  "testPresets": [
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug",
+      "displayName": "Clang Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "clang-optimized",
+      "configurePreset": "clang-optimized",
+      "displayName": "Clang Optimized",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release",
+      "displayName": "Clang Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "msvc-debug",
+      "configurePreset": "msvc-debug",
+      "displayName": "MSVC Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "msvc-optimized",
+      "configurePreset": "msvc-optimized",
+      "displayName": "MSVC Optimized",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "msvc-release",
+      "configurePreset": "msvc-release",
+      "displayName": "MSVC Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

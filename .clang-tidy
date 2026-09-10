@@ -1,0 +1,94 @@
+# Static analysis for Magic, which is a C project (CMake: LANGUAGES C). The
+# only C++ in the tree is the GoogleTest glue under tests/unit.
+Checks:
+  - -*
+  - bugprone-*
+  - -bugprone-easily-swappable-parameters
+  - -bugprone-narrowing-conversions
+  - -bugprone-suspicious-semicolon
+  - -bugprone-macro-parentheses
+  # C has no reinterpret_cast to spell it with, and the (type*)(void*)(byte*)
+  # hop in foreach is how a generic buffer steps by item_size; the void* leg
+  # silences -Wcast-align, not a type change being hidden.
+  - -bugprone-casting-through-void
+  - clang-analyzer-*
+  - -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+  - -clang-diagnostic-attributes
+  # Cannot model __builtin_va_start on the MSVC ABI: it reports va_end on an
+  # "uninitialized" list for a textbook va_start/vsnprintf/va_end.
+  - -clang-analyzer-security.VAList
+  - readability-identifier-naming
+  # A leading __ is reserved by the standard, and is nonetheless this project's
+  # marker for a macro-minted private identifier. Allowed by prefix rather than
+  # renamed; the IgnoredRegexp entries below make the naming check agree.
+  - -bugprone-reserved-identifier
+# Everything is an error except the unused family: unused code is work in
+# progress, not a defect, so it stays a warning here and in MagicCompiler's
+# -Wno-error demotions.
+WarningsAsErrors: '*,-clang-diagnostic-unused*'
+# The project's own headers are checked wherever a compile includes them.
+# System and GoogleTest headers live outside core/ and stay out.
+HeaderFilterRegex: '.*[/\\]core[/\\].*'
+FormatStyle: file
+CheckOptions:
+  # Types.
+  - key: readability-identifier-naming.StructCase
+    value: lower_case
+  - key: readability-identifier-naming.UnionCase
+    value: lower_case
+  - key: readability-identifier-naming.EnumCase
+    value: lower_case
+  - key: readability-identifier-naming.TypedefCase
+    value: lower_case
+
+  # Functions. A trailing _ is this project's marker for a private helper
+  # (mg_default_mem_fits_), allowed on an otherwise lower_case name.
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalFunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.FunctionIgnoredRegexp
+    value: '^[a-z][a-z0-9_]*_$'
+
+  # Variables and members.
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.LocalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.StaticVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.MemberCase
+    value: lower_case
+
+  # Constants. Constant DATA is named like the variable it is (g_slots, the
+  # static desc a gem mints); UPPER_CASE is for the compile-time world of
+  # macros and enum constants.
+  - key: readability-identifier-naming.LocalConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.StaticConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: lower_case
+  # The __ prefix of macro-minted private identifiers (__mg_lib_syms), which
+  # lower_case would otherwise reject.
+  - key: readability-identifier-naming.GlobalConstantIgnoredRegexp
+    value: '^__[a-z][a-z0-9_]*$'
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+
+  # Macros. The trailing _ again: the private half of an argument-count
+  # dispatch (MG_LOG_1_, MG_UNUSED_PICK_) keeps its marker. Function-like
+  # macros that read as functions or keywords (foreach, where, first, last,
+  # mg_alloc_one) are named like functions: fully lower_case.
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionIgnoredRegexp
+    value: '^([A-Z][A-Z0-9_]*_|[a-z][a-z0-9_]*)$'
