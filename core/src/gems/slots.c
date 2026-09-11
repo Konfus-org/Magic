@@ -17,11 +17,13 @@
 
 MG_DEFINE_LIST(mg_gem_slot, NULL);
 
-/* The registry: grows as families register, alive for the whole program and
- * never freed, across app closes and reopens included -- the slots describe
- * pointers whose lifetime is the process's, so the list is this module's
- * own, not the app's. mg_list_construct, not _new: a global's initializer
- * must be a constant expression, which no function call is. */
+/* The registry: grows as families register, and is emptied by
+ * mg_clear_gem_slots when the app closes -- the pointers the slots describe
+ * live for the whole process, but this bookkeeping about them need not, and
+ * an unfreed list is a leak the close-time balance check rightly refuses.
+ * The list is this module's own, not the app's. mg_list_construct, not _new:
+ * a global's initializer must be a constant expression, which no function
+ * call is. */
 static mg_gem_slot_list g_slots = mg_list_construct(mg_gem_slot);
 
 void mg_register_gem_slot(const char* name, mg_lib_fn* ptr_address) {
@@ -54,4 +56,8 @@ void mg_register_gem_slot(const char* name, mg_lib_fn* ptr_address) {
 mg_gem_slot_table mg_gem_slots(void) {
     const mg_gem_slot_table table = {(const mg_gem_slot*)g_slots.items, g_slots.count};
     return table;
+}
+
+void mg_clear_gem_slots(void) {
+    mg_gem_slot_list_free(&g_slots);
 }

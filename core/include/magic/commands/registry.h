@@ -14,23 +14,26 @@
 #pragma once
 #include "magic/collections/list.h"
 #include "magic/commands/parser.h"
+#include "magic/enums.h"
 #include "magic/export.h"
 #include "magic/primitives.h"
+
+/** @brief Every command code, for the mg_cmd_code mint below. */
+#define MG_CMD_CODE_VALUES_(X)                                                                     \
+    X(MG_CMD_CODE_NONE)                                                                            \
+    X(MG_CMD_CODE_HELP)                                                                            \
+    X(MG_CMD_CODE_NAME)                                                                            \
+    X(MG_CMD_CODE_DIRS)                                                                            \
+    X(MG_CMD_CODE_WINDOW)
 
 /**
  * @brief The commands the engine itself understands. A command's code is a
  * plain u32 everywhere it travels, not this enum, so a user mints their own
- * codes starting at MG_CMD_CODE_COUNT and registers handlers for them the
- * same way the engine registers these.
+ * codes starting at MG_CMD_CODE_COUNT -- the first code free for a user's
+ * own -- and registers handlers for them the same way the engine registers
+ * these.
  */
-typedef enum mg_cmd_code {
-    MG_CMD_CODE_NONE,
-    MG_CMD_CODE_HELP,
-    MG_CMD_CODE_NAME,
-    MG_CMD_CODE_DIRS,
-    MG_CMD_CODE_WINDOW,
-    MG_CMD_CODE_COUNT, /**< The first code free for a user's own. */
-} mg_cmd_code;
+MG_DEFINE_ENUM(mg_cmd_code, MG_CMD_CODE_COUNT, MG_CMD_CODE_VALUES_);
 
 /**
  * @brief One command to run: which, and its arguments. args is borrowed

@@ -1,7 +1,8 @@
 /**
  * @file gem.h
  * @author Jeremy Hummel (konfusdev@gmail.com)
- * @brief What a gem is: a loaded library plus an identity and a lifecycle.
+ * @brief What a gem is: a loaded library plus an identity, a lifecycle, and
+ * the gems it needs standing before it.
  * @version 1.0
  * @date 2026-09-08
  * @copyright MagicGameEngine is Copyright (c) Jeremy Hummel
@@ -11,6 +12,13 @@
 #include "magic/collections/list.h"
 #include "magic/collections/string.h"
 #include "magic/platform/shared_lib.h"
+
+/**
+ * @brief How many gems one gem may name as its dependencies. A fixed array
+ * rather than a pointer: the desc crosses an ABI boundary and is read once,
+ * so it carries its dependencies rather than pointing at them.
+ */
+#define MG_MAX_GEM_DEPENDENCIES 8
 
 /* Forward declared to avoid a cycle through app.h. */
 typedef struct mg_app mg_app;
@@ -37,6 +45,9 @@ typedef struct mg_gem_desc {
     mg_str_view version;
     mg_str_view description;
     mg_str_view author;
+    /** @brief The names of the gems that must be loaded before this one. */
+    mg_str_view dependencies[MG_MAX_GEM_DEPENDENCIES];
+    len dependency_count; /**< How many of dependencies are filled in. */
     mg_gem_api hooks; /**< Lifecycle hooks; any of them may be NULL. */
 } mg_gem_desc;
 

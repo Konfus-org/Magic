@@ -13,6 +13,9 @@
 /** @brief Boxes a pointer with the size of what it points at. */
 #define mg_boxup(ptr) (LITERAL(mg_box) {(ptr), sizeof(*(ptr))})
 
+/** @brief The box carrying nothing: NULL data, zero size. */
+#define MG_NIL_BOX (LITERAL(mg_box) {NULL, 0})
+
 /**
  * @brief Reads a box back as type. A box carries a size, not a type; it is
  * on the caller to unbox what was boxed.

@@ -39,80 +39,82 @@
  * mg_logger_array_free(&loggers);
  * @endcode
  */
-#define MG_DEFINE_NAMED_ARRAY(type, name, destructor)                                                \
-    typedef mg_array name;                                                                           \
-    typedef mg_iter name##_iter;                                                                     \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline name name##_construct(type* storage, const len capacity) {         \
-        const name array =                                                                           \
-            {(void*)storage, sizeof(type), 0, storage != NULL ? capacity : 0, (destructor)};         \
-        return array;                                                                                \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline name name##_new(const len capacity) {                              \
-        return mg_buffer_new(sizeof(type), capacity, (destructor), MG_MEMORY_TAG_ARRAY);             \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline void name##_free(name* array) {                                    \
-        mg_buffer_free(array, MG_MEMORY_TAG_ARRAY);                                                  \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline void name##_push(name* array, type curr) {                         \
-        mg_buffer_push(array, (const void*)&curr, sizeof(type));                                     \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline void name##_push_many(                                             \
-        name* array,                                                                                 \
-        const type* items,                                                                           \
-        const len count) {                                                                           \
-        mg_buffer_push_many(array, (const void*)items, count);                                       \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline type name##_pop(name* array) {                                     \
-        type popped = MG_ZERO_INIT_;                                                                 \
-        /* Cast spelled out: when type is itself a pointer, &popped erases two                     \
-         * levels at once, which is only OK because the buffer copies bytes. */ \
-        mg_buffer_pop(array, (void*)&popped);                                                        \
-        return popped;                                                                               \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline type* name##_peek(name* array) {                                   \
-        return (type*)mg_buffer_peek(array);                                                         \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline ind name##_index_of(const name* array, type curr) {                \
-        return mg_buffer_index_of(array, (const void*)&curr, sizeof(type));                          \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline void name##_remove(name* array, const ind index) {                 \
-        mg_buffer_remove(array, index);                                                              \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline type* name##_at(name* array, const ind index) {                    \
-        return (type*)mg_buffer_at_sized(array, index, sizeof(type));                                \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline mg_view name##_view(const name* array) {                           \
-        return mg_buffer_view(array);                                                                \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline name##_iter name##_it(const name* array) {                         \
-        return mg_iter_construct(mg_buffer_view(array));                                             \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline name##_iter name##_rit(const name* array) {                        \
-        return mg_iter_construct_reverse(mg_buffer_view(array));                                     \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline const type* name##_iter_next(name##_iter* it) {                    \
-        return (const type*)mg_iter_next(it);                                                        \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline const type* name##_iter_previous(name##_iter* it) {                \
-        return (const type*)mg_iter_previous(it);                                                    \
-    }                                                                                                \
-                                                                                                     \
-    /* Eats the call site's semicolon; retyping a name to the same type is legal C11. */             \
+#define MG_DEFINE_NAMED_ARRAY(type, name, destructor)                                              \
+    typedef mg_array name;                                                                         \
+    typedef mg_iter name##_iter;                                                                   \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline name name##_construct(type* storage, const len capacity) {       \
+        const name array =                                                                         \
+            {(void*)storage, sizeof(type), 0, storage != NULL ? capacity : 0, (destructor)};       \
+        return array;                                                                              \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline name name##_new(const len capacity) {                            \
+        return mg_buffer_new(sizeof(type), capacity, (destructor), MG_MEMORY_TAG_ARRAY);           \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline void name##_free(name* array) {                                  \
+        mg_buffer_free(array, MG_MEMORY_TAG_ARRAY);                                                \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline void name##_clear(name* array) {                                 \
+        mg_buffer_clear(array);                                                                    \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline void name##_push(name* array, type curr) {                       \
+        mg_buffer_push(array, (const void*)&curr, sizeof(type));                                   \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline void name##_push_many(                                           \
+        name* array,                                                                               \
+        const type* items,                                                                         \
+        const len count) {                                                                         \
+        mg_buffer_push_many(array, (const void*)items, count);                                     \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline type name##_pop(name* array) {                                   \
+        type popped = MG_ZERO_INIT_;                                                               \
+        mg_buffer_pop(array, (void*)&popped);                                                      \
+        return popped;                                                                             \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline type* name##_peek(name* array) {                                 \
+        return (type*)mg_buffer_peek(array);                                                       \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline ind name##_index_of(const name* array, type curr) {              \
+        return mg_buffer_index_of(array, (const void*)&curr, sizeof(type));                        \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline void name##_remove(name* array, const ind index) {               \
+        mg_buffer_remove(array, index);                                                            \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline type* name##_at(name* array, const ind index) {                  \
+        return (type*)mg_buffer_at_sized(array, index, sizeof(type));                              \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline mg_view name##_view(const name* array) {                         \
+        return mg_buffer_view(array);                                                              \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline name##_iter name##_it(const name* array) {                       \
+        return mg_iter_construct(mg_buffer_view(array));                                           \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline name##_iter name##_rit(const name* array) {                      \
+        return mg_iter_construct_reverse(mg_buffer_view(array));                                   \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline const type* name##_iter_next(name##_iter* it) {                  \
+        return (const type*)mg_iter_next(it);                                                      \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline const type* name##_iter_previous(name##_iter* it) {              \
+        return (const type*)mg_iter_previous(it);                                                  \
+    }                                                                                              \
+                                                                                                   \
+    /* Eats the call site's semicolon; retyping a name to the same type is legal C11. */           \
     typedef name name
 
 /**

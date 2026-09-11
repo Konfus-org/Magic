@@ -112,13 +112,12 @@ TEST(GemSlotRegistry, PlatformFamilyRegistersEverySlotAtItsDefault) {
 
     const char* expected[] = {
         "gs_platform_setup",          "gs_platform_cleanup",
-        "gs_platform_pump",           "gs_platform_write_to_console",
-        "gs_platform_sleep",          "gs_platform_get_timestamp",
-        "gs_platform_get_datetime",   "gs_platform_copy_file",
-        "gs_platform_delete_file",    "gs_platform_move_file",
-        "gs_platform_file_exists",    "gs_platform_dir_exists",
-        "gs_platform_read_dir",       "gs_platform_read_txt_file",
-        "gs_platform_read_binary_file"};
+        "gs_platform_pump",           "gs_platform_sleep",
+        "gs_platform_get_timestamp",  "gs_platform_get_datetime",
+        "gs_platform_copy_file",      "gs_platform_delete_file",
+        "gs_platform_move_file",      "gs_platform_file_exists",
+        "gs_platform_dir_exists",     "gs_platform_read_dir",
+        "gs_platform_read_txt_file",  "gs_platform_read_binary_file"};
     for (const char* name : expected) {
         const mg_gem_slot* slot = find_slot(name);
         ASSERT_NE(slot, nullptr) << name << " is not registered";
@@ -126,25 +125,10 @@ TEST(GemSlotRegistry, PlatformFamilyRegistersEverySlotAtItsDefault) {
         EXPECT_EQ(*slot->ptr_address, slot->default_fn) << name;
     }
 
-    /* Memory is a family of its own, and deliberately not here: allocation is
-     * the app's to install and the byte moves register separately. */
+    /* Memory has no slots at all: the engine needs it before a gem is ever
+     * loaded, so nothing about it is a gem's to fill. */
     EXPECT_EQ(find_slot("gs_platform_mem_alloc"), nullptr);
-}
-
-TEST(GemSlotRegistry, MemoryFamilyRegistersEverySlotAtItsDefault) {
-    mg_memory_register_gem_slots();
-    const len after_first = mg_gem_slots().count;
-
-    // The second call proves the family function is safe to call again.
-    mg_memory_register_gem_slots();
-    EXPECT_EQ(mg_gem_slots().count, after_first);
-
-    const char* expected[] = {"gs_mem_zero", "gs_mem_fill", "gs_mem_copy", "gs_mem_move"};
-    for (const char* name : expected) {
-        const mg_gem_slot* slot = find_slot(name);
-        ASSERT_NE(slot, nullptr) << name << " is not registered";
-        EXPECT_EQ(*slot->ptr_address, slot->default_fn) << name;
-    }
+    EXPECT_EQ(find_slot("gs_mem_copy"), nullptr);
 }
 
 TEST(GemSlotRegistry, DefaultsAnswerWithoutAGem) {

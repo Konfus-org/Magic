@@ -10,6 +10,7 @@
 #pragma once
 #include "magic/commands/registry.h"
 #include "magic/debug/logging.h"
+#include "magic/enums.h"
 #include "magic/events/registry.h"
 #include "magic/export.h"
 #include "magic/gems/gem.h"
@@ -37,14 +38,16 @@ typedef struct mg_app_dirs {
     const char* asset_folder;
 } mg_app_dirs;
 
+/** @brief Every lifecycle state, for the mg_app_state mint below. */
+#define MG_APP_STATE_VALUES_(X)                                                                    \
+    X(MG_APP_STATE_UNINITIALIZED)                                                                  \
+    X(MG_APP_STATE_RUNNING)                                                                        \
+    X(MG_APP_STATE_SUSPENDED)                                                                      \
+    X(MG_APP_STATE_EXITING)                                                                        \
+    X(MG_APP_STATE_ERROR)
+
 /** @brief Where an app is in its lifecycle. Only RUNNING and PAUSED poll. */
-typedef enum mg_app_state {
-    MG_APP_STATE_UNINITIALIZED,
-    MG_APP_STATE_RUNNING,
-    MG_APP_STATE_SUSPENDED,
-    MG_APP_STATE_EXITING,
-    MG_APP_STATE_ERROR
-} mg_app_state;
+MG_DEFINE_ENUM(mg_app_state, MG_APP_STATE_COUNT, MG_APP_STATE_VALUES_);
 
 /**
  * @brief The functions the engine-owned loop drives, carried as pointers

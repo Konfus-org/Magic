@@ -2,9 +2,12 @@
  * @file slots.h
  * @author Jeremy Hummel (konfusdev@gmail.com)
  * @brief Every slot of the platform backend, grouped per concern: lifecycle,
- * console, time, files. Memory is not among them -- allocation is an app's
- * to install (magic/memory/allocator.h) and the byte moves are their own
- * family (magic/memory/slots.h).
+ * time, files. Memory is not among them -- the engine needs memory
+ * before a gem is ever loaded, so nothing about it is a gem's to fill:
+ * allocation is an app's to install (magic/memory/allocator.h) and the byte
+ * moves are libc's (magic/memory/copy.h). Neither is logging: a backend that
+ * wants the log registers itself with mg_register_logger
+ * (magic/debug/logging.h) instead of filling a slot.
  * @version 1.0
  * @date 2026-09-09
  * @copyright MagicGameEngine is Copyright (c) Jeremy Hummel
@@ -13,7 +16,6 @@
 #pragma once
 #include "magic/collections/list.h"
 #include "magic/collections/string.h"
-#include "magic/debug/logging.h"
 #include "magic/events/event.h"
 #include "magic/gems/slots.h"
 #include "magic/platform/state.h"
@@ -68,22 +70,6 @@ MG_DECLARE_GEM_SLOT(b8, gs_platform_pump, mg_platform_state* out_state);
  * @return True when the platform applied it.
  */
 MG_DECLARE_GEM_SLOT(b8, gs_platform_update, const mg_platform_state* state);
-
-/* ========================================================================== */
-/* Console                                                                    */
-/* ========================================================================== */
-
-/**
- * @brief Writes a log line to the console. Shaped like mg_logger, so an
- * app can register the slot itself as a logger.
- */
-MG_DECLARE_GEM_SLOT(
-    void,
-    gs_platform_write_to_console,
-    mg_log_level level,
-    const char* file,
-    i32 line,
-    const char* message);
 
 /* ========================================================================== */
 /* Time                                                                       */

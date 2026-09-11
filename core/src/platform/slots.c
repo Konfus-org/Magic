@@ -4,8 +4,8 @@
  * @brief The platform family's slot storage: every pointer starts at its
  * default and unbind puts the default back, so no slot is ever NULL and no
  * call site checks. A new slot adds its declare in magic/platform/slots.h,
- * and its default, define and register line here. Memory is not a platform
- * concern; its slots live in core/src/memory/slots.c.
+ * and its default, define and register line here. Memory has no slots at
+ * all: the engine needs it before a gem is ever loaded.
  * @version 1.0
  * @date 2026-09-09
  * @copyright MagicGameEngine is Copyright (c) Jeremy Hummel
@@ -13,7 +13,6 @@
 
 #include "magic/platform/slots.h"
 #include "magic/debug/asserts.h"
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <threads.h>
@@ -65,42 +64,6 @@ static b8 mg_default_pump_(mg_platform_state* out_state) {
 static b8 mg_default_update_(const mg_platform_state* state) {
     (void)state;
     return FALSE;
-}
-
-// Console
-
-/**
- * @brief gs_platform_write_to_console when no gem provides one: plain
- * stdio, so logging works before any gem loads; trace is the one level it
- * swallows.
- */
-static void mg_default_write_to_console_(
-    const mg_log_level level,
-    const char* file,
-    const i32 line,
-    const char* message) {
-    switch (level) {
-        case MG_LOG_LEVEL_DEBUG:
-            printf("[DEBUG] %s:%d: %s\n", file, line, message);
-            break;
-        case MG_LOG_LEVEL_TRACE:
-            printf("[TRACE] %s:%d: %s\n", file, line, message);
-            break;
-        case MG_LOG_LEVEL_INFO:
-            printf("[INFO] %s:%d: %s\n", file, line, message);
-            break;
-        case MG_LOG_LEVEL_WARN:
-            printf("[WARN] %s:%d: %s\n", file, line, message);
-            break;
-        case MG_LOG_LEVEL_ERROR:
-            printf("[ERROR] %s:%d: %s\n", file, line, message);
-            break;
-        case MG_LOG_LEVEL_FATAL:
-            printf("[FATAL] %s:%d: %s\n", file, line, message);
-            break;
-        default:
-            printf("[UNKNOWN] %s:%d: %s\n", file, line, message);
-    }
 }
 
 // Time
@@ -203,16 +166,6 @@ MG_DEFINE_GEM_SLOT(b8, gs_platform_poll_event, mg_default_poll_event_, mg_event*
 MG_DEFINE_GEM_SLOT(b8, gs_platform_pump, mg_default_pump_, mg_platform_state* out_state);
 MG_DEFINE_GEM_SLOT(b8, gs_platform_update, mg_default_update_, const mg_platform_state* state);
 
-// Console
-MG_DEFINE_GEM_SLOT(
-    void,
-    gs_platform_write_to_console,
-    mg_default_write_to_console_,
-    mg_log_level level,
-    const char* file,
-    i32 line,
-    const char* message);
-
 // Time
 MG_DEFINE_GEM_SLOT(void, gs_platform_sleep, mg_default_sleep_, ts ms);
 MG_DEFINE_GEM_SLOT(ts, gs_platform_get_timestamp, mg_default_get_timestamp_, void);
@@ -249,9 +202,6 @@ void mg_platform_register_gem_slots(void) {
     MG_REGISTER_GEM_SLOT(gs_platform_poll_event);
     MG_REGISTER_GEM_SLOT(gs_platform_pump);
     MG_REGISTER_GEM_SLOT(gs_platform_update);
-
-    // Console
-    MG_REGISTER_GEM_SLOT(gs_platform_write_to_console);
 
     // Time
     MG_REGISTER_GEM_SLOT(gs_platform_sleep);

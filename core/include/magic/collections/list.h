@@ -44,110 +44,112 @@
  * mg_u32_list_free(&xs);
  * @endcode
  */
-#define MG_DEFINE_NAMED_LIST(type, name, destructor)                                                 \
-    typedef mg_list name;                                                                            \
-    typedef mg_iter name##_iter;                                                                     \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline name name##_construct(void) {                                      \
-        const name list = {NULL, sizeof(type), 0, 0, (destructor)};                                  \
-        return list;                                                                                 \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline name name##_new(const len capacity) {                              \
-        return mg_buffer_new(sizeof(type), capacity, (destructor), MG_MEMORY_TAG_LIST);              \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline void name##_free(name* list) {                                     \
-        mg_buffer_free(list, MG_MEMORY_TAG_LIST);                                                    \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline b8 name##_push(name* list, type curr) {                            \
-        if (list == NULL) {                                                                          \
-            return FALSE;                                                                            \
-        }                                                                                            \
-        const len needed = list->count + 1;                                                          \
-        if (!mg_buffer_reserve(                                                                      \
-                list,                                                                                \
-                needed < MG_LIST_MIN_CAPACITY ? MG_LIST_MIN_CAPACITY : needed,                       \
-                MG_MEMORY_TAG_LIST)) {                                                               \
-            return FALSE;                                                                            \
-        }                                                                                            \
-        mg_buffer_push(list, (const void*)&curr, sizeof(type));                                      \
-        return TRUE;                                                                                 \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline b8 name##_push_many(                                               \
-        name* list,                                                                                  \
-        const type* items,                                                                           \
-        const len count) {                                                                           \
-        if (list == NULL) {                                                                          \
-            return FALSE;                                                                            \
-        }                                                                                            \
-        if (count == 0) {                                                                            \
-            return TRUE;                                                                             \
-        }                                                                                            \
-        const len needed = list->count + count;                                                      \
-        if (!mg_buffer_reserve(                                                                      \
-                list,                                                                                \
-                needed < MG_LIST_MIN_CAPACITY ? MG_LIST_MIN_CAPACITY : needed,                       \
-                MG_MEMORY_TAG_LIST)) {                                                               \
-            return FALSE;                                                                            \
-        }                                                                                            \
-        mg_buffer_push_many(list, (const void*)items, count);                                        \
-        return TRUE;                                                                                 \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline type name##_pop(name* list) {                                      \
-        type popped = MG_ZERO_INIT_;                                                                 \
-        /* Cast spelled out: when type is itself a pointer, &popped erases two                     \
-         * levels at once, which is only OK because the buffer copies bytes. */ \
-        mg_buffer_pop(list, (void*)&popped);                                                         \
-        return popped;                                                                               \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline type name##_pop_front(name* list) {                                \
-        type popped = MG_ZERO_INIT_;                                                                 \
-        mg_buffer_pop_front(list, (void*)&popped);                                                   \
-        return popped;                                                                               \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline type* name##_peek(name* list) {                                    \
-        return (type*)mg_buffer_peek(list);                                                          \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline ind name##_index_of(const name* list, type curr) {                 \
-        return mg_buffer_index_of(list, (const void*)&curr, sizeof(type));                           \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline void name##_remove(name* list, const ind index) {                  \
-        mg_buffer_remove(list, index);                                                               \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline type* name##_at(name* list, const ind index) {                     \
-        return (type*)mg_buffer_at_sized(list, index, sizeof(type));                                 \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline mg_view name##_view(const name* list) {                            \
-        return mg_buffer_view(list);                                                                 \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline name##_iter name##_it(const name* list) {                          \
-        return mg_iter_construct(mg_buffer_view(list));                                              \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline name##_iter name##_rit(const name* list) {                         \
-        return mg_iter_construct_reverse(mg_buffer_view(list));                                      \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline const type* name##_iter_next(name##_iter* it) {                    \
-        return (const type*)mg_iter_next(it);                                                        \
-    }                                                                                                \
-                                                                                                     \
-    MG_MAYBE_UNUSED static inline const type* name##_iter_previous(name##_iter* it) {                \
-        return (const type*)mg_iter_previous(it);                                                    \
-    }                                                                                                \
-                                                                                                     \
-    /* Eats the call site's semicolon; retyping a name to the same type is legal C11. */             \
+#define MG_DEFINE_NAMED_LIST(type, name, destructor)                                               \
+    typedef mg_list name;                                                                          \
+    typedef mg_iter name##_iter;                                                                   \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline name name##_construct(void) {                                    \
+        const name list = {NULL, sizeof(type), 0, 0, (destructor)};                                \
+        return list;                                                                               \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline name name##_new(const len capacity) {                            \
+        return mg_buffer_new(sizeof(type), capacity, (destructor), MG_MEMORY_TAG_LIST);            \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline void name##_free(name* list) {                                   \
+        mg_buffer_free(list, MG_MEMORY_TAG_LIST);                                                  \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline void name##_clear(name* list) {                                  \
+        mg_buffer_clear(list);                                                                     \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline b8 name##_push(name* list, type curr) {                          \
+        if (list == NULL) {                                                                        \
+            return FALSE;                                                                          \
+        }                                                                                          \
+        const len needed = list->count + 1;                                                        \
+        if (!mg_buffer_reserve(                                                                    \
+                list,                                                                              \
+                needed < MG_LIST_MIN_CAPACITY ? MG_LIST_MIN_CAPACITY : needed,                     \
+                MG_MEMORY_TAG_LIST)) {                                                             \
+            return FALSE;                                                                          \
+        }                                                                                          \
+        mg_buffer_push(list, (const void*)&curr, sizeof(type));                                    \
+        return TRUE;                                                                               \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline b8 name##_push_many(                                             \
+        name* list,                                                                                \
+        const type* items,                                                                         \
+        const len count) {                                                                         \
+        if (list == NULL) {                                                                        \
+            return FALSE;                                                                          \
+        }                                                                                          \
+        if (count == 0) {                                                                          \
+            return TRUE;                                                                           \
+        }                                                                                          \
+        const len needed = list->count + count;                                                    \
+        if (!mg_buffer_reserve(                                                                    \
+                list,                                                                              \
+                needed < MG_LIST_MIN_CAPACITY ? MG_LIST_MIN_CAPACITY : needed,                     \
+                MG_MEMORY_TAG_LIST)) {                                                             \
+            return FALSE;                                                                          \
+        }                                                                                          \
+        mg_buffer_push_many(list, (const void*)items, count);                                      \
+        return TRUE;                                                                               \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline type name##_pop(name* list) {                                    \
+        type popped = MG_ZERO_INIT_;                                                               \
+        mg_buffer_pop(list, (void*)&popped);                                                       \
+        return popped;                                                                             \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline type name##_pop_front(name* list) {                              \
+        type popped = MG_ZERO_INIT_;                                                               \
+        mg_buffer_pop_front(list, (void*)&popped);                                                 \
+        return popped;                                                                             \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline type* name##_peek(name* list) {                                  \
+        return (type*)mg_buffer_peek(list);                                                        \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline ind name##_index_of(const name* list, type curr) {               \
+        return mg_buffer_index_of(list, (const void*)&curr, sizeof(type));                         \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline void name##_remove(name* list, const ind index) {                \
+        mg_buffer_remove(list, index);                                                             \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline type* name##_at(name* list, const ind index) {                   \
+        return (type*)mg_buffer_at_sized(list, index, sizeof(type));                               \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline mg_view name##_view(const name* list) {                          \
+        return mg_buffer_view(list);                                                               \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline name##_iter name##_it(const name* list) {                        \
+        return mg_iter_construct(mg_buffer_view(list));                                            \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline name##_iter name##_rit(const name* list) {                       \
+        return mg_iter_construct_reverse(mg_buffer_view(list));                                    \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline const type* name##_iter_next(name##_iter* it) {                  \
+        return (const type*)mg_iter_next(it);                                                      \
+    }                                                                                              \
+                                                                                                   \
+    MG_MAYBE_UNUSED static inline const type* name##_iter_previous(name##_iter* it) {              \
+        return (const type*)mg_iter_previous(it);                                                  \
+    }                                                                                              \
+                                                                                                   \
+    /* Eats the call site's semicolon; retyping a name to the same type is legal C11. */           \
     typedef name name
 
 /**

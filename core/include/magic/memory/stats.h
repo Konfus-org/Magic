@@ -9,31 +9,33 @@
  */
 
 #pragma once
+#include "magic/enums.h"
 #include "magic/export.h"
 #include "magic/primitives.h"
+
+/** @brief Every memory tag, for the mg_memory_tag mint below. */
+#define MG_MEMORY_TAG_VALUES_(X)                                                                   \
+    X(MG_MEMORY_TAG_UNKNOWN)                                                                       \
+    X(MG_MEMORY_TAG_ARRAY)                                                                         \
+    X(MG_MEMORY_TAG_LIST)                                                                          \
+    X(MG_MEMORY_TAG_STRING)                                                                        \
+    X(MG_MEMORY_TAG_APPLICATION)                                                                   \
+    X(MG_MEMORY_TAG_EVENT)                                                                         \
+    X(MG_MEMORY_TAG_LOGGING)                                                                       \
+    X(MG_MEMORY_TAG_PLATFORM)                                                                      \
+    X(MG_MEMORY_TAG_INPUT)                                                                         \
+    X(MG_MEMORY_TAG_RENDERING)                                                                     \
+    X(MG_MEMORY_TAG_DYNAMIC_LIBRARY)                                                               \
+    X(MG_MEMORY_TAG_TEXTURE)                                                                       \
+    X(MG_MEMORY_TAG_MATERIAL)                                                                      \
+    X(MG_MEMORY_TAG_MODEL)
 
 /**
  * @brief What an allocation is for, so usage reads as a budget by system
  * rather than one opaque total. UNKNOWN is the tag of code that has not
  * chosen one, not an error.
  */
-enum mg_memory_tag {
-    MG_MEMORY_TAG_UNKNOWN,
-    MG_MEMORY_TAG_ARRAY,
-    MG_MEMORY_TAG_LIST,
-    MG_MEMORY_TAG_STRING,
-    MG_MEMORY_TAG_APPLICATION,
-    MG_MEMORY_TAG_EVENT,
-    MG_MEMORY_TAG_LOGGING,
-    MG_MEMORY_TAG_PLATFORM,
-    MG_MEMORY_TAG_INPUT,
-    MG_MEMORY_TAG_RENDERING,
-    MG_MEMORY_TAG_DYNAMIC_LIBRARY,
-    MG_MEMORY_TAG_TEXTURE,
-    MG_MEMORY_TAG_MATERIAL,
-    MG_MEMORY_TAG_MODEL,
-    MG_MEMORY_TAG_COUNT
-};
+MG_DEFINE_ENUM(mg_memory_tag, MG_MEMORY_TAG_COUNT, MG_MEMORY_TAG_VALUES_);
 
 /** @brief Running byte totals; what is live now is allocated minus deallocated. */
 typedef struct mg_memory_stats {

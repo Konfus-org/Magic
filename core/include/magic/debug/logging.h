@@ -9,6 +9,7 @@
 
 #pragma once
 #include "magic/collections/array.h"
+#include "magic/enums.h"
 #include "magic/export.h"
 #include "magic/memory/alloc.h"
 #include "magic/primitives.h"
@@ -70,15 +71,17 @@
 /** @brief How many loggers one log dispatches to. */
 #define MG_MAX_LOGGERS 15
 
+/** @brief Every severity, for the mg_log_level mint below. */
+#define MG_LOG_LEVEL_VALUES_(X)                                                                    \
+    X(MG_LOG_LEVEL_TRACE)                                                                          \
+    X(MG_LOG_LEVEL_DEBUG)                                                                          \
+    X(MG_LOG_LEVEL_INFO)                                                                           \
+    X(MG_LOG_LEVEL_WARN)                                                                           \
+    X(MG_LOG_LEVEL_ERROR)                                                                          \
+    X(MG_LOG_LEVEL_FATAL)
+
 /** @brief The severity level of a log message. */
-typedef enum mg_log_level {
-    MG_LOG_LEVEL_TRACE,
-    MG_LOG_LEVEL_DEBUG,
-    MG_LOG_LEVEL_INFO,
-    MG_LOG_LEVEL_WARN,
-    MG_LOG_LEVEL_ERROR,
-    MG_LOG_LEVEL_FATAL
-} mg_log_level;
+MG_DEFINE_ENUM(mg_log_level, MG_LOG_LEVEL_COUNT, MG_LOG_LEVEL_VALUES_);
 
 /**
  * @brief A logging backend.
@@ -94,6 +97,9 @@ MG_DEFINE_ARRAY(mg_logger, NULL);
  * The array owns its slots: mg_open_log allocates them, mg_close_log
  * releases them. A struct copy of an open log shares the original's slots, so
  * close only one of the two.
+ * A log with nothing registered is not a silent one -- it writes through a
+ * built-in stdio default, which stands down as soon as the first logger
+ * registers. Silence is mg_use_log(NULL).
  */
 typedef struct mg_log {
     mg_logger_array loggers; /**< Registered mg_logger items, in registration order. */
@@ -131,15 +137,23 @@ void mg_use_log(mg_log* log);
 
 /**
  * @brief Adds a logger to the log in use, dispatched to in registration
- * order. A registration past the log's capacity is dropped.
+ * order. A registration past the log's capacity is dropped. The first one
+ * registered retires the built-in stdio default, so a backend that joins the
+ * log replaces it rather than printing alongside it.
  */
 MG_EXPORT void mg_register_logger(mg_logger logger);
 
-/** @brief Removes a logger from the log in use, to no longer be dispatched to. */
+/**
+ * @brief Removes a logger from the log in use, to no longer be dispatched to.
+ * A gem unregisters its own in on_unload, before its image goes: a logger
+ * left behind would be dispatched to through code that is no longer mapped.
+ * Taking the last one out puts the built-in default back.
+ */
 MG_EXPORT void mg_unregister_logger(mg_logger logger);
 
 /**
- * @brief Dispatches a message to every logger on the log in use.
+ * @brief Dispatches a message to every logger on the log in use, or to the
+ * built-in default when none is registered.
  * Called through the MG_* macros, which fill in file and line.
  */
 MG_EXPORT void mg_trace(mg_log_level level, const char* file, i32 line, const char* format, ...)

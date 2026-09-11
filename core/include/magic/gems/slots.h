@@ -107,3 +107,12 @@ MG_EXPORT void mg_register_gem_slot(const char* name, mg_lib_fn* ptr_address);
  * core/src/gems/slots.c.
  */
 MG_EXPORT mg_gem_slot_table mg_gem_slots(void);
+
+/**
+ * @brief Empties the registry, giving its storage back. Only once every gem
+ * is unbound -- unbinding is what reads the table -- and every pointer is
+ * back at its default, which is exactly where mg_close_app stands when it
+ * calls this: a later open re-registers the families and recaptures the same
+ * defaults, so nothing is lost but the bytes.
+ */
+MG_EXPORT void mg_clear_gem_slots(void);

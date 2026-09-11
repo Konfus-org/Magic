@@ -8,7 +8,10 @@
  */
 
 #include "magic/app.h"
+#include "magic/enums.h"
+#include "magic/events/event.h"
 #include "magic/memory/allocator.h"
+#include "magic/memory/box.h"
 #include <stdlib.h>
 
 static len g_events = 0;
@@ -16,8 +19,6 @@ static len g_updates = 0;
 static len g_fixed_updates = 0;
 
 static ts g_print_stats_timer = 0;
-static len g_total_frames = 0;
-static ts g_total_time_ms = 0;
 
 static len g_qa_allocs = 0;
 static len g_qa_frees = 0;
@@ -62,9 +63,69 @@ void mg_on_start(void) {
 
 void mg_on_event(const void* sender, const mg_event* evt) {
     MG_UNUSED(sender);
-    MG_UNUSED(evt);
-    MG_INFO("QA heard mg_on_event: %d", evt->code);
     g_events++;
+
+    /* Every code the platform boxes a payload for gets its values printed;
+     * the rest print their name alone. On the enum values, not the enum type,
+     * so a custom code past MG_EVENT_CODE_COUNT falls to default rather than
+     * tripping -Wswitch-enum here. */
+    const char* code_name = mg_get_enum_name(mg_event_code, evt->code);
+    switch (evt->code) {
+        case MG_EVENT_CODE_WINDOW_RESIZED:
+        {
+            const mg_window_resize_event* resize = mg_unbox(mg_window_resize_event, evt->data);
+            if (resize != NULL) {
+                MG_INFO("QA heard %s: %u x %u", code_name, resize->size.width, resize->size.height);
+            }
+            break;
+        }
+        case MG_EVENT_CODE_INPUT_PRESSED:
+        case MG_EVENT_CODE_INPUT_RELEASED:
+        {
+            const mg_input_press_event* press = mg_unbox(mg_input_press_event, evt->data);
+            if (press != NULL) {
+                MG_INFO(
+                    "QA heard %s: key %s, button %s",
+                    code_name,
+                    mg_get_enum_name(mg_key_code, press->key),
+                    mg_get_enum_name(mg_button_code, press->button));
+            }
+            break;
+        }
+        case MG_EVENT_CODE_INPUT_DEVICE_CONNECTED:
+        case MG_EVENT_CODE_INPUT_DEVICE_DISCONNECTED:
+        {
+            const mg_input_device_event* device = mg_unbox(mg_input_device_event, evt->data);
+            if (device != NULL) {
+                MG_INFO(
+                    "QA heard %s: %s",
+                    code_name,
+                    mg_get_enum_name(mg_input_device_kind, device->kind));
+            }
+            break;
+        }
+        case MG_EVENT_CODE_INPUT_MOUSE_MOVED:
+        {
+            /* Trace, deliberately: the mouse fires many of these per frame,
+             * and info would scroll everything else away. */
+            const mg_mouse_move_event* move = mg_unbox(mg_mouse_move_event, evt->data);
+            if (move != NULL) {
+                MG_TRACE(
+                    "QA heard %s: %.1f, %.1f (moved %.1f, %.1f)",
+                    code_name,
+                    (f64)move->x,
+                    (f64)move->y,
+                    (f64)move->delta_x,
+                    (f64)move->delta_y);
+            }
+            break;
+        }
+        default:
+            /* The number rides along: a custom code past MG_EVENT_CODE_COUNT
+             * names as "?", and the number is all there is to go on. */
+            MG_INFO("QA heard %s (%u)", code_name, evt->code);
+            break;
+    }
 }
 
 void mg_on_update(const ts dt) {
@@ -72,18 +133,16 @@ void mg_on_update(const ts dt) {
         MG_INFO("QA heard the first mg_on_update, dt %f ms.", dt);
     g_updates++;
     g_print_stats_timer += dt;
-    g_total_frames++;
-    g_total_time_ms += dt;
 
     /* The whole block is log output, so it is compiled in only where there is
      * a log to write to: with MG_INFO off, the usage it gathers would be a
-     * store nothing loads. */
+     * store nothing loads. FPS is not printed here: the pump reports it, as
+     * engine machinery for every app. */
 #if MG_INFO_ENABLED
-    // Every second, print memory usage and average FPS.
+    // Every second, print memory usage.
     if (g_print_stats_timer >= 1000) {
         const mg_memory_usage usage = mg_get_mem_usage();
         MG_INFO("QA memory usage: %llu bytes", usage.total.allocated - usage.total.deallocated);
-        MG_INFO("QA average FPS: %f", (ts)g_total_frames / (g_total_time_ms / 1000.0));
         g_print_stats_timer = 0;
     }
 #endif

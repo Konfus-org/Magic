@@ -22,6 +22,51 @@
  * silences the macros. */
 static mg_log* g_log = NULL;
 
+/**
+ * @brief What a log with no logger registered writes through: plain stdio, so
+ * the engine is heard before the first gem loads and after the last one goes.
+ * Never registered and never registerable -- it speaks only while nobody
+ * else does, the way a gem slot answers with its default until a gem fills
+ * it. A switch and not a table of tags, because -Wswitch-enum is what makes
+ * a level added to mg_log_level a compile error here rather than a line that
+ * quietly prints as UNKNOWN.
+ */
+static void mg_default_logger_(
+    const mg_log_level level,
+    const char* file,
+    const i32 line,
+    const char* message) {
+    switch (level) {
+        case MG_LOG_LEVEL_TRACE:
+            printf("[TRACE] %s:%d: %s\n", file, line, message);
+            break;
+        case MG_LOG_LEVEL_DEBUG:
+            printf("[DEBUG] %s:%d: %s\n", file, line, message);
+            break;
+        case MG_LOG_LEVEL_INFO:
+            printf("[INFO] %s:%d: %s\n", file, line, message);
+            break;
+        case MG_LOG_LEVEL_WARN:
+            printf("[WARN] %s:%d: %s\n", file, line, message);
+            break;
+        case MG_LOG_LEVEL_ERROR:
+            printf("[ERROR] %s:%d: %s\n", file, line, message);
+            break;
+        case MG_LOG_LEVEL_FATAL:
+            printf("[FATAL] %s:%d: %s\n", file, line, message);
+            break;
+        case MG_LOG_LEVEL_COUNT:
+        default:
+            printf("[UNKNOWN] %s:%d: %s\n", file, line, message);
+    }
+
+    /* Flushed every line: this is the fallback writer, whose job is being
+     * heard, and a redirected stdout is fully buffered -- the assert trap
+     * that follows a FATAL would otherwise take the words down with the
+     * process. */
+    fflush(stdout);
+}
+
 void mg_open_log(mg_log* log) {
     MG_ASSERT_RETURN_IF(log, "Tried to initialize a null log");
 
@@ -83,9 +128,9 @@ void mg_unregister_logger(const mg_logger logger) {
 
 void mg_trace(const mg_log_level level, const char* file, const i32 line, const char* format, ...) {
     /* Returns rather than asserting: MG_ASSERT reports through MG_FATAL,
-     * which is a call straight back into here. Logging with no log in use is
-     * a no-op by design, and an empty log skips out before the formatting. */
-    if (g_log == NULL || mg_buffer_empty(&g_log->loggers)) {
+     * which is a call straight back into here. No log in use is silence by
+     * design -- the state before an app opens and after it closes. */
+    if (g_log == NULL) {
         return;
     }
 
@@ -94,6 +139,15 @@ void mg_trace(const mg_log_level level, const char* file, const i32 line, const 
     va_start(arg_ptr, format);
     vsnprintf(message, MAX_MESSAGE_LENGTH, format, arg_ptr);
     va_end(arg_ptr);
+
+    /* An empty log is not a silent one: with nobody registered the default
+     * writer speaks, and the moment a backend registers it stops. That is
+     * what keeps a logging gem from printing every line twice, and what
+     * keeps the lines before it loads from being lost. */
+    if (mg_buffer_empty(&g_log->loggers)) {
+        mg_default_logger_(level, file, line, message);
+        return;
+    }
 
     mg_logger_array_iter it = mg_logger_array_it(&g_log->loggers);
     const mg_logger* logger;

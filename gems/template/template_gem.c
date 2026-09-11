@@ -65,15 +65,24 @@ MG_PROVIDE_GEM(
     "1.0",
     "What this gem is for, in one line.",
     "Jeremy Hummel",
+    MG_GEM_REQUIRES_NOTHING,
     template_on_load,
     template_on_reload,
     template_on_reloaded,
     template_on_unload)
 
-/* The engine slots this gem fills, if any: one MG_GEM_FILL_SLOT per slot,
+/* The gems this one needs loaded, and whose on_load must have run, before its
+ * own: MG_GEM_REQUIRES("their_name", ...) in place of MG_GEM_REQUIRES_NOTHING
+ * above, naming each the way that gem's own MG_PROVIDE_GEM does. The loader
+ * orders the folder by it, and refuses a gem whose dependencies it cannot
+ * meet; gems/SDL/platform/sdl_platform_gem.c is the worked example.
+ *
+ * The engine slots this gem fills, if any: one MG_GEM_FILL_SLOT per slot,
  * naming the slot as its api header declares it and the static here that
- * implements it. A gem that fills no slots deletes the whole block;
- * gems/SDL/sdl_gem.c is the worked example.
+ * implements it. A gem that fills no slots deletes the whole block --
+ * gems/SDL/base/sdl_base_gem.c is one that does -- and
+ * gems/SDL/platform/sdl_platform_gem.c is the worked example of one that
+ * fills many.
  *
  * MG_GEM_FILL_SLOTS(
  *     MG_GEM_FILL_SLOT(gs_platform_setup, template_setup_platform),

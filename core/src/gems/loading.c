@@ -8,6 +8,7 @@
  */
 
 #include "magic/gems/loading.h"
+#include "magic/collections/string.h"
 #include "magic/debug/asserts.h"
 #include "magic/debug/logging.h"
 #include "magic/gems/slots.h"
@@ -36,6 +37,11 @@
 #else
     #error Platform not supported!
 #endif
+
+/* A name as the MG_* format arguments want it: a view carries no terminator,
+ * so every mention of one spells out the precision and the cast. Pairs with a
+ * %.*s in the format. */
+#define MG_VIEW_ARGS_(view) (int)(view).count, (const char*)(view).items
 
 #if defined(MG_HOT_RELOAD_GEMS)
 
@@ -84,8 +90,7 @@ static void mg_bind_gem(const mg_gem* gem) {
             && *slot->ptr_address != provided) {
             MG_WARN(
                 "Gem '%.*s' is taking over '%s' from another provider.",
-                (int)gem->desc.name.count,
-                (const char*)gem->desc.name.items,
+                MG_VIEW_ARGS_(gem->desc.name),
                 slot->name);
         }
         *slot->ptr_address = provided;
@@ -103,8 +108,7 @@ static void mg_bind_gem(const mg_gem* gem) {
         if (!matched) {
             MG_WARN(
                 "Gem '%.*s' fills '%s', which no registered slot answers to.",
-                (int)gem->desc.name.count,
-                (const char*)gem->desc.name.items,
+                MG_VIEW_ARGS_(gem->desc.name),
                 published);
         }
     }
@@ -178,11 +182,14 @@ static void mg_close_gem_lib(mg_gem* gem) {
 }
 
 /**
- * @brief Reads the identity off an already-open image and binds what it provides.
+ * @brief Reads the identity off an already-open image onto the gem: who it
+ * is, what it needs and what it does. Nothing is bound and no hook fires, so
+ * the dependencies a set is ordered by are readable before any gem is stood
+ * up.
  * @return FALSE with the library still open; the caller decides whether that
  * means freeing a new gem or keeping an old one.
  */
-static b8 mg_attach_gem(mg_gem* gem, const char* path) {
+static b8 mg_read_gem_desc(mg_gem* gem, const char* path) {
     // Cast through a named value; casting the call itself trips -Wbad-function-cast.
     const mg_lib_fn describe_export = mg_find_export(&gem->lib, MG_GEM_ENTRY_POINT);
     const mg_gem_describe_fn describe = (mg_gem_describe_fn)describe_export;
@@ -202,9 +209,8 @@ static b8 mg_attach_gem(mg_gem* gem, const char* path) {
             MG_GEM_ABI_VERSION);
         return FALSE;
     }
-    gem->desc = *desc;
 
-    mg_bind_gem(gem);
+    gem->desc = *desc;
     return TRUE;
 }
 
@@ -218,47 +224,24 @@ static void mg_detach_gem(mg_gem* gem) {
     gem->desc = no_desc;
 }
 
-/** @brief Builds folder/file with the engine's allocator. Caller frees. */
-static char* mg_gem_new_file_path(const char* folder, const char* file) {
-    const int needed = snprintf(NULL, 0, "%s/%s", folder, file);
-    if (needed < 0) {
-        return NULL;
-    }
-
-    const u64 size = (u64)needed + 1;
-    char* path = mg_alloc_buffer(char, size, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
-    if (path == NULL) {
-        return NULL;
-    }
-
-    snprintf(path, size, "%s/%s", folder, file);
-    return path;
+/**
+ * @brief Gives back everything a gem holds without firing a hook: its image,
+ * its path and itself. The teardown for a gem whose on_load never ran, so it
+ * has no on_unload owing; mg_unload_gem is the one for a gem that is up.
+ */
+static void mg_free_gem(mg_gem* gem) {
+    mg_close_gem_lib(gem);
+    mg_str_free(&gem->path);
+    mg_free(gem, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
 }
 
 /**
- * @brief Loads the gem file named file inside folder into owner and gems.
- * A failed load leaves the list as it was; the loader already said why.
+ * @brief Opens the gem at path and reads its identity, stopping short of
+ * standing it up: nothing is bound and on_load has not fired. The half of a
+ * load that answers who this is and what it needs.
+ * @return The gem, unbound, or NULL on failure.
  */
-static void mg_load_gem_into(
-    mg_gem_list* gems,
-    const char* folder,
-    const char* file,
-    mg_app* owner) {
-    char* path = mg_gem_new_file_path(folder, file);
-    if (path == NULL) {
-        return;
-    }
-
-    mg_gem* gem = mg_load_gem(path, owner);
-    mg_free(path, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
-    if (gem != NULL && !mg_gem_list_push(gems, gem)) {
-        mg_unload_gem(gem);
-    }
-}
-
-mg_gem* mg_load_gem(const char* path, mg_app* owner) {
-    MG_ASSERT_RETURN_VAL_IF(path != NULL, NULL, "path is null");
-
+static mg_gem* mg_open_gem(const char* path, mg_app* owner) {
     mg_gem* gem = mg_alloc_one(mg_gem, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
     if (gem == NULL) {
         MG_ERROR("Out of memory loading gem '%s'.", path);
@@ -281,14 +264,23 @@ mg_gem* mg_load_gem(const char* path, mg_app* owner) {
         return NULL;
     }
 
-    /* Not mg_unload_gem on this failure path: that fires on_unload, and a
-     * gem whose identity was never read has no hooks to fire. */
-    if (!mg_attach_gem(gem, path)) {
-        mg_close_gem_lib(gem);
-        mg_str_free(&gem->path);
-        mg_free(gem, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
+    // mg_free_gem and not mg_unload_gem: no hook has fired, so none is owed.
+    if (!mg_read_gem_desc(gem, path)) {
+        mg_free_gem(gem);
         return NULL;
     }
+
+    return gem;
+}
+
+/**
+ * @brief Stands an opened gem up: fills the slots it provides, then fires its
+ * on_load. The other half of a load, split off so a set can be ordered
+ * between the two -- a gem is only ever activated once everything it named
+ * with MG_GEM_REQUIRES already has been.
+ */
+static void mg_activate_gem(mg_gem* gem) {
+    mg_bind_gem(gem);
 
     if (gem->desc.hooks.on_load != NULL) {
         gem->desc.hooks.on_load(gem->owner);
@@ -296,12 +288,233 @@ mg_gem* mg_load_gem(const char* path, mg_app* owner) {
 
     MG_INFO(
         "Loaded gem '%.*s' %.*s by %.*s.",
-        (int)gem->desc.name.count,
-        (const char*)gem->desc.name.items,
-        (int)gem->desc.version.count,
-        (const char*)gem->desc.version.items,
-        (int)gem->desc.author.count,
-        (const char*)gem->desc.author.items);
+        MG_VIEW_ARGS_(gem->desc.name),
+        MG_VIEW_ARGS_(gem->desc.version),
+        MG_VIEW_ARGS_(gem->desc.author));
+}
+
+/**
+ * @brief The gem in gems answering to name, or NULL when none does. Matching
+ * is exact: a dependency names the gem the way that gem's own MG_PROVIDE_GEM
+ * does.
+ */
+static const mg_gem* mg_gem_named(const mg_gem_list* gems, const mg_str_view name) {
+    mg_gem_list_iter it = mg_gem_list_it(gems);
+    const mg_gem_ptr* slot;
+    while ((slot = mg_gem_list_iter_next(&it)) != NULL) {
+        if (*slot != NULL && mg_str_eq((*slot)->desc.name, name)) {
+            return *slot;
+        }
+    }
+    return NULL;
+}
+
+/** @brief Whether every gem this one requires is already standing in loaded. */
+static b8 mg_gem_deps_met(const mg_gem* gem, const mg_gem_list* loaded) {
+    for (len i = 0; i < gem->desc.dependency_count; i++) {
+        if (mg_gem_named(loaded, gem->desc.dependencies[i]) == NULL) {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+/**
+ * @brief Says why a gem could not be stood up, one line per dependency it is
+ * still waiting on. A name another gem still in the pool answers to is a
+ * cycle -- that one is waiting too, or it would have gone first; a name the
+ * pool has none of is a gem the folder simply does not hold.
+ * @param loaded The gems already standing, whose names are the met ones.
+ * @param stuck The gems left in the pool, this one among them.
+ */
+static void mg_report_unmet_deps(
+    const mg_gem* gem,
+    const mg_gem_list* loaded,
+    const mg_gem_list* stuck) {
+    for (len i = 0; i < gem->desc.dependency_count; i++) {
+        const mg_str_view needed = gem->desc.dependencies[i];
+        if (mg_gem_named(loaded, needed) != NULL) {
+            continue;
+        }
+
+        MG_ERROR(
+            "Gem '%.*s' is not loaded: it requires '%.*s', which %s.",
+            MG_VIEW_ARGS_(gem->desc.name),
+            MG_VIEW_ARGS_(needed),
+            mg_gem_named(stuck, needed) != NULL ? "is itself waiting on a dependency cycle"
+                                               : "no gem in the folder provides");
+    }
+}
+
+/**
+ * @brief Stands the pooled gems up in dependency order, moving each into
+ * loaded as it goes.
+ * Passes over the pool until one takes nothing: each pass activates every gem
+ * whose dependencies are already standing, so a chain comes up a link per
+ * pass. A pass that takes nothing with gems still in the pool has found the
+ * two cases nothing can fix -- a dependency the folder has none of, and a
+ * cycle -- and those are reported and freed rather than stood up half way.
+ * Quadratic in the gem count by construction, over a list one folder scan
+ * bounds; the alternative is a graph built to save microseconds once at load.
+ * @param pool The opened gems; emptied of every gem this takes or refuses.
+ * @param loaded Receives each gem as it is stood up, in that order.
+ */
+static void mg_activate_in_dependency_order(mg_gem_list* pool, mg_gem_list* loaded) {
+    b8 took_one = TRUE;
+    while (took_one) {
+        took_one = FALSE;
+
+        mg_gem_ptr* slot;
+        mg_where(slot, pool, *slot != NULL) {
+            if (!mg_gem_deps_met(*slot, loaded)) {
+                continue;
+            }
+
+            /* Out of the pool before it is stood up: on_load is the gem's
+             * first chance to look around, and what it finds should not
+             * include itself still waiting to be loaded. */
+            mg_gem* gem = *slot;
+            *slot = NULL;
+            took_one = TRUE;
+
+            mg_activate_gem(gem);
+            if (!mg_gem_list_push(loaded, gem)) {
+                MG_ERROR(
+                    "Out of memory keeping gem '%.*s'; unloading it again.",
+                    MG_VIEW_ARGS_(gem->desc.name));
+                mg_unload_gem(gem);
+            }
+        }
+    }
+
+    // Whatever the passes could not take, and why.
+    mg_gem_ptr* left;
+    mg_where(left, pool, *left != NULL) {
+        mg_report_unmet_deps(*left, loaded, pool);
+        // Never stood up, so it has no on_unload owing.
+        mg_free_gem(*left);
+        *left = NULL;
+    }
+}
+
+/** @brief Builds folder/file with the engine's allocator. Caller frees. */
+static char* mg_gem_new_file_path(const char* folder, const char* file) {
+    const int needed = snprintf(NULL, 0, "%s/%s", folder, file);
+    if (needed < 0) {
+        return NULL;
+    }
+
+    const u64 size = (u64)needed + 1;
+    char* path = mg_alloc_buffer(char, size, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
+    if (path == NULL) {
+        return NULL;
+    }
+
+    snprintf(path, size, "%s/%s", folder, file);
+    return path;
+}
+
+/**
+ * @brief Notes the gem file named file inside folder as one to open. The scan
+ * only collects: with dependencies to order by, nothing can be stood up until
+ * every candidate has been seen.
+ */
+static void mg_collect_gem_path(mg_str_list* paths, const char* folder, const char* file) {
+    char* path = mg_gem_new_file_path(folder, file);
+    if (path == NULL) {
+        return;
+    }
+
+    mg_str kept = mg_str_new(mg_view_cstr(path));
+    mg_free(path, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
+
+    if (kept.items == NULL) {
+        MG_ERROR("Out of memory noting the path of gem '%s'.", file);
+        return;
+    }
+    if (!mg_str_list_push(paths, kept)) {
+        MG_ERROR("Out of memory collecting the path of gem '%s'.", file);
+        mg_str_free(&kept);
+    }
+}
+
+/** @brief Frees every path a scan collected, and the list holding them. */
+static void mg_free_gem_paths(mg_str_list* paths) {
+    mg_str* path;
+    mg_foreach(path, paths) {
+        mg_str_free(path);
+    }
+    mg_str_list_free(paths);
+}
+
+/**
+ * @brief The gem files in folder, one flat pass.
+ * The engine's own scan, never the read_dir slot: gems are what fill the
+ * slots, so the loader cannot ask a gem to find gems. A gem is any file
+ * ending in the platform's library extension, and subfolders are not entered.
+ * @return The paths, owned; hand them to mg_free_gem_paths.
+ */
+static mg_str_list mg_scan_for_gems(const char* folder) {
+    mg_str_list paths = mg_str_list_construct();
+
+#if defined(MG_PLATFORM_WINDOWS)
+    char* pattern = mg_gem_new_file_path(folder, "*" MG_SHARED_LIB_EXT_);
+    if (pattern == NULL) {
+        return paths;
+    }
+
+    WIN32_FIND_DATAA found;
+    const HANDLE find = FindFirstFileA(pattern, &found);
+    mg_free(pattern, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
+    if (find == INVALID_HANDLE_VALUE) {
+        MG_WARN("No gems found in '%s'.", folder);
+        return paths;
+    }
+
+    do {
+        // A folder named like a library is not a gem.
+        if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+            continue;
+        }
+        mg_collect_gem_path(&paths, folder, found.cFileName);
+    } while (FindNextFileA(find, &found) != 0);
+    FindClose(find);
+#elif defined(MG_PLATFORM_IOS) || defined(MG_PLATFORM_LINUX)
+    DIR* dir = opendir(folder);
+    if (dir == NULL) {
+        MG_WARN("No gems found in '%s': the folder did not open.", folder);
+        return paths;
+    }
+
+    const struct dirent* entry;
+    while ((entry = readdir(dir)) != NULL) {
+        /* Kept only when the name ends in the extension; that also skips the
+         * . and .. entries, which are too short to. */
+        const char* name = entry->d_name;
+        const size_t length = strlen(name);
+        const size_t ext_length = sizeof(MG_SHARED_LIB_EXT_) - 1;
+        if (length <= ext_length || strcmp(name + (length - ext_length), MG_SHARED_LIB_EXT_) != 0) {
+            continue;
+        }
+        mg_collect_gem_path(&paths, folder, name);
+    }
+    closedir(dir);
+#endif
+
+    return paths;
+}
+
+mg_gem* mg_load_gem(const char* path, mg_app* owner) {
+    MG_ASSERT_RETURN_VAL_IF(path != NULL, NULL, "path is null");
+
+    mg_gem* gem = mg_open_gem(path, owner);
+    if (gem == NULL) {
+        return NULL;
+    }
+
+    /* Straight through: one gem loaded by name has no set to be ordered
+     * against, so whatever it requires is the caller's to have loaded first. */
+    mg_activate_gem(gem);
     return gem;
 }
 
@@ -309,12 +522,9 @@ void mg_unload_gem(mg_gem* gem) {
     MG_ASSERT_RETURN_IF(gem != NULL, "Tried to unload a null gem");
     MG_INFO(
         "Unloading gem '%.*s' %.*s by %.*s.",
-        (int)gem->desc.name.count,
-        (const char*)gem->desc.name.items,
-        (int)gem->desc.version.count,
-        (const char*)gem->desc.version.items,
-        (int)gem->desc.author.count,
-        (const char*)gem->desc.author.items);
+        MG_VIEW_ARGS_(gem->desc.name),
+        MG_VIEW_ARGS_(gem->desc.version),
+        MG_VIEW_ARGS_(gem->desc.author));
 
     // First, while the image is still mapped and its slots are still bound.
     if (gem->desc.hooks.on_unload != NULL) {
@@ -322,9 +532,7 @@ void mg_unload_gem(mg_gem* gem) {
     }
 
     mg_unbind_gem(gem);
-    mg_close_gem_lib(gem);
-    mg_str_free(&gem->path);
-    mg_free(gem, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
+    mg_free_gem(gem);
 }
 
 void mg_reload_gem(mg_gem* gem) {
@@ -361,7 +569,7 @@ void mg_reload_gem(mg_gem* gem) {
         return;
     }
 
-    if (!mg_attach_gem(gem, path)) {
+    if (!mg_read_gem_desc(gem, path)) {
         mg_close_gem_lib(gem);
         mg_detach_gem(gem);
         mg_byte_list_free(&state);
@@ -369,7 +577,12 @@ void mg_reload_gem(mg_gem* gem) {
         return;
     }
 
-    // On the new image, and only once it is bound, so the hook finds its slots filled.
+    /* Bound, but no on_load: a reload is the same gem carrying on, and the
+     * gems it stands on never went anywhere. mg_reload_gems keeps load order,
+     * so by here each of those already has its own new image. */
+    mg_bind_gem(gem);
+
+    // Only once it is bound, so the hook finds its slots filled.
     if (gem->desc.hooks.on_reloaded != NULL) {
         gem->desc.hooks.on_reloaded(gem->owner, state);
     }
@@ -377,12 +590,9 @@ void mg_reload_gem(mg_gem* gem) {
 
     MG_INFO(
         "Reloaded gem '%.*s' %.*s by %.*s.",
-        (int)gem->desc.name.count,
-        (const char*)gem->desc.name.items,
-        (int)gem->desc.version.count,
-        (const char*)gem->desc.version.items,
-        (int)gem->desc.author.count,
-        (const char*)gem->desc.author.items);
+        MG_VIEW_ARGS_(gem->desc.name),
+        MG_VIEW_ARGS_(gem->desc.version),
+        MG_VIEW_ARGS_(gem->desc.author));
 }
 
 mg_gem_list mg_load_gems(const char* path, mg_app* owner) {
@@ -393,53 +603,24 @@ mg_gem_list mg_load_gems(const char* path, mg_app* owner) {
         return gems;
     }
 
-    /* The engine's own scan, never the read_dir slot: gems are what fill the
-     * slots, so the loader cannot ask a gem to find gems. One flat pass over
-     * the given folder; a gem is any file ending in the platform's library
-     * extension, and subfolders are not entered. */
-#if defined(MG_PLATFORM_WINDOWS)
-    char* pattern = mg_gem_new_file_path(path, "*" MG_SHARED_LIB_EXT_);
-    if (pattern == NULL) {
-        return gems;
-    }
+    mg_str_list paths = mg_scan_for_gems(path);
 
-    WIN32_FIND_DATAA found;
-    const HANDLE find = FindFirstFileA(pattern, &found);
-    mg_free(pattern, MG_MEMORY_TAG_DYNAMIC_LIBRARY);
-    if (find == INVALID_HANDLE_VALUE) {
-        MG_WARN("No gems found in '%s'.", path);
-        return gems;
-    }
-
-    do {
-        // A folder named like a library is not a gem.
-        if ((found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
-            continue;
+    /* Every candidate opened before any is stood up: what a gem requires is
+     * in its desc, and a desc is only readable once its image is. The pool
+     * holds them open but unbound, hooks unfired, until the order is known. */
+    mg_gem_list pool = mg_gem_list_construct();
+    mg_str* file;
+    mg_foreach(file, &paths) {
+        mg_gem* gem = mg_open_gem(mg_str_to_cstr(*file), owner);
+        if (gem != NULL && !mg_gem_list_push(&pool, gem)) {
+            MG_ERROR("Out of memory pooling gem '%s'.", mg_str_to_cstr(*file));
+            mg_free_gem(gem);
         }
-        mg_load_gem_into(&gems, path, found.cFileName, owner);
-    } while (FindNextFileA(find, &found) != 0);
-    FindClose(find);
-#elif defined(MG_PLATFORM_IOS) || defined(MG_PLATFORM_LINUX)
-    DIR* dir = opendir(path);
-    if (dir == NULL) {
-        MG_WARN("No gems found in '%s': the folder did not open.", path);
-        return gems;
     }
+    mg_free_gem_paths(&paths);
 
-    const struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
-        /* Kept only when the name ends in the extension; that also skips the
-         * . and .. entries, which are too short to. */
-        const char* name = entry->d_name;
-        const size_t length = strlen(name);
-        const size_t ext_length = sizeof(MG_SHARED_LIB_EXT_) - 1;
-        if (length <= ext_length || strcmp(name + (length - ext_length), MG_SHARED_LIB_EXT_) != 0) {
-            continue;
-        }
-        mg_load_gem_into(&gems, path, name, owner);
-    }
-    closedir(dir);
-#endif
+    mg_activate_in_dependency_order(&pool, &gems);
+    mg_gem_list_free(&pool);
 
     return gems;
 }
@@ -447,11 +628,17 @@ mg_gem_list mg_load_gems(const char* path, mg_app* owner) {
 void mg_unload_gems(mg_gem_list* gems) {
     MG_ASSERT_RETURN_IF(gems != NULL, "gems list is null");
 
-    /* The list holds plain pointers with no destructor behind them, so the
-     * unload is spelled out: every gem still in the list, then the storage. */
-    mg_gem_ptr* slot;
-    mg_where(slot, gems, *slot != NULL) {
-        mg_unload_gem(*slot);
+    /* Back to front, the mirror of the order they were stood up in, so a gem
+     * is torn down while every gem it depends on is still up and its
+     * on_unload may still call into one. The list holds plain pointers with
+     * no destructor behind them, so the unload is spelled out; an index walk
+     * rather than mg_foreach, which only runs forwards, and counting down to
+     * one rather than to zero, because len is unsigned. */
+    for (len i = gems->count; i > 0; i--) {
+        mg_gem_ptr* slot = mg_gem_list_at(gems, (ind)(i - 1));
+        if (slot != NULL && *slot != NULL) {
+            mg_unload_gem(*slot);
+        }
     }
     mg_gem_list_free(gems);
 }
@@ -459,7 +646,9 @@ void mg_unload_gems(mg_gem_list* gems) {
 void mg_reload_gems(mg_gem_list* gems) {
     MG_ASSERT_RETURN_IF(gems != NULL, "gems list is null");
 
-    // Skips the empty slot a failed load may have left behind.
+    /* Forwards, which is load order: a gem's dependencies get their new
+     * images before it gets its own. Skips the empty slot a failed load may
+     * have left behind. */
     mg_gem_ptr* slot;
     mg_where(slot, gems, *slot != NULL) {
         mg_reload_gem(*slot);

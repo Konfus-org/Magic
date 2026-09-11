@@ -33,14 +33,17 @@
 #define TRUE 1
 #define FALSE 0
 
-#define ABS(x) _Generic((x), float: fabsf(x), default: fabs(x))
-
-#define MAX(a, b) _Generic((a) + (b), float: fmaxf(a, b), default: fmax(a, b))
-
 #define EPSILON 1e-6
 
-#define FP_EQ(a, b)                                                                                \
-    (((a) == (b)) ? TRUE : (fp_abs((a) - (b)) <= (EPSILON) * fp_max(fp_abs(a), fp_abs(b))))
+/** @brief Returns the absolute value of a numbers. */
+#define absolute(x) _Generic((x), float: fabsf(x), default: fabs(x))
+
+/** @brief Returns the maximum of two numbers. */
+#define maximum(a, b) _Generic((a) + (b), float: fmaxf(a, b), default: fmax(a, b))
+
+/** @brief Compares two numbers for equality within a small margin of error. */
+#define fequivalent(a, b)                                                                          \
+    (((a) == (b)) ? TRUE : (absolute((a) - (b)) <= (EPSILON) * maximum(absolute(a), absolute(b))))
 
 /** @brief Size of one kilobyte in bytes. */
 #define KILOBYTE 1024
@@ -81,7 +84,7 @@
 #endif
 
 /** @brief Builds an r64 from an offset and a size. */
-#define RANGE(offset, size) (LITERAL(r64) {(u64)(offset), (u64)(size)})
+#define range(offset, size) (LITERAL(r64) {(u64)(offset), (u64)(size)})
 
 /** @brief Unsigned 8-bit integer */
 typedef unsigned char u8;
