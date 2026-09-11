@@ -41,14 +41,12 @@ CheckOptions:
   - key: readability-identifier-naming.TypedefCase
     value: lower_case
 
-  # Functions. A trailing _ is this project's marker for a private helper
-  # (mg_default_mem_fits_), allowed on an otherwise lower_case name.
+  # Functions. Nothing is marked private by its name: a helper that is nobody
+  # else's business is static, and static is what says so.
   - key: readability-identifier-naming.FunctionCase
     value: lower_case
   - key: readability-identifier-naming.GlobalFunctionCase
     value: lower_case
-  - key: readability-identifier-naming.FunctionIgnoredRegexp
-    value: '^[a-z][a-z0-9_]*_$'
 
   # Variables and members.
   - key: readability-identifier-naming.VariableCase
@@ -84,8 +82,12 @@ CheckOptions:
   - key: readability-identifier-naming.EnumConstantCase
     value: UPPER_CASE
 
-  # Macros. The trailing _ again: the private half of an argument-count
-  # dispatch (MG_LOG_1_, MG_UNUSED_PICK_) keeps its marker. Function-like
+  # Macros. The one place a trailing _ still means private, because it is the
+  # only place it can: a macro in a public header has no static to hide behind
+  # and is in every consumer's preprocessor, so the private half of an
+  # argument-count dispatch (MG_LOG_1_, MG_UNUSED_PICK_) keeps the marker that
+  # says do not call this. A macro private to a .c is private already and
+  # spells its name plainly. Function-like
   # macros that read as functions or keywords (foreach, where, first, last,
   # mg_alloc_one) are named like functions: fully lower_case.
   - key: readability-identifier-naming.MacroDefinitionCase

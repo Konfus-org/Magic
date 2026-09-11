@@ -29,11 +29,11 @@
  * folder as a gem candidate. The hot-reload copies end in .tmp, so a scan for
  * this suffix never picks one up. */
 #if defined(MG_PLATFORM_WINDOWS)
-    #define MG_SHARED_LIB_EXT_ ".dll"
+    #define MG_SHARED_LIB_EXT ".dll"
 #elif defined(MG_PLATFORM_IOS)
-    #define MG_SHARED_LIB_EXT_ ".dylib"
+    #define MG_SHARED_LIB_EXT ".dylib"
 #elif defined(MG_PLATFORM_LINUX)
-    #define MG_SHARED_LIB_EXT_ ".so"
+    #define MG_SHARED_LIB_EXT ".so"
 #else
     #error Platform not supported!
 #endif
@@ -41,7 +41,7 @@
 /* A name as the MG_* format arguments want it: a view carries no terminator,
  * so every mention of one spells out the precision and the cast. Pairs with a
  * %.*s in the format. */
-#define MG_VIEW_ARGS_(view) (int)(view).count, (const char*)(view).items
+#define MG_VIEW_ARGS(view) (int)(view).count, (const char*)(view).items
 
 #if defined(MG_HOT_RELOAD_GEMS)
 
@@ -90,7 +90,7 @@ static void mg_bind_gem(const mg_gem* gem) {
             && *slot->ptr_address != provided) {
             MG_WARN(
                 "Gem '%.*s' is taking over '%s' from another provider.",
-                MG_VIEW_ARGS_(gem->desc.name),
+                MG_VIEW_ARGS(gem->desc.name),
                 slot->name);
         }
         *slot->ptr_address = provided;
@@ -108,7 +108,7 @@ static void mg_bind_gem(const mg_gem* gem) {
         if (!matched) {
             MG_WARN(
                 "Gem '%.*s' fills '%s', which no registered slot answers to.",
-                MG_VIEW_ARGS_(gem->desc.name),
+                MG_VIEW_ARGS(gem->desc.name),
                 published);
         }
     }
@@ -288,9 +288,9 @@ static void mg_activate_gem(mg_gem* gem) {
 
     MG_INFO(
         "Loaded gem '%.*s' %.*s by %.*s.",
-        MG_VIEW_ARGS_(gem->desc.name),
-        MG_VIEW_ARGS_(gem->desc.version),
-        MG_VIEW_ARGS_(gem->desc.author));
+        MG_VIEW_ARGS(gem->desc.name),
+        MG_VIEW_ARGS(gem->desc.version),
+        MG_VIEW_ARGS(gem->desc.author));
 }
 
 /**
@@ -339,8 +339,8 @@ static void mg_report_unmet_deps(
 
         MG_ERROR(
             "Gem '%.*s' is not loaded: it requires '%.*s', which %s.",
-            MG_VIEW_ARGS_(gem->desc.name),
-            MG_VIEW_ARGS_(needed),
+            MG_VIEW_ARGS(gem->desc.name),
+            MG_VIEW_ARGS(needed),
             mg_gem_named(stuck, needed) != NULL ? "is itself waiting on a dependency cycle"
                                                : "no gem in the folder provides");
     }
@@ -381,7 +381,7 @@ static void mg_activate_in_dependency_order(mg_gem_list* pool, mg_gem_list* load
             if (!mg_gem_list_push(loaded, gem)) {
                 MG_ERROR(
                     "Out of memory keeping gem '%.*s'; unloading it again.",
-                    MG_VIEW_ARGS_(gem->desc.name));
+                    MG_VIEW_ARGS(gem->desc.name));
                 mg_unload_gem(gem);
             }
         }
@@ -458,7 +458,7 @@ static mg_str_list mg_scan_for_gems(const char* folder) {
     mg_str_list paths = mg_str_list_construct();
 
 #if defined(MG_PLATFORM_WINDOWS)
-    char* pattern = mg_gem_new_file_path(folder, "*" MG_SHARED_LIB_EXT_);
+    char* pattern = mg_gem_new_file_path(folder, "*" MG_SHARED_LIB_EXT);
     if (pattern == NULL) {
         return paths;
     }
@@ -492,8 +492,8 @@ static mg_str_list mg_scan_for_gems(const char* folder) {
          * . and .. entries, which are too short to. */
         const char* name = entry->d_name;
         const size_t length = strlen(name);
-        const size_t ext_length = sizeof(MG_SHARED_LIB_EXT_) - 1;
-        if (length <= ext_length || strcmp(name + (length - ext_length), MG_SHARED_LIB_EXT_) != 0) {
+        const size_t ext_length = sizeof(MG_SHARED_LIB_EXT) - 1;
+        if (length <= ext_length || strcmp(name + (length - ext_length), MG_SHARED_LIB_EXT) != 0) {
             continue;
         }
         mg_collect_gem_path(&paths, folder, name);
@@ -522,9 +522,9 @@ void mg_unload_gem(mg_gem* gem) {
     MG_ASSERT_RETURN_IF(gem != NULL, "Tried to unload a null gem");
     MG_INFO(
         "Unloading gem '%.*s' %.*s by %.*s.",
-        MG_VIEW_ARGS_(gem->desc.name),
-        MG_VIEW_ARGS_(gem->desc.version),
-        MG_VIEW_ARGS_(gem->desc.author));
+        MG_VIEW_ARGS(gem->desc.name),
+        MG_VIEW_ARGS(gem->desc.version),
+        MG_VIEW_ARGS(gem->desc.author));
 
     // First, while the image is still mapped and its slots are still bound.
     if (gem->desc.hooks.on_unload != NULL) {
@@ -590,9 +590,9 @@ void mg_reload_gem(mg_gem* gem) {
 
     MG_INFO(
         "Reloaded gem '%.*s' %.*s by %.*s.",
-        MG_VIEW_ARGS_(gem->desc.name),
-        MG_VIEW_ARGS_(gem->desc.version),
-        MG_VIEW_ARGS_(gem->desc.author));
+        MG_VIEW_ARGS(gem->desc.name),
+        MG_VIEW_ARGS(gem->desc.version),
+        MG_VIEW_ARGS(gem->desc.author));
 }
 
 mg_gem_list mg_load_gems(const char* path, mg_app* owner) {

@@ -28,7 +28,7 @@
  * @param level The engine level the message was logged at.
  * @return The sink level to write it at; INFO for anything past the ladder.
  */
-static mg_spdlog_level mg_spdlog_level_from_(const mg_log_level level) {
+static mg_spdlog_level mg_spdlog_level_from(const mg_log_level level) {
     switch (level) {
         case MG_LOG_LEVEL_TRACE:
             return MG_SPDLOG_TRACE;
@@ -56,12 +56,12 @@ static mg_spdlog_level mg_spdlog_level_from_(const mg_log_level level) {
  * @param line The line the message came from.
  * @param message The message itself.
  */
-static void mg_spdlog_logger_(
+static void mg_spdlog_logger(
     const mg_log_level level,
     const char* file,
     const i32 line,
     const char* message) {
-    mg_spdlog_write(mg_spdlog_level_from_(level), file, line, message);
+    mg_spdlog_write(mg_spdlog_level_from(level), file, line, message);
 }
 
 /* ========================================================================== */
@@ -77,7 +77,7 @@ static void spdlog_on_load(mg_app* owner) {
     MG_UNUSED(owner);
 
     mg_spdlog_open_sink();
-    mg_register_logger(mg_spdlog_logger_);
+    mg_register_logger(mg_spdlog_logger);
 }
 
 /**
@@ -91,7 +91,7 @@ static void spdlog_on_unload(mg_app* owner) {
      * unmapped: a logger left on the log would be dispatched to through code
      * that is no longer there. The engine's built-in default takes the line
      * back the moment this one steps off. */
-    mg_unregister_logger(mg_spdlog_logger_);
+    mg_unregister_logger(mg_spdlog_logger);
     mg_spdlog_close_sink();
 }
 

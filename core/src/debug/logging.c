@@ -31,7 +31,7 @@ static mg_log* g_log = NULL;
  * a level added to mg_log_level a compile error here rather than a line that
  * quietly prints as UNKNOWN.
  */
-static void mg_default_logger_(
+static void mg_default_logger(
     const mg_log_level level,
     const char* file,
     const i32 line,
@@ -145,7 +145,7 @@ void mg_trace(const mg_log_level level, const char* file, const i32 line, const 
      * what keeps a logging gem from printing every line twice, and what
      * keeps the lines before it loads from being lost. */
     if (mg_buffer_empty(&g_log->loggers)) {
-        mg_default_logger_(level, file, line, message);
+        mg_default_logger(level, file, line, message);
         return;
     }
 

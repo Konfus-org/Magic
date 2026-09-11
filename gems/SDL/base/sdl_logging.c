@@ -43,9 +43,10 @@ static mg_log_level sdl_level_from_priority(const SDL_LogPriority priority) {
 }
 
 /**
- * @brief What SDL's category names, for the call site a log line carries.
- * An engine line carries the file it was written in; an SDL line has no file
- * this side of SDL, so the category stands in its place.
+ * @brief What SDL's category names, for the text of the line it tags.
+ * Which part of SDL is talking is the one thing an SDL line carries that an
+ * engine line does not, and the nearest thing it has to the file an engine
+ * line names itself by.
  * @param category The category SDL tagged the message with.
  * @return A literal in this image, so it outlives the call.
  */
@@ -75,7 +76,7 @@ static const char* sdl_category_name(const int category) {
 /**
  * @brief SDL's log writer as a call into the engine's log.
  * @param userdata Unused; nothing rides along with the callback.
- * @param category The SDL category, which stands in for the call site's file.
+ * @param category The SDL category, which rides along in the line's text.
  * @param priority The SDL severity, mapped to an engine level.
  * @param message The line itself, already formatted by SDL.
  */
@@ -86,10 +87,24 @@ static void SDLCALL sdl_write_to_magic_log(
     const char* message) {
     MG_UNUSED(userdata);
 
-    /* "%s" and not message: the line SDL hands over is text, and a stray
-     * percent in it is a device name, not a conversion to go reading
-     * arguments for. */
-    mg_trace(sdl_level_from_priority(priority), sdl_category_name(category), 0, "%s", message);
+    /* This file and this line, which is the truth: an SDL line has no call
+     * site this side of SDL, and here is where it enters the engine's log.
+     * Not the category and line 0 -- a logger is free to read a zero line as
+     * no source at all and drop the file with it, which is a category thrown
+     * away and whatever punctuation its writer puts between the two left
+     * standing on its own.
+     *
+     * So the category goes in the text, where nothing can drop it. "%s" and
+     * not message for the same reason it is not the format anywhere else: the
+     * line is already expanded, and a stray percent in it is a device name,
+     * not a conversion to go reading arguments for. */
+    mg_trace(
+        sdl_level_from_priority(priority),
+        __FILE__,
+        __LINE__,
+        "[%s] %s",
+        sdl_category_name(category),
+        message);
 }
 
 void sdl_route_logging_to_magic(void) {

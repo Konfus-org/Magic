@@ -37,7 +37,7 @@ static f32 mg_input_value(mg_input_array* array, const ind code) {
 /* Shifts rows toward history and copies the incoming array into row 0. A
  * macro rather than a function: a two-dimensional parameter needs its inner
  * extent spelled, and it differs per code space. */
-#define MG_SHIFT_INPUT_VALUES_(values, incoming, count)                                            \
+#define MG_SHIFT_INPUT_VALUES(values, incoming, count)                                            \
     do {                                                                                           \
         for (len row = MG_INPUT_HISTORY - 1; row > 0; row--) {                                     \
             for (len code = 0; code < (count); code++) {                                           \
@@ -50,12 +50,12 @@ static f32 mg_input_value(mg_input_array* array, const ind code) {
     } while (0)
 
 void mg_update_input(mg_input_state state, const s32 screen_size) {
-    MG_SHIFT_INPUT_VALUES_(g_key_values, &state.keyboard, MG_KEY_COUNT);
-    MG_SHIFT_INPUT_VALUES_(
+    MG_SHIFT_INPUT_VALUES(g_key_values, &state.keyboard, MG_KEY_COUNT);
+    MG_SHIFT_INPUT_VALUES(
         g_button_values,
         &state.buttons,
         (len)MG_MAX_CONTROLLERS * MG_BUTTON_COUNT);
-    MG_SHIFT_INPUT_VALUES_(g_axis_values, &state.analog, (len)MG_MAX_CONTROLLERS * MG_AXIS_COUNT);
+    MG_SHIFT_INPUT_VALUES(g_axis_values, &state.analog, (len)MG_MAX_CONTROLLERS * MG_AXIS_COUNT);
     g_screen_size = screen_size;
 }
 
