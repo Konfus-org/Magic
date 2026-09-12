@@ -13,14 +13,10 @@
 #include "magic/collections/string.h"
 #include "magic/platform/shared_lib.h"
 
-/**
- * @brief How many gems one gem may name as its dependencies. A fixed array
- * rather than a pointer: the desc crosses an ABI boundary and is read once,
- * so it carries its dependencies rather than pointing at them.
- */
+/** @brief How many gems one gem may name as its dependencies.*/
 #define MG_MAX_GEM_DEPENDENCIES 8
 
-/* Forward declared to avoid a cycle through app.h. */
+// Forward declared to avoid a cycle through app.h.
 typedef struct mg_app mg_app;
 
 /**
@@ -28,12 +24,12 @@ typedef struct mg_app mg_app;
  * The state lists are typed spellings of the same mg_buffer they always
  * were, so this is the same ABI a gem built before the mints speaks.
  */
-typedef struct mg_gem_api {
+typedef struct mg_gem_callbacks {
     void (*on_load)(mg_app* owner);
     void (*on_reload)(mg_app* owner, mg_byte_list state);
     void (*on_reloaded)(mg_app* owner, mg_byte_list restore_state);
     void (*on_unload)(mg_app* owner);
-} mg_gem_api;
+} mg_gem_callbacks;
 
 /**
  * @brief Everything a gem says about itself through its one entry point.
@@ -48,7 +44,7 @@ typedef struct mg_gem_desc {
     /** @brief The names of the gems that must be loaded before this one. */
     mg_str_view dependencies[MG_MAX_GEM_DEPENDENCIES];
     len dependency_count; /**< How many of dependencies are filled in. */
-    mg_gem_api hooks; /**< Lifecycle hooks; any of them may be NULL. */
+    mg_gem_callbacks hooks; /**< Lifecycle hooks; any of them may be NULL. */
 } mg_gem_desc;
 
 /**

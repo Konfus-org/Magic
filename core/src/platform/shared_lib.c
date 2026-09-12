@@ -58,7 +58,7 @@ static mg_lib_fn mg_os_find_export(void* handle, const char* name) {
     void* address = dlsym(handle, name);
     mg_lib_fn fn = NULL;
     if (address != NULL) {
-        memcpy(&fn, &address, sizeof(fn));
+        memcpy((void*)&fn, (const void*)&address, sizeof(fn));
     }
     return fn;
 #endif
@@ -191,10 +191,16 @@ b8 mg_copy_shared_lib(const char* path, const char* copy_path) {
 
     b8 copied = TRUE;
     byte chunk[KILOBYTES(4)];
-    size_t bytes_read;
-    while ((bytes_read = fread(chunk, 1, sizeof(chunk), source)) > 0) {
-        if (fwrite(chunk, 1, bytes_read, destination) != bytes_read) {
+    for (;;) {
+        const size_t bytes_read = fread(chunk, 1, sizeof(chunk), source);
+        if (bytes_read > 0 && fwrite(chunk, 1, bytes_read, destination) != bytes_read) {
             copied = FALSE;
+            break;
+        }
+        /* A short read is end of file or an error, and either way the last one:
+         * reading past it again is what the analyzer flags. ferror below says
+         * which it was. */
+        if (bytes_read < sizeof(chunk)) {
             break;
         }
     }

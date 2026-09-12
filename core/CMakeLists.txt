@@ -35,9 +35,12 @@ target_include_directories(magic
 
 # The precompiled prelude, injected ahead of every src/*.c. PRIVATE twice
 # over: a build-time device of this target alone, and nothing about it travels
-# to consumers. See src/pch.h for what belongs in it.
+# to consumers. See src/pch.h for what belongs in it. The path is published so
+# mg_add_gem/mg_add_app can precompile the same prelude for their own sources;
+# INTERNAL because gems/ is a sibling directory and cannot see this scope.
+set(MG_CORE_PCH "${CMAKE_CURRENT_SOURCE_DIR}/src/pch.h" CACHE INTERNAL "core's precompiled prelude")
 if (MG_PCH)
-    target_precompile_headers(magic PRIVATE src/pch.h)
+    target_precompile_headers(magic PRIVATE ${MG_CORE_PCH})
 endif ()
 
 # PUBLIC because c_std_11 has to travel: a gem or app compiled as C17 would get

@@ -38,12 +38,16 @@
     {                                                                                                                   \
         /* static const: the names are literals in this image, and the views                                            \
          * below borrow them for as long as the image is mapped. */                                                     \
-        static const char* const required_[] = {__VA_ARGS__};                                                           \
-        const len asked_ = (len)(sizeof(required_) / sizeof(required_[0]));                                             \
-        desc.dependency_count = asked_ < MG_MAX_GEM_DEPENDENCIES ? asked_ : MG_MAX_GEM_DEPENDENCIES;                    \
-        for (len i_ = 0; i_ < desc.dependency_count; i_++) {                                                            \
-            desc.dependencies[i_] = mg_view_cstr(required_[i_]);                                                        \
+        static const char* const required_names[] = {__VA_ARGS__};                                                      \
+        const len required_count = (len)(sizeof(required_names) / sizeof(required_names[0]));                           \
+        /* Capped in the loop and not with a ternary up front: with a handful of                                        \
+         * names, required_count < MG_MAX_GEM_DEPENDENCIES is a constant the                                            \
+         * compiler rejects as always true. */                                                                          \
+        len required_i = 0;                                                                                             \
+        for (; required_i < required_count && required_i < MG_MAX_GEM_DEPENDENCIES; required_i++) {                    \
+            desc.dependencies[required_i] = mg_view_cstr(required_names[required_i]);                                   \
         }                                                                                                               \
+        desc.dependency_count = required_i;                                                                             \
     }
 
 /**

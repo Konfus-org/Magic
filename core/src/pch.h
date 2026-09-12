@@ -9,19 +9,6 @@
 
 #pragma once
 
-/*
- * The intersection of two sets: headers nearly every translation unit pulls in
- * anyway, and headers that almost never change. Minion's own public headers
- * deliberately stay out -- a PCH is rebuilt in full, along with every object
- * using it, whenever anything it includes is touched.
- *
- * Under src/ and attached PRIVATE because it is a build-time device, not API.
- *
- * It does not excuse a source file from including what it uses: CMake injects
- * this ahead of the first line, so a .c calling free() without <stdlib.h>
- * compiles until -DMINION_PCH=OFF.
- */
-
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>

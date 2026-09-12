@@ -61,10 +61,10 @@ option(MG_HOT_RELOAD_GEMS "Compile gem hot reloading in" OFF)
 # extern block.
 option(MG_USE_CALLBACKS "Build the Magic::main stub and declare the mg_on_* app callbacks" ON)
 
-# Injects core's src/pch.h ahead of every engine translation unit. OFF is the
-# honesty check: a .c leaning on the PCH for a header it never includes stops
-# compiling.
-option(MG_PCH "Precompile core's src/pch.h for the engine's own sources" ON)
+# Injects core's src/pch.h ahead of every engine, gem and app translation unit.
+# OFF is the honesty check: a .c leaning on the PCH for a header it never
+# includes stops compiling.
+option(MG_PCH "Precompile core's src/pch.h for the engine, gems and apps" ON)
 
 # The unit tests are C++: GoogleTest is a C++ framework, and the umbrella header
 # they include is the C++ binding they exist to keep honest. Turning this off

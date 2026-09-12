@@ -27,6 +27,7 @@
 /* The standard headers Magic's public headers reach for, pulled in ahead of
  * the C linkage block: a standard header expanded inside extern "C" is
  * ill-formed. Harvested from the headers at configure time, not by hand. */
+#include <stdint.h>
 #include <stdlib.h>
 
 #ifdef __cplusplus

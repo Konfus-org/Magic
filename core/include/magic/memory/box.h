@@ -11,7 +11,7 @@
 #include "magic/primitives.h"
 
 /** @brief Boxes a pointer with the size of what it points at. */
-#define mg_boxup(ptr) (LITERAL(mg_box) {(ptr), sizeof(*(ptr))})
+#define mg_boxup(ptr) (LITERAL(mg_box) {(void*)(ptr), sizeof(*(ptr))})
 
 /** @brief The box carrying nothing: NULL data, zero size. */
 #define MG_NIL_BOX (LITERAL(mg_box) {NULL, 0})

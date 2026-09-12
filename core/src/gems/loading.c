@@ -19,7 +19,7 @@
 
 #if defined(MG_PLATFORM_WINDOWS)
     #include <windows.h>
-#elif defined(MG_PLATFORM_IOS) || defined(MG_PLATFORM_LINUX))
+#elif defined(MG_PLATFORM_IOS) || defined(MG_PLATFORM_LINUX)
     #include <dirent.h>
 #else
     #error Platform not supported!

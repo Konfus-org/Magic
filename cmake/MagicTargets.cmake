@@ -176,6 +176,14 @@ function(_mg_add_module kind name)
     # The target's own directory, so private headers are included by plain name.
     target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${MOD_INCLUDES})
 
+    # The engine's precompiled prelude, compiled per target: a gem's flags and
+    # definitions differ from the engine's (no COMPILING_MAGIC), so REUSE_FROM
+    # would hand it a PCH the compiler rejects. MG_CORE_PCH is only defined when
+    # core/ was added in this tree; a consumer of an installed engine goes without.
+    if(MG_PCH AND MG_CORE_PCH)
+        target_precompile_headers(${target} PRIVATE ${MG_CORE_PCH})
+    endif()
+
     # A handle for "build the gems/apps and nothing else". Created on first use;
     # no ALL, because each target is already part of the default build.
     set(group mg_${lower_kind}s)

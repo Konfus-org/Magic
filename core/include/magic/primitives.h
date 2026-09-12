@@ -10,6 +10,7 @@
 
 #pragma once
 #include "magic/debug/asserts.h"
+#include <stdint.h>
 #include <stdlib.h>
 
 #define U64_MAX 18446744073709551615ULL

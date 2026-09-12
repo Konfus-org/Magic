@@ -23,9 +23,11 @@
  * fail to link. MG_SHARED separates the two, and is only defined when
  * BUILD_SHARED_LIBS is on.
  *
- * Everywhere else the marker is empty: ELF and Mach-O export by default and the
- * build asks for hidden visibility instead, so a per-function attribute has
- * nothing to add.
+ * ELF and Mach-O would export everything by default, but core/CMakeLists.txt
+ * builds with hidden visibility so that MG_EXPORT alone decides the ABI. A
+ * shared build there has to put default visibility back per function, the way
+ * MG_LIB_EXPORT does for gems -- left empty, libmagic.so exports nothing and
+ * every consumer fails to link.
  */
 #if defined(MG_PLATFORM_WINDOWS) && defined(MG_SHARED)
     #ifdef COMPILING_MAGIC
@@ -35,10 +37,10 @@
         /** @brief Imports a function from the Magic DLL being consumed. */
         #define MG_EXPORT __declspec(dllimport)
     #endif
+#elif defined(MG_SHARED) && (defined(__GNUC__) || defined(__clang__))
+    /** @brief Exports a function from the Magic shared object past hidden visibility. */
+    #define MG_EXPORT __attribute__((visibility("default")))
 #else
-    /**
-     * @brief Expands to nothing: a static library, or a platform that exports
-     * by default and is asked for hidden visibility by the build instead.
-     */
+    /** @brief Expands to nothing: a static library needs no marker. */
     #define MG_EXPORT
 #endif
