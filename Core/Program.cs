@@ -4,11 +4,12 @@ using Core.Services;
 using DryIoc;
 
 // Setup core services. The container stays open: gems register into it later.
-using Container container = new(rules => rules.WithDefaultReuse(Reuse.Singleton));
-container.Register<IFileOperations, FileOperations>();
+// Reuse is explicit on purpose: the default (transient) is the safe one for anything a gem registers.
+using Container container = new();
+container.Register<IFileOperations, FileOperations>(Reuse.Singleton);
 container.RegisterInstance(new Directories(AppContext.BaseDirectory, Path.Combine(AppContext.BaseDirectory, "Gems")));
-container.Register<GemRegistry>();
-container.Register<GemLoader>();
+container.Register<GemRegistry>(Reuse.Singleton);
+container.Register<GemLoader>(Reuse.Singleton);
 
 // Load gems
 string gemsDirectory = container.Resolve<Directories>().Gems;

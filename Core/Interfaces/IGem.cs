@@ -9,8 +9,9 @@ namespace Core.Interfaces;
 public interface IGem
 {
     /// <summary>
-    /// Resolve host services here, and register any services this gem provides to the host and to other gems.
-    /// Everything registered is unregistered automatically when the gem is unloaded.
+    /// Resolve host services here, and offer any services this gem provides to the host and to other gems
+    /// via <see cref="Services.GemServices.Provide{TService}"/>. Everything registered is unregistered
+    /// automatically when the gem is unloaded.
     /// </summary>
     void OnLoad(IContainer services);
     void OnUnload();

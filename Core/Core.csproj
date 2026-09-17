@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Gems compile against this too (it flows through their ProjectReference to Core),
          but must never load their own copy at runtime: see GemLoadContext.Load. -->
     <PackageReference Include="DryIoc.dll" Version="5.4.3" />

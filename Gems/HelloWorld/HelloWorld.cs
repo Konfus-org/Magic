@@ -7,7 +7,7 @@ internal sealed class HelloWorld : IGem
 {
     public void OnLoad(IContainer services)
     {
-        // A gem providing e.g. a renderer would do: services.Register<IRenderer, VulkanRenderer>();
+        // A gem providing e.g. a renderer would keep it in a field and do: services.Provide<IRenderer>(_renderer);
         Console.WriteLine("Hello World!");
     }
 
