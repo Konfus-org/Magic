@@ -1,0 +1,16 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+
+    <!-- Tests land in bin\Tests\, beside bin\Gems\ so a test can load real gem DLLs. -->
+    <OutputPath>$(MagicBuildDir)bin\Tests\</OutputPath>
+
+    <!-- One obj\ per test project; sharing one breaks MSBuild's incremental build. -->
+    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\Tests\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+  </PropertyGroup>
+
+</Project>

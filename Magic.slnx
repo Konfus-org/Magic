@@ -2,5 +2,8 @@
   <Folder Name="/Gems/">
     <Project Path="Gems/HelloWorld/HelloWorld.csproj" Id="c214dd75-72bc-49e0-963d-c8567fd4749b" />
   </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="Tests/Core.Tests/Core.Tests.csproj" />
+  </Folder>
   <Project Path="Core/Core.csproj" />
 </Solution>

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\Core.csproj" />
+    <!-- Built before the tests so bin\Gems\HelloWorld.dll exists, but not referenced:
+         the test must load it through GemLoader, not have it in the default context. -->
+    <ProjectReference Include="..\..\Gems\HelloWorld\HelloWorld.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>
