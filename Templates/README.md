@@ -11,15 +11,16 @@ Install once from the repo root (re-run after editing the template):
 dotnet new install .\Templates\MagicGem
 ```
 
-Create a gem. It must live under `Gems\` so `Gems\Directory.Build.props` applies
-and the `..\..\Core\Core.csproj` reference resolves:
+Create a gem. `Gems\` is the conventional home, but any folder in the repo works: the
+build recognises a gem by the `<Name>.meta` file next to its csproj, and the Core
+reference is anchored to the repo root.
 
 ```
 dotnet new magicgem -n Physics -o Gems\Physics --Author "Konfus" --Description "Rigid bodies and collision."
 dotnet sln Magic.slnx add Gems\Physics\Physics.csproj --solution-folder Gems
 ```
 
-In Visual Studio, pick the `Gems` folder as the location and add the new project
+In Visual Studio, set the location to the `Gems` folder and add the new project
 to the `Gems` solution folder.
 
 Uninstall with `dotnet new uninstall .\Templates\MagicGem`.

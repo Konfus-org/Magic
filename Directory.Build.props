@@ -13,6 +13,9 @@
          "dotnet build" (VS and "dotnet build -c X" pass it in explicitly). -->
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 
+    <!-- Repo root, for project references that must not depend on where a project lives. -->
+    <MagicRoot>$(MSBuildThisFileDirectory)</MagicRoot>
+
     <MagicBuildDir>$(MSBuildThisFileDirectory)Build\$(TargetFramework)\$(Configuration)\</MagicBuildDir>
 
     <!-- Stop the SDK from appending net10.0\ after the path; it's already in it. -->
@@ -34,6 +37,35 @@
          conventional folders by name too, so a stale obj\ left next to a
          csproj can never get compiled as source. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!-- A gem is any project with a <ProjectName>.meta next to its csproj, wherever it lives.
+       (Not tied to the Gems\ folder, so a project created from the template in the wrong
+       place still builds as a gem.) -->
+  <PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)\$(MSBuildProjectName).meta')">
+    <IsGem>true</IsGem>
+
+    <!-- Gems are plugins: build as class libraries only, never an EXE/apphost. -->
+    <OutputType>Library</OutputType>
+
+    <!-- Marks this as a dynamically-loaded plugin, so the SDK writes a
+         .deps.json and copies its dependencies locally. A gem loaded
+         via reflection outside the host's own dependency graph needs
+         those sitting right next to it. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+
+    <!-- Gems aren't published to NuGet. -->
+    <IsPackable>false</IsPackable>
+
+    <!-- All gems land flat in bin\Gems\ next to the host exe: that is the
+         folder GemLoader scans for plugin DLLs at runtime. -->
+    <OutputPath>$(MagicBuildDir)bin\Gems\</OutputPath>
+
+    <!-- Intermediate files get one folder per gem. Sharing a single obj\
+         between projects breaks MSBuild's incremental build (they overwrite
+         each other's per-project caches). -->
+    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\Gems\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
   </PropertyGroup>
 
 </Project>

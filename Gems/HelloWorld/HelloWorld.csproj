@@ -12,7 +12,7 @@
          which already has its own Core.dll loaded. A second private copy
          next to the gem would be a *different* assembly identity, and the
          cast back to the host's IGem would fail at runtime. -->
-    <ProjectReference Include="..\..\Core\Core.csproj">
+    <ProjectReference Include="$(MagicRoot)Core\Core.csproj">
       <Private>false</Private>
       <ExcludeAssets>runtime</ExcludeAssets>
     </ProjectReference>
