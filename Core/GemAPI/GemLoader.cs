@@ -83,8 +83,7 @@ internal sealed class GemLoader
         // container holds no reference to the gem's assembly.
         if (_container.New(myType, null, RegistrySharing.CloneAndDropCache) is not IGem myInstance) return null;
 
-        // Let the gem register the services it provides, then call its OnLoad method
-        myInstance.Register(_container);
+        // Call the OnLoad method of the instance; it may register services into the container
         myInstance.OnLoad(_container);
 
         // Load metadata from .meta next to the gem assembly
