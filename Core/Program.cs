@@ -29,5 +29,5 @@ foreach (LoadedGem loadedGem in loadedGems)
     Log.Flush(); // Flush logs before unloading gems to ensure all log messages are written
     Log.Info($"Unloading gem: {loadedGem.Metadata.Name}");
     loadedGem.Instance.OnUnload();
-    loadedGem.Context.Unload();
+    gemLoader.Unload(loadedGem);
 }

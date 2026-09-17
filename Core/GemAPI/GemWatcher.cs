@@ -30,6 +30,7 @@ internal sealed class GemWatcher
             if (registry.TryGetValue(e.FullPath, out LoadedGem? gem))
             {
                 gem.Instance.OnUnload();
+                loader.Unload(gem);
                 registry.Unregister(e.FullPath);
             }
         };
@@ -44,7 +45,7 @@ internal sealed class GemWatcher
                         // Unload the gem, save out any state, and remove it from the registry
                         byte[] persistData = Array.Empty<byte>();
                         gem.Instance.OnReloading(persistData);
-                        gem.Context.Unload();
+                        loader.Unload(gem);
                         registry.Unregister(e.FullPath);
 
                         // Load the gem again and restore its state

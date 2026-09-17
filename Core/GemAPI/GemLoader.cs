@@ -1,6 +1,6 @@
 using Core.Interfaces;
 using Core.Utils;
-using Microsoft.Extensions.DependencyInjection;
+using DryIoc;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.Loader;
@@ -33,13 +33,8 @@ internal sealed class GemLoadContext : AssemblyLoadContext
 }
 
 internal sealed record LoadedGem(
-    // The actual instance of the gem, which implements IGem
     IGem Instance,
-    // Gems can have metadata associated with them, which is loaded from a .meta file next to the gem assembly
     GemMetadata Metadata,
-    // Services provided by the gem, if any
-    ServiceProvider Services,
-    // The AssemblyLoadContext that loaded the gem assembly, which allows for unloading the gem later
     GemLoadContext Context);
 
 /// <summary>
@@ -48,12 +43,12 @@ internal sealed record LoadedGem(
 internal sealed class GemLoader
 {
     private readonly IFileOperations _fileOperations;
-    private readonly IServiceProvider _rootProvider;
+    private readonly IContainer _container;
 
-    internal GemLoader(IFileOperations fileOperations, IServiceProvider rootProvider)
+    public GemLoader(IFileOperations fileOperations, IContainer container)
     {
         _fileOperations = fileOperations;
-        _rootProvider = rootProvider;
+        _container = container;
     }
 
     internal async Task<LoadedGem[]> LoadAllAsync(string directory, IProgress<double>? progress, CancellationToken cancellationToken)
@@ -78,45 +73,19 @@ internal sealed class GemLoader
         // Load the assembly from a file path
         GemLoadContext gemAssembly = new(gemPath);
         Assembly assembly = gemAssembly.LoadFromAssemblyPath(gemPath);
-        Type[] assemblyTypes = assembly.GetTypes();
 
         // Get the specific type (Namespace.ClassName)
-        Type? myType = assemblyTypes.FirstOrDefault(t => t.GetInterface(nameof(IGem)) != null);
+        Type? myType = assembly.GetTypes().FirstOrDefault(t => t.GetInterface(nameof(IGem)) != null);
         if (myType is null) return null;
 
-        // Search for services provided by the gem and register them in a new ServiceCollection
-        ServiceCollection services = new();
-        assemblyTypes.ForEach(t =>
-        {
-            if (t.GetCustomAttribute<ProvidesServiceAttribute>() is { } providerAtt)
-            {
-                if (providerAtt.IsSingleton)
-                {
-                    ProvidesServiceAttribute? attr = t.GetCustomAttribute<ProvidesServiceAttribute>();
-                    if (attr is not null)
-                    {
-                        services.AddSingleton(attr.ServiceType, t);
-                    }
-                }
-                else
-                {
-                    ProvidesServiceAttribute? attr = t.GetCustomAttribute<ProvidesServiceAttribute>();
-                    if (attr is not null)
-                    {
-                        services.AddTransient(attr.ServiceType, t);
-                    }
-                }
+        // Create an instance of the class, injecting host services into its constructor.
+        // The gem type itself is never registered, and the cache is dropped, so the
+        // container holds no reference to the gem's assembly.
+        if (_container.New(myType, null, RegistrySharing.CloneAndDropCache) is not IGem myInstance) return null;
 
-            }
-        });
-
-
-        // Create an instance of the class
-        IGem? myInstance = Activator.CreateInstance(myType) as IGem;
-        if (myInstance is null) return null;
-
-        // Call the OnLoad method of the instance
-        myInstance.OnLoad();
+        // Let the gem register the services it provides, then call its OnLoad method
+        myInstance.Register(_container);
+        myInstance.OnLoad(_container);
 
         // Load metadata from .meta next to the gem assembly
         string metaPath = Path.ChangeExtension(gemPath, ".meta");
@@ -128,5 +97,25 @@ internal sealed class GemLoader
 
         // Return the loaded gem
         return new LoadedGem(myInstance, restored, gemAssembly);
+    }
+
+    /// <summary>
+    /// Unregisters every service implemented by a type from the gem's assembly, then unloads the assembly.
+    /// Must run after the gem's OnUnload/OnReloading so the container no longer references the gem's types.
+    /// </summary>
+    internal void Unload(LoadedGem gem)
+    {
+        Assembly gemAssembly = gem.Instance.GetType().Assembly;
+        ServiceRegistrationInfo[] gemServices = _container.GetServiceRegistrations()
+            .Where(r => r.ImplementationType?.Assembly == gemAssembly)
+            .ToArray();
+        foreach (ServiceRegistrationInfo service in gemServices)
+        {
+            _container.Unregister(service.ServiceType, service.OptionalServiceKey, service.Factory.FactoryType, null);
+            // Drop the compiled resolve delegates too, or they keep the gem's types (and so its assembly) alive
+            _container.ClearCache(service.ServiceType, service.Factory.FactoryType, service.OptionalServiceKey);
+        }
+
+        gem.Context.Unload();
     }
 }
