@@ -1,18 +1,18 @@
 using Core.GemAPI;
 using Core.Interfaces;
 using Core.Services;
-using Microsoft.Extensions.DependencyInjection;
+using DryIoc;
 
-// Setup core services
-ServiceCollection services = new();
-services.AddSingleton<IFileOperations, FileOperations>();
-services.AddSingleton(new Directories(AppContext.BaseDirectory, Path.Combine(AppContext.BaseDirectory, "Gems")));
-services.AddSingleton<GemRegistry>();
-ServiceProvider serviceProvider = services.BuildServiceProvider();
+// Setup core services. The container stays open: gems register into it later.
+using Container container = new(rules => rules.WithDefaultReuse(Reuse.Singleton));
+container.Register<IFileOperations, FileOperations>();
+container.RegisterInstance(new Directories(AppContext.BaseDirectory, Path.Combine(AppContext.BaseDirectory, "Gems")));
+container.Register<GemRegistry>();
+container.Register<GemLoader>();
 
 // Load gems
-string gemsDirectory = serviceProvider.GetRequiredService<Directories>().Gems;
-GemLoader gemLoader = new(serviceProvider.GetRequiredService<IFileOperations>());
+string gemsDirectory = container.Resolve<Directories>().Gems;
+GemLoader gemLoader = container.Resolve<GemLoader>();
 LoadedGem[] loadedGems = await gemLoader
     .LoadAllAsync(gemsDirectory, null, CancellationToken.None)
     .ConfigureAwait(false);
@@ -31,5 +31,3 @@ foreach (LoadedGem loadedGem in loadedGems)
     loadedGem.Instance.OnUnload();
     loadedGem.Context.Unload();
 }
-
-await serviceProvider.DisposeAsync().ConfigureAwait(false);
