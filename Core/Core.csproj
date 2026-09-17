@@ -8,11 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Source-code form of the DryIoc NuGet package: compiled straight into
-         Core.dll, so there is no DryIoc.dll for a gem to ship its own copy of.
-         PrivateAssets="all" stops the source files flowing into gem projects,
-         which would compile a second, conflicting copy of every DryIoc type. -->
-    <PackageReference Include="DryIoc" Version="5.4.3" PrivateAssets="all" />
+    <!-- Gems compile against this too (it flows through their ProjectReference to Core),
+         but must never load their own copy at runtime: see GemLoadContext.Load. -->
+    <PackageReference Include="DryIoc.dll" Version="5.4.3" />
   </ItemGroup>
 
 </Project>

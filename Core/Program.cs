@@ -17,9 +17,7 @@ LoadedGem[] loadedGems = await gemLoader
     .LoadAllAsync(gemsDirectory, null, CancellationToken.None)
     .ConfigureAwait(false);
 foreach (GemMetadata loadedGem in loadedGems.Select(g => g.Metadata))
-{
     Log.Info($"Loaded gem: {loadedGem.Name} v{loadedGem.Version} by {loadedGem.Author}");
-}
 
 // TODO: Setup windowing, rendering, asset loading, and input gems these all need to be behind interfaces
 

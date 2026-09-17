@@ -21,7 +21,15 @@ internal sealed class GemLoadContext : AssemblyLoadContext
     [RequiresUnreferencedCode("Calls System.Runtime.Loader.AssemblyLoadContext.LoadFromAssemblyPath(String)")]
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        // Resolve dependencies (like shared libraries or framework dlls)
+        // Anything the host already has loaded (Core, DryIoc, ...) must be shared, never loaded
+        // a second time into this context: types from two copies of the same assembly are not
+        // interchangeable, and the gem would no longer implement the host's IGem.
+        if (Default.Assemblies.Any(a => a.GetName().Name == assemblyName.Name))
+        {
+            return null;
+        }
+
+        // Resolve the gem's own dependencies (like shared libraries or framework dlls)
         string? assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
         if (assemblyPath != null)
         {
@@ -92,10 +100,10 @@ internal sealed class GemLoader
             .ReadTextAsync(metaPath, progress, cancellationToken)
             .ConfigureAwait(false);
         if (!readResult.Ok) return null;
-        GemMetadata restored = JsonSerializer.Deserialize<GemMetadata>(readResult.Payload);
+        GemMetadata meta = JsonSerializer.Deserialize<GemMetadata>(readResult.Payload);
 
         // Return the loaded gem
-        return new LoadedGem(myInstance, restored, gemAssembly);
+        return new LoadedGem(myInstance, meta, gemAssembly);
     }
 
     /// <summary>
