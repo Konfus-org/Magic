@@ -1,0 +1,14 @@
+# Build output (centralized via Directory.Build.props)
+Build/
+
+# Per-project build output (kept as a fallback in case a project ever
+# opts out of Directory.Build.props)
+[Bb]in/
+[Oo]bj/
+
+# IDE
+.vs/
+.idea/
+.cr/
+*.user
+*.suo

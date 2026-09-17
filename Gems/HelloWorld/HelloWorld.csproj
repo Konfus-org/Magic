@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Private=false + ExcludeAssets=runtime: compile against Core, but
+         don't copy Core.dll (or its dependencies) into this gem's own
+         output folder. At runtime the gem is loaded into the host process,
+         which already has its own Core.dll loaded. A second private copy
+         next to the gem would be a *different* assembly identity, and the
+         cast back to the host's IGem would fail at runtime. -->
+    <ProjectReference Include="..\..\Core\Core.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </ProjectReference>
+    <None Include="$(MSBuildProjectName).meta">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

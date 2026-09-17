@@ -1,0 +1,29 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
+
+  <PropertyGroup>
+    <!-- Gems are plugins: build as class libraries only, never an EXE/apphost. -->
+    <OutputType>Library</OutputType>
+
+    <!-- Marks this as a dynamically-loaded plugin, so the SDK writes a
+         .deps.json and copies its dependencies locally. A gem loaded
+         via reflection outside the host's own dependency graph needs
+         those sitting right next to it. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+
+    <!-- Gems aren't published to NuGet. -->
+    <IsPackable>false</IsPackable>
+
+    <!-- All gems land flat in bin\Gems\ next to the host exe: that is the
+         folder GemLoader scans for plugin DLLs at runtime. -->
+    <OutputPath>$(MagicBuildDir)bin\Gems\</OutputPath>
+
+    <!-- Intermediate files get one folder per gem. Sharing a single obj\
+         between projects breaks MSBuild's incremental build (they overwrite
+         each other's per-project caches). -->
+    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\Gems\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+  </PropertyGroup>
+
+</Project>

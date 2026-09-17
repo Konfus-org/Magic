@@ -1,0 +1,39 @@
+<Project>
+
+  <!-- Shared settings for every project in this repo. -->
+
+  <PropertyGroup>
+    <!-- Single source of truth for the target framework. Declared here (not
+         in each csproj) so the output paths below can use it: this file is
+         imported before a project's own PropertyGroup is evaluated. -->
+    <TargetFramework>net10.0</TargetFramework>
+
+    <!-- The SDK only defaults Configuration later, in its .targets. Default
+         it here so it's usable in the paths below under a plain
+         "dotnet build" (VS and "dotnet build -c X" pass it in explicitly). -->
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+
+    <MagicBuildDir>$(MSBuildThisFileDirectory)Build\$(TargetFramework)\$(Configuration)\</MagicBuildDir>
+
+    <!-- Stop the SDK from appending net10.0\ after the path; it's already in it. -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+
+    <OutputPath>$(MagicBuildDir)bin\</OutputPath>
+    <!-- BaseIntermediateOutputPath is where NuGet restore writes
+         project.assets.json; IntermediateOutputPath is where the compiler
+         writes. Pointing both at the same folder keeps everything in one obj\. -->
+    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+
+    <!-- Reference assemblies only speed up incremental builds across
+         projects; skipping them keeps a ref\ folder out of obj\. -->
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+
+    <!-- The SDK only excludes bin\ and obj\ from the *.cs glob by way of
+         the two paths above, which now live under Build\. Exclude the
+         conventional folders by name too, so a stale obj\ left next to a
+         csproj can never get compiled as source. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+</Project>

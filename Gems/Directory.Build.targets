@@ -1,0 +1,4 @@
+<Project>
+  <!-- Intentionally empty. Output paths live in Directory.Build.props now.
+       This file can be deleted. -->
+</Project>
