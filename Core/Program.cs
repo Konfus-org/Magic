@@ -1,4 +1,4 @@
-using Core.GemAPI;
+using Core.Contexts;
 using Core.Interfaces;
 using Core.Services;
 using DryIoc;
@@ -13,7 +13,7 @@ container.Register<GemLoader>();
 // Load gems
 string gemsDirectory = container.Resolve<Directories>().Gems;
 GemLoader gemLoader = container.Resolve<GemLoader>();
-LoadedGem[] loadedGems = await gemLoader
+GemContext[] loadedGems = await gemLoader
     .LoadAllAsync(gemsDirectory, null, CancellationToken.None)
     .ConfigureAwait(false);
 foreach (GemMetadata loadedGem in loadedGems.Select(g => g.Metadata))
@@ -22,10 +22,10 @@ foreach (GemMetadata loadedGem in loadedGems.Select(g => g.Metadata))
 // TODO: Setup windowing, rendering, asset loading, and input gems these all need to be behind interfaces
 
 // Unload gems
-foreach (LoadedGem loadedGem in loadedGems)
+foreach (GemContext loadedGem in loadedGems)
 {
     Log.Flush(); // Flush logs before unloading gems to ensure all log messages are written
     Log.Info($"Unloading gem: {loadedGem.Metadata.Name}");
-    loadedGem.Instance.OnUnload();
+    loadedGem.Loaded.OnUnload();
     gemLoader.Unload(loadedGem);
 }

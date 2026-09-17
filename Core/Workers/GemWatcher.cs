@@ -1,4 +1,7 @@
-namespace Core.GemAPI;
+using Core.Contexts;
+using Core.Services;
+
+namespace Core.Workers;
 
 internal sealed class GemWatcher
 {
@@ -9,7 +12,7 @@ internal sealed class GemWatcher
         _watcher = new FileSystemWatcher(path);
         _watcher.Created += async (sender, e) =>
         {
-            LoadedGem? gem = await loader
+            GemContext? gem = await loader
                 .LoadSingleAsync(e.FullPath, null, CancellationToken.None)
                 .ConfigureAwait(false);
             if (gem is not null)
@@ -19,7 +22,7 @@ internal sealed class GemWatcher
         };
         _watcher.Renamed += (sender, e) =>
         {
-            if (registry.TryGetValue(e.OldFullPath, out LoadedGem? gem))
+            if (registry.TryGetValue(e.OldFullPath, out GemContext? gem))
             {
                 registry.Unregister(e.OldFullPath);
                 registry.Register(e.FullPath, gem);
@@ -27,9 +30,9 @@ internal sealed class GemWatcher
         };
         _watcher.Deleted += (sender, e) =>
         {
-            if (registry.TryGetValue(e.FullPath, out LoadedGem? gem))
+            if (registry.TryGetValue(e.FullPath, out GemContext? gem))
             {
-                gem.Instance.OnUnload();
+                gem.Loaded.OnUnload();
                 loader.Unload(gem);
                 registry.Unregister(e.FullPath);
             }
@@ -40,21 +43,21 @@ internal sealed class GemWatcher
             {
                 case WatcherChangeTypes.Changed:
                 {
-                    if (registry.TryGetValue(e.FullPath, out LoadedGem? gem))
+                    if (registry.TryGetValue(e.FullPath, out GemContext? gem))
                     {
                         // Unload the gem, save out any state, and remove it from the registry
                         byte[] persistData = Array.Empty<byte>();
-                        gem.Instance.OnReloading(persistData);
+                        gem.Loaded.OnReloading(persistData);
                         loader.Unload(gem);
                         registry.Unregister(e.FullPath);
 
                         // Load the gem again and restore its state
-                        LoadedGem? reloadedGem = await loader
+                        GemContext? reloadedGem = await loader
                             .LoadSingleAsync(e.FullPath, null, CancellationToken.None)
                             .ConfigureAwait(false);
                         if (reloadedGem is not null)
                         {
-                            reloadedGem.Instance.OnReloaded(persistData);
+                            reloadedGem.Loaded.OnReloaded(persistData);
                             registry.Register(e.FullPath, reloadedGem);
                         }
                     }

@@ -1,6 +1,6 @@
 using DryIoc;
 
-namespace Core.GemAPI;
+namespace Core.Interfaces;
 
 /// <summary>
 /// Gems are the core components of the Magic framework.

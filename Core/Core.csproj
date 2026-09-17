@@ -13,4 +13,8 @@
     <PackageReference Include="DryIoc.dll" Version="5.4.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Folder Include="Operations\" />
+  </ItemGroup>
+
 </Project>

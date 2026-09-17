@@ -1,4 +1,4 @@
-﻿using Core.GemAPI;
+﻿using Core.Interfaces;
 using DryIoc;
 
 namespace HelloWorld;
