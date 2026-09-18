@@ -1,4 +1,4 @@
-namespace Core.Utils;
+namespace Magic.Utils;
 
 public class Result
 {
@@ -18,14 +18,14 @@ public class Result
 
     public static Result Failure(string message)
     {
-        return new Result(false);
+        return new Result(false, message);
     }
 }
 
 public class Result<T> : Result
 {
-    public Result(T payload, bool isSuccess)
-        : base(isSuccess)
+    public Result(T payload, bool isSuccess, string message = "")
+        : base(isSuccess, message)
     {
         Payload = payload;
     }
@@ -42,6 +42,6 @@ public class Result<T> : Result
 
     public static new Result<T> Failure(string message)
     {
-        return new Result<T>(default!, false);
+        return new Result<T>(default!, false, message);
     }
 }

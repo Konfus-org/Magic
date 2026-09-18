@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Interfaces shared by the test gems and Core.Tests. Referenced normally by Core.Tests, so it lives
+       in the test's default load context and every gem sees the same types. -->
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

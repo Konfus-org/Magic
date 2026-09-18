@@ -1,6 +1,4 @@
-﻿using System.Runtime.CompilerServices;
-
-namespace Core.Interfaces;
+﻿namespace Magic.Interfaces;
 
 public enum LogLevel
 {
@@ -12,6 +10,6 @@ public enum LogLevel
 
 public interface ILogger
 {
-    void Log(LogLevel level, string message, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0);
+    void Log(LogLevel level, string message, string file, int line);
     void Flush();
 }

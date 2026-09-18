@@ -39,11 +39,11 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
   </PropertyGroup>
 
-  <!-- A gem is any project with a <ProjectName>.meta next to its csproj, wherever it lives.
-       (Not tied to the Gems\ folder, so a project created from the template in the wrong
-       place still builds as a gem.) -->
-  <PropertyGroup Condition="Exists('$(MSBuildProjectDirectory)\$(MSBuildProjectName).meta')">
-    <IsGem>true</IsGem>
+  <!-- A gem is any project that sets <IsMagicGem>true</IsMagicGem> *before* importing Sdk.props
+       (see Gems\SDL\SDL.csproj). A property set in the body of a csproj that uses the Sdk="..."
+       attribute is not visible here: this file is imported by the SDK before that body is read.
+       Not tied to the Gems\ folder, so a project created from the template elsewhere still builds as a gem. -->
+  <PropertyGroup Condition="'$(IsMagicGem)' == 'true'">
 
     <!-- Gems are plugins: build as class libraries only, never an EXE/apphost. -->
     <OutputType>Library</OutputType>

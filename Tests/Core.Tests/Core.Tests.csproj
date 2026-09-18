@@ -6,16 +6,24 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Every test file uses xunit; no per-file using needed. -->
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Core\Core.csproj" />
-    <!-- Built before the tests so bin\Gems\HelloWorld.dll exists, but not referenced:
-         the test must load it through GemLoader, not have it in the default context. -->
-    <ProjectReference Include="..\..\Gems\HelloWorld\HelloWorld.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Core\Magic.csproj" />
+    <ProjectReference Include="..\TestGems\TestGems.Contracts\TestGems.Contracts.csproj" />
+    <!-- Built before the tests so bin\Tests\Gems\*.dll exist, but not referenced: the tests must
+         load them through GemManager, not have them in the default load context. -->
+    <ProjectReference Include="..\TestGems\LoggerGem\LoggerGem.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\TestGems\ProviderGem\ProviderGem.csproj" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="..\TestGems\ConsumerGem\ConsumerGem.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
 </Project>

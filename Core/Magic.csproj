@@ -8,17 +8,19 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Operations\**" />
+    <EmbeddedResource Remove="Operations\**" />
+    <None Remove="Operations\**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Core.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <!-- Gems compile against this too (it flows through their ProjectReference to Core),
-         but must never load their own copy at runtime: see GemLoadContext.Load. -->
+         but must never load their own copy at runtime: see GemAssemblyContext.Load. -->
     <PackageReference Include="DryIoc.dll" Version="5.4.3" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Folder Include="Operations\" />
   </ItemGroup>
 
 </Project>

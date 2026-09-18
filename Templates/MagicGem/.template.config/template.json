@@ -18,14 +18,14 @@
       "datatype": "string",
       "defaultValue": "Konfus",
       "replaces": "GEM_AUTHOR",
-      "description": "Author written to the gem's .meta file."
+      "description": "Author written to the gem's [Gem] attribute."
     },
     "Description": {
       "type": "parameter",
       "datatype": "string",
       "defaultValue": "A gem for the Magic game engine.",
       "replaces": "GEM_DESCRIPTION",
-      "description": "Description written to the gem's .meta file."
+      "description": "Description written to the gem's [Gem] attribute."
     }
   },
   "primaryOutputs": [

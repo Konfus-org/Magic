@@ -1,9 +1,16 @@
 <Solution>
   <Folder Name="/Gems/">
-    <Project Path="Gems/HelloWorld/HelloWorld.csproj" Id="c214dd75-72bc-49e0-963d-c8567fd4749b" />
+    <Project Path="Gems/SDL/SDL.csproj" Id="dc93ae9f-b3ed-4220-b9eb-a7bf52ec8d68" />
+    <Project Path="Gems/ZLogging/ZLogging.csproj" Id="a585cf9f-0774-4b62-b353-838c1bf1c5a2" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="Tests/Core.Tests/Core.Tests.csproj" />
   </Folder>
-  <Project Path="Core/Core.csproj" />
+  <Folder Name="/Tests/TestGems/">
+    <Project Path="Tests/TestGems/TestGems.Contracts/TestGems.Contracts.csproj" />
+    <Project Path="Tests/TestGems/LoggerGem/LoggerGem.csproj" />
+    <Project Path="Tests/TestGems/ProviderGem/ProviderGem.csproj" />
+    <Project Path="Tests/TestGems/ConsumerGem/ConsumerGem.csproj" />
+  </Folder>
+  <Project Path="Core/Magic.csproj" />
 </Solution>

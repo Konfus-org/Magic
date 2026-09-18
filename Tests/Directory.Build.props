@@ -7,6 +7,8 @@
 
     <!-- Tests land in bin\Tests\, beside bin\Gems\ so a test can load real gem DLLs. -->
     <OutputPath>$(MagicBuildDir)bin\Tests\</OutputPath>
+    <!-- Test gems go beside the tests, not into bin\Gems\, so the host never loads them. -->
+    <OutputPath Condition="'$(IsMagicGem)' == 'true'">$(MagicBuildDir)bin\Tests\Gems\</OutputPath>
 
     <!-- One obj\ per test project; sharing one breaks MSBuild's incremental build. -->
     <BaseIntermediateOutputPath>$(MagicBuildDir)obj\Tests\$(MSBuildProjectName)\</BaseIntermediateOutputPath>

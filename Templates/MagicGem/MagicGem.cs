@@ -1,28 +1,32 @@
-﻿using Core.Interfaces;
-using DryIoc;
+using Magic.Attributes;
+using Magic.Services;
 
 namespace MagicGem;
 
-internal sealed class MagicGem : IGem
+/// <summary>
+/// Constructor parameters are this gem's dependencies: host services (SystemRegistry, Directories, ...) or
+/// services other gems export. The host loads gems in dependency order, so they are always there.
+/// To offer a service to the host and other gems, put [GemExport] on a class implementing a host interface.
+/// </summary>
+[Gem("MagicGem", "1.0.0", "GEM_DESCRIPTION", Author = "GEM_AUTHOR")]
+internal sealed class MagicGem : IDisposable
 {
-    public void OnLoad(IContainer services)
+    public MagicGem(SystemRegistry systems)
     {
-        // Resolve host services here. To offer a service to the host and other gems, keep the
-        // instance in a field and call services.Provide<IMyService>(_myService).
+        // Runs when the gem is loaded. To run something every frame:
+        // _system = systems.Register(deltaTime => { ... }, UpdateType.Update); and dispose it in Dispose().
     }
 
-    public void OnReloading(byte[] persist)
-    {
-        // Called before a hot reload: write any state to keep into `persist`.
-    }
+    // Hot reload: return the state to keep before the gem is unloaded...
+    //[OnGemReloading]
+    //private byte[] Save() => [];
 
-    public void OnReloaded(byte[] restore)
-    {
-        // Called after a hot reload: read the state written in OnReloading back from `restore`.
-    }
+    // ...and get it back once the rebuilt gem has been constructed.
+    //[OnGemReloaded]
+    //private void Restore(byte[] state) { }
 
-    public void OnUnload()
+    public void Dispose()
     {
-        // Dispose anything this gem owns, including services it provided.
+        // Runs when the gem is unloaded. Exports implementing IDisposable are disposed by the host.
     }
 }

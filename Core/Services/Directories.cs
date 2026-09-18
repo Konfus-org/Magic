@@ -1,4 +1,4 @@
-namespace Core.Services;
+namespace Magic.Services;
 
 public sealed class Directories
 {
@@ -9,5 +9,5 @@ public sealed class Directories
     }
 
     public string Root { get; }
-    public string Gems { get; }
+    public string Gems => Path.Combine(Root, field);
 }
