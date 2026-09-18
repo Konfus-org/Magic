@@ -11,11 +11,12 @@ public enum WindowMode
 
 public interface IWindow : IDisposable
 {
+    bool IsOpen { get; }
+    nint Handle { get; }
     string Title { get; set; }
     Guid Icon { get; set; }
     Size Size { get; set; }
     WindowMode Mode { get; set; }
-    bool IsOpen { get; }
 
     void Show();
     void Hide();

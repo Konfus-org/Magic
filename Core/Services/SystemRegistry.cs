@@ -26,7 +26,7 @@ public sealed class SystemRegistry
     private readonly object _lock = new();
 
     /// <summary>Runs <paramref name="system"/> every tick of <paramref name="when"/>, in registration order.</summary>
-    public IDisposable Register(Action<float> system, UpdateType when = UpdateType.Update)
+    public IDisposable Register(Action<double> system, UpdateType when = UpdateType.Update)
     {
         Registration registration = new(this, system, when);
         lock (_lock)
@@ -37,7 +37,7 @@ public sealed class SystemRegistry
     }
 
     /// <summary>Runs every system registered for <paramref name="when"/> once. Called by the main loop.</summary>
-    internal void Run(UpdateType when, float deltaTime)
+    internal void Run(UpdateType when, double deltaTime)
     {
         Registration[] snapshot;
         lock (_lock)
@@ -66,9 +66,9 @@ public sealed class SystemRegistry
         }
     }
 
-    private sealed class Registration(SystemRegistry owner, Action<float> system, UpdateType when) : IDisposable
+    private sealed class Registration(SystemRegistry owner, Action<double> system, UpdateType when) : IDisposable
     {
-        public Action<float> System { get; } = system;
+        public Action<double> System { get; } = system;
         public UpdateType When { get; } = when;
 
         public void Dispose()

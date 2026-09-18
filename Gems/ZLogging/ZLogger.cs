@@ -7,10 +7,6 @@ using MagicLogLevel = Magic.Interfaces.LogLevel;
 
 namespace ZLoggingGem;
 
-/// <summary>
-/// The gem is the logger: exporting <see cref="IMagicLogger"/> makes the host load this gem before any
-/// other, register it with <c>Magic.Services.Log</c>, and unload it last.
-/// </summary>
 [Gem("ZLogging", "1.0.0", "Registers a logger implemented using ZLogger.", Author = "Konfus")]
 [GemExport]
 internal sealed class ZLogger : IMagicLogger, IDisposable
@@ -25,7 +21,7 @@ internal sealed class ZLogger : IMagicLogger, IDisposable
             logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Trace);
 
             // Output Structured Logging, setup options
-            logging.AddZLoggerConsole(options => options.UseJsonFormatter());
+            logging.AddZLoggerConsole();
             logging.AddZLoggerRollingFile(options =>
             {
                 // File name determined by parameters to be rotated
@@ -36,7 +32,6 @@ internal sealed class ZLogger : IMagicLogger, IDisposable
 
                 // Limit of size if you want to rotate by file size. (KB)
                 options.RollingSizeKB = 1024;
-                options.UseJsonFormatter();
             });
         });
         _logger = _factory.CreateLogger("Magic");
