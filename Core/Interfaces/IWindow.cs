@@ -1,4 +1,6 @@
-﻿using System.Drawing;
+using Magic.Contexts;
+using Magic.Contexts.Assets;
+using System.Drawing;
 
 namespace Magic.Interfaces;
 
@@ -12,9 +14,12 @@ public enum WindowMode
 public interface IWindow : IDisposable
 {
     bool IsOpen { get; }
-    nint Handle { get; }
+
+    /// <summary>The window's id, as the windowing backend reports it in its events.</summary>
+    uint Handle { get; }
+
     string Title { get; set; }
-    Guid Icon { get; set; }
+    Handle<Texture> Icon { get; set; }
     Size Size { get; set; }
     WindowMode Mode { get; set; }
 

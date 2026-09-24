@@ -13,6 +13,15 @@
          "dotnet build" (VS and "dotnet build -c X" pass it in explicitly). -->
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
 
+    <!-- The three build configurations. The SDK defines the upper-cased configuration name
+         for every build (Microsoft.NET.Sdk.CSharp.targets), so code gets exactly one of
+         DEBUG, OPTIMIZE or RELEASE:
+           Debug    - no optimisation, DEBUG.
+           Optimize - optimised code with full symbols, OPTIMIZE: profile real performance
+                      while still being able to step through it.
+           Release  - optimised code, RELEASE. -->
+    <Configurations>Debug;Optimize;Release</Configurations>
+
     <!-- Repo root, for project references that must not depend on where a project lives. -->
     <MagicRoot>$(MSBuildThisFileDirectory)</MagicRoot>
 
@@ -39,6 +48,14 @@
     <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
   </PropertyGroup>
 
+  <!-- The SDK only knows Debug and Release: it sets Optimize and DebugSymbols from those
+       names, so Optimize has to set them itself. -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Optimize'">
+    <Optimize>true</Optimize>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
   <!-- A gem is any project that sets <IsMagicGem>true</IsMagicGem> *before* importing Sdk.props
        (see Gems\SDL\SDL.csproj). A property set in the body of a csproj that uses the Sdk="..."
        attribute is not visible here: this file is imported by the SDK before that body is read.
@@ -58,7 +75,7 @@
     <IsPackable>false</IsPackable>
 
     <!-- All gems land flat in bin\Gems\ next to the host exe: that is the
-         folder GemLoader scans for plugin DLLs at runtime. -->
+         folder GemManager scans for plugin DLLs at runtime. -->
     <OutputPath>$(MagicBuildDir)bin\Gems\</OutputPath>
 
     <!-- Intermediate files get one folder per gem. Sharing a single obj\

@@ -1,15 +1,9 @@
 namespace Magic.Utils;
 
-public class Result
+public class Result(bool isSuccess, string message = "")
 {
-    public bool IsSuccess { get; }
-    public string Message { get; } = string.Empty;
-
-    public Result(bool isSuccess, string message = "")
-    {
-        IsSuccess = isSuccess;
-        Message = message;
-    }
+    public bool IsSuccess { get; } = isSuccess;
+    public string Message { get; } = message;
 
     public static Result Success()
     {
@@ -22,15 +16,9 @@ public class Result
     }
 }
 
-public class Result<T> : Result
+public class Result<T>(T payload, bool isSuccess, string message = "") : Result(isSuccess, message)
 {
-    public Result(T payload, bool isSuccess, string message = "")
-        : base(isSuccess, message)
-    {
-        Payload = payload;
-    }
-
-    public T Payload { get; }
+    public T Payload { get; } = payload;
 
     public bool Ok => IsSuccess;
     public bool Failed => !IsSuccess;

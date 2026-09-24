@@ -1,0 +1,5 @@
+{
+    "color": { "x": 1, "y": 1, "z": 1, "w": 1 },
+    "roughness": 0.8,
+    "colorTexture": { "id": 36 }
+}

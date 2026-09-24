@@ -6,6 +6,13 @@ Build/
 [Bb]in/
 [Oo]bj/
 
+# Import and shader caches (Directories.Cache); rebuilt on demand
+Library/
+
+# Written at runtime under the project root (see Program.cs)
+logs/
+screenshots/
+
 # IDE
 .vs/
 .idea/

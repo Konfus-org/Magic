@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Magic.Tests</RootNamespace>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- A normal reference: Magic.dll is copied next to the tests, unlike in a gem. -->
+    <ProjectReference Include="..\..\Core\Magic.csproj" />
+    <!-- The ECS and asset tests drive the gems in-process, no gem loader involved; the package natives
+         (SDL3.dll, SDL3_image.dll, SDL3_ttf.dll, assimp.dll) land flat next to the tests because of the RuntimeIdentifier. -->
+    <ProjectReference Include="..\..\Gems\FlecsEcs\FlecsEcs.csproj" />
+    <ProjectReference Include="..\..\Gems\SDL\SDL.csproj" />
+    <ProjectReference Include="..\..\Gems\SDLImage\SDLImage.csproj" />
+    <ProjectReference Include="..\..\Gems\SDLTtf\SDLTtf.csproj" />
+    <ProjectReference Include="..\..\Gems\AssimpModels\AssimpModels.csproj" />
+  </ItemGroup>
+
+</Project>
