@@ -1,5 +1,5 @@
 {
     "name": "Monkey",
     "gems": ["default", "Monkey"],
-    "domain": { "id": 3011 }
+    "entryPoint": { "id": 3011 }
 }

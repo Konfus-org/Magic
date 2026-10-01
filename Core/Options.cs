@@ -52,8 +52,8 @@ internal sealed class Options
     [Option("fail-on-error", HelpText = "Exit with code 2 if anything was logged at Error or above, so a script can tell a clean run from a noisy one.")]
     public bool FailOnError { get; set; }
 
-    [Option("domain", HelpText = "Open this domain instead of the project's: a path under Resources or Assets, like Domains/Cube/Cube.domain.")]
-    public string? Domain { get; set; }
+    [Option("entry-point", HelpText = "Open this domain at start-up instead of the project's entry point: a path under Resources or Assets, like Domains/Cube/Cube.domain.")]
+    public string? EntryPoint { get; set; }
 
     [Option("set", HelpText = "Override project settings: --set Render.Resolution.Width=1280 Render.Resolution.Height=720 Render.Vsync=false (Section.Key=value, space separated).")]
     public IEnumerable<string> Set { get; set; } = [];

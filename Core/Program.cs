@@ -91,7 +91,7 @@ internal static class Program
                 return 1;
             using IWindow? _ = mainWindow;
 
-            OpenDomain(options, project, assets, world);
+            OpenEntryPoint(options, project, assets, world);
 
             MainLoop(options, new Engine(container, files, project, events, assets, gems, scheduler, core, mainWindow, new RenderCommands()), shutdown.Token);
 
@@ -131,16 +131,16 @@ internal static class Program
         return new CoreSystems(console, settings, streaming, scripts, transforms, rendering, debugger, [.. systems.Select(system => scheduler.Add(ecs, system))]);
     }
 
-    /// <summary>Opens the domain to start in: --domain, else the project's. It is spawned in the first frame.</summary>
-    private static void OpenDomain(Options options, Project project, Assets assets, World world)
+    /// <summary>Opens the domain to start in: --entry-point, else the project's entry point. It is spawned in the first frame.</summary>
+    private static void OpenEntryPoint(Options options, Project project, Assets assets, World world)
     {
-        Handle<Domain> domain = options.Domain is { } path ? assets.Find<Domain>(path) : project.Domain;
-        if (options.Domain is not null && !domain.IsValid)
-            Debugging.Log.Error($"--domain {options.Domain}: no such asset under Resources or Assets.");
-        else if (domain.IsValid)
-            world.Open(domain);
+        Handle<Domain> entryPoint = options.EntryPoint is { } path ? assets.Find<Domain>(path) : project.EntryPoint;
+        if (options.EntryPoint is not null && !entryPoint.IsValid)
+            Debugging.Log.Error($"--entry-point {options.EntryPoint}: no such asset under Resources or Assets.");
+        else if (entryPoint.IsValid)
+            world.Open(entryPoint);
         else
-            Debugging.Log.Info("No domain to open: set \"domain\" in the .magic file or pass --domain.");
+            Debugging.Log.Info("No entry point to open: set \"entryPoint\" in the .magic file or pass --entry-point.");
     }
 
     /// <summary>Ctrl+C ends the loop cleanly instead of killing the process mid-frame (gems get their Dispose, logs flush).</summary>

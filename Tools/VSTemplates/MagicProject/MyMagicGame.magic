@@ -1,4 +1,4 @@
 {
     "name": "MyMagicGame",
-    "domain": { "id": 1001 }
+    "entryPoint": { "id": 1001 }
 }

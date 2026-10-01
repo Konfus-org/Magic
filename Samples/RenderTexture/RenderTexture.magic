@@ -1,6 +1,6 @@
 {
     "name": "RenderTexture",
-    "domain": {
+    "entryPoint": {
         "id": 5001
     }
 }

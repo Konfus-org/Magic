@@ -1,4 +1,4 @@
 {
     "name": "Fallbacks",
-    "domain": { "id": 3040 }
+    "entryPoint": { "id": 3040 }
 }

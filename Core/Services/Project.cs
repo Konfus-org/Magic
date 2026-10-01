@@ -20,8 +20,8 @@ public sealed record Project
     /// <summary>Per-subsystem settings; <c>--set Section.Key=value</c> on the command line overrides them.</summary>
     public Settings Settings { get; init; } = new();
 
-    /// <summary>The domain opened at start-up (<c>"domain": { "id": N }</c>); <c>--domain</c> overrides it. None starts in an empty world.</summary>
-    public Handle<Domain> Domain { get; init; } = Handle<Domain>.None;
+    /// <summary>The domain opened at start-up (<c>"entryPoint": { "id": N }</c>); <c>--entry-point</c> overrides it. None starts in an empty world.</summary>
+    public Handle<Domain> EntryPoint { get; init; } = Handle<Domain>.None;
 
     /// <summary>
     /// The engine gems to load, by assembly name (the name <c>GemDependsOn</c> uses); <c>"default"</c> stands for

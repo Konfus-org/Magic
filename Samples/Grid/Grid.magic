@@ -1,5 +1,5 @@
 {
     "name": "Grid",
     "gems": ["default", "Grid"],
-    "domain": { "id": 3031 }
+    "entryPoint": { "id": 3031 }
 }

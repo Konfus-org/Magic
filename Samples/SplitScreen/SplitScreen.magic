@@ -1,6 +1,6 @@
 {
     "name": "SplitScreen",
-    "domain": {
+    "entryPoint": {
         "id": 5101
     }
 }

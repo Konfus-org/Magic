@@ -24,7 +24,7 @@ The `.magic` file says which engine gems load, by their assembly name (the same 
 `["default"]`, and `[]` loads none of them.
 
 ```json
-{ "name": "Cube", "domain": { "id": 3001 }, "gems": ["ZLogging", "FlecsEcs", "SDL", "SDLWindowing", "SDLRender"] }
+{ "name": "Cube", "entryPoint": { "id": 3001 }, "gems": ["ZLogging", "FlecsEcs", "SDL", "SDLWindowing", "SDLRender"] }
 ```
 
 A project's own gems are never listed: any gem dll found under the project folder (each sample's
