@@ -1,36 +1,26 @@
-// The GPU tables, mirroring Gems/Render/Residency/GpuStructs.cs field for field. Every member is 16 bytes so
-// the layout is the same under D3D packing and DXC's vector-relaxed std430: a float3 followed by a scalar is
-// the one thing that would differ, so there are none. Scalars that are not floats travel as float bits
-// (asfloat on the CPU, asuint here).
+// The GPU tables, mirroring Core/Contexts/Rendering/GpuStructs.cs field for field. Every member is 16 bytes
+// (or a run of scalars adding up to 16) so the layout is the same under D3D packing and DXC's vector-relaxed
+// std430. Never change a struct here without its C# twin (or the other way round): both sides read the same
+// bytes blind, so a mismatch compiles and draws garbage.
+
 #ifndef MAGIC_STRUCTS_HLSLI
 #define MAGIC_STRUCTS_HLSLI
 
-struct GpuLod
-{
-    uint firstIndex;
-    uint indexCount;
-    float error;
-    uint pad;
-};
-
-// 112 B. aabbMinLodCount.w = asfloat(lodCount), aabbMaxVertexOffset.w = asfloat(vertexOffset).
-struct GpuMesh
-{
-    float4 sphere;
-    float4 aabbMinLodCount;
-    float4 aabbMaxVertexOffset;
-    GpuLod lods[4];
-};
-
-// 32 B. sphere is the instance's bounds in absolute world space.
-struct GpuInstanceCull
+// 32 B: one drawn instance. sphere is its bounds in absolute world space; bucketGroup indexes the draw-args
+// slot of its (pipeline class, mesh) pair. meshSlot is the CPU's bookkeeping, no shader reads it.
+struct GpuInstance
 {
     float4 sphere;
     uint meshSlot;
     uint materialSlot;
+    uint bucketGroup;
     uint flags;
-    uint cell;
 };
+
+// GpuInstance.flags
+static const uint InstanceAlive = 1u << 0;
+static const uint InstanceMirrored = 1u << 1;
+static const uint InstanceNoSizeCull = 1u << 2;
 
 // 48 B: the three rows of transpose(world), so p' = (dot(r0, p), dot(r1, p), dot(r2, p)) with p.w = 1.
 struct GpuInstanceXform
@@ -40,31 +30,38 @@ struct GpuInstanceXform
     float4 r2;
 };
 
-// 64 B. textures = (baseColor, normal, orm, emissive) as (poolSlot << 16) | layer, TEXTURE_NONE when unset.
-// roughMetalNormalFlags.w = asfloat(MaterialFlags).
+// 128 B: a material's parameters, packed by the CPU in the layout the surface shader's MaterialParams
+// declares; the generated LoadMaterialParams(slot) unpacks it. Nothing else knows the layout.
 struct GpuMaterial
 {
-    uint4 textures;
-    float4 baseColor;
-    float4 emissiveAlphaCutoff;
-    float4 roughMetalNormalFlags;
+    uint4 words[8];
 };
 
-#define TEXTURE_NONE 0xFFFFFFFF
+// 16 B: a run of instance slots that belong to one cell.
+struct GpuPage
+{
+    uint firstInstance;
+    uint count;
+    uint cell;
+    uint pad;
+};
 
-// GpuInstanceCull.flags
-#define INSTANCE_ALIVE        (1u << 0)
-#define INSTANCE_CASTS_SHADOW (1u << 1)
-#define INSTANCE_MIRRORED     (1u << 2)
-#define INSTANCE_DOUBLE_SIDED (1u << 3)
-#define INSTANCE_MASKED       (1u << 4)
-#define INSTANCE_NO_SIZE_CULL (1u << 5)
-#define INSTANCE_DYNAMIC      (1u << 6)
-#define INSTANCE_GI_ELIGIBLE  (1u << 7)
+// 32 B: a residency cell's world-space bounds, w unused.
+struct GpuCell
+{
+    float4 aabbMin;
+    float4 aabbMax;
+};
 
-// GpuMaterial.roughMetalNormalFlags.w, as Magic.Contexts.Assets.MaterialFlags
-#define MATERIAL_DOUBLE_SIDED 1u
-#define MATERIAL_MASKED       2u
-#define MATERIAL_CLAMP_UV     4u
+// 20 B: SDL's GPUIndexedIndirectDrawCommand, one per bucket group. The field order is the graphics API's
+// (the GPU reads it as the draw), not ours: never reorder it, here or in C# DrawArgs.
+struct GpuDrawArgs
+{
+    uint indexCount;
+    uint instanceCount;
+    uint firstIndex;
+    int vertexOffset;
+    uint firstInstance;
+};
 
 #endif

@@ -1,0 +1,18 @@
+{
+    "entities": [
+        {
+            "name": "Camera",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 1.5, "z": -9 }, "scale": { "x": 1, "y": 1, "z": 1 } },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": { "rotation": { "x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023 }, "scale": { "x": 1, "y": 1, "z": 1 } },
+                "DirectionalLight": { "color": { "x": 1, "y": 1, "z": 1 }, "intensity": 3 }
+            }
+        }
+    ]
+}

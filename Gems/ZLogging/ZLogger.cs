@@ -1,15 +1,14 @@
-using Magic.Attributes;
+using IGem = Magic.Interfaces.IGem;
 using Magic.Services;
 using Microsoft.Extensions.Logging;
 using ZLogger;
+using ZLogger.Providers;
 using IMagicLogger = Magic.Interfaces.ILogger;
 using MagicLogLevel = Magic.Interfaces.LogLevel;
 
 namespace ZLoggingGem;
 
-[Gem(name: "ZLogging", version: "1.0.0", description: "Registers a logger implemented using ZLogger.", author: "Konfus", isStatic: true)]
-[GemExport(typeof(IMagicLogger))]
-internal sealed class ZLogger : IMagicLogger, IDisposable
+internal sealed class ZLogger : IGem, IMagicLogger
 {
     private readonly ILoggerFactory _factory;
     private readonly ILogger _logger;
@@ -23,12 +22,13 @@ internal sealed class ZLogger : IMagicLogger, IDisposable
             // Output Structured Logging, setup options
             logging.AddZLoggerConsole();
 
-#if !DEBUG
+#if RELEASE
+            // Files only from a Release build, under Logs next to the executable, one name per project.
             logging.AddZLoggerRollingFile(options =>
             {
                 // File name determined by parameters to be rotated
                 options.FilePathSelector = (timestamp, sequenceNumber) =>
-                    $"{project.Logs}{timestamp.ToLocalTime():yyyy-MM-dd}_{sequenceNumber:000}.log";
+                    Path.Combine(Project.Logs, $"{project.Name}_{timestamp.ToLocalTime():yyyy-MM-dd}_{sequenceNumber:000}.log");
 
                 // The period of time for which you want to rotate files at time intervals.
                 options.RollingInterval = RollingInterval.Day;
@@ -53,12 +53,15 @@ internal sealed class ZLogger : IMagicLogger, IDisposable
     {
         LogLevel logLvl = level switch
         {
+            MagicLogLevel.Verbose => LogLevel.Trace,
             MagicLogLevel.Debug => LogLevel.Debug,
             MagicLogLevel.Information => LogLevel.Information,
             MagicLogLevel.Warning => LogLevel.Warning,
             MagicLogLevel.Error => LogLevel.Error,
+            MagicLogLevel.Critical => LogLevel.Critical,
             _ => throw new ArgumentOutOfRangeException(nameof(level), level, null)
         };
+
         _logger.ZLog(logLvl, $"{file}:{line} - {message}");
     }
 

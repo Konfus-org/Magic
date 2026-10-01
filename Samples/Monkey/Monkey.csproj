@@ -1,0 +1,36 @@
+<Project>
+
+  <!-- The Monkey sample as a project: its .magic file and assets to browse, and Scripts\ compiled into a gem in
+       the sample's own Build\ tree (see Samples\Directory.Build.props), where the host finds it. Build it with
+       "dotnet build Samples\Monkey"; rebuild while the sample runs to hot reload the scripts. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Only Scripts\ is this gem; any other gem under the sample is a project of its own. -->
+    <Compile Include="Scripts\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Compile against the host, never copy it: the gem shares the host's loaded Magic.dll. -->
+    <ProjectReference Include="$(MagicRoot)Core\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
+  <PropertyGroup>
+    <Description>Orbits the camera around the Monkey scene.</Description>
+    <Authors>Magic</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

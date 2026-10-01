@@ -18,6 +18,7 @@ public static class Png
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(width);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(height);
+
         int rowBytes = checked(width * 4);
         if (rgba.Length != checked(rowBytes * height))
             throw new ArgumentException($"Expected {rowBytes * height} bytes for {width}x{height} RGBA, got {rgba.Length}.", nameof(rgba));
@@ -45,6 +46,7 @@ public static class Png
         Chunk(png, "IHDR", header);
         Chunk(png, "IDAT", compressed.GetBuffer().AsSpan(0, (int)compressed.Length));
         Chunk(png, "IEND", []);
+
         return png.ToArray();
     }
 

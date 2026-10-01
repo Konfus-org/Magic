@@ -1,0 +1,55 @@
+{
+    "entities": [
+        {
+            "name": "Camera",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 30,
+                        "z": -360
+                    },
+                    "rotation": {
+                        "x": 0.22311,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.9748
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": {
+                    "rotation": {
+                        "x": 0.41554,
+                        "y": 0.2661,
+                        "z": -0.12854,
+                        "w": 0.86023
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "DirectionalLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    },
+                    "intensity": 3,
+                    "castsShadows": true
+                }
+            }
+        }
+    ]
+}

@@ -1,0 +1,12 @@
+# Built gems (see Directory.Build.props)
+Build/
+
+# Written by the engine at run time
+Cache/
+Logs/
+Screenshots/
+
+# IDE
+.vs/
+.idea/
+*.user

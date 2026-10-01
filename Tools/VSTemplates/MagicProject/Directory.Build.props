@@ -1,0 +1,68 @@
+<Project>
+
+  <!-- Build settings for every gem in this project, laid out like the engine's own build. This file is what
+       lets a gem csproj (the project's Scripts, or one made with the magicgem template under Gems\) build
+       outside the engine repository. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <Configurations>Debug;Optimize;Release</Configurations>
+
+    <!-- Where the engine lives: MAGIC_ROOT in the environment, else the path this project was created with. -->
+    <MagicRoot Condition="'$(MagicRoot)' == ''">$(MAGIC_ROOT)</MagicRoot>
+    <MagicRoot Condition="'$(MagicRoot)' == ''">MAGIC_ROOT_PATH</MagicRoot>
+    <MagicRoot Condition="'$(MagicRoot)' != '' and !HasTrailingSlash('$(MagicRoot)')">$(MagicRoot)\</MagicRoot>
+
+    <!-- Set here so a gem csproj can tell it sits in a project rather than in the engine repository. -->
+    <MagicProjectRoot>$(MSBuildThisFileDirectory)</MagicProjectRoot>
+    <MagicBuildDir>$(MagicProjectRoot)Build\$(TargetFramework)\$(Configuration)\</MagicBuildDir>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+
+    <!-- Build output, what the engine writes at run time, and other gems are not items of the root project. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);Build\**;bin\**;obj\**;Cache\**;Logs\**;Screenshots\**;Gems\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Optimize'">
+    <Optimize>true</Optimize>
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>portable</DebugType>
+  </PropertyGroup>
+
+  <!-- A gem is any project that sets <IsMagicGem>true</IsMagicGem> before importing Sdk.props. Every gem in
+       the project lands in Build\net10.0\<Configuration>\bin\, where the engine finds them by searching the
+       project folder (it skips obj\, so the intermediate copies never load). -->
+  <PropertyGroup Condition="'$(IsMagicGem)' == 'true'">
+    <OutputType>Library</OutputType>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <IsPackable>false</IsPackable>
+    <OutputPath>$(MagicBuildDir)bin\</OutputPath>
+    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+  </PropertyGroup>
+
+  <!-- Gems compile against the engine's built Magic.dll of the same configuration and never copy it: the
+       gem's load context shares the host's already-loaded copy. -->
+  <ItemGroup Condition="'$(IsMagicGem)' == 'true'">
+    <Reference Include="Magic">
+      <HintPath>$(MagicRoot)Build\$(TargetFramework)\$(Configuration)\bin\Magic.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- What the host needs to know about a gem before it constructs it, stamped into the assembly. Set in the gem's
+       csproj: GemStatic (true: loaded once, never reloaded) and GemDependsOn (gem names, ';' separated, that must be
+       loaded first though no service connects them). The gem's name is its assembly name; Version, Description and
+       Authors are the SDK's own properties. Items are evaluated after every property, so the csproj body's values count. -->
+  <ItemGroup Condition="'$(IsMagicGem)' == 'true'">
+    <AssemblyMetadata Include="MagicGem.Static" Value="$(GemStatic)" />
+    <AssemblyMetadata Include="MagicGem.DependsOn" Value="$(GemDependsOn)" />
+  </ItemGroup>
+
+  <Target Name="CheckMagicRoot" BeforeTargets="ResolveAssemblyReferences" Condition="'$(IsMagicGem)' == 'true'">
+    <Error Condition="!Exists('$(MagicRoot)Build\$(TargetFramework)\$(Configuration)\bin\Magic.dll')"
+           Text="Magic.dll was not found at $(MagicRoot)Build\$(TargetFramework)\$(Configuration)\bin\. Set MAGIC_ROOT (or MagicRoot in Directory.Build.props) to the engine repository and build it in the $(Configuration) configuration first." />
+  </Target>
+
+</Project>

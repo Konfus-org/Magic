@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json.schemastore.org/vs-2017.3.host",
+  "icon": "icon.png",
+  "symbolInfo": [
+    { "id": "EnginePath", "isVisible": true },
+    { "id": "Author", "isVisible": true }
+  ]
+}

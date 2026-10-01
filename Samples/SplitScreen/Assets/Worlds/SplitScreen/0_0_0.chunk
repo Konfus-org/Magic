@@ -1,0 +1,202 @@
+{
+    "entities": [
+        {
+            "name": "Floor",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 12,
+                        "y": 1,
+                        "z": 12
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 7381546209823741553
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Monkey",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0.8,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "w": 0
+                    },
+                    "scale": {
+                        "x": 0.7,
+                        "y": 0.7,
+                        "z": 0.7
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 516
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Cube",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 2,
+                        "y": 0.5,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 7381546209823741553
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Sphere",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -2,
+                        "y": 0.5,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Torus",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0.5,
+                        "z": 2
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 518
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 7381546209823741553
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Cone",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0.5,
+                        "z": -2
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 513
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}

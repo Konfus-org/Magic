@@ -1,0 +1,9 @@
+{
+    "shader": { "id": 10021 },
+    "stage": "after_tonemap",
+    "order": 0,
+    "enabled": false,
+    "inputs": [ "Ldr" ],
+    "output": { "name": "Ldr" },
+    "params": { "strength": { "x": 0.5 } }
+}

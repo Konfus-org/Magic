@@ -1,0 +1,139 @@
+{
+    "entities": [
+        {
+            "name": "Floor",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 12,
+                        "y": 1,
+                        "z": 12
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 7381546209823741553
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Monkey",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -1.3,
+                        "y": 0.9,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "w": 0
+                    },
+                    "scale": {
+                        "x": 0.6,
+                        "y": 0.6,
+                        "z": 0.6
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 516
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                },
+                "Spin": {
+                    "degreesPerSecond": 45
+                }
+            }
+        },
+        {
+            "name": "Cube",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -1.3,
+                        "y": 0.25,
+                        "z": 1.3
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0,
+                        "w": 1
+                    },
+                    "scale": {
+                        "x": 0.5,
+                        "y": 0.5,
+                        "z": 0.5
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 7381546209823741553
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Monitor",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 1.4,
+                        "y": 1.3,
+                        "z": 0.5
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": -0.70711,
+                        "z": 0.70711,
+                        "w": 0
+                    },
+                    "scale": {
+                        "x": 2.2,
+                        "y": 1,
+                        "z": 2.2
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 5011
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}

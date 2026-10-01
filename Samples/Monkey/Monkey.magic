@@ -1,0 +1,5 @@
+{
+    "name": "Monkey",
+    "gems": ["default", "Monkey"],
+    "world": { "id": 3011 }
+}

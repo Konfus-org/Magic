@@ -6,12 +6,17 @@ Build/
 [Bb]in/
 [Oo]bj/
 
-# Import and shader caches (Directories.Cache); rebuilt on demand
+# Import and shader caches (Project.Cache); rebuilt on demand
 Library/
+Cache/
 
 # Written at runtime under the project root (see Program.cs)
 logs/
+Logs/
 screenshots/
+Screenshots/
+cache/
+Cache/
 
 # IDE
 .vs/

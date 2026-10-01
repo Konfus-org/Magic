@@ -5,29 +5,35 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The GPU structs mirror HLSL with fixed buffers (Contexts/Rendering/GpuStructs.cs). -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Gems compile against this too (it flows through their ProjectReference to Core),
-         but must never load their own copy at runtime: see GemManager.LoadContext. -->
+         but must never load their own copy at runtime: see Gems.GemLoadContext. -->
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
-    <PackageReference Include="DryIoc.dll" Version="5.4.3" />
     <PackageReference Include="System.IO.Hashing" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Magic.UnitTests" />
+    <InternalsVisibleTo Include="Magic.IntegrationTests" />
   </ItemGroup>
 
   <!-- Where the engine's Resources come from (see Program.cs). Debug and Optimize read them straight out of
        the repo, so an edit shows up without a build: the repo root is stamped into the assembly as MagicRoot.
        Release ships them: the stamp is left out, the host falls back to the folder next to the exe, and the
-       whole Resources tree is copied there (and into a publish) as content. -->
+       whole Resources tree is copied there (and into a publish) as content. In every configuration the tree
+       shows in the project as a Resources folder (linked, so it stays where it is), sidecars included. -->
   <ItemGroup Condition="'$(Configuration)' != 'Release'">
     <AssemblyMetadata Include="MagicRoot" Value="$(MagicRoot)" />
   </ItemGroup>
-  <ItemGroup Condition="'$(Configuration)' == 'Release'">
-    <None Include="$(MagicRoot)Resources\**" Link="Resources\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
-  </ItemGroup>
-
   <ItemGroup>
-    <InternalsVisibleTo Include="Magic.Tests" />
+    <None Include="$(MagicRoot)Resources\**" Link="Resources\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <None Update="$(MagicRoot)Resources\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- The gems the runtime ships with. Building Magic builds them too, so bin\Gems\ is
@@ -41,27 +47,25 @@
     <DefaultGem Include="$(MagicRoot)Gems\SDLImage\SDLImage.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\SDLTtf\SDLTtf.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\AssimpModels\AssimpModels.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\SDLRender\SDLRender.csproj" />
   </ItemGroup>
+
+  <!-- "dotnet build" only restores the entry project and its ProjectReferences, so the gems
+       have to be restored here or their Build below fails for a missing project.assets.json. -->
+  <Target Name="RestoreDefaultGems" AfterTargets="Restore">
+    <MSBuild Projects="@(DefaultGem)" Targets="Restore" Properties="Configuration=$(Configuration)" />
+  </Target>
 
   <!-- BuildProjectReferences=false: Magic.dll was just built by this very project, so the gems
        only read its output path instead of asking for a second build of it (which would also be
        a circular build request). Configuration is passed explicitly so a gem built from here
        always lands in the same Build\...\$(Configuration)\ tree as the host. -->
-  <!-- "dotnet build" only restores the entry project and its ProjectReferences, so the gems
-       have to be restored here or their Build below fails for a missing project.assets.json. -->
-  <Target Name="RestoreDefaultGems" AfterTargets="Restore">
-    <MSBuild Projects="@(DefaultGem)" Targets="Restore"
-             Properties="Configuration=$(Configuration)" />
-  </Target>
-
   <Target Name="BuildDefaultGems" AfterTargets="Build">
-    <MSBuild Projects="@(DefaultGem)" Targets="Build"
-             Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
+    <MSBuild Projects="@(DefaultGem)" Targets="Build" Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
   </Target>
 
   <Target Name="CleanDefaultGems" AfterTargets="Clean">
-    <MSBuild Projects="@(DefaultGem)" Targets="Clean"
-             Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
+    <MSBuild Projects="@(DefaultGem)" Targets="Clean" Properties="Configuration=$(Configuration);BuildProjectReferences=false" />
   </Target>
 
 </Project>

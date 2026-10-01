@@ -1,0 +1,28 @@
+<Project>
+
+  <!-- A gem for the loader tests. Tests\Directory.Build.props sends it to bin\Tests\Gems\, beside the tests
+       and out of the host's own Gems folder. IsMagicGem must come before the SDK props import. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(MagicRoot)Core\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
+  <PropertyGroup>
+    <Description>A gem for the loader tests.</Description>
+    <Authors>Magic</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

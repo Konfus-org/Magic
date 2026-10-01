@@ -1,35 +1,41 @@
 namespace Magic.Utils;
 
-public class Result(bool isSuccess, string message = "")
+/// <summary>Whether something worked, and why not when it did not.</summary>
+public readonly record struct Result(string? Error)
 {
-    public bool IsSuccess { get; } = isSuccess;
-    public string Message { get; } = message;
+    public bool Ok => Error is null;
+
+    public bool Failed => Error is not null;
+
+    public string Message => Error ?? "";
 
     public static Result Success()
     {
-        return new Result(true);
+        return new Result(null);
     }
 
     public static Result Failure(string message)
     {
-        return new Result(false, message);
+        return new Result(message);
     }
 }
 
-public class Result<T>(T payload, bool isSuccess, string message = "") : Result(isSuccess, message)
+/// <summary>A value, or why there is none.</summary>
+public readonly record struct Result<T>(T Payload, string? Error)
 {
-    public T Payload { get; } = payload;
+    public bool Ok => Error is null;
 
-    public bool Ok => IsSuccess;
-    public bool Failed => !IsSuccess;
+    public bool Failed => Error is not null;
+
+    public string Message => Error ?? "";
 
     public static Result<T> Success(T value)
     {
-        return new Result<T>(value, true);
+        return new Result<T>(value, null);
     }
 
-    public static new Result<T> Failure(string message)
+    public static Result<T> Failure(string message)
     {
-        return new Result<T>(default!, false, message);
+        return new Result<T>(default!, message);
     }
 }

@@ -94,4 +94,6 @@ public sealed class Texture : Asset
     /// <summary>For a vector image (svg): the pixel size to rasterise it at, or 0 for the size the file states.</summary>
     [MetaData]
     public int Size { get; set; }
+
+    public override long Bytes => Pixels.LongLength;
 }

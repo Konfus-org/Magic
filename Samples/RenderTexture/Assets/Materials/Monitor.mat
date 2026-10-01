@@ -1,0 +1,12 @@
+{
+    "shader": {
+        "id": 10002
+    },
+    "params": {
+        "colorMap": {
+            "texture": {
+                "id": 5010
+            }
+        }
+    }
+}

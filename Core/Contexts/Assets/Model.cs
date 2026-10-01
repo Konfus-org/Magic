@@ -15,6 +15,8 @@ public sealed class Model : Asset
     /// Material name per slot, as the source file called them, so a scene can bind slots by name.
     /// </summary>
     public string[] SlotNames { get; set; } = [];
+
+    public override long Bytes => Meshes.Sum(m => (m.Vertices.LongLength * Vertex.Size) + (m.Indices.LongLength * sizeof(uint)));
 }
 
 /// <summary>

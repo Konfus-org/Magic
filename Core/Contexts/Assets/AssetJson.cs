@@ -6,11 +6,11 @@ namespace Magic.Contexts.Assets;
 /// <summary>
 /// How every asset file and sidecar is read and written: camelCase keys, snake_case enum names
 /// (<c>clamp_to_edge</c>), fields included so System.Numerics vectors serialise as <c>{x, y, z, w}</c>,
-/// comments and trailing commas tolerated. No custom converters: a <see cref="Handle{T}"/> is <c>{ "id": N }</c>.
+/// comments and trailing commas tolerated, infinities written by name. No custom converters: a <see cref="Handle{T}"/> is <c>{ "id": N }</c>.
 /// </summary>
 public static class AssetJson
 {
-    public static readonly JsonSerializerOptions Options = new()
+    public static JsonSerializerOptions Options { get; } = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
@@ -18,6 +18,7 @@ public static class AssetJson
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
         WriteIndented = true,
+        NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals, // Camera.Far = +Infinity round-trips as "Infinity"
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower) }
     };
 }

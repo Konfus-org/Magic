@@ -1,11 +1,12 @@
-using Magic.Attributes;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Events;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
 using SDL3;
 using System.Drawing;
+using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace SDLWindowingGem;
@@ -14,33 +15,38 @@ namespace SDLWindowingGem;
 /// Creates SDL windows and answers who is open. Factory and registry live in one class on purpose: there
 /// is exactly one window table, and the class that adds to it (Create) and removes from it (close events,
 /// Dispose) is the only one that can keep it truthful. A separate registry would either duplicate the
-/// table or need callbacks from the factory to stay in sync; neither buys anything.
+/// table or need callbacks from the factory to stay in sync; neither buys anything. It publishes
+/// <see cref="EventType.FocusGained"/> and <see cref="EventType.FocusLost"/>; keyboard, text and mouse are the input
+/// gem's. Text input is on for every window, so <see cref="EventType.TextInput"/> always arrives.
 /// </summary>
-[Gem(name: "SDL Windowing", version: "1.0.0", description: "Provides SDL windowing and window event handling.", author: "Konfus", isStatic: true, DependsOn = ["SDL"])]
-[GemExport(typeof(IWindowFactory), typeof(IWindowRegistry))]
-internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposable
+internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
 {
-    private readonly AssetManager _assets;
+    private readonly Assets _assets;
+    private readonly Events _events;
     private readonly Handle<Texture> _projectIcon;
 
     // Windows by handle (the SDL window id): that is what window events carry. A window stays here after
     // it is closed, until it is disposed: closing hides it, disposing destroys it (see OnCloseRequested).
     private readonly Dictionary<uint, Window> _byHandle = [];
+
     // The same windows in creation order, so Main is "the first one still open" rather than dictionary luck.
     private readonly List<Window> _ordered = [];
+
     // Kept in a field: SDL holds the native function pointer, and a collected delegate would crash the next event.
     private readonly SDL.EventFilter _watch;
 
-    public WindowManager(Project project, AssetManager assets)
+    public WindowManager(Project project, Assets assets, Events events)
     {
         _assets = assets;
+        _events = events;
         _projectIcon = project.Icon;
 
         // The SDL gem owns SDL_Init/SDL_Quit and the event pump; this one only adds the subsystem it uses and
         // watches the queue. SDL runs the watch for every event as it is queued, from the pump on the main thread.
         if (!SDL.InitSubSystem(SDL.InitFlags.Video))
             throw new InvalidOperationException($"SDL video initialization failed: {SDL.GetError()}");
-        Debugging.LogInfo($"SDL video initialised on thread {Environment.CurrentManagedThreadId}.");
+
+        Debugging.Log.Info($"SDL video initialised on thread {Environment.CurrentManagedThreadId}.");
 
         _watch = OnEvent;
         SDL.AddEventWatch(_watch, IntPtr.Zero);
@@ -55,6 +61,7 @@ internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposab
                 if (window.IsOpen)
                     return window;
             }
+
             return null;
         }
     }
@@ -67,18 +74,13 @@ internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposab
         return _byHandle.TryGetValue(handle, out Window? window) && window.IsOpen ? window : null;
     }
 
-    public void Dispose()
-    {
-        SDL.RemoveEventWatch(_watch, IntPtr.Zero);
-        CloseAll();
-        SDL.QuitSubSystem(SDL.InitFlags.Video);
-    }
-
     public IWindow Create(string title, int width, int height, WindowMode mode)
     {
         Window newWindow = new(title, width, height, mode, _assets, _projectIcon);
+
         _byHandle[newWindow.Handle] = newWindow;
         _ordered.Add(newWindow);
+
         return newWindow;
     }
 
@@ -95,6 +97,7 @@ internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposab
     {
         foreach (Window window in _ordered)
             window.Dispose();
+
         _ordered.Clear();
         _byHandle.Clear();
     }
@@ -111,24 +114,41 @@ internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposab
                 foreach (Window window in _ordered)
                     window.Close();
                 break;
+            case SDL.EventType.WindowFocusGained:
+            case SDL.EventType.WindowFocusLost:
+                EventType focus = (SDL.EventType)e.Type == SDL.EventType.WindowFocusGained ? EventType.FocusGained : EventType.FocusLost;
+                _events.Publish(new Event(focus, e.Window.WindowID));
+                break;
         }
+
         return true;
+    }
+
+    public void Dispose()
+    {
+        SDL.RemoveEventWatch(_watch, IntPtr.Zero);
+        CloseAll();
+        SDL.QuitSubSystem(SDL.InitFlags.Video);
     }
 
     private sealed class Window : IWindow
     {
-        private readonly AssetManager _assets;
+        private readonly Assets _assets;
+
         // The SDL_Window* stays private; the host only ever sees the id.
         private nint _window;
 
-        public Window(string title, int width, int height, WindowMode mode, AssetManager assets, Handle<Texture> icon)
+        public Window(string title, int width, int height, WindowMode mode, Assets assets, Handle<Texture> icon)
         {
             _assets = assets;
+
             _window = SDL.CreateWindow(title, width, height, SDL.WindowFlags.Hidden | SDL.WindowFlags.Resizable);
             if (_window == IntPtr.Zero)
                 throw new InvalidOperationException($"SDL window creation failed: {SDL.GetError()}");
+
             Handle = SDL.GetWindowID(_window);
             IsOpen = true;
+            SDL.StartTextInput(_window);
 
             Title = title;
             Size = new Size(width, height);
@@ -164,12 +184,14 @@ internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposab
                 field = value;
                 if (!value.IsValid)
                     return;
+
                 Texture? icon = _assets.Load(value);
                 if (icon is null)
                     return; // the manager logged why
+
                 if (icon.Format is not (TextureFormat.Rgba8Unorm or TextureFormat.Rgba8Srgb) || icon.Levels.Length == 0)
                 {
-                    Debugging.LogWarning($"{icon.Path} cannot be a window icon: it is {icon.Format}, and an icon must be uncompressed RGBA.");
+                    Debugging.Log.Warn($"{icon.Path} cannot be a window icon: it is {icon.Format}, and an icon must be uncompressed RGBA.");
                     return;
                 }
 
@@ -178,14 +200,16 @@ internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposab
                 GCHandle pin = GCHandle.Alloc(icon.Pixels, GCHandleType.Pinned);
                 try
                 {
-                    nint surface = SDL.CreateSurfaceFrom(level.Width, level.Height, SDL.PixelFormat.ABGR8888, pin.AddrOfPinnedObject() + level.Offset, level.Width * 4);
+                    nint pixels = pin.AddrOfPinnedObject() + level.Offset;
+                    nint surface = SDL.CreateSurfaceFrom(level.Width, level.Height, SDL.PixelFormat.ABGR8888, pixels, level.Width * 4);
                     if (surface == IntPtr.Zero)
                     {
-                        Debugging.LogWarning($"Could not wrap {icon.Path} as a surface: {SDL.GetError()}");
+                        Debugging.Log.Warn($"Could not wrap {icon.Path} as a surface: {SDL.GetError()}");
                         return;
                     }
+
                     if (!SDL.SetWindowIcon(_window, surface))
-                        Debugging.LogWarning($"Could not set {icon.Path} as the window icon: {SDL.GetError()}");
+                        Debugging.Log.Warn($"Could not set {icon.Path} as the window icon: {SDL.GetError()}");
                     SDL.DestroySurface(surface);
                 }
                 finally
@@ -195,15 +219,14 @@ internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposab
             }
         }
 
+        /// <summary>Read from SDL each time: the user resizes the window too.</summary>
         public Size Size
         {
-            get;
-            set
-            {
-                field = value;
-                SDL.SetWindowSize(_window, value.Width, value.Height);
-            }
+            get => SDL.GetWindowSize(_window, out int w, out int h) ? new Size(w, h) : Size.Empty;
+            set => SDL.SetWindowSize(_window, value.Width, value.Height);
         }
+
+        public Size PixelSize => SDL.GetWindowSizeInPixels(_window, out int w, out int h) ? new Size(w, h) : Size.Empty;
 
         public WindowMode Mode
         {
@@ -253,6 +276,7 @@ internal sealed class WindowManager : IWindowFactory, IWindowRegistry, IDisposab
         public void Close()
         {
             IsOpen = false;
+
             if (_window != IntPtr.Zero)
                 SDL.HideWindow(_window);
         }

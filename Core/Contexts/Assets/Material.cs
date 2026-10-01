@@ -1,5 +1,4 @@
 using Magic.Attributes;
-using System.Numerics;
 
 namespace Magic.Contexts.Assets;
 
@@ -8,7 +7,7 @@ public enum MaterialType : byte
 {
     Opaque,
 
-    /// <summary>Opaque, but fragments whose base colour alpha is below <see cref="Material.AlphaCutoff"/> are discarded.</summary>
+    /// <summary>Opaque, but fragments the surface shader declares transparent below its cutoff are discarded.</summary>
     Masked,
 
     /// <summary>Blended over what is behind it, drawn after everything opaque.</summary>
@@ -16,40 +15,22 @@ public enum MaterialType : byte
 }
 
 /// <summary>
-/// The inputs of the metallic-roughness PBR model, nothing else. The pipelines belong to the renderer,
-/// because a GPU-driven renderer needs every opaque surface to go through the same few pipelines, and a
-/// material can only pick data for them.
-/// A <c>.mat</c> file is this class as JSON (<see cref="AssetJson"/>: vectors are <c>{x, y, z, w}</c>, textures
-/// are <c>{ "id": N }</c>); its sidecar carries the <c>[MetaData]</c> properties. Every property has a default
-/// so a file states only what differs. Texture handles are <see cref="Handle{T}.None"/> where the factor
-/// alone applies; the ORM texture packs occlusion, roughness and metallic in r, g and b.
+/// A surface shader plus the values of the parameters it declares. The shader (a <c>.surf.hlsl</c>) declares
+/// <c>struct MaterialParams</c>; the renderer reads that declaration, packs <see cref="Params"/> into the
+/// record the shader loads, and stitches the shader's surface function into its own pipelines. Every
+/// distinct shader is one pipeline class, so a GPU-driven renderer still draws all materials of one shader
+/// in one indirect call. A <c>.mat</c> file is this class as JSON (<see cref="AssetJson"/>); keys of
+/// <see cref="Params"/> are the HLSL member names, and a parameter a file leaves out takes the shader's
+/// default. The sidecar carries only the id.
 /// </summary>
 [AssetFormat(AssetFormat.Json)]
 public sealed class Material : Asset
 {
-    [MetaData]
+    public Handle<Shader> Shader { get; set; }
+
     public MaterialType Type { get; set; }
 
-    [MetaData]
     public bool DoubleSided { get; set; }
 
-    public Vector4 Color { get; set; } = Vector4.One;
-
-    public Vector3 Emissive { get; set; }
-
-    public float Roughness { get; set; } = 1f;
-
-    public float Metallic { get; set; }
-
-    public float NormalScale { get; set; } = 1f;
-
-    public float AlphaCutoff { get; set; } = 0.5f;
-
-    public Handle<Texture> ColorTexture { get; set; }
-
-    public Handle<Texture> NormalTexture { get; set; }
-
-    public Handle<Texture> OrmTexture { get; set; }
-
-    public Handle<Texture> EmissiveTexture { get; set; }
+    public Dictionary<string, Param> Params { get; set; } = [];
 }

@@ -31,6 +31,9 @@ public interface IFileSystem
     /// <summary>Reads a whole file on the calling thread. A failed result means it could not be read: missing, locked, or still being written.</summary>
     Result<byte[]> ReadBinary(string path);
 
+    /// <summary>Reads a whole text file (UTF-8, a BOM is dropped) on the calling thread. Fails like <see cref="ReadBinary"/>.</summary>
+    Result<string> ReadText(string path);
+
     /// <summary>Lists the entries of <paramref name="path"/> on the calling thread.</summary>
     Result<string[]> ReadDirectory(string path, string? filter = null);
 
@@ -44,23 +47,10 @@ public interface IFileSystem
     Result WriteBinary(string path, byte[] data);
 
     /// <summary>
-    /// Reports created or changed files under <paramref name="path"/> to <paramref name="changed"/> and removed ones to
-    /// <paramref name="deleted"/> (a rename is both) until the handle is disposed; with <paramref name="recursive"/>,
-    /// subfolders too, and a folder renamed or removed is reported by its own path only. Callbacks arrive on a worker thread.
+    /// Reports every path under <paramref name="path"/> that was created, changed, renamed (both names) or removed to
+    /// <paramref name="changed"/> until the handle is disposed: whether it still exists says which. With
+    /// <paramref name="recursive"/>, subfolders too; a folder renamed or removed is reported by its own path only.
+    /// Calls arrive on a worker thread.
     /// </summary>
-    IDisposable Watch(string path, string? filter, Action<string> changed, Action<string> deleted, bool recursive = false);
-
-    Task<Result<byte[]>> ReadBinaryAsync(string path, IProgress<double>? progress = null, CancellationToken cancellationToken = default);
-
-    Task<Result<string>> ReadTextAsync(string path, IProgress<double>? progress = null, CancellationToken cancellationToken = default);
-
-    Task<Result> WriteBytesAsync(string path, byte[] data, IProgress<double>? progress = null, CancellationToken cancellationToken = default);
-
-    Task<Result> WriteTextAsync(string path, string data, IProgress<double>? progress = null, CancellationToken cancellationToken = default);
-
-    Task<Result> CopyAsync(string sourcePath, string destinationPath, IProgress<double>? progress = null, CancellationToken cancellationToken = default);
-
-    Task<Result<string[]>> ReadDirectoryAsync(string path, string? filter = null, IProgress<double>? progress = null, CancellationToken cancellationToken = default);
-
-    Task<Result<string[]>> ReadDirectoryRecursiveAsync(string path, string? filter = null, IProgress<double>? progress = null, CancellationToken cancellationToken = default);
+    IDisposable Watch(string path, string? filter, Action<string> changed, bool recursive = false);
 }

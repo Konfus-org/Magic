@@ -1,3 +1,4 @@
+using Magic.Mathematics;
 using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -32,12 +33,42 @@ public struct Vertex
 
 /// <summary>
 /// Geometry in engine space (left handed, +X right, +Y up, +Z forward, 1 unit = 1 metre = 1 Blender unit):
-/// triangles wound clockwise seen from
-/// outside, tangents already generated. Filled by the model's loader; not modified after it is published.
+/// triangles wound clockwise seen from outside, tangents already generated, bounds computed. Filled by the
+/// model's loader; not modified after it is published.
 /// </summary>
 public sealed class Mesh
 {
     public Vertex[] Vertices { get; set; } = [];
 
     public uint[] Indices { get; set; } = [];
+
+    /// <summary>The box around every vertex, in the mesh's own space.</summary>
+    public Aabb Box { get; set; }
+
+    /// <summary>The sphere around <see cref="Box"/>; what the renderer culls with. Radius 0 means not computed.</summary>
+    public BoundingSphere Bounds { get; set; }
+
+    /// <summary>Sets <see cref="Box"/> and <see cref="Bounds"/> from <see cref="Vertices"/>; the loader calls it once.</summary>
+    public void ComputeBounds()
+    {
+        Box = BoxAround(Vertices);
+        Bounds = Box.Sphere;
+    }
+
+    /// <summary>Over the positions of the vertices, without copying them out first.</summary>
+    private static Aabb BoxAround(ReadOnlySpan<Vertex> vertices)
+    {
+        if (vertices.IsEmpty)
+            return default;
+
+        Vector3 min = vertices[0].Position, max = min;
+
+        foreach (ref readonly Vertex v in vertices)
+        {
+            min = Vector3.Min(min, v.Position);
+            max = Vector3.Max(max, v.Position);
+        }
+
+        return new Aabb(min, max);
+    }
 }

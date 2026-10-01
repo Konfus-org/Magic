@@ -1,0 +1,33 @@
+<Project>
+
+  <!-- The project's own gem: everything under Scripts\ compiles into Build\net10.0\<Configuration>\bin\MyMagicGame.dll,
+       which the engine loads when it opens this project. Further gems live under Gems\ as projects of their
+       own (dotnet new magicgem -o Gems\Physics). The .magic file and Assets\ are here to browse. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Scripts\**\*.cs" />
+  </ItemGroup>
+
+  <!-- The gem, as the engine sees it before constructing it. GemStatic true: loaded once, never hot reloaded.
+       GemDependsOn: names of gems (their assembly names, ';' separated) to load first though no service connects them. -->
+  <PropertyGroup>
+    <GemStatic>false</GemStatic>
+    <GemDependsOn></GemDependsOn>
+    <Description>Scripts of the MyMagicGame project.</Description>
+    <Authors>GEM_AUTHOR</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

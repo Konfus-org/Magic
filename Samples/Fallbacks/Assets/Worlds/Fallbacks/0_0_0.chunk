@@ -1,0 +1,32 @@
+{
+    "entities": [
+        {
+            "name": "BadShader (surface does not compile: solid magenta)",
+            "components": {
+                "Transform": { "position": { "x": -4.5, "y": 0.5, "z": 0 }, "scale": { "x": 1, "y": 1, "z": 1 } },
+                "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 10051 } } }
+            }
+        },
+        {
+            "name": "BadRecord (material names a shader that is not an asset: magenta checker)",
+            "components": {
+                "Transform": { "position": { "x": -1.5, "y": 0.5, "z": 0 }, "scale": { "x": 1, "y": 1, "z": 1 } },
+                "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 10052 } } }
+            }
+        },
+        {
+            "name": "BadModel (model is not an asset: red checker on the unit cube)",
+            "components": {
+                "Transform": { "position": { "x": 1.5, "y": 0.5, "z": 0 }, "scale": { "x": 1, "y": 1, "z": 1 } },
+                "Renderer": { "model": { "id": 999999 }, "materials": { "slot0": { "id": 12045873320119837722 } } }
+            }
+        },
+        {
+            "name": "BadTexture (material samples a texture that is not an asset: red checker)",
+            "components": {
+                "Transform": { "position": { "x": 4.5, "y": 0.5, "z": 0 }, "scale": { "x": 1, "y": 1, "z": 1 } },
+                "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 10053 } } }
+            }
+        }
+    ]
+}

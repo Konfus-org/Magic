@@ -1,0 +1,37 @@
+{
+    "entities": [
+        {
+            "name": "Monkey",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "w": 0
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 516
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}

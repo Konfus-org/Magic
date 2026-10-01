@@ -7,7 +7,7 @@ namespace Magic.Contexts.Assets;
 /// JSON: <see cref="Id"/>, <see cref="Version"/> and whatever import settings the type keeps there (see
 /// <see cref="Attributes.MetaDataAttribute"/>). The manager deserialises the sidecar as the asset type, then a
 /// loader (or the built-in JSON/text reading, see <see cref="Attributes.AssetFormatAttribute"/>) fills in the rest.
-/// An asset is not modified after it is published.
+/// An asset is not modified after it is loaded: the manager pools it, so every Load of it gets the same object.
 /// </summary>
 public abstract class Asset
 {
@@ -22,4 +22,15 @@ public abstract class Asset
 
     [JsonIgnore]
     public string Name => System.IO.Path.GetFileNameWithoutExtension(Path);
+
+    /// <summary>The folder <see cref="Path"/> is in, in the same form (forward slashes, no trailing one); empty at the root.</summary>
+    [JsonIgnore]
+    public string Folder => Path[..Math.Max(0, Path.LastIndexOf('/'))];
+
+    /// <summary>
+    /// Roughly what the loaded asset holds in memory, for the pool's budgets; 0 means about its file's size. Types whose
+    /// loaded form is far bigger than their file (decoded pixels, imported meshes) say so.
+    /// </summary>
+    [JsonIgnore]
+    public virtual long Bytes => 0;
 }

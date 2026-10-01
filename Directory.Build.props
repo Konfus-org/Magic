@@ -61,7 +61,6 @@
        attribute is not visible here: this file is imported by the SDK before that body is read.
        Not tied to the Gems\ folder, so a project created from the template elsewhere still builds as a gem. -->
   <PropertyGroup Condition="'$(IsMagicGem)' == 'true'">
-
     <!-- Gems are plugins: build as class libraries only, never an EXE/apphost. -->
     <OutputType>Library</OutputType>
 
@@ -75,7 +74,7 @@
     <IsPackable>false</IsPackable>
 
     <!-- All gems land flat in bin\Gems\ next to the host exe: that is the
-         folder GemManager scans for plugin DLLs at runtime. -->
+         folder the host's gem loader (Core\Gems.cs) scans for plugin DLLs at runtime. -->
     <OutputPath>$(MagicBuildDir)bin\Gems\</OutputPath>
 
     <!-- Intermediate files get one folder per gem. Sharing a single obj\
@@ -84,5 +83,14 @@
     <BaseIntermediateOutputPath>$(MagicBuildDir)obj\Gems\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
   </PropertyGroup>
+
+  <!-- What the host needs to know about a gem before it constructs it, stamped into the assembly. Set in the gem's
+       csproj: GemStatic (true: loaded once, never reloaded) and GemDependsOn (gem names, ';' separated, that must be
+       loaded first though no service connects them). The gem's name is its assembly name; Version, Description and
+       Authors are the SDK's own properties. Items are evaluated after every property, so the csproj body's values count. -->
+  <ItemGroup Condition="'$(IsMagicGem)' == 'true'">
+    <AssemblyMetadata Include="MagicGem.Static" Value="$(GemStatic)" />
+    <AssemblyMetadata Include="MagicGem.DependsOn" Value="$(GemDependsOn)" />
+  </ItemGroup>
 
 </Project>

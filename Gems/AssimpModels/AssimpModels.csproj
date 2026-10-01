@@ -18,7 +18,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Magic.Tests" />
+    <PackageReference Include="AssimpNetter" Version="6.0.5" />
   </ItemGroup>
 
   <ItemGroup>
@@ -30,8 +30,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AssimpNetter" Version="6.0.5" />
+    <InternalsVisibleTo Include="Magic.UnitTests" />
+    <InternalsVisibleTo Include="Magic.IntegrationTests" />
   </ItemGroup>
+
+  <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
+  <PropertyGroup>
+    <Description>Loads models with Assimp.</Description>
+    <Authors>Konfus</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
 
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 

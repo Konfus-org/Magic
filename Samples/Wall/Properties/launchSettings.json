@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Wall": {
+      "commandName": "Executable",
+      "executablePath": "$(ProjectDir)../../Build/net10.0/$(Configuration)/bin/Magic.exe",
+      "commandLineArgs": "--project \"$(ProjectDir).\"",
+      "workingDirectory": "$(ProjectDir)../.."
+    }
+  }
+}

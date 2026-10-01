@@ -1,0 +1,4 @@
+{
+    "shader": { "id": 10001 },
+    "params": { "colorMap": { "texture": { "id": 999999 } } }
+}

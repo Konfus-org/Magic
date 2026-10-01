@@ -17,7 +17,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Magic.Tests" />
+    <PackageReference Include="SDL3-CS" Version="3.4.16" />
+    <PackageReference Include="SDL3-CS.Windows.TTF" Version="3.2.2.11" />
   </ItemGroup>
 
   <ItemGroup>
@@ -29,9 +30,17 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="SDL3-CS" Version="3.4.16" />
-    <PackageReference Include="SDL3-CS.Windows.TTF" Version="3.2.2.11" />
+    <InternalsVisibleTo Include="Magic.UnitTests" />
+    <InternalsVisibleTo Include="Magic.IntegrationTests" />
   </ItemGroup>
+
+  <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
+  <PropertyGroup>
+    <GemDependsOn>SDL</GemDependsOn>
+    <Description>Loads fonts with SDL3_ttf.</Description>
+    <Authors>Konfus</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
 
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
 

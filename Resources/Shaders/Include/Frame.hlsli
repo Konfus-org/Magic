@@ -1,25 +1,55 @@
-// The per-frame constants (256 B), uploaded untransposed from Gems/Render/Scene/FrameConstants.cs. The
-// register depends on the stage, so the including shader says where it goes first:
-//   #define FRAME_REGISTER VS_CB(0)    // or PS_CB(0), CS_CB(0)
-//   #include "Include/Frame.hlsli"
-// Camera-relative rendering: ViewProj and View expect positions relative to CameraPos.xyz, which keeps
-// float precision flat however far from the origin the camera is.
+// The per-view constants (256 B), exactly as FrameConstants in Core/Contexts/Rendering/GpuStructs.cs lays
+// them out, uploaded untransposed, at uniform slot 0 of every stage that reads one.
+//
+// One block per stage on purpose: DXC drops a cbuffer nothing reads, and SDL needs the uniform bindings a
+// stage does use to be consecutive from 0, so a second block only works while the first is always used.
+// Everything a stage needs per frame therefore lives here; a header that needs more of its own (Include/
+// Pass.hlsli) defines FRAME_APPEND as the extra members before including this file.
+//
+// Members are grouped into 16-byte rows (a float3 with a scalar, two float2, four scalars), which pack the
+// same under HLSL's cbuffer rules and std140. Camera-relative rendering: ViewProj and View expect positions
+// relative to CameraPos.
+
 #ifndef MAGIC_FRAME_HLSLI
 #define MAGIC_FRAME_HLSLI
 
-#ifndef FRAME_REGISTER
-#error "Define FRAME_REGISTER (VS_CB(n), PS_CB(n) or CS_CB(n)) before including Frame.hlsli."
-#endif
+#include "Include/Bindings.hlsli"
 
-cbuffer Frame : FRAME_REGISTER
+cbuffer Frame : UNIFORM(0)
 {
-    float4x4 ViewProj;     // camera-relative view * reverse-Z projection
-    float4x4 PrevViewProj; // last frame's, for motion vectors (M12)
-    float4x4 View;         // rotation only
-    float4 CameraPos;      // xyz absolute world position, w = time in seconds
-    float4 Viewport;       // width, height, 1 / width, 1 / height
-    float4 Proj;           // P11, P22, near, 0
-    float4 Cull;           // minPixels, lodTarget, hizWidth, hizHeight (M3+)
+    float4x4 ViewProj;      // camera-relative view * reverse-Z projection
+    float4x4 View;          // rotation only
+
+    float3 CameraPos;       // absolute world position
+    float Time;             // seconds since the renderer was built
+
+    float2 ViewSize;        // the view's rectangle in pixels
+    float2 ViewTexel;       // 1 / ViewSize
+
+    float2 ViewOrigin;      // where the view's rectangle sits in its render target, in pixels
+    float2 ProjScale;       // the projection's diagonal: P11, P22
+
+    float Near;             // the near plane's view-space distance
+    float MinPixels;        // an instance whose bounds project to a smaller radius is culled
+    uint IsOrthographic;    // 1 = orthographic: the culler lets everything through
+    uint HiZLevelCount;     // levels in the view's depth pyramid
+
+    uint2 HiZSize;          // level 0 of the depth pyramid, in texels
+    uint HiZFirstLevel;     // the first level the pyramid build pass being dispatched writes
+    uint FramePad;
+
+    float3 SunDirection;    // the direction the sun's light travels, normalised
+    float SunDirectionPad;
+
+    float3 SunColor;        // linear colour times intensity
+    float SunColorPad;
+
+    float3 Ambient;         // linear
+    float AmbientPad;
+
+#ifdef FRAME_APPEND
+    FRAME_APPEND
+#endif
 };
 
 #endif

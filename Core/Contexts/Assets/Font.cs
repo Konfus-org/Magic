@@ -31,4 +31,6 @@ public sealed class Font : Asset
 
     /// <summary>By codepoint.</summary>
     public Dictionary<uint, Glyph> Glyphs { get; set; } = [];
+
+    public override long Bytes => Pixels.LongLength;
 }

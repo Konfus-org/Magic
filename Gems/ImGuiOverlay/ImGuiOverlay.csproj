@@ -1,0 +1,46 @@
+<Project>
+
+  <!-- Must come before the SDK props import: Directory.Build.props (imported by the SDK)
+       switches this project to gem output settings when IsMagicGem is true. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Not "ImGui": that namespace segment would shadow Hexa.NET.ImGui.ImGui, and the dll must not clash with the native cimgui.dll. -->
+    <RootNamespace>ImGuiOverlayGem</RootNamespace>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hexa.NET.ImGui" Version="2.2.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Private=false + ExcludeAssets=runtime: compile against the host, but never copy Magic.dll
+         (or its dependencies) next to this gem. The gem's load context shares the host's
+         already-loaded copy (see Gems.LoadContext); a second copy would be a different
+         assembly identity and the host would not recognise the gem's [Gem] attribute. -->
+    <ProjectReference Include="$(MagicRoot)Core\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Magic.UnitTests" />
+    <InternalsVisibleTo Include="Magic.IntegrationTests" />
+  </ItemGroup>
+
+  <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
+  <PropertyGroup>
+    <Description>Debug UI widgets drawn with Dear ImGui.</Description>
+    <Authors>Konfus</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

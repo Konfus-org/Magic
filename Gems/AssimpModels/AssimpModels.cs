@@ -1,7 +1,6 @@
 using Assimp;
 using Assimp.Configs;
 using Assimp.Unmanaged;
-using Magic.Attributes;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 using Magic.Services;
@@ -17,69 +16,45 @@ namespace AssimpGem;
 /// +Y up, with the model's front at +Z (glTF's convention), so the conversion is one X mirror plus a winding
 /// flip for every format, and a unit fix for FBX only.
 /// </summary>
-[Gem(name: "Assimp Models", version: "1.0.0", description: "Loads models with Assimp.", author: "Konfus")]
-[GemExport(typeof(IAssetLoader<Model>))]
-internal sealed class AssimpModels : IAssetLoader<Model>
+internal sealed class AssimpModels : IGem, IAssetLoader<Model>
 {
     private const PostProcessSteps Steps =
         PostProcessSteps.Triangulate | PostProcessSteps.JoinIdenticalVertices | PostProcessSteps.GenerateSmoothNormals |
         PostProcessSteps.CalculateTangentSpace | PostProcessSteps.FlipUVs | PostProcessSteps.SortByPrimitiveType |
         PostProcessSteps.ImproveCacheLocality;
 
-    /// <summary>
-    /// Assimp's right-handed frame to the engine's: an X mirror, and for FBX a constant 0.01. FBX files
-    /// are in centimetres and Assimp's FBX importer folds the file's own unit scale and axis correction into
-    /// the root node, so its output is always centimetres whatever Blender's export scale was, and the
-    /// file's UnitScaleFactor must never be applied on top. Every other format Assimp reads (glTF, OBJ, ...)
-    /// is already in metres.
-    /// </summary>
-    private static Matrix4x4 ToEngine(string format)
-    {
-        float scale = format.Equals("fbx", StringComparison.OrdinalIgnoreCase) ? 0.01f : 1f;
-        return Matrix4x4.CreateScale(-scale, scale, scale);
-    }
-
     public AssimpModels(Project project)
     {
         // AssimpNet finds assimp.dll itself, from AppContext.BaseDirectory (bin\, not bin\Gems\) and the NuGet
         // cache; gem assemblies are loaded from a stream, so there is no Assembly.Location to probe from.
-        AssimpLibrary.Instance.Resolver.SetProbingPaths(project.Gems);
+        AssimpLibrary.Instance.Resolver.SetProbingPaths(project.EngineGems);
         AssimpLibrary.Instance.LoadLibrary();
     }
 
     public void Load(Model asset, byte[] bytes)
     {
-        Load(asset, bytes, null, default);
-    }
-
-    public Task LoadAsync(Model asset, byte[] bytes, IProgress<double>? progress, CancellationToken cancellationToken)
-    {
-        return Task.Run(() => Load(asset, bytes, progress, cancellationToken), cancellationToken);
-    }
-
-    private static void Load(Model asset, byte[] bytes, IProgress<double>? progress, CancellationToken cancellationToken)
-    {
         using AssimpContext context = new(); // not shared: an importer instance serves one import at a time
         context.SetConfig(new FBXPreservePivotsConfig(false));
+
         string hint = Path.GetExtension(asset.Path).TrimStart('.');
         Scene scene = context.ImportFileFromStream(new MemoryStream(bytes), Steps, hint);
         if (scene is null || scene.SceneFlags.HasFlag(SceneFlags.Incomplete) || scene.RootNode is null)
             throw new InvalidOperationException("Assimp could not import the file.");
-        progress?.Report(0.5);
 
         List<Mesh> meshes = [];
         List<ModelPart> parts = [];
-        Walk(scene, scene.RootNode, Matrix4x4.Identity, ToEngine(hint), meshes, parts, cancellationToken);
+        Walk(scene, scene.RootNode, Matrix4x4.Identity, ToEngine(hint), meshes, parts);
 
         asset.Meshes = [.. meshes];
         asset.Parts = [.. parts];
         asset.SlotNames = [.. scene.Materials.Select(m => m.Name ?? "")];
-        progress?.Report(1);
     }
 
-    private static void Walk(Scene scene, Node node, Matrix4x4 parentWorld, Matrix4x4 toEngine, List<Mesh> meshes, List<ModelPart> parts, CancellationToken cancellationToken)
+    private static void Walk(
+        Scene scene, Node node, Matrix4x4 parentWorld, Matrix4x4 toEngine,
+        List<Mesh> meshes, List<ModelPart> parts)
     {
-        cancellationToken.ThrowIfCancellationRequested();
+
         // Assimp matrices are row-major with the translation in the last column (M14, M24, M34 once copied
         // into System.Numerics); the transpose puts them in the row-vector convention this code multiplies in.
         Matrix4x4 world = Matrix4x4.Transpose(node.Transform) * parentWorld;
@@ -87,14 +62,17 @@ internal sealed class AssimpModels : IAssetLoader<Model>
         foreach (int meshIndex in node.MeshIndices)
         {
             Assimp.Mesh source = scene.Meshes[meshIndex];
-            if (!source.PrimitiveType.HasFlag(PrimitiveType.Triangle) || source.VertexCount == 0) // Triangulate left only triangles (plus an n-gon flag)
+
+            // Triangulate left only triangles (plus an n-gon flag).
+            if (!source.PrimitiveType.HasFlag(PrimitiveType.Triangle) || source.VertexCount == 0)
                 continue;
+
             parts.Add(new ModelPart(meshes.Count, source.MaterialIndex));
             meshes.Add(Bake(source, world * toEngine));
         }
 
         foreach (Node child in node.Children)
-            Walk(scene, child, world, toEngine, meshes, parts, cancellationToken);
+            Walk(scene, child, world, toEngine, meshes, parts);
     }
 
     private static Mesh Bake(Assimp.Mesh source, Matrix4x4 transform)
@@ -115,6 +93,7 @@ internal sealed class AssimpModels : IAssetLoader<Model>
                 Vector3 b = Vector3.TransformNormal(source.BiTangents[i], normalTransform);
                 tangent = new Vector4(t, Vector3.Dot(Vector3.Cross(normal, t), b) < 0 ? -1 : 1);
             }
+
             vertices[i] = new Vertex
             {
                 Position = Vector3.Transform(source.Vertices[i], transform),
@@ -134,6 +113,23 @@ internal sealed class AssimpModels : IAssetLoader<Model>
             indices[(f * 3) + 2] = (uint)face[1];
         }
 
-        return new Mesh { Vertices = vertices, Indices = indices };
+        Mesh mesh = new() { Vertices = vertices, Indices = indices };
+        mesh.ComputeBounds();
+
+        return mesh;
+    }
+
+    /// <summary>
+    /// Assimp's right-handed frame to the engine's: an X mirror, and for FBX a constant 0.01. FBX files
+    /// are in centimetres and Assimp's FBX importer folds the file's own unit scale and axis correction into
+    /// the root node, so its output is always centimetres whatever Blender's export scale was, and the
+    /// file's UnitScaleFactor must never be applied on top. Every other format Assimp reads (glTF, OBJ, ...)
+    /// is already in metres.
+    /// </summary>
+    private static Matrix4x4 ToEngine(string format)
+    {
+        float scale = format.Equals("fbx", StringComparison.OrdinalIgnoreCase) ? 0.01f : 1f;
+
+        return Matrix4x4.CreateScale(-scale, scale, scale);
     }
 }

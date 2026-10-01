@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Konfus",
+  "classifications": [ "Magic", "Game Engine", "Game" ],
+  "identity": "Magic.Project.CSharp",
+  "name": "Magic Project",
+  "shortName": "magicproject",
+  "description": "Creates a Magic game project: a .magic file, a starting world, and a Scripts gem the engine loads from the project.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "MyMagicGame",
+  "preferNameDirectory": true,
+  "symbols": {
+    "EnginePath": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "",
+      "replaces": "MAGIC_ROOT_PATH",
+      "description": "Folder of the Magic engine repository (the one holding Core and Build). Leave empty to use the MAGIC_ROOT environment variable at build time."
+    },
+    "Author": {
+      "type": "parameter",
+      "datatype": "string",
+      "defaultValue": "Konfus",
+      "replaces": "GEM_AUTHOR",
+      "description": "Author written to the Scripts gem's csproj."
+    }
+  },
+  "primaryOutputs": [
+    { "path": "MyMagicGame.csproj" }
+  ]
+}

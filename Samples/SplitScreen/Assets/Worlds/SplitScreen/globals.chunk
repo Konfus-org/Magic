@@ -1,0 +1,88 @@
+{
+    "entities": [
+        {
+            "name": "TopCamera",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 2,
+                        "z": -6
+                    },
+                    "rotation": {
+                        "x": 0.13053,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.99144
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Camera": {
+                    "viewport": "top_half"
+                }
+            }
+        },
+        {
+            "name": "BottomCamera",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 4,
+                        "z": -4
+                    },
+                    "rotation": {
+                        "x": 0.38268,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.92388
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Camera": {
+                    "viewport": "bottom_half"
+                }
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0.41554,
+                        "y": 0.2661,
+                        "z": -0.12854,
+                        "w": 0.86023
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "DirectionalLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    },
+                    "intensity": 3,
+                    "castsShadows": true
+                }
+            }
+        }
+    ]
+}

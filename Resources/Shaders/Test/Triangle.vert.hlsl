@@ -1,6 +1,6 @@
-// M1 conventions probe: two triangles straight from a vertex buffer in NDC. The pass draws them with
-// FrontFace = Clockwise and CullMode = Back, so only the one wound clockwise on screen survives.
-#include "Include/Bindings.hlsli"
+// Conventions probe: two triangles straight from a vertex buffer in NDC. The pass draws them with
+// FrontFace = Clockwise and CullMode = Back, so only the one wound clockwise on screen survives. VsOut must
+// match PsIn in Triangle.frag.hlsl.
 
 struct VsIn
 {

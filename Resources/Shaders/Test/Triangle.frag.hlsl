@@ -1,5 +1,5 @@
-// M1 conventions probe: the interpolated vertex colour, written as linear into the sRGB colour target.
-#include "Include/Bindings.hlsli"
+// Conventions probe: the interpolated vertex colour, written as linear into the sRGB colour target. PsIn
+// must match VsOut in Triangle.vert.hlsl.
 
 struct PsIn
 {

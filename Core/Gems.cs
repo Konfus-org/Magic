@@ -1,9 +1,7 @@
-using DryIoc;
-using Magic.Attributes;
+using Magic.Contexts.Events;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
-using System.Diagnostics;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
@@ -14,311 +12,313 @@ namespace Magic;
 /// <summary>
 /// The whole gem system: load, watch, reload, unload.
 ///
-/// <para>A gem is one dll holding one <see cref="GemAttribute"/> class and any number of
-/// <see cref="GemExportAttribute"/> classes. Each is constructed once, its constructor parameters resolved from the
-/// container, and each export is registered into the container under its contracts. What a gem's constructors need is
-/// what it depends on; gems load after whatever provides that, and unload before it. A
-/// <see cref="GemAttribute.Static"/> gem is never unloaded before shutdown, and neither is anything it depends on.
-/// Whatever a gem registers with a host service (a system, a subscription, an event watch) the gem disposes in its
-/// own Dispose: the host tracks none of it, and a handle left behind keeps the old assembly alive after a reload.
-/// </para>
+/// <para>A gem is one dll holding one class that implements <see cref="IGem"/>. Its name is the assembly name; the
+/// gem's csproj stamps whether it is static and which gems it depends on into the assembly
+/// (<c>GemStatic</c>, <c>GemDependsOn</c>, see Directory.Build.props). The class is constructed once, its constructor
+/// parameters taken from the <see cref="Container"/>, and put in the container under every Core interface it
+/// implements. What its constructor needs is what it depends on: gems load after whatever provides that, and unload
+/// before it. A static gem is never unloaded before shutdown, and neither is anything it depends on. Whatever a gem
+/// takes from a host service (an event watch, an ECS query) the gem disposes in its own Dispose: the host tracks none
+/// of it, and a handle left behind keeps the old assembly alive after a reload.</para>
 ///
-/// Gems only change on the main thread: <see cref="Load"/> at startup, <see cref="ProcessChanges"/> at the top of every frame,
-/// and <see cref="Dispose"/> on the way out. The folder watcher only queues changes.
+/// Gems come from two places: the engine's own folder, of which the project lists the ones it wants by name
+/// (<c>"default"</c> for all of them), and the project's folder, searched top to bottom, from which everything loads.
+///
+/// Gems only change on the main thread: <see cref="Load"/> at startup, <see cref="ProcessChanges"/> at the top of
+/// every frame, and <see cref="Dispose"/> on the way out. The folder watchers only queue changes.
 /// </summary>
-internal sealed class Gems(IContainer container, IFileSystem files) : IDisposable
+internal sealed class Gems(Container container, IFileSystem files, Events events) : IDisposable
 {
-    /// <summary>How long a file must be quiet before its change is applied; a build touches a dll several times.</summary>
-    private static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(300);
-    private static readonly string HostAssembly = typeof(GemAttribute).Assembly.GetName().Name!;
+    /// <summary>The list entry that stands for every gem in the engine folder.</summary>
+    internal const string Default = "default";
+
+    private static readonly Assembly Host = typeof(IGem).Assembly;
 
     private readonly List<Gem> _gems = []; // in load order
-    private readonly Dictionary<string, (bool Deleted, long Stamp)> _pending = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Lock _pendingLock = new();
-    private readonly List<WeakReference<LoadContext>> _unloaded = [];
-    private IDisposable? _watcher;
+    private readonly List<GemSource> _sources = []; // engine folder first, so a path under both is the engine's
+    private readonly List<IDisposable> _watchers = [];
+    private readonly ChangeQueue _changes = new();
+    private readonly List<WeakReference<GemLoadContext>> _unloaded = [];
 
-    internal IReadOnlyList<Gem> Loaded => _gems;
+    /// <summary>Every loaded gem, in load order (dependencies first): the order the frame loop calls them in.</summary>
+    public IGem[] Loaded { get; private set; } = [];
 
-    /// <summary>Stops watching and unloads everything, dependents before dependencies and logger gems last.</summary>
-    public void Dispose()
+    /// <summary>
+    /// Loads, in one dependency-ordered pass, the gems in <paramref name="engineDirectory"/> whose name is in
+    /// <paramref name="names"/> (<see cref="Default"/> takes them all) and every gem dll anywhere under
+    /// <paramref name="projectRoot"/>, then watches both for changes. The project tree is left alone when the engine
+    /// folder sits inside it (the engine running as its own project), and <c>obj</c>, <c>Cache</c> and dot folders are
+    /// skipped: a build's intermediate copy of a dll is not a second gem.
+    /// </summary>
+    public void Load(string engineDirectory, IReadOnlyCollection<string> names, string projectRoot)
     {
-        _watcher?.Dispose();
-        _watcher = null;
-        foreach (Gem gem in _gems.Where(g => !g.Provides.Contains(typeof(ILogger))).Reverse().ToList())
-            Unload(gem);
-        foreach (Gem gem in _gems.AsEnumerable().Reverse().ToList())
-            Unload(gem);
+        HashSet<string>? wanted = names.Contains(Default) ? null : new HashSet<string>(names, StringComparer.Ordinal);
+        GemSource engine = new(engineDirectory, Recursive: false, wanted);
+        List<string> paths = [];
+
+        Add(engine, paths);
+        if (!Within(engineDirectory, projectRoot))
+            Add(new GemSource(projectRoot, Recursive: true, Names: null), paths);
+
+        HashSet<string> seen = Load(paths, []);
+
+        foreach (string name in engine.Names?.Where(n => !seen.Contains(n)) ?? [])
+            Debugging.Log.Warn($"Gem \"{name}\" is listed in the project but no dll in {engineDirectory} provides it.");
     }
 
     /// <summary>
-    /// Applies every queued change whose file has been quiet for <see cref="Settle"/>. Called by the main
-    /// loop at the start of each frame, so gems never come or go in the middle of one.
+    /// Applies every gem file change that has settled. Called by the frame loop at the start of each frame, so gems
+    /// never come or go in the middle of one.
     /// </summary>
     public void ProcessChanges()
     {
         CheckUnloaded();
 
-        List<(string Path, bool Deleted)> ready;
-        lock (_pendingLock)
+        foreach (string path in _changes.TakeSettled())
         {
-            ready = [.. _pending.Where(p => Stopwatch.GetElapsedTime(p.Value.Stamp) >= Settle).Select(p => (p.Key, p.Value.Deleted))];
-            foreach ((string path, _) in ready)
-                _pending.Remove(path);
-        }
+            if (SourceOf(path) is null)
+                continue;
 
-        foreach ((string path, bool deleted) in ready)
-        {
             try
             {
-                if (deleted)
-                    Unload(path);
-                else
+                if (files.FileExists(path))
                     Reload(path);
+                else
+                    Unload(path);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Debugging.LogWarning($"Handling a change to {path} failed. {ex}");
+                Debugging.Log.Warn($"Handling a change to {path} failed. {ex}");
             }
         }
     }
 
-    /// <summary>Loads every gem dll in <paramref name="directory"/> in dependency order and watches the folder for changes.</summary>
-    public void Load(string directory)
+    /// <summary>Registers a source, lists the dlls it accepts into <paramref name="paths"/> (once each) and watches it.</summary>
+    private void Add(GemSource source, List<string> paths)
     {
-        Watch(directory);
-        Result<string[]> listing = files.ReadDirectory(directory, "*.dll");
+        _sources.Add(source);
+
+        Result<string[]> listing = source.Recursive
+            ? files.ReadDirectoryRecursive(source.Directory, "*.dll")
+            : files.ReadDirectory(source.Directory, "*.dll");
         if (listing.Failed)
         {
-            Debugging.LogWarning($"Could not list gems in {directory}: {listing.Message}");
+            Debugging.Log.Warn($"Could not list gems in {source.Directory}: {listing.Message}");
             return;
         }
-        Load(listing.Payload, []);
+
+        foreach (string path in listing.Payload)
+        {
+            if (SourceOf(path) == source && !paths.Contains(path, StringComparer.OrdinalIgnoreCase))
+                paths.Add(path);
+        }
+
+        _watchers.Add(files.Watch(source.Directory, "*.dll", _changes.Add, source.Recursive));
+    }
+
+    /// <summary>Is <paramref name="path"/> <paramref name="root"/> itself or somewhere beneath it?</summary>
+    private bool Within(string path, string root)
+    {
+        string relative = files.Relative(root, path);
+        return relative == "." || (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative));
+    }
+
+    /// <summary>The source <paramref name="path"/> falls under, engine folder first; null when no source accepts it.</summary>
+    private GemSource? SourceOf(string path)
+    {
+        return _sources.Find(s => s.Accepts(files, path));
     }
 
     /// <summary>
-    /// Loads the gems at <paramref name="paths"/>: inspects each, then constructs them in dependency order,
-    /// loggers first. <paramref name="state"/> is hot reload state by path, handed back to the rebuilt gem.
+    /// Loads the gems at <paramref name="paths"/>: inspects each, then constructs them in dependency order, loggers
+    /// first. <paramref name="state"/> is hot reload state by path, handed back to the rebuilt gem. Returns the name of
+    /// every gem inspected, wanted by its source or not.
     /// </summary>
-    private void Load(IEnumerable<string> paths, Dictionary<string, byte[]> state)
+    private HashSet<string> Load(IEnumerable<string> paths, Dictionary<string, byte[]> state)
     {
+        HashSet<string> seen = new(StringComparer.Ordinal);
         List<Gem> pending = [];
         foreach (string path in paths)
         {
             if (Find(path) is not null)
-                Debugging.LogWarning($"{path} is already loaded.");
-            else if (Parse(path) is { } gem)
+            {
+                Debugging.Log.Warn($"{path} is already loaded.");
+                continue;
+            }
+
+            if (Parse(path) is not { } gem)
+                continue;
+
+            seen.Add(gem.Name);
+            if (SourceOf(path) is { } source && source.Wants(gem))
+            {
                 pending.Add(gem);
+                continue;
+            }
+
+            Debugging.Log.Debug($"Skipping gem {gem.Name} ({path}): the project does not list it.");
+            gem.Context.Unload();
         }
 
-        // Kahn's algorithm by hand: take any gem whose needs are all met (services registered by the host or a
-        // gem already up, and every gem it names in DependsOn loaded).
+        // Kahn's algorithm by hand: take any gem whose needs are all met (services in the container and every gem it
+        // names in GemDependsOn loaded).
         while (pending.Count > 0)
         {
             Gem? next = pending
                 .OrderBy(g => g.Provides.Contains(typeof(ILogger)) ? 0 : 1).ThenBy(g => g.Name)
-                .FirstOrDefault(g => g.Requires.All(t => container.IsRegistered(t)) && g.DependsOn.All(n => Find(n) is not null || g.Name == n));
+                .FirstOrDefault(g => g.Requires.All(container.Has) && g.DependsOn.All(n => Find(n) is not null));
             if (next is null)
                 break;
-            pending.Remove(next);
 
-            if (Construct(next, state.GetValueOrDefault(next.Path)))
+            pending.Remove(next);
+            if (!Construct(next, state.GetValueOrDefault(next.Path)))
             {
-                _gems.Add(next);
-                Debugging.LogInfo($"Loaded gem: {next.Name} v{next.Version}{(next.Author is null ? "" : $" by {next.Author}")}{(next.IsStatic ? " (static)" : "")}");
-            }
-            else
                 next.Context.Unload();
+                continue;
+            }
+
+            _gems.Add(next);
+            Changed();
+
+            string pinned = next.IsStatic ? " (static)" : "";
+            Debugging.Log.Info($"Loaded gem: {next.Name} v{next.Version}{pinned}");
         }
 
         // Whatever is left needs something nobody provides, or sits in a dependency cycle.
         foreach (Gem gem in pending)
         {
-            string missing = gem.Requires.FirstOrDefault(t => !container.IsRegistered(t)) is { } type
+            string missing = gem.Requires.FirstOrDefault(t => !container.Has(t)) is { } type
                 ? $"nothing provides {type}"
                 : $"gem {gem.DependsOn.First(n => Find(n) is null)} is not loaded";
-            Debugging.LogWarning($"Skipping gem {gem.Name} ({gem.Path}): {missing}.");
+            Debugging.Log.Warn($"Skipping gem {gem.Name} ({gem.Path}): {missing}.");
             gem.Context.Unload();
         }
+
+        return seen;
     }
 
     /// <summary>
-    /// Loads the assembly into its own collectible context and reads what its gem declares, without
-    /// constructing anything. Null (context unloaded again) for anything that is not a usable gem.
+    /// Loads the assembly into its own collectible context and reads what the gem declares, without constructing
+    /// anything. Null (context unloaded again) for anything that is not a usable gem.
     /// </summary>
     private Gem? Parse(string path)
     {
         Result<byte[]> read = files.ReadBinary(path);
         if (read.Failed)
         {
-            Debugging.LogDebug($"Skipping {path} for now: {read.Message}"); // still being written; the next change event retries
+            Debugging.Log.Debug($"Skipping {path} for now: {read.Message}"); // still being written; the next change retries
             return null;
         }
+
         if (!IsGemFile(read.Payload))
             return null;
 
-        LoadContext context = new(path, read.Payload, files);
+        GemLoadContext context = new(path, read.Payload, files);
         try
         {
+            Assembly assembly = context.LoadGem();
             Type[] types;
             try
             {
-                types = context.LoadGem().GetTypes();
+                types = assembly.GetTypes();
             }
             catch (ReflectionTypeLoadException ex)
             {
                 types = [.. ex.Types.OfType<Type>()];
             }
 
-            Type[] gemTypes = [.. types.Where(t => t.IsDefined(typeof(GemAttribute), inherit: false))];
+            Type[] gemTypes = [.. types.Where(t => typeof(IGem).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface)];
             if (gemTypes.Length == 0)
             {
                 context.Unload(); // a helper library that happens to reference the host
                 return null;
             }
-            if (gemTypes.Length > 1)
-                Debugging.LogWarning($"{path} holds several [Gem] classes; using {gemTypes[0].FullName} and ignoring the rest.");
-            Type gemType = gemTypes[0];
 
-            // The gem class first, so it is constructed first unless it needs one of its own exports.
-            List<GemPart> parts = [];
-            foreach (Type type in types.Where(t => t != gemType && t.IsDefined(typeof(GemExportAttribute), inherit: false)).Prepend(gemType))
+            if (gemTypes.Length > 1)
+                Debugging.Log.Warn($"{path} holds several IGem classes; using {gemTypes[0].FullName} and ignoring the rest.");
+
+            ConstructorInfo? ctor = gemTypes[0].GetConstructors().MaxBy(c => c.GetParameters().Length);
+            if (ctor is null)
             {
-                if (GemPart.Of(type) is not { } part)
-                {
-                    context.Unload();
-                    return null;
-                }
-                parts.Add(part);
+                Debugging.Log.Warn($"Skipping {gemTypes[0].FullName}: it has no public constructor.");
+                context.Unload();
+                return null;
             }
-            return new Gem(context, gemType, parts);
+
+            return new Gem(context, assembly, ctor);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debugging.LogWarning($"Skipping {path}: could not inspect it. {ex}");
+            Debugging.Log.Warn($"Skipping {path}: could not inspect it. {ex}");
             context.Unload();
             return null;
         }
     }
 
-    /// <summary>
-    /// Constructs the gem class and its exports, registers the exports, and hands back hot reload
-    /// <paramref name="state"/>. False (with everything torn down again) on any failure.
-    /// </summary>
+    /// <summary>Constructs the gem, puts it in the container and hands back hot reload <paramref name="state"/>. False, logged, on failure.</summary>
     private bool Construct(Gem gem, byte[]? state)
     {
         try
         {
-            // Same rule as between gems: build whichever part has everything its constructor needs.
-            List<GemPart> parts = [.. gem.Parts];
-            while (parts.Count > 0)
-            {
-                GemPart part = parts.FirstOrDefault(p => p.Requires.All(t => container.IsRegistered(t)))
-                    ?? throw new InvalidOperationException($"{parts[0].Type.FullName} needs {parts[0].Requires.First(t => !container.IsRegistered(t))}, which nothing provides.");
-                parts.Remove(part);
+            gem.Instance = (IGem)gem.Ctor.Invoke([.. gem.Ctor.GetParameters().Select(p => container.Get(p.ParameterType))]);
 
-                object instance = part.Ctor.Invoke([.. part.Requires.Select(t => container.Resolve(t))]);
-                gem.Instances.Add(instance);
-                if (part.Type == gem.Type)
-                    gem.Instance = instance;
+            // Core decides when rendering debugs, before a gem constructed after this one can reach the renderer.
+#if DEBUG
+            if (gem.Instance is IRendering rendering)
+                rendering.Debug = true;
+#endif
 
-                foreach (Type contract in part.Contracts)
-                {
-                    if (Register(contract, instance))
-                        gem.Registrations.Add(contract);
-                }
+            foreach (Type contract in gem.Provides)
+                container.Add(contract, gem.Instance);
 
-                if (instance is ILogger logger && part.Contracts.Contains(typeof(ILogger)))
-                {
-                    gem.Loggers.Add(logger);
-                    Debugging.RegisterLogger(logger);
-                }
-                else if (instance is IAssetLoader loader)
-                {
-                    // Also kept by the asset type each declared IAssetLoader<T> contract names, since a type can only have one loader.
-                    foreach (Type assetType in part.Contracts
-                        .Where(c => c.IsGenericType && c.GetGenericTypeDefinition() == typeof(IAssetLoader<>))
-                        .Select(c => c.GenericTypeArguments[0]))
-                    {
-                        AssetLoaderRegistry.Register(assetType, loader);
-                        gem.Loaders.Add((assetType, loader));
-                    }
-                }
-            }
+            // Loggers and debug UIs are also driven through Debugging, which fans every call out to all of them.
+            if (gem.Instance is ILogger logger)
+                Debugging.Log.Register(logger);
+            if (gem.Instance is IDebugUI ui)
+                Debugging.UI.Register(ui);
 
-            if (state is not null && gem.Instance is IHotReloadable reloadable)
-                reloadable.Restore(state);
+            if (state is not null)
+                gem.Instance.Restore(state);
 
             return true;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Log the text only: holding on to the exception would pin the gem's types.
-            Debugging.LogWarning($"Failed to load gem {gem.Name}: {(ex as TargetInvocationException)?.InnerException ?? ex}");
+            Debugging.Log.Warn($"Failed to load gem {gem.Name}: {(ex as TargetInvocationException)?.InnerException ?? ex}");
             Teardown(gem);
             return false;
         }
     }
 
     /// <summary>
-    /// Offers an instance a gem owns to the host and other gems. Registered weakly: the gem keeps the instance
-    /// alive while it is loaded, so nothing in the container pins the gem's assembly after it unloads. First
-    /// gem to provide a contract wins; a later one is logged and ignored.
-    /// </summary>
-    private bool Register(Type contract, object instance)
-    {
-        if (container.IsRegistered(contract))
-        {
-            Debugging.LogWarning($"{contract} is already provided; keeping the existing one and ignoring {instance.GetType().FullName}.");
-            return false;
-        }
-        container.RegisterInstance(contract, instance, IfAlreadyRegistered.Replace,
-            // asResolutionCall keeps consumers from inlining this instance into their cached resolve expressions
-            Setup.With(weaklyReferenced: true, asResolutionCall: true));
-        return true;
-    }
-
-    /// <summary>Queues dll changes in <paramref name="directory"/> (which must exist); <see cref="ProcessChanges"/> applies them.</summary>
-    private void Watch(string directory)
-    {
-        _watcher?.Dispose();
-        _watcher = files.Watch(directory, "*.dll", path => Notify(path, deleted: false), path => Notify(path, deleted: true));
-    }
-
-    /// <summary>Newest change per path wins. Safe from any thread.</summary>
-    private void Notify(string path, bool deleted)
-    {
-        lock (_pendingLock)
-        {
-            _pending[path] = (deleted, Stopwatch.GetTimestamp());
-        }
-    }
-
-    /// <summary>
-    /// The frame after a reload: were the old assemblies collected? One still loaded means something kept a
-    /// reference into the old gem (a delegate, an instance, an export), and the reload leaked it.
+    /// The frame after a reload: were the old assemblies collected? One still loaded means something kept a reference
+    /// into the old gem (a delegate, an instance, an export), and the reload leaked it.
     /// </summary>
     private void CheckUnloaded()
     {
         if (_unloaded.Count == 0)
             return;
+
         // Unloading takes a few collections to go through; this is the documented way to wait it out.
         for (int i = 0; i < 10 && _unloaded.Any(u => u.TryGetTarget(out _)); i++)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
         }
-        foreach (WeakReference<LoadContext> reference in _unloaded)
+
+        foreach (WeakReference<GemLoadContext> reference in _unloaded)
         {
-            if (reference.TryGetTarget(out LoadContext? context))
-                Debugging.LogWarning($"The old assembly of {context.Path} is still loaded after its reload: a system, subscription or other handle it registered was not disposed. Every handle a gem takes from a host service must be disposed in its Dispose.");
+            if (reference.TryGetTarget(out GemLoadContext? context))
+                Debugging.Log.Warn($"The old assembly of {context.Path} is still loaded after its reload: an event watch, query or other handle it took was not disposed. Every handle a gem takes from a host service must be disposed in its Dispose.");
         }
+
         _unloaded.Clear();
     }
 
     /// <summary>
-    /// Hot reload: saves state from the gem and everything depending on it, unloads them all (dependents
-    /// first), then loads them again in dependency order and hands the state back. An unknown path is just loaded.
+    /// Hot reload: saves state from the gem and everything depending on it, unloads them all (dependents first), then
+    /// loads them again in dependency order and hands the state back. An unknown path is just loaded.
     /// </summary>
     private void Reload(string path)
     {
@@ -327,6 +327,7 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
             Load([path], []);
             return;
         }
+
         if (Group(gem, "reloading") is not { } group)
             return;
 
@@ -335,81 +336,78 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
         {
             try
             {
-                if (g.Instance is IHotReloadable reloadable)
-                    state[g.Path] = reloadable.Persist();
+                state[g.Path] = g.Instance!.Save();
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Debugging.LogWarning($"Gem {g.Name}: saving reload state failed. {ex}");
+                Debugging.Log.Warn($"Gem {g.Name}: saving reload state failed. {ex}");
             }
-            _unloaded.Add(new WeakReference<LoadContext>(g.Context)); // checked next frame
+
+            _unloaded.Add(new WeakReference<GemLoadContext>(g.Context)); // checked next frame
             Unload(g);
         }
+
         Load([.. group.Select(g => g.Path)], state);
     }
 
     /// <summary>Unloads the gem at <paramref name="path"/> and everything depending on it, dependents first.</summary>
     private void Unload(string path)
     {
-        if (Find(path) is { } gem && Group(gem, "unloading") is { } group)
-        {
-            foreach (Gem g in group.AsEnumerable().Reverse())
-                Unload(g);
-        }
+        if (Find(path) is not { } gem || Group(gem, "unloading") is not { } group)
+            return;
+
+        foreach (Gem g in group.AsEnumerable().Reverse())
+            Unload(g);
     }
 
     private void Unload(Gem gem)
     {
-        Debugging.LogInfo($"Unloading gem: {gem.Name}");
+        Debugging.Log.Info($"Unloading gem: {gem.Name}");
         _gems.Remove(gem);
+        Changed();
         Teardown(gem);
         gem.Context.Unload();
     }
 
-    /// <summary>
-    /// Unregisters everything the gem provided and disposes what was built: the gem class first, so it can
-    /// still use its exports, then the exports newest first. Loggers are flushed before they go.
-    /// </summary>
+    /// <summary>The set of gems changed: the frame loop's list follows, and whoever caches types by name hears of it next frame.</summary>
+    private void Changed()
+    {
+        Loaded = [.. _gems.Select(g => g.Instance!)];
+        events.Publish(new Event(EventType.GemsChanged));
+    }
+
+    /// <summary>Takes the gem out of the container and Debugging and disposes it; a logger is flushed before it goes.</summary>
     private void Teardown(Gem gem)
     {
-        foreach (Type contract in gem.Registrations)
-        {
-            container.Unregister(contract, null, FactoryType.Service, null);
-            container.ClearCache(contract, FactoryType.Service, null); // compiled resolve delegates pin the gem's types too
-        }
-        if (gem.Loggers.Count > 0)
-        {
-            Debugging.Flush();
-            gem.Loggers.ForEach(Debugging.UnregisterLogger);
-        }
-        foreach ((Type assetType, IAssetLoader loader) in gem.Loaders)
-            AssetLoaderRegistry.Unregister(assetType, loader);
+        if (gem.Instance is null)
+            return;
 
-        IEnumerable<object> order = gem.Instances.AsEnumerable().Reverse();
-        if (gem.Instance is not null)
-            order = order.Where(i => i != gem.Instance).Prepend(gem.Instance);
-        foreach (IDisposable instance in order.OfType<IDisposable>())
+        container.Remove(gem.Instance);
+
+        if (gem.Instance is ILogger logger)
         {
-            try
-            {
-                instance.Dispose();
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                Debugging.LogWarning($"Gem {gem.Name}: disposing {instance.GetType().FullName} failed. {ex}");
-            }
+            Debugging.Log.Flush();
+            Debugging.Log.Unregister(logger);
+        }
+
+        if (gem.Instance is IDebugUI ui)
+            Debugging.UI.Unregister(ui);
+
+        try
+        {
+            gem.Instance.Dispose();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Debugging.Log.Warn($"Gem {gem.Name}: Dispose failed. {ex}");
         }
 
         gem.Instance = null;
-        gem.Instances.Clear();
-        gem.Registrations.Clear();
-        gem.Loggers.Clear();
-        gem.Loaders.Clear();
     }
 
     /// <summary>
-    /// <paramref name="gem"/> and every gem that (transitively) needs something it registered or names it
-    /// in DependsOn, in load order; or null, logged, when one of them is static and so cannot go.
+    /// <paramref name="gem"/> and every gem that (transitively) needs something it provides or names it in
+    /// GemDependsOn, in load order; or null, logged, when one of them is static and so cannot go.
     /// </summary>
     private List<Gem>? Group(Gem gem, string action)
     {
@@ -419,7 +417,7 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
             grew = false;
             foreach (Gem other in _gems)
             {
-                if (!group.Contains(other) && group.Any(g => g.Registrations.Any(other.Requires.Contains) || other.DependsOn.Contains(g.Name)))
+                if (!group.Contains(other) && group.Any(g => g.Provides.Overlaps(other.Requires) || other.DependsOn.Contains(g.Name)))
                     grew |= group.Add(other);
             }
         }
@@ -427,13 +425,14 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
         if (group.FirstOrDefault(g => g.IsStatic) is { } pinned)
         {
             string who = pinned == gem ? "it" : $"{pinned.Name}, which depends on it,";
-            Debugging.LogWarning($"Not {action} {gem.Path}: {who} is static. Restart to apply the change.");
+            Debugging.Log.Warn($"Not {action} {gem.Path}: {who} is static. Restart to apply the change.");
             return null;
         }
+
         return [.. _gems.Where(group.Contains)];
     }
 
-    /// <summary>The loaded gem at <paramref name="path"/> or, failing that, with that name (as DependsOn refers to it).</summary>
+    /// <summary>The loaded gem at <paramref name="path"/> or, failing that, with that name (as GemDependsOn refers to it).</summary>
     private Gem? Find(string path)
     {
         return _gems.Find(g => string.Equals(g.Path, path, StringComparison.OrdinalIgnoreCase))
@@ -441,8 +440,8 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
     }
 
     /// <summary>
-    /// Cheap check, without loading anything, that a file is a managed assembly referencing the host. Gems
-    /// land in a flat folder next to their own dependencies and native dlls, and none of those reference it.
+    /// Cheap check, without loading anything, that a file is a managed assembly referencing the host. Gems land in a
+    /// flat folder next to their own dependencies and native dlls, and none of those reference it.
     /// </summary>
     private static bool IsGemFile(byte[] bytes)
     {
@@ -451,9 +450,10 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
             using PEReader pe = new(new MemoryStream(bytes));
             if (!pe.HasMetadata)
                 return false; // native dll
+
             MetadataReader metadata = pe.GetMetadataReader();
             return metadata.IsAssembly && metadata.AssemblyReferences
-                .Any(h => metadata.GetString(metadata.GetAssemblyReference(h).Name) == HostAssembly);
+                .Any(h => metadata.GetString(metadata.GetAssemblyReference(h).Name) == Host.GetName().Name);
         }
         catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
         {
@@ -461,97 +461,70 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
         }
     }
 
-    /// <summary>A loaded gem: metadata copied out of its attribute, plus what was built and registered for it.</summary>
-    internal sealed class Gem
+    public void Dispose()
     {
-        public Gem(LoadContext context, Type type, List<GemPart> parts)
+        _watchers.ForEach(w => w.Dispose());
+        _watchers.Clear();
+        _sources.Clear();
+
+        foreach (Gem gem in _gems.Where(g => !g.Provides.Contains(typeof(ILogger))).Reverse().ToList())
+            Unload(gem);
+
+        foreach (Gem gem in _gems.AsEnumerable().Reverse().ToList())
+            Unload(gem);
+    }
+
+    /// <summary>A gem: what its assembly declares, read before construction, and the instance once built.</summary>
+    private sealed class Gem
+    {
+        public Gem(GemLoadContext context, Assembly assembly, ConstructorInfo ctor)
         {
-            GemAttribute meta = type.GetCustomAttribute<GemAttribute>()!;
             Context = context;
-            Type = type;
-            Parts = parts;
-            Name = meta.Name;
-            Version = meta.Version;
-            Description = meta.Description;
-            Author = meta.Author;
-            IsStatic = meta.Static;
-            DependsOn = meta.DependsOn;
-            Provides = [.. parts.SelectMany(p => p.Contracts)];
-            Requires = [.. parts.SelectMany(p => p.Requires).Where(t => !Provides.Contains(t))];
+            Ctor = ctor;
+            Name = assembly.GetName().Name!;
+            Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "?";
+            IsStatic = bool.TryParse(Metadata(assembly, "MagicGem.Static"), out bool isStatic) && isStatic;
+            DependsOn = Metadata(assembly, "MagicGem.DependsOn")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
+            Provides = [.. ctor.DeclaringType!.GetInterfaces().Where(i => i.Assembly == Host && i != typeof(IGem))];
+            Requires = [.. ctor.GetParameters().Select(p => p.ParameterType)];
         }
 
-        public LoadContext Context { get; }
+        public GemLoadContext Context { get; }
+
+        public ConstructorInfo Ctor { get; }
+
         public string Path => Context.Path;
-        public Type Type { get; }
-        public List<GemPart> Parts { get; }
 
         public string Name { get; }
+
         public string Version { get; }
-        public string Description { get; }
-        public string? Author { get; }
+
         public bool IsStatic { get; }
 
         /// <summary>Names of gems this one must load after and unload before.</summary>
         public string[] DependsOn { get; }
 
-        /// <summary>Contracts this gem's exports register.</summary>
+        /// <summary>The Core interfaces the gem class implements: what it is put in the container under.</summary>
         public HashSet<Type> Provides { get; }
 
-        /// <summary>Types this gem's constructors need from outside itself: host services or other gems' exports.</summary>
+        /// <summary>Its constructor's parameter types: host services or other gems' interfaces.</summary>
         public HashSet<Type> Requires { get; }
 
+        public IGem? Instance { get; set; }
 
-        /// <summary>The <see cref="GemAttribute"/> class instance.</summary>
-        public object? Instance { get; set; }
-        /// <summary>Every instance built for this gem, in construction order (includes <see cref="Instance"/>).</summary>
-        public List<object> Instances { get; } = [];
-
-        /// <summary>Contracts this gem really registered (not ones another gem already provided).</summary>
-        public List<Type> Registrations { get; } = [];
-
-        public List<ILogger> Loggers { get; } = [];
-
-        /// <summary>Asset loaders this gem put in <see cref="AssetLoaderRegistry"/>, by asset type.</summary>
-        public List<(Type AssetType, IAssetLoader Loader)> Loaders { get; } = [];
-    }
-
-    /// <summary>One class to construct: the gem class or an export. Reflection metadata only, no instances.</summary>
-    internal sealed record GemPart(Type Type, ConstructorInfo Ctor, Type[] Contracts)
-    {
-        public IEnumerable<Type> Requires => Ctor.GetParameters().Select(p => p.ParameterType);
-
-        /// <summary>Reads a class's constructor and contracts; null, logged, when it cannot be a gem part.</summary>
-        public static GemPart? Of(Type type)
+        private static string? Metadata(Assembly assembly, string key)
         {
-            if (type.IsAbstract || type.IsGenericTypeDefinition)
-            {
-                Debugging.LogWarning($"Skipping {type.FullName}: a gem class or export must be a concrete, non-generic class.");
-                return null;
-            }
-            ConstructorInfo? ctor = type.GetConstructors().MaxBy(c => c.GetParameters().Length);
-            if (ctor is null)
-            {
-                Debugging.LogWarning($"Skipping {type.FullName}: it has no public constructor.");
-                return null;
-            }
-
-            Type[] contracts = type.GetCustomAttribute<GemExportAttribute>()?.Contracts ?? [];
-            if (contracts.FirstOrDefault(c => !c.IsAssignableFrom(type)) is { } bad)
-            {
-                Debugging.LogWarning($"Skipping {type.FullName}: it does not implement its declared contract {bad}.");
-                return null;
-            }
-            return new GemPart(type, ctor, contracts);
+            return assembly.GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == key)?.Value;
         }
     }
 
     /// <summary>
     /// One gem's collectible load context. The assembly and its managed dependencies are read through
-    /// <see cref="IFileSystem"/> and loaded from memory, so their files stay free for the next build while
-    /// they are loaded (<see cref="Assembly.Location"/> is therefore empty for gem code; use <see cref="Project"/>
-    /// for paths). Native libraries stay file-mapped; they only change when a package does.
+    /// <see cref="IFileSystem"/> and loaded from memory, so their files stay free for the next build while they are
+    /// loaded (<see cref="Assembly.Location"/> is therefore empty for gem code; use <see cref="Project"/> for paths).
+    /// Native libraries stay file-mapped; they only change when a package does.
     /// </summary>
-    internal sealed class LoadContext(string path, byte[] bytes, IFileSystem files) : AssemblyLoadContext(isCollectible: true)
+    private sealed class GemLoadContext(string path, byte[] bytes, IFileSystem files) : AssemblyLoadContext(isCollectible: true)
     {
         private readonly AssemblyDependencyResolver _resolver = new(path);
 
@@ -564,14 +537,16 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
 
         protected override Assembly? Load(AssemblyName assemblyName)
         {
-            // Anything the host already has loaded (Core, DryIoc, ...) must be shared, never loaded a second
-            // time here: types from two copies of one assembly are not interchangeable, and the gem's [Gem]
-            // attribute would not be the host's GemAttribute.
+            // Anything the host already has loaded (Core, CommandLineParser, ...) must be shared, never loaded a
+            // second time here: types from two copies of one assembly are not interchangeable, and the gem's IGem
+            // would not be the host's IGem.
             if (Default.Assemblies.Any(a => a.GetName().Name == assemblyName.Name))
                 return null;
+
             string? assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
             if (assemblyPath is null)
                 return null;
+
             Result<byte[]> read = files.ReadBinary(assemblyPath);
             return read.Ok ? LoadBytes(assemblyPath, read.Payload) : throw new FileLoadException(read.Message, assemblyPath);
         }
@@ -587,7 +562,35 @@ internal sealed class Gems(IContainer container, IFileSystem files) : IDisposabl
         {
             string pdbPath = System.IO.Path.ChangeExtension(file, ".pdb");
             Result<byte[]>? pdb = files.Exists(pdbPath) ? files.ReadBinary(pdbPath) : null;
-            return LoadFromStream(new MemoryStream(assembly), pdb is { Ok: true } ? new MemoryStream(pdb.Payload) : null);
+            MemoryStream? symbols = pdb is { Ok: true } ? new MemoryStream(pdb.Value.Payload) : null;
+            return LoadFromStream(new MemoryStream(assembly), symbols);
+        }
+    }
+
+    /// <summary>
+    /// A folder gems come from: the engine's, flat and filtered to <paramref name="Names"/> (null takes all), or the
+    /// project's, searched recursively with build and cache folders left out.
+    /// </summary>
+    private sealed record GemSource(string Directory, bool Recursive, HashSet<string>? Names)
+    {
+        private static readonly char[] Separators = ['\\', '/'];
+
+        /// <summary>Does <paramref name="path"/> lie in this source's territory?</summary>
+        public bool Accepts(IFileSystem files, string path)
+        {
+            string relative = files.Relative(Directory, path);
+            if (relative.StartsWith("..", StringComparison.Ordinal) || System.IO.Path.IsPathRooted(relative))
+                return false;
+
+            string[] folders = relative.Split(Separators, StringSplitOptions.RemoveEmptyEntries)[..^1];
+            return Recursive
+                ? folders.All(f => f is not ("obj" or "Cache") && !f.StartsWith('.'))
+                : folders.Length == 0;
+        }
+
+        public bool Wants(Gem gem)
+        {
+            return Names is null || Names.Contains(gem.Name);
         }
     }
 }
