@@ -14,14 +14,4 @@ public sealed class ProjectTests
 
         Assert.Equal(@"C:\Games\Demo\Assets", assets);
     }
-
-    [Fact]
-    public void The_cache_hangs_off_the_root()
-    {
-        Project project = new() { Root = @"C:\Games\Demo" };
-
-        string cache = project.Cache;
-
-        Assert.Equal(@"C:\Games\Demo\Cache", cache);
-    }
 }

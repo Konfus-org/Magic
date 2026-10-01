@@ -35,13 +35,14 @@ public interface IGem : IDisposable
     {
     }
 
-    /// <summary>Hot reload: called on the old instance before it goes; the rebuilt one gets it back in <see cref="Restore"/>.</summary>
-    byte[] Save()
+    /// <summary>Hot reload: called on the old instance before it goes; what it returns the rebuilt one gets in <see cref="Reloaded"/>.</summary>
+    byte[] Reloading()
     {
         return [];
     }
 
-    void Restore(byte[] state)
+    /// <summary>Hot reload: called on the rebuilt instance, once constructed, with what the old one returned from <see cref="Reloading"/>.</summary>
+    void Reloaded(byte[] state)
     {
     }
 }

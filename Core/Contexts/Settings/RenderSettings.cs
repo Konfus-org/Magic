@@ -39,6 +39,6 @@ public sealed class RenderSettings
     /// </summary>
     public float ViewDist { get; set; } = 500f;
 
-    /// <summary>Keep compiled shaders under the project's cache folder.</summary>
+    /// <summary>Keep compiled shaders under the cache folder next to the executable.</summary>
     public bool ShaderCache { get; set; } = true;
 }

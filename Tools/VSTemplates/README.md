@@ -54,7 +54,7 @@ A gem is the one class in its assembly that implements `IGem`. Its constructor p
 the Core interfaces it implements are the services it offers (`IAssetLoader<T>`, `IOverlay`, `IRendering`, ...),
 and `Dispose` runs on unload. The frame loop calls its hooks once a frame, gems in load order: `Update`,
 `FixedUpdate`, `LateUpdate` and `Render`, each with the frame's `Frame` (delta in seconds, the events since the
-last frame). Implement `Save`/`Restore` to carry state across a hot reload.
+last frame). Implement `Reloading`/`Reloaded` to carry state across a hot reload.
 
 The gem's name is its assembly name. Two csproj properties are the only other things the host reads, stamped into
 the assembly by `Directory.Build.props`: `<GemStatic>true</GemStatic>` marks a gem that loads once and is never

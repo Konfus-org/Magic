@@ -15,16 +15,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Only Scripts\ is this gem; any other gem under the sample is a project of its own. -->
-    <Compile Include="Scripts\**\*.cs" />
+    <!-- Script assets: classes the chunks attach to entities by the file's asset id. A gem under the sample is a
+         project of its own. -->
+    <Compile Include="Assets\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Compile against the host, never copy it: the gem shares the host's loaded Magic.dll. -->
+    <!-- Compile against the host, never copy it: the scripts share the host's loaded Magic.dll. -->
     <ProjectReference Include="$(MagicRoot)Core\Magic.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
-  <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
+  <!-- What the host says of the dll when it loads it. -->
   <PropertyGroup>
     <Description>Orbits the camera around the Fallbacks scene.</Description>
     <Authors>Magic</Authors>

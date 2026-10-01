@@ -202,6 +202,43 @@ public sealed class RenderSystemTests : IDisposable
         Assert.False(_ecs.Has<RenderInstance>(entity));
     }
 
+    [Theory]
+    [InlineData("#define SURFACE_MASKED 0\n")]
+    [InlineData("#define SURFACE_DOUBLE_SIDED 1\n")]
+    [InlineData("#define FAILURE_FORCE 1\n")]
+    public void A_built_in_surface_is_compiled_with_its_variant_defined(string define)
+    {
+        RenderFrame(_fake);
+
+        Assert.Contains(SurfaceSources(), source => source.Contains(define));
+    }
+
+    [Fact]
+    public void A_surface_is_compiled_with_its_variant_defined_before_anything_else()
+    {
+        RenderFrame(_fake);
+
+        Assert.All(SurfaceSources(), source => Assert.StartsWith("#define", source));
+    }
+
+    [Theory]
+    [InlineData("#line 1 \"Shaders/Surfaces/Pbr.surf.hlsl\"\n")]
+    [InlineData("#line 1 \"Shaders/Templates/Forward.frag.hlsl\"\n")]
+    public void A_surface_is_compiled_with_each_part_mapped_back_to_its_file(string directive)
+    {
+        RenderFrame(_fake);
+
+        Assert.Contains(SurfaceSources(), source => source.Contains(directive));
+    }
+
+    [Fact]
+    public void A_surface_is_compiled_without_its_parameter_declarations()
+    {
+        RenderFrame(_fake);
+
+        Assert.DoesNotContain(SurfaceSources(), source => source.Contains("GiColor"));
+    }
+
     /// <summary>What the frame loop does for these two systems after LateUpdate: transforms, then record, submit and finish.</summary>
     private void RenderFrame(IRendering? rendering)
     {
@@ -216,6 +253,12 @@ public sealed class RenderSystemTests : IDisposable
             _commands.Clear();
 
         _rendering.Finish(frame, 0f, waitMs);
+    }
+
+    /// <summary>What the fake was handed to compile for the material pipelines: every one carries the generated loader.</summary>
+    private string[] SurfaceSources()
+    {
+        return [.. _fake.Compiled.Where(source => source.Contains("MaterialParams LoadMaterialParams(uint slot)"))];
     }
 
     private Handle Spawn(Vector3 position, bool isStatic = false)

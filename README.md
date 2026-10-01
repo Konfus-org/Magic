@@ -15,8 +15,15 @@ logging, lives in a gem and can be hot reloaded while the engine runs.
   are its dependencies: host services (`Project`, `Assets`, `Events`, `IFileSystem`, `Scheduler`, `World`) and
   other gems' interfaces, which is also how load order is decided; the Core interfaces it implements are what it provides. `GemStatic` and `GemDependsOn`
   in its csproj are the only other things the host reads. Engine gems come from `bin/Gems/`, and the project
-  lists the ones it wants. Every gem dll under the project folder loads too. A changed dll is unloaded and
-  loaded again.
+  lists the ones it wants. Every gem dll under the project folder loads too, once per name: of a build per
+  configuration, the host's own is taken. A changed dll is unloaded and loaded again; a gem carries state
+  across that with `Reloading`/`Reloaded`.
+- **Scripts** (`Core/Systems/Streaming/ScriptSystem.cs`, `Gems/CSharpScripting`). A script is a `.cs` asset whose
+  class, named like the file, is an `ISystem` or an `IBehavior` (a gem's hooks, on one entity). The project's
+  csproj compiles them; its dll needs no `IGem` and loads and reloads like a gem. A chunk entity lists its
+  scripts as `"scripts": [{ "id": 5333, "speed": 25 }]`: the asset id, and values for the instance's public
+  fields and properties. An instance is made when the entity streams in, its constructor parameters taken from
+  the host as a gem's are plus the entity's `Handle`, and disposed when the entity goes or the project reloads.
 - **Events** (`Core/Services/Events.cs`). One `Event` struct with a `Type`, like `SDL_Event`. Anything publishes
   from any thread; the frame loop takes the queue once a frame into `Frame.Events`. Read them in a hook, or
   `Watch` a type and dispose the watch when done.

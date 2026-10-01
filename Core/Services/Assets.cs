@@ -462,6 +462,9 @@ public sealed class Assets : IDisposable
             foreach (Type type in _pools.Keys.Where(pooled => pooled.Assembly.IsCollectible).ToArray())
                 _pools.Remove(type);
 
+            // A script is a Core type, but what it holds is a class of a project assembly that may just have gone.
+            _pools.Remove(typeof(Script));
+
             _failed.Clear();
         }
 

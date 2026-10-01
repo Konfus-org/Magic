@@ -2,7 +2,7 @@
 
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)..'))" />
 
-  <!-- A sample's Scripts\ compile into a gem that belongs to the sample, not the engine: it builds into the
+  <!-- A sample's scripts (Assets\**\*.cs) compile into a dll that belongs to the sample, not the engine: it builds into the
        sample's own Build\ tree, laid out like the engine's (Build\net10.0\<Configuration>\bin\ and obj\), where
        the host finds the dll by searching the project folder. That search skips obj\, so the intermediate copy
        is never loaded. -->

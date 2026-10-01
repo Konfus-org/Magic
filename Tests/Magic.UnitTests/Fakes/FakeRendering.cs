@@ -1,6 +1,7 @@
 using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Magic.Utils;
+using System.Collections.Concurrent;
 
 namespace Magic.UnitTests.Fakes;
 
@@ -11,6 +12,10 @@ internal sealed class FakeRendering : IRendering
 
     public List<RenderCommandType[]> Submitted { get; } = [];
     public List<byte[]> Uploaded { get; } = [];
+
+    /// <summary>The HLSL of every compile, in no order: compiles run on workers.</summary>
+    public ConcurrentBag<string> Compiled { get; } = [];
+
     public int Released { get; private set; }
 
     public bool Debug { get; set; }
@@ -26,6 +31,7 @@ internal sealed class FakeRendering : IRendering
 
     public Result<CompiledShader> Compile(string hlsl, string name, GpuStage stage, string includeDirectory)
     {
+        Compiled.Add(hlsl);
         return Result<CompiledShader>.Success(new CompiledShader { Stage = stage, Code = [1] });
     }
 

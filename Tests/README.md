@@ -31,7 +31,7 @@ Both build to `Build\...\bin\Tests\`, beside `bin\Tests\Gems\` where TestGem lan
 - **Nothing is exposed for a test.** No member is added, or widened from private (to `public` or `internal`), so
   that a test can call or read it. If production code does not use it from outside the type, it is private, and
   it is tested through the member that uses it. A helper worth testing on its own is a type of its own that the
-  engine calls (`SurfaceComposer`, `Png`).
+  engine calls (`Png`).
 - **Our code only.** Third-party and framework code is trusted to work: no test of what System.Text.Json reads,
   what CommandLineParser parses, what flecs matches or what System.Numerics computes. Test what we wrote on top.
 - **No defaults.** A test that only checks what a value starts as breaks every time the default is tuned and

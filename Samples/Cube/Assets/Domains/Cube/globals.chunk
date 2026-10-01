@@ -2,6 +2,12 @@
     "entities": [
         {
             "name": "Camera",
+            "scripts": [
+                {
+                    "id": 3004,
+                    "degreesPerSecond": 30
+                }
+            ],
             "components": {
                 "Transform": {
                     "position": {

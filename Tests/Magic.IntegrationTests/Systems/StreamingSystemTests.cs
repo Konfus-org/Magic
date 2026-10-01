@@ -27,6 +27,7 @@ public sealed class StreamingSystemTests : IDisposable
     private readonly FlecsEcs _ecs = new();
     private readonly Services.Assets _assets;
     private readonly TransformSystem _transforms;
+    private readonly ScriptSystem _scripts;
     private readonly StreamingSystem _streaming;
 
     public StreamingSystemTests()
@@ -37,7 +38,7 @@ public sealed class StreamingSystemTests : IDisposable
             { "entities": [
                 { "id": 7, "name": "Sun", "tags": [ "static" ],
                   "components": { "Transform": { "position": { "x": 1, "y": 2, "z": 3 } } },
-                  "children": [ { "name": "Child", "components": { "Spin": { "speed": 2 }, "Nope": { "a": 1 } } } ] }
+                  "children": [ { "name": "Child", "components": { "Spin": { "speed": 2 }, "Nope": { "a": 1 } }, "scripts": [ { "id": 9 } ] } ] }
             ] }
             """, 3003);
         Write("Test/0_0_-2.chunk", """{ "entities": [ { "name": "Behind", "components": { "Transform": {} } } ] }""", 3012);
@@ -51,9 +52,11 @@ public sealed class StreamingSystemTests : IDisposable
         Write("Other/Other.domain", """{ "chunkSize": 16 }""", 3050);
         Write("Other/0_0_0.chunk", """{ "entities": [ { "name": "O", "components": { "Transform": {} } } ] }""", 3051);
 
-        _assets = new Services.Assets(project, new FileSystem(), _events, new Container());
+        Container container = new();
+        _assets = new Services.Assets(project, new FileSystem(), _events, container);
         _transforms = new TransformSystem(_ecs);
-        _streaming = new StreamingSystem(_ecs, _assets, project);
+        _scripts = new ScriptSystem(_ecs, _assets, new Scheduler(), container);
+        _streaming = new StreamingSystem(_ecs, _assets, project, _scripts);
 
         // The watcher can still report the files just written; let those settle and drain them, or they would reopen the domain mid-test.
         Thread.Sleep(400);
@@ -63,6 +66,7 @@ public sealed class StreamingSystemTests : IDisposable
 
     public void Dispose()
     {
+        _scripts.Dispose();
         _streaming.Dispose();
         _transforms.Dispose();
         _assets.Dispose();
@@ -116,6 +120,14 @@ public sealed class StreamingSystemTests : IDisposable
         Open(Test);
 
         Assert.Equal(2f, _ecs.Get<Spin>(_ecs.Lookup("World.Test.Globals.Sun.Child")).Speed);
+    }
+
+    [Fact]
+    public void An_entity_with_scripts_in_its_chunk_is_handed_to_the_script_system()
+    {
+        Open(Test);
+
+        Assert.True(_ecs.Has<Scripts>(_ecs.Lookup("World.Test.Globals.Sun.Child")));
     }
 
     [Fact]

@@ -33,6 +33,8 @@
     <ProjectReference Include="..\..\Gems\AssimpModels\AssimpModels.csproj" />
     <!-- Built, not referenced: the loader tests find it in bin\Tests\Gems\ as the host would. -->
     <ProjectReference Include="..\TestGem\TestGem.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\TestScripts\TestScripts.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Gems\CSharpScripting\CSharpScripting.csproj" />
   </ItemGroup>
 
 </Project>

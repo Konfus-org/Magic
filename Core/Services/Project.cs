@@ -30,7 +30,7 @@ public sealed record Project
     /// </summary>
     public string[] Gems { get; init; } = ["default"];
 
-    /// <summary>Where Assets and Cache live.</summary>
+    /// <summary>Where Assets live.</summary>
     [JsonIgnore]
     public string Root { get; init; } = "";
 
@@ -54,10 +54,10 @@ public sealed record Project
     [JsonIgnore]
     public static string Screenshots => Path.Combine(AppContext.BaseDirectory, "Screenshots");
 
+    /// <summary>Import, shader and other caches: <c>Cache</c> next to <see cref="Logs"/>, for the same reason.</summary>
+    [JsonIgnore]
+    public static string Cache => Path.Combine(AppContext.BaseDirectory, "Cache");
+
     [JsonIgnore]
     public string Assets => Path.Combine(Root, "Assets");
-
-    /// <summary>Import, shader and other caches.</summary>
-    [JsonIgnore]
-    public string Cache => Path.Combine(Root, "Cache");
 }

@@ -2,6 +2,7 @@ using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Rendering;
 using Magic.Utils;
+using System.Text;
 
 namespace Magic.Systems.Rendering;
 
@@ -58,12 +59,6 @@ internal static class Pipelines
     {
         Ensure(ctx, cls);
         ctx.Pipelines.Compiles.Wait(cls);
-        Update(ctx);
-    }
-
-    /// <summary>Main thread, once per frame: turns finished compiles into pipelines.</summary>
-    public static void Update(RenderContext ctx)
-    {
         ctx.Pipelines.Compiles.Poll(ctx, FinishCompile);
     }
 
@@ -83,7 +78,7 @@ internal static class Pipelines
         if (everything && Shaders.GetByPath(ctx, VertexTemplate) is { } vertex)
         {
             // The classes restart once the new vertex shader is in (FinishCompile).
-            ctx.Pipelines.Compiles.Start(PipelineTable.VertexKey, Shaders.CompileAsync(ctx, vertex.Text, vertex.Path, GpuStage.Vertex, Shaders.ClosureHash(ctx, vertex)));
+            ctx.Pipelines.Compiles.Start(PipelineTable.VertexKey, Task.Run(() => Shaders.Compile(ctx, vertex.Text, vertex.Path, GpuStage.Vertex, Shaders.ClosureHash(ctx, vertex))));
             return;
         }
 
@@ -94,27 +89,11 @@ internal static class Pipelines
         }
     }
 
-    private static void StartCompile(RenderContext ctx, PipelineClass cls)
-    {
-        SurfaceSource? surface = Shaders.Surface(ctx, cls.Surface);
-        Shader? surfaceShader = Shaders.Get(ctx, new Handle<Shader>(cls.Surface));
-        Shader? template = Shaders.GetByPath(ctx, Template);
-        Shader? contract = Shaders.GetByPath(ctx, Contract);
-        if (surface is null || surfaceShader is null || template is null || contract is null)
-        {
-            ctx.Pipelines.Built[cls] = ctx.Pipelines.Built[cls] with { Error = "missing surface, template or Include/Surface.hlsli" };
-            return;
-        }
-
-        string composed = SurfaceComposer.Compose(surface, cls.Variant, template.Path, template.Text);
-        // The contract is included by the composed text, not by any asset, so its closure goes into the salt by hand;
-        // otherwise editing it would serve stale bytecode from the cache.
-        string salt = Shaders.ClosureHash(ctx, template) + Shaders.ClosureHash(ctx, surfaceShader) + contract.Text + Shaders.ClosureHash(ctx, contract);
-        ctx.Pipelines.Compiles.Start(cls, Shaders.CompileAsync(ctx, composed, $"{surface.Path}+{template.Path}:{cls.Variant}", GpuStage.Fragment, salt));
-    }
-
-    /// <summary>A compile finished: the vertex shader is swapped, or the class gets its pipeline (or keeps its last one and the error).</summary>
-    private static void FinishCompile(RenderContext ctx, PipelineClass cls, Result<CompiledShader> result)
+    /// <summary>
+    /// A compile finished: the vertex shader is swapped, or the class gets its pipeline (or keeps its last one and the
+    /// error). Main thread: the render system polls the table's compiles with it once per frame.
+    /// </summary>
+    public static void FinishCompile(RenderContext ctx, PipelineClass cls, Result<CompiledShader> result)
     {
         PipelineTable table = ctx.Pipelines;
         if (cls == PipelineTable.VertexKey)
@@ -159,6 +138,49 @@ internal static class Pipelines
             table.Built[cls] = built with { Error = ex.Message };
             Debugging.Log.Error($"Pipeline {Describe(ctx, cls)}: {ex.Message}");
         }
+    }
+
+    private static void StartCompile(RenderContext ctx, PipelineClass cls)
+    {
+        SurfaceSource? surface = Shaders.Surface(ctx, cls.Surface);
+        Shader? surfaceShader = Shaders.Get(ctx, new Handle<Shader>(cls.Surface));
+        Shader? template = Shaders.GetByPath(ctx, Template);
+        Shader? contract = Shaders.GetByPath(ctx, Contract);
+        if (surface is null || surfaceShader is null || template is null || contract is null)
+        {
+            ctx.Pipelines.Built[cls] = ctx.Pipelines.Built[cls] with { Error = "missing surface, template or Include/Surface.hlsli" };
+            return;
+        }
+
+        string composed = Compose(surface, cls.Variant, template.Path, template.Text);
+        // The contract is included by the composed text, not by any asset, so its closure goes into the salt by hand;
+        // otherwise editing it would serve stale bytecode from the cache.
+        string salt = Shaders.ClosureHash(ctx, template) + Shaders.ClosureHash(ctx, surfaceShader) + contract.Text + Shaders.ClosureHash(ctx, contract);
+        ctx.Pipelines.Compiles.Start(cls, Task.Run(() => Shaders.Compile(ctx, composed, $"{surface.Path}+{template.Path}:{cls.Variant}", GpuStage.Fragment, salt)));
+    }
+
+    /// <summary>
+    /// The HLSL of one class's fragment stage: the variant defines, the surface contract, the surface shader (stripped of
+    /// what DXC must not see), the generated parameter loader, then the template. <c>#line</c> directives keep DXC's
+    /// messages pointing at the real files.
+    /// </summary>
+    private static string Compose(SurfaceSource surface, SurfaceVariant variant, string templatePath, string templateText)
+    {
+        StringBuilder sb = new(surface.Stripped.Length + templateText.Length + 512);
+        sb.Append("#define SURFACE_MASKED ").Append(variant.HasFlag(SurfaceVariant.Masked) ? '1' : '0').Append('\n');
+        sb.Append("#define SURFACE_DOUBLE_SIDED ").Append(variant.HasFlag(SurfaceVariant.DoubleSided) ? '1' : '0').Append('\n');
+        if (variant.HasFlag(SurfaceVariant.FailureForced))
+            sb.Append("#define FAILURE_FORCE 1\n");
+        sb.Append("#include \"Include/Surface.hlsli\"\n");
+        sb.Append("#line 1 \"").Append(surface.Path).Append("\"\n");
+        sb.Append(surface.Stripped);
+        if (!surface.Stripped.EndsWith('\n'))
+            sb.Append('\n');
+        sb.Append("#line 1 \"").Append(surface.Path).Append(".loader\"\n");
+        sb.Append(surface.Layout.EmitLoader("LoadMaterialParams", "Materials"));
+        sb.Append("#line 1 \"").Append(templatePath).Append("\"\n");
+        sb.Append(templateText);
+        return sb.ToString();
     }
 
     private static string Describe(RenderContext ctx, PipelineClass cls)

@@ -1,4 +1,5 @@
 using Magic.Contexts.Events;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
@@ -21,8 +22,13 @@ namespace Magic;
 /// takes from a host service (an event watch, an ECS query) the gem disposes in its own Dispose: the host tracks none
 /// of it, and a handle left behind keeps the old assembly alive after a reload.</para>
 ///
+/// <para>A dll with no <see cref="IGem"/> class but with <see cref="IScript"/> classes is a project's scripts: it is
+/// loaded, watched and reloaded the same way, only nothing is constructed here. The script system makes the
+/// instances, and hears of a reload as it does of any gem's.</para>
+///
 /// Gems come from two places: the engine's own folder, of which the project lists the ones it wants by name
 /// (<c>"default"</c> for all of them), and the project's folder, searched top to bottom, from which everything loads.
+/// One name loads once: of a project gem built in several configurations, the build in the host's own is taken.
 ///
 /// Gems only change on the main thread: <see cref="Load"/> at startup, <see cref="ProcessChanges"/> at the top of
 /// every frame, and <see cref="Dispose"/> on the way out. The folder watchers only queue changes.
@@ -33,6 +39,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     internal const string Default = "default";
 
     private static readonly Assembly Host = typeof(IGem).Assembly;
+
+    /// <summary>The configuration the host was built in (Debug, Release...), which is a folder of a project's build output.</summary>
+    private static readonly string Configuration = Host.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "";
 
     private readonly List<Gem> _gems = []; // in load order
     private readonly List<GemSource> _sources = []; // engine folder first, so a path under both is the engine's
@@ -120,7 +129,8 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             return;
         }
 
-        foreach (string path in listing.Payload)
+        // A project keeps a build per configuration; the one matching the host comes first and so is the one loaded.
+        foreach (string path in listing.Payload.OrderBy(path => path.Split('\\', '/').Contains(Configuration, StringComparer.OrdinalIgnoreCase) ? 0 : 1))
         {
             if (SourceOf(path) == source && !paths.Contains(path, StringComparer.OrdinalIgnoreCase))
                 paths.Add(path);
@@ -163,6 +173,13 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
                 continue;
 
             seen.Add(gem.Name);
+            if ((Find(gem.Name) ?? pending.Find(other => other.Name == gem.Name)) is { } loaded)
+            {
+                Debugging.Log.Debug($"Skipping {path}: {gem.Name} is loaded from {loaded.Path}.");
+                gem.Context.Unload();
+                continue;
+            }
+
             if (SourceOf(path) is { } source && source.Wants(gem))
             {
                 pending.Add(gem);
@@ -194,7 +211,8 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             PublishChanged();
 
             string pinned = next.IsStatic ? " (static)" : "";
-            Debugging.Log.Info($"Loaded gem: {next.Name} v{next.Version}{pinned}");
+            string kind = next.Type is null ? "scripts" : "gem";
+            Debugging.Log.Info($"Loaded {kind}: {next.Name} v{next.Version}{pinned}");
         }
 
         // Whatever is left needs something nobody provides, or sits in a dependency cycle.
@@ -243,22 +261,26 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             Type[] gemTypes = [.. types.Where(candidate => typeof(IGem).IsAssignableFrom(candidate) && !candidate.IsAbstract && !candidate.IsInterface)];
             if (gemTypes.Length == 0)
             {
-                context.Unload(); // a helper library that happens to reference the host
+                // A project's scripts stay loaded with nothing to construct; anything else is a helper library that
+                // happens to reference the host.
+                if (types.Any(candidate => typeof(IScript).IsAssignableFrom(candidate) && !candidate.IsAbstract && !candidate.IsInterface))
+                    return new Gem(context, assembly, null);
+
+                context.Unload();
                 return null;
             }
 
             if (gemTypes.Length > 1)
                 Debugging.Log.Warn($"{path} holds several IGem classes; using {gemTypes[0].FullName} and ignoring the rest.");
 
-            ConstructorInfo? ctor = gemTypes[0].GetConstructors().MaxBy(constructor => constructor.GetParameters().Length);
-            if (ctor is null)
+            if (gemTypes[0].Constructor() is null)
             {
                 Debugging.Log.Warn($"Skipping {gemTypes[0].FullName}: it has no public constructor.");
                 context.Unload();
                 return null;
             }
 
-            return new Gem(context, assembly, ctor);
+            return new Gem(context, assembly, gemTypes[0]);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -268,12 +290,18 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         }
     }
 
-    /// <summary>Constructs the gem, puts it in the container and hands back hot reload <paramref name="state"/>. False, logged, on failure.</summary>
+    /// <summary>
+    /// Constructs the gem, puts it in the container and hands back hot reload <paramref name="state"/>. False, logged,
+    /// on failure. A project's scripts have no gem to construct: true, with nothing done.
+    /// </summary>
     private bool Construct(Gem gem, byte[]? state)
     {
+        if (gem.Type is null)
+            return true;
+
         try
         {
-            gem.Instance = (IGem)gem.Ctor.Invoke([.. gem.Ctor.GetParameters().Select(parameter => container.Get(parameter.ParameterType))]);
+            gem.Instance = (IGem)gem.Type.Create(container);
 
             // Core decides when rendering debugs, before a gem constructed after this one can reach the renderer.
 #if DEBUG
@@ -291,14 +319,14 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
                 Debugging.UI.Register(ui);
 
             if (state is not null)
-                gem.Instance.Restore(state);
+                gem.Instance.Reloaded(state);
 
             return true;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // Log the text only: holding on to the exception would pin the gem's types.
-            Debugging.Log.Warn($"Failed to load gem {gem.Name}: {(ex as TargetInvocationException)?.InnerException ?? ex}");
+            Debugging.Log.Warn($"Failed to load gem {gem.Name}: {ex}");
             Teardown(gem);
             return false;
         }
@@ -349,11 +377,12 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         {
             try
             {
-                state[member.Path] = member.Instance!.Save();
+                if (member.Instance is { } instance)
+                    state[member.Path] = instance.Reloading();
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Debugging.Log.Warn($"Gem {member.Name}: saving reload state failed. {ex}");
+                Debugging.Log.Warn($"Gem {member.Name}: Reloading failed. {ex}");
             }
 
             _unloaded.Add(new WeakReference<GemLoadContext>(member.Context)); // checked next frame
@@ -375,7 +404,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
     private void Unload(Gem gem)
     {
-        Debugging.Log.Info($"Unloading gem: {gem.Name}");
+        Debugging.Log.Info($"Unloading {(gem.Type is null ? "scripts" : "gem")}: {gem.Name}");
         _gems.Remove(gem);
         PublishChanged();
         Teardown(gem);
@@ -385,7 +414,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// <summary>The set of gems changed: the frame loop's list follows, and whoever caches types by name hears of it next frame.</summary>
     private void PublishChanged()
     {
-        Loaded = [.. _gems.Select(loaded => loaded.Instance!)];
+        Loaded = [.. _gems.Select(loaded => loaded.Instance).OfType<IGem>()];
         events.Publish(new Event(EventType.GemsChanged));
     }
 
@@ -474,24 +503,28 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         }
     }
 
-    /// <summary>A gem: what its assembly declares, read before construction, and the instance once built.</summary>
+    /// <summary>
+    /// A gem: what its assembly declares, read before construction, and the instance once built. A project's scripts
+    /// are one without a <see cref="Type"/>: an assembly kept loaded, with no instance.
+    /// </summary>
     private sealed class Gem
     {
-        public Gem(GemLoadContext context, Assembly assembly, ConstructorInfo ctor)
+        public Gem(GemLoadContext context, Assembly assembly, Type? type)
         {
             Context = context;
-            Ctor = ctor;
+            Type = type;
             Name = assembly.GetName().Name!;
             Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "?";
             IsStatic = bool.TryParse(Metadata(assembly, "MagicGem.Static"), out bool isStatic) && isStatic;
             DependsOn = Metadata(assembly, "MagicGem.DependsOn")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
-            Provides = [.. ctor.DeclaringType!.GetInterfaces().Where(i => i.Assembly == Host && i != typeof(IGem))];
-            Requires = [.. ctor.GetParameters().Select(parameter => parameter.ParameterType)];
+            Provides = [.. type?.GetInterfaces().Where(i => i.Assembly == Host && i != typeof(IGem)) ?? []];
+            Requires = [.. type?.Constructor()?.GetParameters().Select(parameter => parameter.ParameterType) ?? []];
         }
 
         public GemLoadContext Context { get; }
 
-        public ConstructorInfo Ctor { get; }
+        /// <summary>The gem's class; null for a project's scripts.</summary>
+        public Type? Type { get; }
 
         public string Path => Context.Path;
 

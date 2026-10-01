@@ -80,12 +80,12 @@ internal static class Program
             container.Add(assets);
             container.Add(scheduler);
             container.Add(world);
-            Debugging.Log.Info($"Project {project.Name}: root {project.Root}; assets {project.Assets}; cache {project.Cache}; resources {project.Resources}; engine gems {project.EngineGems}; gems [{string.Join(", ", project.Gems)}].");
+            Debugging.Log.Info($"Project {project.Name}: root {project.Root}; assets {project.Assets}; cache {Project.Cache}; resources {project.Resources}; engine gems {project.EngineGems}; gems [{string.Join(", ", project.Gems)}].");
 
             using Gems gems = new(container, files, events);
             gems.Load(project.EngineGems, project.Gems, project.Root);
 
-            using CoreSystems? core = CreateSystems(container.Get<IEcs>(), container.Get<IInput>(), container.Get<IWindowRegistry>(), scheduler, assets, files, project); // disposed before the gems go
+            using CoreSystems? core = CreateSystems(container.Get<IEcs>(), container.Get<IInput>(), container.Get<IWindowRegistry>(), scheduler, assets, files, project, container); // disposed before the gems go
 
             if (!TryOpenMainWindow(options, container.Get<IWindowFactory>(), project, out IWindow? mainWindow))
                 return 1;
@@ -110,7 +110,7 @@ internal static class Program
     /// keep what they are given here (null when no gem provides it); the renderer lives in a reloadable gem, so
     /// <see cref="Step"/> hands the render system the loaded one every frame.
     /// </summary>
-    private static CoreSystems? CreateSystems(IEcs? ecs, IInput? input, IWindowRegistry? windows, Scheduler scheduler, Assets assets, IFileSystem files, Project project)
+    private static CoreSystems? CreateSystems(IEcs? ecs, IInput? input, IWindowRegistry? windows, Scheduler scheduler, Assets assets, IFileSystem files, Project project, Container container)
     {
         if (ecs is null)
         {
@@ -118,16 +118,17 @@ internal static class Program
             return null;
         }
 
-        StreamingSystem streaming = new(ecs, assets, project);
+        ScriptSystem scripts = new(ecs, assets, scheduler, container); // its later phases' hooks go on the schedule here, ahead of transforms and rendering
+        StreamingSystem streaming = new(ecs, assets, project, scripts);
         TransformSystem transforms = new(ecs);
         RenderSystem rendering = new(ecs, assets, files, project, windows);
         ConsoleSystem console = new(input);
         SettingsSystem settings = new(project.Settings, input);
         DebuggerDisplaySystem debugger = new(transforms, rendering, streaming, assets, input);
 
-        ISystem[] systems = [console, settings, streaming, debugger, transforms, rendering];
+        ISystem[] systems = [console, settings, streaming, scripts, debugger, transforms, rendering];
 
-        return new CoreSystems(console, settings, streaming, transforms, rendering, debugger, [.. systems.Select(system => scheduler.Add(ecs, system))]);
+        return new CoreSystems(console, settings, streaming, scripts, transforms, rendering, debugger, [.. systems.Select(system => scheduler.Add(ecs, system))]);
     }
 
     /// <summary>Opens the domain to start in: --domain, else the project's. It is spawned in the first frame.</summary>
@@ -465,6 +466,7 @@ internal static class Program
         ConsoleSystem Console,
         SettingsSystem Settings,
         StreamingSystem Streaming,
+        ScriptSystem Scripts,
         TransformSystem Transforms,
         RenderSystem Rendering,
         DebuggerDisplaySystem Debugger,
@@ -477,6 +479,7 @@ internal static class Program
 
             Rendering.Dispose();
             Transforms.Dispose();
+            Scripts.Dispose(); // before streaming destroys the entities under them
             Streaming.Dispose();
             Debugger.Dispose();
             Settings.Dispose();

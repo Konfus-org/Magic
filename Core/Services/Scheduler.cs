@@ -10,6 +10,7 @@ namespace Magic.Services;
 /// </summary>
 public sealed class Scheduler
 {
+    private readonly Dictionary<string, int> _added = []; // by type name, to tell two of one type apart
     private Frame _currentFrame;
 
     internal Scheduler()
@@ -18,11 +19,17 @@ public sealed class Scheduler
 
     /// <summary>
     /// Schedules <paramref name="system"/> on <paramref name="ecs"/> in its phase, after those already added.
-    /// Disposing the handle takes it off the schedule; the system itself stays the caller's to dispose.
+    /// Disposing the handle takes it off the schedule; the system itself stays the caller's to dispose. The ECS
+    /// knows it by its type name, numbered from the second of a type on: one name is one system there.
     /// </summary>
     public IDisposable Add(IEcs ecs, ISystem system)
     {
-        return ecs.Schedule(system.GetType().Name).On(system.Phase).Run(dt => system.Run(_currentFrame with { Delta = dt }));
+        string name = system.GetType().Name;
+        int count = _added[name] = _added.GetValueOrDefault(name) + 1;
+        if (count > 1)
+            name = $"{name}_{count}";
+
+        return ecs.Schedule(name).On(system.Phase).Run(dt => system.Run(_currentFrame with { Delta = dt }));
     }
 
     /// <summary>The frame the systems are handed from here on.</summary>

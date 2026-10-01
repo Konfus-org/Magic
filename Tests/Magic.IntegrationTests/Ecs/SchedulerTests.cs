@@ -76,6 +76,18 @@ public sealed class SchedulerTests : IDisposable
     }
 
     [Fact]
+    public void Two_systems_of_one_type_both_run()
+    {
+        List<string> order = [];
+        using IDisposable first = _scheduler.Add(_ecs, new FirstSystem(order));
+        using IDisposable second = _scheduler.Add(_ecs, new FirstSystem(order));
+
+        _ecs.Update(FrameOf(1f));
+
+        Assert.Equal(["FirstSystem", "FirstSystem"], order);
+    }
+
+    [Fact]
     public void A_system_whose_handle_was_disposed_no_longer_runs()
     {
         FirstSystem system = new([]);

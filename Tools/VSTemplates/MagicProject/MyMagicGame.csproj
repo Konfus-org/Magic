@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <Compile Include="Scripts\**\*.cs" />
+    <!-- Script assets: classes the chunks attach to entities by the file's asset id. -->
+    <Compile Include="Assets\**\*.cs" />
   </ItemGroup>
 
   <!-- The gem, as the engine sees it before constructing it. GemStatic true: loaded once, never hot reloaded.

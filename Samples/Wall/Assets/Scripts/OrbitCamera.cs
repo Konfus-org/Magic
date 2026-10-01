@@ -6,29 +6,19 @@ using System.Numerics;
 namespace Wall;
 
 /// <summary>
-/// Swings every camera around the world's up axis through the origin, keeping its height, distance and tilt,
+/// Swings its camera around the world's up axis through the origin, keeping its height, distance and tilt,
 /// so the scene is seen from all sides. Rounding the wall shows the occlusion-culled count rise and fall in the Stats line.
 /// </summary>
-internal sealed class OrbitCamera(IEcs ecs) : IGem
+internal sealed class OrbitCamera(Handle entity, IEcs ecs) : IBehavior
 {
-    /// <summary>Degrees per second.</summary>
-    private const float DegreesPerSecond = 6f;
-
-    private readonly IEcsQuery<Transform, Camera> _cameras = ecs.Query<Transform, Camera>().Build();
-
-    public void Dispose()
-    {
-        _cameras.Dispose();
-    }
+    /// <summary>Degrees per second; the chunk sets it beside the script's id.</summary>
+    public float DegreesPerSecond { get; set; } = 20f;
 
     public void Update(in Frame frame)
     {
+        ref Transform transform = ref ecs.Get<Transform>(entity);
         Quaternion yaw = Quaternion.CreateFromAxisAngle(Vector3.UnitY, float.DegreesToRadians(DegreesPerSecond * frame.Delta));
-        _cameras.Each((Handle _, ref Transform transform, ref Camera _) => Orbit(ref transform, yaw));
-    }
 
-    private static void Orbit(ref Transform transform, Quaternion yaw)
-    {
         // A chunk that gives no rotation leaves the all-zero quaternion, which draws as identity but would stay zero here.
         Quaternion tilt = transform.Rotation.LengthSquared() < 1e-6f ? Quaternion.Identity : transform.Rotation;
 

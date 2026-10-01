@@ -28,7 +28,8 @@ internal readonly record struct StreamingStats(int Domains, int Cameras, int Wan
 /// frame, under <c>World.&lt;Name&gt;.Chunks.Cx_y_z</c>. A cube nobody wants for <see cref="UnloadDelayFrames"/>
 /// frames is destroyed again. Both budgets are shared by all open domains. This is the only code that reads a chunk's
 /// entities: a component is set from its JSON by the name it was written under, resolved against every loaded
-/// assembly, so gems add components without registering anything. Asset and gem changes arrive in
+/// assembly, so gems add components without registering anything; an entity's scripts go to the
+/// <see cref="ScriptSystem"/> as they are. Asset and gem changes arrive in
 /// <see cref="Frame.Events"/> too. It runs in Update.
 /// </summary>
 internal sealed class StreamingSystem : ISystem
@@ -48,6 +49,7 @@ internal sealed class StreamingSystem : ISystem
     private readonly IEcs _ecs;
     private readonly Assets _assets;
     private readonly Project _project;
+    private readonly ScriptSystem? _scripts;
     private readonly IEcsQuery<Camera, WorldTransform> _cameras;
 
     // One per open domain, in the order they were opened; their roots hang under the one World entity.
@@ -65,11 +67,12 @@ internal sealed class StreamingSystem : ISystem
     private volatile ComponentTypes? _types;
     private readonly HashSet<string> _warned = []; // locked: workers warn too
 
-    public StreamingSystem(IEcs ecs, Assets assets, Project project)
+    public StreamingSystem(IEcs ecs, Assets assets, Project project, ScriptSystem? scripts)
     {
         _ecs = ecs;
         _assets = assets;
         _project = project;
+        _scripts = scripts;
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
         _nearestFirst = (left, right) => DistanceSquared(left.Stream, left.Chunk).CompareTo(DistanceSquared(right.Stream, right.Chunk));
     }
@@ -595,6 +598,8 @@ internal sealed class StreamingSystem : ISystem
 
             foreach ((Action<IEcs, Handle, object> set, object value) in entity.Components)
                 set(_ecs, handle, value);
+
+            _scripts?.Attach(handle, entity.Scripts);
         }
 
         return handles.Length;
@@ -648,7 +653,7 @@ internal sealed class StreamingSystem : ISystem
         }
 
         int index = entities.Count;
-        entities.Add(new Prepared(parent, entity.Name, entity.Id, tags, [.. components]));
+        entities.Add(new Prepared(parent, entity.Name, entity.Id, tags, [.. components], entity.Scripts));
         foreach (Chunk.Entity child in entity.Children)
             Prepare(child, index, file, types, entities);
     }
@@ -731,7 +736,7 @@ internal sealed class StreamingSystem : ISystem
     }
 
     /// <summary>One entity of a chunk as the main thread spawns it; <see cref="Parent"/> indexes an earlier entity, or is -1 for the chunk's root.</summary>
-    private readonly record struct Prepared(int Parent, string? Name, ulong Id, Tags? Tags, (Action<IEcs, Handle, object> Set, object Value)[] Components);
+    private readonly record struct Prepared(int Parent, string? Name, ulong Id, Tags? Tags, (Action<IEcs, Handle, object> Set, object Value)[] Components, JsonElement[] Scripts);
 
     /// <summary>
     /// One open domain: its asset as it was when opened, its entities' roots, its global chunks, and its cubes by

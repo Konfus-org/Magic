@@ -91,13 +91,11 @@ internal static class Shaders
         return compiled.Ok ? compiled.Payload : throw new InvalidOperationException(compiled.Message);
     }
 
+    /// <summary>
+    /// From the disk cache, or compiled by the renderer and stored. Any thread, reading only what never changes: the
+    /// pipelines and passes run it on a worker (<c>Task.Run</c>) and collect the result through their <see cref="Compiles{TKey}"/>.
+    /// </summary>
     /// <param name="salt">Anything else the result depends on (the hash of the includes' text), for the cache key.</param>
-    public static Task<Result<CompiledShader>> CompileAsync(RenderContext ctx, string source, string name, GpuStage stage, string salt = "")
-    {
-        return Task.Run(() => Compile(ctx, source, name, stage, salt));
-    }
-
-    /// <summary>From the disk cache, or compiled by the renderer and stored. Any thread: reads only what never changes.</summary>
     public static Result<CompiledShader> Compile(RenderContext ctx, string source, string name, GpuStage stage, string salt = "")
     {
         ShaderCache cache = ctx.Shaders;
@@ -137,7 +135,7 @@ internal static class Shaders
         SurfaceSource? surface = null;
         if (shader.Stage == ShaderStage.Surface)
         {
-            Result<SurfaceSource> read = SurfaceComposer.Read(id, shader.Path, shader.Text);
+            Result<SurfaceSource> read = ReadSurface(id, shader.Path, shader.Text);
             if (read.Failed)
                 Debugging.Log.Error($"Surface shader rejected: {read.Message}");
             else
@@ -147,6 +145,23 @@ internal static class Shaders
         cached = new CachedShader(shader, hash, closure, surface);
         ctx.Shaders.Entries[id] = cached;
         return cached;
+    }
+
+    /// <summary>
+    /// Parses a surface shader's text: its <c>MaterialParams</c> struct becomes the layout materials are packed with, and
+    /// the declarations DXC must not see (the defaults and annotations of that struct) are blanked out of the text the
+    /// pipelines compile. Refused, with why, when the struct does not parse or there is no <c>EvaluateSurface</c>.
+    /// </summary>
+    private static Result<SurfaceSource> ReadSurface(ulong id, string path, string text)
+    {
+        Result<ParamLayout> layout = ParamLayout.Parse(text, "MaterialParams", allowTextures: true);
+        if (layout.Failed)
+            return Result<SurfaceSource>.Failure($"{path}: {layout.Message}");
+        if (!text.Contains("EvaluateSurface", StringComparison.Ordinal))
+            return Result<SurfaceSource>.Failure($"{path}: no EvaluateSurface(SurfaceInputs, MaterialParams) function.");
+
+        string stripped = ParamLayout.BlankDefaults(text, layout.Payload.StructSpan);
+        return Result<SurfaceSource>.Success(new SurfaceSource(id, path, stripped, layout.Payload));
     }
 
     /// <summary>Every include the shader reaches, transitively, and a hash over their paths and text.</summary>

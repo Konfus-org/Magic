@@ -134,8 +134,8 @@ internal sealed class RenderSystem : ISystem
 
         // Reload: what changed on disk, and the compiles that finished.
         ApplyAssetChanges(ctx, frame.Events.Span);
-        Pipelines.Update(ctx);
-        Passes.Update(ctx);
+        ctx.Pipelines.Compiles.Poll(ctx, Pipelines.FinishCompile);
+        ctx.Passes.Compiles.Poll(ctx, Passes.FinishCompile);
 
         // Sync: the entities into the tables. The moves read every chunk's columns as they are: no copy, and statics and
         // unchanged matrices are skipped.
@@ -239,7 +239,7 @@ internal sealed class RenderSystem : ISystem
         if (failureSurface == 0)
             Debugging.Log.Error("Shaders/Surfaces/Failure.surf.hlsl is not an indexed asset: broken materials and shaders will draw grey or not at all.");
 
-        string? cache = settings.ShaderCache ? Path.Combine(project.Cache, "Shaders", gpu.ShaderFormat) : null;
+        string? cache = settings.ShaderCache ? Path.Combine(Project.Cache, "Shaders", gpu.ShaderFormat) : null;
         RenderContext ctx = new()
         {
             Gpu = gpu,
@@ -327,7 +327,20 @@ internal sealed class RenderSystem : ISystem
             Debugging.Log.Info($"Shaders changed: {shaders.Count} shader(s) rebuild.");
         }
 
-        Passes.OnAssetsChanged(ctx, changed, shaders);
+        // A changed .pass reloads; a pass whose shader (or an include of it) changed recompiles.
+        List<PassState> passes = ctx.Passes.States;
+        for (int i = 0; i < passes.Count; i++)
+        {
+            PassState pass = passes[i];
+            if (changed.Contains(pass.Id))
+            {
+                Passes.Load(ctx, pass.Id);
+                Debugging.Log.Info($"Pass {pass.Path} reloaded{(passes[i].Error is null ? "" : " (disabled)")}.");
+            }
+            else if (shaders.Contains(pass.ShaderId))
+                Passes.Compile(ctx, i);
+        }
+
         bool textures = false;
         foreach (ulong id in changed)
         {

@@ -6,6 +6,7 @@
   </Configurations>
   <Folder Name="/Gems/">
     <Project Path="Gems/AssimpModels/AssimpModels.csproj" />
+    <Project Path="Gems/CSharpScripting/CSharpScripting.csproj" />
     <Project Path="Gems/FlecsEcs/FlecsEcs.csproj" />
     <Project Path="Gems/ImGuiOverlay/ImGuiOverlay.csproj" />
     <Project Path="Gems/SDLRender/SDLRender.csproj" />

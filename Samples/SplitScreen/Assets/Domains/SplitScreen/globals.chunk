@@ -2,12 +2,12 @@
   "entities": [
     {
       "name": "CameraSystem",
-      "components": {
-        "Script": {
-          "id": "5333",
-          "Speed": 25
+      "scripts": [
+        {
+          "id": 5333,
+          "speed": 25
         }
-      }
+      ]
     },
     {
       "name": "TopCamera",

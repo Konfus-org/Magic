@@ -1,0 +1,27 @@
+<Project>
+
+  <!-- A project's scripts for the loader tests: script classes and no IGem. Tests\Directory.Build.props sends it to
+       bin\Tests\Gems\, beside the tests. IsMagicGem must come before the SDK props import. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="$(MagicRoot)Core\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <Description>Scripts without a gem, for the loader tests.</Description>
+    <Authors>Magic</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

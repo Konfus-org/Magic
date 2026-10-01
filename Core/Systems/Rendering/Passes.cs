@@ -61,29 +61,6 @@ internal static class Passes
         Debugging.Log.Info($"Passes: {(passes.Count == 0 ? "none" : listed)}.");
     }
 
-    /// <summary>Assets changed: a changed .pass reloads, a pass whose shader (or an include of it) changed recompiles.</summary>
-    public static void OnAssetsChanged(RenderContext ctx, IReadOnlySet<ulong> changed, IReadOnlySet<ulong> shaders)
-    {
-        List<PassState> passes = ctx.Passes.States;
-        for (int i = 0; i < passes.Count; i++)
-        {
-            PassState pass = passes[i];
-            if (changed.Contains(pass.Id))
-            {
-                Load(ctx, pass.Id);
-                Debugging.Log.Info($"Pass {pass.Path} reloaded{(passes[i].Error is null ? "" : " (disabled)")}.");
-            }
-            else if (shaders.Contains(pass.ShaderId))
-                Compile(ctx, i);
-        }
-    }
-
-    /// <summary>Main thread, once per frame: finished compiles become pipelines.</summary>
-    public static void Update(RenderContext ctx)
-    {
-        ctx.Passes.Compiles.Poll(ctx, FinishCompile);
-    }
-
     /// <summary>
     /// Before a frame is recorded: gives every ready pass its output among the render target's textures (made, or made
     /// again when the pass changed its format or scale, with a twin when the pass reads it too) and checks that its inputs
@@ -185,8 +162,11 @@ internal static class Passes
         return wroteLdr;
     }
 
-    /// <summary>Reads the .pass file into a new state (keeping the pipeline until the recompile lands) and compiles it.</summary>
-    private static void Load(RenderContext ctx, ulong id)
+    /// <summary>
+    /// Reads the .pass file into a new state (keeping the pipeline until the recompile lands) and compiles it. For a new
+    /// pass, and again when its file changed.
+    /// </summary>
+    public static void Load(RenderContext ctx, ulong id)
     {
         List<PassState> passes = ctx.Passes.States;
         int index = ctx.Passes.IndexOf(id);
@@ -214,8 +194,12 @@ internal static class Passes
             Compile(ctx, index);
     }
 
-    /// <summary>Composes the pass's shader (contract, inputs, generated parameter loader) and starts its compile; packs its parameters.</summary>
-    private static void Compile(RenderContext ctx, int index)
+    /// <summary>
+    /// Composes the shader of the pass at <paramref name="index"/> (contract, inputs, generated parameter loader) and
+    /// starts its compile on a worker; packs its parameters. When the pass is loaded, and again when its shader or an
+    /// include of it changed.
+    /// </summary>
+    public static void Compile(RenderContext ctx, int index)
     {
         PassState state = ctx.Passes.States[index];
         Shader? shader = Shaders.Get(ctx, state.Pass.Shader);
@@ -272,12 +256,16 @@ internal static class Passes
         composed.Append("#line 1 \"").Append(shader.Path).Append("\"\n").Append(text);
 
         ctx.Passes.States[index] = state with { ShaderId = shader.Id, Params = parameters };
+        string source = composed.ToString();
         string salt = Shaders.ClosureHash(ctx, shader) + string.Join(",", state.Pass.Inputs);
-        ctx.Passes.Compiles.Start(state.Id, Shaders.CompileAsync(ctx, composed.ToString(), $"{state.Path}+{shader.Path}", compute ? GpuStage.Compute : GpuStage.Fragment, salt));
+        ctx.Passes.Compiles.Start(state.Id, Task.Run(() => Shaders.Compile(ctx, source, $"{state.Path}+{shader.Path}", compute ? GpuStage.Compute : GpuStage.Fragment, salt)));
     }
 
-    /// <summary>A compile finished: the pass gets its new pipeline, or is disabled with the error.</summary>
-    private static void FinishCompile(RenderContext ctx, ulong id, Result<CompiledShader> result)
+    /// <summary>
+    /// A compile finished: the pass gets its new pipeline, or is disabled with the error. Main thread: the render system
+    /// polls the table's compiles with it once per frame.
+    /// </summary>
+    public static void FinishCompile(RenderContext ctx, ulong id, Result<CompiledShader> result)
     {
         int index = ctx.Passes.IndexOf(id);
         if (index < 0)

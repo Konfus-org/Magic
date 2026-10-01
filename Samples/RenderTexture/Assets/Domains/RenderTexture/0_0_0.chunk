@@ -35,6 +35,12 @@
         },
         {
             "name": "Monkey",
+            "scripts": [
+                {
+                    "id": 5020,
+                    "degreesPerSecond": 45
+                }
+            ],
             "components": {
                 "Transform": {
                     "position": {
@@ -63,9 +69,6 @@
                             "id": 12045873320119837722
                         }
                     }
-                },
-                "Spin": {
-                    "degreesPerSecond": 45
                 }
             }
         },

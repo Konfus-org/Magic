@@ -66,6 +66,13 @@ public sealed class Chunk : Asset
                 : new Dictionary<string, JsonElement>(value, StringComparer.OrdinalIgnoreCase);
         }
 
+        /// <summary>
+        /// One object per script: the <c>id</c> of its <see cref="Script"/> asset, and beside it the values of the
+        /// instance's public fields and properties. JSON for the reason <see cref="Components"/> is: only the script's
+        /// class, known once it is loaded, says what they are.
+        /// </summary>
+        public JsonElement[] Scripts { get; set; } = [];
+
         public Entity[] Children { get; set; } = [];
     }
 }

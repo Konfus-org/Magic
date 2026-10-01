@@ -1,0 +1,35 @@
+<Project>
+
+  <!-- Must come before the SDK props import: Directory.Build.props (imported by the SDK)
+       switches this project to gem output settings when IsMagicGem is true. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>CSharpScriptingGem</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile against the host, never copy it: the gem shares the host's loaded Magic.dll. -->
+    <ProjectReference Include="$(MagicRoot)Core\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Magic.IntegrationTests" />
+  </ItemGroup>
+
+  <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
+  <PropertyGroup>
+    <GemStatic>true</GemStatic>
+    <Description>Loads C# script assets: finds the class a project compiled from each script file.</Description>
+    <Authors>Konfus</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

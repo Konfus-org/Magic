@@ -48,6 +48,7 @@
     <DefaultGem Include="$(MagicRoot)Gems\SDLTtf\SDLTtf.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\AssimpModels\AssimpModels.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\SDLRender\SDLRender.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\CSharpScripting\CSharpScripting.csproj" />
   </ItemGroup>
 
   <!-- "dotnet build" only restores the entry project and its ProjectReferences, so the gems

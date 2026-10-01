@@ -1,9 +1,9 @@
 # Samples
 
 Each folder is a project: a `<Name>.magic` file naming the domain to open, `Assets/Domains/<Name>/` holding
-that domain, and `Scripts/` holding C# that `<Name>.csproj` compiles into a gem. A sample builds into its own
-`Build/` tree, laid out like the engine's (`Build/net10.0/<Config>/bin/` and `obj/`), and the host finds the
-gem there. The samples sit in `Magic.slnx`, so `dotnet build Magic.slnx` builds the engine and all of them; a
+that domain, and `Assets/Scripts/` holding C# scripts that `<Name>.csproj` compiles into a dll. A sample builds
+into its own `Build/` tree, laid out like the engine's (`Build/net10.0/<Config>/bin/` and `obj/`), and the host
+finds the dll there. The samples sit in `Magic.slnx`, so `dotnet build Magic.slnx` builds the engine and all of them; a
 single one builds with `dotnet build Samples\Cube`. Run one from the repository root:
 
 ```powershell
@@ -11,7 +11,7 @@ Build\net10.0\Debug\bin\Magic.exe --project Samples\Cube
 Build\net10.0\Debug\bin\Magic.exe --project Samples\Grid
 ```
 
-Caches land under the sample's own folder. Screenshots (`--screenshots 1 --screenshot-delay 60`) go to `Screenshots\` next to `Magic.exe` (`Build\net10.0\<Configuration>\bin\Screenshots\<Project>_<frame>.png`). Log files are written only by a Release build, to `Logs\` beside it (`Build\net10.0\Release\bin\Logs\<Project>_<date>_<n>.log`).
+Caches land in `Cache\` next to `Magic.exe`. Screenshots (`--screenshots 1 --screenshot-delay 60`) go to `Screenshots\` next to `Magic.exe` (`Build\net10.0\<Configuration>\bin\Screenshots\<Project>_<frame>.png`). Log files are written only by a Release build, to `Logs\` beside it (`Build\net10.0\Release\bin\Logs\<Project>_<date>_<n>.log`).
 
 In Visual Studio, set a sample as the startup project and press F5: each carries a launch profile
 (`Properties/launchSettings.json`) that starts `Magic.exe` from the engine's build tree with the sample as its
@@ -33,9 +33,19 @@ folders are skipped, so a build's intermediate copy of the dll does not count tw
 
 ## Scripts
 
-Most samples' `Scripts/OrbitCamera.cs` is its gem: an `IGem` whose `Update` swings the camera around the
-world's up axis through the origin, keeping its height, distance and tilt, at a speed picked for the scene. Edit it and rebuild the sample while
-it runs: the host sees the new dll and hot reloads the gem without a restart.
+A sample's scripts are assets: a `.cs` file under `Assets/Scripts/` with a `.meta` beside it, whose class a
+chunk attaches to an entity by the file's id. The sample's dll has no gem in it, only those classes.
+
+Most samples' `OrbitCamera.cs` is an `IBehavior` on the camera entity: its `Update` swings that camera around
+the world's up axis through the origin, keeping its height, distance and tilt. `globals.chunk` lists it under
+the camera's `"scripts"` with the speed picked for the scene (`{ "id": 3004, "degreesPerSecond": 30 }`).
+RenderTexture's `Spin.cs` is a behaviour on the monkey the same way.
+
+SplitScreen's `OrbitCamera.cs` is an `ISystem` instead: one instance, attached to an entity of its own, that
+queries both cameras and turns them opposite ways.
+
+Edit a script and rebuild the sample while it runs: the host sees the new dll and reloads the scripts without
+a restart.
 
 ## A domain on disk
 

@@ -30,6 +30,6 @@ internal sealed class MyMagicGem : IGem
     {
     }
 
-    // Also available: FixedUpdate, LateUpdate and Render (same shape), and Save/Restore to carry state across a hot
-    // reload (byte[] Save() on the old instance, void Restore(byte[] state) on the rebuilt one).
+    // Also available: FixedUpdate, LateUpdate and Render (same shape), and Reloading/Reloaded to carry state across a
+    // hot reload (byte[] Reloading() on the old instance, void Reloaded(byte[] state) on the rebuilt one).
 }
