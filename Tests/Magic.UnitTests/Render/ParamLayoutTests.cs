@@ -29,7 +29,7 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        Assert.Equal(["color", "roughness", "metallic", "emissive", "colorMap", "flip", "tiles"], layout.Fields.Select(f => f.Name));
+        Assert.Equal(["color", "roughness", "metallic", "emissive", "colorMap", "flip", "tiles"], layout.Fields.Select(field => field.Name));
     }
 
     [Fact]
@@ -37,7 +37,7 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        Assert.Equal([0, 16, 20, 32, 44, 48, 56], layout.Fields.Select(f => f.Offset));
+        Assert.Equal([0, 16, 20, 32, 44, 48, 56], layout.Fields.Select(field => field.Offset));
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        string stripped = ParamLayout.StripDeclarations(Pbr, layout.StructSpan);
+        string stripped = ParamLayout.BlankDefaults(Pbr, layout.StructSpan);
 
         Assert.Equal(Pbr.Length, stripped.Length);
     }
@@ -112,9 +112,9 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        string stripped = ParamLayout.StripDeclarations(Pbr, layout.StructSpan);
+        string stripped = ParamLayout.BlankDefaults(Pbr, layout.StructSpan);
 
-        Assert.Equal(Pbr.Count(c => c == '\n'), stripped.Count(c => c == '\n'));
+        Assert.Equal(Pbr.Count(character => character == '\n'), stripped.Count(character => character == '\n'));
     }
 
     [Theory]
@@ -124,7 +124,7 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        string stripped = ParamLayout.StripDeclarations(Pbr, layout.StructSpan);
+        string stripped = ParamLayout.BlankDefaults(Pbr, layout.StructSpan);
 
         Assert.DoesNotContain(blanked, stripped);
     }
@@ -137,7 +137,7 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        string stripped = ParamLayout.StripDeclarations(Pbr, layout.StructSpan);
+        string stripped = ParamLayout.BlankDefaults(Pbr, layout.StructSpan);
 
         Assert.Contains(kept, stripped);
     }
@@ -148,7 +148,7 @@ public sealed class ParamLayoutTests
         const string hlsl = "struct MaterialParams\n{\n    float scale; // scale = 2\n};\n";
         ParamLayout layout = ParamLayout.Parse(hlsl, "MaterialParams", true).Payload;
 
-        string stripped = ParamLayout.StripDeclarations(hlsl, layout.StructSpan);
+        string stripped = ParamLayout.BlankDefaults(hlsl, layout.StructSpan);
 
         Assert.Equal(hlsl, stripped);
     }
@@ -244,7 +244,7 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        Param color = ParamLayout.DefaultValue(layout.Fields[0]);
+        Param color = layout.Fields[0].DefaultParam;
 
         Assert.Equal(new Vector4(0.8f, 0.8f, 0.8f, 1f), color.Vector);
     }
@@ -254,7 +254,7 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        Param flip = ParamLayout.DefaultValue(layout.Fields[5]);
+        Param flip = layout.Fields[5].DefaultParam;
 
         Assert.Equal(1f, flip.X);
     }
@@ -269,7 +269,7 @@ public sealed class ParamLayoutTests
     {
         byte[] record = new byte[ParamLayout.RecordBytes];
 
-        Parse().Write(values, t => t.Id == 36 ? 0x00020005u : uint.MaxValue, record);
+        Parse().Write(values, texture => texture.Id == 36 ? 0x00020005u : uint.MaxValue, record);
 
         return record;
     }

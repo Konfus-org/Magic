@@ -5,45 +5,45 @@ using Xunit;
 
 namespace Magic.IntegrationTests.Ecs;
 
-/// <summary>The adapter's own iteration over flecs' tables, and the parent column a cascade shares.</summary>
+/// <summary>The adapter's own iteration over flecs' tables, and the parent column first cascade shares.</summary>
 public sealed class FlecsQueryTests
 {
     [Fact]
     public void Each_visits_every_matching_entity()
     {
         using FlecsEcs ecs = new();
-        Handle a = Spawn(ecs, 1);
-        Handle b = Spawn(ecs, 2);
+        Handle first = Spawn(ecs, 1);
+        Handle second = Spawn(ecs, 2);
         using IEcsQuery<Position> query = ecs.Query<Position>().Build();
         List<Handle> seen = [];
 
-        query.Each((Handle e, ref Position _) => seen.Add(e));
+        query.Each((Handle entity, ref Position _) => seen.Add(entity));
 
-        Assert.Equal([a, b], seen.OrderBy(h => h.Id));
+        Assert.Equal([first, second], seen.OrderBy(handle => handle.Id));
     }
 
     [Fact]
     public void Each_writes_through_to_the_component()
     {
         using FlecsEcs ecs = new();
-        Handle a = Spawn(ecs, 1);
+        Handle first = Spawn(ecs, 1);
         using IEcsQuery<Position> query = ecs.Query<Position>().Build();
 
-        query.Each((Handle _, ref Position p) => p.X = 11);
+        query.Each((Handle _, ref Position position) => position.X = 11);
 
-        Assert.Equal(11, ecs.Get<Position>(a).X);
+        Assert.Equal(11, ecs.Get<Position>(first).X);
     }
 
     [Fact]
     public void Run_writes_through_to_the_component()
     {
         using FlecsEcs ecs = new();
-        Handle a = Spawn(ecs, 1);
+        Handle first = Spawn(ecs, 1);
         using IEcsQuery<Position> query = ecs.Query<Position>().Build();
 
         query.Run((ReadOnlySpan<Handle> ids, Span<Position> positions) => positions.Fill(new Position { X = 10 }));
 
-        Assert.Equal(10, ecs.Get<Position>(a).X);
+        Assert.Equal(10, ecs.Get<Position>(first).X);
     }
 
     [Fact]
@@ -57,8 +57,8 @@ public sealed class FlecsQueryTests
 
         query.Run((ReadOnlySpan<Handle> entities, Span<Local> _, Span<Composed> _, Span<Composed> parent) =>
         {
-            foreach (Handle e in entities)
-                parents[e] = parent.IsEmpty ? -1 : parent[0].Value;
+            foreach (Handle entity in entities)
+                parents[entity] = parent.IsEmpty ? -1 : parent[0].Value;
         });
 
         Assert.Equal(7, parents[child]);
@@ -92,18 +92,18 @@ public sealed class FlecsQueryTests
 
     private static Handle Spawn(FlecsEcs ecs, float x)
     {
-        Handle e = ecs.Create();
-        ecs.Set(e, new Position { X = x });
+        Handle entity = ecs.Create();
+        ecs.Set(entity, new Position { X = x });
 
-        return e;
+        return entity;
     }
 
     private static Handle Spawn(FlecsEcs ecs, string? name, Handle parent, int composed)
     {
-        Handle e = ecs.Create(name, parent);
-        ecs.Set(e, new Local());
-        ecs.Set(e, new Composed { Value = composed });
+        Handle entity = ecs.Create(name, parent);
+        ecs.Set(entity, new Local());
+        ecs.Set(entity, new Composed { Value = composed });
 
-        return e;
+        return entity;
     }
 }

@@ -17,9 +17,6 @@ internal sealed class ShaderCache
         IncludeDirectory = includeDirectory;
         CacheDirectory = cacheDirectory;
         Format = format;
-
-        if (cacheDirectory is not null)
-            Directory.CreateDirectory(cacheDirectory);
     }
 
     public string IncludeDirectory { get; }

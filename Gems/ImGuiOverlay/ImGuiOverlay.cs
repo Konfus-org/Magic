@@ -46,10 +46,10 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     private readonly byte[] _input = new byte[InputBytes];
     private readonly Dictionary<uint, (GpuTexture Texture, int Width, int Height)> _textures = [];
     private readonly Dictionary<GpuFormat, GpuPipeline> _pipelines = [];
-    private readonly List<Level> _levels = []; // what Begin opened, by depth; reused frame to frame
+    private readonly List<Level> _openViews = []; // what Begin opened, by depth; reused frame to frame
     private readonly Dictionary<string, float> _reserved = []; // nested view id: height of what followed it last frame
     private readonly Dictionary<string, DocumentBuffer> _documents = []; // by field id: the text's bytes, encoded once
-    private readonly HashSet<string> _placed = []; // windows given a first position
+    private readonly HashSet<string> _positioned = []; // windows given a first position
     private readonly GpuSampler _sampler;
     private readonly CompiledShader? _vertexShader;
     private readonly CompiledShader? _fragmentShader;
@@ -88,6 +88,18 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         NewFrame(0);
     }
 
+    public void Dispose()
+    {
+        foreach ((GpuTexture texture, _, _) in _textures.Values)
+            _rendering.Release(texture);
+        foreach (GpuPipeline pipeline in _pipelines.Values)
+            _rendering.Release(pipeline);
+        _rendering.Release(_vertexBuffer);
+        _rendering.Release(_indexBuffer);
+        _rendering.Release(_sampler);
+        ImGui.DestroyContext(_context);
+    }
+
     /// <summary>Feeds the main window's input events to ImGui.</summary>
     public void Update(in Frame frame)
     {
@@ -95,30 +107,30 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         ImGuiIOPtr io = ImGui.GetIO();
         uint main = _windows.Main?.Handle ?? 0;
 
-        foreach (Event e in frame.Events.Span)
+        foreach (Event inputEvent in frame.Events.Span)
         {
-            if (e.Window != main)
+            if (inputEvent.Window != main)
                 continue;
 
-            switch (e.Type)
+            switch (inputEvent.Type)
             {
-                case EventType.KeyDown or EventType.KeyUp when Map(e.Key) is var key && key != ImGuiKey.None:
-                    io.AddKeyEvent(key, e.Type == EventType.KeyDown);
+                case EventType.KeyDown or EventType.KeyUp when inputEvent.Key.ToImGuiKey() is var key && key != ImGuiKey.None:
+                    io.AddKeyEvent(key, inputEvent.Type == EventType.KeyDown);
                     break;
                 case EventType.TextInput when io.WantTextInput: // only while a field has the keyboard, so keys that open a panel are not typed into it
-                    io.AddInputCharactersUTF8(e.Text);
+                    io.AddInputCharactersUTF8(inputEvent.Text);
                     break;
                 case EventType.MouseMotion:
-                    io.AddMousePosEvent(e.Value.X, e.Value.Y);
+                    io.AddMousePosEvent(inputEvent.Value.X, inputEvent.Value.Y);
                     break;
                 case EventType.MouseButtonDown or EventType.MouseButtonUp:
-                    io.AddMouseButtonEvent((int)e.Button, e.Type == EventType.MouseButtonDown); // same order as ImGui's
+                    io.AddMouseButtonEvent((int)inputEvent.Button, inputEvent.Type == EventType.MouseButtonDown); // same order as ImGui's
                     break;
                 case EventType.MouseWheel:
-                    io.AddMouseWheelEvent(-e.Value.X, e.Value.Y);
+                    io.AddMouseWheelEvent(-inputEvent.Value.X, inputEvent.Value.Y);
                     break;
                 case EventType.FocusGained or EventType.FocusLost:
-                    io.AddFocusEvent(e.Type == EventType.FocusGained);
+                    io.AddFocusEvent(inputEvent.Type == EventType.FocusGained);
                     break;
             }
         }
@@ -141,18 +153,18 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     public void Begin(string title, bool scrollable = false)
     {
         int depth = _depth++;
-        if (_levels.Count <= depth)
-            _levels.Add(new Level());
+        if (_openViews.Count <= depth)
+            _openViews.Add(new Level());
 
-        Level level = _levels[depth];
+        Level level = _openViews[depth];
         level.Closed.Clear();
         level.Scrollable = scrollable;
         level.Nested = depth > 0;
         if (!level.Nested)
         {
             level.Id = title;
-            if (_placed.Add(title)) // each new window a step down and right of the last, not on top of it
-                ImGui.SetNextWindowPos(new Vector2(20 + (40 * (_placed.Count - 1)), 20 + (40 * (_placed.Count - 1))), ImGuiCond.FirstUseEver);
+            if (_positioned.Add(title)) // each new window a step down and right of the last, not on top of it
+                ImGui.SetNextWindowPos(new Vector2(20 + (40 * (_positioned.Count - 1)), 20 + (40 * (_positioned.Count - 1))), ImGuiCond.FirstUseEver);
             if (scrollable)
                 ImGui.SetNextWindowSize(new Vector2(640, 360), ImGuiCond.FirstUseEver);
 
@@ -161,7 +173,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         }
 
         // As tall as the parent's room less what followed this view last frame (0, the first time: all of it).
-        level.Id = $"{_levels[depth - 1].Id}/{title}";
+        level.Id = $"{_openViews[depth - 1].Id}/{title}";
         float reserved = _reserved.GetValueOrDefault(level.Id);
         ImGuiWindowFlags flags = scrollable ? ImGuiWindowFlags.HorizontalScrollbar : ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
         ImGui.BeginChild(title, new Vector2(0, -reserved), ImGuiChildFlags.Borders, flags);
@@ -172,7 +184,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         if (_depth == 0)
             return;
 
-        Level level = _levels[--_depth];
+        Level level = _openViews[--_depth];
 
         // What followed each view nested in this one, measured now that everything after them is laid out.
         float end = ImGui.GetCursorPosY();
@@ -190,7 +202,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
             ImGui.SetScrollHereY(1f);
 
         ImGui.EndChild();
-        _levels[_depth - 1].Closed.Add((level.Id, ImGui.GetCursorPosY()));
+        _openViews[_depth - 1].Closed.Add((level.Id, ImGui.GetCursorPosY()));
     }
 
     public void Text(string text)
@@ -211,7 +223,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         Utf8.FromUtf16(text, _input.AsSpan(0, InputBytes - 1), out _, out int written); // too long is cut, not an error
         _input[written] = 0;
 
-        string id = Field(label);
+        string id = LabelField(label);
         bool entered;
         fixed (byte* buffer = _input)
             entered = ImGui.InputText(id, buffer, InputBytes, ImGuiInputTextFlags.EnterReturnsTrue);
@@ -225,7 +237,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
     public bool Document(string label, ref string text, bool readOnly = false)
     {
-        string id = Field(label);
+        string id = LabelField(label);
         if (!_documents.TryGetValue(id, out DocumentBuffer? document) || !ReferenceEquals(document.Text, text) || document.ReadOnly != readOnly)
             _documents[id] = document = new DocumentBuffer(text, readOnly);
 
@@ -245,18 +257,18 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
     public bool Checkbox(string label, ref bool value)
     {
-        return ImGui.Checkbox(Field(label), ref value);
+        return ImGui.Checkbox(LabelField(label), ref value);
     }
 
     public bool Slider(string label, ref float value, float min = 0f, float max = 0f)
     {
         float speed = Math.Max(Math.Abs(value) * 0.01f, 0.1f);
-        return ImGui.DragFloat(Field(label), ref value, speed, min, max);
+        return ImGui.DragFloat(LabelField(label), ref value, speed, min, max);
     }
 
     public bool Choice(string label, ref int index, string[] options)
     {
-        string id = Field(label);
+        string id = LabelField(label);
         if (!ImGui.BeginCombo(id, index >= 0 && index < options.Length ? options[index] : ""))
             return false;
 
@@ -279,7 +291,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     /// Lays out a field: its label (up to any <c>##</c>) on the left, then the field stretched to the right edge. Returns
     /// the field's hidden ImGui id.
     /// </summary>
-    private static string Field(string label)
+    private static string LabelField(string label)
     {
         int hidden = label.IndexOf("##", StringComparison.Ordinal);
         string shown = hidden < 0 ? label : label[..hidden];
@@ -324,33 +336,6 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         ImGui.NewFrame();
     }
 
-    /// <summary>ImGui has its own key enum; these are the keys a text field needs to edit, select and copy. Characters arrive as text.</summary>
-    private static ImGuiKey Map(Key key)
-    {
-        return key switch
-        {
-            Key.Enter => ImGuiKey.Enter,
-            Key.KeypadEnter => ImGuiKey.KeypadEnter,
-            Key.Backspace => ImGuiKey.Backspace,
-            Key.Delete => ImGuiKey.Delete,
-            Key.Left => ImGuiKey.LeftArrow,
-            Key.Right => ImGuiKey.RightArrow,
-            Key.Home => ImGuiKey.Home,
-            Key.End => ImGuiKey.End,
-            Key.Up => ImGuiKey.UpArrow,
-            Key.Down => ImGuiKey.DownArrow,
-            Key.PageUp => ImGuiKey.PageUp,
-            Key.PageDown => ImGuiKey.PageDown,
-            Key.A => ImGuiKey.A,
-            Key.C => ImGuiKey.C,
-            Key.V => ImGuiKey.V,
-            Key.X => ImGuiKey.X,
-            Key.LeftCtrl or Key.RightCtrl => ImGuiKey.ModCtrl,
-            Key.LeftShift or Key.RightShift => ImGuiKey.ModShift,
-            _ => ImGuiKey.None,
-        };
-    }
-
     /// <summary>ImGui's draw lists as one upload each of vertices (in window pixels) and indices, then one render pass of draws over the window.</summary>
     private void Draw(ImDrawDataPtr data, IWindow window, RenderCommands commands)
     {
@@ -367,12 +352,12 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         Vector2 origin = data.DisplayPos;
         Vector2 scale = data.FramebufferScale;
         int vertexBase = 0, indexBase = 0;
-        for (int l = 0; l < data.CmdListsCount; l++)
+        for (int listIndex = 0; listIndex < data.CmdListsCount; listIndex++)
         {
-            ImDrawListPtr list = data.CmdLists[l];
+            ImDrawListPtr list = data.CmdLists[listIndex];
             new ReadOnlySpan<ImDrawVert>(list.VtxBuffer.Data, list.VtxBuffer.Size).CopyTo(_vertices.AsSpan(vertexBase));
-            for (int v = vertexBase; v < vertexBase + list.VtxBuffer.Size; v++)
-                _vertices[v].Pos = (_vertices[v].Pos - origin) * scale; // points to pixels
+            for (int vertex = vertexBase; vertex < vertexBase + list.VtxBuffer.Size; vertex++)
+                _vertices[vertex].Pos = (_vertices[vertex].Pos - origin) * scale; // points to pixels
 
             new ReadOnlySpan<ushort>(list.IdxBuffer.Data, list.IdxBuffer.Size).CopyTo(_indices.AsSpan(indexBase));
             vertexBase += list.VtxBuffer.Size;
@@ -391,12 +376,12 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
         uint bound = 0;
         vertexBase = indexBase = 0;
-        for (int l = 0; l < data.CmdListsCount; l++)
+        for (int listIndex = 0; listIndex < data.CmdListsCount; listIndex++)
         {
-            ImDrawListPtr list = data.CmdLists[l];
-            for (int c = 0; c < list.CmdBuffer.Size; c++)
+            ImDrawListPtr list = data.CmdLists[listIndex];
+            for (int commandIndex = 0; commandIndex < list.CmdBuffer.Size; commandIndex++)
             {
-                ImDrawCmd cmd = list.CmdBuffer.Data[c];
+                ImDrawCmd cmd = list.CmdBuffer.Data[commandIndex];
                 ImTextureID id = cmd.TexRef.TexData != null ? cmd.TexRef.TexData->TexID : cmd.TexRef.TexID;
                 if (cmd.UserCallback != null || cmd.ElemCount == 0 || !_textures.TryGetValue((uint)id.Handle, out (GpuTexture Texture, int, int) texture))
                     continue;
@@ -481,12 +466,12 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
                 case ImTextureStatus.WantCreate:
                     uint id = _nextTexture++;
                     _textures[id] = (default, 0, 0);
-                    Set(id, texture);
+                    UpdateTexture(id, texture);
                     texture.SetTexID(new ImTextureID(id));
                     texture.SetStatus(ImTextureStatus.Ok);
                     break;
                 case ImTextureStatus.WantUpdates:
-                    Set((uint)texture.TexID.Handle, texture);
+                    UpdateTexture((uint)texture.TexID.Handle, texture);
                     texture.SetStatus(ImTextureStatus.Ok);
                     break;
                 case ImTextureStatus.WantDestroy when texture.UnusedFrames > 0:
@@ -500,7 +485,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     }
 
     /// <summary>The texture's pixels into its GPU texture, made again when the size changed.</summary>
-    private void Set(uint id, ImTextureDataPtr texture)
+    private void UpdateTexture(uint id, ImTextureDataPtr texture)
     {
         if (!_textures.TryGetValue(id, out (GpuTexture Texture, int Width, int Height) known))
             return;
@@ -524,25 +509,13 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
             return new ReadOnlySpan<byte>(pixels, count * 4).ToArray();
 
         byte[] rgba = new byte[count * 4];
-        for (int p = 0; p < count; p++)
+        for (int pixel = 0; pixel < count; pixel++)
         {
-            rgba[p * 4] = rgba[(p * 4) + 1] = rgba[(p * 4) + 2] = 255;
-            rgba[(p * 4) + 3] = pixels[p];
+            rgba[pixel * 4] = rgba[(pixel * 4) + 1] = rgba[(pixel * 4) + 2] = 255;
+            rgba[(pixel * 4) + 3] = pixels[pixel];
         }
 
         return rgba;
-    }
-
-    public void Dispose()
-    {
-        foreach ((GpuTexture texture, _, _) in _textures.Values)
-            _rendering.Release(texture);
-        foreach (GpuPipeline pipeline in _pipelines.Values)
-            _rendering.Release(pipeline);
-        _rendering.Release(_vertexBuffer);
-        _rendering.Release(_indexBuffer);
-        _rendering.Release(_sampler);
-        ImGui.DestroyContext(_context);
     }
 
     /// <summary>One open <see cref="Begin"/>: a window, or a view nested in one, and the views nested in it that closed where.</summary>

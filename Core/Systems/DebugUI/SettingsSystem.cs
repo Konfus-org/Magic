@@ -1,6 +1,7 @@
 using Magic.Contexts;
 using Magic.Contexts.Input;
 using Magic.Contexts.Settings;
+using Magic.Interfaces;
 using Magic.Utils;
 using System.Drawing;
 using System.Reflection;
@@ -12,20 +13,20 @@ namespace Magic.Systems.DebugUI;
 /// place. bool, enum, float and size values are edited live and the systems that read them pick the change up the next
 /// frame; a string is only read at start-up by whoever uses it, so it is shown as text.
 /// </summary>
-public sealed class SettingsSystem : DebugWindowSystem
+internal sealed class SettingsSystem : DebugWindowSystem
 {
     private readonly Settings _settings;
     private readonly (string Name, PropertyInfo Section, PropertyInfo[] Values)[] _sections;
     private readonly Dictionary<Type, string[]> _enumNames = [];
 
-    public SettingsSystem(Settings settings) : base(Key.F4)
+    public SettingsSystem(Settings settings, IInput? input) : base(Key.F4, input)
     {
         _settings = settings;
         _sections = [.. typeof(Settings).GetProperties()
-            .Select(section => (section.Name, section, section.PropertyType.GetProperties().Where(p => p.CanRead && p.CanWrite).ToArray()))];
+            .Select(section => (section.Name, section, section.PropertyType.GetProperties().Where(property => property.CanRead && property.CanWrite).ToArray()))];
     }
 
-    protected override void Run(in Frame frame)
+    protected override void Draw(in Frame frame)
     {
         if (!Open)
             return;

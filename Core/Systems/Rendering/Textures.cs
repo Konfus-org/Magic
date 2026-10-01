@@ -55,38 +55,38 @@ internal static class Textures
         TextureTable table = ctx.Textures;
         for (int i = 0; i < TextureTable.Classes; i++)
         {
-            TextureTable.PoolClass c = table.Pools[i];
-            if (!c.Grown.IsValid)
+            TextureTable.PoolClass pool = table.Pools[i];
+            if (!pool.Grown.IsValid)
                 continue;
 
             // Layers past the old capacity were allocated after the grow: they only exist in the new array.
-            uint copied = Math.Min(c.Used, c.Capacity);
+            uint copied = Math.Min(pool.Used, pool.Capacity);
             for (uint layer = 0; layer < copied; layer++)
             {
-                uint w = (uint)c.Size;
-                for (uint level = 0; level < c.Levels; level++)
+                uint width = (uint)pool.Size;
+                for (uint level = 0; level < pool.Levels; level++)
                 {
-                    gpu.Copy(new TextureRegion(c.Texture, level, layer, 0, 0, w, w), new TextureRegion(c.Grown, level, layer, 0, 0, w, w));
-                    w = Math.Max(1, w / 2);
+                    gpu.Copy(new TextureRegion(pool.Texture, level, layer, 0, 0, width, width), new TextureRegion(pool.Grown, level, layer, 0, 0, width, width));
+                    width = Math.Max(1, width / 2);
                 }
             }
 
-            gpu.Release(c.Texture);
-            c.Texture = c.Grown;
-            c.Capacity = c.GrownCapacity;
-            c.Grown = default;
-            Debugging.Log.Debug($"Texture pool class {i} grown to {c.Capacity} layers.");
+            gpu.Release(pool.Texture);
+            pool.Texture = pool.Grown;
+            pool.Capacity = pool.GrownCapacity;
+            pool.Grown = default;
+            Debugging.Log.Debug($"Texture pool class {i} grown to {pool.Capacity} layers.");
         }
 
         foreach ((int classIndex, uint layer, byte[] pixels, int[] offsets) in table.Pending)
         {
-            TextureTable.PoolClass c = table.Pools[classIndex];
-            uint w = (uint)c.Size;
+            TextureTable.PoolClass pool = table.Pools[classIndex];
+            uint width = (uint)pool.Size;
             for (int level = 0; level < offsets.Length - 1; level++)
             {
                 ReadOnlySpan<byte> bytes = pixels.AsSpan(offsets[level], offsets[level + 1] - offsets[level]);
-                gpu.Upload(new TextureRegion(c.Texture, (uint)level, layer, 0, 0, w, w), bytes);
-                w = Math.Max(1, w / 2);
+                gpu.Upload(new TextureRegion(pool.Texture, (uint)level, layer, 0, 0, width, width), bytes);
+                width = Math.Max(1, width / 2);
             }
         }
 
@@ -130,14 +130,14 @@ internal static class Textures
         TextureTable table = ctx.Textures;
         int size = table.SizeFor(texture.Width, texture.Height);
         int classIndex = (texture.Format == TextureFormat.Rgba8Srgb ? 0 : 4) + Array.IndexOf(TextureTable.PoolSizes, size);
-        TextureTable.PoolClass c = table.Pools[classIndex];
-        if (!table.TryAllocateLayer(ctx.Gpu, c, out uint layer))
+        TextureTable.PoolClass pool = table.Pools[classIndex];
+        if (!table.TryAllocateLayer(ctx.Gpu, pool, out uint layer))
         {
             Debugging.Log.Warn($"Texture pool class {classIndex} is full ({TextureTable.MaxLayers} layers); {texture.Path} draws as failed.");
             return TextureTable.Failed;
         }
 
-        (byte[] pixels, int[] offsets) = Fit(texture, c.Size);
+        (byte[] pixels, int[] offsets) = FitToPool(texture, pool.Size);
         table.Pending.Add((classIndex, layer, pixels, offsets));
         return ((uint)classIndex << 16) | layer;
     }
@@ -160,17 +160,17 @@ internal static class Textures
 
         TextureTable table = ctx.Textures;
         int classIndex = Array.IndexOf(TextureTable.PoolSizes, table.SizeFor(texture.Width, texture.Height));
-        TextureTable.PoolClass c = table.Pools[classIndex];
-        if (!table.TryAllocateLayer(ctx.Gpu, c, out uint layer))
+        TextureTable.PoolClass pool = table.Pools[classIndex];
+        if (!table.TryAllocateLayer(ctx.Gpu, pool, out uint layer))
         {
             Debugging.Log.Warn($"Texture pool class {classIndex} is full ({TextureTable.MaxLayers} layers); {texture.Path} draws as failed.");
             return TextureTable.Failed;
         }
 
-        int levels = (int)c.Levels;
+        int levels = (int)pool.Levels;
         int[] offsets = new int[levels + 1];
-        for (int i = 0, w = c.Size; i < levels; i++, w = Math.Max(1, w / 2))
-            offsets[i + 1] = offsets[i] + (w * w * 4);
+        for (int i = 0, width = pool.Size; i < levels; i++, width = Math.Max(1, width / 2))
+            offsets[i + 1] = offsets[i] + (width * width * 4);
 
         uint packed = ((uint)classIndex << 16) | layer;
         table.Pending.Add((classIndex, layer, new byte[offsets[levels]], offsets));
@@ -183,7 +183,7 @@ internal static class Textures
     /// <c>Offsets[i]</c> is where level i starts and the last offset is where the chain ends. A source that is already
     /// square at the size with its whole chain is used as it is.
     /// </summary>
-    private static (byte[] Pixels, int[] Offsets) Fit(Texture texture, int size)
+    private static (byte[] Pixels, int[] Offsets) FitToPool(Texture texture, int size)
     {
         int levels = 1 + (int)Math.Log2(size);
         int[] offsets = new int[levels + 1];
@@ -197,10 +197,10 @@ internal static class Textures
         }
 
         int total = 0;
-        for (int i = 0, w = size; i < levels; i++, w /= 2)
+        for (int i = 0, width = size; i < levels; i++, width /= 2)
         {
             offsets[i] = total;
-            total += w * w * 4;
+            total += width * width * 4;
         }
         offsets[levels] = total;
         byte[] pixels = new byte[total];
@@ -213,11 +213,11 @@ internal static class Textures
         else
             Resize(source, level0.Width, level0.Height, top, size, size);
 
-        for (int i = 1, w = size; i < levels; i++, w /= 2)
+        for (int i = 1, width = size; i < levels; i++, width /= 2)
         {
             Span<byte> above = pixels.AsSpan(offsets[i - 1], offsets[i] - offsets[i - 1]);
             Span<byte> level = pixels.AsSpan(offsets[i], offsets[i + 1] - offsets[i]);
-            Downsample(above, w, w, level);
+            Downsample(above, width, width, level);
         }
 
         return (pixels, offsets);
@@ -230,10 +230,10 @@ internal static class Textures
             return false;
 
         int offset = texture.Levels[0].Offset;
-        for (int i = 0, w = size; i < levels; i++, w /= 2)
+        for (int i = 0, width = size; i < levels; i++, width /= 2)
         {
             TextureLevel level = texture.Levels[i];
-            if (level.Width != w || level.Height != w || level.Size != w * w * 4 || level.Offset != offset)
+            if (level.Width != width || level.Height != width || level.Size != width * width * 4 || level.Offset != offset)
                 return false;
 
             offset += level.Size;

@@ -43,7 +43,7 @@ public sealed partial class Shader : Asset
     };
 
     [JsonIgnore]
-    public string[] Includes => [.. IncludePattern().Matches(Text).Select(m => m.Groups[1].Value)];
+    public string[] Includes => [.. IncludePattern().Matches(Text).Select(match => match.Groups[1].Value)];
 
     [GeneratedRegex("""^\s*#\s*include\s+"([^"]+)"\s*$""", RegexOptions.Multiline)]
     private static partial Regex IncludePattern();

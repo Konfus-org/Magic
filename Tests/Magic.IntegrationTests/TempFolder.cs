@@ -8,18 +8,6 @@ internal sealed class TempFolder : IDisposable
         Directory.CreateDirectory(Path);
     }
 
-    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MagicTests", Guid.NewGuid().ToString("N"));
-
-    /// <summary>Writes <paramref name="text"/> to a file under the folder, creating its subfolder; returns the full path.</summary>
-    public string Write(string relative, string text)
-    {
-        string file = System.IO.Path.Combine(Path, relative);
-        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file)!);
-        File.WriteAllText(file, text);
-
-        return file;
-    }
-
     public void Dispose()
     {
         try
@@ -30,5 +18,17 @@ internal sealed class TempFolder : IDisposable
         {
             // A watcher or a worker still holds a file: the OS clears the temp folder.
         }
+    }
+
+    public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MagicTests", Guid.NewGuid().ToString("N"));
+
+    /// <summary>Writes <paramref name="text"/> to a file under the folder, creating its subfolder; returns the full path.</summary>
+    public string Write(string relative, string text)
+    {
+        string file = System.IO.Path.Combine(Path, relative);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(file)!);
+        File.WriteAllText(file, text);
+
+        return file;
     }
 }

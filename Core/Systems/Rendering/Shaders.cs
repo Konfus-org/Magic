@@ -1,6 +1,7 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Rendering;
+using Magic.Interfaces;
 using Magic.Utils;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
@@ -58,11 +59,6 @@ internal static class Shaders
         return Cached(ctx, id)?.Surface;
     }
 
-    public static bool Owns(RenderContext ctx, ulong id)
-    {
-        return ctx.Shaders.Entries.ContainsKey(id);
-    }
-
     /// <summary>
     /// Forgets a changed shader and every cached shader whose closure has it; returns them all (itself included), since
     /// whatever was built on any of them must be built again.
@@ -105,8 +101,8 @@ internal static class Shaders
     public static Result<CompiledShader> Compile(RenderContext ctx, string source, string name, GpuStage stage, string salt = "")
     {
         ShaderCache cache = ctx.Shaders;
-        string key = Key(cache, source, stage, salt);
-        if (TryLoad(cache, key, out CompiledShader? cached) && cached is not null)
+        string key = CacheKey(cache, source, stage, salt);
+        if (TryLoad(ctx.Files, cache, key, out CompiledShader? cached) && cached is not null)
             return Result<CompiledShader>.Success(cached);
 
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -114,13 +110,13 @@ internal static class Shaders
         if (!result.Ok)
             return result;
 
-        Store(cache, key, result.Payload);
+        Store(ctx.Files, cache, key, result.Payload);
 
-        CompiledShader c = result.Payload;
+        CompiledShader compiled = result.Payload;
         double ms = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         Debugging.Log.Debug(
-            $"Compiled {name} ({stage}, {cache.Format}) in {ms:F0} ms: samplers {c.Samplers}, storage textures {c.StorageTextures}, " +
-            $"storage buffers {c.StorageBuffers}, uniforms {c.UniformBuffers}, rw {c.ReadWriteStorageTextures}/{c.ReadWriteStorageBuffers}.");
+            $"Compiled {name} ({stage}, {cache.Format}) in {ms:F0} ms: samplers {compiled.Samplers}, storage textures {compiled.StorageTextures}, " +
+            $"storage buffers {compiled.StorageBuffers}, uniforms {compiled.UniformBuffers}, rw {compiled.ReadWriteStorageTextures}/{compiled.ReadWriteStorageBuffers}.");
 
         return result;
     }
@@ -137,7 +133,7 @@ internal static class Shaders
         if (shader is null)
             return null;
 
-        (string hash, ulong[] closure) = Close(ctx, shader);
+        (string hash, ulong[] closure) = IncludeClosure(ctx, shader);
         SurfaceSource? surface = null;
         if (shader.Stage == ShaderStage.Surface)
         {
@@ -154,7 +150,7 @@ internal static class Shaders
     }
 
     /// <summary>Every include the shader reaches, transitively, and a hash over their paths and text.</summary>
-    private static (string Hash, ulong[] Closure) Close(RenderContext ctx, Shader shader)
+    private static (string Hash, ulong[] Closure) IncludeClosure(RenderContext ctx, Shader shader)
     {
         XxHash128 hash = new();
         List<ulong> seen = [];
@@ -179,7 +175,7 @@ internal static class Shaders
         return (Convert.ToHexStringLower(hash.GetCurrentHash()), [.. seen]);
     }
 
-    private static string Key(ShaderCache cache, string source, GpuStage stage, string salt)
+    private static string CacheKey(ShaderCache cache, string source, GpuStage stage, string salt)
     {
         XxHash128 hash = new();
         hash.Append(MemoryMarshal.AsBytes(source.AsSpan())); // UTF-16 as it sits, no copy
@@ -187,60 +183,65 @@ internal static class Shaders
         return Convert.ToHexStringLower(hash.GetCurrentHash());
     }
 
-    private static bool TryLoad(ShaderCache cache, string key, out CompiledShader? shader)
+    private static bool TryLoad(IFileSystem files, ShaderCache cache, string key, out CompiledShader? shader)
     {
         shader = null;
         if (cache.CacheDirectory is null)
             return false;
 
-        string bin = Path.Combine(cache.CacheDirectory, key + ".bin");
-        string meta = Path.Combine(cache.CacheDirectory, key + ".json");
-        if (!File.Exists(bin) || !File.Exists(meta))
+        string bin = files.Combine(cache.CacheDirectory, key + ".bin");
+        string meta = files.Combine(cache.CacheDirectory, key + ".json");
+        if (!files.FileExists(bin) || !files.FileExists(meta))
             return false;
+
+        Result<byte[]> metaBytes = files.ReadBinary(meta);
+        Result<byte[]> code = files.ReadBinary(bin);
+        if (metaBytes.Failed || code.Failed)
+        {
+            Debugging.Log.Debug($"Shader cache entry {key} unreadable: {(metaBytes.Failed ? metaBytes.Message : code.Message)}");
+            return false;
+        }
 
         try
         {
-            shader = JsonSerializer.Deserialize<CompiledShader>(File.ReadAllBytes(meta), MetaJson);
-            if (shader is null)
-                return false;
-
-            shader.Code = File.ReadAllBytes(bin);
-            return shader.Code.Length > 0;
+            shader = JsonSerializer.Deserialize<CompiledShader>(metaBytes.Payload, MetaJson);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (JsonException ex)
         {
             Debugging.Log.Debug($"Shader cache entry {key} unreadable: {ex.Message}");
             return false;
         }
+
+        if (shader is null)
+            return false;
+
+        shader.Code = code.Payload;
+        return shader.Code.Length > 0;
     }
 
-    private static void Store(ShaderCache cache, string key, CompiledShader shader)
+    private static void Store(IFileSystem files, ShaderCache cache, string key, CompiledShader shader)
     {
         if (cache.CacheDirectory is null)
             return;
 
-        try
+        // The metadata without the code, then the code on its own.
+        CompiledShader meta = new()
         {
-            // The metadata without the code, then the code on its own.
-            CompiledShader meta = new()
-            {
-                Stage = shader.Stage,
-                Samplers = shader.Samplers,
-                StorageTextures = shader.StorageTextures,
-                StorageBuffers = shader.StorageBuffers,
-                UniformBuffers = shader.UniformBuffers,
-                ReadWriteStorageTextures = shader.ReadWriteStorageTextures,
-                ReadWriteStorageBuffers = shader.ReadWriteStorageBuffers,
-                ThreadCountX = shader.ThreadCountX,
-                ThreadCountY = shader.ThreadCountY,
-                ThreadCountZ = shader.ThreadCountZ,
-            };
-            File.WriteAllBytes(Path.Combine(cache.CacheDirectory, key + ".json"), JsonSerializer.SerializeToUtf8Bytes(meta, MetaJson));
-            File.WriteAllBytes(Path.Combine(cache.CacheDirectory, key + ".bin"), shader.Code);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            Debugging.Log.Warn($"Could not write the shader cache: {ex.Message}");
-        }
+            Stage = shader.Stage,
+            Samplers = shader.Samplers,
+            StorageTextures = shader.StorageTextures,
+            StorageBuffers = shader.StorageBuffers,
+            UniformBuffers = shader.UniformBuffers,
+            ReadWriteStorageTextures = shader.ReadWriteStorageTextures,
+            ReadWriteStorageBuffers = shader.ReadWriteStorageBuffers,
+            ThreadCountX = shader.ThreadCountX,
+            ThreadCountY = shader.ThreadCountY,
+            ThreadCountZ = shader.ThreadCountZ,
+        };
+
+        Result wroteMeta = files.WriteBinary(files.Combine(cache.CacheDirectory, key + ".json"), JsonSerializer.SerializeToUtf8Bytes(meta, MetaJson));
+        Result wroteCode = files.WriteBinary(files.Combine(cache.CacheDirectory, key + ".bin"), shader.Code);
+        if (wroteMeta.Failed || wroteCode.Failed)
+            Debugging.Log.Warn($"Could not write the shader cache: {(wroteMeta.Failed ? wroteMeta.Message : wroteCode.Message)}");
     }
 }

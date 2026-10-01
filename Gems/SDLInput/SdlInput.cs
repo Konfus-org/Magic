@@ -52,6 +52,19 @@ internal sealed class SdlInput : IGem, IInput
             OnGamepadAdded(id);
     }
 
+    public void Dispose()
+    {
+        SDL.RemoveEventWatch(_watch, IntPtr.Zero);
+
+        foreach (Gamepad? gamepad in _gamepads)
+        {
+            if (gamepad is not null)
+                SDL.CloseGamepad(gamepad.Handle);
+        }
+
+        SDL.QuitSubSystem(SDL.InitFlags.Gamepad);
+    }
+
     public Vector2 MousePosition { get; private set; }
 
     public Vector2 MouseDelta { get; private set; }
@@ -83,15 +96,15 @@ internal sealed class SdlInput : IGem, IInput
     /// <summary>Makes what arrived since the last frame the state every reader sees until the next.</summary>
     public void Update(in Frame frame)
     {
-        _keys.Tick();
-        _mouseButtons.Tick();
+        _keys.Latch();
+        _mouseButtons.Latch();
         MouseDelta = _liveMouseDelta;
         MouseWheel = _liveMouseWheel;
         _liveMouseDelta = _liveMouseWheel = Vector2.Zero;
 
         foreach (Gamepad? gamepad in _gamepads)
         {
-            gamepad?.Buttons.Tick();
+            gamepad?.Buttons.Latch();
             gamepad?.LiveAxes.CopyTo(gamepad.Axes, 0);
         }
     }
@@ -103,7 +116,7 @@ internal sealed class SdlInput : IGem, IInput
 
     private Gamepad? Find(uint id)
     {
-        return Array.Find(_gamepads, g => g?.Id == id);
+        return Array.Find(_gamepads, gamepad => gamepad?.Id == id);
     }
 
     /// <summary>Sees every event as it is queued; always lets it through for whoever else watches.</summary>
@@ -113,10 +126,10 @@ internal sealed class SdlInput : IGem, IInput
         {
             case SDL.EventType.KeyDown:
             case SDL.EventType.KeyUp:
-                Key key = Map(e.Key.Key);
+                Key key = e.Key.Key.ToKey();
                 if (!e.Key.Repeat)
                     _keys.Set((int)key, e.Key.Down);
-                _events.Publish(new Event(e.Key.Down ? EventType.KeyDown : EventType.KeyUp, e.Key.WindowID, Key: key, Modifiers: Map(e.Key.Mod), Repeat: e.Key.Repeat));
+                _events.Publish(new Event(e.Key.Down ? EventType.KeyDown : EventType.KeyUp, e.Key.WindowID, Key: key, Modifiers: e.Key.Mod.ToModifiers(), Repeat: e.Key.Repeat));
                 break;
             case SDL.EventType.TextInput:
                 if (Marshal.PtrToStringUTF8(e.Text.Text) is { Length: > 0 } text)
@@ -129,7 +142,7 @@ internal sealed class SdlInput : IGem, IInput
                 break;
             case SDL.EventType.MouseButtonDown:
             case SDL.EventType.MouseButtonUp:
-                if (Map(e.Button.Button) is not { } button)
+                if (ToMouseButton(e.Button.Button) is not { } button)
                     break;
                 _mouseButtons.Set((int)button, e.Button.Down);
                 _events.Publish(new Event(e.Button.Down ? EventType.MouseButtonDown : EventType.MouseButtonUp, e.Button.WindowID, Button: button));
@@ -178,7 +191,7 @@ internal sealed class SdlInput : IGem, IInput
 
     private void OnGamepadRemoved(uint id)
     {
-        int slot = Array.FindIndex(_gamepads, g => g?.Id == id);
+        int slot = Array.FindIndex(_gamepads, gamepad => gamepad?.Id == id);
         if (slot < 0)
             return;
 
@@ -187,7 +200,7 @@ internal sealed class SdlInput : IGem, IInput
         Debugging.Log.Info($"Gamepad {slot} disconnected.");
     }
 
-    private static MouseButton? Map(byte button) => button switch
+    private static MouseButton? ToMouseButton(byte button) => button switch
     {
         1 => MouseButton.Left,
         2 => MouseButton.Middle,
@@ -197,67 +210,7 @@ internal sealed class SdlInput : IGem, IInput
         _ => null,
     };
 
-    private static KeyModifiers Map(SDL.Keymod mod)
-    {
-        KeyModifiers modifiers = KeyModifiers.None;
 
-        if ((mod & SDL.Keymod.Shift) != 0)
-            modifiers |= KeyModifiers.Shift;
-        if ((mod & SDL.Keymod.Ctrl) != 0)
-            modifiers |= KeyModifiers.Ctrl;
-        if ((mod & SDL.Keymod.Alt) != 0)
-            modifiers |= KeyModifiers.Alt;
-        if ((mod & SDL.Keymod.GUI) != 0)
-            modifiers |= KeyModifiers.Super;
-
-        return modifiers;
-    }
-
-    private static Key Map(SDL.Keycode key) => key switch
-    {
-        >= SDL.Keycode.A and <= SDL.Keycode.Z => Key.A + (int)(key - SDL.Keycode.A),
-        >= SDL.Keycode.Alpha0 and <= SDL.Keycode.Alpha9 => Key.D0 + (int)(key - SDL.Keycode.Alpha0),
-        >= SDL.Keycode.F1 and <= SDL.Keycode.F12 => Key.F1 + (int)(key - SDL.Keycode.F1),
-        SDL.Keycode.Escape => Key.Escape,
-        SDL.Keycode.Return => Key.Enter,
-        SDL.Keycode.KpEnter => Key.KeypadEnter,
-        SDL.Keycode.Tab => Key.Tab,
-        SDL.Keycode.Backspace => Key.Backspace,
-        SDL.Keycode.Space => Key.Space,
-        SDL.Keycode.Grave => Key.Grave,
-        SDL.Keycode.Insert => Key.Insert,
-        SDL.Keycode.Delete => Key.Delete,
-        SDL.Keycode.Home => Key.Home,
-        SDL.Keycode.End => Key.End,
-        SDL.Keycode.Pageup => Key.PageUp,
-        SDL.Keycode.Pagedown => Key.PageDown,
-        SDL.Keycode.Left => Key.Left,
-        SDL.Keycode.Right => Key.Right,
-        SDL.Keycode.Up => Key.Up,
-        SDL.Keycode.Down => Key.Down,
-        SDL.Keycode.LShift => Key.LeftShift,
-        SDL.Keycode.RShift => Key.RightShift,
-        SDL.Keycode.LCtrl => Key.LeftCtrl,
-        SDL.Keycode.RCtrl => Key.RightCtrl,
-        SDL.Keycode.LAlt => Key.LeftAlt,
-        SDL.Keycode.RAlt => Key.RightAlt,
-        SDL.Keycode.LGUI => Key.LeftSuper,
-        SDL.Keycode.RGUI => Key.RightSuper,
-        _ => Key.Unknown,
-    };
-
-    public void Dispose()
-    {
-        SDL.RemoveEventWatch(_watch, IntPtr.Zero);
-
-        foreach (Gamepad? gamepad in _gamepads)
-        {
-            if (gamepad is not null)
-                SDL.CloseGamepad(gamepad.Handle);
-        }
-
-        SDL.QuitSubSystem(SDL.InitFlags.Gamepad);
-    }
 
     /// <summary>
     /// Down, pressed and released per button: live as events arrive, frame as readers see it. A press stays pressed
@@ -290,7 +243,7 @@ internal sealed class SdlInput : IGem, IInput
                 _liveReleased[button] = true;
         }
 
-        public void Tick()
+        public void Latch()
         {
             _liveDown.CopyTo(_down, 0);
             _livePressed.CopyTo(_pressed, 0);

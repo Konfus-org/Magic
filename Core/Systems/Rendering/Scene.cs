@@ -1,5 +1,6 @@
 using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Utils;
 using System.Drawing;
@@ -38,7 +39,7 @@ internal static class Scene
         PlanTargets(ctx, plan, windows, views, main, textures: true, lighting, time);
         PlanTargets(ctx, plan, windows, views, main, textures: false, lighting, time);
 
-        if (main != 0 && !Planned(plan, RenderTarget.Of(main)))
+        if (main != 0 && !IsPlanned(plan, RenderTarget.Of(main)))
             plan.ClearWindow = main;
     }
 
@@ -49,9 +50,9 @@ internal static class Scene
         ReadOnlySpan<ViewPlan> views = CollectionsMarshal.AsSpan(plan.Views);
         foreach (TargetPlan target in plan.Targets)
         {
-            (int d, int c) = RecordTarget(ctx, commands, target.Targets, views.Slice(target.FirstView, target.ViewCount));
-            draws += d;
-            dispatches += c;
+            (int targetDraws, int targetDispatches) = RecordTarget(ctx, commands, target.FrameTargets, views.Slice(target.FirstView, target.ViewCount));
+            draws += targetDraws;
+            dispatches += targetDispatches;
         }
 
         if (plan.ClearWindow != 0)
@@ -77,7 +78,7 @@ internal static class Scene
         foreach (View view in views)
         {
             RenderTarget target = Resolve(view.Camera.Target, main);
-            if (target.IsTexture != textures || Planned(plan, target))
+            if (target.IsTexture != textures || IsPlanned(plan, target))
                 continue;
 
             FrameTargets? targets = textures ? PlanTexture(ctx, target) : PlanWindow(ctx, windows, target);
@@ -86,10 +87,10 @@ internal static class Scene
 
             Passes.Prepare(ctx, targets);
             int first = plan.Views.Count;
-            for (int v = 0; v < views.Length; v++)
+            for (int index = 0; index < views.Length; index++)
             {
-                if (Resolve(views[v].Camera.Target, main) == target)
-                    plan.Views.Add(PlanView(ctx, views[v], v, targets, lighting, time));
+                if (Resolve(views[index].Camera.Target, main) == target)
+                    plan.Views.Add(PlanView(ctx, views[index], index, targets, lighting, time));
             }
 
             plan.Targets.Add(new TargetPlan(targets, first, plan.Views.Count - first));
@@ -108,11 +109,11 @@ internal static class Scene
         return new ViewPlan(index, rect, buffers, constants);
     }
 
-    private static bool Planned(FramePlan plan, RenderTarget target)
+    private static bool IsPlanned(FramePlan plan, RenderTarget target)
     {
         foreach (TargetPlan planned in plan.Targets)
         {
-            if (planned.Targets.RenderTarget == target)
+            if (planned.FrameTargets.RenderTarget == target)
                 return true;
         }
 

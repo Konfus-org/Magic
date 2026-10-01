@@ -43,6 +43,19 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// <summary>Every loaded gem, in load order (dependencies first): the order the frame loop calls them in.</summary>
     public IGem[] Loaded { get; private set; } = [];
 
+    public void Dispose()
+    {
+        _watchers.ForEach(watcher => watcher.Dispose());
+        _watchers.Clear();
+        _sources.Clear();
+
+        foreach (Gem gem in _gems.Where(loaded => !loaded.Provides.Contains(typeof(ILogger))).Reverse().ToList())
+            Unload(gem);
+
+        foreach (Gem gem in _gems.AsEnumerable().Reverse().ToList())
+            Unload(gem);
+    }
+
     /// <summary>
     /// Loads, in one dependency-ordered pass, the gems in <paramref name="engineDirectory"/> whose name is in
     /// <paramref name="names"/> (<see cref="Default"/> takes them all) and every gem dll anywhere under
@@ -57,12 +70,12 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         List<string> paths = [];
 
         Add(engine, paths);
-        if (!Within(engineDirectory, projectRoot))
+        if (!IsUnder(engineDirectory, projectRoot))
             Add(new GemSource(projectRoot, Recursive: true, Names: null), paths);
 
         HashSet<string> seen = Load(paths, []);
 
-        foreach (string name in engine.Names?.Where(n => !seen.Contains(n)) ?? [])
+        foreach (string name in engine.Names?.Where(listed => !seen.Contains(listed)) ?? [])
             Debugging.Log.Warn($"Gem \"{name}\" is listed in the project but no dll in {engineDirectory} provides it.");
     }
 
@@ -117,7 +130,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     }
 
     /// <summary>Is <paramref name="path"/> <paramref name="root"/> itself or somewhere beneath it?</summary>
-    private bool Within(string path, string root)
+    private bool IsUnder(string path, string root)
     {
         string relative = files.Relative(root, path);
         return relative == "." || (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative));
@@ -126,7 +139,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// <summary>The source <paramref name="path"/> falls under, engine folder first; null when no source accepts it.</summary>
     private GemSource? SourceOf(string path)
     {
-        return _sources.Find(s => s.Accepts(files, path));
+        return _sources.Find(source => source.Accepts(files, path));
     }
 
     /// <summary>
@@ -165,8 +178,8 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         while (pending.Count > 0)
         {
             Gem? next = pending
-                .OrderBy(g => g.Provides.Contains(typeof(ILogger)) ? 0 : 1).ThenBy(g => g.Name)
-                .FirstOrDefault(g => g.Requires.All(container.Has) && g.DependsOn.All(n => Find(n) is not null));
+                .OrderBy(candidate => candidate.Provides.Contains(typeof(ILogger)) ? 0 : 1).ThenBy(candidate => candidate.Name)
+                .FirstOrDefault(candidate => candidate.Requires.All(container.Has) && candidate.DependsOn.All(dependency => Find(dependency) is not null));
             if (next is null)
                 break;
 
@@ -178,7 +191,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             }
 
             _gems.Add(next);
-            Changed();
+            PublishChanged();
 
             string pinned = next.IsStatic ? " (static)" : "";
             Debugging.Log.Info($"Loaded gem: {next.Name} v{next.Version}{pinned}");
@@ -187,9 +200,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         // Whatever is left needs something nobody provides, or sits in a dependency cycle.
         foreach (Gem gem in pending)
         {
-            string missing = gem.Requires.FirstOrDefault(t => !container.Has(t)) is { } type
+            string missing = gem.Requires.FirstOrDefault(required => !container.Has(required)) is { } type
                 ? $"nothing provides {type}"
-                : $"gem {gem.DependsOn.First(n => Find(n) is null)} is not loaded";
+                : $"gem {gem.DependsOn.First(dependency => Find(dependency) is null)} is not loaded";
             Debugging.Log.Warn($"Skipping gem {gem.Name} ({gem.Path}): {missing}.");
             gem.Context.Unload();
         }
@@ -227,7 +240,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
                 types = [.. ex.Types.OfType<Type>()];
             }
 
-            Type[] gemTypes = [.. types.Where(t => typeof(IGem).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface)];
+            Type[] gemTypes = [.. types.Where(candidate => typeof(IGem).IsAssignableFrom(candidate) && !candidate.IsAbstract && !candidate.IsInterface)];
             if (gemTypes.Length == 0)
             {
                 context.Unload(); // a helper library that happens to reference the host
@@ -237,7 +250,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             if (gemTypes.Length > 1)
                 Debugging.Log.Warn($"{path} holds several IGem classes; using {gemTypes[0].FullName} and ignoring the rest.");
 
-            ConstructorInfo? ctor = gemTypes[0].GetConstructors().MaxBy(c => c.GetParameters().Length);
+            ConstructorInfo? ctor = gemTypes[0].GetConstructors().MaxBy(constructor => constructor.GetParameters().Length);
             if (ctor is null)
             {
                 Debugging.Log.Warn($"Skipping {gemTypes[0].FullName}: it has no public constructor.");
@@ -260,7 +273,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     {
         try
         {
-            gem.Instance = (IGem)gem.Ctor.Invoke([.. gem.Ctor.GetParameters().Select(p => container.Get(p.ParameterType))]);
+            gem.Instance = (IGem)gem.Ctor.Invoke([.. gem.Ctor.GetParameters().Select(parameter => container.Get(parameter.ParameterType))]);
 
             // Core decides when rendering debugs, before a gem constructed after this one can reach the renderer.
 #if DEBUG
@@ -301,7 +314,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             return;
 
         // Unloading takes a few collections to go through; this is the documented way to wait it out.
-        for (int i = 0; i < 10 && _unloaded.Any(u => u.TryGetTarget(out _)); i++)
+        for (int i = 0; i < 10 && _unloaded.Any(context => context.TryGetTarget(out _)); i++)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
@@ -328,51 +341,51 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             return;
         }
 
-        if (Group(gem, "reloading") is not { } group)
+        if (WithDependents(gem, "reloading") is not { } group)
             return;
 
         Dictionary<string, byte[]> state = [];
-        foreach (Gem g in group.AsEnumerable().Reverse())
+        foreach (Gem member in group.AsEnumerable().Reverse())
         {
             try
             {
-                state[g.Path] = g.Instance!.Save();
+                state[member.Path] = member.Instance!.Save();
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
-                Debugging.Log.Warn($"Gem {g.Name}: saving reload state failed. {ex}");
+                Debugging.Log.Warn($"Gem {member.Name}: saving reload state failed. {ex}");
             }
 
-            _unloaded.Add(new WeakReference<GemLoadContext>(g.Context)); // checked next frame
-            Unload(g);
+            _unloaded.Add(new WeakReference<GemLoadContext>(member.Context)); // checked next frame
+            Unload(member);
         }
 
-        Load([.. group.Select(g => g.Path)], state);
+        Load([.. group.Select(member => member.Path)], state);
     }
 
     /// <summary>Unloads the gem at <paramref name="path"/> and everything depending on it, dependents first.</summary>
     private void Unload(string path)
     {
-        if (Find(path) is not { } gem || Group(gem, "unloading") is not { } group)
+        if (Find(path) is not { } gem || WithDependents(gem, "unloading") is not { } group)
             return;
 
-        foreach (Gem g in group.AsEnumerable().Reverse())
-            Unload(g);
+        foreach (Gem member in group.AsEnumerable().Reverse())
+            Unload(member);
     }
 
     private void Unload(Gem gem)
     {
         Debugging.Log.Info($"Unloading gem: {gem.Name}");
         _gems.Remove(gem);
-        Changed();
+        PublishChanged();
         Teardown(gem);
         gem.Context.Unload();
     }
 
     /// <summary>The set of gems changed: the frame loop's list follows, and whoever caches types by name hears of it next frame.</summary>
-    private void Changed()
+    private void PublishChanged()
     {
-        Loaded = [.. _gems.Select(g => g.Instance!)];
+        Loaded = [.. _gems.Select(loaded => loaded.Instance!)];
         events.Publish(new Event(EventType.GemsChanged));
     }
 
@@ -409,7 +422,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// <paramref name="gem"/> and every gem that (transitively) needs something it provides or names it in
     /// GemDependsOn, in load order; or null, logged, when one of them is static and so cannot go.
     /// </summary>
-    private List<Gem>? Group(Gem gem, string action)
+    private List<Gem>? WithDependents(Gem gem, string action)
     {
         HashSet<Gem> group = [gem];
         for (bool grew = true; grew;)
@@ -417,12 +430,12 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             grew = false;
             foreach (Gem other in _gems)
             {
-                if (!group.Contains(other) && group.Any(g => g.Provides.Overlaps(other.Requires) || other.DependsOn.Contains(g.Name)))
+                if (!group.Contains(other) && group.Any(member => member.Provides.Overlaps(other.Requires) || other.DependsOn.Contains(member.Name)))
                     grew |= group.Add(other);
             }
         }
 
-        if (group.FirstOrDefault(g => g.IsStatic) is { } pinned)
+        if (group.FirstOrDefault(member => member.IsStatic) is { } pinned)
         {
             string who = pinned == gem ? "it" : $"{pinned.Name}, which depends on it,";
             Debugging.Log.Warn($"Not {action} {gem.Path}: {who} is static. Restart to apply the change.");
@@ -432,11 +445,11 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         return [.. _gems.Where(group.Contains)];
     }
 
-    /// <summary>The loaded gem at <paramref name="path"/> or, failing that, with that name (as GemDependsOn refers to it).</summary>
-    private Gem? Find(string path)
+    /// <summary>The loaded gem at <paramref name="pathOrName"/>, or failing that with that name (as GemDependsOn refers to it).</summary>
+    private Gem? Find(string pathOrName)
     {
-        return _gems.Find(g => string.Equals(g.Path, path, StringComparison.OrdinalIgnoreCase))
-            ?? _gems.Find(g => string.Equals(g.Name, path, StringComparison.Ordinal));
+        return _gems.Find(loaded => string.Equals(loaded.Path, pathOrName, StringComparison.OrdinalIgnoreCase))
+            ?? _gems.Find(loaded => string.Equals(loaded.Name, pathOrName, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -453,25 +466,12 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
             MetadataReader metadata = pe.GetMetadataReader();
             return metadata.IsAssembly && metadata.AssemblyReferences
-                .Any(h => metadata.GetString(metadata.GetAssemblyReference(h).Name) == Host.GetName().Name);
+                .Any(reference => metadata.GetString(metadata.GetAssemblyReference(reference).Name) == Host.GetName().Name);
         }
         catch (Exception ex) when (ex is BadImageFormatException or InvalidOperationException)
         {
             return false; // not a PE file
         }
-    }
-
-    public void Dispose()
-    {
-        _watchers.ForEach(w => w.Dispose());
-        _watchers.Clear();
-        _sources.Clear();
-
-        foreach (Gem gem in _gems.Where(g => !g.Provides.Contains(typeof(ILogger))).Reverse().ToList())
-            Unload(gem);
-
-        foreach (Gem gem in _gems.AsEnumerable().Reverse().ToList())
-            Unload(gem);
     }
 
     /// <summary>A gem: what its assembly declares, read before construction, and the instance once built.</summary>
@@ -486,7 +486,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             IsStatic = bool.TryParse(Metadata(assembly, "MagicGem.Static"), out bool isStatic) && isStatic;
             DependsOn = Metadata(assembly, "MagicGem.DependsOn")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
             Provides = [.. ctor.DeclaringType!.GetInterfaces().Where(i => i.Assembly == Host && i != typeof(IGem))];
-            Requires = [.. ctor.GetParameters().Select(p => p.ParameterType)];
+            Requires = [.. ctor.GetParameters().Select(parameter => parameter.ParameterType)];
         }
 
         public GemLoadContext Context { get; }
@@ -514,7 +514,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
         private static string? Metadata(Assembly assembly, string key)
         {
-            return assembly.GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(a => a.Key == key)?.Value;
+            return assembly.GetCustomAttributes<AssemblyMetadataAttribute>().FirstOrDefault(attribute => attribute.Key == key)?.Value;
         }
     }
 
@@ -540,7 +540,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             // Anything the host already has loaded (Core, CommandLineParser, ...) must be shared, never loaded a
             // second time here: types from two copies of one assembly are not interchangeable, and the gem's IGem
             // would not be the host's IGem.
-            if (Default.Assemblies.Any(a => a.GetName().Name == assemblyName.Name))
+            if (Default.Assemblies.Any(loaded => loaded.GetName().Name == assemblyName.Name))
                 return null;
 
             string? assemblyPath = _resolver.ResolveAssemblyToPath(assemblyName);
@@ -584,7 +584,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
             string[] folders = relative.Split(Separators, StringSplitOptions.RemoveEmptyEntries)[..^1];
             return Recursive
-                ? folders.All(f => f is not ("obj" or "Cache") && !f.StartsWith('.'))
+                ? folders.All(folder => folder is not ("obj" or "Cache") && !folder.StartsWith('.'))
                 : folders.Length == 0;
         }
 

@@ -1,4 +1,5 @@
 using Magic.Contexts.Settings;
+using Magic.Interfaces;
 using Magic.Utils;
 using SDL3;
 using System.Diagnostics;
@@ -23,18 +24,18 @@ internal sealed class GpuDevice : IDisposable
     private readonly Dictionary<uint, nint> _claimed = [];
     private readonly InFlight[] _slots = [new(), new()];
     private readonly List<(Kind Kind, nint Handle)> _released = []; // freed since the last submit
-    private long _frame;
+    private long _frameNumber;
     private bool _vsync;
 
-    public GpuDevice(RenderSettings settings, bool debug, string gemsDirectory)
+    public GpuDevice(RenderSettings settings, bool debug, IFileSystem files, string gemsDirectory)
     {
         _settings = settings;
         _vsync = settings.Vsync;
 
         // dxcompiler.dll loads dxil.dll by bare name and, without it, produces unsigned DXIL that D3D12 rejects; the gem
         // folder is not on the search path, so it is loaded by full path first.
-        string dxil = Path.Combine(gemsDirectory, "dxil.dll");
-        if (File.Exists(dxil))
+        string dxil = files.Combine(gemsDirectory, "dxil.dll");
+        if (files.FileExists(dxil))
             NativeLibrary.Load(dxil);
         else
             Debugging.Log.Warn($"dxil.dll not found at {dxil}; DXIL shaders will be unsigned.");
@@ -77,6 +78,36 @@ internal sealed class GpuDevice : IDisposable
         Debugging.Log.Info($"GPU device: {Name} ({Driver}), shaders {ShaderFormat}, depth {DepthFormat}, debug {debug}, on thread {_mainThread}.");
     }
 
+    public void Dispose()
+    {
+        if (Handle == 0)
+            return;
+
+        Staging.Dispose();
+        WaitIdle();
+
+        foreach (InFlight slot in _slots)
+        {
+            if (slot.Fence != 0)
+                SDL.ReleaseGPUFence(Handle, slot.Fence);
+            foreach ((Kind kind, nint handle) in slot.Released)
+                Release(kind, handle);
+            slot.Released.Clear();
+        }
+
+        foreach ((Kind kind, nint handle) in _released)
+            Release(kind, handle);
+        _released.Clear();
+
+        foreach (nint window in _claimed.Values)
+            SDL.ReleaseWindowFromGPUDevice(Handle, window);
+        _claimed.Clear();
+
+        SDL.DestroyGPUDevice(Handle);
+        Handle = 0;
+        ShaderCross.Quit();
+    }
+
     public nint Handle { get; private set; }
 
     public SDL.GPUShaderFormat ShaderFormat { get; }
@@ -98,13 +129,13 @@ internal sealed class GpuDevice : IDisposable
     }
 
     /// <summary>Throws with SDL's error text when an SDL call reported failure.</summary>
-    public static void Check(bool ok, string what)
+    public static void ThrowOnError(bool ok, string what)
     {
         if (!ok)
             throw new InvalidOperationException($"{what} failed: {SDL.GetError()}");
     }
 
-    public static nint Check(nint handle, string what)
+    public static nint ThrowOnError(nint handle, string what)
     {
         if (handle == 0)
             throw new InvalidOperationException($"{what} failed: {SDL.GetError()}");
@@ -115,17 +146,17 @@ internal sealed class GpuDevice : IDisposable
     /// Starts a frame: waits until the frame that last used this slot is done, releases what was freed during it, and
     /// returns a command buffer. Every <see cref="Begin"/> is followed by one <see cref="Submit"/>.
     /// </summary>
-    public nint Begin()
+    public nint BeginFrame()
     {
         AssertMainThread();
         if (_vsync != _settings.Vsync)
             ChangeVsync();
 
-        InFlight slot = _slots[_frame % FramesInFlight];
+        InFlight slot = _slots[_frameNumber % FramesInFlight];
         if (slot.Fence != 0)
         {
             Span<nint> fences = [slot.Fence];
-            Check(SDL.WaitForGPUFences(Handle, true, fences, 1), "SDL_WaitForGPUFences");
+            ThrowOnError(SDL.WaitForGPUFences(Handle, true, fences, 1), "SDL_WaitForGPUFences");
             SDL.ReleaseGPUFence(Handle, slot.Fence);
             slot.Fence = 0;
         }
@@ -134,7 +165,7 @@ internal sealed class GpuDevice : IDisposable
             Release(kind, handle);
         slot.Released.Clear();
 
-        return Check(SDL.AcquireGPUCommandBuffer(Handle), "SDL_AcquireGPUCommandBuffer");
+        return ThrowOnError(SDL.AcquireGPUCommandBuffer(Handle), "SDL_AcquireGPUCommandBuffer");
     }
 
     /// <summary>Submits the frame; its fence, and everything freed since the last submit, go into its slot.</summary>
@@ -145,11 +176,11 @@ internal sealed class GpuDevice : IDisposable
         if (fence == 0)
             Debugging.Log.Error($"SDL_SubmitGPUCommandBuffer failed: {SDL.GetError()}");
 
-        InFlight slot = _slots[_frame % FramesInFlight];
+        InFlight slot = _slots[_frameNumber % FramesInFlight];
         slot.Fence = fence;
         slot.Released.AddRange(_released);
         _released.Clear();
-        _frame++;
+        _frameNumber++;
     }
 
     public void WaitIdle()
@@ -174,7 +205,7 @@ internal sealed class GpuDevice : IDisposable
         if (_claimed.TryGetValue(id, out nint claimed) && claimed == window)
             return claimed;
 
-        Check(SDL.ClaimWindowForGPUDevice(Handle, window), "SDL_ClaimWindowForGPUDevice");
+        ThrowOnError(SDL.ClaimWindowForGPUDevice(Handle, window), "SDL_ClaimWindowForGPUDevice");
         SDL.GPUPresentMode mode = SetPresentMode(window);
 
         _claimed[id] = window;
@@ -185,7 +216,7 @@ internal sealed class GpuDevice : IDisposable
     public nint CreateTransferBuffer(SDL.GPUTransferBufferUsage usage, uint size)
     {
         SDL.GPUTransferBufferCreateInfo info = new() { Usage = usage, Size = size };
-        return Check(SDL.CreateGPUTransferBuffer(Handle, in info), "SDL_CreateGPUTransferBuffer");
+        return ThrowOnError(SDL.CreateGPUTransferBuffer(Handle, in info), "SDL_CreateGPUTransferBuffer");
     }
 
     /// <summary>Released once the frames in flight now are done with it: it goes with the next submit's fence.</summary>
@@ -206,17 +237,17 @@ internal sealed class GpuDevice : IDisposable
         nint transfer = CreateTransferBuffer(SDL.GPUTransferBufferUsage.Download, bytes);
         try
         {
-            nint commandBuffer = Check(SDL.AcquireGPUCommandBuffer(Handle), "SDL_AcquireGPUCommandBuffer");
+            nint commandBuffer = ThrowOnError(SDL.AcquireGPUCommandBuffer(Handle), "SDL_AcquireGPUCommandBuffer");
             nint copyPass = SDL.BeginGPUCopyPass(commandBuffer);
             download(copyPass, transfer);
             SDL.EndGPUCopyPass(copyPass);
 
-            nint fence = Check(SDL.SubmitGPUCommandBufferAndAcquireFence(commandBuffer), "SDL_SubmitGPUCommandBufferAndAcquireFence");
+            nint fence = ThrowOnError(SDL.SubmitGPUCommandBufferAndAcquireFence(commandBuffer), "SDL_SubmitGPUCommandBufferAndAcquireFence");
             Span<nint> fences = [fence];
-            Check(SDL.WaitForGPUFences(Handle, true, fences, 1), "SDL_WaitForGPUFences");
+            ThrowOnError(SDL.WaitForGPUFences(Handle, true, fences, 1), "SDL_WaitForGPUFences");
             SDL.ReleaseGPUFence(Handle, fence);
 
-            nint mapped = Check(SDL.MapGPUTransferBuffer(Handle, transfer, false), "SDL_MapGPUTransferBuffer");
+            nint mapped = ThrowOnError(SDL.MapGPUTransferBuffer(Handle, transfer, false), "SDL_MapGPUTransferBuffer");
             byte[] result = GC.AllocateUninitializedArray<byte>((int)bytes);
             new ReadOnlySpan<byte>((void*)mapped, (int)bytes).CopyTo(result);
             SDL.UnmapGPUTransferBuffer(Handle, transfer);
@@ -269,36 +300,6 @@ internal sealed class GpuDevice : IDisposable
         return mode;
     }
 
-    public void Dispose()
-    {
-        if (Handle == 0)
-            return;
-
-        Staging.Dispose();
-        WaitIdle();
-
-        foreach (InFlight slot in _slots)
-        {
-            if (slot.Fence != 0)
-                SDL.ReleaseGPUFence(Handle, slot.Fence);
-            foreach ((Kind kind, nint handle) in slot.Released)
-                Release(kind, handle);
-            slot.Released.Clear();
-        }
-
-        foreach ((Kind kind, nint handle) in _released)
-            Release(kind, handle);
-        _released.Clear();
-
-        foreach (nint window in _claimed.Values)
-            SDL.ReleaseWindowFromGPUDevice(Handle, window);
-        _claimed.Clear();
-
-        SDL.DestroyGPUDevice(Handle);
-        Handle = 0;
-        ShaderCross.Quit();
-    }
-
     public enum Kind : byte { Buffer, Texture, TransferBuffer, Sampler, GraphicsPipeline, ComputePipeline }
 
     /// <summary>One frame slot: the fence of the frame that last used it and what was freed while it was recorded.</summary>
@@ -333,6 +334,13 @@ internal sealed class Staging : IDisposable
         _buffer = device.CreateTransferBuffer(SDL.GPUTransferBufferUsage.Upload, _capacity);
     }
 
+    public void Dispose()
+    {
+        Unmap();
+        _device.Defer(GpuDevice.Kind.TransferBuffer, _buffer);
+        _buffer = 0;
+    }
+
     /// <summary>Copies <paramref name="data"/> in; the transfer buffer and offset a copy pass reads it from, valid until the frame is submitted.</summary>
     public unsafe (nint TransferBuffer, uint Offset) Stage(ReadOnlySpan<byte> data)
     {
@@ -345,7 +353,7 @@ internal sealed class Staging : IDisposable
 
         if (_mapped == 0)
         {
-            _mapped = GpuDevice.Check(SDL.MapGPUTransferBuffer(_device.Handle, _buffer, true), "SDL_MapGPUTransferBuffer");
+            _mapped = GpuDevice.ThrowOnError(SDL.MapGPUTransferBuffer(_device.Handle, _buffer, true), "SDL_MapGPUTransferBuffer");
             _used = aligned = 0;
             if (bytes > _capacity)
                 Grow(bytes);
@@ -373,15 +381,8 @@ internal sealed class Staging : IDisposable
         _device.Defer(GpuDevice.Kind.TransferBuffer, _buffer);
         _capacity = BitOperations.RoundUpToPowerOf2(Math.Max(needed, _capacity * 2));
         _buffer = _device.CreateTransferBuffer(SDL.GPUTransferBufferUsage.Upload, _capacity);
-        _mapped = GpuDevice.Check(SDL.MapGPUTransferBuffer(_device.Handle, _buffer, false), "SDL_MapGPUTransferBuffer");
+        _mapped = GpuDevice.ThrowOnError(SDL.MapGPUTransferBuffer(_device.Handle, _buffer, false), "SDL_MapGPUTransferBuffer");
         _used = 0;
         Debugging.Log.Debug($"Staging grown to {_capacity / 1024} KiB.");
-    }
-
-    public void Dispose()
-    {
-        Unmap();
-        _device.Defer(GpuDevice.Kind.TransferBuffer, _buffer);
-        _buffer = 0;
     }
 }

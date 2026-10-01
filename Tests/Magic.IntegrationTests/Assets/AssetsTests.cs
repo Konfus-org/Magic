@@ -28,6 +28,11 @@ public sealed class AssetsTests : IDisposable
         Directory.CreateDirectory(_project.Assets);
     }
 
+    public void Dispose()
+    {
+        _root.Dispose();
+    }
+
     [Fact]
     public void A_json_asset_is_read_from_its_file()
     {
@@ -225,6 +230,87 @@ public sealed class AssetsTests : IDisposable
     }
 
     [Fact]
+    public void A_load_with_dependencies_loads_what_the_asset_names()
+    {
+        Write("M.mat", """{ "shader": { "id": 81 } }""", 80);
+        Write("S.surf.hlsl", "void surface() {}", 81);
+        using Services.Assets assets = Open();
+
+        assets.Load(Mat, dependencies: true);
+
+        Assert.Contains(assets.PoolStats(), pool => pool.Type == nameof(Shader) && pool.Count == 1);
+    }
+
+    [Fact]
+    public void A_load_without_dependencies_loads_the_asset_alone()
+    {
+        Write("M.mat", """{ "shader": { "id": 81 } }""", 80);
+        Write("S.surf.hlsl", "void surface() {}", 81);
+        using Services.Assets assets = Open();
+
+        assets.Load(Mat);
+
+        Assert.DoesNotContain(assets.PoolStats(), pool => pool.Type == nameof(Shader));
+    }
+
+    [Fact]
+    public async Task An_async_load_with_dependencies_is_done_once_they_are_loaded()
+    {
+        Write("M.mat", """{ "shader": { "id": 81 } }""", 80);
+        Write("S.surf.hlsl", "void surface() {}", 81);
+        using Services.Assets assets = Open();
+
+        await assets.LoadAsync(Mat, dependencies: true);
+
+        Assert.Contains(assets.PoolStats(), pool => pool.Type == nameof(Shader) && pool.Count == 1);
+    }
+
+    [Fact]
+    public void A_render_texture_a_material_names_is_not_loaded_as_a_texture()
+    {
+        Write("M.mat", """{ "params": { "color": { "texture": { "id": 83 } } } }""", 80);
+        Write("Screen.rtex", "{}", 83);
+        using Services.Assets assets = Open();
+
+        assets.Load(Mat, dependencies: true);
+
+        Assert.False(assets.HasFailed(new Handle<Texture>(83)));
+    }
+
+    [Fact]
+    public async Task Loading_dependencies_loads_what_the_holders_name()
+    {
+        Write("S.surf.hlsl", "void surface() {}", 81);
+        using Services.Assets assets = Open();
+
+        await assets.LoadDependenciesAsync([new Material { Shader = new Handle<Shader>(81) }]);
+
+        Assert.Contains(assets.PoolStats(), pool => pool.Type == nameof(Shader) && pool.Count == 1);
+    }
+
+    [Fact]
+    public void An_asset_that_could_not_be_loaded_has_failed()
+    {
+        Write("M.mat", "{ not json", 80);
+        using Services.Assets assets = Open();
+
+        assets.Load(Mat);
+
+        Assert.True(assets.HasFailed(Mat));
+    }
+
+    [Fact]
+    public void A_failed_asset_is_not_kept_in_its_pool()
+    {
+        Write("M.mat", "{ not json", 80);
+        using Services.Assets assets = Open();
+
+        assets.Load(Mat);
+
+        Assert.Equal(0, Assert.Single(assets.PoolStats()).Count);
+    }
+
+    [Fact]
     public async Task A_cancelled_load_throws()
     {
         Write("M.mat", "{}", 80);
@@ -232,7 +318,7 @@ public sealed class AssetsTests : IDisposable
         using CancellationTokenSource cancel = new();
         cancel.Cancel();
 
-        Func<Task> load = () => assets.LoadAsync(Mat, cancel.Token);
+        Func<Task> load = () => assets.LoadAsync(Mat, cancellationToken: cancel.Token);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(load);
     }
@@ -244,7 +330,7 @@ public sealed class AssetsTests : IDisposable
 
         _root.Write("Assets/New.mat", "{}");
 
-        Assert.Equal(EventType.AssetAdded, Next(assets).Type);
+        Assert.Equal(EventType.AssetAdded, NextEvent(assets).Type);
     }
 
     [Fact]
@@ -253,7 +339,7 @@ public sealed class AssetsTests : IDisposable
         using Services.Assets assets = Open();
         Write("Late.mat", "{}", 95);
 
-        Next(assets);
+        NextEvent(assets);
 
         Assert.NotNull(assets.Load(new Handle<Material>(95)));
     }
@@ -265,7 +351,7 @@ public sealed class AssetsTests : IDisposable
         assets.Load(new Handle<Material>(95));
         Write("Late.mat", "{}", 95);
 
-        Next(assets);
+        NextEvent(assets);
 
         Assert.NotNull(assets.Load(new Handle<Material>(95)));
     }
@@ -278,7 +364,7 @@ public sealed class AssetsTests : IDisposable
 
         File.WriteAllText(file, """{ "doubleSided": true }""");
 
-        Assert.Equal(new Event(EventType.AssetModified, Id: 80, Text: "M.mat"), Next(assets));
+        Assert.Equal(new Event(EventType.AssetModified, Id: 80, Text: "M.mat"), NextEvent(assets));
     }
 
     [Fact]
@@ -289,7 +375,7 @@ public sealed class AssetsTests : IDisposable
 
         File.AppendAllText(file + ".meta", "\n");
 
-        Assert.Equal(new Event(EventType.AssetModified, Id: 80, Text: "M.mat"), Next(assets));
+        Assert.Equal(new Event(EventType.AssetModified, Id: 80, Text: "M.mat"), NextEvent(assets));
     }
 
     [Fact]
@@ -300,7 +386,7 @@ public sealed class AssetsTests : IDisposable
         Material? before = assets.Load(Mat);
         File.WriteAllText(file, """{ "doubleSided": true }""");
 
-        Next(assets);
+        NextEvent(assets);
 
         Assert.NotSame(before, assets.Load(Mat));
     }
@@ -315,7 +401,7 @@ public sealed class AssetsTests : IDisposable
         File.Move(file, Path.Combine(_project.Assets, "Sub", "Renamed.mat"));
         File.Move(file + ".meta", Path.Combine(_project.Assets, "Sub", "Renamed.mat.meta"));
 
-        Assert.Equal(new Event(EventType.AssetMoved, Id: 80, Text: "Sub/Renamed.mat", OldText: "M.mat"), Next(assets));
+        Assert.Equal(new Event(EventType.AssetMoved, Id: 80, Text: "Sub/Renamed.mat", OldText: "M.mat"), NextEvent(assets));
     }
 
     [Fact]
@@ -326,7 +412,7 @@ public sealed class AssetsTests : IDisposable
 
         Directory.Move(Path.Combine(_project.Assets, "Sub"), Path.Combine(_project.Assets, "Other"));
 
-        Assert.Equal(new Event(EventType.AssetMoved, Id: 80, Text: "Other/M.mat", OldText: "Sub/M.mat"), Next(assets));
+        Assert.Equal(new Event(EventType.AssetMoved, Id: 80, Text: "Other/M.mat", OldText: "Sub/M.mat"), NextEvent(assets));
     }
 
     [Fact]
@@ -338,12 +424,7 @@ public sealed class AssetsTests : IDisposable
         File.Delete(file);
         File.Delete(file + ".meta");
 
-        Assert.Equal(new Event(EventType.AssetRemoved, Id: 80, Text: "M.mat"), Next(assets));
-    }
-
-    public void Dispose()
-    {
-        _root.Dispose();
+        Assert.Equal(new Event(EventType.AssetRemoved, Id: 80, Text: "M.mat"), NextEvent(assets));
     }
 
     private Services.Assets Open()
@@ -371,7 +452,7 @@ public sealed class AssetsTests : IDisposable
     }
 
     /// <summary>Pumps the service like the frame loop until the watcher's changes have settled into exactly one event.</summary>
-    private Event Next(Services.Assets assets)
+    private Event NextEvent(Services.Assets assets)
     {
         List<Event> seen = [];
         Stopwatch clock = Stopwatch.StartNew();

@@ -13,6 +13,11 @@ namespace Magic.Interfaces;
 /// </summary>
 public interface IGem : IDisposable
 {
+    /// <summary>Nothing to let go of by default; a gem that took handles implements Dispose itself.</summary>
+    void IDisposable.Dispose()
+    {
+    }
+
     void Update(in Frame frame)
     {
     }
@@ -37,11 +42,6 @@ public interface IGem : IDisposable
     }
 
     void Restore(byte[] state)
-    {
-    }
-
-    /// <summary>Nothing to let go of by default; a gem that took handles implements Dispose itself.</summary>
-    void IDisposable.Dispose()
     {
     }
 }

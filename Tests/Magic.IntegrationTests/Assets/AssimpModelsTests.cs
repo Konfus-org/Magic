@@ -31,9 +31,9 @@ public sealed class AssimpModelsTests
         Loader().Load(model, Encoding.ASCII.GetBytes(Triangle));
 
         Mesh mesh = model.Meshes[0];
-        Vertex a = mesh.Vertices[mesh.Indices[0]], b = mesh.Vertices[mesh.Indices[1]], c = mesh.Vertices[mesh.Indices[2]];
-        Vector3 face = Vector3.Normalize(Vector3.Cross(b.Position - a.Position, c.Position - a.Position));
-        Assert.Equal(1f, Vector3.Dot(face, a.Normal), 3);
+        Vertex first = mesh.Vertices[mesh.Indices[0]], second = mesh.Vertices[mesh.Indices[1]], third = mesh.Vertices[mesh.Indices[2]];
+        Vector3 face = Vector3.Normalize(Vector3.Cross(second.Position - first.Position, third.Position - first.Position));
+        Assert.Equal(1f, Vector3.Dot(face, first.Normal), 3);
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public sealed class AssimpModelsTests
 
         Loader().Load(cube, Resources.Read(cube.Path));
 
-        Assert.All(cube.Meshes[0].Vertices, v => Assert.Equal(1f, MathF.Abs(v.Position.X), 3));
+        Assert.All(cube.Meshes[0].Vertices, vertex => Assert.Equal(1f, MathF.Abs(vertex.Position.X), 3));
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public sealed class AssimpModelsTests
 
         Loader().Load(plane, Resources.Read(plane.Path));
 
-        Assert.All(plane.Meshes[0].Vertices, v => Assert.Equal(1f, v.Normal.Y, 3));
+        Assert.All(plane.Meshes[0].Vertices, vertex => Assert.Equal(1f, vertex.Normal.Y, 3));
     }
 
     [Fact]

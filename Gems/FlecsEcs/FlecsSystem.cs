@@ -36,9 +36,24 @@ internal sealed unsafe class FlecsScheduleBuilder(FlecsEcs ecs, string name) : I
 
     public IDisposable Run(Action<float> callback)
     {
+        // Immediate: on the main thread with the world writable, and with deferring suspended so what the callback
+        // changes (an entity created, a component added) is there the moment it asks for it, as outside a pipeline.
         System_ system = new SystemBuilder(ecs.Native.Handle, name)
             .Kind(ecs.Phases.Tag(_phase))
-            .Run((Iter it) => callback(it.DeltaTime()));
+            .Immediate()
+            .Run((Iter it) =>
+            {
+                float dt = it.DeltaTime();
+                ecs.Native.DeferSuspend();
+                try
+                {
+                    callback(dt);
+                }
+                finally
+                {
+                    ecs.Native.DeferResume();
+                }
+            });
 
         return new FlecsSystem(ecs, system.Entity.Id);
     }
@@ -51,20 +66,20 @@ internal sealed unsafe class FlecsScheduleBuilder(FlecsEcs ecs, string name) : I
 /// </summary>
 internal sealed class FlecsSystem : IDisposable
 {
-    private readonly FlecsEcs _world;
+    private readonly FlecsEcs _ecs;
     private readonly ulong _id;
 
     public FlecsSystem(FlecsEcs ecs, ulong id)
     {
-        _world = ecs;
+        _ecs = ecs;
         _id = id;
     }
 
     public void Dispose()
     {
         // Flecs.NET.Debug aborts on a dead entity rather than throwing, so check first.
-        if (!_world.IsDisposed && _world.Native.IsAlive(_id))
-            _world.Native.Entity(_id).Destruct();
+        if (!_ecs.IsDisposed && _ecs.Native.IsAlive(_id))
+            _ecs.Native.Entity(_id).Destruct();
     }
 }
 
@@ -97,11 +112,11 @@ internal sealed unsafe class FlecsSystemBuilder<T1> : FlecsSystemBuilder, IEcsPi
 
         while (it.Next())
         {
-            flecs.ecs_iter_t* p = it.Handle;
-            ref T1 c1 = ref FlecsIter.First<T1>(p, 0, out int s1);
+            flecs.ecs_iter_t* iter = it.Handle;
+            ref T1 c1 = ref FlecsIter.First<T1>(iter, 0, out int s1);
 
-            for (int i = 0, n = p->count; i < n; i++)
-                action(dt, new Handle(p->entities[i]), ref Unsafe.Add(ref c1, i * s1));
+            for (int i = 0, count = iter->count; i < count; i++)
+                action(dt, new Handle(iter->entities[i]), ref Unsafe.Add(ref c1, i * s1));
         }
     }, action);
 
@@ -131,12 +146,12 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2> : FlecsSystemBuilder, IE
 
         while (it.Next())
         {
-            flecs.ecs_iter_t* p = it.Handle;
-            ref T1 c1 = ref FlecsIter.First<T1>(p, 0, out int s1);
-            ref T2 c2 = ref FlecsIter.First<T2>(p, 1, out int s2);
+            flecs.ecs_iter_t* iter = it.Handle;
+            ref T1 c1 = ref FlecsIter.First<T1>(iter, 0, out int s1);
+            ref T2 c2 = ref FlecsIter.First<T2>(iter, 1, out int s2);
 
-            for (int i = 0, n = p->count; i < n; i++)
-                action(dt, new Handle(p->entities[i]), ref Unsafe.Add(ref c1, i * s1), ref Unsafe.Add(ref c2, i * s2));
+            for (int i = 0, count = iter->count; i < count; i++)
+                action(dt, new Handle(iter->entities[i]), ref Unsafe.Add(ref c1, i * s1), ref Unsafe.Add(ref c2, i * s2));
         }
     }, action);
 
@@ -166,16 +181,16 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2, T3> : FlecsSystemBuilder
 
         while (it.Next())
         {
-            flecs.ecs_iter_t* p = it.Handle;
-            ref T1 c1 = ref FlecsIter.First<T1>(p, 0, out int s1);
-            ref T2 c2 = ref FlecsIter.First<T2>(p, 1, out int s2);
-            ref T3 c3 = ref FlecsIter.First<T3>(p, 2, out int s3);
+            flecs.ecs_iter_t* iter = it.Handle;
+            ref T1 c1 = ref FlecsIter.First<T1>(iter, 0, out int s1);
+            ref T2 c2 = ref FlecsIter.First<T2>(iter, 1, out int s2);
+            ref T3 c3 = ref FlecsIter.First<T3>(iter, 2, out int s3);
 
-            for (int i = 0, n = p->count; i < n; i++)
+            for (int i = 0, count = iter->count; i < count; i++)
             {
                 action(
                     dt,
-                    new Handle(p->entities[i]),
+                    new Handle(iter->entities[i]),
                     ref Unsafe.Add(ref c1, i * s1),
                     ref Unsafe.Add(ref c2, i * s2),
                     ref Unsafe.Add(ref c3, i * s3));
@@ -216,17 +231,17 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2, T3, T4> : FlecsSystemBui
 
         while (it.Next())
         {
-            flecs.ecs_iter_t* p = it.Handle;
-            ref T1 c1 = ref FlecsIter.First<T1>(p, 0, out int s1);
-            ref T2 c2 = ref FlecsIter.First<T2>(p, 1, out int s2);
-            ref T3 c3 = ref FlecsIter.First<T3>(p, 2, out int s3);
-            ref T4 c4 = ref FlecsIter.First<T4>(p, 3, out int s4);
+            flecs.ecs_iter_t* iter = it.Handle;
+            ref T1 c1 = ref FlecsIter.First<T1>(iter, 0, out int s1);
+            ref T2 c2 = ref FlecsIter.First<T2>(iter, 1, out int s2);
+            ref T3 c3 = ref FlecsIter.First<T3>(iter, 2, out int s3);
+            ref T4 c4 = ref FlecsIter.First<T4>(iter, 3, out int s4);
 
-            for (int i = 0, n = p->count; i < n; i++)
+            for (int i = 0, count = iter->count; i < count; i++)
             {
                 action(
                     dt,
-                    new Handle(p->entities[i]),
+                    new Handle(iter->entities[i]),
                     ref Unsafe.Add(ref c1, i * s1),
                     ref Unsafe.Add(ref c2, i * s2),
                     ref Unsafe.Add(ref c3, i * s3),

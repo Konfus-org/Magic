@@ -1,4 +1,5 @@
 using Magic.Contexts.Components;
+using Magic.Extensions;
 using System.Drawing;
 using Xunit;
 

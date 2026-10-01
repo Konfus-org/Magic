@@ -1,6 +1,7 @@
 using Magic.Contexts;
 using Magic.Contexts.Input;
 using Magic.Contexts.Rendering;
+using Magic.Interfaces;
 using Magic.Services;
 using Magic.Systems.Rendering;
 using Magic.Systems.Streaming;
@@ -14,7 +15,7 @@ namespace Magic.Systems.DebugUI;
 /// (verbose, so only with --verbose) every <see cref="LogIntervalMs"/> whether open or not, so a headless or scripted
 /// run can have them too. Reads the other systems, changes nothing.
 /// </summary>
-public sealed class DebuggerDisplaySystem : DebugWindowSystem
+internal sealed class DebuggerDisplaySystem : DebugWindowSystem
 {
     public const double LogIntervalMs = 10000;
 
@@ -24,11 +25,11 @@ public sealed class DebuggerDisplaySystem : DebugWindowSystem
     private readonly Assets _assets;
 
     private double _frameMs;
-    private double _worstMs;
+    private double _lastFrameMs;
     private double _windowWorstMs;
     private double _sinceLogMs;
 
-    public DebuggerDisplaySystem(TransformSystem transforms, RenderSystem rendering, StreamingSystem streaming, Assets assets) : base(Key.F3)
+    public DebuggerDisplaySystem(TransformSystem transforms, RenderSystem rendering, StreamingSystem streaming, Assets assets, IInput? input) : base(Key.F3, input)
     {
         _transforms = transforms;
         _rendering = rendering;
@@ -36,7 +37,7 @@ public sealed class DebuggerDisplaySystem : DebugWindowSystem
         _assets = assets;
     }
 
-    protected override void Run(in Frame frame)
+    protected override void Draw(in Frame frame)
     {
         double dtMs = frame.Delta * 1000d;
         _frameMs = _frameMs == 0 ? dtMs : _frameMs + ((dtMs - _frameMs) * 0.05);
@@ -49,12 +50,12 @@ public sealed class DebuggerDisplaySystem : DebugWindowSystem
         if (Open)
         {
             Debugging.UI.Begin("Debug");
-            Debugging.UI.Text($"Frame {_frameMs:F2} ms ({fps:F0} fps), worst {_worstMs:F2} ms");
+            Debugging.UI.Text($"Frame {_frameMs:F2} ms ({fps:F0} fps), worst {_lastFrameMs:F2} ms");
             Debugging.UI.Text($"Transforms {_transforms.LastMs:F2} ms, render sync {_rendering.SyncMs:F2} ms, render {_rendering.RenderMs:F2} ms");
             Debugging.UI.Text($"Instances {render.Instances}");
             Debugging.UI.Text($"Draws {render.Draws}, dispatches {render.Dispatches}, pipelines pending {render.PipelinesPending}");
             Debugging.UI.Text($"Resident meshes {render.ResidentMeshes}, textures {render.ResidentTextures}; renderer sync {render.CpuSyncMs:F2} ms, record {render.CpuRecordMs:F2} ms, GPU wait {render.CpuWaitMs:F2} ms");
-            Debugging.UI.Text($"Streaming: {streaming.Loaded} chunk(s) loaded ({streaming.Active} active, " +
+            Debugging.UI.Text($"Streaming: {streaming.Domains} domain(s), {streaming.Loaded} chunk(s) loaded ({streaming.Active} active, " +
                 $"{streaming.Loading} loading, {streaming.PendingUnload} unloading), {streaming.Entities} entities, {streaming.Cameras} camera(s).");
             foreach (AssetPoolStats pool in _assets.PoolStats())
                 Debugging.UI.Text($"Pool {pool.Type} {pool.Count} ({Megabytes(pool.Bytes):F1} / {Megabytes(pool.Budget):F0} MB), hits {pool.Hits}, misses {pool.Misses}");
@@ -65,7 +66,7 @@ public sealed class DebuggerDisplaySystem : DebugWindowSystem
         if (_sinceLogMs >= LogIntervalMs)
         {
             _sinceLogMs = 0;
-            Debugging.Log.Verbose($"Frame {_frameMs:F2} ms ({fps:F0} fps, worst {_worstMs:F2}): transforms {_transforms.LastMs:F2}, render sync {_rendering.SyncMs:F2}, " +
+            Debugging.Log.Verbose($"Frame {_frameMs:F2} ms ({fps:F0} fps, worst {_lastFrameMs:F2}): transforms {_transforms.LastMs:F2}, render sync {_rendering.SyncMs:F2}, " +
                 $"render {_rendering.RenderMs:F2} (renderer sync {render.CpuSyncMs:F2}, record {render.CpuRecordMs:F2}, GPU wait {render.CpuWaitMs:F2}) ms; " +
                 $"{render.Instances} instances, {render.Draws} draws, {render.Dispatches} dispatches.");
         }
@@ -73,7 +74,7 @@ public sealed class DebuggerDisplaySystem : DebugWindowSystem
         if (fps < 30)
             Debugging.Log.Verbose("FPS is below 30! Consider profiling and optimizing.");
 
-        _worstMs = _windowWorstMs;
+        _lastFrameMs = _windowWorstMs;
         _windowWorstMs = 0;
     }
 

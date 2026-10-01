@@ -10,19 +10,19 @@ namespace Magic.Extensions;
 /// </summary>
 public static class MatrixExtensions
 {
-    extension(Matrix4x4 m)
+    extension(Matrix4x4 matrix)
     {
         /// <summary>The first row: the local +X axis in world space, scale included.</summary>
-        public Vector3 Right => new(m.M11, m.M12, m.M13);
+        public Vector3 Right => new(matrix.M11, matrix.M12, matrix.M13);
 
         /// <summary>The second row: the local +Y axis in world space, scale included.</summary>
-        public Vector3 Up => new(m.M21, m.M22, m.M23);
+        public Vector3 Up => new(matrix.M21, matrix.M22, matrix.M23);
 
         /// <summary>The third row: the local +Z axis in world space, scale included.</summary>
-        public Vector3 Forward => new(m.M31, m.M32, m.M33);
+        public Vector3 Forward => new(matrix.M31, matrix.M32, matrix.M33);
 
         /// <summary>The length of the longest axis: what a sphere's radius scales by, conservatively for non-uniform scale.</summary>
-        public float MaxScale => MathF.Sqrt(MathF.Max(m.Right.LengthSquared(), MathF.Max(m.Up.LengthSquared(), m.Forward.LengthSquared())));
+        public float MaxScale => MathF.Sqrt(MathF.Max(matrix.Right.LengthSquared(), MathF.Max(matrix.Up.LengthSquared(), matrix.Forward.LengthSquared())));
     }
 
     extension(Matrix4x4)

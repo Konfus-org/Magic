@@ -22,9 +22,9 @@ public readonly record struct Tag(int Id)
         ArgumentException.ThrowIfNullOrEmpty(name);
 
         uint hash = 2166136261u;
-        foreach (char c in name)
+        foreach (char character in name)
         {
-            hash ^= c;
+            hash ^= character;
             hash *= 16777619u;
         }
 
@@ -50,9 +50,9 @@ public struct Tags
         if (!tag.IsValid)
             return false;
 
-        foreach (Tag t in this)
+        foreach (Tag held in this)
         {
-            if (t == tag)
+            if (held == tag)
                 return true;
         }
 

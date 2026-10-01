@@ -9,7 +9,7 @@ namespace Magic.Contexts.Rendering;
 internal sealed class Compiles<TKey> where TKey : notnull
 {
     private readonly Dictionary<TKey, Task<Result<CompiledShader>>> _running = [];
-    private readonly List<(TKey Key, Task<Result<CompiledShader>> Job)> _done = [];
+    private readonly List<(TKey Key, Task<Result<CompiledShader>> Job)> _finished = [];
 
     public int InFlight => _running.Count;
 
@@ -39,10 +39,10 @@ internal sealed class Compiles<TKey> where TKey : notnull
         foreach ((TKey key, Task<Result<CompiledShader>> job) in _running)
         {
             if (job.IsCompleted)
-                _done.Add((key, job));
+                _finished.Add((key, job));
         }
 
-        foreach ((TKey key, Task<Result<CompiledShader>> job) in _done)
+        foreach ((TKey key, Task<Result<CompiledShader>> job) in _finished)
         {
             _running.Remove(key);
             done(state, key, job.IsCompletedSuccessfully
@@ -50,6 +50,6 @@ internal sealed class Compiles<TKey> where TKey : notnull
                 : Result<CompiledShader>.Failure(job.Exception?.GetBaseException().Message ?? "compile faulted"));
         }
 
-        _done.Clear();
+        _finished.Clear();
     }
 }

@@ -10,6 +10,7 @@ internal sealed class FakeRendering : IRendering
     private uint _next = 1;
 
     public List<RenderCommandType[]> Submitted { get; } = [];
+    public List<byte[]> Uploaded { get; } = [];
     public int Released { get; private set; }
 
     public bool Debug { get; set; }
@@ -28,7 +29,7 @@ internal sealed class FakeRendering : IRendering
         return Result<CompiledShader>.Success(new CompiledShader { Stage = stage, Code = [1] });
     }
 
-    public void Upload(GpuBuffer buffer, uint offset, ReadOnlySpan<byte> data) { }
+    public void Upload(GpuBuffer buffer, uint offset, ReadOnlySpan<byte> data) => Uploaded.Add(data.ToArray());
     public void Upload(in TextureRegion region, ReadOnlySpan<byte> data) { }
     public void Copy(in TextureRegion source, in TextureRegion destination) { }
     public void Release(GpuBuffer buffer) => Released++;

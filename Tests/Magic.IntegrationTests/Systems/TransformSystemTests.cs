@@ -19,7 +19,7 @@ public sealed class TransformSystemTests
         Handle child = Spawn(ecs, new Vector3(0, 2, 0), root);
         Handle grandchild = Spawn(ecs, new Vector3(0, 0, 3), child);
 
-        transforms.Update(default);
+        transforms.Run(default);
 
         Assert.Equal(new Vector3(1, 2, 3), ecs.Get<WorldTransform>(grandchild).Value.Translation);
     }
@@ -31,10 +31,10 @@ public sealed class TransformSystemTests
         using TransformSystem transforms = new(ecs);
         Handle root = Spawn(ecs, new Vector3(1, 0, 0));
         Handle child = Spawn(ecs, new Vector3(0, 2, 0), root);
-        transforms.Update(default);
+        transforms.Run(default);
         ecs.Get<Transform>(root).Position = new Vector3(10, 0, 0);
 
-        transforms.Update(default);
+        transforms.Run(default);
 
         Assert.Equal(new Vector3(10, 2, 0), ecs.Get<WorldTransform>(child).Value.Translation);
     }
@@ -45,10 +45,10 @@ public sealed class TransformSystemTests
         using FlecsEcs ecs = new();
         using TransformSystem transforms = new(ecs);
         Handle rock = Spawn(ecs, new Vector3(1, 1, 1), isStatic: true);
-        transforms.Update(default);
+        transforms.Run(default);
         ecs.Get<Transform>(rock).Position = new Vector3(9, 9, 9);
 
-        transforms.Update(default);
+        transforms.Run(default);
 
         Assert.Equal(new Vector3(1, 1, 1), ecs.Get<WorldTransform>(rock).Value.Translation);
     }
@@ -59,11 +59,11 @@ public sealed class TransformSystemTests
         using FlecsEcs ecs = new();
         using TransformSystem transforms = new(ecs);
         Handle rock = Spawn(ecs, new Vector3(1, 1, 1), isStatic: true);
-        transforms.Update(default);
+        transforms.Run(default);
         ecs.Get<Transform>(rock).Position = new Vector3(9, 9, 9);
         ecs.Set(rock, Tags.Of(Tag.Static));
 
-        transforms.Update(default);
+        transforms.Run(default);
 
         Assert.Equal(new Vector3(9, 9, 9), ecs.Get<WorldTransform>(rock).Value.Translation);
     }
@@ -74,23 +74,23 @@ public sealed class TransformSystemTests
         using FlecsEcs ecs = new();
         using TransformSystem transforms = new(ecs);
         Handle rock = Spawn(ecs, new Vector3(1, 1, 1), isStatic: true);
-        transforms.Update(default);
+        transforms.Run(default);
         ecs.Set(rock, Tags.Of(Tag.Static));
-        transforms.Update(default);
+        transforms.Run(default);
         ecs.Get<Transform>(rock).Position = new Vector3(5, 5, 5);
 
-        transforms.Update(default);
+        transforms.Run(default);
 
         Assert.Equal(new Vector3(1, 1, 1), ecs.Get<WorldTransform>(rock).Value.Translation);
     }
 
     private static Handle Spawn(FlecsEcs ecs, Vector3 position, Handle parent = default, bool isStatic = false)
     {
-        Handle e = ecs.Create(null, parent);
-        ecs.Set(e, new Transform { Position = position });
+        Handle entity = ecs.Create(null, parent);
+        ecs.Set(entity, new Transform { Position = position });
         if (isStatic)
-            ecs.Set(e, Tags.Of(Tag.Static));
+            ecs.Set(entity, Tags.Of(Tag.Static));
 
-        return e;
+        return entity;
     }
 }

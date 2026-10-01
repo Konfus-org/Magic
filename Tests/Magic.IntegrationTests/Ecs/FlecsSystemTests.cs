@@ -45,6 +45,23 @@ public sealed class FlecsSystemTests
     }
 
     [Fact]
+    public void A_system_without_a_query_sees_its_own_changes_at_once()
+    {
+        using FlecsEcs ecs = new();
+        float seen = 0f;
+        using IDisposable system = ecs.Schedule("Spawn").Run(_ =>
+        {
+            Handle entity = ecs.Create();
+            ecs.Set(entity, new Position { X = 3 });
+            seen = ecs.Get<Position>(entity).X;
+        });
+
+        ecs.Update(FrameOf(1f));
+
+        Assert.Equal(3f, seen);
+    }
+
+    [Fact]
     public void Systems_on_one_phase_run_in_the_order_they_were_scheduled()
     {
         using FlecsEcs ecs = new();
@@ -61,15 +78,15 @@ public sealed class FlecsSystemTests
     public void A_query_system_visits_the_matching_entities()
     {
         using FlecsEcs ecs = new();
-        Handle e = ecs.Create();
-        ecs.Set(e, new Position());
-        ecs.Set(e, new Velocity { X = 4 });
+        Handle entity = ecs.Create();
+        ecs.Set(entity, new Position());
+        ecs.Set(entity, new Velocity { X = 4 });
         using IDisposable system = ecs.Schedule("Move").Query<Position, Velocity>()
-            .Each((float dt, Handle _, ref Position p, ref Velocity v) => p.X += v.X * dt);
+            .Each((float dt, Handle _, ref Position position, ref Velocity velocity) => position.X += velocity.X * dt);
 
         ecs.Update(FrameOf(0.5f));
 
-        Assert.Equal(2, ecs.Get<Position>(e).X);
+        Assert.Equal(2, ecs.Get<Position>(entity).X);
     }
 
     [Fact]

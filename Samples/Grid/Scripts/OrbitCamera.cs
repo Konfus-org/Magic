@@ -12,13 +12,18 @@ namespace Grid;
 internal sealed class OrbitCamera(IEcs ecs) : IGem
 {
     /// <summary>Degrees per second.</summary>
-    private const float Speed = 4f;
+    private const float DegreesPerSecond = 4f;
 
     private readonly IEcsQuery<Transform, Camera> _cameras = ecs.Query<Transform, Camera>().Build();
 
+    public void Dispose()
+    {
+        _cameras.Dispose();
+    }
+
     public void Update(in Frame frame)
     {
-        Quaternion yaw = Quaternion.CreateFromAxisAngle(Vector3.UnitY, float.DegreesToRadians(Speed * frame.Delta));
+        Quaternion yaw = Quaternion.CreateFromAxisAngle(Vector3.UnitY, float.DegreesToRadians(DegreesPerSecond * frame.Delta));
         _cameras.Each((Handle _, ref Transform transform, ref Camera _) => Orbit(ref transform, yaw));
     }
 
@@ -29,10 +34,5 @@ internal sealed class OrbitCamera(IEcs ecs) : IGem
 
         transform.Position = Vector3.Transform(transform.Position, yaw);
         transform.Rotation = Quaternion.Concatenate(tilt, yaw); // its own tilt first, then the turn
-    }
-
-    public void Dispose()
-    {
-        _cameras.Dispose();
     }
 }

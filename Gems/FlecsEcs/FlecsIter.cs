@@ -40,8 +40,8 @@ internal static unsafe class FlecsIter
         if (column.IsEmpty)
         {
             stride = 0;
-            Scratch<T>.Value = default;
-            return ref Scratch<T>.Value;
+            Absent<T>.Value = default;
+            return ref Absent<T>.Value;
         }
 
         stride = column.Length == it->count ? 1 : 0;
@@ -50,7 +50,7 @@ internal static unsafe class FlecsIter
     }
 
     /// <summary>What an absent optional field reads as in Each(): a default that nobody keeps.</summary>
-    private static class Scratch<T> where T : unmanaged
+    private static class Absent<T> where T : unmanaged
     {
         [ThreadStatic]
         public static T Value;

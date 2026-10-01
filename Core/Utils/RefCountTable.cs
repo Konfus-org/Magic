@@ -9,14 +9,14 @@ namespace Magic.Utils;
 /// (so the caller frees what it holds). A value is replaced whole with <see cref="Set"/>, never changed in place. Not
 /// thread-safe. The render state keeps its GPU resources (materials, textures, models, draw groups) in these.
 /// </summary>
-public sealed class RefCountTable<TKey, TValue> where TKey : notnull
+internal sealed class RefCountTable<TKey, TValue> where TKey : notnull
 {
     private readonly Dictionary<TKey, (TValue Value, int Refs)> _entries = [];
 
     public int Count => _entries.Count;
 
     /// <summary>Every key with its value, for the rare pass over all of them (an asset changed).</summary>
-    public IEnumerable<(TKey Key, TValue Value)> Entries => _entries.Select(e => (e.Key, e.Value.Value));
+    public IEnumerable<(TKey Key, TValue Value)> Entries => _entries.Select(entry => (entry.Key, entry.Value.Value));
 
     /// <summary>Takes another reference to an existing value; false when there is none (then <see cref="Add"/> one).</summary>
     public bool TryAcquire(TKey key, out TValue value)

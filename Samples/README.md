@@ -1,14 +1,14 @@
 # Samples
 
-Each folder is a project: a `<Name>.magic` file naming the world to open, `Assets/Worlds/<Name>/` holding
-that world, and `Scripts/` holding C# that `<Name>.csproj` compiles into a gem. A sample builds into its own
+Each folder is a project: a `<Name>.magic` file naming the domain to open, `Assets/Domains/<Name>/` holding
+that domain, and `Scripts/` holding C# that `<Name>.csproj` compiles into a gem. A sample builds into its own
 `Build/` tree, laid out like the engine's (`Build/net10.0/<Config>/bin/` and `obj/`), and the host finds the
 gem there. The samples sit in `Magic.slnx`, so `dotnet build Magic.slnx` builds the engine and all of them; a
 single one builds with `dotnet build Samples\Cube`. Run one from the repository root:
 
 ```powershell
 Build\net10.0\Debug\bin\Magic.exe --project Samples\Cube
-Build\net10.0\Debug\bin\Magic.exe --project Samples\Grid --set Render.Vsync=false
+Build\net10.0\Debug\bin\Magic.exe --project Samples\Grid
 ```
 
 Caches land under the sample's own folder. Screenshots (`--screenshots 1 --screenshot-delay 60`) go to `Screenshots\` next to `Magic.exe` (`Build\net10.0\<Configuration>\bin\Screenshots\<Project>_<frame>.png`). Log files are written only by a Release build, to `Logs\` beside it (`Build\net10.0\Release\bin\Logs\<Project>_<date>_<n>.log`).
@@ -24,7 +24,7 @@ The `.magic` file says which engine gems load, by their assembly name (the same 
 `["default"]`, and `[]` loads none of them.
 
 ```json
-{ "name": "Cube", "world": { "id": 3001 }, "gems": ["ZLogging", "FlecsEcs", "SDL", "SDLWindowing", "SDLRender"] }
+{ "name": "Cube", "domain": { "id": 3001 }, "gems": ["ZLogging", "FlecsEcs", "SDL", "SDLWindowing", "SDLRender"] }
 ```
 
 A project's own gems are never listed: any gem dll found under the project folder (each sample's
@@ -37,16 +37,17 @@ Most samples' `Scripts/OrbitCamera.cs` is its gem: an `IGem` whose `Update` swin
 world's up axis through the origin, keeping its height, distance and tilt, at a speed picked for the scene. Edit it and rebuild the sample while
 it runs: the host sees the new dll and hot reloads the gem without a restart.
 
-## A world on disk
+## A domain on disk
 
 ```
-Worlds/Cube/
-    Cube.world        { "chunkSize": 64 }          global data: seed, chunk size, time
+Domains/Cube/
+    Cube.domain       { "chunkSize": 64 }          global data: seed, chunk size, time
     globals.chunk     always loaded (camera, sun)  any .chunk whose name is not a coordinate
     0_0_0.chunk       the cube at x=0, y=0, z=0    streamed by the cameras
 ```
 
-A chunk `x_y_z.chunk` covers `[x * chunkSize, (x + 1) * chunkSize)` on each axis. The streaming system keeps
+A chunk `x_y_z.chunk` covers `[x * chunkSize, (x + 1) * chunkSize)` on each axis. Opening a domain spawns its
+global chunks under `World.<Name>.Globals`; its cubes spawn under `World.<Name>.Chunks`. The streaming system keeps
 the cube each camera stands in, the cubes within one chunk size of it, and every cube the camera's frustum touches
 within `Render.ViewDist` (500 m by default; `Infinity` is every chunk in view), and unloads the rest two seconds after the last camera stopped wanting them.
 
@@ -67,9 +68,9 @@ A component is written as the struct's own JSON; any struct implementing `ICompo
 | Monkey | Model import conventions | Suzanne faces the camera, her left ear on the viewer's right |
 | RenderTexture | A camera drawing into a texture: `SecurityCamera`'s `"target": { "texture": { "id": 5010 } }` names `Textures/Monitor.rtex` (`{ "width": 512, "height": 512 }`), and `Monitor.mat` samples the same id on a standing plane. `Scripts/Spin.cs` adds a `Spin` component the chunk uses | the plane shows the spinning monkey side-on, live; edit the size in `Monitor.rtex` while it runs |
 | SplitScreen | Two cameras in one window: `"viewport": "top_half"` and `"bottom_half"`, each culled and drawn on its own | two views orbiting opposite ways; Debug-build Stats count both |
-| Grid | GPU-driven scale: 102 400 static entities in 100 chunks streamed by distance | `Streaming:` lines; `FPS:` above 60 without vsync; `--set Render.ViewDist=Infinity` loads every chunk in view |
+| Grid | GPU-driven scale: 102 400 static entities in 100 chunks streamed by distance | `Streaming:` lines; `FPS:` above 60 in a Debug build (vsync off by default); `--set Render.ViewDist=Infinity` loads every chunk in view |
 | Wall | Two-phase HiZ occlusion culling: a wall in front of a 16k grid | in a Debug build, the last `Stats:` visible count is a fraction of the instances |
 | Fallbacks | The render failure looks, one cube each: a surface that does not compile (magenta), a material whose shader is not an asset (magenta checker), a model that is not an asset (red checker on the unit cube), a texture that is not an asset (red checker). All glow and breathe. Logs errors by design, so `--fail-on-error` returns 2 | fix `Assets/Shaders/BadCompile.surf.hlsl` or point `BadTexture.mat` at texture 36 while it runs and the cube heals |
 
 Hot reload works on every file: edit `0_0_0.chunk` while Cube runs and the cube moves; edit `globals.chunk`
-and the camera or sun change; edit `Cube.world` and the world reloads.
+and the camera or sun change; edit `Cube.domain` and the domain reopens.

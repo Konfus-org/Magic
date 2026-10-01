@@ -122,21 +122,21 @@ internal static class Culling
         int dispatches = 0;
 
         // One compute pass per six levels: the first six from the depth target, each later six from the level before them.
-        FrameConstants f = frame;
-        int lw = view.HiZWidth, lh = view.HiZHeight;
+        FrameConstants constants = frame;
+        int levelWidth = view.HiZWidth, levelHeight = view.HiZHeight;
         ReadOnlySpan<GpuBinding> depthBinding = [new GpuBinding(Texture: depth, Sampler: ctx.NearestClamp)];
         for (int first = 0; first < view.HiZLevels; first += HiZLevelsPerPass)
         {
-            f.HiZFirstLevel = (uint)first;
-            commands.Push(GpuStage.Compute, f);
+            constants.HiZFirstLevel = (uint)first;
+            commands.Push(GpuStage.Compute, constants);
             Dispatch(commands, ctx.Cull.HiZBuild, [view.HiZThisFrame!.Handle], [],
-                (uint)((lw + HiZTile - 1) / HiZTile), (uint)((lh + HiZTile - 1) / HiZTile), samplers: depthBinding);
+                (uint)((levelWidth + HiZTile - 1) / HiZTile), (uint)((levelHeight + HiZTile - 1) / HiZTile), samplers: depthBinding);
             dispatches++;
 
-            for (int l = 0; l < HiZLevelsPerPass; l++)
+            for (int level = 0; level < HiZLevelsPerPass; level++)
             {
-                lw = (lw + 1) / 2;
-                lh = (lh + 1) / 2;
+                levelWidth = (levelWidth + 1) / 2;
+                levelHeight = (levelHeight + 1) / 2;
             }
         }
 
@@ -191,23 +191,23 @@ internal static class Culling
 
     private static void ResizeHiZ(RenderContext ctx, ViewBuffers view, int viewWidth, int viewHeight)
     {
-        int w = Math.Max(1, (viewWidth + 1) / 2), h = Math.Max(1, (viewHeight + 1) / 2);
-        if (w == view.HiZWidth && h == view.HiZHeight)
+        int width = Math.Max(1, (viewWidth + 1) / 2), height = Math.Max(1, (viewHeight + 1) / 2);
+        if (width == view.HiZWidth && height == view.HiZHeight)
             return;
 
-        view.HiZWidth = w;
-        view.HiZHeight = h;
+        view.HiZWidth = width;
+        view.HiZHeight = height;
         view.HiZLevels = 1;
 
         int floats = 0;
-        int lw = w, lh = h;
+        int levelWidth = width, levelHeight = height;
         while (true)
         {
-            floats += lw * lh;
-            if ((lw == 1 && lh == 1) || view.HiZLevels == MaxHiZLevels)
+            floats += levelWidth * levelHeight;
+            if ((levelWidth == 1 && levelHeight == 1) || view.HiZLevels == MaxHiZLevels)
                 break;
-            lw = (lw + 1) / 2;
-            lh = (lh + 1) / 2;
+            levelWidth = (levelWidth + 1) / 2;
+            levelHeight = (levelHeight + 1) / 2;
             view.HiZLevels++;
         }
 

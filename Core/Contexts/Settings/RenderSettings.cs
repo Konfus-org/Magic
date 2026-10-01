@@ -12,7 +12,12 @@ public sealed class RenderSettings
     /// <summary><c>"vulkan"</c>, <c>"direct3d12"</c>, or null for SDL's choice. The <c>SDL_GPU_DRIVER</c> environment variable still wins.</summary>
     public string? Backend { get; set; }
 
+    /// <summary>Present on the display's refresh. On by default, except in a Debug build, where frame times are worth more uncapped.</summary>
+#if DEBUG
+    public bool Vsync { get; set; }
+#else
     public bool Vsync { get; set; } = true;
+#endif
 
     /// <summary>
     /// The resolution a window's scene is rendered at, in pixels: every target of the pipeline (colour, depth, the
@@ -28,7 +33,7 @@ public sealed class RenderSettings
     public float Anisotropy { get; set; } = 8f;
 
     /// <summary>
-    /// Metres a camera sees: the world's chunks its frustum touches within this are loaded. <see cref="float.PositiveInfinity"/>
+    /// Metres a camera sees: the open domains' chunks its frustum touches within this are loaded. <see cref="float.PositiveInfinity"/>
     /// (<c>"Infinity"</c> in a file or <c>--set</c>) is every chunk in view. The chunks within one chunk size of a camera
     /// are loaded whatever this says and wherever it looks.
     /// </summary>

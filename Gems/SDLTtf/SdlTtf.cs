@@ -14,7 +14,7 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
 {
     private const int Padding = 1; // between glyphs, so linear sampling never bleeds a neighbour in
 
-    private readonly Lock _one = new();
+    private readonly Lock _loadLock = new();
 
     public SdlTtf()
     {
@@ -22,20 +22,25 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
             throw new InvalidOperationException($"TTF_Init failed: {SDL.GetError()}");
     }
 
+    public void Dispose()
+    {
+        TTF.Quit();
+    }
+
     public void Load(Font asset, byte[] bytes)
     {
-        lock (_one)
+        lock (_loadLock)
             Rasterise(asset, bytes);
     }
 
     /// <summary>Printable ASCII and Latin-1; enough for UI text until a sidecar setting says otherwise.</summary>
     private static IEnumerable<uint> Codepoints()
     {
-        for (uint c = 32; c <= 126; c++)
-            yield return c;
+        for (uint codepoint = 32; codepoint <= 126; codepoint++)
+            yield return codepoint;
 
-        for (uint c = 160; c <= 255; c++)
-            yield return c;
+        for (uint codepoint = 160; codepoint <= 255; codepoint++)
+            yield return codepoint;
     }
 
     private static void Rasterise(Font asset, byte[] bytes)
@@ -58,7 +63,7 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
             asset.LineHeight = TTF.GetFontLineSkip(font);
             asset.Ascent = TTF.GetFontAscent(font);
 
-            uint[] wanted = [.. Codepoints().Where(c => TTF.FontHasGlyph(font, c))];
+            uint[] wanted = [.. Codepoints().Where(codepoint => TTF.FontHasGlyph(font, codepoint))];
             foreach (uint codepoint in wanted)
             {
                 if (!TTF.GetGlyphMetrics(font, codepoint, out int minX, out _, out _, out int maxY, out int advance))
@@ -120,13 +125,13 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
         byte[] atlas = new byte[width * height * 4];
         for (int i = 0; i < glyphs.Count; i++)
         {
-            (uint codepoint, byte[] pixels, int w, int h, int minX, int maxY, int advance) = glyphs[i];
+            (uint codepoint, byte[] pixels, int glyphWidth, int glyphHeight, int minX, int maxY, int advance) = glyphs[i];
             (int x, int y) = places[i];
 
-            for (int row = 0; row < h; row++)
-                Buffer.BlockCopy(pixels, row * w * 4, atlas, ((y + row) * width + x) * 4, w * 4);
+            for (int row = 0; row < glyphHeight; row++)
+                Buffer.BlockCopy(pixels, row * glyphWidth * 4, atlas, ((y + row) * width + x) * 4, glyphWidth * 4);
 
-            asset.Glyphs[codepoint] = new Glyph(x, y, w, h, minX, maxY, advance);
+            asset.Glyphs[codepoint] = new Glyph(x, y, glyphWidth, glyphHeight, minX, maxY, advance);
         }
 
         asset.Width = width;
@@ -139,21 +144,21 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
         places = [];
         int x = 0, y = 0, rowHeight = 0;
 
-        foreach ((_, _, int w, int h, _, _, _) in glyphs)
+        foreach ((_, _, int glyphWidth, int glyphHeight, _, _, _) in glyphs)
         {
-            if (x + w > width)
+            if (x + glyphWidth > width)
             {
                 x = 0;
                 y += rowHeight + Padding;
                 rowHeight = 0;
             }
 
-            if (y + h > height || w > width)
+            if (y + glyphHeight > height || glyphWidth > width)
                 return false;
 
             places.Add((x, y));
-            x += w + Padding;
-            rowHeight = Math.Max(rowHeight, h);
+            x += glyphWidth + Padding;
+            rowHeight = Math.Max(rowHeight, glyphHeight);
         }
 
         return true;
@@ -182,10 +187,5 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
         }
 
         return data;
-    }
-
-    public void Dispose()
-    {
-        TTF.Quit();
     }
 }

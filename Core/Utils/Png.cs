@@ -9,7 +9,7 @@ namespace Magic.Utils;
 /// Writes 8-bit RGBA pixels as a PNG: one IHDR, one IDAT holding every unfiltered scanline deflated, one IEND.
 /// Enough for screenshots, which is all the host writes; nothing is read back (that is a loader gem's job).
 /// </summary>
-public static class Png
+internal static class Png
 {
     private static ReadOnlySpan<byte> Signature => [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
@@ -43,15 +43,15 @@ public static class Png
 
         using MemoryStream png = new();
         png.Write(Signature);
-        Chunk(png, "IHDR", header);
-        Chunk(png, "IDAT", compressed.GetBuffer().AsSpan(0, (int)compressed.Length));
-        Chunk(png, "IEND", []);
+        WriteChunk(png, "IHDR", header);
+        WriteChunk(png, "IDAT", compressed.GetBuffer().AsSpan(0, (int)compressed.Length));
+        WriteChunk(png, "IEND", []);
 
         return png.ToArray();
     }
 
     /// <summary>Length, type, data, then a CRC over type and data; all integers big-endian.</summary>
-    private static void Chunk(Stream png, string type, ReadOnlySpan<byte> data)
+    private static void WriteChunk(Stream png, string type, ReadOnlySpan<byte> data)
     {
         Span<byte> typeBytes = stackalloc byte[4];
         Encoding.ASCII.GetBytes(type, typeBytes);

@@ -12,6 +12,11 @@ public sealed class SdlImageTests : IDisposable
 {
     private readonly Sdl _sdl = new(new Project { Name = "Tests" });
 
+    public void Dispose()
+    {
+        _sdl.Dispose();
+    }
+
     [Fact]
     public void A_texture_takes_the_size_of_its_image()
     {
@@ -29,7 +34,7 @@ public sealed class SdlImageTests : IDisposable
 
         new SdlImage().Load(texture, Resources.Read(texture.Path));
 
-        Assert.Equal([8, 4, 2, 1], texture.Levels.Select(l => l.Width));
+        Assert.Equal([8, 4, 2, 1], texture.Levels.Select(level => level.Width));
     }
 
     [Fact]
@@ -70,10 +75,5 @@ public sealed class SdlImageTests : IDisposable
         Action load = () => new SdlImage().Load(texture, [1, 2, 3]);
 
         Assert.Throws<InvalidOperationException>(load);
-    }
-
-    public void Dispose()
-    {
-        _sdl.Dispose();
     }
 }

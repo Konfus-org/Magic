@@ -36,15 +36,15 @@ internal abstract unsafe class FlecsQuery(FlecsEcs ecs, Query query) : IDisposab
 
     protected FlecsEcs Owner { get; } = ecs;
 
-    public int Count() => Query.Count();
-
-    protected flecs.ecs_iter_t Iter() => Query.GetIter(Owner.Native.Handle);
-
     public void Dispose()
     {
         if (!Owner.IsDisposed)
             Query.Dispose();
     }
+
+    public int Count() => Query.Count();
+
+    protected flecs.ecs_iter_t Iter() => Query.GetIter(Owner.Native.Handle);
 }
 
 internal sealed class FlecsQueryBuilder<T1> : FlecsQueryBuilder, IEcsQueryBuilder<T1>
@@ -113,7 +113,7 @@ internal sealed unsafe class FlecsQuery<T1>(FlecsEcs ecs, Query query) : FlecsQu
         {
             ref T1 c1 = ref FlecsIter.First<T1>(&it, 0, out int s1);
 
-            for (int i = 0, n = it.count; i < n; i++)
+            for (int i = 0, count = it.count; i < count; i++)
                 action(new Handle(it.entities[i]), ref Unsafe.Add(ref c1, i * s1));
         }
     }
@@ -137,7 +137,7 @@ internal sealed unsafe class FlecsQuery<T1, T2>(FlecsEcs ecs, Query query) : Fle
             ref T1 c1 = ref FlecsIter.First<T1>(&it, 0, out int s1);
             ref T2 c2 = ref FlecsIter.First<T2>(&it, 1, out int s2);
 
-            for (int i = 0, n = it.count; i < n; i++)
+            for (int i = 0, count = it.count; i < count; i++)
                 action(new Handle(it.entities[i]), ref Unsafe.Add(ref c1, i * s1), ref Unsafe.Add(ref c2, i * s2));
         }
     }
@@ -162,7 +162,7 @@ internal sealed unsafe class FlecsQuery<T1, T2, T3>(FlecsEcs ecs, Query query) :
             ref T2 c2 = ref FlecsIter.First<T2>(&it, 1, out int s2);
             ref T3 c3 = ref FlecsIter.First<T3>(&it, 2, out int s3);
 
-            for (int i = 0, n = it.count; i < n; i++)
+            for (int i = 0, count = it.count; i < count; i++)
             {
                 action(
                     new Handle(it.entities[i]),
@@ -200,7 +200,7 @@ internal sealed unsafe class FlecsQuery<T1, T2, T3, T4>(FlecsEcs ecs, Query quer
             ref T3 c3 = ref FlecsIter.First<T3>(&it, 2, out int s3);
             ref T4 c4 = ref FlecsIter.First<T4>(&it, 3, out int s4);
 
-            for (int i = 0, n = it.count; i < n; i++)
+            for (int i = 0, count = it.count; i < count; i++)
             {
                 action(
                     new Handle(it.entities[i]),

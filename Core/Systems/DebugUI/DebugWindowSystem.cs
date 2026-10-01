@@ -7,14 +7,22 @@ namespace Magic.Systems.DebugUI;
 
 /// <summary>
 /// One debug UI window as a system: its <see cref="Key"/> opens and closes it, and while it is <see cref="Open"/> the
-/// debug UI shows (<see cref="Debugging.UI.Visible"/>), from the moment it opens, so it draws the same frame. Input is
-/// handed in every frame: it lives in a gem. The frame loop calls these after every gem's Update.
+/// debug UI shows (<see cref="Debugging.UI.Visible"/>), from the moment it opens, so it draws the same frame. Without
+/// an <see cref="IInput"/> (no input gem is loaded) its key does nothing.
 /// </summary>
-public abstract class DebugWindowSystem : IDisposable
+internal abstract class DebugWindowSystem : ISystem
 {
-    protected DebugWindowSystem(Key key)
+    private readonly IInput? _input;
+
+    protected DebugWindowSystem(Key key, IInput? input)
     {
         Key = key;
+        _input = input;
+    }
+
+    public virtual void Dispose()
+    {
+        Open = false;
     }
 
     public Key Key { get; }
@@ -29,20 +37,15 @@ public abstract class DebugWindowSystem : IDisposable
         }
     }
 
-    /// <summary>Toggles the window on its key, then runs it: <see cref="Run"/> is called every frame, open or not.</summary>
-    public void Update(in Frame frame, IInput? input)
+    /// <summary>Toggles the window on its key, then draws it: <see cref="Draw"/> is called every frame, open or not.</summary>
+    public void Run(in Frame frame)
     {
-        if (input?.WasPressed(Key) == true)
+        if (_input?.WasPressed(Key) == true)
             Open = !Open;
 
-        Run(frame);
-    }
-
-    public virtual void Dispose()
-    {
-        Open = false;
+        Draw(frame);
     }
 
     /// <summary>The window's frame: draw it while <see cref="Open"/>, and whatever else it does every frame.</summary>
-    protected abstract void Run(in Frame frame);
+    protected abstract void Draw(in Frame frame);
 }

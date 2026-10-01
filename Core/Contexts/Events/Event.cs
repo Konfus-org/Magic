@@ -21,6 +21,15 @@ public enum EventType : ushort
     /// <summary>A gem was loaded, reloaded or unloaded, so the set of types in the process changed.</summary>
     GemsChanged,
 
+    /// <summary>The world opened a domain; whoever fills the ECS spawns it. Id = the domain asset.</summary>
+    DomainOpened,
+
+    /// <summary>The world closed a domain; its entities go. Id = the domain asset.</summary>
+    DomainClosed,
+
+    /// <summary>The game was asked to end; the frame loop stops after this frame.</summary>
+    Quit,
+
     /// <summary><see cref="Event.Window"/>, <see cref="Event.Key"/>, <see cref="Event.Modifiers"/>, <see cref="Event.Repeat"/>.</summary>
     KeyDown,
 

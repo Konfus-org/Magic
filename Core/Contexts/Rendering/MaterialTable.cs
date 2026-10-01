@@ -20,7 +20,7 @@ internal sealed record MaterialState(uint Slot, Material? Material, PipelineClas
 internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong failureSurface)
 {
     /// <summary>The failure kinds of Surfaces/Failure.surf.hlsl a record carries.</summary>
-    public const uint FailureShader = 1, FailureRecord = 2, FailureMesh = 3, FailureTexture = 4;
+    public const uint FailureShader = 1, FailureMissing = 2, FailureMesh = 3, FailureTexture = 4;
 
     /// <summary>The slot every instance whose model did not load draws with.</summary>
     public const uint MeshFailureSlot = 1;

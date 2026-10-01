@@ -13,34 +13,34 @@ public sealed class FlecsEcsTests
     {
         // flecs hands back the column memory as it was; a removed and re-added component must still read as default.
         using FlecsEcs ecs = new();
-        Handle e = ecs.Create();
-        ecs.Set(e, new Position { X = 5 });
-        ecs.Remove<Position>(e);
+        Handle entity = ecs.Create();
+        ecs.Set(entity, new Position { X = 5 });
+        ecs.Remove<Position>(entity);
 
-        ecs.Add<Position>(e);
+        ecs.Add<Position>(entity);
 
-        Assert.Equal(0, ecs.Get<Position>(e).X);
+        Assert.Equal(0, ecs.Get<Position>(entity).X);
     }
 
     [Fact]
     public void Add_of_a_present_component_keeps_its_value()
     {
         using FlecsEcs ecs = new();
-        Handle e = ecs.Create();
-        ecs.Set(e, new Position { X = 3 });
+        Handle entity = ecs.Create();
+        ecs.Set(entity, new Position { X = 3 });
 
-        ecs.Add<Position>(e);
+        ecs.Add<Position>(entity);
 
-        Assert.Equal(3, ecs.Get<Position>(e).X);
+        Assert.Equal(3, ecs.Get<Position>(entity).X);
     }
 
     [Fact]
     public void Get_of_a_missing_component_throws()
     {
         using FlecsEcs ecs = new();
-        Handle e = ecs.Create();
+        Handle entity = ecs.Create();
 
-        Action get = () => ecs.Get<Position>(e);
+        Action get = () => ecs.Get<Position>(entity);
 
         Assert.Throws<InvalidOperationException>(get);
     }
@@ -49,9 +49,9 @@ public sealed class FlecsEcsTests
     public void An_unnamed_entity_has_no_name()
     {
         using FlecsEcs ecs = new();
-        Handle e = ecs.Create();
+        Handle entity = ecs.Create();
 
-        string? name = ecs.GetName(e);
+        string? name = ecs.GetName(entity);
 
         Assert.Null(name);
     }
@@ -83,11 +83,11 @@ public sealed class FlecsEcsTests
         using FlecsEcs ecs = new();
         List<Handle> heard = [];
         using IDisposable observer = ecs.Observe<Position>(ComponentEvent.Added, heard.Add);
-        Handle e = ecs.Create();
+        Handle entity = ecs.Create();
 
-        ecs.Add<Position>(e);
+        ecs.Add<Position>(entity);
 
-        Assert.Equal([e], heard);
+        Assert.Equal([entity], heard);
     }
 
     [Fact]
@@ -96,11 +96,11 @@ public sealed class FlecsEcsTests
         using FlecsEcs ecs = new();
         List<Handle> heard = [];
         using IDisposable observer = ecs.Observe<Position>(ComponentEvent.Set, heard.Add);
-        Handle e = ecs.Create();
+        Handle entity = ecs.Create();
 
-        ecs.Set(e, new Position { X = 1 });
+        ecs.Set(entity, new Position { X = 1 });
 
-        Assert.Equal([e], heard);
+        Assert.Equal([entity], heard);
     }
 
     [Fact]
@@ -109,12 +109,12 @@ public sealed class FlecsEcsTests
         using FlecsEcs ecs = new();
         List<Handle> heard = [];
         using IDisposable observer = ecs.Observe<Position>(ComponentEvent.Removed, heard.Add);
-        Handle e = ecs.Create();
-        ecs.Set(e, new Position());
+        Handle entity = ecs.Create();
+        ecs.Set(entity, new Position());
 
-        ecs.Remove<Position>(e);
+        ecs.Remove<Position>(entity);
 
-        Assert.Equal([e], heard);
+        Assert.Equal([entity], heard);
     }
 
     [Fact]

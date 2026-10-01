@@ -6,7 +6,7 @@ namespace Magic.Services;
 /// <see cref="Get{T}"/> answers the first one added, <see cref="All{T}"/> all of them in the order they came.
 /// Main thread only: filled at startup and changed by <see cref="Gems"/> between frames.
 /// </summary>
-public sealed class Container
+internal sealed class Container
 {
     private readonly List<(Type Contract, object Instance)> _entries = [];
 
@@ -26,18 +26,18 @@ public sealed class Container
     /// <summary>Removes every contract <paramref name="instance"/> was added under.</summary>
     public void Remove(object instance)
     {
-        _entries.RemoveAll(e => ReferenceEquals(e.Instance, instance));
+        _entries.RemoveAll(entry => ReferenceEquals(entry.Instance, instance));
     }
 
     public bool Has(Type contract)
     {
-        return _entries.Exists(e => e.Contract == contract);
+        return _entries.Exists(entry => entry.Contract == contract);
     }
 
     /// <summary>The first instance added under <paramref name="contract"/>, or null.</summary>
     public object? Get(Type contract)
     {
-        return _entries.Find(e => e.Contract == contract).Instance;
+        return _entries.Find(entry => entry.Contract == contract).Instance;
     }
 
     public T? Get<T>() where T : class
@@ -47,6 +47,6 @@ public sealed class Container
 
     public T[] All<T>() where T : class
     {
-        return [.. _entries.Where(e => e.Contract == typeof(T)).Select(e => (T)e.Instance)];
+        return [.. _entries.Where(entry => entry.Contract == typeof(T)).Select(entry => (T)entry.Instance)];
     }
 }

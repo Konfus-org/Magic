@@ -16,6 +16,11 @@ internal sealed class Spinner(IEcs ecs) : IGem
 {
     private readonly IEcsQuery<Transform, Spin> _spinning = ecs.Query<Transform, Spin>().Build();
 
+    public void Dispose()
+    {
+        _spinning.Dispose();
+    }
+
     public void Update(in Frame frame)
     {
         float delta = frame.Delta;
@@ -25,10 +30,5 @@ internal sealed class Spinner(IEcs ecs) : IGem
             Quaternion turn = Quaternion.CreateFromAxisAngle(Vector3.UnitY, float.DegreesToRadians(spin.DegreesPerSecond * delta));
             transform.Rotation = Quaternion.Normalize(Quaternion.Concatenate(rotation, turn));
         });
-    }
-
-    public void Dispose()
-    {
-        _spinning.Dispose();
     }
 }

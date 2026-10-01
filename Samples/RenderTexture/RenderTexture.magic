@@ -1,6 +1,6 @@
 {
     "name": "RenderTexture",
-    "world": {
+    "domain": {
         "id": 5001
     }
 }

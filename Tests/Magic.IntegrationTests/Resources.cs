@@ -9,7 +9,7 @@ internal static class Resources
     /// <summary>The bytes of a file under Resources; the repo root is stamped into Magic.dll.</summary>
     public static byte[] Read(string relative)
     {
-        string repo = typeof(Project).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().First(a => a.Key == "MagicRoot").Value!;
+        string repo = typeof(Project).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().First(attribute => attribute.Key == "MagicRoot").Value!;
 
         return File.ReadAllBytes(Path.Combine(repo, "Resources", relative));
     }

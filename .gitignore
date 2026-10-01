@@ -18,9 +18,15 @@ Screenshots/
 cache/
 Cache/
 
+# Crash reports (Debugging.Flush writes them into Logs/; this catches strays)
+*.crash
+
+# Dot folders are tools' own state (.vs, .vscode, .idea, .claude, .cr, ...): none is source.
+# Dot files (.gitignore, .editorconfig, .gitattributes) are not folders, so they stay tracked.
+.*/
+!.github/
+!.template.config/
+
 # IDE
-.vs/
-.idea/
-.cr/
 *.user
 *.suo

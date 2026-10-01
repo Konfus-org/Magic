@@ -19,7 +19,7 @@ internal static class SurfaceComposer
         if (!text.Contains("EvaluateSurface", StringComparison.Ordinal))
             return Result<SurfaceSource>.Failure($"{path}: no EvaluateSurface(SurfaceInputs, MaterialParams) function.");
 
-        string stripped = ParamLayout.StripDeclarations(text, layout.Payload.StructSpan);
+        string stripped = ParamLayout.BlankDefaults(text, layout.Payload.StructSpan);
         return Result<SurfaceSource>.Success(new SurfaceSource(id, path, stripped, layout.Payload));
     }
 

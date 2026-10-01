@@ -15,7 +15,7 @@ namespace Magic.Contexts.Rendering;
 
 /// <summary>32 B. One drawn instance: world-space bounds, its material, its flags and where its draw goes.</summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct GpuInstance
+internal struct GpuInstance
 {
     public const int Size = 32;
 
@@ -28,7 +28,7 @@ public struct GpuInstance
 
 /// <summary>48 B. The three rows of transpose(world): row i holds column i of the row-vector matrix.</summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct GpuInstanceXform
+internal struct GpuInstanceXform
 {
     public const int Size = 48;
 
@@ -47,7 +47,7 @@ public struct GpuInstanceXform
 
 /// <summary>128 B. A material's parameters, packed by the surface's parameter layout; only the generated loader knows the layout.</summary>
 [StructLayout(LayoutKind.Sequential)]
-public unsafe struct GpuMaterial
+internal unsafe struct GpuMaterial
 {
     public const int Size = 128;
 
@@ -56,7 +56,7 @@ public unsafe struct GpuMaterial
 
 /// <summary>16 B. A run of instance slots belonging to one cell.</summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct GpuPage
+internal struct GpuPage
 {
     public const int Size = 16;
 
@@ -65,7 +65,7 @@ public struct GpuPage
 
 /// <summary>32 B. A residency cell's world-space bounds.</summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct GpuCell
+internal struct GpuCell
 {
     public const int Size = 32;
 
@@ -79,7 +79,7 @@ public struct GpuCell
 /// Structs.hlsli: the layouts must match byte for byte, and nothing checks that at build time.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct DrawArgs
+internal struct DrawArgs
 {
     public const int Size = 20;
 
@@ -90,7 +90,7 @@ public struct DrawArgs
 
 /// <summary>GpuInstance.Flags, as Structs.hlsli names them: only what a shader reads.</summary>
 [Flags]
-public enum InstanceFlags : uint
+internal enum InstanceFlags : uint
 {
     None = 0,
     Alive = 1u << 0,
@@ -104,7 +104,7 @@ public enum InstanceFlags : uint
 /// needs per frame lives together, lighting included.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct FrameConstants
+internal struct FrameConstants
 {
     public const int Size = 256;
 
@@ -179,7 +179,7 @@ public struct FrameConstants
 
 /// <summary>A data pass's constants: the frame block followed by its packed parameters (<c>Include/Pass.hlsli</c>).</summary>
 [StructLayout(LayoutKind.Sequential)]
-public unsafe struct PassConstants
+internal unsafe struct PassConstants
 {
     public const int Size = FrameConstants.Size + GpuMaterial.Size;
 
@@ -189,7 +189,7 @@ public unsafe struct PassConstants
 
 /// <summary>The lights as the frame constants carry them: one sun and a flat ambient, each xyz with w unused.</summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct LightingConstants
+internal struct LightingConstants
 {
     public Vector4 SunDirection;
     public Vector4 SunColor;
@@ -197,7 +197,7 @@ public struct LightingConstants
 
     public static LightingConstants From(ReadOnlySpan<LightInstance> lights)
     {
-        LightingConstants c = new()
+        LightingConstants constants = new()
         {
             SunDirection = new Vector4(Vector3.Normalize(new Vector3(0.3f, -0.8f, 0.5f)), 0f),
             SunColor = Vector4.Zero,
@@ -209,16 +209,16 @@ public struct LightingConstants
             if (light.Kind != LightKind.Directional)
                 continue;
 
-            c.SunDirection = new Vector4(Vector3.Normalize(light.World.Forward), 0f);
-            c.SunColor = new Vector4(light.Color * light.Intensity, 0f);
+            constants.SunDirection = new Vector4(Vector3.Normalize(light.World.Forward), 0f);
+            constants.SunColor = new Vector4(light.Color * light.Intensity, 0f);
             break;
         }
 
-        return c;
+        return constants;
     }
 }
 
-public static class GpuStructs
+internal static class GpuStructs
 {
     public static void AssertLayout()
     {

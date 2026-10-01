@@ -30,31 +30,6 @@ public enum ViewportRegion : byte
     RightHalf
 }
 
-public static class ViewportRegionExtensions
-{
-    extension(ViewportRegion region)
-    {
-        /// <summary>The pixels of a <paramref name="width"/> × <paramref name="height"/> target the region covers, origin top left.</summary>
-        public Rectangle ToPixels(int width, int height)
-        {
-            int hw = width / 2, hh = height / 2;
-
-            return region switch
-            {
-                ViewportRegion.TopLeft => new Rectangle(0, 0, hw, hh),
-                ViewportRegion.TopRight => new Rectangle(hw, 0, width - hw, hh),
-                ViewportRegion.BottomLeft => new Rectangle(0, hh, hw, height - hh),
-                ViewportRegion.BottomRight => new Rectangle(hw, hh, width - hw, height - hh),
-                ViewportRegion.TopHalf => new Rectangle(0, 0, width, hh),
-                ViewportRegion.BottomHalf => new Rectangle(0, hh, width, height - hh),
-                ViewportRegion.LeftHalf => new Rectangle(0, 0, hw, height),
-                ViewportRegion.RightHalf => new Rectangle(hw, 0, width - hw, height),
-                _ => new Rectangle(0, 0, width, height),
-            };
-        }
-    }
-}
-
 /// <summary>
 /// What a camera draws into: the <see cref="RenderTexture"/> <see cref="Texture"/> when it is set, else the window
 /// whose <see cref="Interfaces.IWindow.Handle"/> is <see cref="Window"/> (0, <see cref="MainWindow"/>, is the main
@@ -185,9 +160,9 @@ public struct Camera : IComponent, IEquatable<Camera>
         if (Projection == Projection.Orthographic)
         {
             float halfH = FieldOfView * 0.5f;
-            Vector3 o = world.Translation + (world.Right * (ndc.X * halfH * aspect)) + (world.Up * (ndc.Y * halfH));
+            Vector3 origin = world.Translation + (world.Right * (ndc.X * halfH * aspect)) + (world.Up * (ndc.Y * halfH));
 
-            return new Ray(o, Vector3.Normalize(world.Forward));
+            return new Ray(origin, Vector3.Normalize(world.Forward));
         }
 
         float h = MathF.Tan(float.DegreesToRadians(FieldOfView) * 0.5f);

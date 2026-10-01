@@ -1,6 +1,6 @@
 {
     "name": "SplitScreen",
-    "world": {
+    "domain": {
         "id": 5101
     }
 }

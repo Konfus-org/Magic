@@ -8,7 +8,7 @@ namespace Magic.Contexts.Assets;
 /// (<c>clamp_to_edge</c>), fields included so System.Numerics vectors serialise as <c>{x, y, z, w}</c>,
 /// comments and trailing commas tolerated, infinities written by name. No custom converters: a <see cref="Handle{T}"/> is <c>{ "id": N }</c>.
 /// </summary>
-public static class AssetJson
+internal static class AssetJson
 {
     public static JsonSerializerOptions Options { get; } = new()
     {

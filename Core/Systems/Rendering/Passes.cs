@@ -22,7 +22,7 @@ internal static class Passes
     /// <summary>Lists every .pass file again; new ones are loaded, gone ones dropped, kept ones untouched.</summary>
     public static void Discover(RenderContext ctx)
     {
-        List<PassState> passes = ctx.Passes.Passes;
+        List<PassState> passes = ctx.Passes.States;
         HashSet<ulong> seen = [];
         foreach (string root in (ReadOnlySpan<string>)[ctx.Project.Resources, ctx.Project.Assets])
         {
@@ -51,9 +51,9 @@ internal static class Passes
             passes.RemoveAt(i);
         }
 
-        passes.Sort(static (a, b) => a.Pass.Stage != b.Pass.Stage ? a.Pass.Stage.CompareTo(b.Pass.Stage)
-            : a.Pass.Order != b.Pass.Order ? a.Pass.Order.CompareTo(b.Pass.Order)
-            : string.CompareOrdinal(a.Path, b.Path));
+        passes.Sort(static (left, right) => left.Pass.Stage != right.Pass.Stage ? left.Pass.Stage.CompareTo(right.Pass.Stage)
+            : left.Pass.Order != right.Pass.Order ? left.Pass.Order.CompareTo(right.Pass.Order)
+            : string.CompareOrdinal(left.Path, right.Path));
 
         StringBuilder listed = new();
         foreach (PassState pass in passes)
@@ -64,7 +64,7 @@ internal static class Passes
     /// <summary>Assets changed: a changed .pass reloads, a pass whose shader (or an include of it) changed recompiles.</summary>
     public static void OnAssetsChanged(RenderContext ctx, IReadOnlySet<ulong> changed, IReadOnlySet<ulong> shaders)
     {
-        List<PassState> passes = ctx.Passes.Passes;
+        List<PassState> passes = ctx.Passes.States;
         for (int i = 0; i < passes.Count; i++)
         {
             PassState pass = passes[i];
@@ -81,7 +81,7 @@ internal static class Passes
     /// <summary>Main thread, once per frame: finished compiles become pipelines.</summary>
     public static void Update(RenderContext ctx)
     {
-        ctx.Passes.Compiles.Poll(ctx, Finish);
+        ctx.Passes.Compiles.Poll(ctx, FinishCompile);
     }
 
     /// <summary>
@@ -91,16 +91,16 @@ internal static class Passes
     /// </summary>
     public static void Prepare(RenderContext ctx, FrameTargets targets)
     {
-        List<PassState> passes = ctx.Passes.Passes;
-        for (int p = 0; p < passes.Count; p++)
+        List<PassState> passes = ctx.Passes.States;
+        for (int index = 0; index < passes.Count; index++)
         {
-            PassState pass = passes[p];
+            PassState pass = passes[index];
             if (!pass.Ready)
                 continue;
 
-            if (Conflict(passes, p) is { } earlier)
+            if (Conflict(passes, index) is { } earlier)
             {
-                Fail(ctx, p, $"output {pass.Pass.Output.Name} is written by {earlier.Path} in another format or scale; a target has one of each.");
+                Disable(ctx, index, $"output {pass.Pass.Output.Name} is written by {earlier.Path} in another format or scale; a target has one of each.");
                 continue;
             }
 
@@ -119,7 +119,7 @@ internal static class Passes
                 if (targets.Get(input) is { Texture.IsValid: true })
                     continue;
 
-                Fail(ctx, p, $"input {input} is not a target of this frame (passes run in stage, order, path order).");
+                Disable(ctx, index, $"input {input} is not a target of this frame (passes run in stage, order, path order).");
                 break;
             }
         }
@@ -135,7 +135,7 @@ internal static class Passes
     {
         bool wroteLdr = false;
         Span<GpuBinding> bindings = stackalloc GpuBinding[PassTable.MaxInputs];
-        foreach (PassState pass in ctx.Passes.Passes)
+        foreach (PassState pass in ctx.Passes.States)
         {
             if (!pass.Ready || targets.Get(pass.Pass.Output.Name) is not { } output)
                 continue;
@@ -188,7 +188,7 @@ internal static class Passes
     /// <summary>Reads the .pass file into a new state (keeping the pipeline until the recompile lands) and compiles it.</summary>
     private static void Load(RenderContext ctx, ulong id)
     {
-        List<PassState> passes = ctx.Passes.Passes;
+        List<PassState> passes = ctx.Passes.States;
         int index = ctx.Passes.IndexOf(id);
         if (index < 0)
         {
@@ -199,7 +199,7 @@ internal static class Passes
         Pass? pass = ctx.Assets.Load(new Handle<Pass>(id));
         if (pass is null)
         {
-            Fail(ctx, index, "the file could not be read.");
+            Disable(ctx, index, "the file could not be read.");
             return;
         }
 
@@ -207,9 +207,9 @@ internal static class Passes
         passes[index] = passes[index] with { Path = pass.Path, Pass = pass, PingPong = pingPong, OutputFormat = FrameTargets.Format(pass.Output), Error = null };
 
         if (string.IsNullOrEmpty(pass.Output.Name))
-            Fail(ctx, index, "no output target named.");
+            Disable(ctx, index, "no output target named.");
         else if (pass.Inputs.Length > PassTable.MaxInputs)
-            Fail(ctx, index, $"{pass.Inputs.Length} inputs; a pass binds at most {PassTable.MaxInputs}.");
+            Disable(ctx, index, $"{pass.Inputs.Length} inputs; a pass binds at most {PassTable.MaxInputs}.");
         else
             Compile(ctx, index);
     }
@@ -217,17 +217,17 @@ internal static class Passes
     /// <summary>Composes the pass's shader (contract, inputs, generated parameter loader) and starts its compile; packs its parameters.</summary>
     private static void Compile(RenderContext ctx, int index)
     {
-        PassState state = ctx.Passes.Passes[index];
+        PassState state = ctx.Passes.States[index];
         Shader? shader = Shaders.Get(ctx, state.Pass.Shader);
         if (shader is null)
         {
-            Fail(ctx, index, $"shader {state.Pass.Shader.Id} is not an asset.");
+            Disable(ctx, index, $"shader {state.Pass.Shader.Id} is not an asset.");
             return;
         }
 
         if (shader.Stage is not (ShaderStage.Fragment or ShaderStage.Compute))
         {
-            Fail(ctx, index, $"{shader.Path} is a {shader.Stage} shader; a pass wants a .frag.hlsl or a .comp.hlsl.");
+            Disable(ctx, index, $"{shader.Path} is a {shader.Stage} shader; a pass wants a .frag.hlsl or a .comp.hlsl.");
             return;
         }
 
@@ -239,7 +239,7 @@ internal static class Passes
             Result<ParamLayout> layout = ParamLayout.Parse(text, "PassParams", allowTextures: false);
             if (layout.Failed)
             {
-                Fail(ctx, index, $"{shader.Path}: {layout.Message}");
+                Disable(ctx, index, $"{shader.Path}: {layout.Message}");
                 return;
             }
 
@@ -247,7 +247,7 @@ internal static class Passes
             foreach (string key in layout.Payload.UnknownKeys(state.Pass.Params))
                 Debugging.Log.Warn($"{state.Path} sets '{key}', which {shader.Path} does not declare.");
 
-            string stripped = ParamLayout.StripDeclarations(text, layout.Payload.StructSpan);
+            string stripped = ParamLayout.BlankDefaults(text, layout.Payload.StructSpan);
 
             // The loader goes right after the struct's closing brace, before main() needs it.
             int end = layout.Payload.StructSpan.End;
@@ -271,28 +271,28 @@ internal static class Passes
         }
         composed.Append("#line 1 \"").Append(shader.Path).Append("\"\n").Append(text);
 
-        ctx.Passes.Passes[index] = state with { ShaderId = shader.Id, Params = parameters };
+        ctx.Passes.States[index] = state with { ShaderId = shader.Id, Params = parameters };
         string salt = Shaders.ClosureHash(ctx, shader) + string.Join(",", state.Pass.Inputs);
         ctx.Passes.Compiles.Start(state.Id, Shaders.CompileAsync(ctx, composed.ToString(), $"{state.Path}+{shader.Path}", compute ? GpuStage.Compute : GpuStage.Fragment, salt));
     }
 
     /// <summary>A compile finished: the pass gets its new pipeline, or is disabled with the error.</summary>
-    private static void Finish(RenderContext ctx, ulong id, Result<CompiledShader> result)
+    private static void FinishCompile(RenderContext ctx, ulong id, Result<CompiledShader> result)
     {
         int index = ctx.Passes.IndexOf(id);
         if (index < 0)
             return; // removed while compiling
         if (result.Failed)
         {
-            Fail(ctx, index, result.Message);
+            Disable(ctx, index, result.Message);
             return;
         }
 
-        PassState state = ctx.Passes.Passes[index];
+        PassState state = ctx.Passes.States[index];
         CompiledShader shader = result.Payload;
         if (shader.Samplers != state.Pass.Inputs.Length)
         {
-            Fail(ctx, index, $"the shader uses {shader.Samplers} of its {state.Pass.Inputs.Length} inputs; every input must be read.");
+            Disable(ctx, index, $"the shader uses {shader.Samplers} of its {state.Pass.Inputs.Length} inputs; every input must be read.");
             return;
         }
 
@@ -302,13 +302,13 @@ internal static class Passes
             GpuPipeline pipeline = shader.Stage == GpuStage.Compute
                 ? ctx.Gpu.CreateComputePipeline(shader)
                 : ctx.Gpu.CreatePipeline(new PipelineDesc(ctx.Passes.FullscreenVertex, shader, state.OutputFormat) { Cull = GpuCull.None });
-            ctx.Passes.Passes[index] = state with { Pipeline = pipeline, Compiled = shader, Error = null };
+            ctx.Passes.States[index] = state with { Pipeline = pipeline, Compiled = shader, Error = null };
             Debugging.Log.Debug($"Pass ready: {state.Path}.");
         }
         catch (InvalidOperationException ex)
         {
-            ctx.Passes.Passes[index] = state with { Pipeline = default, Compiled = null };
-            Fail(ctx, index, ex.Message);
+            ctx.Passes.States[index] = state with { Pipeline = default, Compiled = null };
+            Disable(ctx, index, ex.Message);
         }
     }
 
@@ -342,12 +342,12 @@ internal static class Passes
     }
 
     /// <summary>Disables the pass with <paramref name="message"/>, logged when it is new.</summary>
-    private static void Fail(RenderContext ctx, int index, string message)
+    private static void Disable(RenderContext ctx, int index, string message)
     {
-        PassState state = ctx.Passes.Passes[index];
+        PassState state = ctx.Passes.States[index];
         if (state.Error != message)
             Debugging.Log.Error($"Pass {state.Path} disabled: {message}");
 
-        ctx.Passes.Passes[index] = state with { Error = message };
+        ctx.Passes.States[index] = state with { Error = message };
     }
 }

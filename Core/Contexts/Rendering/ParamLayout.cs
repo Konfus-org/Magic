@@ -95,23 +95,23 @@ internal sealed partial class ParamLayout
             if (declaration.Length == 0)
                 continue;
 
-            Match m = MemberPattern().Match(declaration);
-            if (!m.Success)
+            Match member = MemberPattern().Match(declaration);
+            if (!member.Success)
                 return Result<ParamLayout>.Failure($"cannot read member '{declaration}' of {structName}.");
 
-            string name = m.Groups["name"].Value;
-            string typeName = m.Groups["type"].Value;
+            string name = member.Groups["name"].Value;
+            string typeName = member.Groups["type"].Value;
             if (!Types.TryGetValue(typeName, out ParamType type))
                 return Result<ParamLayout>.Failure($"{structName}.{name} has type {typeName}; allowed: float/int/uint/bool, their 2..4 vectors, TextureRef.");
             if (type == ParamType.TextureRef && !allowTextures)
                 return Result<ParamLayout>.Failure($"{structName}.{name}: a TextureRef is not allowed here.");
-            if (fields.Exists(f => f.Name == name))
+            if (fields.Exists(field => field.Name == name))
                 return Result<ParamLayout>.Failure($"{structName} declares {name} twice.");
             if (fields.Count == MaxFields)
                 return Result<ParamLayout>.Failure($"{structName} has more than {MaxFields} members.");
 
-            string? semantic = m.Groups["semantic"].Success ? m.Groups["semantic"].Value : null;
-            string? defaultText = m.Groups["default"].Success ? m.Groups["default"].Value.Trim() : null;
+            string? semantic = member.Groups["semantic"].Success ? member.Groups["semantic"].Value : null;
+            string? defaultText = member.Groups["default"].Success ? member.Groups["default"].Value.Trim() : null;
             ParamField field = new(name, type, semantic, defaultText, 0);
             int align = field.Components switch { 1 => 4, 2 => 8, _ => 16 };
             offset = (offset + align - 1) / align * align;
@@ -131,13 +131,13 @@ internal sealed partial class ParamLayout
     /// tails are found in the body with its comments blanked (same length, so the offsets line up), so a
     /// <c>=</c> or <c>:</c> inside a comment never blanks the member after it.
     /// </summary>
-    public static string StripDeclarations(string hlsl, (int Start, int End) span)
+    public static string BlankDefaults(string hlsl, (int Start, int End) span)
     {
         string body = hlsl[span.Start..span.End];
         char[] stripped = body.ToCharArray();
-        foreach (Match m in DefaultOrSemanticPattern().Matches(StripComments(body)))
+        foreach (Match match in DefaultOrSemanticPattern().Matches(StripComments(body)))
         {
-            for (int i = m.Index; i < m.Index + m.Length; i++)
+            for (int i = match.Index; i < match.Index + match.Length; i++)
             {
                 if (stripped[i] != '\n' && stripped[i] != '\r')
                     stripped[i] = ' ';
@@ -181,30 +181,30 @@ internal sealed partial class ParamLayout
     {
         record.Clear();
 
-        foreach (ParamField f in Fields)
+        foreach (ParamField field in Fields)
         {
-            if (!values.TryGetValue(f.Name, out Param p))
-                p = f.DefaultParam;
+            if (!values.TryGetValue(field.Name, out Param param))
+                param = field.DefaultParam;
 
-            Span<byte> dst = record.Slice(f.Offset, f.Size);
-            switch (f.Type)
+            Span<byte> dst = record.Slice(field.Offset, field.Size);
+            switch (field.Type)
             {
                 case ParamType.TextureRef:
-                    BitConverter.TryWriteBytes(dst, p.Texture.IsValid ? texture(p.Texture) : uint.MaxValue);
+                    BitConverter.TryWriteBytes(dst, param.Texture.IsValid ? texture(param.Texture) : uint.MaxValue);
                     break;
                 case ParamType.Bool:
-                    BitConverter.TryWriteBytes(dst, p.X != 0f ? 1u : 0u);
+                    BitConverter.TryWriteBytes(dst, param.X != 0f ? 1u : 0u);
                     break;
                 default:
-                    for (int c = 0; c < f.Components; c++)
+                    for (int component = 0; component < field.Components; component++)
                     {
-                        float v = c switch { 0 => p.X, 1 => p.Y, 2 => p.Z, _ => p.W };
-                        if (f.IsFloat)
-                            BitConverter.TryWriteBytes(dst[(c * 4)..], v);
-                        else if (f.IsInt)
-                            BitConverter.TryWriteBytes(dst[(c * 4)..], (int)v);
+                        float value = component switch { 0 => param.X, 1 => param.Y, 2 => param.Z, _ => param.W };
+                        if (field.IsFloat)
+                            BitConverter.TryWriteBytes(dst[(component * 4)..], value);
+                        else if (field.IsInt)
+                            BitConverter.TryWriteBytes(dst[(component * 4)..], (int)value);
                         else
-                            BitConverter.TryWriteBytes(dst[(c * 4)..], (uint)Math.Max(0f, v));
+                            BitConverter.TryWriteBytes(dst[(component * 4)..], (uint)Math.Max(0f, value));
                     }
                     break;
             }
@@ -212,7 +212,7 @@ internal sealed partial class ParamLayout
     }
 
     /// <summary>The declared default as a <see cref="Param"/>: the numbers in the initialiser in order, <c>true</c> as 1, anything else 0/none.</summary>
-    public static Param DefaultValue(ParamField field)
+    private static Param DefaultValue(ParamField field)
     {
         if (field.Default is null)
             return default;
@@ -223,18 +223,18 @@ internal sealed partial class ParamLayout
 
         // "float4(0.8, 0.8, 0.8, 1.0)": the type name's digit is not a value, so identifiers go first.
         MatchCollection numbers = NumberPattern().Matches(IdentifierPattern().Replace(field.Default, " "));
-        float[] v = new float[4];
+        float[] values = new float[4];
         if (numbers.Count == 1)
         {
-            Array.Fill(v, Parse(numbers[0].Value)); // float4(0.5) broadcasts
+            Array.Fill(values, ParseFloat(numbers[0].Value)); // float4(0.5) broadcasts
         }
         else
         {
             for (int i = 0; i < Math.Min(4, numbers.Count); i++)
-                v[i] = Parse(numbers[i].Value);
+                values[i] = ParseFloat(numbers[i].Value);
         }
 
-        return new Param { X = v[0], Y = v[1], Z = v[2], W = v[3] };
+        return new Param { X = values[0], Y = values[1], Z = values[2], W = values[3] };
     }
 
     private string Emit(string functionName, string parameters, string prologue, string rows)
@@ -244,20 +244,20 @@ internal sealed partial class ParamLayout
         sb.Append(prologue);
         sb.Append("    ").Append(StructName).Append(" loaded;\n");
 
-        foreach (ParamField f in Fields)
+        foreach (ParamField field in Fields)
         {
-            int row = f.Offset / 16;
-            int first = (f.Offset % 16) / 4;
-            string swizzle = "xyzw".Substring(first, f.Components);
+            int row = field.Offset / 16;
+            int first = (field.Offset % 16) / 4;
+            string swizzle = "xyzw".Substring(first, field.Components);
             string raw = $"{rows}[{row}].{swizzle}";
-            string value = f.Type switch
+            string value = field.Type switch
             {
                 ParamType.Bool => $"{raw} != 0u",
-                _ when f.IsFloat => $"asfloat({raw})",
-                _ when f.IsInt => $"asint({raw})",
+                _ when field.IsFloat => $"asfloat({raw})",
+                _ when field.IsInt => $"asint({raw})",
                 _ => raw,
             };
-            sb.Append("    loaded.").Append(f.Name).Append(" = ").Append(value).Append(";\n");
+            sb.Append("    loaded.").Append(field.Name).Append(" = ").Append(value).Append(";\n");
         }
 
         sb.Append("    return loaded;\n}\n");
@@ -266,16 +266,16 @@ internal sealed partial class ParamLayout
 
     private bool Declares(string name)
     {
-        foreach (ParamField f in Fields)
+        foreach (ParamField field in Fields)
         {
-            if (f.Name == name)
+            if (field.Name == name)
                 return true;
         }
 
         return false;
     }
 
-    private static float Parse(string number)
+    private static float ParseFloat(string number)
     {
         return float.TryParse(number.TrimEnd('f', 'F', 'u', 'U'), NumberStyles.Float, CultureInfo.InvariantCulture, out float value) ? value : 0f;
     }
@@ -294,7 +294,7 @@ internal sealed partial class ParamLayout
 
     private static string StripComments(string text)
     {
-        return CommentPattern().Replace(text, m => Blank(m.Value));
+        return CommentPattern().Replace(text, comment => Blank(comment.Value));
     }
 
     private static Regex StructPattern(string structName)

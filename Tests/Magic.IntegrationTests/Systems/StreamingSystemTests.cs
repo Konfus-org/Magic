@@ -11,20 +11,16 @@ using Xunit;
 
 namespace Magic.IntegrationTests.Systems;
 
-/// <summary>A component declared outside Core: a chunk names it and it loads with no registration.</summary>
-public struct Spin : IComponent
-{
-    public float Speed { get; set; }
-}
-
 /// <summary>
-/// The streaming system over chunk files in a temp folder, on the real Flecs gem. The world is a row of chunks along
-/// +Z (0_0_0 to 0_0_6) and one behind the origin (0_0_-2); a camera spawned at the origin looks down the row.
+/// The streaming system over chunk files in a temp folder, on the real Flecs gem. The Test domain is a row of chunks
+/// along +Z (0_0_0 to 0_0_6) and one behind the origin (0_0_-2); a camera spawned at the origin looks down the row.
+/// Its globals hold a Sun. The Other domain has smaller cubes and one chunk at the origin. Domains open and close by
+/// the events the world publishes.
 /// </summary>
 public sealed class StreamingSystemTests : IDisposable
 {
-    private static readonly Handle<World> Test = new(3001);
-    private static readonly Handle<World> Other = new(3050);
+    private static readonly Handle<Domain> Test = new(3001);
+    private static readonly Handle<Domain> Other = new(3050);
 
     private readonly TempFolder _root = new();
     private readonly Events _events = new();
@@ -36,7 +32,7 @@ public sealed class StreamingSystemTests : IDisposable
     public StreamingSystemTests()
     {
         Project project = new() { Name = "Tests", Root = _root.Path, EngineGems = AppContext.BaseDirectory, Resources = Path.Combine(_root.Path, "NoResources") };
-        Write("Test/Test.world", """{ "chunkSize": 64 }""", 3001);
+        Write("Test/Test.domain", """{ "chunkSize": 64 }""", 3001);
         Write("Test/globals.chunk", """
             { "entities": [
                 { "id": 7, "name": "Sun", "tags": [ "static" ],
@@ -52,194 +48,17 @@ public sealed class StreamingSystemTests : IDisposable
         for (int z = 2; z <= 6; z++)
             Write($"Test/0_0_{z}.chunk", """{ "entities": [ { "name": "Far", "components": { "Transform": {} } } ] }""", 3020ul + (ulong)z);
 
-        Write("Other/Other.world", """{ "chunkSize": 16 }""", 3050);
+        Write("Other/Other.domain", """{ "chunkSize": 16 }""", 3050);
+        Write("Other/0_0_0.chunk", """{ "entities": [ { "name": "O", "components": { "Transform": {} } } ] }""", 3051);
 
         _assets = new Services.Assets(project, new FileSystem(), _events, new Container());
         _transforms = new TransformSystem(_ecs);
         _streaming = new StreamingSystem(_ecs, _assets, project);
 
-        // The watcher can still report the files just written; let those settle and drain them, or they would reload the world mid-test.
+        // The watcher can still report the files just written; let those settle and drain them, or they would reopen the domain mid-test.
         Thread.Sleep(400);
         _assets.ProcessChanges();
         _events.NextFrame();
-    }
-
-    [Fact]
-    public void Opening_a_world_spawns_its_globals()
-    {
-        _streaming.Open(Test);
-
-        Assert.True(_ecs.Lookup("World.Globals.Sun").IsValid);
-    }
-
-    [Fact]
-    public void A_spawned_entity_has_the_components_its_chunk_gives_it()
-    {
-        _streaming.Open(Test);
-
-        Assert.Equal(new Vector3(1, 2, 3), _ecs.Get<Transform>(_ecs.Lookup("World.Globals.Sun")).Position);
-    }
-
-    [Fact]
-    public void A_spawned_entity_has_the_tags_its_chunk_gives_it()
-    {
-        _streaming.Open(Test);
-
-        Assert.True(_ecs.Get<Tags>(_ecs.Lookup("World.Globals.Sun")).Has(Tag.Static));
-    }
-
-    [Fact]
-    public void A_spawned_entity_has_the_id_its_chunk_gives_it()
-    {
-        _streaming.Open(Test);
-
-        Assert.Equal(7ul, _ecs.Get<EntityId>(_ecs.Lookup("World.Globals.Sun")).Value);
-    }
-
-    [Fact]
-    public void A_child_spawns_under_its_parent()
-    {
-        _streaming.Open(Test);
-
-        Assert.True(_ecs.Lookup("World.Globals.Sun.Child").IsValid);
-    }
-
-    [Fact]
-    public void A_component_declared_outside_core_is_found_by_name()
-    {
-        _streaming.Open(Test);
-
-        Assert.Equal(2f, _ecs.Get<Spin>(_ecs.Lookup("World.Globals.Sun.Child")).Speed);
-    }
-
-    [Fact]
-    public void Opening_a_second_world_destroys_the_first()
-    {
-        _streaming.Open(Test);
-
-        _streaming.Open(Other);
-
-        Assert.False(_ecs.Lookup("World.Globals.Sun").IsValid);
-    }
-
-    [Fact]
-    public void A_camera_streams_in_the_chunk_it_stands_in()
-    {
-        _streaming.Open(Test);
-        SpawnCamera();
-
-        StepUntil(() => _streaming.Loaded.Contains((0, 0, 0)));
-
-        Assert.True(_ecs.Lookup("World.Chunks.C0_0_0.A").IsValid);
-    }
-
-    [Fact]
-    public void The_chunk_the_camera_stands_in_is_active()
-    {
-        _streaming.Open(Test);
-        SpawnCamera();
-
-        StepUntil(() => _streaming.Loaded.Contains((0, 0, 0)));
-
-        Assert.True(_streaming.IsActive((0, 0, 0)));
-    }
-
-    [Fact]
-    public void A_camera_streams_in_every_chunk_it_sees()
-    {
-        _streaming.Open(Test);
-        SpawnCamera();
-
-        StepUntil(() => _streaming.Loaded.Count == 7);
-
-        Assert.Equal(Enumerable.Range(0, 7).Select(z => (0, 0, z)), _streaming.Loaded.OrderBy(c => c.Z));
-    }
-
-    [Fact]
-    public void Only_a_few_loads_start_at_a_time_nearest_first()
-    {
-        _streaming.Open(Test);
-        SpawnCamera();
-
-        StepUntil(() => _streaming.Loaded.Count > 0);
-
-        Assert.All(_streaming.Loaded, c => Assert.InRange(c.Z, 0, StreamingSystem.MaxLoads - 1));
-    }
-
-    [Fact]
-    public void A_chunk_no_longer_seen_is_kept_for_the_unload_delay()
-    {
-        _streaming.Open(Test);
-        Handle camera = SpawnCamera();
-        StepUntil(() => _streaming.Loaded.Contains((0, 0, 2)));
-        TurnAround(camera);
-
-        Step(StreamingSystem.UnloadDelayFrames / 2);
-
-        Assert.Contains((0, 0, 2), _streaming.Loaded);
-    }
-
-    [Fact]
-    public void A_chunk_no_longer_seen_is_unloaded_after_the_unload_delay()
-    {
-        _streaming.Open(Test);
-        Handle camera = SpawnCamera();
-        StepUntil(() => _streaming.Loaded.Contains((0, 0, 2)));
-        TurnAround(camera);
-
-        Step(StreamingSystem.UnloadDelayFrames + 5);
-
-        Assert.DoesNotContain((0, 0, 2), _streaming.Loaded);
-    }
-
-    [Fact]
-    public void A_chunk_within_a_chunk_of_the_camera_stays_wherever_it_looks()
-    {
-        _streaming.Open(Test);
-        Handle camera = SpawnCamera();
-        StepUntil(() => _streaming.Loaded.Contains((0, 0, 1)));
-        TurnAround(camera);
-
-        Step(StreamingSystem.UnloadDelayFrames + 5);
-
-        Assert.Contains((0, 0, 1), _streaming.Loaded);
-    }
-
-    [Fact]
-    public void A_changed_chunk_file_respawns_its_entities()
-    {
-        _streaming.Open(Test);
-        SpawnCamera();
-        StepUntil(() => _streaming.Loaded.Contains((0, 0, 0)));
-
-        Write("Test/0_0_0.chunk", """{ "entities": [ { "name": "A2", "components": { "Transform": {} } } ] }""", 3020);
-        StepUntil(() => _ecs.Lookup("World.Chunks.C0_0_0.A2").IsValid);
-
-        Assert.True(_ecs.Lookup("World.Chunks.C0_0_0.A2").IsValid);
-    }
-
-    [Fact]
-    public void Gems_changing_mid_load_still_spawns_each_chunk_once()
-    {
-        _streaming.Open(Test);
-        SpawnCamera();
-        Step(1); // the loads are in flight
-
-        _events.Publish(new Event(EventType.GemsChanged));
-        StepUntil(() => _streaming.Loaded.Count == 7);
-
-        Assert.Equal(7, _ecs.GetChildren(_ecs.Lookup("World.Chunks")).Length);
-    }
-
-    [Fact]
-    public void Chunks_naming_one_model_load_it_once()
-    {
-        _streaming.Open(Test);
-        SpawnCamera();
-
-        StepUntil(() => _streaming.Loaded.Contains((0, 0, 0)) && _streaming.Loaded.Contains((0, 0, 1)));
-
-        Assert.Equal(1, Assert.Single(_assets.PoolStats(), s => s.Type == nameof(Model)).Misses);
     }
 
     public void Dispose()
@@ -249,6 +68,270 @@ public sealed class StreamingSystemTests : IDisposable
         _assets.Dispose();
         _ecs.Dispose();
         _root.Dispose();
+    }
+
+    [Fact]
+    public void An_opened_domain_spawns_its_globals()
+    {
+        Open(Test);
+
+        Assert.True(_ecs.Lookup("World.Test.Globals.Sun").IsValid);
+    }
+
+    [Fact]
+    public void A_spawned_entity_has_the_components_its_chunk_gives_it()
+    {
+        Open(Test);
+
+        Assert.Equal(new Vector3(1, 2, 3), _ecs.Get<Transform>(_ecs.Lookup("World.Test.Globals.Sun")).Position);
+    }
+
+    [Fact]
+    public void A_spawned_entity_has_the_tags_its_chunk_gives_it()
+    {
+        Open(Test);
+
+        Assert.True(_ecs.Get<Tags>(_ecs.Lookup("World.Test.Globals.Sun")).Has(Tag.Static));
+    }
+
+    [Fact]
+    public void A_spawned_entity_has_the_id_its_chunk_gives_it()
+    {
+        Open(Test);
+
+        Assert.Equal(7ul, _ecs.Get<EntityId>(_ecs.Lookup("World.Test.Globals.Sun")).Value);
+    }
+
+    [Fact]
+    public void A_child_spawns_under_its_parent()
+    {
+        Open(Test);
+
+        Assert.True(_ecs.Lookup("World.Test.Globals.Sun.Child").IsValid);
+    }
+
+    [Fact]
+    public void A_component_declared_outside_core_is_found_by_name()
+    {
+        Open(Test);
+
+        Assert.Equal(2f, _ecs.Get<Spin>(_ecs.Lookup("World.Test.Globals.Sun.Child")).Speed);
+    }
+
+    [Fact]
+    public void A_closed_domain_loses_its_entities()
+    {
+        Open(Test);
+
+        Close(Test);
+
+        Assert.False(_ecs.Lookup("World.Test.Globals.Sun").IsValid);
+    }
+
+    [Fact]
+    public void A_domain_that_is_not_an_asset_spawns_nothing()
+    {
+        Open(new Handle<Domain>(9999));
+
+        Assert.Equal(0, _streaming.Stats.Domains);
+    }
+
+    [Fact]
+    public void A_changed_domain_file_reopens_the_domain()
+    {
+        Open(Test);
+        Handle before = _ecs.Lookup("World.Test");
+
+        Write("Test/Test.domain", """{ "chunkSize": 32 }""", 3001);
+        StepUntil(() => _ecs.Lookup("World.Test") is { IsValid: true } root && root != before);
+
+        Assert.NotEqual(before, _ecs.Lookup("World.Test"));
+    }
+
+    [Fact]
+    public void A_changed_global_chunk_respawns_the_globals()
+    {
+        Open(Test);
+
+        Write("Test/globals.chunk", """{ "entities": [ { "name": "Star" } ] }""", 3003);
+        StepUntil(() => _ecs.Lookup("World.Test.Globals.Star").IsValid);
+
+        Assert.True(_ecs.Lookup("World.Test.Globals.Star").IsValid);
+    }
+
+    [Fact]
+    public void A_camera_streams_in_the_chunk_it_stands_in()
+    {
+        Open(Test);
+        SpawnCamera();
+
+        StepUntil(() => Spawned("Test", 0, 0, 0));
+
+        Assert.True(_ecs.Lookup("World.Test.Chunks.C0_0_0.A").IsValid);
+    }
+
+    [Fact]
+    public void The_chunk_the_camera_stands_in_is_active()
+    {
+        Open(Test);
+        SpawnCamera();
+
+        StepUntil(() => Spawned("Test", 0, 0, 0));
+
+        Assert.Equal(1, _streaming.Stats.Active);
+    }
+
+    [Fact]
+    public void A_camera_at_a_negative_position_streams_in_the_chunk_it_stands_in()
+    {
+        Open(Test);
+        Handle camera = SpawnCamera();
+        _ecs.Get<Transform>(camera).Position = new Vector3(5, 5, -70);
+
+        StepUntil(() => Spawned("Test", 0, 0, -2));
+
+        Assert.True(Spawned("Test", 0, 0, -2));
+    }
+
+    [Fact]
+    public void A_camera_streams_in_every_chunk_it_sees()
+    {
+        Open(Test);
+        SpawnCamera();
+
+        StepUntil(() => _streaming.Stats.Loaded == 7);
+
+        Assert.Equal(Enumerable.Range(0, 7).Select(z => $"C0_0_{z}"), _ecs.GetChildren(_ecs.Lookup("World.Test.Chunks")).Select(child => _ecs.GetName(child)!).Order());
+    }
+
+    [Fact]
+    public void The_farthest_chunk_is_not_among_the_first_to_load()
+    {
+        Open(Test);
+        SpawnCamera();
+
+        StepUntil(() => _streaming.Stats.Loaded > 0);
+
+        Assert.False(Spawned("Test", 0, 0, 6));
+    }
+
+    [Fact]
+    public void A_chunk_no_longer_seen_is_not_unloaded_at_once()
+    {
+        Open(Test);
+        Handle camera = SpawnCamera();
+        StepUntil(() => Spawned("Test", 0, 0, 2));
+        TurnAround(camera);
+
+        Step(2);
+
+        Assert.True(Spawned("Test", 0, 0, 2));
+    }
+
+    [Fact]
+    public void A_chunk_no_longer_seen_is_unloaded_in_the_end()
+    {
+        Open(Test);
+        Handle camera = SpawnCamera();
+        StepUntil(() => Spawned("Test", 0, 0, 2));
+        TurnAround(camera);
+
+        StepUntil(() => !Spawned("Test", 0, 0, 2));
+
+        Assert.False(Spawned("Test", 0, 0, 2));
+    }
+
+    [Fact]
+    public void A_chunk_within_a_chunk_of_the_camera_stays_wherever_it_looks()
+    {
+        Open(Test);
+        Handle camera = SpawnCamera();
+        StepUntil(() => Spawned("Test", 0, 0, 1) && Spawned("Test", 0, 0, 2));
+        TurnAround(camera);
+
+        StepUntil(() => !Spawned("Test", 0, 0, 2)); // the far one has gone: the unload delay is over
+
+        Assert.True(Spawned("Test", 0, 0, 1));
+    }
+
+    [Fact]
+    public void A_changed_chunk_file_respawns_its_entities()
+    {
+        Open(Test);
+        SpawnCamera();
+        StepUntil(() => Spawned("Test", 0, 0, 0));
+
+        Write("Test/0_0_0.chunk", """{ "entities": [ { "name": "A2", "components": { "Transform": {} } } ] }""", 3020);
+        StepUntil(() => _ecs.Lookup("World.Test.Chunks.C0_0_0.A2").IsValid);
+
+        Assert.True(_ecs.Lookup("World.Test.Chunks.C0_0_0.A2").IsValid);
+    }
+
+    [Fact]
+    public void Gems_changing_mid_load_still_spawns_each_chunk_once()
+    {
+        Open(Test);
+        SpawnCamera();
+        Step(1); // the loads are in flight
+
+        _events.Publish(new Event(EventType.GemsChanged));
+        StepUntil(() => _streaming.Stats.Loaded == 7);
+
+        Assert.Equal(7, _ecs.GetChildren(_ecs.Lookup("World.Test.Chunks")).Length);
+    }
+
+    [Fact]
+    public void Chunks_naming_one_model_load_it_once()
+    {
+        Open(Test);
+        SpawnCamera();
+
+        StepUntil(() => Spawned("Test", 0, 0, 0) && Spawned("Test", 0, 0, 1));
+
+        Assert.Equal(1, Assert.Single(_assets.PoolStats(), pool => pool.Type == nameof(Model)).Misses);
+    }
+
+    [Fact]
+    public void Every_open_domain_streams_its_own_chunks()
+    {
+        Open(Test);
+        Open(Other);
+        SpawnCamera();
+
+        StepUntil(() => Spawned("Other", 0, 0, 0));
+
+        Assert.True(_ecs.Lookup("World.Other.Chunks.C0_0_0.O").IsValid);
+    }
+
+    [Fact]
+    public void A_closed_domain_is_no_longer_streamed()
+    {
+        Open(Test);
+        SpawnCamera();
+        StepUntil(() => Spawned("Test", 0, 0, 0));
+
+        Close(Test);
+
+        Assert.Equal(0, _streaming.Stats.Loaded);
+    }
+
+    /// <summary>What the world publishes when a domain opens, and the frame that hears it.</summary>
+    private void Open(Handle<Domain> domain)
+    {
+        _events.Publish(new Event(EventType.DomainOpened, Id: domain.Id));
+        Step(1);
+    }
+
+    private void Close(Handle<Domain> domain)
+    {
+        _events.Publish(new Event(EventType.DomainClosed, Id: domain.Id));
+        Step(1);
+    }
+
+    /// <summary>Whether a domain's chunk is in the ECS now, where the system spawns it: <c>World.&lt;Domain&gt;.Chunks.Cx_y_z</c>.</summary>
+    private bool Spawned(string domain, int x, int y, int z)
+    {
+        return _ecs.Lookup($"World.{domain}.Chunks.C{x}_{y}_{z}").IsValid;
     }
 
     /// <summary>A camera in chunk 0_0_0 looking down +Z.</summary>
@@ -274,9 +357,9 @@ public sealed class StreamingSystemTests : IDisposable
             _assets.ProcessChanges();
             Frame frame = new(1, 0, 1f / 60f, _events.NextFrame());
             _ecs.Update(frame);
-            _streaming.Update(frame);
+            _streaming.Run(frame);
             _ecs.LateUpdate(frame);
-            _transforms.Update(frame);
+            _transforms.Run(frame);
         }
     }
 
@@ -293,7 +376,7 @@ public sealed class StreamingSystemTests : IDisposable
 
     private void Write(string file, string json, ulong id)
     {
-        _root.Write($"Assets/Worlds/{file}", json);
-        _root.Write($"Assets/Worlds/{file}.meta", $$$"""{ "id": {{{id}}}, "version": 1 }""");
+        _root.Write($"Assets/Domains/{file}", json);
+        _root.Write($"Assets/Domains/{file}.meta", $$$"""{ "id": {{{id}}}, "version": 1 }""");
     }
 }

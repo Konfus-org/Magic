@@ -6,9 +6,9 @@ using System.Text.Json.Serialization;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// A list of entities on disk, one file per cube of a <see cref="World"/>. A chunk named <c>x_y_z.chunk</c>
+/// A list of entities on disk, one file per cube of a <see cref="Domain"/>. A chunk named <c>x_y_z.chunk</c>
 /// (signed integers) sits at that grid coordinate and streams in and out with the cameras; any other name
-/// (<c>globals.chunk</c> by convention) is loaded with the world and stays. Only the streaming system reads
+/// (<c>globals.chunk</c> by convention) is loaded with the domain and stays. Only the spawner reads
 /// the entities; the ECS never sees a chunk.
 /// </summary>
 [AssetFormat(AssetFormat.Json)]

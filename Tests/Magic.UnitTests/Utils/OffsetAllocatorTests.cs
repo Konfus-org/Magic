@@ -10,10 +10,10 @@ public sealed class OffsetAllocatorTests
     {
         OffsetAllocator allocator = new(1024, 64);
 
-        OffsetAllocator.Allocation a = allocator.Allocate(100);
-        OffsetAllocator.Allocation b = allocator.Allocate(200);
+        OffsetAllocator.Allocation first = allocator.Allocate(100);
+        OffsetAllocator.Allocation second = allocator.Allocate(200);
 
-        Assert.True(a.Offset + 100 <= b.Offset || b.Offset + 200 <= a.Offset);
+        Assert.True(first.Offset + 100 <= second.Offset || second.Offset + 200 <= first.Offset);
     }
 
     [Fact]
@@ -30,9 +30,9 @@ public sealed class OffsetAllocatorTests
     public void Freeing_returns_the_size_to_free_storage()
     {
         OffsetAllocator allocator = new(1024, 64);
-        OffsetAllocator.Allocation a = allocator.Allocate(100);
+        OffsetAllocator.Allocation first = allocator.Allocate(100);
 
-        allocator.Free(a);
+        allocator.Free(first);
 
         Assert.Equal(1024u, allocator.FreeStorage);
     }
@@ -55,12 +55,12 @@ public sealed class OffsetAllocatorTests
     public void Freed_neighbours_merge_back_into_one_range()
     {
         OffsetAllocator allocator = new(1024, 64);
-        OffsetAllocator.Allocation a = allocator.Allocate(100);
-        OffsetAllocator.Allocation b = allocator.Allocate(200);
-        OffsetAllocator.Allocation c = allocator.Allocate(300);
-        allocator.Free(b);
-        allocator.Free(a);
-        allocator.Free(c);
+        OffsetAllocator.Allocation first = allocator.Allocate(100);
+        OffsetAllocator.Allocation second = allocator.Allocate(200);
+        OffsetAllocator.Allocation third = allocator.Allocate(300);
+        allocator.Free(second);
+        allocator.Free(first);
+        allocator.Free(third);
 
         OffsetAllocator.Allocation whole = allocator.Allocate(1024);
 
@@ -102,10 +102,10 @@ public sealed class OffsetAllocatorTests
     public void A_double_free_throws()
     {
         OffsetAllocator allocator = new(256, 16);
-        OffsetAllocator.Allocation a = allocator.Allocate(256);
-        allocator.Free(a);
+        OffsetAllocator.Allocation first = allocator.Allocate(256);
+        allocator.Free(first);
 
-        Action again = () => allocator.Free(a);
+        Action again = () => allocator.Free(first);
 
         Assert.Throws<InvalidOperationException>(again);
     }

@@ -10,6 +10,8 @@ internal sealed class FakeWindows : IWindowRegistry, IWindow
 {
     public IWindow? Main => this;
     public IReadOnlyList<IWindow> Windows => [this];
+
+    public void Dispose() { }
     public IWindow? Get(uint handle) => handle == Handle ? this : null;
 
     public bool IsOpen => true;
@@ -23,5 +25,4 @@ internal sealed class FakeWindows : IWindowRegistry, IWindow
     public void Hide() { }
     public void Minimize() { }
     public void Maximize() { }
-    public void Dispose() { }
 }

@@ -24,6 +24,12 @@ public sealed class SdlInputTests : IDisposable
         _input = new SdlInput(_events);
     }
 
+    public void Dispose()
+    {
+        _input.Dispose();
+        _sdl.Dispose();
+    }
+
     [Fact]
     public void A_key_pushed_down_reads_as_pressed_that_frame()
     {
@@ -144,12 +150,6 @@ public sealed class SdlInputTests : IDisposable
         Assert.False(_input.IsConnected(gamepad));
     }
 
-    public void Dispose()
-    {
-        _input.Dispose();
-        _sdl.Dispose();
-    }
-
     /// <summary>One frame's Update, in load order.</summary>
     private void Step()
     {
@@ -159,21 +159,21 @@ public sealed class SdlInputTests : IDisposable
 
     private static void PushKey(SDL.Keycode key, bool down)
     {
-        SDL.Event e = default;
-        e.Key.Type = down ? SDL.EventType.KeyDown : SDL.EventType.KeyUp;
-        e.Key.Key = key;
-        e.Key.Down = down;
-        Assert.True(SDL.PushEvent(ref e), SDL.GetError());
+        SDL.Event sdlEvent = default;
+        sdlEvent.Key.Type = down ? SDL.EventType.KeyDown : SDL.EventType.KeyUp;
+        sdlEvent.Key.Key = key;
+        sdlEvent.Key.Down = down;
+        Assert.True(SDL.PushEvent(ref sdlEvent), SDL.GetError());
     }
 
     private static void PushMotion(float x, float y, float dx, float dy)
     {
-        SDL.Event e = default;
-        e.Motion.Type = SDL.EventType.MouseMotion;
-        e.Motion.X = x;
-        e.Motion.Y = y;
-        e.Motion.XRel = dx;
-        e.Motion.YRel = dy;
-        Assert.True(SDL.PushEvent(ref e), SDL.GetError());
+        SDL.Event sdlEvent = default;
+        sdlEvent.Motion.Type = SDL.EventType.MouseMotion;
+        sdlEvent.Motion.X = x;
+        sdlEvent.Motion.Y = y;
+        sdlEvent.Motion.XRel = dx;
+        sdlEvent.Motion.YRel = dy;
+        Assert.True(SDL.PushEvent(ref sdlEvent), SDL.GetError());
     }
 }

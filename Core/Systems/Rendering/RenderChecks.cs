@@ -20,10 +20,10 @@ internal static class RenderChecks
     /// <summary>How often <see cref="Verify"/> runs: its readbacks stall the frame.</summary>
     public const int VerifyEveryFrames = 60;
 
-    public static void Probes(RenderContext ctx)
+    public static void RunProbes(RenderContext ctx)
     {
-        Winding(ctx);
-        Matrices(ctx);
+        CheckWinding(ctx);
+        CheckMatrices(ctx);
     }
 
     /// <summary>
@@ -59,16 +59,16 @@ internal static class RenderChecks
                 continue;
 
             Vector3 center = new Vector3(row.Sphere.X, row.Sphere.Y, row.Sphere.Z) - camera;
-            float r = row.Sphere.W;
+            float radius = row.Sphere.W;
             bool surely = true, maybe = true;
             if (frame.IsOrthographic == 0)
             {
-                surely &= frustum.Intersects(new BoundingSphere(center, r * 0.99f));
-                maybe &= frustum.Intersects(new BoundingSphere(center, r * 1.01f));
+                surely &= frustum.Intersects(new BoundingSphere(center, radius * 0.99f));
+                maybe &= frustum.Intersects(new BoundingSphere(center, radius * 1.01f));
                 if (!row.Flags.HasFlag(InstanceFlags.NoSizeCull))
                 {
                     float z = Vector3.TransformNormal(center, frame.View).Z;
-                    float pixels = r * frame.ProjScale.Y * frame.ViewSize.Y * 0.5f / MathF.Max(z, frame.Near);
+                    float pixels = radius * frame.ProjScale.Y * frame.ViewSize.Y * 0.5f / MathF.Max(z, frame.Near);
                     surely &= pixels >= frame.MinPixels * 1.02f;
                     maybe &= pixels >= frame.MinPixels * 0.98f;
                 }
@@ -100,7 +100,7 @@ internal static class RenderChecks
     }
 
     /// <summary>Two triangles straight from a vertex buffer in NDC, one wound each way; only the clockwise one may survive.</summary>
-    private static void Winding(RenderContext ctx)
+    private static void CheckWinding(RenderContext ctx)
     {
         TriangleVertex[] vertices =
         [
@@ -171,7 +171,7 @@ internal static class RenderChecks
         }
     }
 
-    private static void Matrices(RenderContext ctx)
+    private static void CheckMatrices(RenderContext ctx)
     {
         IRendering gpu = ctx.Gpu;
         GpuPipeline pipeline;
@@ -189,21 +189,21 @@ internal static class RenderChecks
         GpuBuffer output = gpu.CreateBuffer(GpuBufferUsage.ComputeWrite, 32);
         try
         {
-            Matrix4x4 m = Matrix4x4.CreateFromYawPitchRoll(0.3f, 0.7f, -0.2f) * Matrix4x4.CreateTranslation(1f, 2f, 3f) * Matrix4x4.CreatePerspectiveFieldOfView(1f, 1.5f, 0.1f, 100f);
+            Matrix4x4 projection = Matrix4x4.CreateFromYawPitchRoll(0.3f, 0.7f, -0.2f) * Matrix4x4.CreateTranslation(1f, 2f, 3f) * Matrix4x4.CreatePerspectiveFieldOfView(1f, 1.5f, 0.1f, 100f);
             Matrix4x4 world = Matrix4x4.CreateScale(2f, 3f, 4f) * Matrix4x4.CreateFromYawPitchRoll(1f, 0.2f, 0.4f) * Matrix4x4.CreateTranslation(-5f, 6f, 7f);
-            Vector4 v = new(0.5f, -1.5f, 2.5f, 1f);
-            Matrix4x4 t = Matrix4x4.Transpose(world);
+            Vector4 vector = new(0.5f, -1.5f, 2.5f, 1f);
+            Matrix4x4 transposed = Matrix4x4.Transpose(world);
             MatrixProbeInput probe = new()
             {
-                V = v,
-                R0 = new Vector4(t.M11, t.M12, t.M13, t.M14),
-                R1 = new Vector4(t.M21, t.M22, t.M23, t.M24),
-                R2 = new Vector4(t.M31, t.M32, t.M33, t.M34),
+                V = vector,
+                R0 = new Vector4(transposed.M11, transposed.M12, transposed.M13, transposed.M14),
+                R1 = new Vector4(transposed.M21, transposed.M22, transposed.M23, transposed.M24),
+                R2 = new Vector4(transposed.M31, transposed.M32, transposed.M33, transposed.M34),
             };
 
             gpu.Upload<MatrixProbeInput>(input, 0, [probe]);
             RenderCommands commands = new();
-            commands.Push(GpuStage.Compute, m);
+            commands.Push(GpuStage.Compute, projection);
             Culling.Dispatch(commands, pipeline, [output], [input], 1);
             gpu.Submit(commands);
 
@@ -218,9 +218,9 @@ internal static class RenderChecks
             Vector4 cbuffer = results[0];
             Vector4 rows = results[1];
 
-            Vector4 expectedCbuffer = Vector4.Transform(v, m);
-            Vector4 expectedRows = Vector4.Transform(v, world);
-            bool ok = Close(cbuffer, expectedCbuffer) && Close(new Vector4(rows.X, rows.Y, rows.Z, expectedRows.W), expectedRows);
+            Vector4 expectedCbuffer = Vector4.Transform(vector, projection);
+            Vector4 expectedRows = Vector4.Transform(vector, world);
+            bool ok = NearlyEqual(cbuffer, expectedCbuffer) && NearlyEqual(new Vector4(rows.X, rows.Y, rows.Z, expectedRows.W), expectedRows);
 
             if (ok)
                 Debugging.Log.Info($"Probe: matrices agree ({gpu.Device}): cbuffer mul(M, v) and 3x4 rows match Vector4.Transform.");
@@ -235,9 +235,9 @@ internal static class RenderChecks
         }
     }
 
-    private static bool Close(Vector4 a, Vector4 b)
+    private static bool NearlyEqual(Vector4 value, Vector4 expected)
     {
-        return Vector4.Distance(a, b) <= 1e-3f * MathF.Max(1f, b.Length());
+        return Vector4.Distance(value, expected) <= 1e-3f * MathF.Max(1f, expected.Length());
     }
 
     [StructLayout(LayoutKind.Sequential)]

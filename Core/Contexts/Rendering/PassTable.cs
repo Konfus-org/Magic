@@ -29,12 +29,12 @@ internal sealed class PassTable(CompiledShader fullscreenVertex)
 
     public CompiledShader FullscreenVertex { get; } = fullscreenVertex;
 
-    public List<PassState> Passes { get; } = [];
+    public List<PassState> States { get; } = [];
 
     public Compiles<ulong> Compiles { get; } = new();
 
     public int IndexOf(ulong id)
     {
-        return Passes.FindIndex(p => p.Id == id);
+        return States.FindIndex(pass => pass.Id == id);
     }
 }

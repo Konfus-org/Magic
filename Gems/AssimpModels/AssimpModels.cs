@@ -47,7 +47,7 @@ internal sealed class AssimpModels : IGem, IAssetLoader<Model>
 
         asset.Meshes = [.. meshes];
         asset.Parts = [.. parts];
-        asset.SlotNames = [.. scene.Materials.Select(m => m.Name ?? "")];
+        asset.SlotNames = [.. scene.Materials.Select(material => material.Name ?? "")];
     }
 
     private static void Walk(
@@ -105,12 +105,12 @@ internal sealed class AssimpModels : IGem, IAssetLoader<Model>
 
         // The mirror in the transform flips the winding; reversing each triangle puts it back to clockwise from outside.
         uint[] indices = new uint[source.FaceCount * 3];
-        for (int f = 0; f < source.FaceCount; f++)
+        for (int faceIndex = 0; faceIndex < source.FaceCount; faceIndex++)
         {
-            List<int> face = source.Faces[f].Indices;
-            indices[f * 3] = (uint)face[0];
-            indices[(f * 3) + 1] = (uint)face[2];
-            indices[(f * 3) + 2] = (uint)face[1];
+            List<int> face = source.Faces[faceIndex].Indices;
+            indices[faceIndex * 3] = (uint)face[0];
+            indices[(faceIndex * 3) + 1] = (uint)face[2];
+            indices[(faceIndex * 3) + 2] = (uint)face[1];
         }
 
         Mesh mesh = new() { Vertices = vertices, Indices = indices };

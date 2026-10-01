@@ -52,6 +52,13 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
         SDL.AddEventWatch(_watch, IntPtr.Zero);
     }
 
+    public void Dispose()
+    {
+        SDL.RemoveEventWatch(_watch, IntPtr.Zero);
+        CloseAll();
+        SDL.QuitSubSystem(SDL.InitFlags.Video);
+    }
+
     public IWindow? Main
     {
         get
@@ -124,13 +131,6 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
         return true;
     }
 
-    public void Dispose()
-    {
-        SDL.RemoveEventWatch(_watch, IntPtr.Zero);
-        CloseAll();
-        SDL.QuitSubSystem(SDL.InitFlags.Video);
-    }
-
     private sealed class Window : IWindow
     {
         private readonly Assets _assets;
@@ -154,6 +154,16 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
             Size = new Size(width, height);
             Mode = mode;
             Icon = icon;
+        }
+
+        public void Dispose()
+        {
+            if (_window == IntPtr.Zero)
+                return;
+
+            IsOpen = false;
+            SDL.DestroyWindow(_window);
+            _window = IntPtr.Zero;
         }
 
         /// <summary>False once closed; the SDL window itself lives on until <see cref="Dispose"/>.</summary>
@@ -222,11 +232,11 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
         /// <summary>Read from SDL each time: the user resizes the window too.</summary>
         public Size Size
         {
-            get => SDL.GetWindowSize(_window, out int w, out int h) ? new Size(w, h) : Size.Empty;
+            get => SDL.GetWindowSize(_window, out int width, out int height) ? new Size(width, height) : Size.Empty;
             set => SDL.SetWindowSize(_window, value.Width, value.Height);
         }
 
-        public Size PixelSize => SDL.GetWindowSizeInPixels(_window, out int w, out int h) ? new Size(w, h) : Size.Empty;
+        public Size PixelSize => SDL.GetWindowSizeInPixels(_window, out int width, out int height) ? new Size(width, height) : Size.Empty;
 
         public WindowMode Mode
         {
@@ -279,16 +289,6 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
 
             if (_window != IntPtr.Zero)
                 SDL.HideWindow(_window);
-        }
-
-        public void Dispose()
-        {
-            if (_window == IntPtr.Zero)
-                return;
-
-            IsOpen = false;
-            SDL.DestroyWindow(_window);
-            _window = IntPtr.Zero;
         }
     }
 }

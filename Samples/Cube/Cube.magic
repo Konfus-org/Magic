@@ -1,4 +1,4 @@
 {
     "name": "Cube",
-    "world": { "id": 3001 }
+    "domain": { "id": 3001 }
 }

@@ -89,19 +89,19 @@ internal sealed class TextureTable
     }
 
     /// <summary>A layer in the class, making its array (or a bigger one) as needed; false when the class is at the cap.</summary>
-    public bool TryAllocateLayer(IRendering gpu, PoolClass c, out uint layer)
+    public bool TryAllocateLayer(IRendering gpu, PoolClass pool, out uint layer)
     {
-        if (!c.Texture.IsValid)
-            Create(gpu, c);
+        if (!pool.Texture.IsValid)
+            Create(gpu, pool);
 
-        if (c.Free.Count > 0)
+        if (pool.Free.Count > 0)
         {
-            layer = c.Free.Pop();
+            layer = pool.Free.Pop();
             return true;
         }
 
-        uint capacity = c.Grown.IsValid ? c.GrownCapacity : c.Capacity;
-        if (c.Used >= capacity)
+        uint capacity = pool.Grown.IsValid ? pool.GrownCapacity : pool.Capacity;
+        if (pool.Used >= capacity)
         {
             if (capacity >= MaxLayers)
             {
@@ -110,12 +110,12 @@ internal sealed class TextureTable
             }
 
             uint grown = Math.Min(MaxLayers, capacity * 2);
-            gpu.Release(c.Grown);
-            c.Grown = gpu.CreateTexture(new TextureDesc(Format(c.Srgb), Usage(c.Srgb), (uint)c.Size, (uint)c.Size, c.Levels, grown));
-            c.GrownCapacity = grown;
+            gpu.Release(pool.Grown);
+            pool.Grown = gpu.CreateTexture(new TextureDesc(Format(pool.Srgb), Usage(pool.Srgb), (uint)pool.Size, (uint)pool.Size, pool.Levels, grown));
+            pool.GrownCapacity = grown;
         }
 
-        layer = c.Used++;
+        layer = pool.Used++;
         return true;
     }
 
@@ -132,10 +132,10 @@ internal sealed class TextureTable
         return MaxSize;
     }
 
-    public void Create(IRendering gpu, PoolClass c)
+    public void Create(IRendering gpu, PoolClass pool)
     {
-        c.Capacity = 4;
-        c.Texture = gpu.CreateTexture(new TextureDesc(Format(c.Srgb), Usage(c.Srgb), (uint)c.Size, (uint)c.Size, c.Levels, c.Capacity));
+        pool.Capacity = 4;
+        pool.Texture = gpu.CreateTexture(new TextureDesc(Format(pool.Srgb), Usage(pool.Srgb), (uint)pool.Size, (uint)pool.Size, pool.Levels, pool.Capacity));
     }
 
     private static GpuFormat Format(bool srgb)

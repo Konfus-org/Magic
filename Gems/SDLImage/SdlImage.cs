@@ -73,7 +73,7 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
                 }
 
                 byte[] data = Copy(current, out int width, out int height);
-                levels.Add(new TextureLevel(width, height, levels.Sum(l => l.Size), data.Length));
+                levels.Add(new TextureLevel(width, height, levels.Sum(level => level.Size), data.Length));
                 pixels.Add(data);
             }
 
@@ -81,7 +81,7 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
                 SDL.DestroySurface(current);
 
             asset.Levels = [.. levels];
-            asset.Pixels = [.. pixels.SelectMany(p => p)];
+            asset.Pixels = [.. pixels.SelectMany(level => level)];
         }
         finally
         {

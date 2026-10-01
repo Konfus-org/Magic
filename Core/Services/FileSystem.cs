@@ -5,7 +5,7 @@ using System.Text;
 namespace Magic.Services;
 
 /// <summary>The real disk. See <see cref="IFileSystem"/>.</summary>
-public sealed class FileSystem : IFileSystem
+internal sealed class FileSystem : IFileSystem
 {
     private const int BufferSize = 64 * 1024;
 
@@ -162,15 +162,15 @@ public sealed class FileSystem : IFileSystem
             InternalBufferSize = 64 * 1024, // the maximum; a big save or checkout raises many events at once
         };
 
-        watcher.Created += (_, e) => changed(e.FullPath);
-        watcher.Changed += (_, e) => changed(e.FullPath);
-        watcher.Deleted += (_, e) => changed(e.FullPath);
-        watcher.Renamed += (_, e) =>
+        watcher.Created += (_, args) => changed(args.FullPath);
+        watcher.Changed += (_, args) => changed(args.FullPath);
+        watcher.Deleted += (_, args) => changed(args.FullPath);
+        watcher.Renamed += (_, args) =>
         {
-            changed(e.OldFullPath);
-            changed(e.FullPath);
+            changed(args.OldFullPath);
+            changed(args.FullPath);
         };
-        watcher.Error += (_, e) => Debugging.Log.Warn($"Watching {path} hit an error; changes may have been missed. {e.GetException()}");
+        watcher.Error += (_, args) => Debugging.Log.Warn($"Watching {path} hit an error; changes may have been missed. {args.GetException()}");
         watcher.EnableRaisingEvents = true;
 
         return watcher;

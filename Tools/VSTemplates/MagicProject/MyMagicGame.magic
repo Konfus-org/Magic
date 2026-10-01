@@ -1,4 +1,4 @@
 {
     "name": "MyMagicGame",
-    "world": { "id": 1001 }
+    "domain": { "id": 1001 }
 }

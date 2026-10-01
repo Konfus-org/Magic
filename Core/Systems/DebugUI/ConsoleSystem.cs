@@ -11,7 +11,7 @@ namespace Magic.Systems.DebugUI;
 /// above a line to type in, whose first word names a <see cref="Debugging.Commands"/> command (or <c>help</c> or
 /// <c>clear</c>) and the rest its arguments. It is a logger itself, so it sees every line from the moment it exists.
 /// </summary>
-public sealed class ConsoleSystem : DebugWindowSystem, ILogger
+internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
 {
     public const int ConsoleLines = 10_000;
 
@@ -23,12 +23,18 @@ public sealed class ConsoleSystem : DebugWindowSystem, ILogger
     private string _text = "";
     private bool _logChanged;
 
-    public ConsoleSystem() : base(Key.Grave)
+    public ConsoleSystem(IInput? input) : base(Key.Grave, input)
     {
         Debugging.Log.Register(this);
     }
 
-    protected override void Run(in Frame frame)
+    public override void Dispose()
+    {
+        Debugging.Log.Unregister(this);
+        base.Dispose();
+    }
+
+    protected override void Draw(in Frame frame)
     {
         if (!Open)
             return;
@@ -92,22 +98,22 @@ public sealed class ConsoleSystem : DebugWindowSystem, ILogger
     }
 
     /// <summary>Whitespace separates arguments; double quotes keep spaces inside one.</summary>
-    internal static string[] Split(string line)
+    private static string[] Split(string line)
     {
         List<string> words = [];
         StringBuilder word = new();
         bool quoted = false, any = false;
 
-        foreach (char c in line)
+        foreach (char character in line)
         {
-            if (c == '"')
+            if (character == '"')
             {
                 quoted = !quoted;
                 any = true;
                 continue;
             }
 
-            if (char.IsWhiteSpace(c) && !quoted)
+            if (char.IsWhiteSpace(character) && !quoted)
             {
                 if (any)
                     words.Add(word.ToString());
@@ -117,7 +123,7 @@ public sealed class ConsoleSystem : DebugWindowSystem, ILogger
                 continue;
             }
 
-            word.Append(c);
+            word.Append(character);
             any = true;
         }
 
@@ -141,11 +147,5 @@ public sealed class ConsoleSystem : DebugWindowSystem, ILogger
 
     public void Flush()
     {
-    }
-
-    public override void Dispose()
-    {
-        Debugging.Log.Unregister(this);
-        base.Dispose();
     }
 }

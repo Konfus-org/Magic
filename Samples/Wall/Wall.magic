@@ -1,5 +1,5 @@
 {
     "name": "Wall",
     "gems": ["default", "Wall"],
-    "world": { "id": 3021 }
+    "domain": { "id": 3021 }
 }

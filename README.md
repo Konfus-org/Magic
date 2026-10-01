@@ -12,8 +12,8 @@ logging, lives in a gem and can be hot reloaded while the engine runs.
   `Update`, the Core Update systems, `FixedUpdate` zero or more times, `LateUpdate`, then `Render` (see
   `Program.Step`).
 - **Gems** (`Core/Gems.cs`). A gem is one dll with one class that implements `IGem`. Its constructor parameters
-  are its dependencies, taken from the `Container` (host services and other gems' interfaces), which is also how
-  load order is decided; the Core interfaces it implements are what it provides. `GemStatic` and `GemDependsOn`
+  are its dependencies: host services (`Project`, `Assets`, `Events`, `IFileSystem`, `Scheduler`, `World`) and
+  other gems' interfaces, which is also how load order is decided; the Core interfaces it implements are what it provides. `GemStatic` and `GemDependsOn`
   in its csproj are the only other things the host reads. Engine gems come from `bin/Gems/`, and the project
   lists the ones it wants. Every gem dll under the project folder loads too. A changed dll is unloaded and
   loaded again.
@@ -24,11 +24,16 @@ logging, lives in a gem and can be hot reloaded while the engine runs.
   file next to it that holds the id and the asset type. The manager keeps the index only: every load reads the
   file. Gems load other formats by implementing `IAssetLoader<T>`, and file changes are published as events.
 - **ECS** (`Core/Interfaces/IEcs*.cs`, `Gems/FlecsEcs`). Components are structs that implement `IComponent`.
-  A world is a folder of `x_y_z.chunk` files plus a `<Name>.world` file, and `StreamingSystem` loads and
-  unloads chunks around the cameras.
-- **Systems** (`Core/Systems`). The core systems are streaming, transform, overlay, render, debug UI and
-  debugger display: plain classes the frame loop calls by name. Gems do their per-frame work in their `IGem`
-  hooks, or schedule ECS systems with `IEcs.Schedule`.
+- **World** (`Core/Services/World.cs`). A domain is a folder of `x_y_z.chunk` files plus a `<Name>.domain` file.
+  The world is the stack of open domains: `World.Open(domain)` replaces what is open, `OpenMode.Additive`
+  opens one on top, `World.Close(domain)` takes one out, and `World.End()` quits the game. The world only
+  publishes what it decided (`DomainOpened`, `DomainClosed`, `Quit`); the streaming system reads those events
+  the next frame, spawns the domain's global chunks under `World.<Name>.Globals` and streams its cubes around
+  the cameras under `World.<Name>.Chunks`.
+- **Systems** (`Core/Systems`). The core systems are streaming, transform, render and the debug windows. They
+  are internal to the host: an `ISystem` added to the `Scheduler`, which the ECS gem runs in its phase. Gems do
+  their per-frame work in their `IGem` hooks, or add an `ISystem` of their own to the `Scheduler`.
+- **Visibility**. A Core type is `internal` unless a gem or a game script needs it; the tests see internals.
 - **Rendering** (`Gems/SDLRender`). A GPU-driven renderer on SDL_GPU. Culling, HiZ occlusion and materials
   are all driven by data in `Resources/Passes` and `Resources/Materials`.
 
@@ -41,7 +46,7 @@ Core/               Magic.exe: host, gem loader, assets, ECS contracts, core sys
     Extensions/     Extension methods
     Interfaces/     Contracts that gems implement or consume
     Mathematics/    Bounds, frustum, ray
-    Services/       Host services: container, events, assets, file system, project
+    Services/       Host services: container, events, assets, file system, project, scheduler, world
     Systems/        Core ECS systems
     Utils/          Debugging (log and immediate-mode UI), Result, ChangeQueue, Png
 Gems/               Engine gems, built into Build/.../bin/Gems/

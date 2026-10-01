@@ -28,7 +28,10 @@ public interface IEcsPipelineBuilder
 
     IEcsPipelineBuilder<T1, T2, T3, T4> Query<T1, T2, T3, T4>() where T1 : unmanaged where T2 : unmanaged where T3 : unmanaged where T4 : unmanaged;
 
-    /// <summary>A system without a query: a plain callback with the phase's delta time in seconds.</summary>
+    /// <summary>
+    /// A system without a query: a plain callback with the phase's delta time in seconds. It runs on the main thread
+    /// and may change the world as code outside a pipeline does: what it creates or adds is there at once.
+    /// </summary>
     IDisposable Run(Action<float> callback);
 }
 

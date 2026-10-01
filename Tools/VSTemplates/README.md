@@ -9,7 +9,7 @@ Tools\install-templates.bat
 
 ## Magic Project (`magicproject`)
 
-A game project: `<Name>.magic`, a starting world under `Assets\Worlds\<Name>\` (a camera, a sun and a cube),
+A game project: `<Name>.magic`, a starting domain under `Assets\Domains\<Name>\` (a camera, a sun and a cube),
 and `Scripts\` compiled by `<Name>.csproj` into the project's own gem. The engine finds every gem dll under
 the project folder, so nothing is registered anywhere.
 

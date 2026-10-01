@@ -20,8 +20,8 @@ public sealed record Project
     /// <summary>Per-subsystem settings; <c>--set Section.Key=value</c> on the command line overrides them.</summary>
     public Settings Settings { get; init; } = new();
 
-    /// <summary>The world opened at start-up (<c>"world": { "id": N }</c>); <c>--world</c> overrides it. None runs with an empty scene.</summary>
-    public Handle<World> World { get; init; } = Handle<World>.None;
+    /// <summary>The domain opened at start-up (<c>"domain": { "id": N }</c>); <c>--domain</c> overrides it. None starts in an empty world.</summary>
+    public Handle<Domain> Domain { get; init; } = Handle<Domain>.None;
 
     /// <summary>
     /// The engine gems to load, by assembly name (the name <c>GemDependsOn</c> uses); <c>"default"</c> stands for
@@ -44,7 +44,8 @@ public sealed record Project
 
     /// <summary>
     /// Where log files go: <c>Logs</c> next to the running executable (the build's <c>bin</c>, or the install folder), so
-    /// a project folder never collects them. Only a Release build writes any.
+    /// a project folder never collects them. Only a Release build writes log files; a crash report (<c>.crash</c>) is
+    /// written here by any build.
     /// </summary>
     [JsonIgnore]
     public static string Logs => Path.Combine(AppContext.BaseDirectory, "Logs");

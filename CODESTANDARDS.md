@@ -18,14 +18,25 @@ Members go in this order, with one blank line between members and between groups
 1. Constants and static fields
 2. Instance fields
 3. Constructors and finalizer
-4. Events, then properties
-5. Public and internal methods
-6. Private methods
-7. Interface implementations (`Dispose` and similar)
-8. Nested types
+4. `Dispose`
+5. Events, then properties
+6. Public and internal methods
+7. Private methods
+8. Other interface implementations
+9. Nested types
+
+`Dispose` sits directly under the last constructor, so setup and teardown read together. A type with no
+constructor of its own (a primary-constructor type included) has it as its first method, above all the others.
 
 Within a group, public comes before internal, and internal before private. Keep related members next to
 each other.
+
+### Visibility
+
+A Core type or member is `internal` unless a gem or a game script needs it: systems, the container and other
+host plumbing are never public. The test projects see Core's internals, so nothing is public for their sake; nor
+is anything internal for their sake: a member only its own type uses is private, and the tests go through the
+exposed API (see `Tests/README.md`).
 
 ### State
 
@@ -50,6 +61,21 @@ A method should read from top to bottom:
 5. Local functions last, after the final `return`.
 
 Separate these steps with a blank line. Long methods are fine as long as they read in order.
+
+### Naming
+
+- Read a name as `Class.Member(arguments)`. If that says what happens or what is held, the name is good,
+  however short: `Pipelines.Invalidate(ctx, shaders)`, `Shaders.Cached(ctx, id)`. If it does not
+  (`StreamingSystem.Pump()`, `_scratch`), name the object: `SpawnReady()`, `_unwanted`.
+- A reusable buffer is named for its one purpose, and has only one.
+- No single-letter locals or lambda parameters, except loop counters, `x`/`y`/`z`, and the coefficients of a
+  published formula. Established short words (`ctx`, `cls`, `sb`, `dt`, `ex`) stay.
+- A local does not change meaning within a method, and does not shadow a type.
+
+### Extensions
+
+Extension members use `extension(T x) { }` blocks in an `XExtensions` class, in the project's `Extensions`
+folder. Related types (a family of enums converted the same way) share one class, one block each.
 
 ### Comments
 

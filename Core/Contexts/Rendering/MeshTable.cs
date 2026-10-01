@@ -19,7 +19,7 @@ internal sealed class MeshTable
 
     private readonly OffsetAllocator _vertexSpace;
     private readonly OffsetAllocator _indexSpace;
-    private readonly List<Slot?> _slots = [];
+    private readonly List<Placement?> _slots = [];
     private readonly Stack<uint> _free = [];
     private readonly RefCountTable<ulong, ModelEntry> _models = new();
 
@@ -58,7 +58,7 @@ internal sealed class MeshTable
     /// </summary>
     public (uint MeshSlot, int MaterialSlot)[] Add(ulong modelId, Model? model)
     {
-        ModelEntry entry = Entry(model);
+        ModelEntry entry = BuildEntry(model);
         _models.Add(modelId, entry);
         return entry.Parts;
     }
@@ -85,11 +85,11 @@ internal sealed class MeshTable
     /// <summary>What a draw of the slot needs: index range and vertex base.</summary>
     public (uint FirstIndex, uint IndexCount, int VertexOffset) Range(uint slot)
     {
-        Slot s = _slots[(int)slot] ?? _slots[0]!;
-        return (s.Indices.Offset, s.IndexCount, (int)s.Vertices.Offset);
+        Placement placement = _slots[(int)slot] ?? _slots[0]!;
+        return (placement.Indices.Offset, placement.IndexCount, (int)placement.Vertices.Offset);
     }
 
-    private ModelEntry Entry(Model? model)
+    private ModelEntry BuildEntry(Model? model)
     {
         if (model is null)
             return new ModelEntry([], Placeholder); // the asset manager logged why
@@ -123,7 +123,7 @@ internal sealed class MeshTable
             return 0;
         }
 
-        Slot slot = new(vertices, indices, (uint)mesh.Indices.Length, mesh.Bounds);
+        Placement slot = new(vertices, indices, (uint)mesh.Indices.Length, mesh.Bounds);
         uint index;
         if (_free.Count > 0)
         {
@@ -162,27 +162,27 @@ internal sealed class MeshTable
         ];
         Vertex[] vertices = new Vertex[24];
         uint[] indices = new uint[36];
-        for (int f = 0; f < 6; f++)
+        for (int face = 0; face < 6; face++)
         {
-            (Vector3 n, Vector3 u, Vector3 v) = faces[f];
+            (Vector3 n, Vector3 u, Vector3 v) = faces[face];
             Vector3[] corners = [n - u - v, n - u + v, n + u + v, n + u - v];
             Vector2[] uvs = [new(0, 1), new(0, 0), new(1, 0), new(1, 1)];
-            for (int c = 0; c < 4; c++)
-                vertices[(f * 4) + c] = new Vertex { Position = corners[c], Normal = n, Tangent = new Vector4(u, 1f), Uv = uvs[c] };
+            for (int corner = 0; corner < 4; corner++)
+                vertices[(face * 4) + corner] = new Vertex { Position = corners[corner], Normal = n, Tangent = new Vector4(u, 1f), Uv = uvs[corner] };
 
-            // cross(b - a, c - a) must point along n: the engine's clockwise-from-outside rule.
-            uint b = (uint)(f * 4);
+            // cross(first - a, c - a) must point along n: the engine's clockwise-from-outside rule.
+            uint first = (uint)(face * 4);
             Vector3 cross = Vector3.Cross(corners[1] - corners[0], corners[2] - corners[0]);
             bool flip = Vector3.Dot(cross, n) < 0;
-            uint[] order = flip ? [b, b + 2, b + 1, b, b + 3, b + 2] : [b, b + 1, b + 2, b, b + 2, b + 3];
-            order.CopyTo(indices, f * 6);
+            uint[] order = flip ? [first, first + 2, first + 1, first, first + 3, first + 2] : [first, first + 1, first + 2, first, first + 2, first + 3];
+            order.CopyTo(indices, face * 6);
         }
 
         return new Mesh { Vertices = vertices, Indices = indices };
     }
 
     /// <summary>Where one mesh lives in the mega buffers, and its bounds.</summary>
-    private sealed record Slot(OffsetAllocator.Allocation Vertices, OffsetAllocator.Allocation Indices, uint IndexCount, BoundingSphere Bounds);
+    private sealed record Placement(OffsetAllocator.Allocation Vertices, OffsetAllocator.Allocation Indices, uint IndexCount, BoundingSphere Bounds);
 
     /// <summary>A loaded model: the mesh slots it owns and its parts on them.</summary>
     private readonly record struct ModelEntry(uint[] Slots, (uint MeshSlot, int MaterialSlot)[] Parts);

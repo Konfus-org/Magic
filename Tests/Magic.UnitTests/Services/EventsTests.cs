@@ -15,7 +15,7 @@ public sealed class EventsTests
 
         Event[] frame = events.NextFrame();
 
-        Assert.Equal([EventType.AssetAdded, EventType.GemsChanged], frame.Select(e => e.Type));
+        Assert.Equal([EventType.AssetAdded, EventType.GemsChanged], frame.Select(published => published.Type));
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public sealed class EventsTests
     {
         Events events = new();
         List<ulong> heard = [];
-        using IDisposable watch = events.Watch(EventType.AssetRemoved, e => heard.Add(e.Id));
+        using IDisposable watch = events.Watch(EventType.AssetRemoved, published => heard.Add(published.Id));
         events.Publish(new Event(EventType.AssetRemoved, Id: 7));
         events.Publish(new Event(EventType.AssetAdded, Id: 8));
 

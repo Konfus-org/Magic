@@ -44,27 +44,27 @@ public sealed class Events
         if (_watchers.Count == 0)
             return events;
 
-        foreach (Event e in events)
+        foreach (Event published in events)
         {
             foreach (Watcher watcher in _watchers.ToArray()) // a handler may watch or unwatch
             {
-                if (watcher.Type == e.Type)
-                    Call(watcher, e);
+                if (watcher.Type == published.Type)
+                    Call(watcher, published);
             }
         }
 
         return events;
     }
 
-    private static void Call(Watcher watcher, Event e)
+    private static void Call(Watcher watcher, Event published)
     {
         try
         {
-            watcher.Handler(e);
+            watcher.Handler(published);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            Debugging.Log.Error($"A {e.Type} watcher threw and was skipped. {ex}");
+            Debugging.Log.Error($"A {published.Type} watcher threw and was skipped. {ex}");
         }
     }
 

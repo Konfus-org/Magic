@@ -293,11 +293,11 @@ internal sealed class InstanceTable
         Array.Resize(ref _next, size);
     }
 
-    private static long Key(Vector3 p)
+    private static long Key(Vector3 position)
     {
-        long x = (long)MathF.Floor(p.X / CellSize) & 0x1FFFFF;
-        long y = (long)MathF.Floor(p.Y / CellSize) & 0x1FFFFF;
-        long z = (long)MathF.Floor(p.Z / CellSize) & 0x1FFFFF;
+        long x = (long)MathF.Floor(position.X / CellSize) & 0x1FFFFF;
+        long y = (long)MathF.Floor(position.Y / CellSize) & 0x1FFFFF;
+        long z = (long)MathF.Floor(position.Z / CellSize) & 0x1FFFFF;
         return (x << 42) | (y << 21) | z;
     }
 }

@@ -42,6 +42,11 @@ internal sealed class ZLogger : IGem, IMagicLogger
         _logger = _factory.CreateLogger(project.Name);
     }
 
+    public void Dispose()
+    {
+        _factory.Dispose();
+    }
+
     public void Flush()
     {
         // ZLogger writes from a background thread and exposes no flush; its providers drain their queues
@@ -63,10 +68,5 @@ internal sealed class ZLogger : IGem, IMagicLogger
         };
 
         _logger.ZLog(logLvl, $"{file}:{line} - {message}");
-    }
-
-    public void Dispose()
-    {
-        _factory.Dispose();
     }
 }

@@ -67,7 +67,7 @@ public static class Debugging
             lock (_lock)
             {
                 // We are crashing a crit ALWAYS means a crash
-                if (_queuedLogs.Any(l => l.Level == LogLevel.Critical))
+                if (_queuedLogs.Any(queued => queued.Level == LogLevel.Critical))
                 {
                     StringBuilder sb = new();
                     foreach ((LogLevel Level, string Message, string File, int Line) log in _queuedLogs)
@@ -84,7 +84,10 @@ public static class Debugging
                         sb.AppendLine(line);
                     }
 
-                    File.WriteAllText($"{DateTime.Today.ToLocalTime():yyyy-MM-dd}.crash", sb.ToString());
+                    // Beside the log files, never in whatever folder the host was started from. Written with System.IO
+                    // directly, the one place that is allowed: a crash can come before any service exists.
+                    Directory.CreateDirectory(Services.Project.Logs);
+                    File.WriteAllText(Path.Combine(Services.Project.Logs, $"{DateTime.Today:yyyy-MM-dd}.crash"), sb.ToString());
                 }
 
                 // No loggers :(

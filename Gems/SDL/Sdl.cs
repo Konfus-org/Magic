@@ -32,6 +32,12 @@ internal sealed class Sdl : IGem
         Debugging.Log.Info($"SDL {major}.{minor}.{micro} initialised on thread {Environment.CurrentManagedThreadId}.");
     }
 
+    public void Dispose()
+    {
+        SDL.Quit();
+        SDL.SetLogOutputFunction(SDL.GetDefaultLogOutputFunction(), IntPtr.Zero);
+    }
+
     /// <summary>
     /// Every frame on the main thread: SDL wants the OS message queue pumped from the thread that created the
     /// windows, and Windows flags a window as unresponsive if it is not. Event watches see each event as it enters
@@ -62,11 +68,5 @@ internal sealed class Sdl : IGem
                 Debugging.Log.Debug($"SDL: {message}");
                 break;
         }
-    }
-
-    public void Dispose()
-    {
-        SDL.Quit();
-        SDL.SetLogOutputFunction(SDL.GetDefaultLogOutputFunction(), IntPtr.Zero);
     }
 }

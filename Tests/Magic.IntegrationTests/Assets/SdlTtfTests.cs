@@ -13,6 +13,12 @@ public sealed class SdlTtfTests : IDisposable
     private readonly Sdl _sdl = new(new Project { Name = "Tests" });
     private readonly SdlTtf _ttf = new();
 
+    public void Dispose()
+    {
+        _ttf.Dispose();
+        _sdl.Dispose();
+    }
+
     [Fact]
     public void The_atlas_holds_four_bytes_per_pixel()
     {
@@ -26,9 +32,9 @@ public sealed class SdlTtfTests : IDisposable
     {
         Font font = Load();
 
-        Glyph a = font.Glyphs['A'];
+        Glyph glyph = font.Glyphs['A'];
 
-        Assert.True(a.Width > 0 && a.X + a.Width <= font.Width && a.Height > 0 && a.Y + a.Height <= font.Height);
+        Assert.True(glyph.Width > 0 && glyph.X + glyph.Width <= font.Width && glyph.Height > 0 && glyph.Y + glyph.Height <= font.Height);
     }
 
     [Fact]
@@ -36,9 +42,9 @@ public sealed class SdlTtfTests : IDisposable
     {
         Font font = Load();
 
-        Glyph a = font.Glyphs['A'];
+        Glyph glyph = font.Glyphs['A'];
 
-        Assert.Contains(font.Pixels.Skip(((a.Y * font.Width) + a.X) * 4).Take(a.Width * 4), b => b != 0);
+        Assert.Contains(font.Pixels.Skip(((glyph.Y * font.Width) + glyph.X) * 4).Take(glyph.Width * 4), pixel => pixel != 0);
     }
 
     [Fact]
@@ -46,15 +52,9 @@ public sealed class SdlTtfTests : IDisposable
     {
         Font font = Load();
 
-        Glyph a = font.Glyphs['A'];
+        Glyph glyph = font.Glyphs['A'];
 
-        Assert.True(a.Advance > 0);
-    }
-
-    public void Dispose()
-    {
-        _ttf.Dispose();
-        _sdl.Dispose();
+        Assert.True(glyph.Advance > 0);
     }
 
     private Font Load()

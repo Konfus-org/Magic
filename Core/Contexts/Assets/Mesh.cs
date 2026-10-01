@@ -63,10 +63,10 @@ public sealed class Mesh
 
         Vector3 min = vertices[0].Position, max = min;
 
-        foreach (ref readonly Vertex v in vertices)
+        foreach (ref readonly Vertex vertex in vertices)
         {
-            min = Vector3.Min(min, v.Position);
-            max = Vector3.Max(max, v.Position);
+            min = Vector3.Min(min, vertex.Position);
+            max = Vector3.Max(max, vertex.Position);
         }
 
         return new Aabb(min, max);

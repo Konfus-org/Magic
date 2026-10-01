@@ -39,7 +39,7 @@ internal static class Pipelines
             return;
 
         ctx.Pipelines.Built[cls] = default;
-        Start(ctx, cls);
+        StartCompile(ctx, cls);
     }
 
     /// <summary>The pipeline for the class: 0 while its first compile runs, the forced failure pipeline once that compile failed. Reads only.</summary>
@@ -64,7 +64,7 @@ internal static class Pipelines
     /// <summary>Main thread, once per frame: turns finished compiles into pipelines.</summary>
     public static void Update(RenderContext ctx)
     {
-        ctx.Pipelines.Compiles.Poll(ctx, Finish);
+        ctx.Pipelines.Compiles.Poll(ctx, FinishCompile);
     }
 
     /// <summary>
@@ -82,7 +82,7 @@ internal static class Pipelines
 
         if (everything && Shaders.GetByPath(ctx, VertexTemplate) is { } vertex)
         {
-            // The classes restart once the new vertex shader is in (Finish).
+            // The classes restart once the new vertex shader is in (FinishCompile).
             ctx.Pipelines.Compiles.Start(PipelineTable.VertexKey, Shaders.CompileAsync(ctx, vertex.Text, vertex.Path, GpuStage.Vertex, Shaders.ClosureHash(ctx, vertex)));
             return;
         }
@@ -90,11 +90,11 @@ internal static class Pipelines
         foreach (PipelineClass cls in ctx.Pipelines.Built.Keys.ToArray())
         {
             if (shaderIds.Contains(cls.Surface))
-                Start(ctx, cls);
+                StartCompile(ctx, cls);
         }
     }
 
-    private static void Start(RenderContext ctx, PipelineClass cls)
+    private static void StartCompile(RenderContext ctx, PipelineClass cls)
     {
         SurfaceSource? surface = Shaders.Surface(ctx, cls.Surface);
         Shader? surfaceShader = Shaders.Get(ctx, new Handle<Shader>(cls.Surface));
@@ -114,7 +114,7 @@ internal static class Pipelines
     }
 
     /// <summary>A compile finished: the vertex shader is swapped, or the class gets its pipeline (or keeps its last one and the error).</summary>
-    private static void Finish(RenderContext ctx, PipelineClass cls, Result<CompiledShader> result)
+    private static void FinishCompile(RenderContext ctx, PipelineClass cls, Result<CompiledShader> result)
     {
         PipelineTable table = ctx.Pipelines;
         if (cls == PipelineTable.VertexKey)
@@ -127,7 +127,7 @@ internal static class Pipelines
             // A shared file changed: every class builds again, linked with the current vertex shader (their fragment
             // bytecode comes from the disk cache unless it changed too).
             foreach (PipelineClass rebuilt in table.Built.Keys.ToArray())
-                Start(ctx, rebuilt);
+                StartCompile(ctx, rebuilt);
             return;
         }
 

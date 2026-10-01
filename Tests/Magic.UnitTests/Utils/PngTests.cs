@@ -25,7 +25,7 @@ public sealed class PngTests
     {
         byte[] png = Png.Encode(2, 1, Pixels);
 
-        Assert.Equal(["IHDR", "IDAT", "IEND"], Chunks(png).Select(c => c.Type));
+        Assert.Equal(["IHDR", "IDAT", "IEND"], Chunks(png).Select(chunk => chunk.Type));
     }
 
     [Fact]
@@ -33,7 +33,7 @@ public sealed class PngTests
     {
         byte[] png = Png.Encode(2, 1, Pixels);
 
-        Assert.All(Chunks(png), c => Assert.Equal(Crc32.HashToUInt32(c.CrcInput), c.Crc));
+        Assert.All(Chunks(png), chunk => Assert.Equal(Crc32.HashToUInt32(chunk.CrcInput), chunk.Crc));
     }
 
     [Fact]

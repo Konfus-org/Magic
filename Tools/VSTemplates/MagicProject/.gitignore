@@ -6,7 +6,13 @@ Cache/
 Logs/
 Screenshots/
 
+# Crash reports (the engine writes them into its Logs/; this catches strays)
+*.crash
+
+# Dot folders are tools' own state (.vs, .vscode, .idea, .claude, ...): none is source
+.*/
+!.github/
+!.template.config/
+
 # IDE
-.vs/
-.idea/
 *.user

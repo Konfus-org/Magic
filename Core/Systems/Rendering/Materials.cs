@@ -158,7 +158,7 @@ internal static class Materials
         SurfaceSource? surface = null;
         uint failure = forced;
         if (forced == 0 && material is null)
-            failure = MaterialTable.FailureRecord; // the file did not load; the asset manager said why
+            failure = MaterialTable.FailureMissing; // the file did not load; the asset manager said why
         else if (forced == 0 && material is not null)
         {
             if (material.Type == MaterialType.Masked)
@@ -169,7 +169,7 @@ internal static class Materials
             ulong surfaceId = material.Shader.IsValid ? material.Shader.Id : table.DefaultSurface;
             surface = Shaders.Surface(ctx, surfaceId);
             if (surface is null)
-                failure = Shaders.Get(ctx, new Handle<Shader>(surfaceId)) is null ? MaterialTable.FailureRecord : MaterialTable.FailureShader; // not an asset vs. rejected
+                failure = Shaders.Get(ctx, new Handle<Shader>(surfaceId)) is null ? MaterialTable.FailureMissing : MaterialTable.FailureShader; // not an asset vs. rejected
         }
 
         List<Handle<Texture>> textures = [];
@@ -180,12 +180,12 @@ internal static class Materials
 
             foreach (ParamField field in surface.Layout.Fields)
             {
-                if (field.Type == ParamType.TextureRef && material.Params.TryGetValue(field.Name, out Param p) && p.Texture.IsValid)
+                if (field.Type == ParamType.TextureRef && material.Params.TryGetValue(field.Name, out Param param) && param.Texture.IsValid)
                 {
-                    if (Textures.Acquire(ctx, p.Texture) == TextureTable.Failed)
+                    if (Textures.Acquire(ctx, param.Texture) == TextureTable.Failed)
                         failure = MaterialTable.FailureTexture;
 
-                    textures.Add(p.Texture);
+                    textures.Add(param.Texture);
                 }
             }
         }

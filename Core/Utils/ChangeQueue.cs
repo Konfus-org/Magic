@@ -7,7 +7,7 @@ namespace Magic.Utils;
 /// touches a file several times, and only the last touch matters. <see cref="Add"/> from any thread (the watcher's),
 /// <see cref="TakeSettled"/> on the main thread.
 /// </summary>
-public sealed class ChangeQueue
+internal sealed class ChangeQueue
 {
     public static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(300);
 
@@ -28,7 +28,7 @@ public sealed class ChangeQueue
             if (_pending.Count == 0)
                 return [];
 
-            string[] settled = [.. _pending.Where(p => Stopwatch.GetElapsedTime(p.Value) >= Settle).Select(p => p.Key)];
+            string[] settled = [.. _pending.Where(change => Stopwatch.GetElapsedTime(change.Value) >= Settle).Select(change => change.Key)];
             foreach (string path in settled)
                 _pending.Remove(path);
 

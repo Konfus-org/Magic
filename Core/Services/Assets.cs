@@ -5,6 +5,7 @@ using Magic.Contexts.Events;
 using Magic.Contexts.Settings;
 using Magic.Interfaces;
 using Magic.Utils;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -12,7 +13,7 @@ using System.Text.Json;
 namespace Magic.Services;
 
 /// <summary>What one asset type's pool holds, for the debug window and logs. Bytes and Budget are in bytes.</summary>
-public readonly record struct AssetPoolStats(string Type, int Count, long Bytes, long Budget, long Hits, long Misses);
+internal readonly record struct AssetPoolStats(string Type, int Count, long Bytes, long Budget, long Hits, long Misses);
 
 /// <summary>
 /// Knows where every asset is and loads one on request. Every file under a watched folder (Resources, Assets, and
@@ -39,9 +40,11 @@ public sealed class Assets : IDisposable
     private readonly Dictionary<ulong, string> _pathById = [];
     private readonly Dictionary<string, ulong> _idByPath = new(StringComparer.OrdinalIgnoreCase); // full paths
     private readonly Dictionary<Type, Pool> _pools = [];
-    private long _clock; // counts Loads, for least recently used
+    private readonly HashSet<(Type Type, ulong Id)> _failed = []; // whatever the budget; until the file or the gems change
+    private readonly ConcurrentDictionary<Type, Func<Assets, ulong, Asset?>> _loads = new(); // LoadOne by run-time type
+    private long _loadCount; // counts Loads, for least recently used
 
-    public Assets(Project project, IFileSystem files, Events events, Container container)
+    internal Assets(Project project, IFileSystem files, Events events, Container container)
     {
         _project = project;
         _files = files;
@@ -55,13 +58,24 @@ public sealed class Assets : IDisposable
             AddFolder(project.Assets);
     }
 
+    public void Dispose()
+    {
+        _gemsChanged.Dispose();
+        foreach ((_, IDisposable watcher) in _folders)
+            watcher.Dispose();
+
+        _folders.Clear();
+        lock (_lock)
+            _pools.Clear();
+    }
+
     /// <summary>Indexes and watches another folder; every file under it is an asset. Main thread.</summary>
     public void AddFolder(string folder)
     {
         string root = _files.FullPath(folder);
         if (!_files.DirectoryExists(root))
             throw new DirectoryNotFoundException(root);
-        if (_folders.Any(f => string.Equals(f.Root, root, StringComparison.OrdinalIgnoreCase)))
+        if (_folders.Any(folder => string.Equals(folder.Root, root, StringComparison.OrdinalIgnoreCase)))
             return;
 
         _folders.Add((root, _files.Watch(root, null, _changes.Add, recursive: true)));
@@ -101,7 +115,7 @@ public sealed class Assets : IDisposable
 
     /// <summary>
     /// The handles of every indexed file directly in <paramref name="folder"/> (relative to any watched folder, forward
-    /// slashes) with the given extension, in path order. For code that starts from a folder, like a world's chunks.
+    /// slashes) with the given extension, in path order. For code that starts from a folder, like a domain's chunks.
     /// </summary>
     public Handle<T>[] FindAll<T>(string folder, string extension) where T : Asset
     {
@@ -121,7 +135,7 @@ public sealed class Assets : IDisposable
             }
         }
 
-        return [.. found.OrderBy(f => f.Path, StringComparer.Ordinal).Select(f => new Handle<T>(f.Id))];
+        return [.. found.OrderBy(asset => asset.Path, StringComparer.Ordinal).Select(asset => new Handle<T>(asset.Id))];
     }
 
     /// <summary>The relative path of an asset, or null for an id nothing has.</summary>
@@ -131,62 +145,58 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// The asset; null when it cannot be loaded (logged once, until its file changes). From its type's pool when it is
-    /// there, else read from disk on the calling thread and pooled, so every Load of it returns the same object: it is
-    /// shared and read-only. A type whose budget is 0 is never pooled, and every Load of it reads the file again. Any
-    /// thread; loads of one id at once read it once.
+    /// The asset; null when it cannot be loaded (logged once, and not tried again until its file or the gems change).
+    /// From its type's pool when it is there, else read from disk on the calling thread and pooled, so every Load of it
+    /// returns the same object: it is shared and read-only. A type whose budget is 0 is never pooled, and every Load of
+    /// it reads the file again. With <paramref name="dependencies"/>, every asset it names (the handles
+    /// <see cref="AssetHandles"/> finds in it) is loaded too, and what those name, each into its own pool. Any thread;
+    /// loads of one id at once read it once.
     /// </summary>
-    public T? Load<T>(Handle<T> handle) where T : Asset
+    public T? Load<T>(Handle<T> handle, bool dependencies = false) where T : Asset
     {
-        long budget = BudgetOf(typeof(T));
-        if (budget == 0)
-        {
-            lock (_lock)
-                _pools.Remove(typeof(T)); // the budget went to 0 while it held some
+        T? asset = LoadOne(handle);
+        if (dependencies && asset is not null)
+            LoadNamed(asset, new() { [(typeof(T), handle.Id)] = true });
 
-            return (T?)LoadFile(handle).Asset;
-        }
-
-        Pool? pool;
-        Entry? entry;
-        bool hit;
-        lock (_lock)
-        {
-            if (!_pools.TryGetValue(typeof(T), out pool))
-                _pools[typeof(T)] = pool = new Pool();
-
-            hit = pool.Entries.TryGetValue(handle.Id, out entry);
-            if (!hit)
-                pool.Entries[handle.Id] = entry = new Entry(new Lazy<(Asset?, long)>(() => LoadFile(handle)));
-
-            entry!.Used = ++_clock;
-            if (hit)
-                pool.Hits++;
-            else
-                pool.Misses++;
-        }
-
-        (Asset? asset, long bytes) = entry.Value.Value; // the first caller reads; the others wait for it
-        if (!hit)
-            Admit(pool, handle.Id, entry, bytes, budget);
-
-        return (T?)asset;
+        return asset;
     }
 
-    /// <summary><see cref="Load{T}"/> on a worker thread.</summary>
-    public Task<T?> LoadAsync<T>(Handle<T> handle, CancellationToken cancellationToken = default) where T : Asset
+    /// <summary><see cref="Load{T}"/> on a worker thread; with <paramref name="dependencies"/>, each of those on a worker of its own.</summary>
+    public async Task<T?> LoadAsync<T>(Handle<T> handle, bool dependencies = false, CancellationToken cancellationToken = default) where T : Asset
     {
-        return Task.Run(() => Load(handle), cancellationToken);
+        T? asset = await Task.Run(() => LoadOne(handle), cancellationToken);
+        if (dependencies && asset is not null)
+            await LoadNamedAsync([asset], new() { [(typeof(T), handle.Id)] = true }, cancellationToken);
+
+        return asset;
+    }
+
+    /// <summary>
+    /// Loads every asset <paramref name="holders"/> name, and what those name, each on a worker of its own and once
+    /// however many name it. For what is not an asset but has handles to some: a chunk's components.
+    /// </summary>
+    public Task LoadDependenciesAsync(IEnumerable<object> holders, CancellationToken cancellationToken = default)
+    {
+        return LoadNamedAsync(holders, new(), cancellationToken);
+    }
+
+    /// <summary>Whether the asset could not be loaded, and so will not be tried again until its file or the gems change.</summary>
+    public bool HasFailed<T>(Handle<T> handle) where T : Asset
+    {
+        lock (_lock)
+        {
+            return _failed.Contains((typeof(T), handle.Id));
+        }
     }
 
     /// <summary>What every type's pool holds now, by type name.</summary>
-    public AssetPoolStats[] PoolStats()
+    internal AssetPoolStats[] PoolStats()
     {
         lock (_lock)
         {
             return [.. _pools
-                .Select(p => new AssetPoolStats(p.Key.Name, p.Value.Entries.Count, p.Value.Bytes, BudgetOf(p.Key), p.Value.Hits, p.Value.Misses))
-                .OrderBy(s => s.Type, StringComparer.Ordinal)];
+                .Select(pool => new AssetPoolStats(pool.Key.Name, pool.Value.Entries.Count, pool.Value.Bytes, BudgetOf(pool.Key), pool.Value.Hits, pool.Value.Misses))
+                .OrderBy(stats => stats.Type, StringComparer.Ordinal)];
         }
     }
 
@@ -214,7 +224,7 @@ public sealed class Assets : IDisposable
             {
                 Result<string[]> listing = _files.ReadDirectoryRecursive(path);
                 if (listing.Ok)
-                    present.UnionWith(listing.Payload.Where(p => _files.FileExists(p) && !IsSidecar(p)));
+                    present.UnionWith(listing.Payload.Where(file => _files.FileExists(file) && !IsSidecar(file)));
             }
             else if (_files.FileExists(path))
                 present.Add(path);
@@ -250,7 +260,7 @@ public sealed class Assets : IDisposable
         lock (_lock)
         {
             string folder = path + Path.DirectorySeparatorChar;
-            return [.. _idByPath.Keys.Where(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase) || p.StartsWith(folder, StringComparison.OrdinalIgnoreCase))];
+            return [.. _idByPath.Keys.Where(known => string.Equals(known, path, StringComparison.OrdinalIgnoreCase) || known.StartsWith(folder, StringComparison.OrdinalIgnoreCase))];
         }
     }
 
@@ -262,9 +272,110 @@ public sealed class Assets : IDisposable
         }
     }
 
+    /// <summary>The asset alone, from its pool or the file; null at once for one that has failed.</summary>
+    private T? LoadOne<T>(Handle<T> handle) where T : Asset
+    {
+        long budget = BudgetOf(typeof(T));
+        Pool? pool = null;
+        Entry? entry = null;
+        bool hit = false;
+        lock (_lock)
+        {
+            if (_failed.Contains((typeof(T), handle.Id)))
+                return null;
+
+            if (budget == 0)
+            {
+                _pools.Remove(typeof(T)); // the budget went to 0 while it held some
+            }
+            else
+            {
+                if (!_pools.TryGetValue(typeof(T), out pool))
+                    _pools[typeof(T)] = pool = new Pool();
+
+                hit = pool.Entries.TryGetValue(handle.Id, out entry);
+                if (!hit)
+                    pool.Entries[handle.Id] = entry = new Entry(new Lazy<(Asset?, long)>(() => LoadFile(handle)));
+
+                entry!.Used = ++_loadCount;
+                if (hit)
+                    pool.Hits++;
+                else
+                    pool.Misses++;
+            }
+        }
+
+        if (pool is null || entry is null)
+            return (T?)LoadFile(handle).Asset;
+
+        (Asset? asset, long bytes) = entry.Value.Value; // the first caller reads; the others wait for it
+        if (asset is null)
+            Discard(pool, handle.Id, entry);
+        else if (!hit)
+            AddToPool(pool, handle.Id, entry, bytes, budget);
+
+        return (T?)asset;
+    }
+
+    /// <summary>Loads what <paramref name="holder"/> names and what those name, on the calling thread; each asset once per <paramref name="seen"/>.</summary>
+    private void LoadNamed(object holder, ConcurrentDictionary<(Type, ulong), bool> seen)
+    {
+        foreach ((Type type, ulong id) in Named(holder, seen))
+        {
+            if (LoadOne(type, id) is { } asset)
+                LoadNamed(asset, seen);
+        }
+    }
+
+    /// <summary>As <see cref="LoadNamed"/>, each asset on a worker of its own; done when all of them are.</summary>
+    private Task LoadNamedAsync(IEnumerable<object> holders, ConcurrentDictionary<(Type, ulong), bool> seen, CancellationToken cancel)
+    {
+        List<Task> loads = [];
+        foreach (object holder in holders)
+        {
+            foreach ((Type type, ulong id) in Named(holder, seen))
+                loads.Add(Follow(type, id));
+        }
+
+        return Task.WhenAll(loads);
+
+        async Task Follow(Type type, ulong id)
+        {
+            if (await Task.Run(() => LoadOne(type, id), cancel) is { } asset)
+                await LoadNamedAsync([asset], seen, cancel);
+        }
+    }
+
     /// <summary>
-    /// The asset read from disk with what it holds in memory, or null (logged) and 0 when it cannot be loaded. Every call
-    /// reads the file and returns a new object.
+    /// The assets <paramref name="holder"/> names that <paramref name="seen"/> has not got yet, now added to it. A
+    /// texture handle may name a render texture, which has no image to load: a camera draws it.
+    /// </summary>
+    private List<(Type Type, ulong Id)> Named(object holder, ConcurrentDictionary<(Type, ulong), bool> seen)
+    {
+        List<(Type Type, ulong Id)> named = [];
+        AssetHandles.Find(holder, named);
+        named.RemoveAll(dependency => !seen.TryAdd(dependency, true) || (dependency.Type == typeof(Texture) && RenderTexture.IsAt(PathOf(dependency.Id))));
+
+        return named;
+    }
+
+    /// <summary><see cref="LoadOne{T}(Handle{T})"/> for a type known only at run time.</summary>
+    private Asset? LoadOne(Type type, ulong id)
+    {
+        return _loads.GetOrAdd(type, static assetType => typeof(Assets)
+            .GetMethod(nameof(LoadBoxed), BindingFlags.NonPublic | BindingFlags.Static)!
+            .MakeGenericMethod(assetType)
+            .CreateDelegate<Func<Assets, ulong, Asset?>>())(this, id);
+    }
+
+    private static Asset? LoadBoxed<T>(Assets assets, ulong id) where T : Asset
+    {
+        return assets.LoadOne(new Handle<T>(id));
+    }
+
+    /// <summary>
+    /// The asset read from disk with what it holds in memory, or null (logged, and remembered as failed) and 0 when it
+    /// cannot be loaded. Every call reads the file and returns a new object.
     /// </summary>
     private (Asset? Asset, long Bytes) LoadFile<T>(Handle<T> handle) where T : Asset
     {
@@ -282,7 +393,20 @@ public sealed class Assets : IDisposable
         {
             string location = path is null ? "" : $" ({Relative(path)})";
             Debugging.Log.Warn($"Failed to load {typeof(T).Name} {handle.Id}{location}: {ex.Message}");
+            lock (_lock)
+                _failed.Add((typeof(T), handle.Id));
+
             return (null, 0);
+        }
+    }
+
+    /// <summary>Takes a failed read's entry out of its pool: a pool holds assets, the failure is remembered apart.</summary>
+    private void Discard(Pool pool, ulong id, Entry entry)
+    {
+        lock (_lock)
+        {
+            if (pool.Entries.TryGetValue(id, out Entry? still) && still == entry)
+                pool.Remove(id);
         }
     }
 
@@ -290,7 +414,7 @@ public sealed class Assets : IDisposable
     /// Counts a newly read entry into its pool, then evicts the pool's least recently used entries while it is over
     /// <paramref name="budget"/>, never the new one: an asset bigger than its budget stays until the next miss.
     /// </summary>
-    private void Admit(Pool pool, ulong id, Entry entry, long bytes, long budget)
+    private void AddToPool(Pool pool, ulong id, Entry entry, long bytes, long budget)
     {
         lock (_lock)
         {
@@ -317,29 +441,37 @@ public sealed class Assets : IDisposable
         return Math.Max(0, settings.DefaultBudget) * Megabyte;
     }
 
-    /// <summary>Takes every changed id out of the pools, so the next Load reads the file. Under the lock.</summary>
+    /// <summary>Takes a changed id out of the pools and the failures, so the next Load reads the file. Under the lock.</summary>
     private void Evict(ulong id)
     {
         foreach (Pool pool in _pools.Values)
             pool.Remove(id);
+
+        if (_failed.Count > 0)
+            _failed.RemoveWhere(failed => failed.Id == id);
     }
 
     /// <summary>
-    /// Gems came or went: the pools of their asset types go (they would keep an unloaded gem's assembly alive), and the
-    /// budget names are checked against the asset types there are now.
+    /// Gems came or went: the pools of their asset types go (they would keep an unloaded gem's assembly alive) with
+    /// whatever else was kept by type, failures are forgotten (a loader may have arrived), and the budget names are checked against the asset types there are now.
     /// </summary>
     private void OnGemsChanged()
     {
         lock (_lock)
         {
-            foreach (Type type in _pools.Keys.Where(t => t.Assembly.IsCollectible).ToArray())
+            foreach (Type type in _pools.Keys.Where(pooled => pooled.Assembly.IsCollectible).ToArray())
                 _pools.Remove(type);
+
+            _failed.Clear();
         }
+
+        _loads.Clear();
+        AssetHandles.Forget();
 
         Type[] types = AssetTypes();
         foreach (string name in _project.Settings.Assets.Budgets.Keys)
         {
-            if (!types.Any(t => IsNamed(t, name)))
+            if (!types.Any(candidate => IsNamed(candidate, name)))
                 Debugging.Log.Warn($"Assets.Budgets: no asset type is called '{name}'.");
         }
     }
@@ -370,13 +502,13 @@ public sealed class Assets : IDisposable
             case AssetFormat.Json:
             {
                 // The file is the same type; the sidecar's values win for what it owns.
-                string json = Payload(_files.ReadText(path));
+                string json = ValueOrThrow(_files.ReadText(path));
                 fileBytes = json.Length * (long)sizeof(char);
                 T content = JsonSerializer.Deserialize<T>(json, AssetJson.Options) ?? throw new JsonException("the file is null.");
                 content.Id = asset.Id;
                 content.Version = asset.Version;
                 content.Path = asset.Path;
-                foreach (PropertyInfo property in typeof(T).GetProperties().Where(p => p.IsDefined(typeof(MetaDataAttribute))))
+                foreach (PropertyInfo property in typeof(T).GetProperties().Where(candidate => candidate.IsDefined(typeof(MetaDataAttribute))))
                     property.SetValue(content, property.GetValue(asset));
 
                 return content;
@@ -385,7 +517,7 @@ public sealed class Assets : IDisposable
             {
                 PropertyInfo property = typeof(T).GetProperty("Text", typeof(string))
                     ?? throw new InvalidOperationException($"{typeof(T).Name} is a text asset but has no string Text property.");
-                string text = Payload(_files.ReadText(path));
+                string text = ValueOrThrow(_files.ReadText(path));
                 fileBytes = text.Length * (long)sizeof(char);
                 property.SetValue(asset, text);
 
@@ -395,7 +527,7 @@ public sealed class Assets : IDisposable
             {
                 IAssetLoader<T> loader = _container.Get<IAssetLoader<T>>()
                     ?? throw new InvalidOperationException($"no loaded gem provides an IAssetLoader<{typeof(T).Name}>.");
-                byte[] bytes = Payload(_files.ReadBinary(path));
+                byte[] bytes = ValueOrThrow(_files.ReadBinary(path));
                 fileBytes = bytes.LongLength;
                 loader.Load(asset, bytes);
 
@@ -447,14 +579,14 @@ public sealed class Assets : IDisposable
 
             _pathById[id] = path;
             _idByPath[path] = id;
-            Evict(id); // added, written or moved: a pooled copy (or a pooled failure) is stale
+            Evict(id); // added, written or moved: a pooled copy (or a remembered failure) is stale
         }
 
         if (!publish)
             return;
 
-        foreach (Event e in happened)
-            _events.Publish(e);
+        foreach (Event published in happened)
+            _events.Publish(published);
     }
 
     private void Unindex(string path)
@@ -535,7 +667,7 @@ public sealed class Assets : IDisposable
         return $"{{\n    \"id\": {id},\n    \"version\": 1\n}}\n";
     }
 
-    private static TPayload Payload<TPayload>(Result<TPayload> read)
+    private static TPayload ValueOrThrow<TPayload>(Result<TPayload> read)
     {
         return read.Failed ? throw new IOException(read.Message) : read.Payload;
     }
@@ -559,7 +691,7 @@ public sealed class Assets : IDisposable
         List<Type> found = [];
         foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
-            if (assembly.IsDynamic || (assembly != core && !assembly.GetReferencedAssemblies().Any(r => r.Name == coreName)))
+            if (assembly.IsDynamic || (assembly != core && !assembly.GetReferencedAssemblies().Any(reference => reference.Name == coreName)))
                 continue;
 
             Type[] types;
@@ -569,24 +701,13 @@ public sealed class Assets : IDisposable
             }
             catch (ReflectionTypeLoadException ex)
             {
-                types = [.. ex.Types.Where(t => t is not null)!];
+                types = [.. ex.Types.Where(loaded => loaded is not null)!];
             }
 
-            found.AddRange(types.Where(t => !t.IsAbstract && typeof(Asset).IsAssignableFrom(t)));
+            found.AddRange(types.Where(candidate => !candidate.IsAbstract && typeof(Asset).IsAssignableFrom(candidate)));
         }
 
         return [.. found];
-    }
-
-    public void Dispose()
-    {
-        _gemsChanged.Dispose();
-        foreach ((_, IDisposable watcher) in _folders)
-            watcher.Dispose();
-
-        _folders.Clear();
-        lock (_lock)
-            _pools.Clear();
     }
 
     /// <summary>One asset type's loaded assets by id, with what they take and how often a Load found one. Used under the lock.</summary>
@@ -625,7 +746,7 @@ public sealed class Assets : IDisposable
         }
     }
 
-    /// <summary>One pooled asset: read once by whoever loads it first, null when it failed.</summary>
+    /// <summary>One pooled asset: read once by whoever loads it first.</summary>
     private sealed class Entry(Lazy<(Asset? Asset, long Bytes)> value)
     {
         public Lazy<(Asset? Asset, long Bytes)> Value { get; } = value;

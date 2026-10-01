@@ -27,6 +27,15 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
         _singletons = Native.Entity("Singletons");
     }
 
+    public void Dispose()
+    {
+        if (IsDisposed)
+            return;
+
+        IsDisposed = true;
+        Native.Dispose(); // destroys every entity, query and system with it
+    }
+
     public int EntityCount => Native.Count(Ecs.Any);
 
     /// <summary>Phase tags and pipelines, one per <see cref="UpdateType"/>.</summary>
@@ -39,22 +48,22 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void Update(in Frame frame)
     {
-        Process(UpdateType.Update, frame.Delta);
+        RunPhase(UpdateType.Update, frame.Delta);
     }
 
     public void FixedUpdate(in Frame frame)
     {
-        Process(UpdateType.FixedUpdate, frame.Delta);
+        RunPhase(UpdateType.FixedUpdate, frame.Delta);
     }
 
     public void LateUpdate(in Frame frame)
     {
-        Process(UpdateType.LateUpdate, frame.Delta);
+        RunPhase(UpdateType.LateUpdate, frame.Delta);
     }
 
     public void Render(in Frame frame)
     {
-        Process(UpdateType.Render, frame.Delta);
+        RunPhase(UpdateType.Render, frame.Delta);
     }
 
     public Handle Create(string? name = null, Handle parent = default)
@@ -85,7 +94,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void Destroy(Handle entity)
     {
-        Handle(entity).Destruct();
+        ToEntity(entity).Destruct();
     }
 
     public bool IsAlive(Handle entity)
@@ -95,7 +104,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void Enable(Handle entity, bool enabled = true)
     {
-        FlecsEntity native = Handle(entity);
+        FlecsEntity native = ToEntity(entity);
         if (enabled)
             native.Enable();
         else
@@ -104,12 +113,12 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public bool IsEnabled(Handle entity)
     {
-        return Handle(entity).Enabled();
+        return ToEntity(entity).Enabled();
     }
 
     public string? GetName(Handle entity)
     {
-        string name = Handle(entity).Name();
+        string name = ToEntity(entity).Name();
 
         return name.Length == 0 ? null : name;
     }
@@ -119,7 +128,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
         if (name is null)
             flecs.ecs_set_name(Native.Handle, entity.Id, null);
         else
-            Handle(entity).SetName(name);
+            ToEntity(entity).SetName(name);
     }
 
     public Handle Lookup(string path)
@@ -129,12 +138,12 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public Handle GetParent(Handle entity)
     {
-        return new Handle(Handle(entity).Parent().Id);
+        return new Handle(ToEntity(entity).Parent().Id);
     }
 
     public void SetParent(Handle entity, Handle parent)
     {
-        FlecsEntity native = Handle(entity);
+        FlecsEntity native = ToEntity(entity);
         if (parent.IsValid)
             native.ChildOf(parent.Id);
         else
@@ -144,19 +153,19 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
     public Handle[] GetChildren(Handle parent)
     {
         List<Handle> children = [];
-        Handle(parent).Children((FlecsEntity child) => children.Add(new Handle(child.Id)));
+        ToEntity(parent).Children((FlecsEntity child) => children.Add(new Handle(child.Id)));
 
         return [.. children];
     }
 
     public void Set<T>(Handle entity, in T value) where T : unmanaged
     {
-        Handle(entity).Set(value);
+        ToEntity(entity).Set(value);
     }
 
     public ref T Get<T>(Handle entity) where T : unmanaged
     {
-        FlecsEntity native = Handle(entity);
+        FlecsEntity native = ToEntity(entity);
         if (!native.Has<T>())
             throw new InvalidOperationException($"{entity} has no {typeof(T).Name} component.");
 
@@ -165,7 +174,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public bool TryGet<T>(Handle entity, out T value) where T : unmanaged
     {
-        FlecsEntity native = Handle(entity);
+        FlecsEntity native = ToEntity(entity);
         if (!native.Has<T>())
         {
             value = default;
@@ -178,12 +187,12 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public bool Has<T>(Handle entity) where T : unmanaged
     {
-        return Handle(entity).Has<T>();
+        return ToEntity(entity).Has<T>();
     }
 
     public void Add<T>(Handle entity) where T : unmanaged
     {
-        FlecsEntity native = Handle(entity);
+        FlecsEntity native = ToEntity(entity);
         if (native.Has<T>())
             return;
 
@@ -197,7 +206,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void Remove<T>(Handle entity) where T : unmanaged
     {
-        Handle(entity).Remove<T>();
+        ToEntity(entity).Remove<T>();
     }
 
     public Handle Singleton()
@@ -252,7 +261,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
         return new FlecsSystem(this, observer.Entity.Id);
     }
 
-    private void Process(UpdateType phase, float dt)
+    private void RunPhase(UpdateType phase, float dt)
     {
         if (IsDisposed)
             return;
@@ -260,18 +269,9 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
         Native.RunPipeline(Phases.Pipeline(phase), dt);
     }
 
-    private FlecsEntity Handle(Handle entity)
+    private FlecsEntity ToEntity(Handle entity)
     {
         return Native.Entity(entity.Id);
-    }
-
-    public void Dispose()
-    {
-        if (IsDisposed)
-            return;
-
-        IsDisposed = true;
-        Native.Dispose(); // destroys every entity, query and system with it
     }
 
     /// <summary>Whether <typeparamref name="T"/> is a tag (a struct with no fields), which flecs stores no memory for.</summary>

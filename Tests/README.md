@@ -24,6 +24,14 @@ Both build to `Build\...\bin\Tests\`, beside `bin\Tests\Gems\` where TestGem lan
   act, and there is no second act after the assert: that is a second test.
 - **No shared state.** Whatever a test needs it builds in its own arrange. Nothing static and mutable, nothing that
   one test leaves for the next, no dependence on the order tests run in.
+- **The exposed API only.** A test drives a type through the members the engine itself calls, and sees what
+  happened where the engine would: a return value, a stat the debug display reads, the entities in the ECS, an
+  event, what a fake gem was handed. The tests see Core's internals because most of Core is internal, not to reach
+  further in: no reflection, no private state.
+- **Nothing is exposed for a test.** No member is added, or widened from private (to `public` or `internal`), so
+  that a test can call or read it. If production code does not use it from outside the type, it is private, and
+  it is tested through the member that uses it. A helper worth testing on its own is a type of its own that the
+  engine calls (`SurfaceComposer`, `Png`).
 - **Our code only.** Third-party and framework code is trusted to work: no test of what System.Text.Json reads,
   what CommandLineParser parses, what flecs matches or what System.Numerics computes. Test what we wrote on top.
 - **No defaults.** A test that only checks what a value starts as breaks every time the default is tuned and
@@ -35,15 +43,15 @@ Both build to `Build\...\bin\Tests\`, beside `bin\Tests\Gems\` where TestGem lan
 
 ## Unit tests
 
-- **One unit.** A unit test drives one class through its public or internal interface. No end to end: a test that
+- **One unit.** A unit test drives one class through its exposed API. No end to end: a test that
   needs two subsystems working together is an integration test.
 - **No I/O.** Never the file system, the network, a native library, the clock or an unseeded `Random`: anything
   that can fail for a reason other than the code being wrong.
 - **No fixture.** A unit test class has no fields but constants; each test news up what it tests.
 - **Don't over-mock.** Fake the gem boundaries (`Fakes\FakeRendering`). Use the real types for plain data and math.
 
-Code that only works through process-wide state (`Debugging.UI`, `Debugging.Commands`) has no unit tests. Pull the
-logic out into something that can be called on its own (`ConsoleSystem.Split`) and test that.
+Code that only works through process-wide state (`Debugging.UI`, `Debugging.Commands`) has no unit tests, and its
+private helpers are not opened up to give it some.
 
 ## Integration tests
 
@@ -56,4 +64,6 @@ still hold; what is different:
 - Use `TempFolder` for files: a fresh GUID folder, deleted on dispose. Write the files before opening the service
   that reads them, so only the tests about the watcher wait on it.
 - A wait on a worker or the watcher is a bounded loop (`StepUntil`), never a bare sleep followed by a hope.
+- Wait on what the system does, not on its tuning: step until the chunk is in the ECS, not for a constant's worth
+  of frames read out of the system.
 - Tests that initialise process-wide SDL go in the `SdlCollection`, so they run one at a time.

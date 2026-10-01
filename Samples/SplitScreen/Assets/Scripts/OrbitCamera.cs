@@ -3,20 +3,20 @@ using Magic.Contexts.Components;
 using Magic.Interfaces;
 using System.Numerics;
 
-namespace SplitScreen;
+namespace SplitScreen.Assets.Scripts;
 
 /// <summary>
 /// Swings every camera around the world's up axis through the origin, keeping its height, distance and tilt: the one in
 /// the top half one way, the one in the bottom half the other way and faster, so the two halves are plainly two views.
 /// </summary>
-internal sealed class OrbitCamera(IEcs ecs) : IGem
+internal sealed class OrbitCamera(IEcs ecs) : ISystem
 {
     /// <summary>Degrees per second.</summary>
-    private const float Speed = 20f;
+    public float Speed = 20f;
 
     private readonly IEcsQuery<Transform, Camera> _cameras = ecs.Query<Transform, Camera>().Build();
 
-    public void Update(in Frame frame)
+    public void Run(in Frame frame)
     {
         float delta = frame.Delta;
         _cameras.Each((Handle _, ref Transform transform, ref Camera camera) =>

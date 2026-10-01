@@ -16,7 +16,7 @@ public sealed class Model : Asset
     /// </summary>
     public string[] SlotNames { get; set; } = [];
 
-    public override long Bytes => Meshes.Sum(m => (m.Vertices.LongLength * Vertex.Size) + (m.Indices.LongLength * sizeof(uint)));
+    public override long Bytes => Meshes.Sum(mesh => (mesh.Vertices.LongLength * Vertex.Size) + (mesh.Indices.LongLength * sizeof(uint)));
 }
 
 /// <summary>

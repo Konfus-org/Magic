@@ -5,7 +5,7 @@
   "identity": "Magic.Project.CSharp",
   "name": "Magic Project",
   "shortName": "magicproject",
-  "description": "Creates a Magic game project: a .magic file, a starting world, and a Scripts gem the engine loads from the project.",
+  "description": "Creates a Magic game project: a .magic file, a starting domain, and a Scripts gem the engine loads from the project.",
   "tags": {
     "language": "C#",
     "type": "project"

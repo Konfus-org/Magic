@@ -102,15 +102,15 @@ internal sealed class FrameTargets
 
         foreach (Target target in _targets.Values)
         {
-            uint w = Math.Max(1, (uint)MathF.Round(width * target.Scale));
-            uint h = Math.Max(1, (uint)MathF.Round(height * target.Scale));
-            if (target.Texture.IsValid && target.Width == w && target.Height == h)
+            uint scaledWidth = Math.Max(1, (uint)MathF.Round(width * target.Scale));
+            uint scaledHeight = Math.Max(1, (uint)MathF.Round(height * target.Scale));
+            if (target.Texture.IsValid && target.Width == scaledWidth && target.Height == scaledHeight)
                 continue;
 
             ReleaseTextures(gpu, target);
-            target.Width = w;
-            target.Height = h;
-            target.Texture = gpu.CreateTexture(new TextureDesc(target.Format, target.Usage, w, h));
+            target.Width = scaledWidth;
+            target.Height = scaledHeight;
+            target.Texture = gpu.CreateTexture(new TextureDesc(target.Format, target.Usage, scaledWidth, scaledHeight));
         }
     }
 

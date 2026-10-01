@@ -40,7 +40,7 @@ public sealed class ChunkTests
     [Fact]
     public void A_chunk_reads_its_coordinate_from_its_path()
     {
-        Chunk chunk = new() { Path = "Worlds/Grid/2_0_-1.chunk" };
+        Chunk chunk = new() { Path = "Domains/Grid/2_0_-1.chunk" };
 
         (int X, int Y, int Z)? coordinate = chunk.Coordinate;
 
