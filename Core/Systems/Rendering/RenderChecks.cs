@@ -87,7 +87,7 @@ internal static class RenderChecks
         if (!ok)
             Debugging.Log.Error($"Culling: GPU drew {early} + {late} instances, the CPU reference says {cpuMin}..{cpuMax} (of {alive} alive).");
         else
-            Debugging.Log.Debug($"Culling verified: {early} early + {late} late of {alive} instances (frustum and size alone: {cpuMin}..{cpuMax}).");
+            Debugging.Log.Verbose($"Culling verified: {early} early + {late} late of {alive} instances (frustum and size alone: {cpuMin}..{cpuMax}).");
     }
 
     private static uint VisibleCount(byte[] drawArgs)
@@ -159,7 +159,7 @@ internal static class RenderChecks
             byte ccw = frame.Payload.Pixels[((32 * (int)size) + 48) * 4];
 
             if (cw > 200 && ccw < 50)
-                Debugging.Log.Info($"Probe: CW triangle visible, CCW culled ({gpu.Device}).");
+                Debugging.Log.Verbose($"Probe: CW triangle visible, CCW culled ({gpu.Device}).");
             else
                 Debugging.Log.Error($"Probe: winding is wrong on {gpu.Device}: clockwise pixel {cw}, counter-clockwise pixel {ccw} (expected >200 and <50).");
         }
@@ -223,7 +223,7 @@ internal static class RenderChecks
             bool ok = NearlyEqual(cbuffer, expectedCbuffer) && NearlyEqual(new Vector4(rows.X, rows.Y, rows.Z, expectedRows.W), expectedRows);
 
             if (ok)
-                Debugging.Log.Info($"Probe: matrices agree ({gpu.Device}): cbuffer mul(M, v) and 3x4 rows match Vector4.Transform.");
+                Debugging.Log.Verbose($"Probe: matrices agree ({gpu.Device}): cbuffer mul(M, v) and 3x4 rows match Vector4.Transform.");
             else
                 Debugging.Log.Error($"Probe: matrices disagree on {gpu.Device}: cbuffer {cbuffer} vs {expectedCbuffer}; rows {rows} vs {expectedRows}.");
         }

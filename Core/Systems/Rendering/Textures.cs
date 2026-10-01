@@ -75,7 +75,7 @@ internal static class Textures
             pool.Texture = pool.Grown;
             pool.Capacity = pool.GrownCapacity;
             pool.Grown = default;
-            Debugging.Log.Debug($"Texture pool class {i} grown to {pool.Capacity} layers.");
+            Debugging.Log.Verbose($"Texture pool class {i} grown to {pool.Capacity} layers.");
         }
 
         foreach ((int classIndex, uint layer, byte[] pixels, int[] offsets) in table.Pending)

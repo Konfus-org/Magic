@@ -1,6 +1,7 @@
 using CSharpScriptingGem;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
+using Magic.Utils;
 using Xunit;
 
 namespace Magic.IntegrationTests;
@@ -25,7 +26,9 @@ public sealed class CSharpScriptingTests
         CSharpScripting scripting = new();
         Script script = new() { Path = "Scripts/NoSuchClassAnywhere.cs" };
 
-        Assert.Throws<InvalidOperationException>(() => scripting.Load(script, []));
+        Result loaded = scripting.Load(script, []);
+
+        Assert.True(loaded.Failed);
     }
 
     [Fact]
@@ -34,7 +37,9 @@ public sealed class CSharpScriptingTests
         CSharpScripting scripting = new();
         Script script = new() { Path = "Scripts/CSharpScriptingTests.cs" };
 
-        Assert.Throws<InvalidOperationException>(() => scripting.Load(script, []));
+        Result loaded = scripting.Load(script, []);
+
+        Assert.True(loaded.Failed);
     }
 
     private sealed class NamedLikeItsFile : IBehavior;

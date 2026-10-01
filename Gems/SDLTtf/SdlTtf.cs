@@ -1,5 +1,6 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
+using Magic.Utils;
 using SDL3;
 using System.Runtime.InteropServices;
 
@@ -27,10 +28,10 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
         TTF.Quit();
     }
 
-    public void Load(Font asset, byte[] bytes)
+    public Result Load(Font asset, byte[] bytes)
     {
         lock (_loadLock)
-            Rasterise(asset, bytes);
+            return Rasterise(asset, bytes);
     }
 
     /// <summary>Printable ASCII and Latin-1; enough for UI text until a sidecar setting says otherwise.</summary>
@@ -43,7 +44,7 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
             yield return codepoint;
     }
 
-    private static void Rasterise(Font asset, byte[] bytes)
+    private static Result Rasterise(Font asset, byte[] bytes)
     {
         // The font reads from the bytes for as long as it is open, so they stay pinned until CloseFont.
         GCHandle pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
@@ -54,11 +55,11 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
         {
             nint io = SDL.IOFromConstMem(pin.AddrOfPinnedObject(), (nuint)bytes.Length);
             if (io == IntPtr.Zero)
-                throw new InvalidOperationException($"SDL_IOFromConstMem failed: {SDL.GetError()}");
+                return Result.Failure($"SDL_IOFromConstMem failed: {SDL.GetError()}");
 
             font = TTF.OpenFontIO(io, closeio: true, asset.Size);
             if (font == IntPtr.Zero)
-                throw new InvalidOperationException($"TTF_OpenFont failed: {SDL.GetError()}");
+                return Result.Failure($"TTF_OpenFont failed: {SDL.GetError()}");
 
             asset.LineHeight = TTF.GetFontLineSkip(font);
             asset.Ascent = TTF.GetFontAscent(font);
@@ -77,7 +78,7 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
                 {
                     nint rgba = SDL.ConvertSurface(image, SDL.PixelFormat.ABGR8888); // R, G, B, A in memory (little endian)
                     if (rgba == IntPtr.Zero)
-                        throw new InvalidOperationException($"SDL_ConvertSurface failed: {SDL.GetError()}");
+                        return Result.Failure($"SDL_ConvertSurface failed: {SDL.GetError()}");
 
                     try
                     {
@@ -103,6 +104,8 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
         }
 
         Pack(asset, glyphs);
+
+        return Result.Success();
     }
 
     /// <summary>

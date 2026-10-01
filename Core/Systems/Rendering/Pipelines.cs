@@ -131,7 +131,7 @@ internal static class Pipelines
             GpuPipeline pipeline = ctx.Gpu.CreatePipeline(desc);
             ctx.Gpu.Release(built.Pipeline);
             table.Built[cls] = new BuiltPipeline(pipeline, null);
-            Debugging.Log.Debug($"Pipeline ready: {Describe(ctx, cls)}.");
+            Debugging.Log.Verbose($"Pipeline ready: {Describe(ctx, cls)}.");
         }
         catch (InvalidOperationException ex)
         {

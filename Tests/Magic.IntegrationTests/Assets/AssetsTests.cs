@@ -3,6 +3,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
 using Magic.Interfaces;
 using Magic.Services;
+using Magic.Utils;
 using System.Diagnostics;
 using System.Text;
 using Xunit;
@@ -470,9 +471,11 @@ public sealed class AssetsTests : IDisposable
     /// <summary>A texture loader that records how many bytes it was handed as the width.</summary>
     private sealed class LengthLoader : IAssetLoader<Texture>
     {
-        public void Load(Texture asset, byte[] bytes)
+        public Result Load(Texture asset, byte[] bytes)
         {
             asset.Width = bytes.Length;
+
+            return bytes.Length == 0 ? Result.Failure("the file is empty.") : Result.Success();
         }
     }
 }

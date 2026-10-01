@@ -4,6 +4,7 @@ using Assimp.Unmanaged;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 using Magic.Services;
+using Magic.Utils;
 using System.Numerics;
 using Mesh = Magic.Contexts.Assets.Mesh;
 
@@ -31,15 +32,24 @@ internal sealed class AssimpModels : IGem, IAssetLoader<Model>
         AssimpLibrary.Instance.LoadLibrary();
     }
 
-    public void Load(Model asset, byte[] bytes)
+    public Result Load(Model asset, byte[] bytes)
     {
         using AssimpContext context = new(); // not shared: an importer instance serves one import at a time
         context.SetConfig(new FBXPreservePivotsConfig(false));
 
         string hint = Path.GetExtension(asset.Path).TrimStart('.');
-        Scene scene = context.ImportFileFromStream(new MemoryStream(bytes), Steps, hint);
+        Scene scene;
+        try
+        {
+            scene = context.ImportFileFromStream(new MemoryStream(bytes), Steps, hint);
+        }
+        catch (AssimpException ex)
+        {
+            return Result.Failure($"Assimp could not import the file: {ex.Message}");
+        }
+
         if (scene is null || scene.SceneFlags.HasFlag(SceneFlags.Incomplete) || scene.RootNode is null)
-            throw new InvalidOperationException("Assimp could not import the file.");
+            return Result.Failure("Assimp could not import the file.");
 
         List<Mesh> meshes = [];
         List<ModelPart> parts = [];
@@ -48,6 +58,8 @@ internal sealed class AssimpModels : IGem, IAssetLoader<Model>
         asset.Meshes = [.. meshes];
         asset.Parts = [.. parts];
         asset.SlotNames = [.. scene.Materials.Select(material => material.Name ?? "")];
+
+        return Result.Success();
     }
 
     private static void Walk(

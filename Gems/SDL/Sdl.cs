@@ -29,7 +29,7 @@ internal sealed class Sdl : IGem
 
         int version = SDL.GetVersion(); // major * 1000000 + minor * 1000 + micro
         int major = version / 1000000, minor = version / 1000 % 1000, micro = version % 1000;
-        Debugging.Log.Info($"SDL {major}.{minor}.{micro} initialised on thread {Environment.CurrentManagedThreadId}.");
+        Debugging.Log.Verbose($"SDL {major}.{minor}.{micro} initialised on thread {Environment.CurrentManagedThreadId}.");
     }
 
     public void Dispose()

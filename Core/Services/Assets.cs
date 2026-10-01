@@ -286,7 +286,7 @@ public sealed class Assets : IDisposable
 
             if (budget == 0)
             {
-                _pools.Remove(typeof(T)); // the budget went to 0 while it held some
+                Drop(typeof(T), "its budget is 0"); // the budget went to 0 while it held some
             }
             else
             {
@@ -312,7 +312,7 @@ public sealed class Assets : IDisposable
         if (asset is null)
             Discard(pool, handle.Id, entry);
         else if (!hit)
-            AddToPool(pool, handle.Id, entry, bytes, budget);
+            AddToPool(typeof(T), pool, handle.Id, entry, bytes, budget);
 
         return (T?)asset;
     }
@@ -387,7 +387,10 @@ public sealed class Assets : IDisposable
                 throw new KeyNotFoundException("no asset has this id.");
 
             T asset = Read(Sidecar<T>(path), path, out long fileBytes);
-            return (asset, asset.Bytes > 0 ? asset.Bytes : fileBytes);
+            long bytes = asset.Bytes > 0 ? asset.Bytes : fileBytes;
+            Debugging.Log.Info($"Loaded {typeof(T).Name} {handle.Id} ({asset.Path}): {bytes / 1024d:0.#} KiB.");
+
+            return (asset, bytes);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -414,7 +417,7 @@ public sealed class Assets : IDisposable
     /// Counts a newly read entry into its pool, then evicts the pool's least recently used entries while it is over
     /// <paramref name="budget"/>, never the new one: an asset bigger than its budget stays until the next miss.
     /// </summary>
-    private void AddToPool(Pool pool, ulong id, Entry entry, long bytes, long budget)
+    private void AddToPool(Type type, Pool pool, ulong id, Entry entry, long bytes, long budget)
     {
         lock (_lock)
         {
@@ -424,7 +427,10 @@ public sealed class Assets : IDisposable
             entry.Bytes = bytes;
             pool.Bytes += bytes;
             while (pool.Bytes > budget && pool.Oldest(except: id) is { } oldest)
+            {
                 pool.Remove(oldest);
+                Debugging.Log.Info($"Unloaded {Describe(type, oldest)}: its pool is over budget.");
+            }
         }
     }
 
@@ -441,11 +447,27 @@ public sealed class Assets : IDisposable
         return Math.Max(0, settings.DefaultBudget) * Megabyte;
     }
 
+    /// <summary>Drops a type's whole pool, saying how many assets went and <paramref name="why"/>. Under the lock.</summary>
+    private void Drop(Type type, string why)
+    {
+        if (_pools.Remove(type, out Pool? pool) && pool.Entries.Count > 0)
+            Debugging.Log.Info($"Unloaded {pool.Entries.Count} {type.Name} asset(s): {why}.");
+    }
+
+    /// <summary>An asset for the log: its type and id, with its path while it has one. Under the lock.</summary>
+    private string Describe(Type type, ulong id)
+    {
+        return _pathById.TryGetValue(id, out string? path) ? $"{type.Name} {id} ({Relative(path)})" : $"{type.Name} {id}";
+    }
+
     /// <summary>Takes a changed id out of the pools and the failures, so the next Load reads the file. Under the lock.</summary>
     private void Evict(ulong id)
     {
-        foreach (Pool pool in _pools.Values)
-            pool.Remove(id);
+        foreach ((Type type, Pool pool) in _pools)
+        {
+            if (pool.Remove(id))
+                Debugging.Log.Info($"Unloaded {Describe(type, id)}: its file changed.");
+        }
 
         if (_failed.Count > 0)
             _failed.RemoveWhere(failed => failed.Id == id);
@@ -460,10 +482,10 @@ public sealed class Assets : IDisposable
         lock (_lock)
         {
             foreach (Type type in _pools.Keys.Where(pooled => pooled.Assembly.IsCollectible).ToArray())
-                _pools.Remove(type);
+                Drop(type, "gems changed");
 
             // A script is a Core type, but what it holds is a class of a project assembly that may just have gone.
-            _pools.Remove(typeof(Script));
+            Drop(typeof(Script), "gems changed");
 
             _failed.Clear();
         }
@@ -532,7 +554,9 @@ public sealed class Assets : IDisposable
                     ?? throw new InvalidOperationException($"no loaded gem provides an IAssetLoader<{typeof(T).Name}>.");
                 byte[] bytes = ValueOrThrow(_files.ReadBinary(path));
                 fileBytes = bytes.LongLength;
-                loader.Load(asset, bytes);
+                Result loaded = loader.Load(asset, bytes);
+                if (loaded.Failed)
+                    throw new InvalidDataException(loaded.Message);
 
                 return asset;
             }
@@ -742,10 +766,15 @@ public sealed class Assets : IDisposable
             return oldest;
         }
 
-        public void Remove(ulong id)
+        /// <summary>Whether <paramref name="id"/> was there to take out.</summary>
+        public bool Remove(ulong id)
         {
-            if (Entries.Remove(id, out Entry? entry))
-                Bytes -= entry.Bytes;
+            if (!Entries.Remove(id, out Entry? entry))
+                return false;
+
+            Bytes -= entry.Bytes;
+
+            return true;
         }
     }
 

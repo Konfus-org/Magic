@@ -1,5 +1,6 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
+using Magic.Utils;
 using System.Reflection;
 using System.Runtime.Loader;
 
@@ -13,16 +14,18 @@ namespace CSharpScriptingGem;
 /// </summary>
 internal sealed class CSharpScripting : IGem, IAssetLoader<Script>
 {
-    public void Load(Script asset, byte[] bytes)
+    public Result Load(Script asset, byte[] bytes)
     {
         Type[] found = [.. Scripts().Where(type => type.Name == asset.Name)];
+        if (found.Length == 0)
+            return Result.Failure($"no loaded assembly has an IScript class named {asset.Name}; build the project.");
 
-        asset.Type = found.Length switch
-        {
-            1 => found[0],
-            0 => throw new InvalidOperationException($"no loaded assembly has an IScript class named {asset.Name}; build the project."),
-            _ => throw new InvalidOperationException($"{found.Length} IScript classes are named {asset.Name} ({string.Join(", ", found.Select(type => type.FullName))}).")
-        };
+        if (found.Length > 1)
+            return Result.Failure($"{found.Length} IScript classes are named {asset.Name} ({string.Join(", ", found.Select(type => type.FullName))}).");
+
+        asset.Type = found[0];
+
+        return Result.Success();
     }
 
     /// <summary>

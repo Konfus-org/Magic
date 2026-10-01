@@ -230,7 +230,7 @@ internal sealed class RenderSystem : ISystem
     {
         GpuStructs.AssertLayout();
         RenderSettings settings = project.Settings.Render;
-        Debugging.Log.Info($"Render settings: occlusion {settings.OcclusionCulling}, anisotropy {settings.Anisotropy}, resolution {(settings.Resolution.IsEmpty ? "the window's" : $"{settings.Resolution.Width} x {settings.Resolution.Height}")}.");
+        Debugging.Log.Verbose($"Render settings: occlusion {settings.OcclusionCulling}, anisotropy {settings.Anisotropy}, resolution {(settings.Resolution.IsEmpty ? "the window's" : $"{settings.Resolution.Width} x {settings.Resolution.Height}")}.");
 
         ulong defaultSurface = assets.Find<Shader>("Shaders/Surfaces/Pbr.surf.hlsl").Id;
         ulong failureSurface = assets.Find<Shader>("Shaders/Surfaces/Failure.surf.hlsl").Id;

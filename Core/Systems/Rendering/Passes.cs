@@ -58,7 +58,7 @@ internal static class Passes
         StringBuilder listed = new();
         foreach (PassState pass in passes)
             listed.Append(listed.Length == 0 ? "" : ", ").Append(pass.Path).Append(" (").Append(pass.Pass.Stage).Append(pass.Pass.Enabled ? "" : ", disabled").Append(pass.Error is null ? "" : ", error").Append(')');
-        Debugging.Log.Info($"Passes: {(passes.Count == 0 ? "none" : listed)}.");
+        Debugging.Log.Verbose($"Passes: {(passes.Count == 0 ? "none" : listed)}.");
     }
 
     /// <summary>
@@ -291,7 +291,7 @@ internal static class Passes
                 ? ctx.Gpu.CreateComputePipeline(shader)
                 : ctx.Gpu.CreatePipeline(new PipelineDesc(ctx.Passes.FullscreenVertex, shader, state.OutputFormat) { Cull = GpuCull.None });
             ctx.Passes.States[index] = state with { Pipeline = pipeline, Compiled = shader, Error = null };
-            Debugging.Log.Debug($"Pass ready: {state.Path}.");
+            Debugging.Log.Verbose($"Pass ready: {state.Path}.");
         }
         catch (InvalidOperationException ex)
         {

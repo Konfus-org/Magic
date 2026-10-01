@@ -112,7 +112,7 @@ internal static class Shaders
 
         CompiledShader compiled = result.Payload;
         double ms = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-        Debugging.Log.Debug(
+        Debugging.Log.Verbose(
             $"Compiled {name} ({stage}, {cache.Format}) in {ms:F0} ms: samplers {compiled.Samplers}, storage textures {compiled.StorageTextures}, " +
             $"storage buffers {compiled.StorageBuffers}, uniforms {compiled.UniformBuffers}, rw {compiled.ReadWriteStorageTextures}/{compiled.ReadWriteStorageBuffers}.");
 

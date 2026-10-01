@@ -1,5 +1,6 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
+using Magic.Utils;
 using SDL3;
 using System.Runtime.InteropServices;
 
@@ -13,7 +14,7 @@ namespace SDLImageGem;
 /// </summary>
 internal sealed class SdlImage : IGem, IAssetLoader<Texture>
 {
-    public void Load(Texture asset, byte[] bytes)
+    public Result Load(Texture asset, byte[] bytes)
     {
         nint decoded;
         GCHandle pin = GCHandle.Alloc(bytes, GCHandleType.Pinned);
@@ -21,7 +22,7 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
         {
             nint io = SDL.IOFromConstMem(pin.AddrOfPinnedObject(), (nuint)bytes.Length);
             if (io == IntPtr.Zero)
-                throw new InvalidOperationException($"SDL_IOFromConstMem failed: {SDL.GetError()}");
+                return Result.Failure($"SDL_IOFromConstMem failed: {SDL.GetError()}");
 
             if (asset.Path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
             {
@@ -33,7 +34,7 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
                 decoded = Image.LoadIO(io, closeio: true); // closes io even on failure
 
             if (decoded == IntPtr.Zero)
-                throw new InvalidOperationException($"IMG_Load failed: {SDL.GetError()}");
+                return Result.Failure($"IMG_Load failed: {SDL.GetError()}");
         }
         finally
         {
@@ -45,7 +46,7 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
         SDL.DestroySurface(decoded);
 
         if (surface == IntPtr.Zero)
-            throw new InvalidOperationException($"SDL_ConvertSurface failed: {SDL.GetError()}");
+            return Result.Failure($"SDL_ConvertSurface failed: {SDL.GetError()}");
 
         try
         {
@@ -69,7 +70,10 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
                     if (current != surface)
                         SDL.DestroySurface(current);
 
-                    current = next != IntPtr.Zero ? next : throw new InvalidOperationException($"SDL_ScaleSurface failed: {SDL.GetError()}");
+                    if (next == IntPtr.Zero)
+                        return Result.Failure($"SDL_ScaleSurface failed: {SDL.GetError()}");
+
+                    current = next;
                 }
 
                 byte[] data = Copy(current, out int width, out int height);
@@ -89,6 +93,8 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
         }
 
         asset.Format = asset.Usage is TextureUsage.Normal or TextureUsage.Mask ? TextureFormat.Rgba8Unorm : TextureFormat.Rgba8Srgb;
+
+        return Result.Success();
     }
 
     /// <summary>The surface's pixels as tightly packed RGBA rows (SDL pads rows to its pitch).</summary>

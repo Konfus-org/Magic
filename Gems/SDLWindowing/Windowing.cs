@@ -46,7 +46,7 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
         if (!SDL.InitSubSystem(SDL.InitFlags.Video))
             throw new InvalidOperationException($"SDL video initialization failed: {SDL.GetError()}");
 
-        Debugging.Log.Info($"SDL video initialised on thread {Environment.CurrentManagedThreadId}.");
+        Debugging.Log.Verbose($"SDL video initialised on thread {Environment.CurrentManagedThreadId}.");
 
         _watch = OnEvent;
         SDL.AddEventWatch(_watch, IntPtr.Zero);

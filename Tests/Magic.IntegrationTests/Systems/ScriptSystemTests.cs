@@ -5,6 +5,7 @@ using Magic.Contexts.Events;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Systems.Streaming;
+using Magic.Utils;
 using System.Reflection;
 using System.Text.Json;
 using Xunit;
@@ -209,9 +210,11 @@ public sealed class ScriptSystemTests : IDisposable
     /// <summary>The scripting gem's part: a script's class is the nested class of these tests named like its file.</summary>
     private sealed class NestedClasses : IAssetLoader<Script>
     {
-        public void Load(Script asset, byte[] bytes)
+        public Result Load(Script asset, byte[] bytes)
         {
             asset.Type = typeof(ScriptSystemTests).GetNestedType(asset.Name, BindingFlags.NonPublic);
+
+            return Result.Success();
         }
     }
 

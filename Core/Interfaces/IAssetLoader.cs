@@ -1,4 +1,5 @@
 using Magic.Contexts.Assets;
+using Magic.Utils;
 
 namespace Magic.Interfaces;
 
@@ -10,7 +11,8 @@ public interface IAssetLoader<T> where T : Asset
 {
     /// <summary>
     /// Fills <paramref name="asset"/> from <paramref name="bytes"/>. The asset already carries its id, version, path
-    /// and every property its sidecar set. Called on whatever thread loads it, the main thread or a worker.
+    /// and every property its sidecar set. A file it cannot make an asset of is a failure saying why, which the
+    /// asset manager logs. Called on whatever thread loads it, the main thread or a worker.
     /// </summary>
-    void Load(T asset, byte[] bytes);
+    Result Load(T asset, byte[] bytes);
 }

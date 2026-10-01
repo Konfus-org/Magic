@@ -209,7 +209,7 @@ internal sealed class GpuDevice : IDisposable
         SDL.GPUPresentMode mode = SetPresentMode(window);
 
         _claimed[id] = window;
-        Debugging.Log.Info($"Window {id} claimed for the GPU device ({mode}, swapchain {SDL.GetGPUSwapchainTextureFormat(Handle, window)}).");
+        Debugging.Log.Verbose($"Window {id} claimed for the GPU device ({mode}, swapchain {SDL.GetGPUSwapchainTextureFormat(Handle, window)}).");
         return window;
     }
 
@@ -383,6 +383,6 @@ internal sealed class Staging : IDisposable
         _buffer = _device.CreateTransferBuffer(SDL.GPUTransferBufferUsage.Upload, _capacity);
         _mapped = GpuDevice.ThrowOnError(SDL.MapGPUTransferBuffer(_device.Handle, _buffer, false), "SDL_MapGPUTransferBuffer");
         _used = 0;
-        Debugging.Log.Debug($"Staging grown to {_capacity / 1024} KiB.");
+        Debugging.Log.Verbose($"Staging grown to {_capacity / 1024} KiB.");
     }
 }

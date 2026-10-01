@@ -1,6 +1,7 @@
 using AssimpGem;
 using Magic.Contexts.Assets;
 using Magic.Services;
+using Magic.Utils;
 using System.Numerics;
 using System.Text;
 using Xunit;
@@ -61,9 +62,9 @@ public sealed class AssimpModelsTests
     {
         Model model = new() { Path = "Broken.fbx" };
 
-        Action load = () => Loader().Load(model, [1, 2, 3]);
+        Result loaded = Loader().Load(model, [1, 2, 3]);
 
-        Assert.ThrowsAny<Exception>(load);
+        Assert.True(loaded.Failed);
     }
 
     private static AssimpModels Loader()

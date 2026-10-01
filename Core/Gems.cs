@@ -175,7 +175,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             seen.Add(gem.Name);
             if ((Find(gem.Name) ?? pending.Find(other => other.Name == gem.Name)) is { } loaded)
             {
-                Debugging.Log.Debug($"Skipping {path}: {gem.Name} is loaded from {loaded.Path}.");
+                Debugging.Log.Verbose($"Skipping {path}: {gem.Name} is loaded from {loaded.Path}.");
                 gem.Context.Unload();
                 continue;
             }
@@ -186,7 +186,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
                 continue;
             }
 
-            Debugging.Log.Debug($"Skipping gem {gem.Name} ({path}): the project does not list it.");
+            Debugging.Log.Verbose($"Skipping gem {gem.Name} ({path}): the project does not list it.");
             gem.Context.Unload();
         }
 
@@ -237,7 +237,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         Result<byte[]> read = files.ReadBinary(path);
         if (read.Failed)
         {
-            Debugging.Log.Debug($"Skipping {path} for now: {read.Message}"); // still being written; the next change retries
+            Debugging.Log.Verbose($"Skipping {path} for now: {read.Message}"); // still being written; the next change retries
             return null;
         }
 
@@ -404,7 +404,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
     private void Unload(Gem gem)
     {
-        Debugging.Log.Info($"Unloading {(gem.Type is null ? "scripts" : "gem")}: {gem.Name}");
+        Debugging.Log.Verbose($"Unloading {(gem.Type is null ? "scripts" : "gem")}: {gem.Name}");
         _gems.Remove(gem);
         PublishChanged();
         Teardown(gem);

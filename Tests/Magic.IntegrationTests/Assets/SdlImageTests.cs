@@ -1,5 +1,6 @@
 using Magic.Contexts.Assets;
 using Magic.Services;
+using Magic.Utils;
 using SDLGem;
 using SDLImageGem;
 using Xunit;
@@ -72,8 +73,8 @@ public sealed class SdlImageTests : IDisposable
     {
         Texture texture = new() { Path = "Textures/Broken.png" };
 
-        Action load = () => new SdlImage().Load(texture, [1, 2, 3]);
+        Result loaded = new SdlImage().Load(texture, [1, 2, 3]);
 
-        Assert.Throws<InvalidOperationException>(load);
+        Assert.True(loaded.Failed);
     }
 }
