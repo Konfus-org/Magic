@@ -11,13 +11,13 @@ internal readonly record struct MaterialSlot(uint Slot, PipelineClass Class);
 internal sealed record MaterialState(uint Slot, Material? Material, PipelineClass Class, uint Failure, Handle<Texture>[] Textures);
 
 /// <summary>
-/// Every material in use: its packed <see cref="GpuMaterial"/> on the GPU, by slot, each one's state an immutable
-/// <see cref="MaterialState"/> replaced whole when it is packed again. Reference counted by id. Slot 0 is the default
+/// Every material in use, id to slot, reference counted: its packed <see cref="GpuMaterial"/> on the GPU, by slot, each
+/// one's state an immutable <see cref="MaterialState"/> replaced whole when it is packed again. Slot 0 is the default
 /// surface with its defaults, for an entity with no material at all; slot <see cref="MeshFailureSlot"/> is the failure
 /// surface saying the model did not load, for every instance drawn as the failure cube. <see cref="RecordBytes"/> mirrors
 /// the GPU records: a slot's record is written when it is packed, and <see cref="Dirty"/> means the mirror goes up again.
 /// </summary>
-internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong failureSurface)
+internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong failureSurface) : RefCountTable<ulong, uint>
 {
     /// <summary>The failure kinds of Surfaces/Failure.surf.hlsl a record carries.</summary>
     public const uint FailureShader = 1, FailureMissing = 2, FailureMesh = 3, FailureTexture = 4;
@@ -31,23 +31,18 @@ internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong 
 
     public GrowableBuffer Records { get; } = new(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, 1024 * GpuMaterial.Size);
 
-    /// <summary>Material id to slot.</summary>
-    public RefCountTable<ulong, uint> Entries { get; } = new();
+    public Slots<MaterialState> States { get; } = new();
 
-    public List<MaterialState?> Slots { get; } = [];
-
-    public Stack<uint> Free { get; } = [];
-
-    /// <summary>Every slot's record, one after the other; grows with <see cref="Slots"/>.</summary>
+    /// <summary>Every slot's record, one after the other; grows with <see cref="States"/>.</summary>
     public byte[] RecordBytes { get; private set; } = new byte[64 * GpuMaterial.Size];
 
     public bool Dirty { get; set; } = true;
 
-    public PipelineClass PlaceholderClass => Slots[0]!.Class;
+    public PipelineClass PlaceholderClass => States[0]!.Class;
 
     public MaterialSlot SlotOf(uint slot)
     {
-        return new MaterialSlot(slot, Slots[(int)slot]!.Class);
+        return new MaterialSlot(slot, States[slot]!.Class);
     }
 
     /// <summary>The bytes of a slot's record in the mirror.</summary>
@@ -62,10 +57,5 @@ internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong 
         }
 
         return RecordBytes.AsSpan(end - GpuMaterial.Size, GpuMaterial.Size);
-    }
-
-    public bool Owns(ulong id)
-    {
-        return Entries.Contains(id);
     }
 }

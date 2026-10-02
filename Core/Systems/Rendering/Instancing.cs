@@ -9,14 +9,14 @@ namespace Magic.Systems.Rendering;
 
 /// <summary>
 /// Entities into the GPU tables: one instance per part of an entity's model, each with its mesh, material and draw group,
-/// and the uploads of what changed (geometry, instance rows, the cell and page tables, the draw-group template).
+/// and the uploads of what changed (instance rows, the cell and page tables, the draw-group template).
 /// </summary>
 internal static class Instancing
 {
     /// <summary>Registers one entity's model (one instance per part, chained) and returns the handle that names it: its first part's slot.</summary>
     public static uint Add(RenderContext ctx, in InstanceDesc desc)
     {
-        (uint MeshSlot, int MaterialSlot)[] parts = Parts(ctx, desc.Model);
+        (uint MeshSlot, int MaterialSlot)[] parts = Meshes.Acquire(ctx, desc.Model);
         InstanceFlags flags = desc.Flags.HasFlag(RenderFlags.NoSizeCull) ? InstanceFlags.NoSizeCull : InstanceFlags.None;
         InstanceTable instances = ctx.Instances;
         uint handle = 0, previous = InstanceTable.End;
@@ -64,12 +64,13 @@ internal static class Instancing
         {
             uint next = instances.NextPart(slot);
             ctx.Buckets.Release(instances.ClassOf(slot), instances.MeshSlotOf(slot));
+            Pipelines.Release(ctx, instances.ClassOf(slot));
             Materials.Release(ctx, instances.MaterialOf(slot));
             instances.Remove(slot);
             slot = next;
         }
 
-        ctx.Meshes.Release(model);
+        Meshes.Release(ctx, model);
     }
 
     /// <summary>A material changed class: every instance takes its material's slot and class again, moving draw group when its class changed.</summary>
@@ -89,24 +90,17 @@ internal static class Instancing
             {
                 ctx.Buckets.Release(previous, meshSlot);
                 group = Group(ctx, material.Class, meshSlot);
+                Pipelines.Release(ctx, previous);
             }
 
             instances.Reclass(slot, material, group);
         }
     }
 
-    /// <summary>Uploads the geometry added since the last frame, every page with a changed row, the cell and page tables and the draw-group template when they changed.</summary>
+    /// <summary>Uploads every page with a changed row, the cell and page tables and the draw-group template when they changed.</summary>
     public static void Flush(RenderContext ctx)
     {
         IRendering gpu = ctx.Gpu;
-        foreach ((uint firstVertex, uint firstIndex, Vertex[] vertices, uint[] indices) in ctx.Meshes.Pending)
-        {
-            gpu.Upload<Vertex>(ctx.Meshes.VertexBuffer, firstVertex * Vertex.Size, vertices);
-            gpu.Upload<uint>(ctx.Meshes.IndexBuffer, firstIndex * 4, indices);
-        }
-
-        ctx.Meshes.Pending.Clear();
-
         FlushInstances(ctx);
 
         InstanceTable instances = ctx.Instances;
@@ -142,22 +136,11 @@ internal static class Instancing
         return meshSlot == 0 ? ctx.Materials.SlotOf(MaterialTable.MeshFailureSlot) : own;
     }
 
-    /// <summary>The draw group of a class and mesh, taking a reference; a class seen for the first time starts compiling its pipeline.</summary>
+    /// <summary>The draw group of a class and mesh, taking a reference to it and to the class's pipeline; a class seen for the first time starts compiling its pipeline.</summary>
     private static uint Group(RenderContext ctx, PipelineClass cls, uint meshSlot)
     {
-        Pipelines.Ensure(ctx, cls);
+        Pipelines.Acquire(ctx, cls);
         return ctx.Buckets.Acquire(cls, meshSlot, ctx.Meshes.Range(meshSlot));
-    }
-
-    /// <summary>The parts of a model, loading it the first time; anything that cannot be drawn is the placeholder part alone.</summary>
-    private static (uint MeshSlot, int MaterialSlot)[] Parts(RenderContext ctx, Handle<Model> model)
-    {
-        if (!model.IsValid)
-            return MeshTable.Placeholder;
-        if (ctx.Meshes.TryAcquire(model.Id, out (uint, int)[] parts))
-            return parts;
-
-        return ctx.Meshes.Add(model.Id, ctx.Assets.Load(model));
     }
 
     /// <summary>Every run of adjacent dirty pages in one upload each; a grown buffer takes every row again.</summary>

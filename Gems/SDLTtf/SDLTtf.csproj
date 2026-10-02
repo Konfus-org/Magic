@@ -12,13 +12,11 @@
     <Nullable>enable</Nullable>
     <!-- Assembly SDLTtf.dll, never SDL3_ttf: bin\Gems is one flat folder shared with the native dlls. -->
     <RootNamespace>SDLTtfGem</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="SDL3-CS" Version="3.4.16" />
-    <PackageReference Include="SDL3-CS.Windows.TTF" Version="3.2.2.11" />
+    <PackageReference Include="SDL3-CS.$(MagicPlatform).TTF" Version="3.2.2.11" />
   </ItemGroup>
 
   <ItemGroup>

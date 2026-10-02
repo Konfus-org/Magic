@@ -6,8 +6,7 @@
     <Nullable>enable</Nullable>
     <IsTestProject>true</IsTestProject>
     <RootNamespace>Magic.IntegrationTests</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <RuntimeIdentifier>$(MagicRuntime)</RuntimeIdentifier>
   </PropertyGroup>
 
   <ItemGroup>

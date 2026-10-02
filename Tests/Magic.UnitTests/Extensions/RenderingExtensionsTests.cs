@@ -16,7 +16,7 @@ public sealed class RenderingExtensionsTests
 
         rendering.Screenshot(new FakeWindows(), files, "shot.png");
 
-        Assert.Equal(Png.Encode(1, 1, [255, 0, 0, 255]), files.Written["shot.png"]);
+        Assert.Equal(new byte[] { 255, 0, 0, 255 }.Png(1, 1), files.Written["shot.png"]);
     }
 
     [Fact]

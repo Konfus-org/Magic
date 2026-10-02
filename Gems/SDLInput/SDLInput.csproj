@@ -12,13 +12,11 @@
     <Nullable>enable</Nullable>
     <!-- Same reason as the SDL gem: a namespace containing "SDL" as a segment would shadow the SDL3.SDL class. -->
     <RootNamespace>SDLInputGem</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="SDL3-CS" Version="3.4.16" />
-    <PackageReference Include="SDL3-CS.Windows" Version="3.4.14.1" />
+    <PackageReference Include="SDL3-CS.$(MagicPlatform)" Version="3.4.14.1" />
   </ItemGroup>
 
   <ItemGroup>

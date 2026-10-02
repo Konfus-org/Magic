@@ -13,13 +13,11 @@
     <!-- The namespace is SDLGem, not SDL: inside a namespace named SDL, "SDL.Init(...)" would bind to the
          namespace instead of the SDL3.SDL class. The assembly stays SDL.dll; the native one is SDL3.dll. -->
     <RootNamespace>SDLGem</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="SDL3-CS" Version="3.4.16" />
-    <PackageReference Include="SDL3-CS.Windows" Version="3.4.14.1" />
+    <PackageReference Include="SDL3-CS.$(MagicPlatform)" Version="3.4.14.1" />
   </ItemGroup>
 
   <ItemGroup>

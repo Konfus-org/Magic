@@ -21,10 +21,8 @@ internal static class Materials
     /// <summary>Packs the two built-in slots: 0, the default surface with its defaults, and the mesh failure.</summary>
     public static void AddBuiltIn(RenderContext ctx)
     {
-        ctx.Materials.Slots.Add(null);
-        Store(ctx, Pack(ctx, 0, new Material { Shader = new Handle<Shader>(ctx.Materials.DefaultSurface) }, []));
-        ctx.Materials.Slots.Add(null);
-        Store(ctx, Pack(ctx, MaterialTable.MeshFailureSlot, null, [], MaterialTable.FailureMesh));
+        Store(ctx, Pack(ctx, ctx.Materials.States.Add(), new Material { Shader = new Handle<Shader>(ctx.Materials.DefaultSurface) }, []));
+        Store(ctx, Pack(ctx, ctx.Materials.States.Add(), null, [], MaterialTable.FailureMesh));
     }
 
     /// <summary>The slot for a material, loading and packing it the first time; the default for no material at all.</summary>
@@ -33,43 +31,39 @@ internal static class Materials
         MaterialTable table = ctx.Materials;
         if (!handle.IsValid)
             return table.SlotOf(0);
-        if (table.Entries.TryAcquire(handle.Id, out uint slot))
+        if (table.TryAcquire(handle.Id, out uint slot))
             return table.SlotOf(slot);
 
-        slot = table.Free.Count > 0 ? table.Free.Pop() : (uint)table.Slots.Count;
-        if (slot == table.Slots.Count)
-            table.Slots.Add(null);
-
+        slot = table.States.Add();
         Store(ctx, Pack(ctx, slot, ctx.Assets.Load(handle), []));
-        table.Entries.Add(handle.Id, slot);
+        table.Add(handle.Id, slot);
         return table.SlotOf(slot);
     }
 
     /// <summary>The slot a material already has, without taking a reference; the default for one it does not.</summary>
     public static MaterialSlot SlotOf(RenderContext ctx, Handle<Material> handle)
     {
-        return ctx.Materials.SlotOf(handle.IsValid && ctx.Materials.Entries.TryGet(handle.Id, out uint slot) ? slot : 0);
+        return ctx.Materials.SlotOf(handle.IsValid && ctx.Materials.TryGet(handle.Id, out uint slot) ? slot : 0);
     }
 
     public static void Release(RenderContext ctx, Handle<Material> handle)
     {
         MaterialTable table = ctx.Materials;
-        if (!table.Entries.Release(handle.Id, out uint slot))
+        if (!table.Release(handle.Id, out uint slot))
             return;
 
-        foreach (Handle<Texture> texture in table.Slots[(int)slot]!.Textures)
+        foreach (Handle<Texture> texture in table.States[slot]!.Textures)
             Textures.Release(ctx, texture);
 
-        table.Slots[(int)slot] = null;
+        table.States.Remove(slot);
         table.Record(slot).Clear();
         table.Dirty = true;
-        table.Free.Push(slot);
     }
 
     /// <summary>The material file changed: reload and repack in place. True when its pipeline class changed.</summary>
     public static bool Reload(RenderContext ctx, ulong id)
     {
-        if (!ctx.Materials.Entries.TryGet(id, out uint slot))
+        if (!ctx.Materials.TryGet(id, out uint slot))
             return false;
 
         return Repack(ctx, slot, ctx.Assets.Load(new Handle<Material>(id)));
@@ -82,10 +76,10 @@ internal static class Materials
     public static bool RepackShaders(RenderContext ctx, IReadOnlySet<ulong> shaders)
     {
         bool changed = false;
-        List<MaterialState?> slots = ctx.Materials.Slots;
-        for (uint slot = 0; slot < slots.Count; slot++)
+        Slots<MaterialState> states = ctx.Materials.States;
+        for (uint slot = 0; slot < states.Count; slot++)
         {
-            if (slots[(int)slot] is not { } state)
+            if (states[slot] is not { } state)
                 continue;
 
             ulong surface = state.Material?.Shader.IsValid == true ? state.Material.Shader.Id : ctx.Materials.DefaultSurface;
@@ -103,10 +97,10 @@ internal static class Materials
     public static bool RepackTextures(RenderContext ctx)
     {
         bool changed = false;
-        List<MaterialState?> slots = ctx.Materials.Slots;
-        for (uint slot = 0; slot < slots.Count; slot++)
+        Slots<MaterialState> states = ctx.Materials.States;
+        for (uint slot = 0; slot < states.Count; slot++)
         {
-            if (slots[(int)slot] is { Textures.Length: > 0 } state)
+            if (states[slot] is { Textures.Length: > 0 } state)
                 changed |= Repack(ctx, slot, state.Material);
         }
 
@@ -121,7 +115,7 @@ internal static class Materials
             return;
 
         table.Dirty = false;
-        uint bytes = (uint)table.Slots.Count * GpuMaterial.Size;
+        uint bytes = (uint)table.States.Count * GpuMaterial.Size;
         table.Records.Ensure(ctx.Gpu, bytes);
         ctx.Gpu.Upload(table.Records.Handle, 0, table.RecordBytes.AsSpan(0, (int)bytes));
     }
@@ -129,7 +123,7 @@ internal static class Materials
     /// <summary>Packs the slot again from <paramref name="material"/>; true when its class changed.</summary>
     private static bool Repack(RenderContext ctx, uint slot, Material? material)
     {
-        MaterialState before = ctx.Materials.Slots[(int)slot]!;
+        MaterialState before = ctx.Materials.States[slot]!;
         uint forced = slot == MaterialTable.MeshFailureSlot ? MaterialTable.FailureMesh : 0;
         MaterialState after = Pack(ctx, slot, material, before.Textures, forced);
         Store(ctx, after);
@@ -140,7 +134,7 @@ internal static class Materials
     private static void Store(RenderContext ctx, MaterialState state)
     {
         MaterialTable table = ctx.Materials;
-        table.Slots[(int)state.Slot] = state;
+        table.States[state.Slot] = state;
         Build(ctx, state, table.Record(state.Slot));
         table.Dirty = true;
     }

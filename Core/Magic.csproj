@@ -25,14 +25,18 @@
        the repo, so an edit shows up without a build: the repo root is stamped into the assembly as MagicRoot.
        Release ships them: the stamp is left out, the host falls back to the folder next to the exe, and the
        whole Resources tree is copied there (and into a publish) as content. In every configuration the tree
-       shows in the project as a Resources folder (linked, so it stays where it is), sidecars included. -->
-  <ItemGroup Condition="'$(Configuration)' != 'Release'">
+       shows in the project as a Resources folder (linked, so it stays where it is), sidecars included.
+       A build for another platform ships them like Release does: a path on this machine means nothing there. -->
+  <PropertyGroup>
+    <ShipResources Condition="'$(Configuration)' == 'Release' Or '$(MagicRuntime)' != '$(MagicHostRuntime)'">true</ShipResources>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(ShipResources)' != 'true'">
     <AssemblyMetadata Include="MagicRoot" Value="$(MagicRoot)" />
   </ItemGroup>
   <ItemGroup>
     <None Include="$(MagicRoot)Resources\**" Link="Resources\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
-  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+  <ItemGroup Condition="'$(ShipResources)' == 'true'">
     <None Update="$(MagicRoot)Resources\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 

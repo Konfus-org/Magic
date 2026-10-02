@@ -13,8 +13,6 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Not "ImGui": that namespace segment would shadow Hexa.NET.ImGui.ImGui, and the dll must not clash with the native cimgui.dll. -->
     <RootNamespace>ImGuiOverlayGem</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>

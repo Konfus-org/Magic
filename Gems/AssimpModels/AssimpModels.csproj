@@ -13,8 +13,6 @@
     <!-- The assembly is AssimpModels, not Assimp: the native library is assimp.dll and the two would overwrite each
          other in bin\Gems (case-insensitive). The namespace is AssimpGem so "Assimp.X" binds to the library. -->
     <RootNamespace>AssimpGem</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>

@@ -8,7 +8,8 @@ namespace Magic.Systems.Rendering;
 
 /// <summary>
 /// The material pipelines of <see cref="PipelineTable"/>. A class starts its compile on a worker the first time an
-/// instance needs it (<see cref="Ensure"/>); until it lands the class answers 0 and its draws are skipped. A recompile (a surface, template or include
+/// instance needs it (<see cref="Acquire"/>); until it lands the class answers 0 and its draws are skipped. When its last
+/// instance goes its pipeline is released (<see cref="Release"/>). A recompile (a surface, template or include
 /// changed) keeps the last good pipeline until the new one is ready, and keeps it on failure too, with the compiler's
 /// message logged. A class that never had a good pipeline answers with the forced failure pipeline instead, so a broken
 /// shader shows up magenta rather than as a hole in the scene. A change made while a compile runs starts another, which
@@ -33,31 +34,47 @@ internal static class Pipelines
         new(4, 1, GpuVertexFormat.Uint, 0),
     ];
 
-    /// <summary>Starts the class's first compile, unless it has one.</summary>
-    public static void Ensure(RenderContext ctx, PipelineClass cls)
+    /// <summary>Takes a reference to the class, starting its first compile when it is new.</summary>
+    public static void Acquire(RenderContext ctx, PipelineClass cls)
     {
-        if (ctx.Pipelines.Built.ContainsKey(cls))
+        if (ctx.Pipelines.TryAcquire(cls, out _))
             return;
 
-        ctx.Pipelines.Built[cls] = default;
+        ctx.Pipelines.Add(cls, default);
         StartCompile(ctx, cls);
+    }
+
+    /// <summary>
+    /// Drops a reference to the class; the last one releases its pipeline, and its surface's text when no other class
+    /// is built on it. A compile still running for it is ignored when it lands.
+    /// </summary>
+    public static void Release(RenderContext ctx, PipelineClass cls)
+    {
+        PipelineTable table = ctx.Pipelines;
+        if (!table.Release(cls, out BuiltPipeline built))
+            return;
+
+        Debugging.Log.Verbose($"Pipeline released: {Describe(ctx, cls)}.");
+        ctx.Gpu.Release(built.Pipeline);
+        if (!table.Entries.Any(entry => entry.Key.Surface == cls.Surface))
+            ctx.Shaders.Entries.Remove(cls.Surface);
     }
 
     /// <summary>The pipeline for the class: 0 while its first compile runs, the forced failure pipeline once that compile failed. Reads only.</summary>
     public static GpuPipeline Get(RenderContext ctx, PipelineClass cls)
     {
         PipelineTable table = ctx.Pipelines;
-        BuiltPipeline built = table.Built.GetValueOrDefault(cls);
+        table.TryGet(cls, out BuiltPipeline built);
         if (!built.Pipeline.IsValid && built.Error is not null && cls != table.Forced && table.Forced.Surface != 0)
-            return table.Built.GetValueOrDefault(table.Forced).Pipeline;
+            table.TryGet(table.Forced, out built);
 
         return built.Pipeline;
     }
 
-    /// <summary>Compiles the class now, on this thread, so the first frame can draw it.</summary>
+    /// <summary>Compiles the class now, on this thread, so the first frame can draw it. The reference it takes is kept for good.</summary>
     public static void Prewarm(RenderContext ctx, PipelineClass cls)
     {
-        Ensure(ctx, cls);
+        Acquire(ctx, cls);
         ctx.Pipelines.Compiles.Wait(cls);
         ctx.Pipelines.Compiles.Poll(ctx, FinishCompile);
     }
@@ -82,7 +99,7 @@ internal static class Pipelines
             return;
         }
 
-        foreach (PipelineClass cls in ctx.Pipelines.Built.Keys.ToArray())
+        foreach ((PipelineClass cls, _) in ctx.Pipelines.Entries.ToArray())
         {
             if (shaderIds.Contains(cls.Surface))
                 StartCompile(ctx, cls);
@@ -105,17 +122,19 @@ internal static class Pipelines
 
             // A shared file changed: every class builds again, linked with the current vertex shader (their fragment
             // bytecode comes from the disk cache unless it changed too).
-            foreach (PipelineClass rebuilt in table.Built.Keys.ToArray())
+            foreach ((PipelineClass rebuilt, _) in table.Entries.ToArray())
                 StartCompile(ctx, rebuilt);
             return;
         }
 
-        BuiltPipeline built = table.Built.GetValueOrDefault(cls);
+        if (!table.TryGet(cls, out BuiltPipeline built))
+            return; // released while compiling
+
         if (result.Failed)
         {
             if (built.Error != result.Message)
                 Debugging.Log.Error($"Pipeline {Describe(ctx, cls)}: {result.Message}{(built.Pipeline.IsValid ? " (keeping the last good pipeline)" : " (drawing the failure pipeline)")}");
-            table.Built[cls] = built with { Error = result.Message };
+            table.Set(cls, built with { Error = result.Message });
             return;
         }
 
@@ -130,12 +149,12 @@ internal static class Pipelines
             };
             GpuPipeline pipeline = ctx.Gpu.CreatePipeline(desc);
             ctx.Gpu.Release(built.Pipeline);
-            table.Built[cls] = new BuiltPipeline(pipeline, null);
+            table.Set(cls, new BuiltPipeline(pipeline, null));
             Debugging.Log.Verbose($"Pipeline ready: {Describe(ctx, cls)}.");
         }
         catch (InvalidOperationException ex)
         {
-            table.Built[cls] = built with { Error = ex.Message };
+            table.Set(cls, built with { Error = ex.Message });
             Debugging.Log.Error($"Pipeline {Describe(ctx, cls)}: {ex.Message}");
         }
     }
@@ -148,7 +167,8 @@ internal static class Pipelines
         Shader? contract = Shaders.GetByPath(ctx, Contract);
         if (surface is null || surfaceShader is null || template is null || contract is null)
         {
-            ctx.Pipelines.Built[cls] = ctx.Pipelines.Built[cls] with { Error = "missing surface, template or Include/Surface.hlsli" };
+            ctx.Pipelines.TryGet(cls, out BuiltPipeline built);
+            ctx.Pipelines.Set(cls, built with { Error = "missing surface, template or Include/Surface.hlsli" });
             return;
         }
 

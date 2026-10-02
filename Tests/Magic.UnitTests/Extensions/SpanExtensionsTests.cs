@@ -1,13 +1,13 @@
-using Magic.Utils;
+using Magic.Extensions;
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.IO.Hashing;
 using System.Text;
 using Xunit;
 
-namespace Magic.UnitTests.Utils;
+namespace Magic.UnitTests.Extensions;
 
-public sealed class PngTests
+public sealed class SpanExtensionsTests
 {
     // Two pixels side by side: one row of eight bytes.
     private static readonly byte[] Pixels = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -15,7 +15,7 @@ public sealed class PngTests
     [Fact]
     public void Starts_with_the_png_signature()
     {
-        byte[] png = Png.Encode(2, 1, Pixels);
+        byte[] png = Pixels.Png(2, 1);
 
         Assert.Equal([0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A], png[..8]);
     }
@@ -23,7 +23,7 @@ public sealed class PngTests
     [Fact]
     public void Holds_a_header_the_data_and_an_end_chunk_in_that_order()
     {
-        byte[] png = Png.Encode(2, 1, Pixels);
+        byte[] png = Pixels.Png(2, 1);
 
         Assert.Equal(["IHDR", "IDAT", "IEND"], Chunks(png).Select(chunk => chunk.Type));
     }
@@ -31,7 +31,7 @@ public sealed class PngTests
     [Fact]
     public void Every_chunk_carries_the_crc_of_its_type_and_data()
     {
-        byte[] png = Png.Encode(2, 1, Pixels);
+        byte[] png = Pixels.Png(2, 1);
 
         Assert.All(Chunks(png), chunk => Assert.Equal(Crc32.HashToUInt32(chunk.CrcInput), chunk.Crc));
     }
@@ -39,7 +39,7 @@ public sealed class PngTests
     [Fact]
     public void The_header_holds_the_size_and_rgba8()
     {
-        byte[] png = Png.Encode(2, 1, Pixels);
+        byte[] png = Pixels.Png(2, 1);
 
         // Width 2, height 1, then 8 bits, RGBA, deflate, no filter, no interlace.
         Assert.Equal([0, 0, 0, 2, 0, 0, 0, 1, 8, 6, 0, 0, 0], Chunks(png)[0].Data);
@@ -48,7 +48,7 @@ public sealed class PngTests
     [Fact]
     public void The_data_inflates_to_each_row_behind_a_zero_filter_byte()
     {
-        byte[] png = Png.Encode(2, 1, Pixels);
+        byte[] png = Pixels.Png(2, 1);
 
         byte[] scanlines = Inflate(Chunks(png)[1].Data);
 
@@ -58,7 +58,7 @@ public sealed class PngTests
     [Fact]
     public void Refuses_a_pixel_buffer_of_the_wrong_size()
     {
-        Action encode = () => Png.Encode(2, 2, new byte[15]);
+        Action encode = () => new byte[15].Png(2, 2);
 
         Assert.Throws<ArgumentException>(encode);
     }
@@ -69,7 +69,7 @@ public sealed class PngTests
     [InlineData(-1, 2)]
     public void Refuses_a_size_that_is_not_positive(int width, int height)
     {
-        Action encode = () => Png.Encode(width, height, []);
+        Action encode = () => ReadOnlySpan<byte>.Empty.Png(width, height);
 
         Assert.Throws<ArgumentOutOfRangeException>(encode);
     }

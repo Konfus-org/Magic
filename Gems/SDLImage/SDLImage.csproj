@@ -12,13 +12,11 @@
     <Nullable>enable</Nullable>
     <!-- Assembly SDLImage.dll, never SDL3_image: bin\Gems is one flat folder shared with the native dlls. -->
     <RootNamespace>SDLImageGem</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="SDL3-CS" Version="3.4.16" />
-    <PackageReference Include="SDL3-CS.Windows.Image" Version="3.4.6.9" />
+    <PackageReference Include="SDL3-CS.$(MagicPlatform).Image" Version="3.4.6.9" />
   </ItemGroup>
 
   <ItemGroup>

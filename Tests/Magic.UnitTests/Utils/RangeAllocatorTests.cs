@@ -3,15 +3,15 @@ using Xunit;
 
 namespace Magic.UnitTests.Utils;
 
-public sealed class OffsetAllocatorTests
+public sealed class RangeAllocatorTests
 {
     [Fact]
     public void Allocations_do_not_overlap()
     {
-        OffsetAllocator allocator = new(1024, 64);
+        RangeAllocator allocator = new(1024, 64);
 
-        OffsetAllocator.Allocation first = allocator.Allocate(100);
-        OffsetAllocator.Allocation second = allocator.Allocate(200);
+        RangeAllocator.Allocation first = allocator.Allocate(100);
+        RangeAllocator.Allocation second = allocator.Allocate(200);
 
         Assert.True(first.Offset + 100 <= second.Offset || second.Offset + 200 <= first.Offset);
     }
@@ -19,7 +19,7 @@ public sealed class OffsetAllocatorTests
     [Fact]
     public void Allocating_takes_the_size_from_free_storage()
     {
-        OffsetAllocator allocator = new(1024, 64);
+        RangeAllocator allocator = new(1024, 64);
 
         allocator.Allocate(100);
 
@@ -29,8 +29,8 @@ public sealed class OffsetAllocatorTests
     [Fact]
     public void Freeing_returns_the_size_to_free_storage()
     {
-        OffsetAllocator allocator = new(1024, 64);
-        OffsetAllocator.Allocation first = allocator.Allocate(100);
+        RangeAllocator allocator = new(1024, 64);
+        RangeAllocator.Allocation first = allocator.Allocate(100);
 
         allocator.Free(first);
 
@@ -40,13 +40,13 @@ public sealed class OffsetAllocatorTests
     [Fact]
     public void A_freed_hole_is_reused()
     {
-        OffsetAllocator allocator = new(1024, 64);
+        RangeAllocator allocator = new(1024, 64);
         allocator.Allocate(100);
-        OffsetAllocator.Allocation hole = allocator.Allocate(200);
+        RangeAllocator.Allocation hole = allocator.Allocate(200);
         allocator.Allocate(300);
         allocator.Free(hole);
 
-        OffsetAllocator.Allocation reused = allocator.Allocate(150);
+        RangeAllocator.Allocation reused = allocator.Allocate(150);
 
         Assert.Equal(hole.Offset, reused.Offset);
     }
@@ -54,15 +54,15 @@ public sealed class OffsetAllocatorTests
     [Fact]
     public void Freed_neighbours_merge_back_into_one_range()
     {
-        OffsetAllocator allocator = new(1024, 64);
-        OffsetAllocator.Allocation first = allocator.Allocate(100);
-        OffsetAllocator.Allocation second = allocator.Allocate(200);
-        OffsetAllocator.Allocation third = allocator.Allocate(300);
+        RangeAllocator allocator = new(1024, 64);
+        RangeAllocator.Allocation first = allocator.Allocate(100);
+        RangeAllocator.Allocation second = allocator.Allocate(200);
+        RangeAllocator.Allocation third = allocator.Allocate(300);
         allocator.Free(second);
         allocator.Free(first);
         allocator.Free(third);
 
-        OffsetAllocator.Allocation whole = allocator.Allocate(1024);
+        RangeAllocator.Allocation whole = allocator.Allocate(1024);
 
         Assert.False(whole.IsNone);
     }
@@ -70,9 +70,9 @@ public sealed class OffsetAllocatorTests
     [Fact]
     public void The_whole_capacity_can_be_allocated_at_once()
     {
-        OffsetAllocator allocator = new(256, 16);
+        RangeAllocator allocator = new(256, 16);
 
-        OffsetAllocator.Allocation whole = allocator.Allocate(256);
+        RangeAllocator.Allocation whole = allocator.Allocate(256);
 
         Assert.False(whole.IsNone);
     }
@@ -80,10 +80,10 @@ public sealed class OffsetAllocatorTests
     [Fact]
     public void A_full_allocator_answers_none()
     {
-        OffsetAllocator allocator = new(256, 16);
+        RangeAllocator allocator = new(256, 16);
         allocator.Allocate(256);
 
-        OffsetAllocator.Allocation one = allocator.Allocate(1);
+        RangeAllocator.Allocation one = allocator.Allocate(1);
 
         Assert.True(one.IsNone);
     }
@@ -91,9 +91,9 @@ public sealed class OffsetAllocatorTests
     [Fact]
     public void More_than_the_capacity_answers_none()
     {
-        OffsetAllocator allocator = new(256, 16);
+        RangeAllocator allocator = new(256, 16);
 
-        OffsetAllocator.Allocation tooBig = allocator.Allocate(257);
+        RangeAllocator.Allocation tooBig = allocator.Allocate(257);
 
         Assert.True(tooBig.IsNone);
     }
@@ -101,8 +101,8 @@ public sealed class OffsetAllocatorTests
     [Fact]
     public void A_double_free_throws()
     {
-        OffsetAllocator allocator = new(256, 16);
-        OffsetAllocator.Allocation first = allocator.Allocate(256);
+        RangeAllocator allocator = new(256, 16);
+        RangeAllocator.Allocation first = allocator.Allocate(256);
         allocator.Free(first);
 
         Action again = () => allocator.Free(first);

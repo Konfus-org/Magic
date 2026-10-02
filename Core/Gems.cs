@@ -1,4 +1,5 @@
 using Magic.Contexts.Events;
+using Magic.Contexts.Files;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
@@ -51,7 +52,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     private readonly List<Gem> _gems = []; // in load order
     private readonly List<GemSource> _sources = []; // engine folder first, so a path under both is the engine's
     private readonly List<IDisposable> _watchers = [];
-    private readonly ChangeQueue _changes = new();
+    private readonly FileChanges _changes = new();
     private readonly List<WeakReference<GemLoadContext>> _unloaded = [];
 
     /// <summary>Every loaded gem, in load order (dependencies first): the order the frame loop calls them in.</summary>
@@ -84,7 +85,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         List<string> paths = [];
 
         Add(engine, paths);
-        if (!IsUnder(engineDirectory, projectRoot))
+        if (!files.IsUnder(projectRoot, engineDirectory))
             Add(new GemSource(projectRoot, Recursive: true, Names: null), paths);
 
         HashSet<string> seen = Load(paths, []);
@@ -135,20 +136,13 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         }
 
         // A project keeps a build per configuration; the one matching the host comes first and so is the one loaded.
-        foreach (string path in listing.Payload.OrderBy(path => path.Split('\\', '/').Contains(Configuration, StringComparer.OrdinalIgnoreCase) ? 0 : 1))
+        foreach (string path in listing.Payload.OrderBy(path => files.Segments(path).Contains(Configuration, StringComparer.OrdinalIgnoreCase) ? 0 : 1))
         {
             if (SourceOf(path) == source && !paths.Contains(path, StringComparer.OrdinalIgnoreCase))
                 paths.Add(path);
         }
 
         _watchers.Add(files.Watch(source.Directory, "*.dll", _changes.Add, source.Recursive));
-    }
-
-    /// <summary>Is <paramref name="path"/> <paramref name="root"/> itself or somewhere beneath it?</summary>
-    private bool IsUnder(string path, string root)
-    {
-        string relative = files.Relative(root, path);
-        return relative == "." || (!relative.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(relative));
     }
 
     /// <summary>The source <paramref name="path"/> falls under, engine folder first; null when no source accepts it.</summary>
@@ -617,16 +611,13 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// </summary>
     private sealed record GemSource(string Directory, bool Recursive, HashSet<string>? Names)
     {
-        private static readonly char[] Separators = ['\\', '/'];
-
         /// <summary>Does <paramref name="path"/> lie in this source's territory?</summary>
         public bool Accepts(IFileSystem files, string path)
         {
-            string relative = files.Relative(Directory, path);
-            if (relative.StartsWith("..", StringComparison.Ordinal) || System.IO.Path.IsPathRooted(relative))
+            if (!files.IsUnder(Directory, path))
                 return false;
 
-            string[] folders = relative.Split(Separators, StringSplitOptions.RemoveEmptyEntries)[..^1];
+            string[] folders = files.Segments(files.Relative(Directory, path))[..^1];
             return Recursive
                 ? folders.All(folder => folder is not ("obj" or "Cache") && !folder.StartsWith('.'))
                 : folders.Length == 0;

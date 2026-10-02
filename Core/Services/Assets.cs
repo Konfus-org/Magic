@@ -2,7 +2,9 @@ using Magic.Attributes;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
+using Magic.Contexts.Files;
 using Magic.Contexts.Settings;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Utils;
 using System.Collections.Concurrent;
@@ -34,7 +36,7 @@ public sealed class Assets : IDisposable
     private readonly Events _events;
     private readonly Container _container;
     private readonly IDisposable _gemsChanged;
-    private readonly ChangeQueue _changes = new();
+    private readonly FileChanges _changes = new();
     private readonly List<(string Root, IDisposable Watcher)> _folders = [];
     private readonly Lock _lock = new(); // the index and the pools are used from worker threads (LoadAsync, streaming)
     private readonly Dictionary<ulong, string> _pathById = [];
@@ -129,7 +131,7 @@ public sealed class Assets : IDisposable
                 foreach ((string path, ulong id) in _idByPath)
                 {
                     if (path.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
-                        && string.Equals(Path.GetDirectoryName(path), full, StringComparison.OrdinalIgnoreCase))
+                        && string.Equals(_files.Parent(path), full, StringComparison.OrdinalIgnoreCase))
                         found.Add((path, id));
                 }
             }
@@ -149,7 +151,7 @@ public sealed class Assets : IDisposable
     /// From its type's pool when it is there, else read from disk on the calling thread and pooled, so every Load of it
     /// returns the same object: it is shared and read-only. A type whose budget is 0 is never pooled, and every Load of
     /// it reads the file again. With <paramref name="dependencies"/>, every asset it names (the handles
-    /// <see cref="AssetHandles"/> finds in it) is loaded too, and what those name, each into its own pool. Any thread;
+    /// <c>ValuesOf</c> finds in it) is loaded too, and what those name, each into its own pool. Any thread;
     /// loads of one id at once read it once.
     /// </summary>
     public T? Load<T>(Handle<T> handle, bool dependencies = false) where T : Asset
@@ -259,8 +261,7 @@ public sealed class Assets : IDisposable
     {
         lock (_lock)
         {
-            string folder = path + Path.DirectorySeparatorChar;
-            return [.. _idByPath.Keys.Where(known => string.Equals(known, path, StringComparison.OrdinalIgnoreCase) || known.StartsWith(folder, StringComparison.OrdinalIgnoreCase))];
+            return [.. _idByPath.Keys.Where(known => _files.IsUnder(path, known))];
         }
     }
 
@@ -353,7 +354,14 @@ public sealed class Assets : IDisposable
     private List<(Type Type, ulong Id)> Named(object holder, ConcurrentDictionary<(Type, ulong), bool> seen)
     {
         List<(Type Type, ulong Id)> named = [];
-        AssetHandles.Find(holder, named);
+        foreach (object handle in holder.ValuesOf<Handle<Asset>>())
+        {
+            Type type = handle.GetType().GetGenericArguments()[0];
+            ulong id = (ulong)handle.GetType().GetProperty(nameof(Handle<>.Id))!.GetValue(handle)!;
+            if (id != 0)
+                named.Add((type, id));
+        }
+
         named.RemoveAll(dependency => !seen.TryAdd(dependency, true) || (dependency.Type == typeof(Texture) && RenderTexture.IsAt(PathOf(dependency.Id))));
 
         return named;
@@ -491,7 +499,6 @@ public sealed class Assets : IDisposable
         }
 
         _loads.Clear();
-        AssetHandles.Forget();
 
         Type[] types = AssetTypes();
         foreach (string name in _project.Settings.Assets.Budgets.Keys)
@@ -681,11 +688,11 @@ public sealed class Assets : IDisposable
     {
         foreach ((string root, _) in _folders)
         {
-            if (path.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                return _files.Relative(root, path).Replace('\\', '/');
+            if (_files.IsUnder(root, path))
+                return string.Join('/', _files.Segments(_files.Relative(root, path)));
         }
 
-        return path.Replace('\\', '/');
+        return string.Join('/', _files.Segments(path));
     }
 
     /// <summary>What <see cref="Mint"/> writes for <paramref name="id"/>.</summary>

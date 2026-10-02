@@ -21,6 +21,12 @@ public interface IFileSystem
     /// <summary><paramref name="path"/> relative to <paramref name="root"/>.</summary>
     string Relative(string root, string path);
 
+    /// <summary>The folder and file names <paramref name="path"/> is made of, in order, without separators.</summary>
+    string[] Segments(string path);
+
+    /// <summary>Is <paramref name="path"/> <paramref name="root"/> itself or somewhere beneath it?</summary>
+    bool IsUnder(string root, string path);
+
     /// <summary>A file or a folder.</summary>
     bool Exists(string path);
 

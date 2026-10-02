@@ -1,13 +1,13 @@
 using System.Diagnostics;
 
-namespace Magic.Utils;
+namespace Magic.Contexts.Files;
 
 /// <summary>
 /// Paths a file watcher reported, held until they have been quiet for <see cref="Settle"/>: a build or a save
 /// touches a file several times, and only the last touch matters. <see cref="Add"/> from any thread (the watcher's),
 /// <see cref="TakeSettled"/> on the main thread.
 /// </summary>
-internal sealed class ChangeQueue
+internal sealed class FileChanges
 {
     public static readonly TimeSpan Settle = TimeSpan.FromMilliseconds(300);
 

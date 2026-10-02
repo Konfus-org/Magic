@@ -1,4 +1,5 @@
 using Magic.Contexts.Assets;
+using Magic.Utils;
 
 namespace Magic.Contexts.Rendering;
 
@@ -21,23 +22,19 @@ internal sealed record PassState(
     public bool Ready => Error is null && Pipeline.IsValid;
 }
 
-/// <summary>The passes some camera lists, their compiles, and the fullscreen vertex shader every fragment pass is built on.</summary>
-internal sealed class PassTable(CompiledShader fullscreenVertex)
+/// <summary>
+/// The passes the pass list names, id to <see cref="PassState"/>, reference counted by the list, with their compiles and
+/// the fullscreen vertex shader every fragment pass is built on.
+/// </summary>
+internal sealed class PassTable(CompiledShader fullscreenVertex) : RefCountTable<ulong, PassState>
 {
     /// <summary>More inputs than a pass can bind.</summary>
     public const int MaxInputs = 16;
 
     public CompiledShader FullscreenVertex { get; } = fullscreenVertex;
 
-    public List<PassState> States { get; } = [];
-
-    /// <summary>The ids every camera lists this frame; what is loaded and not in it is unloaded.</summary>
-    public HashSet<ulong> Listed { get; } = [];
+    /// <summary>The ids the pass list named when it was last synced: one reference each.</summary>
+    public List<ulong> Held { get; } = [];
 
     public Compiles<ulong> Compiles { get; } = new();
-
-    public int IndexOf(ulong id)
-    {
-        return States.FindIndex(pass => pass.Id == id);
-    }
 }

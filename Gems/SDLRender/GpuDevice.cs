@@ -32,13 +32,16 @@ internal sealed class GpuDevice : IDisposable
         _settings = settings;
         _vsync = settings.Vsync;
 
-        // dxcompiler.dll loads dxil.dll by bare name and, without it, produces unsigned DXIL that D3D12 rejects; the gem
-        // folder is not on the search path, so it is loaded by full path first.
-        string dxil = files.Combine(gemsDirectory, "dxil.dll");
-        if (files.FileExists(dxil))
-            NativeLibrary.Load(dxil);
-        else
-            Debugging.Log.Warn($"dxil.dll not found at {dxil}; DXIL shaders will be unsigned.");
+        // DXIL is D3D12's, so Windows only. dxcompiler.dll loads dxil.dll by bare name and, without it, produces
+        // unsigned DXIL that D3D12 rejects; the gem folder is not on the search path, so it is loaded by full path first.
+        if (OperatingSystem.IsWindows())
+        {
+            string dxil = files.Combine(gemsDirectory, "dxil.dll");
+            if (files.FileExists(dxil))
+                NativeLibrary.Load(dxil);
+            else
+                Debugging.Log.Warn($"dxil.dll not found at {dxil}; DXIL shaders will be unsigned.");
+        }
 
         if (!ShaderCross.Init())
             throw new InvalidOperationException($"SDL_shadercross failed to initialise: {SDL.GetError()}");
@@ -47,7 +50,7 @@ internal sealed class GpuDevice : IDisposable
         try
         {
             SDL.SetBooleanProperty(props, SDL.Props.GPUDeviceCreateShadersSPIRVBoolean, true);
-            SDL.SetBooleanProperty(props, SDL.Props.GPUDeviceCreateShadersDXILBoolean, true);
+            SDL.SetBooleanProperty(props, SDL.Props.GPUDeviceCreateShadersDXILBoolean, OperatingSystem.IsWindows());
             SDL.SetBooleanProperty(props, SDL.Props.GPUDeviceCreateDebugModeBoolean, debug);
             if (!string.IsNullOrEmpty(settings.Backend))
                 SDL.SetStringProperty(props, SDL.Props.GPUDeviceCreateNameString, settings.Backend);

@@ -8,10 +8,10 @@ public sealed class ProjectTests
     [Fact]
     public void Assets_hang_off_the_root()
     {
-        Project project = new() { Root = @"C:\Games\Demo" };
+        Project project = new() { Root = "Demo" };
 
         string assets = project.Assets;
 
-        Assert.Equal(@"C:\Games\Demo\Assets", assets);
+        Assert.Equal(Path.Combine("Demo", "Assets"), assets);
     }
 }

@@ -20,17 +20,17 @@ internal static class Textures
         if (!handle.IsValid)
             return TextureTable.None;
 
-        if (ctx.Textures.Entries.TryAcquire(handle.Id, out uint packed))
+        if (ctx.Textures.TryAcquire(handle.Id, out uint packed))
             return packed;
 
         packed = Load(ctx, handle.Id);
-        ctx.Textures.Entries.Add(handle.Id, packed);
+        ctx.Textures.Add(handle.Id, packed);
         return packed;
     }
 
     public static void Release(RenderContext ctx, Handle<Texture> handle)
     {
-        if (!ctx.Textures.Entries.Release(handle.Id, out uint packed))
+        if (!ctx.Textures.Release(handle.Id, out uint packed))
             return;
 
         ctx.Textures.FreeLayer(packed);
@@ -40,12 +40,12 @@ internal static class Textures
     /// <summary>The texture changed on disk: uploaded into a layer again (a fixed texture gets one, a broken one loses its). Materials rebuild their records after.</summary>
     public static void Reload(RenderContext ctx, ulong id)
     {
-        if (!ctx.Textures.Entries.TryGet(id, out uint packed))
+        if (!ctx.Textures.TryGet(id, out uint packed))
             return;
 
         ctx.Textures.FreeLayer(packed);
         ctx.Textures.Rendered.Remove(id);
-        ctx.Textures.Entries.Set(id, Load(ctx, id));
+        ctx.Textures.Set(id, Load(ctx, id));
     }
 
     /// <summary>Copies grown arrays over and uploads what was acquired since the last frame.</summary>

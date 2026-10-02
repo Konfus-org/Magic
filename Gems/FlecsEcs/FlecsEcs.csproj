@@ -16,13 +16,11 @@
          other in bin\Gems. The namespace is FlecsGem, not Flecs: inside a namespace named Flecs,
          "Flecs.NET.Core" would bind to the gem's own namespace instead of the library. -->
     <RootNamespace>FlecsGem</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- The Debug package asserts on API misuse (wrong thread, dead entity, ...); Release skips the checks.
-         Both pull the native flecs.dll for win-x64 in transitively. -->
+         Both pull the native flecs library for the build's runtime in transitively. -->
     <PackageReference Include="Flecs.NET.Debug" Version="4.0.3" Condition="'$(Configuration)' == 'Debug'" />
     <PackageReference Include="Flecs.NET.Release" Version="4.0.3" Condition="'$(Configuration)' != 'Debug'" />
   </ItemGroup>

@@ -317,13 +317,13 @@ internal sealed class Buckets
 
     private readonly RefCountTable<(PipelineClass Class, uint Mesh), Group> _groups = new();
     private readonly List<Stack<int>> _freeInChunk = [];
-    private readonly OffsetAllocator _visibleSpace;
+    private readonly RangeAllocator _visibleSpace;
     private readonly uint _visibleCapacity;
     private DrawArgs[] _template = new DrawArgs[GroupsPerChunk];
 
     public Buckets(IRendering gpu, uint visibleCapacity)
     {
-        _visibleSpace = new OffsetAllocator(visibleCapacity, 64 * 1024);
+        _visibleSpace = new RangeAllocator(visibleCapacity, 64 * 1024);
         _visibleCapacity = visibleCapacity;
         Template = new GrowableBuffer(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, ChunkBytes);
     }
@@ -351,7 +351,7 @@ internal sealed class Buckets
     {
         if (!_groups.TryAcquire((cls, meshSlot), out Group group))
         {
-            group = new Group(AllocateGroup(cls), OffsetAllocator.Allocation.None, 0, range.FirstIndex, range.IndexCount, range.VertexOffset);
+            group = new Group(AllocateGroup(cls), RangeAllocator.Allocation.None, 0, range.FirstIndex, range.IndexCount, range.VertexOffset);
             _groups.Add((cls, meshSlot), group);
         }
 
@@ -362,7 +362,7 @@ internal sealed class Buckets
         // Outgrown its region: a new one at the next power of two.
         uint capacity = Math.Max(4u, BitOperations.RoundUpToPowerOf2((uint)refs));
         _visibleSpace.Free(group.Region);
-        OffsetAllocator.Allocation region = _visibleSpace.Allocate(capacity);
+        RangeAllocator.Allocation region = _visibleSpace.Allocate(capacity);
         if (region.IsNone)
         {
             Debugging.Log.Error($"The visible-id list ({_visibleCapacity} entries) is full; a group of {refs} instances will not be drawn.");
@@ -383,7 +383,7 @@ internal sealed class Buckets
             return;
 
         _visibleSpace.Free(group.Region);
-        WriteTemplate(group with { Region = OffsetAllocator.Allocation.None, Capacity = 0 });
+        WriteTemplate(group with { Region = RangeAllocator.Allocation.None, Capacity = 0 });
         _freeInChunk[(int)group.Index / GroupsPerChunk].Push((int)group.Index % GroupsPerChunk);
     }
 
@@ -426,5 +426,5 @@ internal sealed class Buckets
     }
 
     /// <summary>One draw-argument slot: its index, its region of the visible-id list and capacity, and the mesh range it draws.</summary>
-    private readonly record struct Group(uint Index, OffsetAllocator.Allocation Region, uint Capacity, uint FirstIndex, uint IndexCount, int VertexOffset);
+    private readonly record struct Group(uint Index, RangeAllocator.Allocation Region, uint Capacity, uint FirstIndex, uint IndexCount, int VertexOffset);
 }

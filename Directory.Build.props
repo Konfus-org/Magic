@@ -25,7 +25,30 @@
     <!-- Repo root, for project references that must not depend on where a project lives. -->
     <MagicRoot>$(MSBuildThisFileDirectory)</MagicRoot>
 
+    <!-- The machine doing the build, as a portable runtime (linux-x64): an SDK from a Linux distribution calls
+         itself by the distribution (ubuntu.26.04-x64), which no native package is published for. -->
+    <MagicHostOS Condition="$([MSBuild]::IsOSPlatform('Windows'))">win</MagicHostOS>
+    <MagicHostOS Condition="$([MSBuild]::IsOSPlatform('Linux'))">linux</MagicHostOS>
+    <MagicHostOS Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx</MagicHostOS>
+    <MagicHostRuntime>$(MagicHostOS)-$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</MagicHostRuntime>
+
+    <!-- The platform being built for: the machine's own unless "-r <rid>" says otherwise. No csproj names a
+         runtime; the projects that carry native libraries (gems, tests) build for this one. -->
+    <MagicRuntime>$(RuntimeIdentifier)</MagicRuntime>
+    <MagicRuntime Condition="'$(MagicRuntime)' == ''">$(MagicHostRuntime)</MagicRuntime>
+
+    <!-- The same, as native packages that ship one per OS spell it: "SDL3-CS.$(MagicPlatform)". -->
+    <MagicPlatform Condition="$(MagicRuntime.StartsWith('win'))">Windows</MagicPlatform>
+    <MagicPlatform Condition="$(MagicRuntime.StartsWith('linux'))">Linux</MagicPlatform>
+    <MagicPlatform Condition="$(MagicRuntime.StartsWith('osx'))">MacOS</MagicPlatform>
+
+    <!-- A build for another platform ("-r linux-x64" on Windows) gets a folder of its own, so it never
+         overwrites the machine's own build: Build\net10.0\Debug-linux-x64\. -->
     <MagicBuildDir>$(MSBuildThisFileDirectory)Build\$(TargetFramework)\$(Configuration)\</MagicBuildDir>
+    <MagicBuildDir Condition="'$(MagicRuntime)' != '$(MagicHostRuntime)'">$(MSBuildThisFileDirectory)Build\$(TargetFramework)\$(Configuration)-$(MagicRuntime)\</MagicBuildDir>
+
+    <!-- The runtime is in the path already when it matters; the SDK must not add a folder for it. -->
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
 
     <!-- Stop the SDK from appending net10.0\ after the path; it's already in it. -->
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
@@ -69,6 +92,10 @@
          via reflection outside the host's own dependency graph needs
          those sitting right next to it. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
+
+    <!-- A runtime makes the SDK copy a package's native libraries for that platform, and only those, flat next
+         to the gem, where its load context finds them. -->
+    <RuntimeIdentifier>$(MagicRuntime)</RuntimeIdentifier>
 
     <!-- Gems aren't published to NuGet. -->
     <IsPackable>false</IsPackable>

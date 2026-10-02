@@ -4,14 +4,14 @@ using Magic.Utils;
 namespace Magic.Contexts.Rendering;
 
 /// <summary>
-/// Every material texture on the GPU, in eight <c>Texture2DArray</c>s: {256, 512, 1024, 2048} × {sRGB, linear}, all
+/// Every material texture on the GPU, id to packed reference (or <see cref="Failed"/>), reference counted, in eight <c>Texture2DArray</c>s: {256, 512, 1024, 2048} × {sRGB, linear}, all
 /// bound at once so a material picks its texture with a packed <c>(class &lt;&lt; 16) | layer</c> and the fragment stage
 /// never rebinds (SDL GPU has no bindless, so this is what makes one indirect draw per class possible). Arrays start
 /// small and double up to <see cref="MaxLayers"/>; a grown array waits in <see cref="PoolClass.Grown"/> until its layers are
-/// copied over. Texture ids are reference counted; one that cannot be used keeps an entry too, as <see cref="Failed"/>,
+/// copied over. A texture that cannot be used keeps an entry too, as <see cref="Failed"/>,
 /// so it hot reloads like any other. <see cref="Pending"/> is the pixels not uploaded yet.
 /// </summary>
-internal sealed class TextureTable
+internal sealed class TextureTable : RefCountTable<ulong, uint>
 {
     public const int Classes = 8;
 
@@ -60,26 +60,16 @@ internal sealed class TextureTable
 
     public PoolClass[] Pools { get; } = new PoolClass[Classes];
 
-    /// <summary>Texture id to packed reference (or <see cref="Failed"/>).</summary>
-    public RefCountTable<ulong, uint> Entries { get; } = new();
-
-    /// <summary>The render textures among <see cref="Entries"/> (a material samples them): their layer and the size a camera draws them at.</summary>
+    /// <summary>The render textures among the entries (a material samples them): their layer and the size a camera draws them at.</summary>
     public Dictionary<ulong, RenderedTexture> Rendered { get; } = [];
 
     /// <summary>Fitted mip chains waiting for upload: class, layer, the pixels and where each level starts (the last offset ends the chain).</summary>
     public List<(int Class, uint Layer, byte[] Pixels, int[] Offsets)> Pending { get; } = [];
 
-    public int Resident => Entries.Count;
-
     /// <summary>The packed reference of a texture already in the pool, without taking a reference; <see cref="None"/> otherwise.</summary>
     public uint Lookup(Handle<Assets.Texture> handle)
     {
-        return Entries.TryGet(handle.Id, out uint packed) ? packed : None;
-    }
-
-    public bool Owns(ulong id)
-    {
-        return Entries.Contains(id);
+        return TryGet(handle.Id, out uint packed) ? packed : None;
     }
 
     public void FreeLayer(uint packed)

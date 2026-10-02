@@ -163,6 +163,7 @@ internal sealed class RenderSystem : ISystem
         // Upload: what the tables changed.
         Textures.Flush(ctx);
         Materials.Flush(ctx);
+        Meshes.Flush(ctx);
         Instancing.Flush(ctx);
 
         long recording = Stopwatch.GetTimestamp();
@@ -178,7 +179,7 @@ internal sealed class RenderSystem : ISystem
         RenderMs = recordMs + frame.DrawCommands.SubmitMs;
         Stats = new RenderStats(
             ctx.Instances.Alive, (uint)draws, (uint)dispatches, (uint)ctx.Pipelines.Pending,
-            (uint)ctx.Meshes.Count, (uint)ctx.Textures.Resident, SyncMs, RenderMs - waitMs, waitMs);
+            (uint)ctx.Meshes.MeshCount, (uint)ctx.Textures.Count, SyncMs, RenderMs - waitMs, waitMs);
     }
 
     /// <summary>
@@ -300,36 +301,35 @@ internal sealed class RenderSystem : ISystem
         }
 
         // A changed .pass reloads; a pass whose shader (or an include of it) changed recompiles.
-        List<PassState> passes = ctx.Passes.States;
-        for (int i = 0; i < passes.Count; i++)
+        foreach ((ulong id, PassState pass) in ctx.Passes.Entries.ToArray())
         {
-            PassState pass = passes[i];
-            if (changed.Contains(pass.Id))
+            if (changed.Contains(id))
             {
-                Passes.Load(ctx, pass.Id);
-                Debugging.Log.Info($"Pass {pass.Path} reloaded{(passes[i].Error is null ? "" : " (disabled)")}.");
+                Passes.Load(ctx, id);
+                ctx.Passes.TryGet(id, out PassState reloaded);
+                Debugging.Log.Info($"Pass {pass.Path} reloaded{(reloaded.Error is null ? "" : " (disabled)")}.");
             }
             else if (shaders.Contains(pass.ShaderId))
-                Passes.Compile(ctx, i);
+                Passes.Compile(ctx, id);
         }
 
         bool textures = false;
         foreach (ulong id in changed)
         {
-            if (ctx.Materials.Owns(id))
+            if (ctx.Materials.Contains(id))
             {
                 reclass |= Materials.Reload(ctx, id);
                 Debugging.Log.Info($"Material {id} reloaded.");
             }
 
-            if (ctx.Textures.Owns(id))
+            if (ctx.Textures.Contains(id))
             {
                 Textures.Reload(ctx, id);
                 textures = true;
                 Debugging.Log.Info($"Texture {id} uploaded again.");
             }
 
-            if (ctx.Meshes.Owns(id))
+            if (ctx.Meshes.Contains(id))
                 Debugging.Log.Warn($"Model {id} changed on disk; remove and re-add its entities to see the new geometry (live model reload arrives with streaming).");
         }
 

@@ -9,6 +9,9 @@ internal sealed class FileSystem : IFileSystem
 {
     private const int BufferSize = 64 * 1024;
 
+    // The one place that knows what separates a path: everything else asks through IFileSystem.
+    private static readonly char[] Separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
+
     public string FullPath(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -34,6 +37,23 @@ internal sealed class FileSystem : IFileSystem
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         return Path.GetRelativePath(root, path);
+    }
+
+    public string[] Segments(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        return path.Split(Separators, StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    public bool IsUnder(string root, string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        // Anything outside the root comes back climbing out of it ("..") or, on another drive, still rooted.
+        string relative = Path.GetRelativePath(root, path);
+        return !Path.IsPathRooted(relative) && Segments(relative)[0] != "..";
     }
 
     public bool FileExists(string path)

@@ -25,7 +25,7 @@ public static class RenderingExtensions
             if (captured.Failed)
                 return Result.Failure(captured.Message);
 
-            return files.WriteBinary(path, Png.Encode(captured.Payload.Width, captured.Payload.Height, captured.Payload.Pixels));
+            return files.WriteBinary(path, captured.Payload.Pixels.Png(captured.Payload.Width, captured.Payload.Height));
         }
     }
 }

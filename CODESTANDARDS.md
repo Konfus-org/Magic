@@ -82,4 +82,67 @@ folder. Related types (a family of enums converted the same way) share one class
 - XML doc comments on types and non-obvious members. Say why, not what.
 - No divider comments (`// ---- Section ----`, `// ====`) and no `#region`.
 
+# Cross Platform
+
+Magic targets Windows, Linux and macOS from one code base. Nothing below is optional on the grounds that "it
+works on my machine": the other machines are the point.
+
+## Paths
+
+- Never write a separator, split on one, or compare path prefixes as strings. Build a path with
+  `IFileSystem.Combine`; take one apart with `Segments`, `Parent`, `Relative` and `IsUnder`. `FileSystem` is the
+  one place that knows what a separator is.
+- `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine: they know every OS's rules.
+- No drive letters, no absolute paths, no checking a string for `..`.
+- **An asset path is not an OS path.** It is relative to its asset root and always uses `/`, on every OS.
+  `Assets` converts at its boundary; nothing else converts one into the other.
+
+## Disk
+
+- All disk access goes through `IFileSystem`, never `File` or `Directory` (a test's own setup excepted).
+- The one exception is `Debugging`: it writes crash files itself, so that it works before any service exists and
+  after one has broken.
+- Engine output goes under `Project`'s folders (`Logs`, `Cache`, `Screenshots`), never a hardcoded temp, home or
+  AppData path.
+- File watch events differ per OS: duplicated, coalesced, out of order. Treat one as "something changed here",
+  collect them through `FileChanges`, and check what exists.
+
+## Case
+
+Linux file systems are case-sensitive. A file name in code, an asset, a shader `#include`, a csproj or a `.meta`
+matches the file on disk exactly. The engine compares paths ignoring case so that every OS behaves the same,
+which means two files may never differ by case alone.
+
+## Text
+
+- Files and generated shader source are written with `\n`, never `Environment.NewLine`, as UTF-8 without a BOM.
+  Readers accept `\r\n` and a BOM.
+- Numbers and dates are parsed and formatted culture-invariantly.
+
+## Platform code
+
+- No OS APIs in Core: no P/Invoke, no registry, no `.exe`/`.so`/`.dylib` names, no `OperatingSystem.Is*`.
+  Anything platform-specific lives in a gem, behind a Core interface, guarded by `OperatingSystem.IsWindows()`
+  and its siblings.
+- A native library is referenced by its logical name (`"SDL3"`, never `"SDL3.dll"`). Its binaries come from a
+  NuGet package per platform, picked by `$(MagicPlatform)` or a condition on `$(MagicRuntime)`.
+- No csproj names a runtime identifier. It comes from `Directory.Build.props`: the build machine's own, or
+  `-r <rid>`.
+
+## Graphics
+
+- Shaders are HLSL only and go through the render gem's compiler. Backend-specific code lives only in the render
+  gem.
+- A GPU feature is used only if Vulkan, D3D12 and Metal all have it through SDL GPU.
+
+## Scripts and tools
+
+Prefer one cross-platform script over a script per OS: repo scripts are written in a cross-platform scripting
+language such as PowerShell (`pwsh`), or are a `dotnet` command. No `.bat`/`.sh` pairs.
+
+## Tests
+
+Tests pass on every supported OS. Paths are built with `Combine` or `TempFolder`; no Windows-shaped literals
+(`C:\`, `\\`) in inputs or expectations.
+
 

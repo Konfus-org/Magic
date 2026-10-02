@@ -7,9 +7,10 @@ namespace Magic.Utils;
 /// Values by key, each with a reference count. <see cref="Add"/> puts a value in with one reference,
 /// <see cref="TryAcquire"/> takes another, <see cref="Release"/> drops one and hands the value back when it was the last
 /// (so the caller frees what it holds). A value is replaced whole with <see cref="Set"/>, never changed in place. Not
-/// thread-safe. The render state keeps its GPU resources (materials, textures, models, draw groups) in these.
+/// thread-safe. The render tables (materials, textures, models, pipelines, passes) are each one of these, with what else
+/// they hold beside it.
 /// </summary>
-internal sealed class RefCountTable<TKey, TValue> where TKey : notnull
+internal class RefCountTable<TKey, TValue> where TKey : notnull
 {
     private readonly Dictionary<TKey, (TValue Value, int Refs)> _entries = [];
 

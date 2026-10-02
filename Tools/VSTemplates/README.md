@@ -4,7 +4,7 @@ Two `dotnet new` project templates. Visual Studio lists them in **File > New > P
 "Magic"); the `dotnet` CLI uses the short names. Install both, or reinstall after editing one, with
 
 ```
-Tools\install-templates.bat
+pwsh Tools/install-templates.ps1
 ```
 
 ## Magic Project (`magicproject`)

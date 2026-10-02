@@ -1,90 +1,60 @@
 # Magic
 
-A small C# game engine. `Magic.exe` is a host that loads a project, loads gems (plugin dlls) into it, opens a
-window and runs the frame loop. Almost everything beyond that, including the ECS, windowing, rendering and
-logging, lives in a gem and can be hot reloaded while the engine runs.
+A small C# game engine. `Magic` is a host that loads a project and its gems (plugin dlls), opens a window and
+runs the frame loop. The ECS, windowing, rendering and logging all live in gems and hot reload while it runs.
+
+## Building and running
+
+Needs the .NET 10 SDK. Configurations: `Debug`, `Optimize` (optimised, full symbols), `Release`.
+
+```powershell
+dotnet build Magic.slnx
+dotnet test Tests/Magic.UnitTests
+dotnet test Tests/Magic.IntegrationTests
+Build/net10.0/Debug/bin/Magic --project Samples/Cube
+```
+
+`Magic --help` lists the options. Exit codes: 0 clean, 1 bad arguments or a crash, 2 an error was logged under
+`--fail-on-error`.
+
+Windows and Linux (Vulkan) are supported; macOS is not yet. `-r <rid>` builds for another platform into its own
+folder (`Build/net10.0/Debug-linux-x64/`); the "Magic (WSL)" launch profile runs that build in WSL.
 
 ## How it works
 
-- **Host** (`Core/Program.cs`). Parses the command line, reads the project's `.magic` file, loads gems, opens
-  the main window and runs a variable frame with a fixed 60 Hz step. Each frame builds one immutable `Frame`
-  (number, time, delta, the events since the last frame) and hands it down in a fixed order: every gem's
-  `Update`, the Core Update systems, `FixedUpdate` zero or more times, `LateUpdate`, then `Render` (see
-  `Program.Step`).
-- **Gems** (`Core/Gems.cs`). A gem is one dll with one class that implements `IGem`. Its constructor parameters
-  are its dependencies: host services (`Project`, `Assets`, `Events`, `IFileSystem`, `Scheduler`, `World`) and
-  other gems' interfaces, which is also how load order is decided; the Core interfaces it implements are what it provides. `GemStatic` and `GemDependsOn`
-  in its csproj are the only other things the host reads. Engine gems come from `bin/Gems/`, and the project
-  lists the ones it wants. Every gem dll under the project folder loads too, once per name: of a build per
-  configuration, the host's own is taken. A changed dll is unloaded and loaded again; a gem carries state
-  across that with `Reloading`/`Reloaded`.
-- **Scripts** (`Core/Systems/Streaming/ScriptSystem.cs`, `Gems/CSharpScripting`). A script is a `.cs` asset whose
-  class, named like the file, is an `ISystem` or an `IBehavior` (a gem's hooks, on one entity). The project's
-  csproj compiles them; its dll needs no `IGem` and loads and reloads like a gem. A chunk entity lists its
-  scripts as `"scripts": [{ "id": 5333, "speed": 25 }]`: the asset id, and values for the instance's public
-  fields and properties. An instance is made when the entity streams in, its constructor parameters taken from
-  the host as a gem's are plus the entity's `Handle`, and disposed when the entity goes or the project reloads.
-- **Events** (`Core/Services/Events.cs`). One `Event` struct with a `Type`, like `SDL_Event`. Anything publishes
-  from any thread; the frame loop takes the queue once a frame into `Frame.Events`. Read them in a hook, or
-  `Watch` a type and dispose the watch when done.
-- **Assets** (`Core/Services/Assets.cs`). Assets are addressed by id, not path. Each asset file has a `.meta`
-  file next to it that holds the id and the asset type. The manager keeps the index only: every load reads the
-  file. Gems load other formats by implementing `IAssetLoader<T>`, and file changes are published as events.
-- **ECS** (`Core/Interfaces/IEcs*.cs`, `Gems/FlecsEcs`). Components are structs that implement `IComponent`.
-- **World** (`Core/Services/World.cs`). A domain is a folder of `x_y_z.chunk` files plus a `<Name>.domain` file.
-  The world is the stack of open domains: `World.Open(domain)` replaces what is open, `OpenMode.Additive`
-  opens one on top, `World.Close(domain)` takes one out, and `World.End()` quits the game. The world only
-  publishes what it decided (`DomainOpened`, `DomainClosed`, `Quit`); the streaming system reads those events
-  the next frame, spawns the domain's global chunks under `World.<Name>.Globals` and streams its cubes around
-  the cameras under `World.<Name>.Chunks`.
-- **Systems** (`Core/Systems`). The core systems are streaming, transform, render and the debug windows. They
-  are internal to the host: an `ISystem` added to the `Scheduler`, which the ECS gem runs in its phase. Gems do
-  their per-frame work in their `IGem` hooks, or add an `ISystem` of their own to the `Scheduler`.
-- **Visibility**. A Core type is `internal` unless a gem or a game script needs it; the tests see internals.
-- **Rendering** (`Gems/SDLRender`). A GPU-driven renderer on SDL_GPU. Culling, HiZ occlusion and materials
-  are all driven by data in `Resources/Passes` and `Resources/Materials`.
+- **Host** (`Core/Program.cs`): reads the project's `.magic` file, loads gems, and each frame hands one
+  immutable `Frame` to every gem's `Update`, `FixedUpdate` (60 Hz), `LateUpdate` and `Render`.
+- **Gems** (`Core/Gems.cs`): a dll with one class implementing `IGem`. Its constructor parameters are its
+  dependencies, the Core interfaces it implements are what it provides. A rebuilt dll is reloaded in place.
+- **Scripts**: a `.cs` asset whose class is an `ISystem` or an `IBehavior`, compiled by the project's csproj
+  and attached to entities in chunk files.
+- **Assets** (`Core/Services/Assets.cs`): addressed by id, not path; the id and type live in a `.meta` file
+  beside each asset. Gems add formats with `IAssetLoader<T>`.
+- **Events** (`Core/Services/Events.cs`): one `Event` struct, published from any thread, delivered in
+  `Frame.Events`.
+- **World** (`Core/Services/World.cs`): a stack of open domains. A domain is a folder of `x_y_z.chunk` files
+  streamed in around the cameras.
+- **ECS** (`Core/Interfaces/IEcs*.cs`, `Gems/FlecsEcs`): components are structs implementing `IComponent`;
+  systems are `ISystem`s added to the `Scheduler`.
+- **Rendering** (`Gems/SDLRender`): GPU-driven on SDL_GPU, with passes and materials defined as data in
+  `Resources/`.
 
 ## Folder structure
 
 ```
-Core/               Magic.exe: host, gem loader, assets, ECS contracts, core systems
-    Attributes/     [AssetFormat] and [MetaData]
-    Contexts/       Plain data: Frame, Event, assets, ECS components, input enums, settings
-    Extensions/     Extension methods
-    Interfaces/     Contracts that gems implement or consume
-    Mathematics/    Bounds, frustum, ray
-    Services/       Host services: container, events, assets, file system, project, scheduler, world
-    Systems/        Core ECS systems
-    Utils/          Debugging (log and immediate-mode UI), Result, ChangeQueue, Png
-Gems/               Engine gems, built into Build/.../bin/Gems/
-Resources/          Engine assets: shaders, materials, passes, models, textures
-Samples/            Example projects; see Samples/README.md
-Tests/              Unit and integration tests (xUnit) and TestGem; see Tests/README.md
-Tools/              dotnet new templates for projects and gems; see Tools/VSTemplates/README.md
-Build/              All build output, per framework and configuration (not checked in)
+Core/        The host: gem loader, services, contracts, core systems
+Gems/        Engine gems
+Resources/   Engine assets: shaders, materials, passes, models, textures
+Samples/     Example projects (Samples/README.md)
+Tests/       Unit and integration tests (Tests/README.md)
+Tools/       dotnet new templates for projects and gems (Tools/VSTemplates/README.md)
+Build/       All build output (not checked in)
 ```
 
-## Building and running
+## Contributing
 
-You need the .NET 10 SDK. The configurations are `Debug`, `Optimize` (optimised, with full symbols) and
-`Release`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [code standards](CODESTANDARDS.md).
 
-```powershell
-dotnet build Magic.slnx
-dotnet test Tests\Magic.UnitTests
-dotnet test Tests\Magic.IntegrationTests
-Build\net10.0\Debug\bin\Magic.exe --project Samples\Cube
-```
-
-`Magic.exe --help` lists the options. Durations are counted in frames. The exit codes are 0 for a clean
-run, 1 for bad arguments or a crash, and 2 when `--fail-on-error` is set and an error was logged.
-
-## Contributing and AI Usage
-Look to the contributing documentation [here](CONTRIBUTING.md).
-
-In regards to AI usage:
-
-See `AGENTS.md` for the AI contributor standards used by AI agents in this project.
-We recognize the potential of AI tools to assist in development and encourage their responsible use.
-However, AI code is used with great care and scrutiny and is never blindly accepted. If you use AI to contribute, you should fully understand what the code is doing and be ready to explain, defend, and/or change it.
-All AI-generated code must be reviewed and approved by a human before being merged and any AI-generated code must follow the same standards as human-written code.
+AI-assisted contributions are welcome under the same standards as any other code: you must
+understand, be able to explain, and be ready to change what you submit, and a human reviews and approves
+everything before it merges.
