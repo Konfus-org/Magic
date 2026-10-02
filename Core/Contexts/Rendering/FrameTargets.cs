@@ -43,9 +43,6 @@ internal sealed class FrameTargets
     /// <summary>What is wrong with the passes listed for this target, as last logged; null when nothing is.</summary>
     public string? PassProblem { get; set; }
 
-    /// <summary>The cameras drawing into this target listed different passes last frame, which was warned about.</summary>
-    public bool MixedPassLists { get; set; }
-
     /// <summary>The texture format a pass output is: the engine's own for Hdr and Ldr, else what the pass asks for.</summary>
     public static GpuFormat Format(PassOutput output)
     {

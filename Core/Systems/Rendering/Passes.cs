@@ -9,8 +9,8 @@ using System.Text;
 namespace Magic.Systems.Rendering;
 
 /// <summary>
-/// The custom passes: the <c>.pass</c> assets the cameras' <see cref="PostProcessing"/> components list, loaded while
-/// one lists them and unloaded when none does, validated, compiled (on a worker; the pass is skipped until ready) and
+/// The custom passes: the <c>.pass</c> assets the world's <see cref="PostProcessing"/> lists, loaded while
+/// listed and unloaded when not, validated, compiled (on a worker; the pass is skipped until ready) and
 /// run after the scene over each render target, in the order of its list. A pass is a fullscreen fragment shader or a
 /// compute shader with the pass contract of <c>Include/Pass.hlsli</c>: its inputs bound in order, its parameters packed
 /// after the frame constants, its output a named target (a new one is created, and made again when the pass changes its
@@ -22,23 +22,19 @@ internal static class Passes
     private const GpuTextureUsage OutputUsage = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite;
 
     /// <summary>
-    /// Before a frame is planned: every pass a view lists is loaded (its compile started), and every loaded pass no view
-    /// lists any more is unloaded, its pipeline released.
+    /// Before a frame is planned: every pass of <paramref name="list"/> is loaded (its compile started), and every
+    /// loaded pass no longer in it is unloaded, its pipeline released.
     /// </summary>
-    public static void Sync(RenderContext ctx, ReadOnlySpan<View> views)
+    public static void Sync(RenderContext ctx, PassList list)
     {
         List<PassState> states = ctx.Passes.States;
         HashSet<ulong> listed = ctx.Passes.Listed;
         listed.Clear();
-        foreach (View view in views)
+        ReadOnlySpan<Handle<Pass>> handles = list;
+        foreach (Handle<Pass> handle in handles[..list.Count])
         {
-            PassList list = view.Passes;
-            ReadOnlySpan<Handle<Pass>> handles = list;
-            foreach (Handle<Pass> handle in handles[..list.Count])
-            {
-                if (listed.Add(handle.Id) && ctx.Passes.IndexOf(handle.Id) < 0)
-                    Load(ctx, handle.Id);
-            }
+            if (listed.Add(handle.Id) && ctx.Passes.IndexOf(handle.Id) < 0)
+                Load(ctx, handle.Id);
         }
 
         for (int index = states.Count - 1; index >= 0; index--)
@@ -47,7 +43,7 @@ internal static class Passes
                 continue;
 
             ctx.Gpu.Release(states[index].Pipeline);
-            Debugging.Log.Verbose($"Pass {states[index].Path} unloaded: no camera lists it.");
+            Debugging.Log.Verbose($"Pass {states[index].Path} unloaded: it is no longer listed.");
             states.RemoveAt(index);
         }
     }

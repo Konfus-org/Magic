@@ -1,6 +1,12 @@
 {
     "entities": [
         {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": { "passes": [ { "id": 10030 } ] }
+            }
+        },
+        {
             "name": "Camera",
             "components": {
                 "Transform": {
@@ -21,8 +27,7 @@
                         "z": 1
                     }
                 },
-                "Camera": {},
-                "PostProcessing": { "passes": [ { "id": 10030 } ] }
+                "Camera": {}
             }
         },
         {
@@ -53,8 +58,7 @@
                             "id": 5010
                         }
                     }
-                },
-                "PostProcessing": { "passes": [ { "id": 10030 } ] }
+                }
             }
         },
         {

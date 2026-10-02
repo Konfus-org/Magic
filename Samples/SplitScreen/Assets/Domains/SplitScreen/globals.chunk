@@ -1,6 +1,12 @@
 {
   "entities": [
     {
+      "name": "PostProcessing",
+      "components": {
+        "PostProcessing": { "passes": [ { "id": 10030 } ] }
+      }
+    },
+    {
       "name": "CameraSystem",
       "scripts": [
         {
@@ -32,8 +38,7 @@
         },
         "Camera": {
           "viewport": "top_half"
-        },
-        "PostProcessing": { "passes": [ { "id": 10030 } ] }
+        }
       }
     },
     {
@@ -59,8 +64,7 @@
         },
         "Camera": {
           "viewport": "bottom_half"
-        },
-        "PostProcessing": { "passes": [ { "id": 10030 } ] }
+        }
       }
     },
     {

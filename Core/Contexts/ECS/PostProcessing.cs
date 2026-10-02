@@ -5,10 +5,10 @@ using System.Text.Json.Serialization;
 namespace Magic.Contexts.Components;
 
 /// <summary>
-/// The passes applied to what this entity's <see cref="Camera"/> draws, in the order of <see cref="Passes"/>: nothing
-/// runs that is not listed, the tonemap included, so a camera without one shows the linear scene. Passes work on the
-/// whole render target: when several cameras draw into one (split screen), the first camera that lists any decides
-/// for all of them. A pass is loaded while a camera lists it and unloaded when none does.
+/// The passes applied to everything that is drawn, in the order of <see cref="Passes"/>, over every render target:
+/// post-processing is global, not a camera's. It sits on an entity of its own, one per world; of several, the first
+/// is followed, warned about once. Nothing runs that is not listed, the tonemap included, so without one the linear
+/// scene is shown. A pass is loaded while it is listed and unloaded when it is not.
 /// </summary>
 public struct PostProcessing : IComponent
 {

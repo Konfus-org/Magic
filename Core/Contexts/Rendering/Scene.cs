@@ -5,10 +5,9 @@ using System.Numerics;
 namespace Magic.Contexts.Rendering;
 
 /// <summary>
-/// A camera to draw a frame from: the component (which says the <see cref="RenderTarget"/>), its world matrix, and the
-/// passes its entity's <see cref="PostProcessing"/> lists (none without one).
+/// A camera to draw a frame from: the component (which says the <see cref="RenderTarget"/>) and its world matrix.
 /// </summary>
-internal readonly record struct View(Camera Camera, Matrix4x4 World, PassList Passes);
+internal readonly record struct View(Camera Camera, Matrix4x4 World);
 
 internal enum LightKind : byte
 {

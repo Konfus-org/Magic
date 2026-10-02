@@ -26,21 +26,22 @@ internal static class Scene
     /// <summary>
     /// Fills <paramref name="plan"/> with this frame: every render target a view draws into, each once, render textures
     /// first and then windows, each in view order, with its textures sized to it and the views that draw into it, next
-    /// to each other. Window 0 is the main window, so a target is always named by its real handle.
+    /// to each other; <paramref name="passes"/> run over every one of them. Window 0 is the main window, so a target is always named by its real handle.
     /// </summary>
     public static void Plan(
         RenderContext ctx,
         FramePlan plan,
         IWindowRegistry? windows,
         ReadOnlySpan<View> views,
+        PassList passes,
         in LightingConstants lighting,
         float time)
     {
         plan.Clear();
-        Passes.Sync(ctx, views);
+        Passes.Sync(ctx, passes);
         uint main = windows?.Main?.Handle ?? 0;
-        PlanTargets(ctx, plan, windows, views, main, textures: true, lighting, time);
-        PlanTargets(ctx, plan, windows, views, main, textures: false, lighting, time);
+        PlanTargets(ctx, plan, windows, views, passes, main, textures: true, lighting, time);
+        PlanTargets(ctx, plan, windows, views, passes, main, textures: false, lighting, time);
 
         if (main != 0 && !IsPlanned(plan, RenderTarget.Of(main)))
             plan.ClearWindow = main;
@@ -74,6 +75,7 @@ internal static class Scene
         FramePlan plan,
         IWindowRegistry? windows,
         ReadOnlySpan<View> views,
+        PassList passes,
         uint main,
         bool textures,
         in LightingConstants lighting,
@@ -90,7 +92,7 @@ internal static class Scene
                 continue;
 
             int firstPass = plan.Passes.Count;
-            Passes.Prepare(ctx, targets, ListedPasses(views, target, main, targets), plan.Passes);
+            Passes.Prepare(ctx, targets, passes, plan.Passes);
             int first = plan.Views.Count;
             for (int index = 0; index < views.Length; index++)
             {
@@ -100,38 +102,6 @@ internal static class Scene
 
             plan.Targets.Add(new TargetPlan(targets, first, plan.Views.Count - first, firstPass, plan.Passes.Count - firstPass));
         }
-    }
-
-    /// <summary>
-    /// The passes that run over <paramref name="target"/>: the list of the first view drawing into it that has one.
-    /// Passes work on the whole target, so another view of it listing something else is not followed, warned about once.
-    /// </summary>
-    private static PassList ListedPasses(ReadOnlySpan<View> views, RenderTarget target, uint main, FrameTargets targets)
-    {
-        PassList listed = default;
-        bool mixed = false;
-        foreach (View view in views)
-        {
-            PassList list = view.Passes;
-            if (list.Count == 0 || Resolve(view.Camera.Target, main) != target)
-                continue;
-
-            if (listed.Count == 0)
-            {
-                listed = list;
-                continue;
-            }
-
-            ReadOnlySpan<Handle<Pass>> followed = listed;
-            ReadOnlySpan<Handle<Pass>> other = list;
-            mixed |= !other.SequenceEqual(followed);
-        }
-
-        if (mixed && !targets.MixedPassLists)
-            Debugging.Log.Warn($"The cameras drawing into {target} list different passes; passes cover the whole target, so the first camera's list is used.");
-
-        targets.MixedPassLists = mixed;
-        return listed;
     }
 
     /// <summary>One view of a target: its rectangle, its buffers made ready for this frame, and its constants.</summary>

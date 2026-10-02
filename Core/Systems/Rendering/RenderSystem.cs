@@ -37,6 +37,7 @@ internal sealed class RenderSystem : ISystem
     private readonly IEcsQuery<WorldTransform, RenderInstance> _movable;
     private readonly IEcsQuery<RenderInstance> _allInstances;
     private readonly IEcsQuery<Camera, WorldTransform> _cameras;
+    private readonly IEcsQuery<PostProcessing> _postProcessing;
     private readonly IEcsQuery<DirectionalLight, WorldTransform> _directional;
     private readonly IEcsQuery<PointLight, WorldTransform> _points;
     private readonly IEcsQuery<SpotLight, WorldTransform> _spots;
@@ -57,11 +58,15 @@ internal sealed class RenderSystem : ISystem
     private readonly QueryChunkAction<Renderer, WorldTransform> _collectUnregistered;
     private readonly QueryChunkAction<WorldTransform, RenderInstance> _move;
     private readonly QueryChunkAction<Camera, WorldTransform> _collectViews;
+    private readonly QueryChunkAction<PostProcessing> _collectPasses;
     private readonly QueryChunkAction<DirectionalLight, WorldTransform> _collectDirectional;
     private readonly QueryChunkAction<PointLight, WorldTransform> _collectPoints;
     private readonly QueryChunkAction<SpotLight, WorldTransform> _collectSpots;
 
     private BuiltWith? _builtWith; // null until the first run
+    private PassList _passes;      // the world's post-processing this frame; empty without one
+    private int _passLists;        // how many entities carry a PostProcessing this frame
+    private bool _warnedPassLists;
 
     public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, IWindowRegistry? windows, IRendering? rendering)
     {
@@ -75,6 +80,7 @@ internal sealed class RenderSystem : ISystem
         _movable = ecs.Query<WorldTransform, RenderInstance>().Build();
         _allInstances = ecs.Query<RenderInstance>().Build();
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
+        _postProcessing = ecs.Query<PostProcessing>().Build();
         _directional = ecs.Query<DirectionalLight, WorldTransform>().Build();
         _points = ecs.Query<PointLight, WorldTransform>().Build();
         _spots = ecs.Query<SpotLight, WorldTransform>().Build();
@@ -83,6 +89,7 @@ internal sealed class RenderSystem : ISystem
         _collectUnregistered = CollectUnregistered;
         _move = Move;
         _collectViews = CollectViews;
+        _collectPasses = CollectPasses;
         _collectDirectional = CollectDirectional;
         _collectPoints = CollectPoints;
         _collectSpots = CollectSpots;
@@ -96,6 +103,7 @@ internal sealed class RenderSystem : ISystem
         _movable.Dispose();
         _allInstances.Dispose();
         _cameras.Dispose();
+        _postProcessing.Dispose();
         _directional.Dispose();
         _points.Dispose();
         _spots.Dispose();
@@ -146,6 +154,7 @@ internal sealed class RenderSystem : ISystem
         _movable.Run(_move);
         _views.Clear();
         _cameras.Run(_collectViews);
+        CollectPostProcessing();
         _lights.Clear();
         _directional.Run(_collectDirectional);
         _points.Run(_collectPoints);
@@ -160,7 +169,7 @@ internal sealed class RenderSystem : ISystem
         SyncMs = (float)Stopwatch.GetElapsedTime(started, recording).TotalMilliseconds;
 
         // Plan, then record: the plan is everything the commands are made from.
-        Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), LightingConstants.From(CollectionsMarshal.AsSpan(_lights)), (float)frame.Time);
+        Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), _passes, LightingConstants.From(CollectionsMarshal.AsSpan(_lights)), (float)frame.Time);
         (int draws, int dispatches) = Scene.Record(ctx, frame.DrawCommands, _plan);
         float recordMs = (float)Stopwatch.GetElapsedTime(recording).TotalMilliseconds;
 
@@ -410,10 +419,28 @@ internal sealed class RenderSystem : ISystem
     private void CollectViews(ReadOnlySpan<Handle> entities, Span<Camera> cameras, Span<WorldTransform> worlds)
     {
         for (int i = 0; i < cameras.Length; i++)
-        {
-            PassList passes = _ecs.TryGet<PostProcessing>(entities[i], out PostProcessing postProcessing) ? postProcessing.Passes : default;
-            _views.Add(new View(cameras[i], worlds[i].Value, passes));
-        }
+            _views.Add(new View(cameras[i], worlds[i].Value));
+    }
+
+    /// <summary>The world's one <see cref="PostProcessing"/>; of several the first is followed, warned about once while it lasts.</summary>
+    private void CollectPostProcessing()
+    {
+        _passes = default;
+        _passLists = 0;
+        _postProcessing.Run(_collectPasses);
+
+        if (_passLists > 1 && !_warnedPassLists)
+            Debugging.Log.Warn($"{_passLists} entities carry a PostProcessing; post-processing is global, so only the first is followed.");
+
+        _warnedPassLists = _passLists > 1;
+    }
+
+    private void CollectPasses(ReadOnlySpan<Handle> entities, Span<PostProcessing> postProcessing)
+    {
+        if (_passLists == 0 && postProcessing.Length > 0)
+            _passes = postProcessing[0].Passes;
+
+        _passLists += postProcessing.Length;
     }
 
     private void CollectDirectional(ReadOnlySpan<Handle> entities, Span<DirectionalLight> lights, Span<WorldTransform> worlds)

@@ -104,7 +104,7 @@ public sealed class RenderSystemTests : IDisposable
     }
 
     [Fact]
-    public void A_camera_without_passes_copies_the_scene_to_what_is_shown_before_presenting()
+    public void Without_passes_the_scene_is_copied_to_what_is_shown_before_presenting()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
 
@@ -114,11 +114,10 @@ public sealed class RenderSystemTests : IDisposable
     }
 
     [Fact]
-    public void A_pass_a_camera_lists_is_compiled()
+    public void A_listed_pass_is_compiled()
     {
-        Handle camera = Spawn(new Vector3(0, 1, -3));
-        _ecs.Set(camera, Camera.Perspective(60f, 0.1f));
-        _ecs.Set(camera, new PostProcessing { Passes = TonemapOnly() });
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        _ecs.Set(Spawn(Vector3.Zero), new PostProcessing { Passes = TonemapOnly() });
 
         RenderFrame();
 
@@ -126,7 +125,7 @@ public sealed class RenderSystemTests : IDisposable
     }
 
     [Fact]
-    public void A_pass_no_camera_lists_is_not_compiled()
+    public void A_pass_that_is_not_listed_is_not_compiled()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
 

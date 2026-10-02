@@ -29,8 +29,8 @@ public sealed class PassOutput
 
 /// <summary>
 /// A custom render pass, as data: a fullscreen fragment shader or a compute shader, the named targets it
-/// reads and the one it writes. It runs for the cameras whose <see cref="Components.PostProcessing"/> lists it,
-/// where in the list says when, and nowhere else. Inputs bind in order to the
+/// reads and the one it writes. It runs when the world's <see cref="Components.PostProcessing"/> lists it,
+/// where in the list says when, and not otherwise. Inputs bind in order to the
 /// shader's textures (with a sampler each) and then its storage buffers; <see cref="Params"/> fill the
 /// shader's <c>cbuffer PassParams</c> the way <see cref="Material.Params"/> fill <c>MaterialParams</c>.
 /// </summary>

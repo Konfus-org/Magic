@@ -1,6 +1,12 @@
 {
     "entities": [
         {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": { "passes": [ { "id": 10030 } ] }
+            }
+        },
+        {
             "name": "Camera",
             "scripts": [
                 {
@@ -21,8 +27,7 @@
                         "z": 1
                     }
                 },
-                "Camera": {},
-                "PostProcessing": { "passes": [ { "id": 10030 } ] }
+                "Camera": {}
             }
         },
         {
