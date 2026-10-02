@@ -36,16 +36,35 @@ folders are skipped, so a build's intermediate copy of the dll does not count tw
 A sample's scripts are assets: a `.cs` file under `Assets/Scripts/` with a `.meta` beside it, whose class a
 chunk attaches to an entity by the file's id. The sample's dll has no gem in it, only those classes.
 
-Most samples' `OrbitCamera.cs` is an `IBehavior` on the camera entity: its `Update` swings that camera around
-the world's up axis through the origin, keeping its height, distance and tilt. `globals.chunk` lists it under
-the camera's `"scripts"` with the speed picked for the scene (`{ "id": 3004, "degreesPerSecond": 30 }`).
-RenderTexture's `Spin.cs` is a behaviour on the monkey the same way.
+RenderTexture's `Spin.cs` is an `IBehavior` on the monkey: its `Update` turns that entity around the world's up
+axis. `0_0_0.chunk` lists it under the monkey's `"scripts"` with the speed picked for the scene.
 
-SplitScreen's `OrbitCamera.cs` is an `ISystem` instead: one instance, attached to an entity of its own, that
-queries both cameras and turns them opposite ways.
+The two scripts every sample uses are shared, in `SampleShared/Assets/Scripts/` (see Moving around):
+`CameraController.cs` is an `IBehavior` on the camera, and `OrbitSystem.cs` is an `ISystem`: one instance,
+attached to an entity of its own, that queries the cameras.
 
 Edit a script and rebuild the sample while it runs: the host sees the new dll and reloads the scripts without
 a restart.
+
+## Moving around
+
+`SampleShared/` is a gem every sample's csproj references, so its dll is built into each sample's `Build/` tree
+and loads with it. The gem adds `SampleShared/Assets/` to the asset folders, so every sample's `globals.chunk`
+names the same two scripts by id, with the speeds picked for the scene:
+
+```json
+{ "name": "Orbit", "scripts": [ { "id": 3051, "degreesPerSecond": 4 } ] },
+{ "name": "Camera", "scripts": [ { "id": 3050, "speed": 40 } ], "components": { "Camera": {} } }
+```
+
+`CameraController` (3050) flies its camera: hold the right mouse button to look around with the mouse and move
+with W A S D, Q (down) and E (up); shift moves faster. `speed` is metres per second; `boost` and `sensitivity`
+are optional. Nothing moves while the button is up, so the console and debug windows keep the keyboard.
+
+`OrbitSystem` (3051) swings every camera around the origin, so a run with nobody at the controls (`--lifetime`,
+a screenshot, an agent testing streaming) still sees the scene from all sides. The first press of the right
+mouse button stops it for good; editing the chunk brings it back. A sample without the `Orbit` entity
+(RenderTexture) stays still.
 
 ## A domain on disk
 
@@ -77,7 +96,7 @@ A component is written as the struct's own JSON; any struct implementing `ICompo
 | Cube | The first material end to end: a checkerboard cube, reverse-Z depth, back-face culling | `Stats: … instances 2, visible 2+0` in a Debug build; a 2x2 checkerboard cube on dark blue |
 | Monkey | Model import conventions | Suzanne faces the camera, her left ear on the viewer's right |
 | RenderTexture | A camera drawing into a texture: `SecurityCamera`'s `"target": { "texture": { "id": 5010 } }` names `Textures/Monitor.rtex` (`{ "width": 512, "height": 512 }`), and `Monitor.mat` samples the same id on a standing plane. `Scripts/Spin.cs` adds a `Spin` component the chunk uses | the plane shows the spinning monkey side-on, live; edit the size in `Monitor.rtex` while it runs |
-| SplitScreen | Two cameras in one window: `"viewport": "top_half"` and `"bottom_half"`, each culled and drawn on its own | two views orbiting opposite ways; Debug-build Stats count both |
+| SplitScreen | Two cameras in one window: `"viewport": "top_half"` and `"bottom_half"`, each culled and drawn on its own | two views orbiting until you fly the top one; Debug-build Stats count both |
 | Grid | GPU-driven scale: 102 400 static entities in 100 chunks streamed by distance | `Streaming:` lines; `FPS:` above 60 in a Debug build (vsync off by default); `--set Render.ViewDist=Infinity` loads every chunk in view |
 | Wall | Two-phase HiZ occlusion culling: a wall in front of a 16k grid | in a Debug build, the last `Stats:` visible count is a fraction of the instances |
 | Fallbacks | The render failure looks, one cube each: a surface that does not compile (magenta), a material whose shader is not an asset (magenta checker), a model that is not an asset (red checker on the unit cube), a texture that is not an asset (red checker). All glow and breathe. Logs errors by design, so `--fail-on-error` returns 2 | fix `Assets/Shaders/BadCompile.surf.hlsl` or point `BadTexture.mat` at texture 36 while it runs and the cube heals |

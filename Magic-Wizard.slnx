@@ -14,12 +14,13 @@
     <Project Path="Gems/SDLImage/SDLImage.csproj" />
     <Project Path="Gems/SDLInput/SDLInput.csproj" />
     <Project Path="Gems/SDLRender/SDLRender.csproj" />
-    <Project Path="Gems/SDLTtf/SDLTtf.csproj" />
+    <Project Path="Gems/SDLFonts/SDLFonts.csproj" />
     <Project Path="Gems/SDLWindowing/SDLWindowing.csproj" />
     <Project Path="Gems/ZLogging/ZLogging.csproj" Id="a585cf9f-0774-4b62-b353-838c1bf1c5a2" />
   </Folder>
   <Folder Name="/Samples/">
     <Project Path="Samples/Cube/Cube.csproj" />
+    <Project Path="Samples/SampleShared/SampleShared.csproj" />
     <Project Path="Samples/Fallbacks/Fallbacks.csproj" />
     <Project Path="Samples/Grid/Grid.csproj" />
     <Project Path="Samples/Monkey/Monkey.csproj" />

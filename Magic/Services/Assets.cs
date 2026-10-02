@@ -31,6 +31,9 @@ public sealed class Assets : IDisposable
 {
     private const long Megabyte = 1024 * 1024;
 
+    /// <summary>How much of its budget a pool that went over is trimmed to, so the misses after it evict nothing.</summary>
+    private const double TrimmedTo = 0.9;
+
     private readonly Project _project;
     private readonly IFileSystem _files;
     private readonly Events _events;
@@ -396,7 +399,7 @@ public sealed class Assets : IDisposable
 
             T asset = Read(Sidecar<T>(path), path, out long fileBytes);
             long bytes = asset.Bytes > 0 ? asset.Bytes : fileBytes;
-            Debugging.Log.Info($"Loaded {typeof(T).Name} {handle.Id} ({asset.Path}): {bytes / 1024d:0.#} KiB.");
+            Log(typeof(T), $"Loaded {typeof(T).Name} {handle.Id} ({asset.Path}): {bytes / 1024d:0.#} KiB.");
 
             return (asset, bytes);
         }
@@ -422,8 +425,9 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Counts a newly read entry into its pool, then evicts the pool's least recently used entries while it is over
-    /// <paramref name="budget"/>, never the new one: an asset bigger than its budget stays until the next miss.
+    /// Counts a newly read entry into its pool. When that takes the pool over <paramref name="budget"/>, its least
+    /// recently used entries go until it is down to <see cref="TrimmedTo"/> of it, so a full pool evicts once every
+    /// few misses and not on each. Never the new one: an asset bigger than its budget stays until the next miss.
     /// </summary>
     private void AddToPool(Type type, Pool pool, ulong id, Entry entry, long bytes, long budget)
     {
@@ -434,12 +438,32 @@ public sealed class Assets : IDisposable
 
             entry.Bytes = bytes;
             pool.Bytes += bytes;
-            while (pool.Bytes > budget && pool.Oldest(except: id) is { } oldest)
+            if (pool.Bytes <= budget)
+                return;
+
+            int count = 0;
+            long before = pool.Bytes;
+            while (pool.Bytes > budget * TrimmedTo && pool.Oldest(except: id) is { } oldest)
             {
                 pool.Remove(oldest);
-                Debugging.Log.Info($"Unloaded {Describe(type, oldest)}: its pool is over budget.");
+                count++;
             }
+
+            if (count > 0)
+                Log(type, $"Unloaded {count} {type.Name} asset(s), {(before - pool.Bytes) / (double)Megabyte:0.#} MB: their pool is over budget.");
         }
+    }
+
+    /// <summary>
+    /// A load or an eviction for the log. Chunks come and go all the time while a domain streams, so theirs are
+    /// verbose, like the streaming system's own lines.
+    /// </summary>
+    private static void Log(Type type, string message)
+    {
+        if (type == typeof(Chunk))
+            Debugging.Log.Verbose(message);
+        else
+            Debugging.Log.Info(message);
     }
 
     /// <summary>The type's budget in bytes, from the settings as they are now: by its name, else the default.</summary>

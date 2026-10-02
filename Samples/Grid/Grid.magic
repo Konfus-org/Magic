@@ -1,5 +1,8 @@
 {
     "name": "Grid",
     "gems": ["default", "Grid"],
-    "entryPoint": { "id": 3031 }
+    "entryPoint": { "id": 3031 },
+    "settings": {
+        "assets": { "budgets": { "Texture": 256, "Model": 128, "Chunk": 64 } }
+    }
 }

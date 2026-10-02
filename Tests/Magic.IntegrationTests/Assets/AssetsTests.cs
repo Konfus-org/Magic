@@ -219,6 +219,21 @@ public sealed class AssetsTests : IDisposable
     }
 
     [Fact]
+    public void Over_budget_the_pool_is_trimmed_below_its_budget()
+    {
+        for (int i = 0; i < 11; i++)
+            Write($"Small{i}.mat", "{" + new string(' ', 50_000) + "}", 100 + (ulong)i); // about 0.1 MB each in memory
+
+        _project.Settings.Assets.Budgets[nameof(Material)] = 1; // room for ten
+        using Services.Assets assets = Open();
+
+        for (int i = 0; i < 11; i++)
+            assets.Load(new Handle<Material>(100 + (ulong)i));
+
+        Assert.Contains(assets.PoolStats(), pool => pool.Type == nameof(Material) && pool.Count == 9); // 0.9 MB or less
+    }
+
+    [Fact]
     public void An_asset_bigger_than_its_budget_is_still_kept_until_the_next_miss()
     {
         Write("Huge.mat", "{" + new string(' ', 600_000) + "}", 94); // about 1.2 MB in memory

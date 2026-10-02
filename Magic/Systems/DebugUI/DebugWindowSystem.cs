@@ -13,11 +13,15 @@ namespace Magic.Systems.DebugUI;
 internal abstract class DebugWindowSystem : ISystem
 {
     private readonly IInput? _input;
+    private readonly string _title;
 
-    protected DebugWindowSystem(Key key, IInput? input)
+    private bool _visible;
+
+    protected DebugWindowSystem(string name, Key key, IInput? input)
     {
         Key = key;
         _input = input;
+        _title = $"{name} ({(key == Key.Grave ? "`" : key.ToString())} to Toggle)";
     }
 
     public virtual void Dispose()
@@ -43,7 +47,15 @@ internal abstract class DebugWindowSystem : ISystem
         if (_input?.WasPressed(Key) == true)
             Open = !Open;
 
+        _visible = Open;
         Draw(frame);
+        Open = _visible; // closed by its button: only now, so the frame's End still reached the UI
+    }
+
+    /// <summary>Opens the window, titled with its name and key, with a close button. Pair with <see cref="Debugging.UI.End"/>.</summary>
+    protected void Begin(bool scrollable = false)
+    {
+        Debugging.UI.Begin(_title, ref _visible, scrollable);
     }
 
     /// <summary>The window's frame: draw it while <see cref="Open"/>, and whatever else it does every frame.</summary>

@@ -179,6 +179,19 @@ public static class Debugging
                 ui.Begin(title, scrollable);
         }
 
+        /// <summary>
+        /// <see cref="Begin(string, bool)"/> for a window with a close button, which sets <paramref name="visible"/> to
+        /// false when clicked. Still call <see cref="End"/> that frame.
+        /// </summary>
+        public static void Begin(string title, ref bool visible, bool scrollable = false)
+        {
+            if (!Visible)
+                return;
+
+            foreach (IDebugUI ui in _uis)
+                ui.Begin(title, ref visible, scrollable);
+        }
+
         public static void End()
         {
             if (!Visible)

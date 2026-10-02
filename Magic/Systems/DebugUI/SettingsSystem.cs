@@ -19,7 +19,7 @@ internal sealed class SettingsSystem : DebugWindowSystem
     private readonly (string Name, PropertyInfo Section, PropertyInfo[] Values)[] _sections;
     private readonly Dictionary<Type, string[]> _enumNames = [];
 
-    public SettingsSystem(Settings settings, IInput? input) : base(Key.F4, input)
+    public SettingsSystem(Settings settings, IInput? input) : base("Settings", Key.F4, input)
     {
         _settings = settings;
         _sections = [.. typeof(Settings).GetProperties()
@@ -31,7 +31,7 @@ internal sealed class SettingsSystem : DebugWindowSystem
         if (!Open)
             return;
 
-        Debugging.UI.Begin("Settings", scrollable: true);
+        Begin(scrollable: true);
         foreach ((string name, PropertyInfo sectionProperty, PropertyInfo[] values) in _sections)
         {
             object? section = sectionProperty.GetValue(_settings);

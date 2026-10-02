@@ -25,9 +25,15 @@
     <ProjectReference Include="$(MagicRoot)Magic\Magic.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The samples' shared gem (the CameraController and OrbitSystem scripts): its dll is copied beside this one, so the host loads it
+         with the sample. -->
+    <ProjectReference Include="..\SampleShared\SampleShared.csproj" />
+  </ItemGroup>
+
   <!-- What the host says of the dll when it loads it. -->
   <PropertyGroup>
-    <Description>Orbits the two split-screen cameras in opposite directions.</Description>
+    <Description>The SplitScreen sample; it has no scripts of its own yet.</Description>
     <Authors>Magic</Authors>
     <Version>1.0.0</Version>
   </PropertyGroup>

@@ -10,6 +10,7 @@ using Magic.Services;
 using Magic.Utils;
 using System.Drawing;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
@@ -27,6 +28,7 @@ namespace ImGuiOverlayGem;
 internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 {
     private const int InputBytes = 256;
+    private const string FontPath = "Fonts/MontserratMedium.otf";
 
     /// <summary>ImGui's -FLT_MIN width: up to the right edge of whatever the field is in.</summary>
     private const float Stretch = -1.17549435E-38f;
@@ -62,6 +64,8 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     private uint _indexBytes;
     private uint _nextTexture = 1;
     private int _depth;
+    private ImFontLoader* _fontLoader; // ImGui's memory: the atlas keeps the pointer
+    private GCHandle _font; // the Font asset the loader's callbacks read
 
     public ImGuiOverlay(IWindowRegistry windows, IRendering rendering, Assets assets, Project project)
     {
@@ -78,7 +82,8 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         ImGuiIOPtr io = ImGui.GetIO();
         io.IniFilename = null; // nothing to remember between runs: no imgui.ini next to the exe
         io.BackendFlags |= ImGuiBackendFlags.RendererHasTextures | ImGuiBackendFlags.RendererHasVtxOffset;
-        ImGui.StyleColorsDark();
+        ApplyStyle();
+        LoadFont(assets);
 
         string includes = Path.Combine(project.Resources, "Shaders");
         _vertexShader = Compile(assets, rendering, "Overlay/Overlay.vert.hlsl", GpuStage.Vertex, includes);
@@ -98,6 +103,10 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         _rendering.Release(_indexBuffer);
         _rendering.Release(_sampler);
         ImGui.DestroyContext(_context);
+        if (_fontLoader != null)
+            ImGui.MemFree(_fontLoader);
+        if (_font.IsAllocated)
+            _font.Free();
     }
 
     /// <summary>Feeds the main window's input events to ImGui.</summary>
@@ -152,6 +161,18 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
     public void Begin(string title, bool scrollable = false)
     {
+        Begin(title, null, scrollable);
+    }
+
+    public void Begin(string title, ref bool visible, bool scrollable = false)
+    {
+        fixed (bool* closable = &visible)
+            Begin(title, closable, scrollable);
+    }
+
+    /// <summary>The window or nested view; a window gets a close button writing to <paramref name="visible"/> unless it is null.</summary>
+    private void Begin(string title, bool* visible, bool scrollable)
+    {
         int depth = _depth++;
         if (_openViews.Count <= depth)
             _openViews.Add(new Level());
@@ -168,7 +189,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
             if (scrollable)
                 ImGui.SetNextWindowSize(new Vector2(640, 360), ImGuiCond.FirstUseEver);
 
-            ImGui.Begin(title, scrollable ? ImGuiWindowFlags.None : ImGuiWindowFlags.AlwaysAutoResize);
+            ImGui.Begin(title, visible, scrollable ? ImGuiWindowFlags.None : ImGuiWindowFlags.AlwaysAutoResize);
             return;
         }
 
@@ -321,6 +342,171 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
             Debugging.Log.Error($"The debug UI is not drawn: {compiled.Message}");
 
         return compiled.Ok ? compiled.Payload : null;
+    }
+
+    /// <summary>The engine's look: violet glass, lilac edges, pink where something is held, white text, everything rounded.</summary>
+    private static void ApplyStyle()
+    {
+        ImGui.StyleColorsDark();
+
+        ImGuiStylePtr style = ImGui.GetStyle();
+        style.WindowRounding = 10f;
+        style.ChildRounding = 8f;
+        style.PopupRounding = 8f;
+        style.FrameRounding = 6f;
+        style.GrabRounding = 6f;
+        style.TabRounding = 6f;
+        style.ScrollbarRounding = 10f;
+        style.WindowBorderSize = 1f;
+        style.FrameBorderSize = 0f;
+        style.WindowPadding = new Vector2(12f, 10f);
+        style.FramePadding = new Vector2(8f, 5f);
+        style.ItemSpacing = new Vector2(8f, 6f);
+        style.WindowTitleAlign = new Vector2(0.5f, 0.5f);
+
+        Vector4 white = new(1f, 1f, 1f, 1f);
+        Vector4 pink = new(1f, 0.52f, 0.86f, 1f);
+        Vector4 lilac = new(0.80f, 0.56f, 1f, 1f);
+        Vector4 violet = new(0.64f, 0.32f, 0.96f, 1f);
+        Vector4 plum = new(0.36f, 0.17f, 0.60f, 1f);
+        Vector4 night = new(0.17f, 0.08f, 0.32f, 1f);
+
+        Span<Vector4> colors = style.Colors;
+        colors[(int)ImGuiCol.Text] = white;
+        colors[(int)ImGuiCol.TextDisabled] = lilac with { W = 0.7f };
+        colors[(int)ImGuiCol.WindowBg] = night with { W = 0.90f };
+        colors[(int)ImGuiCol.ChildBg] = plum with { W = 0.35f };
+        colors[(int)ImGuiCol.PopupBg] = night with { W = 0.97f };
+        colors[(int)ImGuiCol.Border] = lilac with { W = 0.85f };
+        colors[(int)ImGuiCol.FrameBg] = plum with { W = 0.85f };
+        colors[(int)ImGuiCol.FrameBgHovered] = violet with { W = 0.6f };
+        colors[(int)ImGuiCol.FrameBgActive] = violet with { W = 0.9f };
+        colors[(int)ImGuiCol.TitleBg] = violet with { W = 0.85f };
+        colors[(int)ImGuiCol.TitleBgActive] = Vector4.Lerp(violet, pink, 0.45f);
+        colors[(int)ImGuiCol.TitleBgCollapsed] = plum with { W = 0.7f };
+        colors[(int)ImGuiCol.MenuBarBg] = plum;
+        colors[(int)ImGuiCol.ScrollbarBg] = night with { W = 0.4f };
+        colors[(int)ImGuiCol.ScrollbarGrab] = violet with { W = 0.8f };
+        colors[(int)ImGuiCol.ScrollbarGrabHovered] = lilac;
+        colors[(int)ImGuiCol.ScrollbarGrabActive] = pink;
+        colors[(int)ImGuiCol.CheckMark] = pink;
+        colors[(int)ImGuiCol.SliderGrab] = lilac;
+        colors[(int)ImGuiCol.SliderGrabActive] = pink;
+        colors[(int)ImGuiCol.Button] = violet with { W = 0.85f };
+        colors[(int)ImGuiCol.ButtonHovered] = lilac with { W = 0.9f };
+        colors[(int)ImGuiCol.ButtonActive] = pink;
+        colors[(int)ImGuiCol.Header] = violet with { W = 0.55f };
+        colors[(int)ImGuiCol.HeaderHovered] = violet with { W = 0.85f };
+        colors[(int)ImGuiCol.HeaderActive] = pink with { W = 0.9f };
+        colors[(int)ImGuiCol.Separator] = lilac with { W = 0.4f };
+        colors[(int)ImGuiCol.SeparatorHovered] = lilac;
+        colors[(int)ImGuiCol.SeparatorActive] = pink;
+        colors[(int)ImGuiCol.ResizeGrip] = lilac with { W = 0.3f };
+        colors[(int)ImGuiCol.ResizeGripHovered] = lilac with { W = 0.8f };
+        colors[(int)ImGuiCol.ResizeGripActive] = pink;
+        colors[(int)ImGuiCol.Tab] = plum;
+        colors[(int)ImGuiCol.TabHovered] = lilac with { W = 0.9f };
+        colors[(int)ImGuiCol.TabSelected] = violet;
+        colors[(int)ImGuiCol.TextSelectedBg] = pink with { W = 0.4f };
+        colors[(int)ImGuiCol.NavCursor] = pink;
+    }
+
+    /// <summary>
+    /// The engine's font for every widget, from its <see cref="Font"/> asset: ImGui asks the loader set up here for each
+    /// glyph it first draws and gets the asset's, as rasterised. Without the asset (logged) ImGui keeps its built-in font.
+    /// </summary>
+    private void LoadFont(Assets assets)
+    {
+        Font? font = assets.Load(assets.Find<Font>(FontPath));
+        if (font is null)
+        {
+            Debugging.Log.Warn($"{FontPath} did not load; the debug UI keeps ImGui's own font.");
+            return;
+        }
+
+        _font = GCHandle.Alloc(font);
+        _fontLoader = (ImFontLoader*)ImGui.MemAlloc((nuint)sizeof(ImFontLoader));
+        *_fontLoader = default;
+        _fontLoader->FontSrcContainsGlyph = (delegate* unmanaged[Cdecl]<ImFontAtlas*, ImFontConfig*, uint, byte>)&ContainsGlyph;
+        _fontLoader->FontBakedInit = (delegate* unmanaged[Cdecl]<ImFontAtlas*, ImFontConfig*, ImFontBaked*, void*, byte>)&InitBaked;
+        _fontLoader->FontBakedLoadGlyph = (delegate* unmanaged[Cdecl]<ImFontAtlas*, ImFontConfig*, ImFontBaked*, void*, uint, ImFontGlyph*, float*, byte>)&LoadGlyph;
+
+        // ImGui copies a source's font data: here that is the asset's handle, which is how the callbacks find the asset.
+        // Its size is the line's height, ImGui's meaning of a font size, so widgets lay out around the glyphs as rasterised.
+        nint handle = GCHandle.ToIntPtr(_font);
+        ImFontConfigPtr config = ImGui.ImFontConfig();
+        config.FontLoader = _fontLoader;
+        config.FontData = &handle;
+        config.FontDataSize = sizeof(nint);
+        config.FontDataOwnedByAtlas = false;
+        config.SizePixels = font.LineHeight;
+
+        ImGuiIOPtr io = ImGui.GetIO();
+        io.FontDefault = io.Fonts.AddFont(config);
+        config.Destroy(); // the atlas took a copy
+    }
+
+    private static Font FontOf(ImFontConfig* source)
+    {
+        return (Font)GCHandle.FromIntPtr(*(nint*)source->FontData).Target!;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static byte ContainsGlyph(ImFontAtlas* atlas, ImFontConfig* source, uint codepoint)
+    {
+        return (byte)(FontOf(source).Glyphs.ContainsKey(codepoint) ? 1 : 0);
+    }
+
+    /// <summary>The line metrics of the font at the size ImGui draws it.</summary>
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static byte InitBaked(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData)
+    {
+        Font font = FontOf(source);
+        float scale = baked->Size / font.LineHeight;
+        baked->Ascent = font.Ascent * scale;
+        baked->Descent = (font.Ascent - font.LineHeight) * scale;
+
+        return 1;
+    }
+
+    /// <summary>
+    /// One glyph of the asset into ImGui's atlas, or only its advance when that is all ImGui asks for. Drawn at the
+    /// asset's size the glyph's pixels land one to one; at any other size ImGui stretches them.
+    /// </summary>
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static byte LoadGlyph(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData, uint codepoint, ImFontGlyph* glyph, float* advance)
+    {
+        Font font = FontOf(source);
+        if (!font.Glyphs.TryGetValue(codepoint, out Glyph loaded))
+            return 0;
+
+        float scale = baked->Size / font.LineHeight;
+        if (advance != null)
+        {
+            *advance = loaded.Advance * scale;
+            return 1;
+        }
+
+        glyph->Codepoint = codepoint;
+        glyph->AdvanceX = loaded.Advance * scale;
+        if (loaded.Width == 0 || loaded.Height == 0)
+            return 1;
+
+        int rectangle = ImGuiP.ImFontAtlasPackAddRect(atlas, loaded.Width, loaded.Height);
+        if (rectangle < 0)
+            return 0;
+
+        glyph->X0 = loaded.BearingX * scale;
+        glyph->Y0 = MathF.Round(baked->Ascent) - (loaded.BearingY * scale);
+        glyph->X1 = glyph->X0 + (loaded.Width * scale);
+        glyph->Y1 = glyph->Y0 + (loaded.Height * scale);
+        glyph->Visible = 1;
+        glyph->PackId = rectangle;
+
+        fixed (byte* pixels = &font.Pixels[((loaded.Y * font.Width) + loaded.X) * 4])
+            ImGuiP.ImFontAtlasBakedSetFontGlyphBitmap(atlas, baked, source, glyph, ImGuiP.ImFontAtlasPackGetRect(atlas, rectangle), pixels, ImTextureFormat.Rgba32, font.Width * 4);
+
+        return 1;
     }
 
     private void NewFrame(float delta)

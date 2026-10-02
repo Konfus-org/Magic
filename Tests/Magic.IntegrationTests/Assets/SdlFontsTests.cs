@@ -1,21 +1,21 @@
 using Magic.Contexts.Assets;
 using Magic.Services;
 using SDLGem;
-using SDLTtfGem;
+using SDLFontsGem;
 using Xunit;
 
 namespace Magic.IntegrationTests.Assets;
 
-/// <summary>The font loader over the real SDL3_ttf, rasterising the engine's own Montserrat.</summary>
+/// <summary>The font loader over the real SDL3_fonts, rasterising the engine's own Montserrat.</summary>
 [Collection(SdlCollection.Name)]
-public sealed class SdlTtfTests : IDisposable
+public sealed class SdlFontsTests : IDisposable
 {
     private readonly Sdl _sdl = new(new Project { Name = "Tests" });
-    private readonly SdlTtf _ttf = new();
+    private readonly SdlFonts _fonts = new();
 
     public void Dispose()
     {
-        _ttf.Dispose();
+        _fonts.Dispose();
         _sdl.Dispose();
     }
 
@@ -57,11 +57,21 @@ public sealed class SdlTtfTests : IDisposable
         Assert.True(glyph.Advance > 0);
     }
 
+    [Fact]
+    public void A_space_advances_the_pen()
+    {
+        Font font = Load();
+
+        Glyph glyph = font.Glyphs[' '];
+
+        Assert.True(glyph.Advance > 0);
+    }
+
     private Font Load()
     {
         Font font = new() { Path = "Fonts/MontserratMedium.otf", Size = 24f };
 
-        _ttf.Load(font, Resources.Read(font.Path));
+        _fonts.Load(font, Resources.Read(font.Path));
 
         return font;
     }

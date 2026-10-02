@@ -6,14 +6,10 @@
                 "PostProcessing": { "passes": [ { "id": 10030 } ] }
             }
         },
+        { "name": "Orbit", "scripts": [ { "id": 3051, "degreesPerSecond": 10 } ] },
         {
             "name": "Camera",
-            "scripts": [
-                {
-                    "id": 3043,
-                    "degreesPerSecond": 10
-                }
-            ],
+            "scripts": [ { "id": 3050, "speed": 5 } ],
             "components": {
                 "Transform": { "position": { "x": 0, "y": 1.5, "z": -9 }, "scale": { "x": 1, "y": 1, "z": 1 } },
                 "Camera": {}

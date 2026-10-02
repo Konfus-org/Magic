@@ -23,7 +23,7 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
     private string _text = "";
     private bool _logChanged;
 
-    public ConsoleSystem(IInput? input) : base(Key.Grave, input)
+    public ConsoleSystem(IInput? input) : base("Console", Key.Grave, input)
     {
         Debugging.Log.Register(this);
     }
@@ -39,7 +39,7 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
         if (!Open)
             return;
 
-        Debugging.UI.Begin("Console", scrollable: true);
+        Begin(scrollable: true);
         Debugging.UI.Begin("Log", scrollable: true);
         string text = LogText();
         Debugging.UI.Document("##log", ref text, readOnly: true);

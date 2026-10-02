@@ -49,7 +49,7 @@
     <DefaultGem Include="$(MagicRoot)Gems\SDL\SDL.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\SDLWindowing\SDLWindowing.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\SDLImage\SDLImage.csproj" />
-    <DefaultGem Include="$(MagicRoot)Gems\SDLTtf\SDLTtf.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\SDLFonts\SDLFonts.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\AssimpModels\AssimpModels.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\SDLRender\SDLRender.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\CSharpScripting\CSharpScripting.csproj" />

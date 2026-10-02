@@ -4,20 +4,20 @@ using Magic.Utils;
 using SDL3;
 using System.Runtime.InteropServices;
 
-namespace SDLTtfGem;
+namespace SDLFontsGem;
 
 /// <summary>
-/// Loads <see cref="Font"/> assets with SDL3_ttf: every glyph of the Latin ranges is rasterised at the
-/// sidecar's size and shelf-packed into one RGBA atlas. Loads run one at a time: SDL_ttf fonts are not
+/// Loads <see cref="Font"/> assets with SDL3_fonts: every glyph of the Latin ranges is rasterised at the
+/// sidecar's size and shelf-packed into one RGBA atlas. Loads run one at a time: SDL_fonts fonts are not
 /// thread safe, and the library keeps shared state between them.
 /// </summary>
-internal sealed class SdlTtf : IGem, IAssetLoader<Font>
+internal sealed class SdlFonts : IGem, IAssetLoader<Font>
 {
     private const int Padding = 1; // between glyphs, so linear sampling never bleeds a neighbour in
 
     private readonly Lock _loadLock = new();
 
-    public SdlTtf()
+    public SdlFonts()
     {
         if (!TTF.Init())
             throw new InvalidOperationException($"TTF_Init failed: {SDL.GetError()}");
@@ -72,7 +72,10 @@ internal sealed class SdlTtf : IGem, IAssetLoader<Font>
 
                 nint image = TTF.GetGlyphImage(font, codepoint, out TTF.ImageType _);
                 if (image == IntPtr.Zero)
+                {
+                    glyphs.Add((codepoint, [], 0, 0, minX, maxY, advance)); // nothing to draw (a space): still moves the pen
                     continue;
+                }
 
                 try
                 {

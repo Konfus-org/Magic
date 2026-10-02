@@ -8,6 +8,7 @@
         },
         {
             "name": "Camera",
+            "scripts": [ { "id": 3050, "speed": 4 } ],
             "components": {
                 "Transform": {
                     "position": {

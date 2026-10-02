@@ -29,7 +29,7 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
     private double _windowWorstMs;
     private double _sinceLogMs;
 
-    public DebuggerDisplaySystem(TransformSystem transforms, RenderSystem rendering, StreamingSystem streaming, Assets assets, IInput? input) : base(Key.F3, input)
+    public DebuggerDisplaySystem(TransformSystem transforms, RenderSystem rendering, StreamingSystem streaming, Assets assets, IInput? input) : base("Debug", Key.F3, input)
     {
         _transforms = transforms;
         _rendering = rendering;
@@ -49,7 +49,7 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
 
         if (Open)
         {
-            Debugging.UI.Begin("Debug");
+            Begin();
             Debugging.UI.Text($"Frame {_frameMs:F2} ms ({fps:F0} fps), worst {_lastFrameMs:F2} ms");
             Debugging.UI.Text($"Transforms {_transforms.LastMs:F2} ms, render sync {_rendering.SyncMs:F2} ms, render {_rendering.RenderMs:F2} ms");
             Debugging.UI.Text($"Instances {render.Instances}");

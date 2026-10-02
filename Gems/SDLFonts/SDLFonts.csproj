@@ -10,8 +10,8 @@
   <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Assembly SDLTtf.dll, never SDL3_ttf: bin\Gems is one flat folder shared with the native dlls. -->
-    <RootNamespace>SDLTtfGem</RootNamespace>
+    <!-- Assembly SDLFonts.dll, never SDL3_ttf: bin\Gems is one flat folder shared with the native dlls. -->
+    <RootNamespace>SDLFontsGem</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

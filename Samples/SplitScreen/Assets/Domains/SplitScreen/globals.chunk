@@ -7,16 +7,17 @@
       }
     },
     {
-      "name": "CameraSystem",
+      "name": "Orbit",
       "scripts": [
         {
-          "id": 5333,
-          "speed": 25
+          "id": 3051,
+          "degreesPerSecond": 25
         }
       ]
     },
     {
       "name": "TopCamera",
+      "scripts": [ { "id": 3050, "speed": 4 } ],
       "components": {
         "Transform": {
           "position": {

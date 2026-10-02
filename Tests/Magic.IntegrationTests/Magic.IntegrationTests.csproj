@@ -29,7 +29,7 @@
     <ProjectReference Include="..\..\Gems\SDL\SDL.csproj" />
     <ProjectReference Include="..\..\Gems\SDLImage\SDLImage.csproj" />
     <ProjectReference Include="..\..\Gems\SDLInput\SDLInput.csproj" />
-    <ProjectReference Include="..\..\Gems\SDLTtf\SDLTtf.csproj" />
+    <ProjectReference Include="..\..\Gems\SDLFonts\SDLFonts.csproj" />
     <ProjectReference Include="..\..\Gems\AssimpModels\AssimpModels.csproj" />
     <!-- Built, not referenced: the loader tests find it in bin\Tests\Gems\ as the host would. -->
     <ProjectReference Include="..\TestGem\TestGem.csproj" ReferenceOutputAssembly="false" />

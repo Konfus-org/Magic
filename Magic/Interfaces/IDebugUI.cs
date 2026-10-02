@@ -16,6 +16,13 @@ public interface IDebugUI
     /// </summary>
     void Begin(string title, bool scrollable = false);
 
+    /// <summary>
+    /// <see cref="Begin(string, bool)"/> for a window with a close button in its header, which sets
+    /// <paramref name="visible"/> to false when clicked: stop drawing the window from the next frame. This frame's
+    /// <see cref="End"/> is still owed. A nested view has no header, so no button.
+    /// </summary>
+    void Begin(string title, ref bool visible, bool scrollable = false);
+
     void End();
 
     void Text(string text);
