@@ -6,7 +6,7 @@ using Xunit;
 
 namespace Magic.IntegrationTests.Assets;
 
-/// <summary>The font loader over the real SDL3_ttf, rasterising the Arial that ships with Windows.</summary>
+/// <summary>The font loader over the real SDL3_ttf, rasterising the engine's own Montserrat.</summary>
 [Collection(SdlCollection.Name)]
 public sealed class SdlTtfTests : IDisposable
 {
@@ -59,9 +59,9 @@ public sealed class SdlTtfTests : IDisposable
 
     private Font Load()
     {
-        Font font = new() { Path = "Arial.ttf", Size = 24f };
+        Font font = new() { Path = "Fonts/MontserratMedium.otf", Size = 24f };
 
-        _ttf.Load(font, File.ReadAllBytes(@"C:\Windows\Fonts\arial.ttf"));
+        _ttf.Load(font, Resources.Read(font.Path));
 
         return font;
     }

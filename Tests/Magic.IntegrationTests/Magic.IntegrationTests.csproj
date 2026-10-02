@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Core\Magic.csproj" />
+    <ProjectReference Include="..\..\Magic\Magic.csproj" />
     <!-- The gems are constructed in-process, no gem loader involved; the package natives (SDL3.dll,
          SDL3_image.dll, SDL3_ttf.dll, assimp.dll) land flat next to the tests because of the RuntimeIdentifier. -->
     <ProjectReference Include="..\..\Gems\FlecsEcs\FlecsEcs.csproj" />

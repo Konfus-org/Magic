@@ -1,4 +1,4 @@
-// The per-view constants (256 B), exactly as FrameConstants in Core/Contexts/Rendering/GpuStructs.cs lays
+// The per-view constants (256 B), exactly as FrameConstants in Magic/Contexts/Rendering/GpuStructs.cs lays
 // them out, uploaded untransposed, at uniform slot 0 of every stage that reads one.
 //
 // One block per stage on purpose: DXC drops a cbuffer nothing reads, and SDL needs the uniform bindings a

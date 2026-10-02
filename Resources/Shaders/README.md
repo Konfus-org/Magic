@@ -30,7 +30,7 @@ These are the ones that break silently when ignored. Most were learned the hard 
 - **One constant block per stage, at `UNIFORM(0)`.** DXC drops a block nothing reads and SDL needs the
   blocks a stage uses to be consecutive from 0. Everything per-frame lives in `Include/Frame.hlsli`; a
   header that needs more appends to it with `FRAME_APPEND`.
-- **A GPU struct changes together with its C# twin** in `Core/Contexts/Rendering/GpuStructs.cs`. Both sides
+- **A GPU struct changes together with its C# twin** in `Magic/Contexts/Rendering/GpuStructs.cs`. Both sides
   read the same bytes blind. Storage-buffer structs are built from 16-byte members; the constant block is
   built from 16-byte rows (a `float3` with a scalar, two `float2`, four scalars).
 - **Varyings shared by composed or generated shaders live in one header** (`MeshVaryings`, `PassVaryings`).

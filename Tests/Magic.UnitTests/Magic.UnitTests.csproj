@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <!-- A normal reference: Magic.dll is copied next to the tests, unlike in a gem. -->
-    <ProjectReference Include="..\..\Core\Magic.csproj" />
+    <ProjectReference Include="..\..\Magic\Magic.csproj" />
   </ItemGroup>
 
 </Project>

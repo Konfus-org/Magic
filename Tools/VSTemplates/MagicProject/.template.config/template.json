@@ -18,7 +18,7 @@
       "datatype": "string",
       "defaultValue": "",
       "replaces": "MAGIC_ROOT_PATH",
-      "description": "Folder of the Magic engine repository (the one holding Core and Build). Leave empty to use the MAGIC_ROOT environment variable at build time."
+      "description": "Folder of the Magic engine repository (the one holding Magic and Build). Leave empty to use the MAGIC_ROOT environment variable at build time."
     },
     "Author": {
       "type": "parameter",

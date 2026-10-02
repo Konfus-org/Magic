@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <!-- Compile against the host, never copy it: the gem shares the host's loaded Magic.dll. -->
-    <ProjectReference Include="$(MagicRoot)Core\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="$(MagicRoot)Magic\Magic.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>

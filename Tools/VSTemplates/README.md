@@ -13,15 +13,15 @@ A game project: `<Name>.magic`, a starting domain under `Assets\Domains\<Name>\`
 and `Scripts\` compiled by `<Name>.csproj` into the project's own gem. The engine finds every gem dll under
 the project folder, so nothing is registered anywhere.
 
-```
-dotnet new magicproject -n MyGame -o C:\Games\MyGame --EnginePath C:\Users\me\Projects\Magic
-dotnet build C:\Games\MyGame
-Build\net10.0\Debug\bin\Magic.exe --project C:\Games\MyGame
+```powershell
+dotnet new magicproject -n MyGame -o ..\MyGame --EnginePath $PWD
+dotnet build ..\MyGame
+Build\net10.0\Debug\bin\Magic.exe --project ..\MyGame
 ```
 
 `--EnginePath` is the engine repository; the `MAGIC_ROOT` environment variable overrides it at build time,
 so a project can leave it empty. Gems compile against the engine's built `Magic.dll` of the same
-configuration, so build the engine first (`dotnet build Core\Magic.csproj`).
+configuration, so build the engine first (`dotnet build Magic\Magic.csproj`).
 
 A project builds like the engine does: `Build\net10.0\<Configuration>\bin\` holds every gem dll and
 `obj\<Gem>\` the intermediates, set by the project's `Directory.Build.props`. That file is the whole
@@ -35,13 +35,13 @@ A gem on its own. The same template works in two places, told apart by whether a
 - **In a project**, under `Gems\`: it builds into the project's `Build\` tree and loads with the project.
 
   ```
-  dotnet new magicgem -n Physics -o C:\Games\MyGame\Gems\Physics --Author "Konfus" --Description "Rigid bodies."
+  dotnet new magicgem -n Physics -o ..\MyGame\Gems\Physics --Author "Konfus" --Description "Rigid bodies."
   ```
 
 - **In the engine repo**, a default gem: `Gems\` is the conventional home, but any folder in the repo works.
   The build recognises a gem by `<IsMagicGem>true</IsMagicGem>` set in its csproj before the SDK import, the
   Core reference is anchored to the repo root, and the dll lands in `bin\Gems\` next to the exe. Add it to
-  `Core\Magic.csproj`'s `DefaultGem` list to ship it with the engine.
+  `Magic\Magic.csproj`'s `DefaultGem` list to ship it with the engine.
 
   ```
   dotnet new magicgem -n Physics -o Gems\Physics --Author "Konfus" --Description "Rigid bodies and collision."

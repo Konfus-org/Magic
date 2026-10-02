@@ -31,5 +31,5 @@
     <Project Path="Tests/Magic.IntegrationTests/Magic.IntegrationTests.csproj" />
     <Project Path="Tests/Magic.UnitTests/Magic.UnitTests.csproj" />
   </Folder>
-  <Project Path="Core/Magic.csproj" />
+  <Project Path="Magic/Magic.csproj" />
 </Solution>

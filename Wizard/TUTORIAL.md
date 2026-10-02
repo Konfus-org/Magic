@@ -89,7 +89,7 @@ from outside the console window needs them, editor or not.
 
 ### 1.1 Let gems list and run console commands
 
-`Core\Utils\Debugging.cs`, in the nested `Commands` class. Gems can already `Register` a command; make the other two
+`Magic\Utils\Debugging.cs`, in the nested `Commands` class. Gems can already `Register` a command; make the other two
 members public so a gem can run one.
 
 ```csharp
@@ -113,7 +113,7 @@ so nothing needs to move.
 
 ### 1.2 Let gems read and write components the way chunk files do
 
-`Core\Contexts\Assets\AssetJson.cs`:
+`Magic\Contexts\Assets\AssetJson.cs`:
 
 ```csharp
 // before
@@ -146,7 +146,7 @@ gem builds last would win, and the loser risks a `MissingMethodException`. Make 
 ### Checkpoint
 
 ```powershell
-dotnet build Core\Magic.csproj
+dotnet build Magic\Magic.csproj
 ```
 
 It builds with 0 warnings and 0 errors. (You can confirm the pin after Part 2: every `Microsoft.Extensions.*.dll` in
@@ -180,7 +180,7 @@ Create the folder `Gems\Mcp` and in it `Mcp.csproj`. It has the same shape as `G
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="$(MagicRoot)Core\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="$(MagicRoot)Magic\Magic.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup>
@@ -205,7 +205,7 @@ them, and it depends on static gems (`IEcs`, `IRendering`) anyway.
 
 ### 2.2 Register it with the build
 
-`Core\Magic.csproj`, at the end of the `DefaultGem` list:
+`Magic\Magic.csproj`, at the end of the `DefaultGem` list:
 
 ```xml
     <DefaultGem Include="$(MagicRoot)Gems\DefaultCheats\DefaultCheats.csproj" />
@@ -808,7 +808,7 @@ Without the second, `Transform` would also emit its computed `Matrix`, which can
 ### Checkpoint
 
 ```powershell
-dotnet build Core\Magic.csproj
+dotnet build Magic\Magic.csproj
 ```
 
 0 warnings, 0 errors, and `Build\net10.0\Debug\bin\Gems\Mcp.dll` exists. Run a sample as usual:
@@ -1885,7 +1885,7 @@ dotnet run --project Wizard
 
 It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 
-1. Paste the full path of a sample into the box, for example `C:\Users\jercl\Projects\C#\Magic\Samples\Cube`
+1. Paste the full path of a sample into the box, for example that of `Samples\Cube` in your checkout
    (a folder or its `.magic` file both work), and press **Play**.
 2. The engine window opens. The status on the right shows `Cube · frame N · 338 entities`, counting up.
 3. The console fills with the engine's log.
@@ -1896,7 +1896,7 @@ It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 "Browse…" does nothing in a browser tab; it needs the shell from Part 5.
 
 If Play reports that Magic exited before its MCP server answered, the engine build does not include the gem:
-run `dotnet build Core\Magic.csproj` from the repo root.
+run `dotnet build Magic\Magic.csproj` from the repo root.
 
 ### Iterating with hot reload
 

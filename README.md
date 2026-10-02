@@ -22,19 +22,19 @@ folder (`Build/net10.0/Debug-linux-x64/`); the "Magic (WSL)" launch profile runs
 
 ## How it works
 
-- **Host** (`Core/Program.cs`): reads the project's `.magic` file, loads gems, and each frame hands one
+- **Host** (`Magic/Program.cs`): reads the project's `.magic` file, loads gems, and each frame hands one
   immutable `Frame` to every gem's `Update`, `FixedUpdate` (60 Hz), `LateUpdate` and `Render`.
-- **Gems** (`Core/Gems.cs`): a dll with one class implementing `IGem`. Its constructor parameters are its
+- **Gems** (`Magic/Gems.cs`): a dll with one class implementing `IGem`. Its constructor parameters are its
   dependencies, the Core interfaces it implements are what it provides. A rebuilt dll is reloaded in place.
 - **Scripts**: a `.cs` asset whose class is an `ISystem` or an `IBehavior`, compiled by the project's csproj
   and attached to entities in chunk files.
-- **Assets** (`Core/Services/Assets.cs`): addressed by id, not path; the id and type live in a `.meta` file
+- **Assets** (`Magic/Services/Assets.cs`): addressed by id, not path; the id and type live in a `.meta` file
   beside each asset. Gems add formats with `IAssetLoader<T>`.
-- **Events** (`Core/Services/Events.cs`): one `Event` struct, published from any thread, delivered in
+- **Events** (`Magic/Services/Events.cs`): one `Event` struct, published from any thread, delivered in
   `Frame.Events`.
-- **World** (`Core/Services/World.cs`): a stack of open domains. A domain is a folder of `x_y_z.chunk` files
+- **World** (`Magic/Services/World.cs`): a stack of open domains. A domain is a folder of `x_y_z.chunk` files
   streamed in around the cameras.
-- **ECS** (`Core/Interfaces/IEcs*.cs`, `Gems/FlecsEcs`): components are structs implementing `IComponent`;
+- **ECS** (`Magic/Interfaces/IEcs*.cs`, `Gems/FlecsEcs`): components are structs implementing `IComponent`;
   systems are `ISystem`s added to the `Scheduler`.
 - **Rendering** (`Gems/SDLRender`): GPU-driven on SDL_GPU, with passes and materials defined as data in
   `Resources/`.
@@ -42,7 +42,7 @@ folder (`Build/net10.0/Debug-linux-x64/`); the "Magic (WSL)" launch profile runs
 ## Folder structure
 
 ```
-Core/        The host: gem loader, services, contracts, core systems
+Magic/       The host: gem loader, services, contracts, core systems
 Gems/        Engine gems
 Resources/   Engine assets: shaders, materials, passes, models, textures
 Samples/     Example projects (Samples/README.md)

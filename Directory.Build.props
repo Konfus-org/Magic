@@ -101,7 +101,7 @@
     <IsPackable>false</IsPackable>
 
     <!-- All gems land flat in bin\Gems\ next to the host exe: that is the
-         folder the host's gem loader (Core\Gems.cs) scans for plugin DLLs at runtime. -->
+         folder the host's gem loader (Magic\Gems.cs) scans for plugin DLLs at runtime. -->
     <OutputPath>$(MagicBuildDir)bin\Gems\</OutputPath>
 
     <!-- Intermediate files get one folder per gem. Sharing a single obj\

@@ -41,7 +41,7 @@
   </ItemGroup>
 
   <!-- The gems the runtime ships with. Building Magic builds them too, so bin\Gems\ is
-       always populated after "dotnet build Core\Magic.csproj". They cannot be plain
+       always populated after "dotnet build Magic\Magic.csproj". They cannot be plain
        ProjectReferences: each gem already references Magic.csproj. -->
   <ItemGroup>
     <DefaultGem Include="$(MagicRoot)Gems\ZLogging\ZLogging.csproj" />
