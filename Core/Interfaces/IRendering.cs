@@ -7,7 +7,7 @@ namespace Magic.Interfaces;
 /// The GPU, one level above the graphics API: make objects, fill them, run a frame's commands. Exported by a renderer gem
 /// (SDL GPU today; Vulkan or anything else would implement the same). It keeps no caches and knows nothing of assets,
 /// entities or windows beyond presenting to them: the host's render system and any gem that draws decide everything and
-/// hold every handle. A handle is only good for the renderer that made it; a different one (a reload) starts from nothing.
+/// hold every handle. The gem is static: loaded once, never hot reloaded, so a handle is good for the whole run.
 /// Main thread only, except <see cref="Compile"/>.
 /// </summary>
 public interface IRendering
@@ -77,6 +77,9 @@ public interface IRendering
     /// <summary>The start of a buffer, after everything submitted. Waits for the GPU: debug checks only.</summary>
     Result<byte[]> Read(GpuBuffer buffer, uint bytes);
 
-    /// <summary>Level 0 of an RGBA8 texture, after everything submitted. Waits for the GPU: screenshots and debug checks only.</summary>
+    /// <summary>
+    /// Level 0 of an RGBA8 texture, after everything submitted; for a <see cref="GpuTexture.Window"/>, the texture last
+    /// blitted onto that window, failed when none has been. Waits for the GPU: screenshots and debug checks only.
+    /// </summary>
     Result<CapturedFrame> Read(GpuTexture texture);
 }

@@ -62,9 +62,13 @@ internal sealed class GpuDevice : IDisposable
             throw new InvalidOperationException($"SDL_CreateGPUDevice failed: {SDL.GetError()}");
 
         SDL.GPUShaderFormat formats = SDL.GetGPUShaderFormats(Handle);
-        ShaderFormat = formats.HasFlag(SDL.GPUShaderFormat.SPIRV) ? SDL.GPUShaderFormat.SPIRV
-            : formats.HasFlag(SDL.GPUShaderFormat.DXIL) ? SDL.GPUShaderFormat.DXIL
-            : throw new InvalidOperationException($"the GPU device takes neither SPIR-V nor DXIL (formats: {formats}).");
+        if (formats.HasFlag(SDL.GPUShaderFormat.SPIRV))
+            ShaderFormat = SDL.GPUShaderFormat.SPIRV;
+        else if (formats.HasFlag(SDL.GPUShaderFormat.DXIL))
+            ShaderFormat = SDL.GPUShaderFormat.DXIL;
+        else
+            throw new InvalidOperationException($"the GPU device takes neither SPIR-V nor DXIL (formats: {formats}).");
+
         Driver = SDL.GetGPUDeviceDriver(Handle) ?? "?";
         uint deviceProps = SDL.GetGPUDeviceProperties(Handle);
         Name = deviceProps != 0 ? SDL.GetStringProperty(deviceProps, SDL.Props.GPUDeviceNameString, "?") : "?";
@@ -75,6 +79,7 @@ internal sealed class GpuDevice : IDisposable
 
         SDL.SetGPUAllowedFramesInFlight(Handle, FramesInFlight);
         Staging = new Staging(this);
+
         Debugging.Log.Info($"GPU device: {Name} ({Driver}), shaders {ShaderFormat}, depth {DepthFormat}, debug {debug}, on thread {_mainThread}.");
     }
 

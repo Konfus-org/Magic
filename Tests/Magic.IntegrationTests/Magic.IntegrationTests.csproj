@@ -17,8 +17,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- One fake renderer for both suites. -->
+    <!-- One fake renderer and one fake window for both suites. -->
     <Compile Include="..\Magic.UnitTests\Fakes\FakeRendering.cs" Link="Fakes\FakeRendering.cs" />
+    <Compile Include="..\Magic.UnitTests\Fakes\FakeWindows.cs" Link="Fakes\FakeWindows.cs" />
   </ItemGroup>
 
   <ItemGroup>

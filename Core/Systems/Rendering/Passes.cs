@@ -1,5 +1,6 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Utils;
 using System.Runtime.InteropServices;
@@ -8,115 +9,124 @@ using System.Text;
 namespace Magic.Systems.Rendering;
 
 /// <summary>
-/// The custom passes: every <c>.pass</c> file under a <c>Passes</c> folder of Resources or of the project's Assets,
-/// validated, compiled (on a worker; the pass is skipped until ready) and run in (stage, order, path) order after the scene.
-/// A pass is a fullscreen fragment shader or a compute shader with the pass contract of <c>Include/Pass.hlsli</c>: its
-/// inputs bound in order, its parameters packed after the frame constants, its output a named target (a new one is created,
-/// and made again when the pass changes its format; one it also reads is ping-ponged). Anything wrong disables the pass
-/// with one logged line and the reason.
+/// The custom passes: the <c>.pass</c> assets the cameras' <see cref="PostProcessing"/> components list, loaded while
+/// one lists them and unloaded when none does, validated, compiled (on a worker; the pass is skipped until ready) and
+/// run after the scene over each render target, in the order of its list. A pass is a fullscreen fragment shader or a
+/// compute shader with the pass contract of <c>Include/Pass.hlsli</c>: its inputs bound in order, its parameters packed
+/// after the frame constants, its output a named target (a new one is created, and made again when the pass changes its
+/// format; one it also reads is ping-ponged). A pass that is itself wrong (its file, its shader) is disabled with one
+/// logged line and the reason; one that does not fit the list it is in is skipped there, logged once per target.
 /// </summary>
 internal static class Passes
 {
     private const GpuTextureUsage OutputUsage = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite;
 
-    /// <summary>Lists every .pass file again; new ones are loaded, gone ones dropped, kept ones untouched.</summary>
-    public static void Discover(RenderContext ctx)
+    /// <summary>
+    /// Before a frame is planned: every pass a view lists is loaded (its compile started), and every loaded pass no view
+    /// lists any more is unloaded, its pipeline released.
+    /// </summary>
+    public static void Sync(RenderContext ctx, ReadOnlySpan<View> views)
     {
-        List<PassState> passes = ctx.Passes.States;
-        HashSet<ulong> seen = [];
-        foreach (string root in (ReadOnlySpan<string>)[ctx.Project.Resources, ctx.Project.Assets])
+        List<PassState> states = ctx.Passes.States;
+        HashSet<ulong> listed = ctx.Passes.Listed;
+        listed.Clear();
+        foreach (View view in views)
         {
-            string folder = Path.Combine(root, "Passes");
-            if (!ctx.Files.DirectoryExists(folder) || ctx.Files.ReadDirectoryRecursive(folder) is not { Ok: true } listing)
-                continue;
-
-            foreach (string file in listing.Payload)
+            PassList list = view.Passes;
+            ReadOnlySpan<Handle<Pass>> handles = list;
+            foreach (Handle<Pass> handle in handles[..list.Count])
             {
-                if (!file.EndsWith(".pass", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                Handle<Pass> handle = ctx.Assets.Find<Pass>(Path.GetRelativePath(root, file).Replace('\\', '/'));
-                if (handle.IsValid && seen.Add(handle.Id) && ctx.Passes.IndexOf(handle.Id) < 0)
+                if (listed.Add(handle.Id) && ctx.Passes.IndexOf(handle.Id) < 0)
                     Load(ctx, handle.Id);
             }
         }
 
-        for (int i = passes.Count - 1; i >= 0; i--)
+        for (int index = states.Count - 1; index >= 0; index--)
         {
-            if (seen.Contains(passes[i].Id))
+            if (listed.Contains(states[index].Id))
                 continue;
 
-            ctx.Gpu.Release(passes[i].Pipeline);
-            Debugging.Log.Info($"Pass {passes[i].Path} removed.");
-            passes.RemoveAt(i);
+            ctx.Gpu.Release(states[index].Pipeline);
+            Debugging.Log.Verbose($"Pass {states[index].Path} unloaded: no camera lists it.");
+            states.RemoveAt(index);
         }
-
-        passes.Sort(static (left, right) => left.Pass.Stage != right.Pass.Stage ? left.Pass.Stage.CompareTo(right.Pass.Stage)
-            : left.Pass.Order != right.Pass.Order ? left.Pass.Order.CompareTo(right.Pass.Order)
-            : string.CompareOrdinal(left.Path, right.Path));
-
-        StringBuilder listed = new();
-        foreach (PassState pass in passes)
-            listed.Append(listed.Length == 0 ? "" : ", ").Append(pass.Path).Append(" (").Append(pass.Pass.Stage).Append(pass.Pass.Enabled ? "" : ", disabled").Append(pass.Error is null ? "" : ", error").Append(')');
-        Debugging.Log.Verbose($"Passes: {(passes.Count == 0 ? "none" : listed)}.");
     }
 
     /// <summary>
-    /// Before a frame is recorded: gives every ready pass its output among the render target's textures (made, or made
-    /// again when the pass changed its format or scale, with a twin when the pass reads it too) and checks that its inputs
-    /// are targets by then. A pass that fails here is disabled, so recording only has to skip it.
+    /// Before a frame is recorded: adds the passes of <paramref name="list"/> that run over the render target this frame
+    /// to <paramref name="planned"/>, in order, each given its output among the target's textures (made, or made again
+    /// when the pass changed its format or scale, with a twin when the pass reads it too). A pass that is not ready is
+    /// left out, and so is one that does not fit the list: an input no earlier pass wrote, or an output an earlier pass
+    /// writes in another format or scale. The textures only passes that have left the list used are released.
     /// </summary>
-    public static void Prepare(RenderContext ctx, FrameTargets targets)
+    public static void Prepare(RenderContext ctx, FrameTargets targets, PassList list, List<PassState> planned)
     {
-        List<PassState> passes = ctx.Passes.States;
-        for (int index = 0; index < passes.Count; index++)
+        string? problem = null;
+        targets.ClearUse();
+        ReadOnlySpan<Handle<Pass>> handles = list;
+        foreach (Handle<Pass> handle in handles[..list.Count])
         {
-            PassState pass = passes[index];
+            PassState pass = ctx.Passes.States[ctx.Passes.IndexOf(handle.Id)];
             if (!pass.Ready)
                 continue;
 
-            if (Conflict(passes, index) is { } earlier)
+            FrameTargets.Target? output = targets.Get(pass.Pass.Output.Name);
+            bool differs = output is null || output.Format != pass.OutputFormat || output.Scale != pass.Pass.Output.Scale;
+            if (differs && output is { InUse: true })
             {
-                Disable(ctx, index, $"output {pass.Pass.Output.Name} is written by {earlier.Path} in another format or scale; a target has one of each.");
+                problem ??= $"{pass.Path}: output {pass.Pass.Output.Name} is written by an earlier pass in another format or scale; a target has one of each.";
                 continue;
             }
 
-            FrameTargets.Target? output = targets.Get(pass.Pass.Output.Name);
-            if (output is null || output.Format != pass.OutputFormat || output.Scale != pass.Pass.Output.Scale)
+            if (MissingInput(targets, pass) is { } input)
+            {
+                problem ??= $"{pass.Path}: input {input} is not a target by then; a pass earlier in the list has to write it.";
+                continue;
+            }
+
+            if (differs)
             {
                 output = targets.Define(ctx.Gpu, pass.Pass.Output.Name, pass.OutputFormat, OutputUsage, pass.Pass.Output.Scale);
                 targets.Ensure(ctx.Gpu, targets.Width, targets.Height);
             }
 
+            output!.InUse = true;
             if (pass.PingPong)
-                targets.TwinOf(ctx.Gpu, output);
-
-            foreach (string input in pass.Pass.Inputs)
             {
-                if (targets.Get(input) is { Texture.IsValid: true })
-                    continue;
-
-                Disable(ctx, index, $"input {input} is not a target of this frame (passes run in stage, order, path order).");
-                break;
+                targets.TwinOf(ctx.Gpu, output);
+                output.TwinInUse = true;
             }
+
+            planned.Add(pass);
         }
+
+        targets.ReleaseUnused(ctx.Gpu);
+        if (problem is not null && problem != targets.PassProblem)
+            Debugging.Log.Error($"Pass skipped for {targets.RenderTarget}: {problem}");
+
+        targets.PassProblem = problem;
     }
 
     /// <summary>
-    /// Records every ready, enabled pass over the render target's textures, as <see cref="Prepare"/> left them, in order,
+    /// Records <paramref name="passes"/> over the render target's textures, as <see cref="Prepare"/> left them, in order,
     /// with the target's first view's constants. Outside any pass. True when one of them wrote Ldr;
     /// <paramref name="dispatches"/> counts the compute ones. The only thing it changes is which of a ping-ponged
     /// target's two textures is the current one.
     /// </summary>
-    public static bool Record(RenderContext ctx, RenderCommands commands, FrameTargets targets, in FrameConstants frame, ref int draws, ref int dispatches)
+    public static bool Record(
+        RenderContext ctx,
+        RenderCommands commands,
+        FrameTargets targets,
+        ReadOnlySpan<PassState> passes,
+        in FrameConstants frame,
+        ref int draws,
+        ref int dispatches)
     {
         bool wroteLdr = false;
         Span<GpuBinding> bindings = stackalloc GpuBinding[PassTable.MaxInputs];
-        foreach (PassState pass in ctx.Passes.States)
+        foreach (PassState pass in passes)
         {
-            if (!pass.Ready || targets.Get(pass.Pass.Output.Name) is not { } output)
-                continue;
-
+            FrameTargets.Target output = targets.Get(pass.Pass.Output.Name)!;
             Span<GpuBinding> inputs = bindings[..pass.Pass.Inputs.Length];
             for (int i = 0; i < inputs.Length; i++)
             {
@@ -300,17 +310,18 @@ internal static class Passes
         }
     }
 
-    /// <summary>An earlier ready pass that writes the same output as pass <paramref name="index"/> in another format or scale.</summary>
-    private static PassState? Conflict(List<PassState> passes, int index)
+    /// <summary>
+    /// The first input of <paramref name="pass"/> that is not a target yet: neither one of the engine's (Hdr, Ldr, Depth)
+    /// nor written by a pass earlier in this frame's list. Null when it has them all.
+    /// </summary>
+    private static string? MissingInput(FrameTargets targets, PassState pass)
     {
-        PassState pass = passes[index];
-        for (int i = 0; i < index; i++)
+        foreach (string input in pass.Pass.Inputs)
         {
-            PassState earlier = passes[i];
-            if (earlier.Ready
-                && string.Equals(earlier.Pass.Output.Name, pass.Pass.Output.Name, StringComparison.OrdinalIgnoreCase)
-                && (earlier.OutputFormat != pass.OutputFormat || earlier.Pass.Output.Scale != pass.Pass.Output.Scale))
-                return earlier;
+            FrameTargets.Target? target = targets.Get(input);
+            bool builtIn = target is not null && (target == targets.Hdr || target == targets.Ldr || target == targets.Depth);
+            if (target is null || !(builtIn || target.InUse))
+                return input;
         }
 
         return null;

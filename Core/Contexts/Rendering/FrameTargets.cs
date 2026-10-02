@@ -6,9 +6,10 @@ namespace Magic.Contexts.Rendering;
 
 /// <summary>
 /// The textures one <see cref="RenderTarget"/> is drawn through, sized to it (a window's pixels, a render texture's
-/// size) and made again when that changes. The frame renders into <c>Hdr</c> with <c>Depth</c>, the tonemap pass writes
-/// <c>Ldr</c> (what a screenshot reads back), and presenting blits it to the window's swapchain or into the render
-/// texture's pool layer. A data pass may add targets of its own by name.
+/// size) and made again when that changes. The frame renders into <c>Hdr</c> with <c>Depth</c>, the passes end in
+/// <c>Ldr</c> (the tonemap writes it; without one <c>Hdr</c> is copied into it, so it is always what was shown and what
+/// a screenshot reads back), and presenting blits it to the window's swapchain or into the render texture's pool
+/// layer. A data pass may add targets of its own by name; they last while a listed pass writes them.
 /// </summary>
 internal sealed class FrameTargets
 {
@@ -38,6 +39,12 @@ internal sealed class FrameTargets
     public Target Ldr { get; }
 
     public Target Depth { get; }
+
+    /// <summary>What is wrong with the passes listed for this target, as last logged; null when nothing is.</summary>
+    public string? PassProblem { get; set; }
+
+    /// <summary>The cameras drawing into this target listed different passes last frame, which was warned about.</summary>
+    public bool MixedPassLists { get; set; }
 
     /// <summary>The texture format a pass output is: the engine's own for Hdr and Ldr, else what the pass asks for.</summary>
     public static GpuFormat Format(PassOutput output)
@@ -123,6 +130,35 @@ internal sealed class FrameTargets
         return target.Twin;
     }
 
+    /// <summary>Before this frame's passes take their outputs: no target is in use by one yet.</summary>
+    public void ClearUse()
+    {
+        foreach (Target target in _targets.Values)
+            target.InUse = target.TwinInUse = false;
+    }
+
+    /// <summary>
+    /// After this frame's passes took their outputs: the targets passes made that none writes any more go, and so do
+    /// the twins no pass writes into, so a pass taken off the list leaves no texture behind.
+    /// </summary>
+    public void ReleaseUnused(IRendering gpu)
+    {
+        foreach ((string name, Target target) in _targets)
+        {
+            if (!target.TwinInUse && target.Twin.IsValid)
+            {
+                gpu.Release(target.Twin);
+                target.Twin = default;
+            }
+
+            if (target.InUse || target == Hdr || target == Ldr || target == Depth)
+                continue;
+
+            ReleaseTextures(gpu, target);
+            _targets.Remove(name); // removing while enumerating a Dictionary is allowed
+        }
+    }
+
     public void Release(IRendering gpu)
     {
         foreach (Target target in _targets.Values)
@@ -160,5 +196,11 @@ internal sealed class FrameTargets
         public uint Height { get; set; }
 
         public bool IsDepth { get; set; }
+
+        /// <summary>A pass of this frame writes it.</summary>
+        public bool InUse { get; set; }
+
+        /// <summary>A pass of this frame reads and writes it, so it needs its <see cref="Twin"/>.</summary>
+        public bool TwinInUse { get; set; }
     }
 }

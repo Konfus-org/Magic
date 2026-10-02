@@ -1,7 +1,5 @@
 {
     "shader": { "id": 10020 },
-    "stage": "before_tonemap",
-    "order": 1000,
     "inputs": [ "Hdr" ],
     "output": { "name": "Ldr" },
     "params": { "exposure": { "x": 1.0 } }

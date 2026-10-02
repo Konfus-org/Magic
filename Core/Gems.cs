@@ -18,7 +18,9 @@ namespace Magic;
 /// (<c>GemStatic</c>, <c>GemDependsOn</c>, see Directory.Build.props). The class is constructed once, its constructor
 /// parameters taken from the <see cref="Container"/>, and put in the container under every Core interface it
 /// implements. What its constructor needs is what it depends on: gems load after whatever provides that, and unload
-/// before it. A static gem is never unloaded before shutdown, and neither is anything it depends on. Whatever a gem
+/// before it. A static gem is never unloaded before shutdown, and neither is anything it depends on, nor a gem that
+/// provides a service the Core systems keep (<see cref="CoreServices"/>): a change to one is warned about and needs a
+/// restart. Whatever a gem
 /// takes from a host service (an event watch, an ECS query) the gem disposes in its own Dispose: the host tracks none
 /// of it, and a handle left behind keeps the old assembly alive after a reload.</para>
 ///
@@ -39,6 +41,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     internal const string Default = "default";
 
     private static readonly Assembly Host = typeof(IGem).Assembly;
+
+    /// <summary>The services the Core systems are constructed with and keep: a gem providing one cannot be reloaded, static or not.</summary>
+    private static readonly Type[] CoreServices = [typeof(IEcs), typeof(IInput), typeof(IWindowRegistry), typeof(IRendering)];
 
     /// <summary>The configuration the host was built in (Debug, Release...), which is a folder of a project's build output.</summary>
     private static readonly string Configuration = Host.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "";
@@ -369,7 +374,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             return;
         }
 
-        if (WithDependents(gem, "reloading") is not { } group)
+        if (WithDependents(gem) is not { } group)
             return;
 
         Dictionary<string, byte[]> state = [];
@@ -395,7 +400,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// <summary>Unloads the gem at <paramref name="path"/> and everything depending on it, dependents first.</summary>
     private void Unload(string path)
     {
-        if (Find(path) is not { } gem || WithDependents(gem, "unloading") is not { } group)
+        if (Find(path) is not { } gem || WithDependents(gem) is not { } group)
             return;
 
         foreach (Gem member in group.AsEnumerable().Reverse())
@@ -449,9 +454,10 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
     /// <summary>
     /// <paramref name="gem"/> and every gem that (transitively) needs something it provides or names it in
-    /// GemDependsOn, in load order; or null, logged, when one of them is static and so cannot go.
+    /// GemDependsOn, in load order; or null, warned about, when one of them cannot go: it provides a service the Core
+    /// systems keep, or is static.
     /// </summary>
-    private List<Gem>? WithDependents(Gem gem, string action)
+    private List<Gem>? WithDependents(Gem gem)
     {
         HashSet<Gem> group = [gem];
         for (bool grew = true; grew;)
@@ -464,10 +470,15 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             }
         }
 
-        if (group.FirstOrDefault(member => member.IsStatic) is { } pinned)
+        // The changed gem's own reason first, then a dependent's.
+        Gem? pinned = new[] { gem }.Concat(group).FirstOrDefault(member => member.IsStatic || member.Provides.Overlaps(CoreServices));
+        if (pinned is not null)
         {
             string who = pinned == gem ? "it" : $"{pinned.Name}, which depends on it,";
-            Debugging.Log.Warn($"Not {action} {gem.Path}: {who} is static. Restart to apply the change.");
+            string why = pinned.Provides.Overlaps(CoreServices)
+                ? $"cannot be reloaded because {who} provides core services ({string.Join(", ", pinned.Provides.Intersect(CoreServices).Select(service => service.Name))})"
+                : $"will not be reloaded because {who} is marked as static";
+            Debugging.Log.Warn($"{gem.Name} has changed but {why}. A restart is required to see changes.");
             return null;
         }
 

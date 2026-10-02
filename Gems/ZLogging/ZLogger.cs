@@ -2,7 +2,11 @@ using IGem = Magic.Interfaces.IGem;
 using Magic.Services;
 using Microsoft.Extensions.Logging;
 using ZLogger;
+
+#if RELEASE
 using ZLogger.Providers;
+#endif
+
 using IMagicLogger = Magic.Interfaces.ILogger;
 using MagicLogLevel = Magic.Interfaces.LogLevel;
 

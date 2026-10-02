@@ -37,6 +37,7 @@ internal sealed class SdlRendering : IGem, IRendering
     private readonly List<Transfer> _transfers = [];              // queued uploads and copies, in call order
     private readonly List<(GpuDevice.Kind Kind, uint Id)> _releasing = []; // released since the last submit
     private readonly Dictionary<uint, (nint Texture, uint Width, uint Height)> _swapchains = []; // this submit's images
+    private readonly Dictionary<uint, GpuTexture> _presented = [];  // by window, the texture last blitted onto it
 
     public SdlRendering(Project project, IFileSystem files)
     {
@@ -292,6 +293,7 @@ internal sealed class SdlRendering : IGem, IRendering
         _swapchains.Clear();
         commands.Clear();
         FreeReleased();
+
         return (float)Stopwatch.GetElapsedTime(0, waited).TotalMilliseconds;
     }
 
@@ -315,7 +317,9 @@ internal sealed class SdlRendering : IGem, IRendering
 
     public Result<CapturedFrame> Read(GpuTexture texture)
     {
-        if (!texture.IsValid || texture.IsWindow)
+        if (texture.IsWindow && !_presented.TryGetValue(texture.WindowHandle, out texture))
+            return Result<CapturedFrame>.Failure("nothing has been shown in the window yet.");
+        if (!texture.IsValid)
             return Result<CapturedFrame>.Failure("only a texture made by the renderer can be read back.");
 
         TextureObject stored = _textures[texture.Id];
@@ -381,7 +385,11 @@ internal sealed class SdlRendering : IGem, IRendering
                     SDL.GPUTextureLocation source = new() { Texture = from.Texture, MipLevel = from.MipLevel, Layer = from.Layer, X = from.X, Y = from.Y };
                     SDL.GPUTextureLocation destination = new()
                     {
-                        Texture = _textures[transfer.Region.Texture.Id].Handle, MipLevel = transfer.Region.Level, Layer = transfer.Region.Layer, X = transfer.Region.X, Y = transfer.Region.Y,
+                        Texture = _textures[transfer.Region.Texture.Id].Handle,
+                        MipLevel = transfer.Region.Level,
+                        Layer = transfer.Region.Layer,
+                        X = transfer.Region.X,
+                        Y = transfer.Region.Y,
                     };
                     SDL.CopyGPUTextureToTexture(copyPass, in source, in destination, from.W, from.H, 1, false);
                     break;
@@ -603,6 +611,8 @@ internal sealed class SdlRendering : IGem, IRendering
                         Filter = SDL.GPUFilter.Linear,
                     };
                     SDL.BlitGPUTexture(commandBuffer, in blit);
+                    if (to.Texture.IsWindow)
+                        _presented[to.Texture.WindowHandle] = command.Texture;
                     break;
                 }
             }
@@ -652,6 +662,13 @@ internal sealed class SdlRendering : IGem, IRendering
                     break;
                 case GpuDevice.Kind.Texture:
                     Gpu.Defer(kind, _textures.Free(id).Handle);
+
+                    // The id is used again: a window that showed this texture has nothing to read back until the next blit.
+                    foreach ((uint window, GpuTexture shown) in _presented)
+                    {
+                        if (shown.Id == id)
+                            _presented.Remove(window); // removing while enumerating a Dictionary is allowed
+                    }
                     break;
                 case GpuDevice.Kind.Sampler:
                     Gpu.Defer(kind, _samplers.Free(id));

@@ -21,10 +21,9 @@ namespace Magic.Systems.Rendering;
 /// <see cref="WorldTransform"/> and no <see cref="RenderInstance"/> yet is registered, the ones whose
 /// <see cref="Renderer"/> went away are forgotten and the ones set again are registered again, both told by observers so
 /// nothing is swept, and the non-static ones give their world matrices); what changed is uploaded; the frame is planned;
-/// and the plan is recorded into <see cref="Frame.Commands"/>. Then the gems loaded after the ECS may add their own
-/// commands on top in their Render hook, the host submits the list, and <see cref="Finish"/> takes the timings. The
-/// renderer lives in a reloadable gem, so the frame loop sets <see cref="Renderer"/> at the top of every frame: a
-/// different one gets a new context, so every <see cref="RenderInstance"/> is stale and is dropped to be registered again.
+/// and the plan is recorded into <see cref="Frame.DrawCommands"/>. Then the gems loaded after the ECS may add their own
+/// commands on top in their Render hook and the host submits the list, leaving how long that took on it for the next
+/// frame's <see cref="Stats"/>. The renderer gem is static, so the one given here is kept; without one nothing is drawn.
 /// </summary>
 internal sealed class RenderSystem : ISystem
 {
@@ -33,6 +32,7 @@ internal sealed class RenderSystem : ISystem
     private readonly IFileSystem _files;
     private readonly Project _project;
     private readonly IWindowRegistry? _windows;
+    private readonly IRendering? _rendering;
     private readonly IEcsQuery<Renderer, WorldTransform> _unregistered;
     private readonly IEcsQuery<WorldTransform, RenderInstance> _movable;
     private readonly IEcsQuery<RenderInstance> _allInstances;
@@ -61,18 +61,16 @@ internal sealed class RenderSystem : ISystem
     private readonly QueryChunkAction<PointLight, WorldTransform> _collectPoints;
     private readonly QueryChunkAction<SpotLight, WorldTransform> _collectSpots;
 
-    private IRendering? _lastRendering; // the one the context was built for
-    private float _recordMs;
-    private (int Draws, int Dispatches) _recorded;
-    private BuiltWith _builtWith;
+    private BuiltWith? _builtWith; // null until the first run
 
-    public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, IWindowRegistry? windows)
+    public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, IWindowRegistry? windows, IRendering? rendering)
     {
         _ecs = ecs;
         _assets = assets;
         _files = files;
         _project = project;
         _windows = windows;
+        _rendering = rendering;
         _unregistered = ecs.Query<Renderer, WorldTransform>().Without<RenderInstance>().Build();
         _movable = ecs.Query<WorldTransform, RenderInstance>().Build();
         _allInstances = ecs.Query<RenderInstance>().Build();
@@ -105,13 +103,10 @@ internal sealed class RenderSystem : ISystem
 
     public UpdateType Phase => UpdateType.Render;
 
-    /// <summary>The loaded renderer, set by the frame loop before the systems run; null when no gem provides one.</summary>
-    public IRendering? Renderer { get; set; }
-
     /// <summary>What the last frame did; default when there is no renderer.</summary>
     public RenderStats Stats { get; private set; }
 
-    /// <summary>Milliseconds the last frame spent syncing the entities in, and recording and submitting.</summary>
+    /// <summary>Milliseconds the last frame spent syncing the entities in, and recording plus the submit before it.</summary>
     public float SyncMs { get; private set; }
 
     public float RenderMs { get; private set; }
@@ -121,16 +116,21 @@ internal sealed class RenderSystem : ISystem
 
     /// <summary>
     /// Syncs the entities into the render state and records the scene into <paramref name="frame"/>'s commands, drawing into
-    /// the windows of the <see cref="IWindowRegistry"/>. No <see cref="Renderer"/> does nothing.
+    /// the windows of the <see cref="IWindowRegistry"/>. Without a renderer it does nothing.
     /// </summary>
     public void Run(in Frame frame)
     {
         long started = Stopwatch.GetTimestamp();
-        if (!ReferenceEquals(Renderer, _lastRendering) || _builtWith != BuiltWith.From(_project.Settings.Render))
-            RebuildContext(Renderer);
+        if (_builtWith != BuiltWith.From(_project.Settings.Render))
+            RebuildContext();
 
         if (Context is not { } ctx)
             return;
+
+        // The previous frame was submitted and nothing of this one is uploaded yet: in a debugging renderer, the periodic
+        // culling check of what it drew.
+        if (ctx.Gpu.Debug && frame.Number % RenderChecks.VerifyEveryFrames == 0 && _plan.Views.Count > 0)
+            RenderChecks.Verify(ctx, _plan.Views[0].Buffers, _plan.Views[0].Constants);
 
         // Reload: what changed on disk, and the compiles that finished.
         ApplyAssetChanges(ctx, frame.Events.Span);
@@ -161,57 +161,36 @@ internal sealed class RenderSystem : ISystem
 
         // Plan, then record: the plan is everything the commands are made from.
         Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), LightingConstants.From(CollectionsMarshal.AsSpan(_lights)), (float)frame.Time);
-        _recorded = Scene.Record(ctx, frame.Commands, _plan);
-        _recordMs = (float)Stopwatch.GetElapsedTime(recording).TotalMilliseconds;
-    }
+        (int draws, int dispatches) = Scene.Record(ctx, frame.DrawCommands, _plan);
+        float recordMs = (float)Stopwatch.GetElapsedTime(recording).TotalMilliseconds;
 
-    /// <summary>
-    /// The frame's commands were submitted, which took <paramref name="submitMs"/>, <paramref name="waitMs"/> of it
-    /// blocked on the GPU: the stats of the frame, and in a debugging renderer the periodic culling check.
-    /// </summary>
-    public void Finish(in Frame frame, float submitMs, float waitMs)
-    {
-        if (Context is not { } ctx)
-            return;
-
-        RenderMs = _recordMs + submitMs;
+        // The host submits after this, so the submit and the wait in the stats are the previous frame's.
+        float waitMs = frame.DrawCommands.WaitMs;
+        RenderMs = recordMs + frame.DrawCommands.SubmitMs;
         Stats = new RenderStats(
-            ctx.Instances.Alive, (uint)_recorded.Draws, (uint)_recorded.Dispatches, (uint)ctx.Pipelines.Pending,
+            ctx.Instances.Alive, (uint)draws, (uint)dispatches, (uint)ctx.Pipelines.Pending,
             (uint)ctx.Meshes.Count, (uint)ctx.Textures.Resident, SyncMs, RenderMs - waitMs, waitMs);
-
-        if (ctx.Gpu.Debug && frame.Number % RenderChecks.VerifyEveryFrames == 0 && _plan.Views.Count > 0)
-            RenderChecks.Verify(ctx, _plan.Views[0].Buffers, _plan.Views[0].Constants);
-    }
-
-    /// <summary>What the target's last frame looked like, before anything the gems drew over it; failed, with why, when there is none.</summary>
-    public Result<CapturedFrame> Capture(RenderTarget target)
-    {
-        if (Context is null || !Context.Targets.TryGetValue(target, out FrameTargets? targets) || !targets.Ldr.Texture.IsValid)
-            return Result<CapturedFrame>.Failure($"nothing has been drawn into {target} yet.");
-
-        return Context.Gpu.Read(targets.Ldr.Texture);
     }
 
     /// <summary>
-    /// A different renderer (a reload, or none), or render settings a context is built from: every instance registered
-    /// with the old context is stale, and the old context goes (its handles belonged to the old renderer, which released
-    /// them). The renderer gets a context of its own; one whose built-in shaders do not compile draws nothing, logged once.
+    /// The first run, or render settings a context is built from changed: every instance registered with the old
+    /// context is stale, and the old context goes. A renderer whose built-in shaders do not compile draws nothing,
+    /// logged once.
     /// </summary>
-    private void RebuildContext(IRendering? rendering)
+    private void RebuildContext()
     {
-        if (ReferenceEquals(rendering, _lastRendering) && rendering is not null)
+        if (_builtWith is not null)
             Debugging.Log.Info("Render settings changed: the render state is built again.");
 
         StripInstances();
-        _lastRendering = rendering;
         Context = null;
         Stats = default;
         _plan.Clear();
-        if (rendering is not null)
+        if (_rendering is not null)
         {
             try
             {
-                Context = CreateContext(rendering, _assets, _files, _project);
+                Context = CreateContext(_rendering, _assets, _files, _project);
             }
             catch (InvalidOperationException ex)
             {
@@ -276,38 +255,22 @@ internal sealed class RenderSystem : ISystem
         if (gpu.Debug)
             RenderChecks.RunProbes(ctx);
 
-        Passes.Discover(ctx);
         return ctx;
     }
 
     /// <summary>
     /// Asset hot reload for the render state, before anything is recorded. Changed shaders drop everything built on them:
-    /// pipelines recompile and materials repack; materials and textures reload; passes follow their files and shaders, and
-    /// are listed again when files came, went or moved. When a material's class changed, every instance re-reads its class.
+    /// pipelines recompile and materials repack; materials and textures reload; the loaded passes follow their files and
+    /// shaders. When a material's class changed, every instance re-reads its class.
     /// </summary>
     private static void ApplyAssetChanges(RenderContext ctx, ReadOnlySpan<Event> events)
     {
         HashSet<ulong>? changed = null;
-        bool rediscover = false;
         foreach (Event change in events)
         {
-            switch (change.Type)
-            {
-                case EventType.AssetAdded:
-                    (changed ??= []).Add(change.Id);
-                    rediscover = true;
-                    break;
-                case EventType.AssetModified:
-                    (changed ??= []).Add(change.Id);
-                    break;
-                case EventType.AssetMoved or EventType.AssetRemoved:
-                    rediscover = true;
-                    break;
-            }
+            if (change.Type is EventType.AssetAdded or EventType.AssetModified)
+                (changed ??= []).Add(change.Id);
         }
-
-        if (rediscover)
-            Passes.Discover(ctx);
 
         if (changed is null)
             return;
@@ -447,7 +410,10 @@ internal sealed class RenderSystem : ISystem
     private void CollectViews(ReadOnlySpan<Handle> entities, Span<Camera> cameras, Span<WorldTransform> worlds)
     {
         for (int i = 0; i < cameras.Length; i++)
-            _views.Add(new View(cameras[i], worlds[i].Value));
+        {
+            PassList passes = _ecs.TryGet<PostProcessing>(entities[i], out PostProcessing postProcessing) ? postProcessing.Passes : default;
+            _views.Add(new View(cameras[i], worlds[i].Value, passes));
+        }
     }
 
     private void CollectDirectional(ReadOnlySpan<Handle> entities, Span<DirectionalLight> lights, Span<WorldTransform> worlds)

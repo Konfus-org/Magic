@@ -153,3 +153,17 @@ float4 main(PassVaryings input) : SV_Target0
 ```
 
 Each input named in the `.pass` file arrives as a `Texture2D` with a `<Name>Sampler`.
+
+A pass runs only where a camera lists it: the camera's entity carries a `PostProcessing` component whose `passes`
+are applied in the order written, over the whole render target the camera draws into.
+
+```json
+"Camera": {},
+"PostProcessing": { "passes": [ { "id": 10030 }, { "id": 10031 } ] }
+```
+
+- Nothing is implied, the tonemap included: a camera without the component shows the linear scene.
+- Up to 8 passes per camera. When several cameras share a render target (split screen), the first camera that
+  lists any decides for the target.
+- A pass is loaded while some camera lists it and unloaded, with the targets it made, when none does.
+- An input must be `Hdr`, `Ldr`, `Depth` or the output of a pass earlier in the same list.

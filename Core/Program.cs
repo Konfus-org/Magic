@@ -4,11 +4,10 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
-using Magic.Systems.DebugUI;
-using Magic.Systems.Rendering;
-using Magic.Systems.Streaming;
+using Magic.Systems;
 using Magic.Utils;
 using System.Diagnostics;
 using System.Reflection;
@@ -85,7 +84,9 @@ internal static class Program
             using Gems gems = new(container, files, events);
             gems.Load(project.EngineGems, project.Gems, project.Root);
 
-            using CoreSystems? core = CreateSystems(container.Get<IEcs>(), container.Get<IInput>(), container.Get<IWindowRegistry>(), scheduler, assets, files, project, container); // disposed before the gems go
+            // The renderer gem is static, so the one loaded now is the run's; null when no gem provides one.
+            IRendering? rendering = container.Get<IRendering>();
+            using CoreSystems? systems = CoreSystems.Create(container.Get<IEcs>(), container.Get<IInput>(), container.Get<IWindowRegistry>(), rendering, scheduler, assets, files, project, container); // disposed before the gems go
 
             if (!TryOpenMainWindow(options, container.Get<IWindowFactory>(), project, out IWindow? mainWindow))
                 return 1;
@@ -93,7 +94,7 @@ internal static class Program
 
             OpenEntryPoint(options, project, assets, world);
 
-            MainLoop(options, new Engine(container, files, project, events, assets, gems, scheduler, core, mainWindow, new RenderCommands()), shutdown.Token);
+            MainLoop(options, new Engine(files, project, events, assets, gems, scheduler, rendering, mainWindow, new RenderCommands()), shutdown.Token);
 
             return ExitCode(options);
         }
@@ -102,33 +103,6 @@ internal static class Program
             Fail($"Exception occurred, crashing...\nException:\n{ex}");
             return 1;
         }
-    }
-
-    /// <summary>
-    /// The host's own systems, once the gems are loaded, added to the scheduler in the order they run within a phase.
-    /// They need the ECS gem; without one there are none. The ECS, input and windowing gems are static, so the systems
-    /// keep what they are given here (null when no gem provides it); the renderer lives in a reloadable gem, so
-    /// <see cref="Step"/> hands the render system the loaded one every frame.
-    /// </summary>
-    private static CoreSystems? CreateSystems(IEcs? ecs, IInput? input, IWindowRegistry? windows, Scheduler scheduler, Assets assets, IFileSystem files, Project project, Container container)
-    {
-        if (ecs is null)
-        {
-            Debugging.Log.Warn("No loaded gem provides IEcs: nothing will be streamed, transformed or rendered.");
-            return null;
-        }
-
-        ScriptSystem scripts = new(ecs, assets, scheduler, container); // its later phases' hooks go on the schedule here, ahead of transforms and rendering
-        StreamingSystem streaming = new(ecs, assets, project, scripts);
-        TransformSystem transforms = new(ecs);
-        RenderSystem rendering = new(ecs, assets, files, project, windows);
-        ConsoleSystem console = new(input);
-        SettingsSystem settings = new(project.Settings, input);
-        DebuggerDisplaySystem debugger = new(transforms, rendering, streaming, assets, input);
-
-        ISystem[] systems = [console, settings, streaming, scripts, debugger, transforms, rendering];
-
-        return new CoreSystems(console, settings, streaming, scripts, transforms, rendering, debugger, [.. systems.Select(system => scheduler.Add(ecs, system))]);
     }
 
     /// <summary>Opens the domain to start in: --entry-point, else the project's entry point. It is spawned in the first frame.</summary>
@@ -310,7 +284,7 @@ internal static class Program
             // End of frame: whatever the renderer presented this frame is what a screenshot shows.
             if (screenshotsLeft > 0 && number >= nextScreenshot && engine.MainWindow is not null)
             {
-                Screenshot(engine.Core?.Rendering, engine.Files, engine.Project, engine.MainWindow.Handle, number);
+                Screenshot(engine.Rendering, engine.Files, engine.Project, engine.MainWindow, number);
                 screenshotsLeft--;
                 nextScreenshot += options.ScreenshotInterval;
             }
@@ -336,15 +310,9 @@ internal static class Program
 
         engine.Gems.ProcessChanges();
         engine.Assets.ProcessChanges();
-        Frame frame = new(number, time, delta, engine.Events.NextFrame(), engine.Commands);
+        Frame frame = new(number, time, delta, engine.Events.NextFrame(), engine.DrawCommands);
         IGem[] gems = engine.Gems.Loaded;
-        CoreSystems? core = engine.Core;
         engine.Scheduler.SetFrame(frame);
-
-        // Gems only change in ProcessChanges, so the renderer loaded now is the frame's.
-        IRendering? rendering = engine.Container.Get<IRendering>();
-        if (core is not null)
-            core.Rendering.Renderer = rendering;
         long afterChanges = Stopwatch.GetTimestamp();
 
         foreach (IGem gem in gems)
@@ -370,16 +338,15 @@ internal static class Program
             gem.Render(frame);
 
         // Without a renderer nothing runs the commands, and without the Core systems nothing recorded a scene, but a gem
-        // may still have drawn: its commands still go.
+        // may still have drawn: its commands still go. How long it took stays on the list, for the next frame's stats.
         long submitting = Stopwatch.GetTimestamp();
-        float waitMs = 0f;
-        if (rendering is not null)
-            waitMs = rendering.Submit(frame.Commands);
+        RenderCommands commands = frame.DrawCommands;
+        if (engine.Rendering is not null)
+            commands.WaitMs = engine.Rendering.Submit(commands);
         else
-            frame.Commands.Clear();
+            commands.Clear();
         long finished = Stopwatch.GetTimestamp();
-
-        core?.Rendering.Finish(frame, (float)Ms(submitting, finished), waitMs);
+        commands.SubmitMs = (float)Ms(submitting, finished);
 
         // A slow frame says where it went, at most every few seconds.
         double totalMs = Stopwatch.GetElapsedTime(started, finished).TotalMilliseconds;
@@ -420,70 +387,35 @@ internal static class Program
         return 1;
     }
 
-    /// <summary>Captures the window's last frame and writes it to <see cref="Project.Screenshots"/>. Every failure is logged as an error: a screenshot that was asked for and not taken is a failed run.</summary>
-    private static void Screenshot(RenderSystem? rendering, IFileSystem files, Project project, uint window, long frame)
+    /// <summary>Writes what the window last showed to <see cref="Project.Screenshots"/>. Every failure is logged as an error: a screenshot that was asked for and not taken is a failed run.</summary>
+    private static void Screenshot(IRendering? rendering, IFileSystem files, Project project, IWindow window, long frame)
     {
         if (rendering is null)
         {
-            Debugging.Log.Error($"Screenshot at frame {frame} skipped: nothing is rendered without an ECS.");
-            return;
-        }
-
-        Result<CapturedFrame> captured = rendering.Capture(RenderTarget.Of(window));
-        if (captured.Failed)
-        {
-            Debugging.Log.Error($"Screenshot at frame {frame} failed: {captured.Message}");
+            Debugging.Log.Error($"Screenshot at frame {frame} skipped: no loaded gem provides {nameof(IRendering)}.");
             return;
         }
 
         string path = files.Combine(Project.Screenshots, $"{project.Name}_{frame:D6}.png");
-        byte[] png = Png.Encode(captured.Payload.Width, captured.Payload.Height, captured.Payload.Pixels);
-        Result written = files.WriteBinary(path, png);
-        if (written.Failed)
+        Result taken = rendering.Screenshot(window, files, path);
+        if (taken.Failed)
         {
-            Debugging.Log.Error($"Screenshot at frame {frame} could not be written to {path}: {written.Message}");
+            Debugging.Log.Error($"Screenshot at frame {frame} failed: {taken.Message}");
             return;
         }
 
-        Debugging.Log.Info($"Screenshot at frame {frame}: {path} ({captured.Payload.Width}x{captured.Payload.Height}).");
+        Debugging.Log.Info($"Screenshot at frame {frame}: {path}.");
     }
 
     /// <summary>Everything a frame needs, built once by <see cref="Run"/> and disposed with it.</summary>
     private readonly record struct Engine(
-        Container Container,
         IFileSystem Files,
         Project Project,
         Events Events,
         Assets Assets,
         Gems Gems,
         Scheduler Scheduler,
-        CoreSystems? Core,
+        IRendering? Rendering,
         IWindow? MainWindow,
-        RenderCommands Commands);
-
-    /// <summary>The host's own systems and their places on the schedule, which go first; then the systems, newest first.</summary>
-    private sealed record CoreSystems(
-        ConsoleSystem Console,
-        SettingsSystem Settings,
-        StreamingSystem Streaming,
-        ScriptSystem Scripts,
-        TransformSystem Transforms,
-        RenderSystem Rendering,
-        DebuggerDisplaySystem Debugger,
-        IDisposable[] Scheduled) : IDisposable
-    {
-        public void Dispose()
-        {
-            foreach (IDisposable scheduled in Scheduled)
-                scheduled.Dispose();
-
-            Rendering.Dispose();
-            Transforms.Dispose();
-            Scripts.Dispose(); // before streaming destroys the entities under them
-            Streaming.Dispose();
-            Debugger.Dispose();
-            Settings.Dispose();
-            Console.Dispose();
-        }
-    }
+        RenderCommands DrawCommands);
 }

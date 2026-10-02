@@ -139,7 +139,7 @@ internal sealed class ScriptSystem : ISystem
                 catch (Exception ex) when (ex is not OutOfMemoryException)
                 {
                     // Said once: the script is ended rather than left to throw every frame.
-                    Debugging.Log.Error($"Script {behavior.GetType().Name} threw in {phase} and was stopped. {ex}");
+                    Debugging.Log.Error($"Script {behavior.GetType().Name} threw in {phase}. {ex}");
                     _faulted.Add(attached);
                 }
             }

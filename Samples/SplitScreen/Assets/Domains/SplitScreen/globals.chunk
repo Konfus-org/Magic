@@ -32,7 +32,8 @@
         },
         "Camera": {
           "viewport": "top_half"
-        }
+        },
+        "PostProcessing": { "passes": [ { "id": 10030 } ] }
       }
     },
     {
@@ -58,7 +59,8 @@
         },
         "Camera": {
           "viewport": "bottom_half"
-        }
+        },
+        "PostProcessing": { "passes": [ { "id": 10030 } ] }
       }
     },
     {

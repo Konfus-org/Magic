@@ -37,6 +37,7 @@
 
   <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
   <PropertyGroup>
+    <GemStatic>true</GemStatic>
     <GemDependsOn>SDL;SDLWindowing</GemDependsOn>
     <Description>SDL GPU renderer.</Description>
     <Authors>Konfus</Authors>

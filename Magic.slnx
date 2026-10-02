@@ -7,12 +7,13 @@
   <Folder Name="/Gems/">
     <Project Path="Gems/AssimpModels/AssimpModels.csproj" />
     <Project Path="Gems/CSharpScripting/CSharpScripting.csproj" />
+    <Project Path="Gems/DefaultCheats/DefaultCheats.csproj" Id="45ab667a-667c-4ea8-bc5b-72d5108546f3" />
     <Project Path="Gems/FlecsEcs/FlecsEcs.csproj" />
     <Project Path="Gems/ImGuiOverlay/ImGuiOverlay.csproj" />
-    <Project Path="Gems/SDLRender/SDLRender.csproj" />
     <Project Path="Gems/SDL/SDL.csproj" Id="dc93ae9f-b3ed-4220-b9eb-a7bf52ec8d68" />
     <Project Path="Gems/SDLImage/SDLImage.csproj" />
     <Project Path="Gems/SDLInput/SDLInput.csproj" />
+    <Project Path="Gems/SDLRender/SDLRender.csproj" />
     <Project Path="Gems/SDLTtf/SDLTtf.csproj" />
     <Project Path="Gems/SDLWindowing/SDLWindowing.csproj" />
     <Project Path="Gems/ZLogging/ZLogging.csproj" Id="a585cf9f-0774-4b62-b353-838c1bf1c5a2" />

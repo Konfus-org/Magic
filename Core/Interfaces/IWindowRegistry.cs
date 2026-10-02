@@ -3,8 +3,7 @@ namespace Magic.Interfaces;
 /// <summary>
 /// The windows that are open right now, exported by the windowing gem next to <see cref="IWindowFactory"/>.
 /// A renderer resolves the window a camera targets through this, by the handle the camera's render target
-/// carries: it never receives a window from the host or from an ECS singleton, so the host holds nothing
-/// that points into a reloadable gem, and a reloaded renderer finds the windows again on its own.
+/// carries: it never receives a window from the host or from an ECS singleton.
 /// </summary>
 public interface IWindowRegistry
 {

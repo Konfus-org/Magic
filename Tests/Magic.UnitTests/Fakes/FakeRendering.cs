@@ -18,6 +18,9 @@ internal sealed class FakeRendering : IRendering
 
     public int Released { get; private set; }
 
+    /// <summary>What every window last showed, as <see cref="Read(GpuTexture)"/> answers it; null when nothing was.</summary>
+    public CapturedFrame? Shown { get; set; }
+
     public bool Debug { get; set; }
     public string Device => "Fake GPU";
     public string ShaderFormat => "FAKE";
@@ -56,5 +59,9 @@ internal sealed class FakeRendering : IRendering
     }
 
     public Result<byte[]> Read(GpuBuffer buffer, uint bytes) => Result<byte[]>.Failure("fake");
-    public Result<CapturedFrame> Read(GpuTexture texture) => Result<CapturedFrame>.Failure("fake");
+
+    public Result<CapturedFrame> Read(GpuTexture texture)
+    {
+        return texture.IsWindow && Shown is { } shown ? Result<CapturedFrame>.Success(shown) : Result<CapturedFrame>.Failure("fake");
+    }
 }

@@ -3,7 +3,7 @@ using Magic.Contexts.Assets;
 using Magic.Interfaces;
 using System.Drawing;
 
-namespace Magic.IntegrationTests.Fakes;
+namespace Magic.UnitTests.Fakes;
 
 /// <summary>One open 800 x 600 window, the main one.</summary>
 internal sealed class FakeWindows : IWindowRegistry, IWindow

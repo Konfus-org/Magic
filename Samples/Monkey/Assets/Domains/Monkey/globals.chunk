@@ -21,7 +21,8 @@
                         "z": 1
                     }
                 },
-                "Camera": {}
+                "Camera": {},
+                "PostProcessing": { "passes": [ { "id": 10030 } ] }
             }
         },
         {

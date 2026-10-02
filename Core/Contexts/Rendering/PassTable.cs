@@ -18,10 +18,10 @@ internal sealed record PassState(
     CompiledShader? Compiled,
     string? Error)
 {
-    public bool Ready => Pass.Enabled && Error is null && Pipeline.IsValid;
+    public bool Ready => Error is null && Pipeline.IsValid;
 }
 
-/// <summary>The custom passes in (stage, order, path) order, their compiles, and the fullscreen vertex shader every fragment pass is built on.</summary>
+/// <summary>The passes some camera lists, their compiles, and the fullscreen vertex shader every fragment pass is built on.</summary>
 internal sealed class PassTable(CompiledShader fullscreenVertex)
 {
     /// <summary>More inputs than a pass can bind.</summary>
@@ -30,6 +30,9 @@ internal sealed class PassTable(CompiledShader fullscreenVertex)
     public CompiledShader FullscreenVertex { get; } = fullscreenVertex;
 
     public List<PassState> States { get; } = [];
+
+    /// <summary>The ids every camera lists this frame; what is loaded and not in it is unloaded.</summary>
+    public HashSet<ulong> Listed { get; } = [];
 
     public Compiles<ulong> Compiles { get; } = new();
 

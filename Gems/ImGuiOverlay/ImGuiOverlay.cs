@@ -20,8 +20,8 @@ namespace ImGuiOverlayGem;
 /// <see cref="IDebugUI"/> drawn with Dear ImGui, straight through <see cref="IRendering"/>: in its Render hook, which runs
 /// after the scene was recorded, it ends the ImGui frame the widgets went into, uploads the triangles and textures, and
 /// appends plain draw commands over the main window's swapchain image, then starts the next frame. It owns every GPU object
-/// it draws with (buffers, textures, sampler, one pipeline per swapchain format) and depends on the renderer, so a new
-/// renderer reloads it too. What to draw is up to whoever calls <see cref="Debugging.UI"/>, not this gem. Input comes from
+/// it draws with (buffers, textures, sampler, one pipeline per swapchain format) and releases them when it is unloaded or
+/// reloaded; the renderer is static and outlives it. What to draw is up to whoever calls <see cref="Debugging.UI"/>, not this gem. Input comes from
 /// the frame's events, fed to ImGui in <see cref="Update"/>, which applies them when the next ImGui frame starts.
 /// </summary>
 internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
@@ -144,8 +144,8 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
         ImDrawDataPtr data = ImGui.GetDrawData();
         UpdateTextures(data);
-        if (_windows.Main is { } main && frame.Commands is not null)
-            Draw(data, main, frame.Commands);
+        if (_windows.Main is { } main && frame.DrawCommands is not null)
+            Draw(data, main, frame.DrawCommands);
 
         NewFrame(frame.Delta);
     }

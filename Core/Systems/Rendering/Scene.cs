@@ -1,3 +1,5 @@
+using Magic.Contexts;
+using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Extensions;
@@ -35,6 +37,7 @@ internal static class Scene
         float time)
     {
         plan.Clear();
+        Passes.Sync(ctx, views);
         uint main = windows?.Main?.Handle ?? 0;
         PlanTargets(ctx, plan, windows, views, main, textures: true, lighting, time);
         PlanTargets(ctx, plan, windows, views, main, textures: false, lighting, time);
@@ -50,7 +53,8 @@ internal static class Scene
         ReadOnlySpan<ViewPlan> views = CollectionsMarshal.AsSpan(plan.Views);
         foreach (TargetPlan target in plan.Targets)
         {
-            (int targetDraws, int targetDispatches) = RecordTarget(ctx, commands, target.FrameTargets, views.Slice(target.FirstView, target.ViewCount));
+            ReadOnlySpan<PassState> passes = CollectionsMarshal.AsSpan(plan.Passes).Slice(target.FirstPass, target.PassCount);
+            (int targetDraws, int targetDispatches) = RecordTarget(ctx, commands, target.FrameTargets, views.Slice(target.FirstView, target.ViewCount), passes);
             draws += targetDraws;
             dispatches += targetDispatches;
         }
@@ -85,7 +89,8 @@ internal static class Scene
             if (targets is null)
                 continue;
 
-            Passes.Prepare(ctx, targets);
+            int firstPass = plan.Passes.Count;
+            Passes.Prepare(ctx, targets, ListedPasses(views, target, main, targets), plan.Passes);
             int first = plan.Views.Count;
             for (int index = 0; index < views.Length; index++)
             {
@@ -93,8 +98,40 @@ internal static class Scene
                     plan.Views.Add(PlanView(ctx, views[index], index, targets, lighting, time));
             }
 
-            plan.Targets.Add(new TargetPlan(targets, first, plan.Views.Count - first));
+            plan.Targets.Add(new TargetPlan(targets, first, plan.Views.Count - first, firstPass, plan.Passes.Count - firstPass));
         }
+    }
+
+    /// <summary>
+    /// The passes that run over <paramref name="target"/>: the list of the first view drawing into it that has one.
+    /// Passes work on the whole target, so another view of it listing something else is not followed, warned about once.
+    /// </summary>
+    private static PassList ListedPasses(ReadOnlySpan<View> views, RenderTarget target, uint main, FrameTargets targets)
+    {
+        PassList listed = default;
+        bool mixed = false;
+        foreach (View view in views)
+        {
+            PassList list = view.Passes;
+            if (list.Count == 0 || Resolve(view.Camera.Target, main) != target)
+                continue;
+
+            if (listed.Count == 0)
+            {
+                listed = list;
+                continue;
+            }
+
+            ReadOnlySpan<Handle<Pass>> followed = listed;
+            ReadOnlySpan<Handle<Pass>> other = list;
+            mixed |= !other.SequenceEqual(followed);
+        }
+
+        if (mixed && !targets.MixedPassLists)
+            Debugging.Log.Warn($"The cameras drawing into {target} list different passes; passes cover the whole target, so the first camera's list is used.");
+
+        targets.MixedPassLists = mixed;
+        return listed;
     }
 
     /// <summary>One view of a target: its rectangle, its buffers made ready for this frame, and its constants.</summary>
@@ -187,7 +224,12 @@ internal static class Scene
     /// One render target: cull and draw its views into its textures (early, then with occlusion the late pass), run the
     /// data passes, present. Returns the draws and dispatches recorded.
     /// </summary>
-    private static (int Draws, int Dispatches) RecordTarget(RenderContext ctx, RenderCommands commands, FrameTargets targets, ReadOnlySpan<ViewPlan> views)
+    private static (int Draws, int Dispatches) RecordTarget(
+        RenderContext ctx,
+        RenderCommands commands,
+        FrameTargets targets,
+        ReadOnlySpan<ViewPlan> views,
+        ReadOnlySpan<PassState> passes)
     {
         int draws = 0, dispatches = 0;
 
@@ -213,21 +255,25 @@ internal static class Scene
             commands.EndRenderPass();
         }
 
-        // Ldr is what the tonemap pass writes; without one (missing, or failed to compile) present the linear scene rather
-        // than a stale image, so a broken pass never blanks the window.
-        bool wroteLdr = Passes.Record(ctx, commands, targets, views[0].Constants, ref draws, ref dispatches);
-        Present(ctx, commands, targets, wroteLdr ? targets.Ldr : targets.Hdr);
+        // Ldr is what is shown and what a screenshot reads. A tonemap pass writes it; when no listed pass did (none
+        // listed, or it is still compiling or broken) the linear scene is copied into it, so neither is ever stale.
+        bool wroteLdr = Passes.Record(ctx, commands, targets, passes, views[0].Constants, ref draws, ref dispatches);
+        if (!wroteLdr)
+            commands.Blit(targets.Hdr.Texture, new Rectangle(0, 0, (int)targets.Hdr.Width, (int)targets.Hdr.Height), new TextureRegion(targets.Ldr.Texture));
+
+        Present(ctx, commands, targets);
 
         return (draws, dispatches);
     }
 
     /// <summary>
-    /// The finished frame to where it is shown: a window's swapchain image, or every mip level of the render texture's pool
-    /// layer, each straight from <paramref name="shown"/> (so no level is read while it is written). A render texture of
+    /// The finished frame, Ldr, to where it is shown: a window's swapchain image, or every mip level of the render
+    /// texture's pool layer, each straight from Ldr (so no level is read while it is written). A render texture of
     /// another shape is stretched into the square layer, and back again on whatever samples it.
     /// </summary>
-    private static void Present(RenderContext ctx, RenderCommands commands, FrameTargets targets, FrameTargets.Target shown)
+    private static void Present(RenderContext ctx, RenderCommands commands, FrameTargets targets)
     {
+        FrameTargets.Target shown = targets.Ldr;
         Rectangle area = new(0, 0, (int)targets.Width, (int)targets.Height);
         RenderTarget target = targets.RenderTarget;
         if (!target.IsTexture)

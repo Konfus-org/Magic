@@ -6,7 +6,8 @@ namespace Magic.Contexts.Assets;
 /// <summary>
 /// How every asset file and sidecar is read and written: camelCase keys, snake_case enum names
 /// (<c>clamp_to_edge</c>), fields included so System.Numerics vectors serialise as <c>{x, y, z, w}</c>,
-/// comments and trailing commas tolerated, infinities written by name. No custom converters: a <see cref="Handle{T}"/> is <c>{ "id": N }</c>.
+/// comments and trailing commas tolerated, infinities written by name. A <see cref="Handle{T}"/> is <c>{ "id": N }</c>;
+/// the one custom converter is <see cref="PassListConverter"/>, named by the type it reads.
 /// </summary>
 internal static class AssetJson
 {
