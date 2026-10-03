@@ -5,13 +5,6 @@
       "executablePath": "$(ProjectDir)../../Build/net10.0/$(Configuration)/bin/Magic.exe",
       "commandLineArgs": "--project \"$(ProjectDir).\"",
       "workingDirectory": "$(ProjectDir)../.."
-    },
-    "Fallbacks (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}\"",
-      "workingDirectory": "{ProjectDir}/../.."
     }
   }
 }
