@@ -1,4 +1,4 @@
-using Flecs.NET.Bindings;
+﻿using Flecs.NET.Bindings;
 using Flecs.NET.Core;
 using Magic.Contexts;
 using Magic.Interfaces;
@@ -71,6 +71,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
     public void Render(in Frame frame)
     {
         RunPhase(UpdateType.Render, frame.Delta);
+        RunPhase(UpdateType.Overlay, frame.Delta);
     }
 
     public Handle Create(string? name = null, Handle parent = default)

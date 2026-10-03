@@ -1,4 +1,4 @@
-using FlecsGem;
+﻿using FlecsGem;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -6,11 +6,13 @@ using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Magic.Services;
-using Magic.Systems.Streaming;
+using StreamingGem;
+using WorldTransformsGem;
 using Magic.UnitTests.Fakes;
 using Magic.Utils;
 using System.Diagnostics;
 using System.Numerics;
+using System.Text.Json;
 using Xunit;
 
 namespace Magic.IntegrationTests.Systems;
@@ -23,8 +25,9 @@ namespace Magic.IntegrationTests.Systems;
 /// StandIn, for beyond 512 m: farther than any chunk of the row, so only a test that writes a chunk out there sees one.
 /// The system is told there is a renderer, and there is none: nothing is registered unless a test does it. The Loading
 /// domain is empty: a test makes it the world's loading domain to open another behind it. The Watched domain has a
-/// camera of its own in its globals.
+/// camera of its own in its globals. A recording scripting gem takes every script entry offered.
 /// </summary>
+[Collection(StreamingCollection.Name)]
 public sealed class StreamingSystemTests : IDisposable
 {
     private static readonly Handle<Domain> Test = new(3001);
@@ -42,8 +45,8 @@ public sealed class StreamingSystemTests : IDisposable
     private readonly FlecsEcs _ecs = new();
     private readonly Services.Assets _assets;
     private readonly TransformSystem _transforms;
-    private readonly ScriptSystem _scripts;
-    private readonly StreamingSystem _streaming;
+    private readonly Recorder _scripting = new();
+    private StreamingSystem _streaming;
     private readonly List<Event> _seen = []; // every event the frames stepped so far were given
 
     public StreamingSystemTests()
@@ -77,14 +80,12 @@ public sealed class StreamingSystemTests : IDisposable
         container.Add<ILODGenerator<Chunk>>(new StandIns());
         _assets = new Services.Assets(_project, new FileSystem(), _events, container, new Threads());
         _transforms = new TransformSystem(_ecs);
-        _scripts = new ScriptSystem(_ecs, _assets, new Scheduler(), container);
         _world = new World(_events, _assets, new Threads());
-        _streaming = new StreamingSystem(_ecs, _assets, _project, _scripts, _world, new Threads(), new FakeRendering());
+        _streaming = new StreamingSystem(_ecs, _assets, _project, [_scripting], _world, new Threads(), new FakeRendering());
     }
 
     public void Dispose()
     {
-        _scripts.Dispose();
         _streaming.Dispose();
         _transforms.Dispose();
         _assets.Dispose();
@@ -163,11 +164,44 @@ public sealed class StreamingSystemTests : IDisposable
     }
 
     [Fact]
-    public void An_entity_with_scripts_in_its_chunk_is_handed_to_the_script_system()
+    public void An_entity_with_scripts_in_its_chunk_is_offered_to_the_scripting_gems()
     {
         Open(Test);
 
-        Assert.True(_ecs.Has<Scripts>(_ecs.Lookup("World.Test.Globals.Sun.Child")));
+        Assert.Contains(_ecs.Lookup("World.Test.Globals.Sun.Child"), _scripting.Taken);
+    }
+
+    [Fact]
+    public void A_script_entry_goes_to_the_first_scripting_gem_that_takes_it()
+    {
+        Recorder declining = new(takes: false);
+        Recorder taking = new();
+        UseScripting(declining, taking);
+
+        Open(Test);
+
+        Assert.Equal(1, declining.Offered);
+        Assert.Single(taking.Taken);
+    }
+
+    [Fact]
+    public void Entities_spawn_without_a_scripting_gem()
+    {
+        UseScripting();
+
+        Open(Test);
+
+        Assert.True(_ecs.Lookup("World.Test.Globals.Sun.Child").IsValid);
+    }
+
+    [Fact]
+    public void A_closed_domains_scripts_are_ended()
+    {
+        Open(Test);
+
+        Close(Test);
+
+        Assert.Equal(1, _scripting.Ended);
     }
 
     [Fact]
@@ -185,7 +219,7 @@ public sealed class StreamingSystemTests : IDisposable
     {
         Open(new Handle<Domain>(9999));
 
-        Assert.Equal(0, _streaming.Stats.Domains);
+        Assert.Equal(0d, Debugging.Stats.Get("Streaming.Domains"));
     }
 
     [Fact]
@@ -230,7 +264,7 @@ public sealed class StreamingSystemTests : IDisposable
 
         StepUntil(() => Spawned("Test", 0, 0, 0));
 
-        Assert.Equal(1, _streaming.Stats.Active);
+        Assert.Equal(1d, Debugging.Stats.Get("Streaming.Active"));
     }
 
     [Fact]
@@ -291,7 +325,7 @@ public sealed class StreamingSystemTests : IDisposable
         Open(Test);
         SpawnCamera();
 
-        StepUntil(() => _streaming.Stats.Loaded > 0);
+        StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") > 0);
 
         Assert.False(Spawned("Test", 0, 0, farthest));
     }
@@ -447,7 +481,7 @@ public sealed class StreamingSystemTests : IDisposable
         Step(1); // the loads are in flight
 
         _events.Publish(new Event(EventType.GemsChanged));
-        StepUntil(() => _streaming.Stats.Loaded == 8);
+        StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") == 8);
 
         Assert.Equal(8, _ecs.GetChildren(_ecs.Lookup("World.Test.Chunks")).Length);
     }
@@ -520,7 +554,7 @@ public sealed class StreamingSystemTests : IDisposable
 
         Step(10);
 
-        Assert.Equal(0, _streaming.Stats.Loaded);
+        Assert.Equal(0d, Debugging.Stats.Get("Streaming.Loaded"));
     }
 
     [Fact]
@@ -539,7 +573,7 @@ public sealed class StreamingSystemTests : IDisposable
         OpenBehindLoading(Test);
         SpawnCamera();
 
-        StepUntil(() => _streaming.Stats.Loaded == 6); // every chunk but the two that draw
+        StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") == 6); // every chunk but the two that draw
         Step(10);
 
         Assert.Equal(DomainState.Loading, _world.StateOf(Test));
@@ -550,7 +584,7 @@ public sealed class StreamingSystemTests : IDisposable
     {
         OpenBehindLoading(Test);
         SpawnCamera();
-        StepUntil(() => _streaming.Stats.Loaded == 6);
+        StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") == 6);
 
         RegisterAll("Test");
         StepUntil(() => _world.StateOf(Test) == DomainState.Loaded);
@@ -563,7 +597,7 @@ public sealed class StreamingSystemTests : IDisposable
     {
         OpenBehindLoading(Test);
         SpawnCamera();
-        StepUntil(() => _streaming.Stats.Loaded == 6);
+        StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") == 6);
 
         RegisterAll("Test");
         StepUntil(() => _world.StateOf(Test) == DomainState.Loaded);
@@ -577,7 +611,7 @@ public sealed class StreamingSystemTests : IDisposable
         _project.Settings.Streaming.Radius = 0f;
         OpenBehindLoading(Test);
         SpawnCamera();
-        StepUntil(() => _streaming.Stats.Loaded == 6);
+        StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") == 6);
 
         RegisterAll("Test");
         StepUntil(() => _world.StateOf(Test) == DomainState.Loaded);
@@ -680,7 +714,16 @@ public sealed class StreamingSystemTests : IDisposable
 
         Close(Test);
 
-        Assert.Equal(0, _streaming.Stats.Loaded);
+        Assert.Equal(0d, Debugging.Stats.Get("Streaming.Loaded"));
+    }
+
+    /// <summary>
+    /// A streaming system over these scripting gems instead of the recording one.
+    /// </summary>
+    private void UseScripting(params IScripting[] scripting)
+    {
+        _streaming.Dispose();
+        _streaming = new StreamingSystem(_ecs, _assets, _project, scripting, _world, new Threads(), new FakeRendering());
     }
 
     /// <summary>
@@ -815,6 +858,28 @@ public sealed class StreamingSystemTests : IDisposable
     /// <summary>
     /// Every chunk's stand-in, beyond 512 m: one entity named StandIn.
     /// </summary>
+    /// <summary>
+    /// A scripting gem that takes every entry, or none, and counts what it was offered and what was ended.
+    /// </summary>
+    private sealed class Recorder(bool takes = true) : IScripting
+    {
+        public int Offered { get; private set; }
+
+        public int Ended { get; private set; }
+
+        public List<Handle> Taken { get; } = [];
+
+        public IDisposable? Attach(Handle entity, JsonElement script)
+        {
+            Offered++;
+            if (!takes)
+                return null;
+
+            Taken.Add(entity);
+            return new Subscription(() => Ended++);
+        }
+    }
+
     private sealed class StandIns : ILODGenerator<Chunk>
     {
         public int Version => 1;

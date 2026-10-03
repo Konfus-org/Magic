@@ -1,4 +1,4 @@
-# Samples
+﻿# Samples
 
 One project: `Samples.magic` opens the Hub (a floor, a question mark and a camera to fly), with the console up, and
 every folder under `Assets/Domains/` is a sample to portal into. The scripts under `Assets/` compile into one dll
@@ -49,7 +49,8 @@ dotnet build Samples
 
 The `.magic` file says which engine gems load, by their assembly name (the same name `GemDependsOn` uses).
 `"default"` stands for every gem in the engine's `bin\Gems\` folder; a file without a `gems` key gets
-`["default"]`, and `[]` loads none of them.
+`["default"]`, and `[]` loads none of them. A name with a leading `-` leaves that gem out of `"default"`:
+`["default", "-DebugTools"]`.
 
 ```json
 { "name": "Cube", "entryPoint": { "id": 3001 }, "gems": ["ZLogging", "FlecsEcs", "SDL", "SDLWindowing", "SDLRender"] }
@@ -57,7 +58,8 @@ The `.magic` file says which engine gems load, by their assembly name (the same 
 
 A project's own gems are never listed: any gem dll found under the project folder (here
 `Build/net10.0/<Config>/bin/Samples.dll`) loads and hot reloads like an engine gem. `obj`, `Cache` and dot
-folders are skipped, so a build's intermediate copy of the dll does not count twice.
+folders are skipped, so a build's intermediate copy of the dll does not count twice. A project gem named like an
+engine gem is the one loaded: that is how a project replaces, say, `DeferredRenderer` with its own.
 
 ## Scripts
 

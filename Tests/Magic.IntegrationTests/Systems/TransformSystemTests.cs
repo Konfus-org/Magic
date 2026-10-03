@@ -1,8 +1,8 @@
+﻿using DefaultTaggingGem;
 using FlecsGem;
 using Magic.Contexts;
 using Magic.Contexts.Components;
-using Magic.Systems;
-using Magic.Systems.Streaming;
+using WorldTransformsGem;
 using System.Numerics;
 using Xunit;
 

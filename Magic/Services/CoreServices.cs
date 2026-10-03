@@ -1,6 +1,5 @@
-using Magic.Contexts.Assets;
+﻿using Magic.Contexts.Assets;
 using Magic.Interfaces;
-using Magic.Systems.Streaming;
 
 namespace Magic.Services;
 
@@ -18,6 +17,7 @@ internal static class CoreServices
     public static Container Create(Project project, IFileSystem files)
     {
         Container container = new();
+        container.Add<IServices>(container); // the read side, for whoever must look services up by type
         Events events = new();
 
         Threads threads = new();
@@ -35,7 +35,6 @@ internal static class CoreServices
         container.Add(threads);
         container.Add(new MainThread(threads));
         container.Add(assets);
-        container.Add<ILODGenerator<Chunk>>(new ChunkLods(assets, files)); // far chunks' stand-ins
         container.Add(new Scheduler());
         container.Add(new World(events, assets, threads) { Loading = project.Loading });
 

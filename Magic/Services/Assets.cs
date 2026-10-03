@@ -1,4 +1,4 @@
-using Magic.Attributes;
+﻿using Magic.Attributes;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
@@ -56,7 +56,7 @@ public sealed class Assets : IDisposable
     private readonly Project _project;
     private readonly IFileSystem _files;
     private readonly Events _events;
-    private readonly Container _container;
+    private readonly IServices _services;
     private readonly Threads _threads;
     private readonly IDisposable _gemsChanged;
     private readonly FileChanges _changes = new();
@@ -78,12 +78,12 @@ public sealed class Assets : IDisposable
     private readonly string _lodCache;
     private long _loadCount; // counts Loads, for least recently used
 
-    internal Assets(Project project, IFileSystem files, Events events, Container container, Threads threads)
+    internal Assets(Project project, IFileSystem files, Events events, IServices services, Threads threads)
     {
         _project = project;
         _files = files;
         _events = events;
-        _container = container;
+        _services = services;
         _threads = threads;
         _gemsChanged = events.Watch(EventType.GemsChanged, _ => OnGemsChanged());
 
@@ -303,6 +303,24 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
+    /// What every type's pool holds, as <c>Pool.&lt;Type&gt;.Count</c>, <c>Bytes</c>, <c>Budget</c>, <c>Hits</c> and <c>Misses</c>.
+    /// </summary>
+    private void PublishPoolStats()
+    {
+        lock (_lock)
+        {
+            foreach ((Type type, Pool pool) in _pools)
+            {
+                Debugging.Stats.Set($"Pool.{type.Name}.Count", pool.Entries.Count);
+                Debugging.Stats.Set($"Pool.{type.Name}.Bytes", pool.Bytes);
+                Debugging.Stats.Set($"Pool.{type.Name}.Budget", BudgetOf(type));
+                Debugging.Stats.Set($"Pool.{type.Name}.Hits", pool.Hits);
+                Debugging.Stats.Set($"Pool.{type.Name}.Misses", pool.Misses);
+            }
+        }
+    }
+
+    /// <summary>
     /// What every type's pool holds now, by type name.
     /// </summary>
     internal AssetPoolStats[] PoolStats()
@@ -318,7 +336,7 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// The type's budget in bytes, as the settings have it now.
     /// </summary>
-    internal long BudgetOf<T>() where T : Asset
+    public long BudgetOf<T>() where T : Asset
     {
         return BudgetOf(typeof(T));
     }
@@ -326,7 +344,7 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// What the asset counts for in its pool, in bytes; 0 when it is not pooled.
     /// </summary>
-    internal long BytesOf<T>(Handle<T> handle) where T : Asset
+    public long BytesOf<T>(Handle<T> handle) where T : Asset
     {
         lock (_lock)
         {
@@ -340,6 +358,8 @@ public sealed class Assets : IDisposable
     /// </summary>
     public void ProcessChanges()
     {
+        PublishPoolStats();
+
         string[] settled = _changes.TakeSettled();
         if (settled.Length == 0)
             return;
@@ -427,7 +447,7 @@ public sealed class Assets : IDisposable
             if (authored.Count > 0)
                 return authored.OrderByDescending(lod => lod.Key).Select(lod => (lod.Key, new Handle<T>(lod.Value))).ToArray();
 
-            if (!_container.TryGet(out ILODGenerator<T>? generator) || await StampAsync(handle, cancel).ConfigureAwait(false) is not { } stamp)
+            if (!_services.TryGet(out ILODGenerator<T>? generator) || await StampAsync(handle, cancel).ConfigureAwait(false) is not { } stamp)
                 return none;
 
             string name = $"{handle.Id:x16}-{stamp}";
@@ -534,7 +554,7 @@ public sealed class Assets : IDisposable
         if (FullPathOf(id) is not { } path || await _files.HashAsync([path, path + ".meta"]).ConfigureAwait(false) is not { Ok: true, Payload: var text })
             return null;
 
-        return _container.TryGet(out ILODGenerator<T>? generator) ? $"{text}-{generator.Version}" : text;
+        return _services.TryGet(out ILODGenerator<T>? generator) ? $"{text}-{generator.Version}" : text;
     }
 
     /// <summary>
@@ -1089,7 +1109,7 @@ public sealed class Assets : IDisposable
             }
             case AssetFormat.Custom:
             {
-                if (!_container.TryGet(out IAssetLoader<T>? loader))
+                if (!_services.TryGet(out IAssetLoader<T>? loader))
                     throw new InvalidOperationException($"no loaded gem provides an IAssetLoader<{typeof(T).Name}>.");
 
 

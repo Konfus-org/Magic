@@ -1,4 +1,4 @@
-# Magic
+﻿# Magic
 
 A small C# game engine. `Magic` is a host that loads a project and its gems (plugin dlls), opens a window and
 runs the frame loop. The ECS, windowing, rendering and logging all live in gems and hot reload while it runs.
@@ -36,9 +36,13 @@ Samples project; run the script before it. It needs the ".NET Debugging with WSL
   is the shorthand for the first. Work given to `InvokeAsync` is handed its `CancellationToken`, and never starts once that
   is cancelled.
 - **Gems** (`Magic/Gems.cs`): a dll with one class implementing `IGem`. Its constructor parameters are its
-  dependencies, the Core interfaces it implements are what it provides. A rebuilt dll is reloaded in place.
+  dependencies (a `T?` is optional, a `T[]` of a Core interface is every provider), the Core interfaces it
+  implements are what it provides. A rebuilt dll is reloaded in place. The engine's own systems are gems too
+  (`Gems/WorldStreaming`, `Scripting`, `DefaultTagging`, `WorldTransforms`, `DeferredRenderer`, `DebugTools`): a project leaves one out
+  with `"-Name"` in its `gems` list, or replaces it by shipping a gem of the same name.
 - **Scripts**: a `.cs` asset whose class is an `ISystem` or an `IBehavior`, compiled by the project's csproj
-  and attached to entities in chunk files.
+  and attached to entities in chunk files. The `Scripting` gem runs them; another language is another gem
+  implementing `IScripting`, loaded beside it.
 - **Assets** (`Magic/Services/Assets.cs`): addressed by id, not path; the id and type live in a `.meta` file
   beside each asset. Gems add formats with `IAssetLoader<T>`. `LoadAsync` reads and imports off the calling
   thread, stops for a `CancellationToken` and tells an `IProgress<float>` how far its dependencies are, as
@@ -51,9 +55,12 @@ Samples project; run the script before it. It needs the ".NET Debugging with WSL
   `World.StateOf` answers that, an `IProgress<float>` given to `Open` follows it, and a `DomainLoaded` event tells
   when it is there.
 - **ECS** (`Magic/Interfaces/IEcs*.cs`, `Gems/FlecsEcs`): components are structs implementing `IComponent`;
-  systems are `ISystem`s added to the `Scheduler`.
-- **Rendering** (`Gems/SDLRender`): GPU-driven on SDL_GPU, with passes and materials defined as data in
-  `Resources/`.
+  systems are `ISystem`s added to the `Scheduler`, in a phase (`Update`, `FixedUpdate`, `LateUpdate`, `Render`,
+  then `Overlay` for what draws on top of the scene).
+- **Rendering** (`Gems/DeferredRenderer` over `Gems/SDLRender`): GPU-driven on SDL_GPU, with passes and
+  materials defined as data in `Resources/`.
+- **Stats** (`Debugging.Stats`): any system sets a number under a dotted name; the debug display (F3) prints
+  them all, grouped.
 
 ## Folder structure
 

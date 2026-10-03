@@ -1,4 +1,4 @@
-using FlecsGem;
+﻿using FlecsGem;
 using Magic.Attributes;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
@@ -7,7 +7,7 @@ using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Magic.Services;
-using Magic.Systems.Streaming;
+using ScriptingGem;
 using Magic.Utils;
 using System.Numerics;
 using System.Reflection;
@@ -17,9 +17,10 @@ using Xunit;
 namespace Magic.IntegrationTests.Systems;
 
 /// <summary>
-/// The script system on the real Flecs gem, over script files in a temp folder. A loader stands in for the scripting
-/// gem: a script's class is the nested class here named like its file. The scripts write what happens to them in a
-/// <see cref="Journal"/> they are constructed with.
+/// The script system on the real Flecs gem, over script files in a temp folder. A loader stands in for the C#
+/// script loader: a script's class is the nested class here named like its file. The scripts write what happens to
+/// them in a <see cref="Journal"/> they are constructed with. The world holds its scripts while the Test domain is
+/// open behind the Loading domain; both are empty domains here, opened for that alone.
 /// </summary>
 public sealed class ScriptSystemTests : IDisposable
 {
@@ -27,11 +28,15 @@ public sealed class ScriptSystemTests : IDisposable
     private const string OneTicker = """[ { "id": 2 } ]""";
     private const string OneCounter = """[ { "id": 5 } ]""";
 
+    private static readonly Handle<Domain> Test = new(3001);
+    private static readonly Handle<Domain> Loading = new(3060);
+
     private readonly TempFolder _root = new();
     private readonly FlecsEcs _ecs = new();
     private readonly Scheduler _scheduler = new();
     private readonly Journal _journal = new();
     private readonly Services.Assets _assets;
+    private readonly World _world;
     private readonly ScriptSystem _scripts;
 
     public ScriptSystemTests()
@@ -44,12 +49,16 @@ public sealed class ScriptSystemTests : IDisposable
         Write("Counter.cs", 5);
         Write("Constant.cs", 6);
         Write("Early.cs", 7);
+        Write("Mover.lua", 8);
+        WriteDomain("Test", 3001);
+        WriteDomain("Loading", 3060);
 
         Container container = new();
         container.Add<IAssetLoader<Script>>(new NestedClasses());
         container.Add(_journal);
         _assets = new Services.Assets(project, new FileSystem(), new Events(), container, new Threads());
-        _scripts = new ScriptSystem(_ecs, _assets, _scheduler, container);
+        _world = new World(new Events(), _assets, new Threads());
+        _scripts = new ScriptSystem(_ecs, _assets, _world, _scheduler, container);
 
         // Loaded already, as a chunk's load leaves the scripts its entities carry: they are made in the first frame.
         for (ulong id = 1; id <= 7; id++)
@@ -68,7 +77,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_behavior_is_made_with_its_entity()
     {
         Handle entity = _ecs.Create("Door");
-        _scripts.Attach(entity, Entries(OneProbe), held: false);
+        Attach(entity, OneProbe);
 
         _scripts.Run(FrameOf());
 
@@ -76,9 +85,10 @@ public sealed class ScriptSystemTests : IDisposable
     }
 
     [Fact]
-    public void A_held_entitys_script_is_not_made()
+    public void A_script_is_not_made_while_the_world_loads()
     {
-        _scripts.Attach(_ecs.Create(), Entries(OneProbe), held: true);
+        HoldTheWorld();
+        Attach(_ecs.Create(), OneProbe);
 
         _scripts.Run(FrameOf());
 
@@ -86,22 +96,24 @@ public sealed class ScriptSystemTests : IDisposable
     }
 
     [Fact]
-    public void A_held_entitys_script_is_made_once_released()
+    public void A_script_is_made_once_the_world_has_loaded()
     {
+        HoldTheWorld();
         Handle entity = _ecs.Create();
-        _scripts.Attach(entity, Entries(OneProbe), held: true);
+        Attach(entity, OneProbe);
         _scripts.Run(FrameOf());
 
-        _scripts.Release();
+        ReleaseTheWorld();
         _scripts.Run(FrameOf());
 
         Assert.Contains($"made {entity.Id}", _journal.Lines);
     }
 
     [Fact]
-    public void A_held_entitys_script_that_runs_on_loading_is_made()
+    public void A_script_that_runs_on_loading_is_made_while_the_world_loads()
     {
-        _scripts.Attach(_ecs.Create(), Entries("""[ { "id": 7 } ]"""), held: true);
+        HoldTheWorld();
+        Attach(_ecs.Create(), """[ { "id": 7 } ]""");
 
         _scripts.Run(FrameOf());
 
@@ -109,9 +121,60 @@ public sealed class ScriptSystemTests : IDisposable
     }
 
     [Fact]
+    public void An_entry_whose_asset_is_not_a_cs_file_is_not_taken()
+    {
+        IDisposable? taken = Attach(_ecs.Create(), """[ { "id": 8 } ]""");
+
+        Assert.Null(taken);
+    }
+
+    [Fact]
+    public void An_entry_without_an_id_is_not_taken()
+    {
+        IDisposable? taken = Attach(_ecs.Create(), """[ { "speed": 3 } ]""");
+
+        Assert.Null(taken);
+    }
+
+    [Fact]
+    public void A_taken_entry_marks_its_entity_as_scripted()
+    {
+        Handle entity = _ecs.Create();
+
+        Attach(entity, OneProbe);
+
+        Assert.True(_ecs.Has<Scripts>(entity));
+    }
+
+    [Fact]
+    public void Disposing_what_attach_answered_ends_the_script()
+    {
+        IDisposable? taken = Attach(_ecs.Create(), OneProbe);
+        _scripts.Run(FrameOf());
+
+        Assert.NotNull(taken);
+        taken.Dispose();
+
+        Assert.Contains("disposed", _journal.Lines);
+    }
+
+    [Fact]
+    public void A_destroyed_parents_childs_behavior_is_disposed()
+    {
+        Handle parent = _ecs.Create();
+        Attach(_ecs.Create(parent: parent), OneProbe);
+        _scripts.Run(FrameOf());
+
+        _ecs.Destroy(parent);
+        _scripts.Run(FrameOf());
+
+        Assert.Contains("disposed", _journal.Lines);
+    }
+
+    [Fact]
     public void A_value_beside_the_id_is_set_on_the_instance()
     {
-        _scripts.Attach(_ecs.Create(), Entries("""[ { "id": 1, "speed": 3 } ]"""), held: false);
+        Attach(_ecs.Create(), """[ { "id": 1, "speed": 3 } ]""");
 
         _scripts.Run(FrameOf());
 
@@ -121,7 +184,7 @@ public sealed class ScriptSystemTests : IDisposable
     [Fact]
     public void A_behavior_is_updated_when_the_system_runs()
     {
-        _scripts.Attach(_ecs.Create(), Entries(OneProbe), held: false);
+        Attach(_ecs.Create(), OneProbe);
 
         _scripts.Run(FrameOf());
 
@@ -134,7 +197,7 @@ public sealed class ScriptSystemTests : IDisposable
     [InlineData(UpdateType.Render)]
     public void A_behavior_gets_the_hook_of_each_later_phase(UpdateType phase)
     {
-        _scripts.Attach(_ecs.Create(), Entries(OneProbe), held: false);
+        Attach(_ecs.Create(), OneProbe);
 
         RunPhase(phase);
 
@@ -145,7 +208,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_destroyed_entitys_behavior_is_disposed()
     {
         Handle entity = _ecs.Create();
-        _scripts.Attach(entity, Entries(OneProbe), held: false);
+        Attach(entity, OneProbe);
         _scripts.Run(FrameOf());
 
         _ecs.Destroy(entity);
@@ -157,7 +220,7 @@ public sealed class ScriptSystemTests : IDisposable
     [Fact]
     public void A_system_script_runs_in_its_phase()
     {
-        _scripts.Attach(_ecs.Create(), Entries(OneTicker), held: false);
+        Attach(_ecs.Create(), OneTicker);
         _scripts.Run(FrameOf());
 
         _ecs.Update(FrameOf());
@@ -169,7 +232,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_destroyed_entitys_system_script_no_longer_runs()
     {
         Handle entity = _ecs.Create();
-        _scripts.Attach(entity, Entries(OneTicker), held: false);
+        Attach(entity, OneTicker);
         _scripts.Run(FrameOf());
 
         _ecs.Destroy(entity);
@@ -183,7 +246,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void Changed_gems_make_every_instance_again()
     {
         Handle entity = _ecs.Create();
-        _scripts.Attach(entity, Entries(OneProbe), held: false);
+        Attach(entity, OneProbe);
         _scripts.Run(FrameOf());
 
         _scripts.Run(FrameOf(new Event(EventType.GemsChanged)));
@@ -194,7 +257,7 @@ public sealed class ScriptSystemTests : IDisposable
     [Fact]
     public void A_behavior_that_throws_is_stopped()
     {
-        _scripts.Attach(_ecs.Create(), Entries("""[ { "id": 3 } ]"""), held: false);
+        Attach(_ecs.Create(), """[ { "id": 3 } ]""");
         _scripts.Run(FrameOf());
 
         _scripts.Run(FrameOf());
@@ -205,7 +268,7 @@ public sealed class ScriptSystemTests : IDisposable
     [Fact]
     public void A_script_needing_what_nothing_provides_is_not_made()
     {
-        _scripts.Attach(_ecs.Create(), Entries("""[ { "id": 4 } ]"""), held: false);
+        Attach(_ecs.Create(), """[ { "id": 4 } ]""");
 
         _scripts.Run(FrameOf());
 
@@ -216,7 +279,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_behavior_near_a_camera_is_updated_every_frame()
     {
         Place(_ecs.Create("Camera"), Vector3.Zero, camera: true);
-        _scripts.Attach(Place(_ecs.Create(), new Vector3(0, 0, 10)), Entries(OneCounter), held: false);
+        Attach(Place(_ecs.Create(), new Vector3(0, 0, 10)), OneCounter);
 
         RunFrames(32);
 
@@ -227,7 +290,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_behavior_far_from_every_camera_is_updated_less_often()
     {
         Place(_ecs.Create("Camera"), Vector3.Zero, camera: true);
-        _scripts.Attach(Place(_ecs.Create(), new Vector3(0, 0, 200)), Entries(OneCounter), held: false); // 128 to 256 m: every 4th frame
+        Attach(Place(_ecs.Create(), new Vector3(0, 0, 200)), OneCounter); // 128 to 256 m: every 4th frame
 
         RunFrames(32);
 
@@ -238,7 +301,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_behavior_updated_less_often_gets_the_time_since_its_last_update()
     {
         Place(_ecs.Create("Camera"), Vector3.Zero, camera: true);
-        _scripts.Attach(Place(_ecs.Create(), new Vector3(0, 0, 200)), Entries(OneCounter), held: false);
+        Attach(Place(_ecs.Create(), new Vector3(0, 0, 200)), OneCounter);
 
         RunFrames(32);
 
@@ -249,7 +312,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_behavior_however_far_is_updated_within_the_longest_interval()
     {
         Place(_ecs.Create("Camera"), Vector3.Zero, camera: true);
-        _scripts.Attach(Place(_ecs.Create(), new Vector3(0, 0, 100000)), Entries(OneCounter), held: false);
+        Attach(Place(_ecs.Create(), new Vector3(0, 0, 100000)), OneCounter);
 
         RunFrames(32);
 
@@ -260,7 +323,7 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_behavior_marked_always_is_updated_every_frame_however_far()
     {
         Place(_ecs.Create("Camera"), Vector3.Zero, camera: true);
-        _scripts.Attach(Place(_ecs.Create(), new Vector3(0, 0, 200)), Entries("""[ { "id": 6 } ]"""), held: false);
+        Attach(Place(_ecs.Create(), new Vector3(0, 0, 200)), """[ { "id": 6 } ]""");
 
         RunFrames(32);
 
@@ -271,11 +334,40 @@ public sealed class ScriptSystemTests : IDisposable
     public void A_behavior_on_an_entity_with_no_place_is_updated_every_frame()
     {
         Place(_ecs.Create("Camera"), new Vector3(0, 0, 1000), camera: true);
-        _scripts.Attach(_ecs.Create(), Entries(OneCounter), held: false);
+        Attach(_ecs.Create(), OneCounter);
 
         RunFrames(32);
 
         Assert.Equal(32, _journal.Lines.Count(line => line.StartsWith("count")));
+    }
+
+    /// <summary>
+    /// Offers each entry of <paramref name="json"/> to the system, as the streaming system does; answers what the last one gave.
+    /// </summary>
+    private IDisposable? Attach(Handle entity, string json)
+    {
+        IDisposable? taken = null;
+        foreach (JsonElement entry in Entries(json))
+            taken = _scripts.Attach(entity, entry);
+
+        return taken;
+    }
+
+    /// <summary>
+    /// Opens the Test domain behind the Loading domain and leaves it loading, which holds every script not marked RunOnLoading.
+    /// </summary>
+    private void HoldTheWorld()
+    {
+        _world.Loading = Loading;
+        Assert.True(_world.Open(Test).Ok);
+    }
+
+    /// <summary>
+    /// The Test domain is there: the Loading domain closes and the held scripts are made in the next run.
+    /// </summary>
+    private void ReleaseTheWorld()
+    {
+        _world.Set(Test, DomainState.Loaded);
     }
 
     /// <summary>
@@ -333,6 +425,12 @@ public sealed class ScriptSystemTests : IDisposable
     {
         _root.Write($"Assets/Scripts/{file}", "");
         _root.Write($"Assets/Scripts/{file}.meta", $$$"""{ "id": {{{id}}}, "version": 1 }""");
+    }
+
+    private void WriteDomain(string name, ulong id)
+    {
+        _root.Write($"Assets/Domains/{name}/{name}.domain", """{ "chunkSize": 64 }""");
+        _root.Write($"Assets/Domains/{name}/{name}.domain.meta", $$$"""{ "id": {{{id}}}, "version": 1 }""");
     }
 
     /// <summary>

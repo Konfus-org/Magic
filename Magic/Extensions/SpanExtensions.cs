@@ -1,11 +1,11 @@
-using System.Buffers.Binary;
+﻿using System.Buffers.Binary;
 using System.IO.Compression;
 using System.IO.Hashing;
 using System.Text;
 
 namespace Magic.Extensions;
 
-internal static class SpanExtensions
+public static class SpanExtensions
 {
     private static ReadOnlySpan<byte> PngSignature => [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
 

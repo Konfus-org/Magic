@@ -1,12 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <!-- The GPU structs mirror HLSL with fixed buffers (Contexts/Rendering/GpuStructs.cs). -->
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -57,8 +55,17 @@
     <DefaultGem Include="$(MagicRoot)Gems\SDLFonts\SDLFonts.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\AssimpModels\AssimpModels.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\SDLRender\SDLRender.csproj" />
-    <DefaultGem Include="$(MagicRoot)Gems\CSharpScripting\CSharpScripting.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\CSharpScripting\CSharpScripts.csproj" />
     <DefaultGem Include="$(MagicRoot)Gems\DefaultCheats\DefaultCheats.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\SDLInput\SDLInput.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\ImGuiOverlay\ImGuiOverlay.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\MeshLods\MeshLods.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\Streaming\WorldStreaming.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\Scripting\Scripting.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\DefaultTagging\DefaultTagging.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\WorldTransforms\WorldTransforms.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\DeferredRenderer\DeferredRenderer.csproj" />
+    <DefaultGem Include="$(MagicRoot)Gems\DebugTools\DebugTools.csproj" />
   </ItemGroup>
 
   <!-- "dotnet build" only restores the entry project and its ProjectReferences, so the gems

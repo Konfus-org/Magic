@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Unit tests: in-memory, no file system, no native loaders. See Tests\README.md. -->
   <PropertyGroup>
@@ -18,6 +18,9 @@
   <ItemGroup>
     <!-- A normal reference: Magic.dll is copied next to the tests, unlike in a gem. -->
     <ProjectReference Include="..\..\Magic\Magic.csproj" />
+    <!-- The render tables under test live in the renderer gem; nothing here touches a GPU. -->
+    <ProjectReference Include="..\..\Gems\DeferredRenderer\DeferredRenderer.csproj" />
+    <ProjectReference Include="..\..\Gems\DebugTools\DebugTools.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,11 +1,11 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 
 namespace Magic.Extensions;
 
-internal static class ObjectExtensions
+public static class ObjectExtensions
 {
     extension(object holder)
     {

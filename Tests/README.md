@@ -1,10 +1,11 @@
-# Tests
+﻿# Tests
 
 ```
 Tests/
   Magic.UnitTests/          Unit tests: in-memory, milliseconds, run before every commit
   Magic.IntegrationTests/   Integration tests: real files, the asset watcher, native loaders, gem DLLs
   TestGem/                  The smallest gem there is, for the gem loader tests
+  TestScripts/              A dll of scripts without a gem, for the gem loader tests
 ```
 
 ```powershell
@@ -66,4 +67,7 @@ still hold; what is different:
 - A wait on a worker or the watcher is a bounded loop (`StepUntil`), never a bare sleep followed by a hope.
 - Wait on what the system does, not on its tuning: step until the chunk is in the ECS, not for a constant's worth
   of frames read out of the system.
-- Tests that initialise process-wide SDL go in the `SdlCollection`, so they run one at a time.
+- Tests that initialise process-wide SDL go in the `SdlCollection`, so they run one at a time; tests that run a
+  streaming system go in the `Streaming` collection, since what it reports in `Debugging.Stats` is process-wide too.
+- The engine's systems live in gems (WorldStreaming, Scripting, DefaultTagging, WorldTransforms, DeferredRenderer, DebugTools): a test of one
+  references the gem project and constructs the system as the gem does.

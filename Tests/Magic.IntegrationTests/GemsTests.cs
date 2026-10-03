@@ -1,4 +1,4 @@
-using Magic.Contexts.Events;
+﻿using Magic.Contexts.Events;
 using Magic.Services;
 using Xunit;
 
@@ -24,6 +24,30 @@ public sealed class GemsTests
         gems.Load(EngineGems, [name], project.Path);
 
         Assert.Equal(expected, gems.Loaded.Length);
+    }
+
+    [Fact]
+    public void A_name_with_a_minus_leaves_that_engine_gem_out_of_default()
+    {
+        using TempFolder project = new();
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
+
+        gems.Load(EngineGems, ["default", "-TestGem"], project.Path);
+
+        Assert.Empty(gems.Loaded);
+    }
+
+    [Fact]
+    public void A_project_gem_named_like_an_engine_gem_loads_once()
+    {
+        using TempFolder temp = new();
+        string project = Path.Combine(temp.Path, "Project");
+        Copy("TestGem", Path.Combine(project, "bin"));
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
+
+        gems.Load(EngineGems, ["default"], project);
+
+        Assert.Single(gems.Loaded);
     }
 
     [Fact]

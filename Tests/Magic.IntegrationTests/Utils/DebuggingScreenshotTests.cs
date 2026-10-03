@@ -1,11 +1,11 @@
-using FlecsGem;
+﻿using FlecsGem;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Extensions;
 using Magic.Services;
-using Magic.Systems.Streaming;
+using StreamingGem;
 using Magic.UnitTests.Fakes;
 using Magic.Utils;
 using System.Diagnostics;
@@ -18,6 +18,7 @@ namespace Magic.IntegrationTests.Utils;
 /// Screenshots written to a temp folder and restored from it, over the real streaming system and Flecs gem. The
 /// Test domain's globals hold a camera at (1, 2, 3); the fake renderer shows one red pixel in every window.
 /// </summary>
+[Collection(StreamingCollection.Name)]
 public sealed class DebuggingScreenshotTests : IDisposable
 {
     private const string CameraPath = "World.Test.Globals.Camera";
@@ -32,7 +33,6 @@ public sealed class DebuggingScreenshotTests : IDisposable
     private readonly World _world;
     private readonly FlecsEcs _ecs = new();
     private readonly Services.Assets _assets;
-    private readonly ScriptSystem _scripts;
     private readonly StreamingSystem _streaming;
     private readonly string _shot;
 
@@ -48,9 +48,8 @@ public sealed class DebuggingScreenshotTests : IDisposable
 
         Container container = new();
         _assets = new Services.Assets(project, _files, _events, container, new Threads());
-        _scripts = new ScriptSystem(_ecs, _assets, new Scheduler(), container);
         _world = new World(_events, _assets, new Threads());
-        _streaming = new StreamingSystem(_ecs, _assets, project, _scripts, _world, new Threads(), _rendering);
+        _streaming = new StreamingSystem(_ecs, _assets, project, [], _world, new Threads(), _rendering);
         _shot = Path.Combine(_root.Path, "shot.png");
 
         _world.Open(Test);
@@ -59,7 +58,6 @@ public sealed class DebuggingScreenshotTests : IDisposable
 
     public void Dispose()
     {
-        _scripts.Dispose();
         _streaming.Dispose();
         _assets.Dispose();
         _ecs.Dispose();

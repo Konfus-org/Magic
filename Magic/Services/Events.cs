@@ -27,10 +27,10 @@ public sealed class Events
     /// </summary>
     public IDisposable Watch(EventType type, Action<Event> handler)
     {
-        Watcher watcher = new(this, type, handler);
+        Watcher watcher = new(type, handler);
         _watchers.Add(watcher);
 
-        return watcher;
+        return new Subscription(() => _watchers.Remove(watcher));
     }
 
     /// <summary>
@@ -72,15 +72,5 @@ public sealed class Events
         }
     }
 
-    private sealed class Watcher(Events owner, EventType type, Action<Event> handler) : IDisposable
-    {
-        public EventType Type { get; } = type;
-
-        public Action<Event> Handler { get; } = handler;
-
-        public void Dispose()
-        {
-            owner._watchers.Remove(this);
-        }
-    }
+    private sealed record Watcher(EventType Type, Action<Event> Handler);
 }

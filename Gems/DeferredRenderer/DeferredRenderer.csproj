@@ -1,0 +1,42 @@
+<Project>
+
+  <!-- Must come before the SDK props import: the Directory.Build.props of the engine repo, or of a Magic project,
+       switches this project to gem output settings when IsMagicGem is true. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Inside the engine repo the gem compiles against Core as a project reference. Inside a Magic project
+       (MagicProjectRoot is set by the project's Directory.Build.props) that file references the engine's built
+       Magic.dll instead, so nothing is added here. Either way Magic.dll is never copied next to the gem: the
+       gem's load context shares the host's already-loaded copy, and a second copy would be a different
+       assembly identity whose IGem the host would not recognise. -->
+  <ItemGroup Condition="'$(MagicProjectRoot)' == ''">
+    <ProjectReference Include="$(MagicRoot)Magic\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <!-- The gem, as the engine sees it before constructing it. GemStatic true: loaded once, never hot reloaded.
+       GemDependsOn: names of gems (their assembly names, ';' separated) to load first though no service connects them. -->
+  <PropertyGroup>
+    <GemStatic>true</GemStatic>
+    <GemDependsOn></GemDependsOn>
+    <Description>Draws the scene: GPU-driven culling, deferred clustered lighting, post passes.</Description>
+    <Authors>Konfus</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Magic.UnitTests" />
+    <InternalsVisibleTo Include="Magic.IntegrationTests" />
+  </ItemGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

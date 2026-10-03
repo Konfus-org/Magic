@@ -91,7 +91,7 @@ public static class Debugging
         /// <summary>
         /// Writes every message queued while no logger was registered, then flushes all loggers.
         /// </summary>
-        internal static void Flush()
+        public static void Flush()
         {
             lock (_lock)
             {
@@ -150,7 +150,7 @@ public static class Debugging
             };
         }
 
-        internal static void Register(ILogger logger)
+        public static void Register(ILogger logger)
         {
             lock (_lock)
             {
@@ -160,7 +160,7 @@ public static class Debugging
             Flush();
         }
 
-        internal static void Unregister(ILogger logger)
+        public static void Unregister(ILogger logger)
         {
             lock (_lock)
             {
@@ -216,7 +216,7 @@ public static class Debugging
         private static readonly HashSet<object> _shown = [];
 
         /// <summary>
-        /// Whether the debug UI shows: while any debug window (<see cref="Systems.DebugUI.DebugWindowSystem"/>) is open.
+        /// Whether the debug UI shows: while any debug window (<see cref="Show"/>) is open.
         /// Skip building text while it is false.
         /// </summary>
         public static bool Visible => _shown.Count > 0;
@@ -236,12 +236,12 @@ public static class Debugging
         /// What shows for a while: the on-screen log lines and everything reported with a position. The debug UI
         /// systems take from it each frame and draw.
         /// </summary>
-        internal static DebugEntries Entries { get; } = new();
+        public static DebugEntries Entries { get; } = new();
 
         /// <summary>
         /// The time <see cref="Entries"/> are reported and taken at, in seconds.
         /// </summary>
-        internal static double Now => Environment.TickCount64 / 1000d;
+        public static double Now => Environment.TickCount64 / 1000d;
 
         /// <summary>
         /// Opens a window titled <paramref name="title"/>; everything until <see cref="End"/> goes in it. Inside another it
@@ -412,7 +412,7 @@ public static class Debugging
         /// <summary>
         /// Text centred on a pixel of the main window: what the 3D debug UI system makes of text in the world.
         /// </summary>
-        internal static void Text(Vector2 pixel, string text, Color color)
+        public static void Text(Vector2 pixel, string text, Color color)
         {
             foreach (IDebugUI ui in _uis)
                 ui.Text(pixel, text, color);
@@ -421,18 +421,18 @@ public static class Debugging
         /// <summary>
         /// The list down the left of the main window, top to bottom.
         /// </summary>
-        internal static void Lines(ReadOnlySpan<DebugLine> lines)
+        public static void Lines(ReadOnlySpan<DebugLine> lines)
         {
             foreach (IDebugUI ui in _uis)
                 ui.Lines(lines);
         }
 
-        internal static void Register(IDebugUI ui)
+        public static void Register(IDebugUI ui)
         {
             _uis.Add(ui);
         }
 
-        internal static void Unregister(IDebugUI ui)
+        public static void Unregister(IDebugUI ui)
         {
             _uis.Remove(ui);
         }
@@ -440,7 +440,7 @@ public static class Debugging
         /// <summary>
         /// Marks <paramref name="window"/> open or closed; the debug UI shows while any is open.
         /// </summary>
-        internal static void Show(object window, bool shown)
+        public static void Show(object window, bool shown)
         {
             if (shown)
                 _shown.Add(window);
@@ -455,7 +455,7 @@ public static class Debugging
     /// </summary>
     public static class Commands
     {
-        private static readonly Dictionary<string, Registration> _commands = [];
+        private static readonly Dictionary<string, Action<string[]>> _commands = [];
 
         /// <summary>
         /// Adds <paramref name="name"/>, replacing a command of that name, until the handle is disposed.
@@ -465,27 +465,31 @@ public static class Debugging
             if (_commands.ContainsKey(name))
                 Log.Warn($"Console command '{name}' is registered again; the newer one runs.");
 
-            Registration registration = new(name, run);
-            _commands[name] = registration;
-            return registration;
+            _commands[name] = run;
+            return new Subscription(() =>
+            {
+                // Only if it is still this one: a newer registration of the name stays.
+                if (_commands.TryGetValue(name, out Action<string[]>? current) && current == run)
+                    _commands.Remove(name);
+            });
         }
 
         /// <summary>
         /// Every registered name, sorted.
         /// </summary>
-        internal static IEnumerable<string> Names => _commands.Keys.Order();
+        public static IEnumerable<string> Names => _commands.Keys.Order();
 
         /// <summary>
         /// Runs the command called <paramref name="name"/>; false when there is none. A command that throws is logged.
         /// </summary>
-        internal static bool Run(string name, string[] args)
+        public static bool Run(string name, string[] args)
         {
-            if (!_commands.TryGetValue(name, out Registration? registration))
+            if (!_commands.TryGetValue(name, out Action<string[]>? run))
                 return false;
 
             try
             {
-                registration.Execute(args);
+                run(args);
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
@@ -494,17 +498,46 @@ public static class Debugging
 
             return true;
         }
+    }
 
-        private sealed class Registration(string name, Action<string[]> exe) : IDisposable
+    /// <summary>
+    /// The engine's numbers in one place: whatever a system wants shown is <see cref="Set"/> under a dotted name
+    /// (<c>Render.Draws</c>, <c>Streaming.Loaded</c>, <c>Pool.Texture.Bytes</c>), from any thread, as often as it
+    /// changes; the debug display takes them all and prints them, grouped by the first part. Nothing here is
+    /// computed: a rate or an average is the caller's to make before setting it.
+    /// </summary>
+    public static class Stats
+    {
+        private static readonly Lock _statsLock = new();
+        private static readonly Dictionary<string, double> _values = [];
+
+        public static void Set(string name, double value)
         {
-            public Action<string[]> Execute { get; } = exe;
+            lock (_statsLock)
+                _values[name] = value;
+        }
 
-            public void Dispose()
+        /// <summary>
+        /// The last value set under <paramref name="name"/>; 0 when none was.
+        /// </summary>
+        public static double Get(string name)
+        {
+            lock (_statsLock)
+                return _values.GetValueOrDefault(name);
+        }
+
+        /// <summary>
+        /// Every value set, name-ordered, added to <paramref name="into"/>.
+        /// </summary>
+        public static void Take(List<(string Name, double Value)> into)
+        {
+            lock (_statsLock)
             {
-                // Only if it is still this one: a newer registration of the name stays.
-                if (_commands.TryGetValue(name, out Registration? current) && current == this)
-                    _commands.Remove(name);
+                foreach ((string name, double value) in _values)
+                    into.Add((name, value));
             }
+
+            into.Sort(static (left, right) => string.CompareOrdinal(left.Name, right.Name));
         }
     }
 
@@ -595,6 +628,7 @@ public static class Debugging
 
             // The cameras come with the domains: wait for the last of those. One closed in the meantime is not waited for.
             IDisposable? watch = null;
+#pragma warning disable CA2000 // the watch disposes itself once the domains are there
             watch = events.Watch(EventType.DomainLoaded, _ =>
             {
                 if (domains.Any(domain => world.StateOf(domain) == DomainState.Loading))
@@ -603,6 +637,7 @@ public static class Debugging
                 watch?.Dispose();
                 Place(ecs, state.Cameras);
             });
+#pragma warning restore CA2000
 
             return Result.Success();
         }

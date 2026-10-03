@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <!-- Integration tests: real files, the asset watcher, native loaders and gem DLLs. See Tests\README.md. -->
   <PropertyGroup>
@@ -34,7 +34,13 @@
     <!-- Built, not referenced: the loader tests find it in bin\Tests\Gems\ as the host would. -->
     <ProjectReference Include="..\TestGem\TestGem.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\TestScripts\TestScripts.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\..\Gems\CSharpScripting\CSharpScripting.csproj" />
+    <ProjectReference Include="..\..\Gems\CSharpScripting\CSharpScripts.csproj" />
+    <ProjectReference Include="..\..\Gems\Streaming\WorldStreaming.csproj" />
+    <ProjectReference Include="..\..\Gems\Scripting\Scripting.csproj" />
+    <ProjectReference Include="..\..\Gems\DefaultTagging\DefaultTagging.csproj" />
+    <ProjectReference Include="..\..\Gems\WorldTransforms\WorldTransforms.csproj" />
+    <ProjectReference Include="..\..\Gems\DeferredRenderer\DeferredRenderer.csproj" />
+    <ProjectReference Include="..\..\Gems\DebugTools\DebugTools.csproj" />
   </ItemGroup>
 
 </Project>

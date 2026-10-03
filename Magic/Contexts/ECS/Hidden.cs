@@ -1,4 +1,4 @@
-namespace Magic.Contexts.Components;
+﻿namespace Magic.Contexts.Components;
 
 /// <summary>
 /// The marker under <see cref="Tag.Hidden"/>: on every entity whose <see cref="Tags"/> hold it, kept there by the tag
@@ -10,4 +10,4 @@ namespace Magic.Contexts.Components;
 /// behind the one on screen. A query leaves hidden entities out with <c>WithoutAbove&lt;Hidden&gt;()</c>. Not
 /// something to add by hand: tag the entity.
 /// </summary>
-internal struct Hidden;
+public struct Hidden;

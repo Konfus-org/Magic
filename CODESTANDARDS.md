@@ -1,4 +1,4 @@
-# Toybox CodeStandard
+﻿# Toybox CodeStandard
 
 ## Core Engineering Policies
 
@@ -33,8 +33,9 @@ each other.
 
 ### Visibility
 
-A Core type or member is `internal` unless a gem or a game script needs it: systems, the container and other
-host plumbing are never public. The test projects see Core's internals, so nothing is public for their sake; nor
+A Core type or member is `internal` unless a gem or a game script needs it: the container and other host
+plumbing are never public. The engine's systems live in gems, and a type only one system uses lives in that
+gem, internal; Core keeps the contracts they share. The test projects see Core's internals, so nothing is public for their sake; nor
 is anything internal for their sake: a member only its own type uses is private, and the tests go through the
 exposed API (see `Tests/README.md`).
 

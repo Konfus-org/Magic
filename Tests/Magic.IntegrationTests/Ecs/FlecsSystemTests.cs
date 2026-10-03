@@ -1,4 +1,4 @@
-using FlecsGem;
+﻿using FlecsGem;
 using Magic.Contexts;
 using Magic.Contexts.Rendering;
 using Magic.Interfaces;
@@ -33,6 +33,19 @@ public sealed class FlecsSystemTests
         ecs.Update(FrameOf(1f));
 
         Assert.Equal(0, runs);
+    }
+
+    [Fact]
+    public void An_overlay_system_runs_after_the_render_systems_in_the_render_hook()
+    {
+        using FlecsEcs ecs = new();
+        List<string> order = [];
+        using IDisposable overlay = ecs.Schedule("Overlay").On(UpdateType.Overlay).Run(_ => order.Add("overlay"));
+        using IDisposable render = ecs.Schedule("Render").On(UpdateType.Render).Run(_ => order.Add("render"));
+
+        ecs.Render(FrameOf(1f));
+
+        Assert.Equal(["render", "overlay"], order);
     }
 
     [Fact]

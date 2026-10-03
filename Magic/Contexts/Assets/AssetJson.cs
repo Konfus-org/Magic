@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Magic.Contexts.Assets;
@@ -9,7 +9,7 @@ namespace Magic.Contexts.Assets;
 /// comments and trailing commas tolerated, infinities written by name. A <see cref="Handle{T}"/> is <c>{ "id": N }</c>;
 /// the one custom converter is <see cref="PassListConverter"/>, named by the type it reads.
 /// </summary>
-internal static class AssetJson
+public static class AssetJson
 {
     public static JsonSerializerOptions Options { get; } = new()
     {

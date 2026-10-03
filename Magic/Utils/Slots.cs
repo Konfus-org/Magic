@@ -1,11 +1,11 @@
-namespace Magic.Utils;
+﻿namespace Magic.Utils;
 
 /// <summary>
 /// Values in numbered slots that never move: <see cref="Add"/> takes a slot given back by <see cref="Remove"/> before
 /// a new one, so a slot number stays good for as long as its value is here and the numbers stay dense. What the GPU
 /// indexes by slot (material records, meshes) is kept in these. Not thread-safe.
 /// </summary>
-internal sealed class Slots<T> where T : class
+public sealed class Slots<T> where T : class
 {
     private readonly List<T?> _values = [];
     private readonly Stack<uint> _free = [];

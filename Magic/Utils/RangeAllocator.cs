@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 
 namespace Magic.Utils;
 
@@ -7,7 +7,7 @@ namespace Magic.Utils;
 /// segregated fit with 256 size bins, ported. Allocation and free are O(1); neighbours merge on free.
 /// Used for the mega vertex and index buffers and the visible-id regions.
 /// </summary>
-internal sealed class RangeAllocator
+public sealed class RangeAllocator
 {
     private const int TopBins = 32;
 

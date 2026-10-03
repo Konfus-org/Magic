@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Numerics;
 
 namespace Magic.Contexts;
@@ -8,14 +8,14 @@ namespace Magic.Contexts;
 /// <see cref="Position"/>, text at that place in the world. <see cref="Count"/> is how many times it was reported
 /// while showing, <see cref="Order"/> which was reported first.
 /// </summary>
-internal readonly record struct DebugEntry(string Text, Color Color, Vector3? Position, int Count, long Order);
+public readonly record struct DebugEntry(string Text, Color Color, Vector3? Position, int Count, long Order);
 
 /// <summary>
 /// What is on screen from the log and the debug UI's warnings, errors and world text, each for its seconds after it was
 /// last reported. Reporting the same text at the same place again while it shows keeps it up instead of adding another.
 /// Any thread may report; whoever draws takes what shows each frame. Time is the caller's, in seconds.
 /// </summary>
-internal sealed class DebugEntries
+public sealed class DebugEntries
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<(string Text, Vector3? Position), Shown> _entries = [];

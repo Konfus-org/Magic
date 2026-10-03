@@ -1,8 +1,8 @@
-using FlecsGem;
+﻿using FlecsGem;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
-using Magic.Systems.Streaming;
+using StreamingGem;
 using System.Numerics;
 using System.Text;
 using Xunit;

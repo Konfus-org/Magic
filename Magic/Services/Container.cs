@@ -1,14 +1,14 @@
+using Magic.Interfaces;
 using System.Diagnostics.CodeAnalysis;
 
 namespace Magic.Services;
 
 /// <summary>
-/// The instances gem constructors can ask for, by contract type: the host's services and every gem export. A
-/// contract can have several (every <see cref="Interfaces.ILogger"/>, every <see cref="Interfaces.IDebugUI"/>);
-/// <see cref="Get{T}"/> answers the first one added, <see cref="All{T}"/> all of them in the order they came.
-/// Main thread only: filled at startup and changed by <see cref="Gems"/> between frames.
+/// The instances gem constructors can ask for, by contract type: the host's services and every gem export. This is
+/// the write side; everything that reads takes it as <see cref="IServices"/>. Main thread only: filled at startup
+/// and changed by <see cref="Gems"/> between frames.
 /// </summary>
-internal sealed class Container
+internal sealed class Container : IServices
 {
     private readonly List<(Type Contract, object Instance)> _entries = [];
 
@@ -38,10 +38,6 @@ internal sealed class Container
         return _entries.Exists(entry => entry.Contract == contract);
     }
 
-    /// <summary>
-    /// The first instance added under <paramref name="contract"/>, which is expected to be there: throws
-    /// <see cref="InvalidOperationException"/> when nothing was. For what may be missing, <see cref="TryGet(Type, out object?)"/>.
-    /// </summary>
     public object Get(Type contract)
     {
         return TryGet(contract, out object? instance)
@@ -49,31 +45,14 @@ internal sealed class Container
             : throw new InvalidOperationException($"Nothing provides {contract.FullName}.");
     }
 
-    /// <inheritdoc cref="Get(Type)"/>
-    public T Get<T>() where T : class
-    {
-        return (T)Get(typeof(T));
-    }
-
-    /// <summary>
-    /// The first instance added under <paramref name="contract"/>, for what may not be there: false, and null, when nothing was.
-    /// </summary>
     public bool TryGet(Type contract, [NotNullWhen(true)] out object? instance)
     {
         instance = _entries.Find(entry => entry.Contract == contract).Instance;
         return instance is not null;
     }
 
-    /// <inheritdoc cref="TryGet(Type, out object?)"/>
-    public bool TryGet<T>([NotNullWhen(true)] out T? instance) where T : class
+    public IReadOnlyList<object> All(Type contract)
     {
-        bool found = TryGet(typeof(T), out object? untyped);
-        instance = (T?)untyped;
-        return found;
-    }
-
-    public T[] All<T>() where T : class
-    {
-        return [.. _entries.Where(entry => entry.Contract == typeof(T)).Select(entry => (T)entry.Instance)];
+        return [.. _entries.Where(entry => entry.Contract == contract).Select(entry => entry.Instance)];
     }
 }

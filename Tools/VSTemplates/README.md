@@ -1,4 +1,4 @@
-# Templates
+﻿# Templates
 
 Three `dotnet new` templates: two projects, which Visual Studio lists in **File > New > Project** (search
 "Magic"), and an item; the `dotnet` CLI uses the short names. Install them, or reinstall after editing one, with
@@ -69,23 +69,32 @@ is of no use in a game project.
 
 ## Writing a gem
 
-A gem is the one class in its assembly that implements `IGem`. Its constructor parameters are its dependencies,
-the Core interfaces it implements are the services it offers (`IAssetLoader<T>`, `IOverlay`, `IRendering`, ...),
-and `Dispose` runs on unload. The frame loop calls its hooks once a frame, gems in load order: `Update`,
+A gem is the one class in its assembly that implements `IGem`. Its constructor parameters are its dependencies
+(a `T?` is optional: null when no gem provides it; a `T[]` of a Core interface is every provider there is, in
+load order, possibly none), the Core interfaces it implements are the services it offers (`IAssetLoader<T>`,
+`IDebugUI`, `IRendering`, `IScripting`, ...), and `Dispose` runs on unload. The frame loop calls its hooks once a frame, gems in load order: `Update`,
 `FixedUpdate`, `LateUpdate` and `Render`, each with the frame's `Frame` (delta in seconds, the events since the
 last frame). Implement `Reloading`/`Reloaded` to carry state across a hot reload.
 
 The gem's name is its assembly name. Two csproj properties are the only other things the host reads, stamped into
 the assembly by `Directory.Build.props`: `<GemStatic>true</GemStatic>` marks a gem that loads once and is never
-hot reloaded (a rebuild while the engine runs is ignored until restart), for the core systems the host itself
-holds on to: windowing, the ECS, logging. The gems a static gem depends on cannot be reloaded under it either.
+hot reloaded (a rebuild while the engine runs is ignored until restart), for what the frame loop and other
+static gems hold on to: windowing, the ECS, the renderer, logging, and the engine's own system gems
+(`WorldStreaming`, `Scripting`, `DefaultTagging`, `WorldTransforms`, `DeferredRenderer`, `DebugTools`). The gems a static gem depends
+on cannot be reloaded under it either.
 `<GemDependsOn>SDL</GemDependsOn>` names gems (`;` separated) that must load first without a service between them
 (say, one that owns a library's init and quit). It loads after them and unloads before them.
 
 Host services a gem can take: `Project` (paths), `IFileSystem` (disk), `Assets` (load an asset by handle; it keeps
-nothing) and `Events` (`Publish` an `Event`, or `Watch` a type). Every handle a gem takes from these (an event
-watch, an ECS query) it disposes in its own `Dispose`; the host tracks none of them, and one left behind keeps the
-old assembly alive after a hot reload (logged).
+nothing), `Events` (`Publish` an `Event`, or `Watch` a type), `World` (the open domains), `Threads`, and
+`Scheduler` (`Add(ecs, system)` puts an `ISystem` on a phase: `Update`, `FixedUpdate`, `LateUpdate`, `Render`, or
+`Overlay` for what draws on top of the scene). `IServices` is the lookup by type, for the few gems that must
+construct things whose dependencies they learn at runtime. Every handle a gem takes from these (an event watch,
+an ECS query, a scheduled system) it disposes in its own `Dispose`; the host tracks none of them, and one left
+behind keeps the old assembly alive after a hot reload (logged). Numbers worth showing go to `Debugging.Stats`.
+
+A gem that runs a scripting language implements `IScripting`: whoever spawns an entity offers it each script
+entry, and it takes the ones whose script asset it runs, answering what ends the instance.
 
 Uninstall with `dotnet new uninstall Tools\VSTemplates\MagicGem`, `dotnet new uninstall Tools\VSTemplates\MagicProject`
 and `dotnet new uninstall Tools\VSTemplates\MagicSample`.

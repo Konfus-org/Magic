@@ -1,8 +1,8 @@
-using Magic.Contexts;
+﻿using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 using Magic.Services;
-using Magic.Systems.Streaming;
+using StreamingGem;
 using Magic.Utils;
 using System.Numerics;
 using Xunit;

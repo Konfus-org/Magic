@@ -1,4 +1,4 @@
-using Magic.Contexts;
+﻿using Magic.Contexts;
 using Magic.Interfaces;
 
 namespace MyMagicGem;
@@ -7,7 +7,7 @@ namespace MyMagicGem;
 /// The gem: the one class in this dll that implements IGem. Constructor parameters are its dependencies: host
 /// services (Project, Assets, Events, IFileSystem, Scheduler, World) or interfaces other gems provide, such as IEcs from the ECS gem.
 /// The host loads gems in dependency order, so they are always there. To offer a service to the host and other gems,
-/// implement its Core interface on this class (IAssetLoader&lt;T&gt;, IOverlay, ...). Name, static and dependencies
+/// implement its Core interface on this class (IAssetLoader&lt;T&gt;, IDebugUI, ...). Name, static and dependencies
 /// on other gems by name are set in the csproj (GemStatic, GemDependsOn).
 /// </summary>
 internal sealed class MyMagicGem : IGem

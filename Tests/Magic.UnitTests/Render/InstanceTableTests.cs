@@ -1,6 +1,6 @@
-using Magic.Contexts;
+﻿using Magic.Contexts;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Rendering;
+using DeferredRendererGem;
 using Magic.Mathematics;
 using Magic.UnitTests.Fakes;
 using System.Numerics;

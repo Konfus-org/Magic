@@ -1,4 +1,4 @@
-using Magic.Contexts;
+﻿using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
 using Magic.Utils;
@@ -113,9 +113,9 @@ public sealed class World(Events events, Assets assets, Threads threads)
     /// <summary>
     /// What <see cref="Spawn"/> asked for and the streaming system has not taken yet.
     /// </summary>
-    internal List<(Handle<Chunk> Chunk, Vector3 At)> Spawns { get; } = [];
+    public List<(Handle<Chunk> Chunk, Vector3 At)> Spawns { get; } = [];
 
-    internal void Set(Handle<Domain> domain, DomainState state)
+    public void Set(Handle<Domain> domain, DomainState state)
     {
         int index = _active.FindIndex(open => open.Domain == domain);
         if (index < 0)
@@ -135,7 +135,7 @@ public sealed class World(Events events, Assets assets, Threads threads)
     /// <summary>
     /// The streaming system says how much of a loading domain is there, 0 to 1.
     /// </summary>
-    internal void Report(Handle<Domain> domain, float progress)
+    public void Report(Handle<Domain> domain, float progress)
     {
         int index = _active.FindIndex(open => open.Domain == domain);
         if (index >= 0)

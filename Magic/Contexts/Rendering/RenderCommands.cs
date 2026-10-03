@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -28,16 +28,6 @@ public sealed class RenderCommands
     public ReadOnlySpan<byte> Bytes => CollectionsMarshal.AsSpan(_bytes);
 
     public int Count => _commands.Count;
-
-    /// <summary>
-    /// Milliseconds the last submit of this list took; 0 before the first.
-    /// </summary>
-    public float SubmitMs { get; internal set; }
-
-    /// <summary>
-    /// How much of <see cref="SubmitMs"/> was spent blocked on the GPU.
-    /// </summary>
-    public float WaitMs { get; internal set; }
 
     /// <summary>
     /// The run a command points at.

@@ -1,4 +1,4 @@
-using Magic.Attributes;
+﻿using Magic.Attributes;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -13,6 +13,7 @@ namespace Magic.Behaviors;
 /// its origin on its left edge, a bar that fills from left to right.
 /// </summary>
 [AlwaysUpdate]
+[RunOnLoading]
 internal sealed class LoadingBar(Handle entity, IEcs ecs, World world) : IBehavior
 {
     /// <summary>

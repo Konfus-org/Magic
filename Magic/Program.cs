@@ -1,11 +1,11 @@
-using CommandLine;
+﻿using CommandLine;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
-using Magic.Systems;
 using Magic.Utils;
 using System.Diagnostics;
 using System.Reflection;
@@ -78,7 +78,8 @@ internal static class Program
                 return Fail(loaded.Message);
 
             // The host's services, which gem constructors ask for by type; gems add theirs as they load.
-            Container services = CoreServices.Create(loaded.Payload, files);
+            Container container = CoreServices.Create(loaded.Payload, files);
+            IServices services = container;
             using Threads threads = services.Get<Threads>();
             threads.Claim(ThreadId.Render); // this thread, the one the process started on, is the render thread: work for it waits for RunUntil below
             using Assets assets = services.Get<Assets>();
@@ -87,10 +88,8 @@ internal static class Program
 
             Debugging.Log.Info($"Project {project.Name}: root {project.Root}; assets {project.Assets}; cache {project.Cache}; resources {project.Resources}; engine gems {project.EngineGems}; gems [{string.Join(", ", project.Gems)}].");
 
-            using Gems gems = new(services, files, events, threads);
+            using Gems gems = new(container, files, events, threads);
             gems.Load(project.EngineGems, project.Gems, project.Root);
-
-            using CoreSystems? systems = CoreSystems.Create(services); // disposed before the gems go
 
             // What a gem provides may not be there: the window factory, the renderer.
             services.TryGet(out IWindowFactory? windowFactory);
@@ -406,19 +405,19 @@ internal static class Program
                 gem.Render(frame);
         });
 
-        // Without a renderer nothing runs the commands, and without the Core systems nothing recorded a scene, but a gem
-        // may still have drawn: its commands still go. How long it took stays on the list, for the next frame's stats.
+        // Without a renderer nothing runs the commands, and without a render system nothing recorded a scene, but a gem
+        // may still have drawn: its commands still go. How long it took is a stat, for the next frame's debug display.
         RenderCommands commands = frame.DrawCommands;
         IRendering? rendering = engine.Rendering;
         _submitted = threads.InvokeAsync(ThreadId.Render, _ =>
         {
             long submitting = Stopwatch.GetTimestamp();
             if (rendering is not null)
-                commands.WaitMs = rendering.Submit(commands);
+                Debugging.Stats.Set("Render.WaitMs", rendering.Submit(commands));
             else
                 commands.Clear();
 
-            commands.SubmitMs = (float)Stopwatch.GetElapsedTime(submitting).TotalMilliseconds;
+            Debugging.Stats.Set("Render.SubmitMs", Stopwatch.GetElapsedTime(submitting).TotalMilliseconds);
         });
 
         long finished = Stopwatch.GetTimestamp();

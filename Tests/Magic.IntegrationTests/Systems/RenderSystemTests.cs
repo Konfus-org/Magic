@@ -1,3 +1,4 @@
+﻿using DefaultTaggingGem;
 using FlecsGem;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
@@ -5,9 +6,9 @@ using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Contexts.Settings;
 using Magic.Services;
-using Magic.Systems;
-using Magic.Systems.Rendering;
-using Magic.Systems.Streaming;
+using Magic.Utils;
+using DeferredRendererGem;
+using WorldTransformsGem;
 using Magic.UnitTests.Fakes;
 using System.Diagnostics;
 using System.Numerics;
@@ -74,7 +75,7 @@ public sealed class RenderSystemTests : IDisposable
 
         RenderUntil(() => _ecs.Has<RenderInstance>(mover));
 
-        Assert.Equal(1u, _rendering.Stats.Instances);
+        Assert.Equal(1d, Debugging.Stats.Get("Render.Instances"));
     }
 
     [Theory]
@@ -222,7 +223,7 @@ public sealed class RenderSystemTests : IDisposable
         RenderFrame();
         RenderUntil(() => _ecs.Has<RenderInstance>(entity));
 
-        Assert.Equal(1u, _rendering.Stats.Instances);
+        Assert.Equal(1d, Debugging.Stats.Get("Render.Instances"));
     }
 
     [Fact]
@@ -235,7 +236,7 @@ public sealed class RenderSystemTests : IDisposable
 
         RenderFrame();
 
-        Assert.Equal(0u, _rendering.Stats.Instances);
+        Assert.Equal(0d, Debugging.Stats.Get("Render.Instances"));
     }
 
     [Fact]
@@ -283,7 +284,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, Tags.Of(Tag.Hidden));
         RenderFrame();
 
-        Assert.Equal(0u, _rendering.Stats.Lights);
+        Assert.Equal(0d, Debugging.Stats.Get("Render.Lights"));
     }
 
     [Fact]
@@ -301,7 +302,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, default(Tags));
         RenderFrame();
 
-        Assert.Equal(1u, _rendering.Stats.Lights);
+        Assert.Equal(1d, Debugging.Stats.Get("Render.Lights"));
     }
 
     [Fact]
@@ -331,7 +332,7 @@ public sealed class RenderSystemTests : IDisposable
 
         RenderFrame();
 
-        Assert.Equal(0u, _rendering.Stats.Lights);
+        Assert.Equal(0d, Debugging.Stats.Get("Render.Lights"));
     }
 
     [Fact]
@@ -347,7 +348,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, default(Tags));
         RenderFrame();
 
-        Assert.Equal(1u, _rendering.Stats.Lights);
+        Assert.Equal(1d, Debugging.Stats.Get("Render.Lights"));
     }
 
     [Theory]

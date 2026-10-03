@@ -1,4 +1,4 @@
-<Solution>
+﻿<Solution>
   <Configurations>
     <BuildType Name="Debug" />
     <BuildType Name="Optimize" />
@@ -6,8 +6,11 @@
   </Configurations>
   <Folder Name="/Gems/">
     <Project Path="Gems/AssimpModels/AssimpModels.csproj" />
-    <Project Path="Gems/CSharpScripting/CSharpScripting.csproj" />
+    <Project Path="Gems/CSharpScripting/CSharpScripts.csproj" />
+    <Project Path="Gems/DebugTools/DebugTools.csproj" />
     <Project Path="Gems/DefaultCheats/DefaultCheats.csproj" Id="45ab667a-667c-4ea8-bc5b-72d5108546f3" />
+    <Project Path="Gems/DefaultTagging/DefaultTagging.csproj" />
+    <Project Path="Gems/DeferredRenderer/DeferredRenderer.csproj" />
     <Project Path="Gems/FlecsEcs/FlecsEcs.csproj" />
     <Project Path="Gems/ImGuiOverlay/ImGuiOverlay.csproj" />
     <Project Path="Gems/MeshLods/MeshLods.csproj" />
@@ -17,6 +20,9 @@
     <Project Path="Gems/SDLRender/SDLRender.csproj" />
     <Project Path="Gems/SDLFonts/SDLFonts.csproj" />
     <Project Path="Gems/SDLWindowing/SDLWindowing.csproj" />
+    <Project Path="Gems/Scripting/Scripting.csproj" />
+    <Project Path="Gems/Streaming/WorldStreaming.csproj" />
+    <Project Path="Gems/WorldTransforms/WorldTransforms.csproj" />
     <Project Path="Gems/ZLogging/ZLogging.csproj" Id="a585cf9f-0774-4b62-b353-838c1bf1c5a2" />
   </Folder>
   <Folder Name="/Samples/">

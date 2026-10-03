@@ -1,4 +1,4 @@
-# Standing up Wizard
+﻿# Standing up Wizard
 
 A step-by-step build of the Magic editor, **Wizard**, and the MCP server that lets it (and an LLM) drive the engine.
 Work through it top to bottom. Every part ends with a checkpoint you can run before moving on.
@@ -2733,7 +2733,7 @@ interface the engine's clients use (an MCP client over HTTP) and checks what hap
 `Tests\Magic.IntegrationTests\Magic.IntegrationTests.csproj`, at the end of the project references:
 
 ```xml
-    <ProjectReference Include="..\..\Gems\CSharpScripting\CSharpScripting.csproj" />
+    <ProjectReference Include="..\..\Gems\CSharpScripting\CSharpScripts.csproj" />
     <ProjectReference Include="..\..\Gems\Mcp\Mcp.csproj" />
 ```
 

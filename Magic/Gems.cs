@@ -21,8 +21,10 @@ namespace Magic;
 /// parameters taken from the <see cref="Container"/>, and put in the container under every Core interface it
 /// implements. What its constructor needs is what it depends on: gems load after whatever provides that, and unload
 /// before it. A static gem is never unloaded before shutdown, and neither is anything it depends on, nor a gem that
-/// provides a service the Core systems keep (<see cref="CoreServices"/>): a change to one is warned about and needs a
-/// restart. Whatever a gem
+/// provides a service the frame loop keeps (<see cref="CoreServices"/>): a change to one is warned about and needs a
+/// restart. A constructor parameter declared nullable (<c>T?</c>) is optional: the gem loads without it, after
+/// whatever would provide it if that is coming; one of an array of a Core interface (<c>T[]</c>) is every provider
+/// there is, possibly none. Whatever a gem
 /// takes from a host service (an event watch, an ECS query) the gem disposes in its own Dispose: the host tracks none
 /// of it, and a handle left behind keeps the old assembly alive after a reload.</para>
 ///
@@ -31,8 +33,10 @@ namespace Magic;
 /// instances, and hears of a reload as it does of any gem's.</para>
 ///
 /// Gems come from two places: the engine's own folder, of which the project lists the ones it wants by name
-/// (<c>"default"</c> for all of them), and the project's folder, searched top to bottom, from which everything loads.
-/// One name loads once: of a project gem built in several configurations, the build in the host's own is taken.
+/// (<c>"default"</c> for all of them, <c>"-Name"</c> to leave one of those out), and the project's folder, searched
+/// top to bottom, from which everything loads. One name loads once, the project's before the engine's, so a project
+/// replaces an engine gem by shipping one of the same name; of a project gem built in several configurations, the
+/// build in the host's own is taken.
 ///
 /// Gems only change on one thread, the one that draws (their constructors and Dispose may touch the GPU and the
 /// windows): <see cref="Load"/> at startup, <see cref="ProcessChanges"/> at the top of every frame, which hands a
@@ -49,9 +53,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     private static readonly Assembly Host = typeof(IGem).Assembly;
 
     /// <summary>
-    /// The services the Core systems are constructed with and keep: a gem providing one cannot be reloaded, static or not.
+    /// The services the host's frame loop takes once and keeps: a gem providing one cannot be reloaded, static or not.
     /// </summary>
-    private static readonly Type[] CoreServices = [typeof(IEcs), typeof(IInput), typeof(IWindowRegistry), typeof(IRendering)];
+    private static readonly Type[] CoreServices = [typeof(IEcs), typeof(IRendering), typeof(IWindowFactory)];
 
     /// <summary>
     /// The configuration the host was built in (Debug, Release...), which is a folder of a project's build output.
@@ -91,17 +95,19 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// </summary>
     public void Load(string engineDirectory, IReadOnlyCollection<string> names, string projectRoot)
     {
-        HashSet<string>? wanted = names.Contains(Default) ? null : new HashSet<string>(names, StringComparer.Ordinal);
-        GemSource engine = new(engineDirectory, Recursive: false, wanted);
+        HashSet<string> excluded = new(names.Where(name => name.StartsWith('-')).Select(name => name[1..]), StringComparer.Ordinal);
+        HashSet<string>? wanted = names.Contains(Default) ? null : new HashSet<string>(names.Where(name => !name.StartsWith('-')), StringComparer.Ordinal);
+        GemSource engine = new(engineDirectory, Recursive: false, wanted, excluded);
         List<string> paths = [];
 
-        Add(engine, paths);
+        // The project's first: of two gems of one name, the first listed is the one loaded.
         if (!files.IsUnder(projectRoot, engineDirectory))
-            Add(new GemSource(projectRoot, Recursive: true, Names: null), paths);
+            Add(new GemSource(projectRoot, Recursive: true, Names: null, Excluded: []), paths);
+        Add(engine, paths);
 
         HashSet<string> seen = Load(paths, []);
 
-        foreach (string name in engine.Names?.Where(listed => !seen.Contains(listed)) ?? [])
+        foreach (string name in (engine.Names ?? []).Concat(engine.Excluded).Where(listed => !seen.Contains(listed)))
             Debugging.Log.Warn($"Gem \"{name}\" is listed in the project but no dll in {engineDirectory} provides it.");
     }
 
@@ -210,17 +216,20 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
                 continue;
             }
 
-            Debugging.Log.Verbose($"Skipping gem {gem.Name} ({path}): the project does not list it.");
+            Debugging.Log.Verbose($"Skipping gem {gem.Name} ({path}): the project {(SourceOf(path)?.Excluded.Contains(gem.Name) == true ? "leaves it out" : "does not list it")}.");
             gem.Context.Unload();
         }
 
         // Kahn's algorithm by hand: take any gem whose needs are all met (services in the container and every gem it
-        // names in GemDependsOn loaded).
+        // names in GemDependsOn loaded), and whose optional services no gem still pending would provide; when every
+        // gem is waiting on an optional one, the wait is given up.
         while (pending.Count > 0)
         {
-            Gem? next = pending
+            IEnumerable<Gem> ready = pending
                 .OrderBy(candidate => candidate.Provides.Contains(typeof(ILogger)) ? 0 : 1).ThenBy(candidate => candidate.Name)
-                .FirstOrDefault(candidate => candidate.Requires.All(container.Has) && candidate.DependsOn.All(dependency => Find(dependency) is not null));
+                .Where(candidate => candidate.Requires.All(container.Has) && candidate.DependsOn.All(dependency => Find(dependency) is not null));
+            Gem? next = ready.FirstOrDefault(candidate => !pending.Any(other => other != candidate && other.Provides.Overlaps(candidate.Optional)))
+                ?? ready.FirstOrDefault();
             if (next is null)
                 break;
 
@@ -490,7 +499,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             grew = false;
             foreach (Gem other in _gems)
             {
-                if (!group.Contains(other) && group.Any(member => member.Provides.Overlaps(other.Requires) || other.DependsOn.Contains(member.Name)))
+                if (!group.Contains(other) && group.Any(member => member.Provides.Overlaps(other.Requires) || member.Provides.Overlaps(other.Optional) || other.DependsOn.Contains(member.Name)))
                     grew |= group.Add(other);
             }
         }
@@ -556,7 +565,19 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             IsStatic = bool.TryParse(Metadata(assembly, "MagicGem.Static"), out bool isStatic) && isStatic;
             DependsOn = Metadata(assembly, "MagicGem.DependsOn")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
             Provides = [.. type?.GetInterfaces().Where(i => i.Assembly == Host && i != typeof(IGem)) ?? []];
-            Requires = [.. type?.Constructor()?.GetParameters().Select(parameter => parameter.ParameterType) ?? []];
+            Requires = [];
+            Optional = [];
+
+            NullabilityInfoContext nullability = new();
+            foreach (ParameterInfo parameter in type?.Constructor()?.GetParameters() ?? [])
+            {
+                if (Magic.Extensions.TypeExtensions.ManyOf(parameter.ParameterType) is { } element)
+                    Optional.Add(element); // every provider, so none is required, but each loads first
+                else if (Magic.Extensions.TypeExtensions.IsOptional(nullability, parameter))
+                    Optional.Add(parameter.ParameterType);
+                else
+                    Requires.Add(parameter.ParameterType);
+            }
         }
 
         public GemLoadContext Context { get; }
@@ -585,9 +606,15 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         public HashSet<Type> Provides { get; }
 
         /// <summary>
-        /// Its constructor's parameter types: host services or other gems' interfaces.
+        /// Its constructor's parameter types that must be there: host services or other gems' interfaces.
         /// </summary>
         public HashSet<Type> Requires { get; }
+
+        /// <summary>
+        /// The parameter types it takes when they are there (<c>T?</c>, and the element of a <c>T[]</c>): their
+        /// providers load before it and unload after it, but it loads without them.
+        /// </summary>
+        public HashSet<Type> Optional { get; }
 
         public IGem? Instance { get; set; }
 
@@ -649,10 +676,10 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     }
 
     /// <summary>
-    /// A folder gems come from: the engine's, flat and filtered to <paramref name="Names"/> (null takes all), or the
-    /// project's, searched recursively with build and cache folders left out.
+    /// A folder gems come from: the engine's, flat and filtered to <paramref name="Names"/> (null takes all) less
+    /// <paramref name="Excluded"/>, or the project's, searched recursively with build and cache folders left out.
     /// </summary>
-    private sealed record GemSource(string Directory, bool Recursive, HashSet<string>? Names)
+    private sealed record GemSource(string Directory, bool Recursive, HashSet<string>? Names, HashSet<string> Excluded)
     {
         /// <summary>
         /// Does <paramref name="path"/> lie in this source's territory?
@@ -670,7 +697,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
         public bool Wants(Gem gem)
         {
-            return Names is null || Names.Contains(gem.Name);
+            return !Excluded.Contains(gem.Name) && (Names is null || Names.Contains(gem.Name));
         }
     }
 }

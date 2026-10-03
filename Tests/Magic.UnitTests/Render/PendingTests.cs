@@ -1,4 +1,4 @@
-using Magic.Contexts.Rendering;
+﻿using DeferredRendererGem;
 using Xunit;
 
 namespace Magic.UnitTests.Render;

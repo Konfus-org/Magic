@@ -1,4 +1,4 @@
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -11,7 +11,7 @@ namespace Magic.Utils;
 /// thread-safe. The render tables (materials, textures, models, pipelines, passes) are each one of these, with what else
 /// they hold beside it.
 /// </summary>
-internal class RefCountTable<TKey, TValue> where TKey : notnull
+public class RefCountTable<TKey, TValue> where TKey : notnull
 {
     private readonly Dictionary<TKey, (TValue Value, int Refs)> _entries = [];
 

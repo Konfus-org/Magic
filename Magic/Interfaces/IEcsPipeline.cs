@@ -1,4 +1,4 @@
-using Magic.Contexts;
+﻿using Magic.Contexts;
 
 namespace Magic.Interfaces;
 
@@ -12,7 +12,12 @@ public enum UpdateType
     Update,
     FixedUpdate,
     LateUpdate,
-    Render
+    Render,
+
+    /// <summary>
+    /// What draws on top of the scene: debug text, the screen log, UI. Runs after every <see cref="Render"/> system.
+    /// </summary>
+    Overlay
 }
 
 public interface IEcsPipelineBuilder
