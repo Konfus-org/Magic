@@ -2,6 +2,7 @@ using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
 using Magic.Utils;
+using System.Numerics;
 
 namespace Magic.Services;
 
@@ -87,6 +88,16 @@ public sealed class World(Events events, Assets assets, Threads threads)
     }
 
     /// <summary>
+    /// Spawns <paramref name="chunk"/>'s entities once, under a root placed at <paramref name="at"/> (its own positions
+    /// are relative to that), outside any domain: they stay until <see cref="Open"/> replaces the world. The
+    /// streaming system does it in its next frame, like a global chunk; a chunk that cannot be read is logged.
+    /// </summary>
+    public void Spawn(Handle<Chunk> chunk, Vector3 at)
+    {
+        Spawns.Add((chunk, at));
+    }
+
+    /// <summary>
     /// Quits the game: the frame loop stops once the frame that hears of it is done.
     /// </summary>
     public void End()
@@ -99,6 +110,11 @@ public sealed class World(Events events, Assets assets, Threads threads)
     /// progress told 1 and <see cref="EventType.DomainLoaded"/> published; when it was the last one loading, the
     /// <see cref="Loading"/> domain is closed. Nothing for a domain that is not open.
     /// </summary>
+    /// <summary>
+    /// What <see cref="Spawn"/> asked for and the streaming system has not taken yet.
+    /// </summary>
+    internal List<(Handle<Chunk> Chunk, Vector3 At)> Spawns { get; } = [];
+
     internal void Set(Handle<Domain> domain, DomainState state)
     {
         int index = _active.FindIndex(open => open.Domain == domain);

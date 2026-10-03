@@ -142,6 +142,8 @@ internal sealed class StreamingSystem : ISystem
     private double _fillWorstMs;
 
     private readonly ChunkReader _reader = new();
+    private readonly List<(string Path, Vector3 At, Task<Loaded?> Task, CancellationTokenSource Cancel)> _summons = []; // what the world was asked to spawn outside any domain, reading
+    private Handle _summonedRoot;
 
     public StreamingSystem(IEcs ecs, Assets assets, Project project, ScriptSystem? scripts, World world, Threads threads, IRendering? rendering)
     {
@@ -161,6 +163,10 @@ internal sealed class StreamingSystem : ISystem
         while (_streams.Count > 0)
             Close(_streams[^1]);
 
+        foreach ((_, _, _, CancellationTokenSource cancel) in _summons)
+            Abandon(cancel);
+
+        _summons.Clear();
         _cameras.Dispose();
     }
 
@@ -175,6 +181,8 @@ internal sealed class StreamingSystem : ISystem
             Apply(change);
 
         Reconcile();
+        BeginSummons();
+        SpawnSummoned();
         _bootstrapping = _streams.Exists(stream => stream.Held);
         SpawnReady();
 
@@ -361,10 +369,7 @@ internal sealed class StreamingSystem : ISystem
     /// </summary>
     private void Open(Handle<Domain> handle, Domain domain)
     {
-        if (!_root.IsValid || !_ecs.IsAlive(_root))
-            _root = _ecs.Create("World");
-
-        Handle root = _ecs.Create(domain.Name, _root);
+        Handle root = _ecs.Create(domain.Name, WorldRoot());
         Stream stream = new(handle, domain, root, _ecs.Create("Globals", root), _ecs.Create("Chunks", root))
         {
             Held = handle != _world.Loading && _world.StateOf(_world.Loading) != DomainState.Closed,
@@ -375,6 +380,71 @@ internal sealed class StreamingSystem : ISystem
 
         LoadGlobals(stream);
         Debugging.Log.Info($"Domain {domain.Name} opened: {stream.Globals.Count} global chunk(s), chunk size {domain.ChunkSize} m.");
+    }
+
+    /// <summary>
+    /// The entity every domain, and what is summoned, sits under; made when there is none.
+    /// </summary>
+    private Handle WorldRoot()
+    {
+        if (!_root.IsValid || !_ecs.IsAlive(_root))
+            _root = _ecs.Lookup("World") is { IsValid: true } found ? found : _ecs.Create("World");
+
+        return _root;
+    }
+
+    /// <summary>
+    /// Takes what the world was asked to <see cref="World.Spawn"/>: each chunk is read like a global one.
+    /// </summary>
+    private void BeginSummons()
+    {
+        foreach ((Handle<Chunk> chunk, Vector3 at) in _world.Spawns)
+        {
+#pragma warning disable CA2000 // _summons owns it: Abandon, or the spawn, disposes it
+            CancellationTokenSource cancel = new();
+#pragma warning restore CA2000
+            _summons.Add((_assets.PathOf(chunk.Id) ?? chunk.Id.ToString(), at, LoadGlobalAsync(chunk, cancel.Token), cancel));
+        }
+
+        _world.Spawns.Clear();
+    }
+
+    /// <summary>
+    /// A summoned chunk that has arrived spawns whole, under World.Summoned.&lt;name&gt; placed where it was asked
+    /// for, so its own positions are relative to that. It belongs to no domain: it stays until that root goes.
+    /// </summary>
+    private void SpawnSummoned()
+    {
+        for (int i = 0; i < _summons.Count; i++)
+        {
+            (string path, Vector3 at, Task<Loaded?> task, CancellationTokenSource cancel) = _summons[i];
+            if (!task.IsCompleted)
+                continue;
+
+            _summons.RemoveAt(i--);
+            cancel.Dispose();
+
+            if (task.IsFaulted)
+            {
+                Debugging.Log.Error($"Chunk {path} could not be summoned: {task.Exception.GetBaseException().Message}");
+                continue;
+            }
+
+            if (!task.IsCompletedSuccessfully || task.Result is not { } loaded)
+            {
+                Debugging.Log.Error($"Chunk {path} could not be summoned: it cannot be loaded.");
+                continue;
+            }
+
+            if (!_summonedRoot.IsValid || !_ecs.IsAlive(_summonedRoot))
+                _summonedRoot = _ecs.Create("Summoned", WorldRoot());
+
+            Handle root = _ecs.Create(Path.GetFileNameWithoutExtension(path), _summonedRoot);
+            _ecs.Set(root, new Transform { Position = at });
+            _ecs.Add<WorldTransform>(root);
+            Spawn(loaded.Chunk, root, held: false);
+            Debugging.Log.Info($"Summoned {path} at {at}: {loaded.Chunk.Entities.Length} entities.");
+        }
     }
 
     private void Close(Stream stream)

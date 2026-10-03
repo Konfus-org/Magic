@@ -1,15 +1,19 @@
 using Magic.Contexts;
 using Magic.Contexts.Input;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Utils;
+using System.Collections.Concurrent;
 using System.Text;
 
 namespace Magic.Systems.DebugUI;
 
 /// <summary>
-/// The console, opened with the grave key: every log line (the last <see cref="ConsoleLines"/>) in a scrolling view
-/// above a line to type in, whose first word names a <see cref="Debugging.Commands"/> command (or <c>help</c> or
-/// <c>clear</c>) and the rest its arguments. It is a logger itself, so it sees every line from the moment it exists.
+/// The console, opened with the grave key (or from the start, when the project says so): every log line (the last
+/// <see cref="ConsoleLines"/>) in a scrolling view above a line to type in, whose first word names a
+/// <see cref="Debugging.Commands"/> command (or <c>help</c> or <c>clear</c>) and the rest its arguments. It is a
+/// logger itself, so it sees every line from the moment it exists. The terminal the host was started from is a
+/// console too: a line typed there runs the same way, in this system's frame, so a headless run is driven from it.
 /// </summary>
 internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
 {
@@ -18,14 +22,21 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
     private readonly Lock _logLock = new();
     private readonly Queue<string> _log = new();
     private readonly StringBuilder _builder = new();
+    private readonly ConcurrentQueue<string> _typed = new(); // lines from the terminal, run in the next frame
 
     private string _line = "";
     private string _text = "";
     private bool _logChanged;
 
-    public ConsoleSystem(IInput? input) : base("Console", Key.Grave, input)
+    public ConsoleSystem(IInput? input, bool openAtStart) : base("Console", Key.Grave, input)
     {
         Debugging.Log.Register(this);
+        Open = openAtStart;
+
+        // Not one of the engine's threads (Threads.Create): this one sits in ReadLine until the terminal closes, and
+        // Threads joins its own at dispose, which would wait for that. A long-running task gets a thread of its own
+        // that goes with the process.
+        Task.Factory.StartNew(ReadTerminal, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).FireAndForget();
     }
 
     public override void Dispose()
@@ -36,6 +47,9 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
 
     protected override void Draw(in Frame frame)
     {
+        while (_typed.TryDequeue(out string? typed))
+            Execute(typed);
+
         if (!Open)
             return;
 
@@ -53,6 +67,29 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
                 Execute(line);
         }
         Debugging.UI.End();
+    }
+
+    /// <summary>
+    /// Every line typed in the terminal, until it closes (end of input), kept for the next frame to run as if typed
+    /// in the window: a command is main-thread work, and nothing runs before the frames do.
+    /// </summary>
+    private void ReadTerminal()
+    {
+        try
+        {
+#pragma warning disable RS0030 // the terminal is the console's to read
+            while (Console.In.ReadLine() is { } line)
+#pragma warning restore RS0030
+            {
+                string trimmed = line.Trim();
+                if (trimmed.Length > 0)
+                    _typed.Enqueue(trimmed);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            // No terminal to read, or it went: the window is the console from here.
+        }
     }
 
     /// <summary>

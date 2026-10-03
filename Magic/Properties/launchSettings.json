@@ -1,126 +1,15 @@
 {
   "profiles": {
     "Magic": {
-      "commandName": "Project"
-    },
-    "Cube Sample": {
       "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/Cube\"",
+      "commandLineArgs": "--project \"$(ProjectDir)../Samples\"",
       "workingDirectory": "$(ProjectDir).."
     },
-    "Cube Sample (WSL)": {
+    "Magic (WSL)": {
       "commandName": "WSL2",
       "distributionName": "Ubuntu",
       "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/Cube\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "Fallbacks Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/Fallbacks\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "Fallbacks Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/Fallbacks\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "Grid Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/Grid\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "Grid Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/Grid\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "LightStress Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/LightStress\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "LightStress Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/LightStress\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "Lights Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/Lights\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "Lights Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/Lights\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "Lods Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/Lods\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "Lods Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/Lods\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "Monkey Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/Monkey\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "Monkey Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/Monkey\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "RenderTexture Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/RenderTexture\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "RenderTexture Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/RenderTexture\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "SplitScreen Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/SplitScreen\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "SplitScreen Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/SplitScreen\"",
-      "workingDirectory": "{ProjectDir}/.."
-    },
-    "Wall Sample": {
-      "commandName": "Project",
-      "commandLineArgs": "--project \"$(ProjectDir)../Samples/Wall\"",
-      "workingDirectory": "$(ProjectDir).."
-    },
-    "Wall Sample (WSL)": {
-      "commandName": "WSL2",
-      "distributionName": "Ubuntu",
-      "executablePath": "dotnet",
-      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples/Wall\"",
+      "commandLineArgs": "\"{ProjectDir}/../Build/net10.0/Debug-linux-x64/bin/Magic.dll\" --project \"{ProjectDir}/../Samples\"",
       "workingDirectory": "{ProjectDir}/.."
     }
   }

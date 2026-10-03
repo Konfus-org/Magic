@@ -31,7 +31,7 @@ internal sealed class CoreSystems : IDisposable
         TagSystem tags = new(ecs);
         TransformSystem transforms = new(ecs);
         RenderSystem renderer = new(ecs, assets, container.Get<IFileSystem>(), project, windows, rendering, threads);
-        ConsoleSystem console = new(input);
+        ConsoleSystem console = new(input, project.Console);
         SettingsSystem settings = new(project.Settings, input);
         DebuggerDisplaySystem debugger = new(transforms, renderer, streaming, assets, input);
         DebugUI3DSystem worldText = new(ecs, windows, project.Settings.Render);

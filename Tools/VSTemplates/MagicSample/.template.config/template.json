@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Konfus",
+  "classifications": [ "Magic", "Game Engine", "Sample" ],
+  "identity": "Magic.Sample.CSharp",
+  "name": "Magic Sample",
+  "shortName": "magicsample",
+  "description": "Adds a sample to the engine's Samples project: a domain folder under Assets/Domains with a camera, a light, a floor, a turning cube and the script that turns it. Run the Samples project and type 'portal <name>' in the console. The template leans on what the Samples project has: the shared CameraController (3050) and OrbitSystem (3051) scripts and the Tonemap pass (10030).",
+  "tags": {
+    "language": "C#",
+    "type": "item"
+  },
+  "sourceName": "MyMagicSample",
+  "symbols": {
+    "DomainId": {
+      "type": "generated",
+      "generator": "random",
+      "parameters": { "low": 100000, "high": 999999 },
+      "replaces": "SAMPLE_DOMAIN_ID"
+    },
+    "GlobalsId": {
+      "type": "generated",
+      "generator": "random",
+      "parameters": { "low": 100000, "high": 999999 },
+      "replaces": "SAMPLE_GLOBALS_ID"
+    },
+    "ChunkId": {
+      "type": "generated",
+      "generator": "random",
+      "parameters": { "low": 100000, "high": 999999 },
+      "replaces": "SAMPLE_CHUNK_ID"
+    },
+    "ScriptId": {
+      "type": "generated",
+      "generator": "random",
+      "parameters": { "low": 100000, "high": 999999 },
+      "replaces": "SAMPLE_SCRIPT_ID"
+    }
+  },
+  "primaryOutputs": [
+    { "path": "Domains/MyMagicSample/MyMagicSample.domain" }
+  ]
+}

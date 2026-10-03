@@ -1,5 +1,0 @@
-{
-    "name": "Wall",
-    "gems": ["default", "Wall"],
-    "entryPoint": { "id": 3021 }
-}

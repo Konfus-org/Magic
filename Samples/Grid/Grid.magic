@@ -1,5 +1,0 @@
-{
-    "name": "Grid",
-    "gems": ["default", "Grid"],
-    "entryPoint": { "id": 3031 }
-}

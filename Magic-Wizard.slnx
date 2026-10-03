@@ -20,17 +20,7 @@
     <Project Path="Gems/ZLogging/ZLogging.csproj" Id="a585cf9f-0774-4b62-b353-838c1bf1c5a2" />
   </Folder>
   <Folder Name="/Samples/">
-    <Project Path="Samples/Cube/Cube.csproj" />
-    <Project Path="Samples/SampleShared/SampleShared.csproj" />
-    <Project Path="Samples/Fallbacks/Fallbacks.csproj" />
-    <Project Path="Samples/Grid/Grid.csproj" />
-    <Project Path="Samples/Lods/Lods.csproj" />
-    <Project Path="Samples/Lights/Lights.csproj" />
-    <Project Path="Samples/LightStress/LightStress.csproj" />
-    <Project Path="Samples/Monkey/Monkey.csproj" />
-    <Project Path="Samples/RenderTexture/RenderTexture.csproj" />
-    <Project Path="Samples/SplitScreen/SplitScreen.csproj" />
-    <Project Path="Samples/Wall/Wall.csproj" />
+    <Project Path="Samples/Samples.csproj" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="Tests/Magic.IntegrationTests/Magic.IntegrationTests.csproj" />

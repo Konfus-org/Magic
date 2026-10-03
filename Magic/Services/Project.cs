@@ -41,6 +41,12 @@ public sealed record Project
     public Handle<Domain> Loading { get; init; } = Handle<Domain>.None;
 
     /// <summary>
+    /// Whether the console window is open when the host starts (<c>"console": true</c>), for a project that is
+    /// driven by typing: the samples. The grave key opens it either way.
+    /// </summary>
+    public bool Console { get; init; }
+
+    /// <summary>
     /// Where Assets live.
     /// </summary>
     [JsonIgnore]

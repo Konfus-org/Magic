@@ -1,5 +1,0 @@
-{
-    "name": "Monkey",
-    "gems": ["default", "Monkey"],
-    "entryPoint": { "id": 3011 }
-}

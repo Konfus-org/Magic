@@ -1,7 +1,7 @@
 # Templates
 
-Two `dotnet new` project templates. Visual Studio lists them in **File > New > Project** (search
-"Magic"); the `dotnet` CLI uses the short names. Install both, or reinstall after editing one, with
+Three `dotnet new` templates: two projects, which Visual Studio lists in **File > New > Project** (search
+"Magic"), and an item; the `dotnet` CLI uses the short names. Install them, or reinstall after editing one, with
 
 ```
 pwsh Tools/install-templates.ps1
@@ -45,8 +45,27 @@ A gem on its own. The same template works in two places, told apart by whether a
 
   ```
   dotnet new magicgem -n Physics -o Gems\Physics --Author "Konfus" --Description "Rigid bodies and collision."
-  dotnet sln Magic.slnx add Gems\Physics\Physics.csproj --solution-folder Gems
+  dotnet sln Magic-Wizard.slnx add Gems\Physics\Physics.csproj --solution-folder Gems
   ```
+
+## Magic Sample (`magicsample`)
+
+A sample for the engine's own `Samples` project: a folder under `Samples\Assets\Domains\` holding a domain
+(a camera, a light, a floor and a turning cube) and the script that turns it. Every id it needs is drawn at random,
+so it never collides with another sample's. The Samples project compiles the script with its next build, and the
+console's `portal` lists the domain, so a sample is in the list by being there.
+
+```
+dotnet new magicsample -n Fountain -o Samples\Assets
+dotnet build Samples
+Build
+et10.0\Debugin\Magic.exe --project Samples
+> portal Fountain
+```
+
+In Visual Studio it is **Add > New Item** on the Samples project, with `Assets` as the location. The template leans
+on what the Samples project has (the shared `CameraController` and `OrbitSystem` scripts, the Tonemap pass), so it
+is of no use in a game project.
 
 ## Writing a gem
 
@@ -68,4 +87,5 @@ nothing) and `Events` (`Publish` an `Event`, or `Watch` a type). Every handle a 
 watch, an ECS query) it disposes in its own `Dispose`; the host tracks none of them, and one left behind keeps the
 old assembly alive after a hot reload (logged).
 
-Uninstall with `dotnet new uninstall Tools\VSTemplates\MagicGem` and `dotnet new uninstall Tools\VSTemplates\MagicProject`.
+Uninstall with `dotnet new uninstall Tools\VSTemplates\MagicGem`, `dotnet new uninstall Tools\VSTemplates\MagicProject`
+and `dotnet new uninstall Tools\VSTemplates\MagicSample`.

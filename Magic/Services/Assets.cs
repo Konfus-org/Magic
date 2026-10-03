@@ -180,6 +180,28 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
+    /// The relative paths (forward slashes, like <see cref="Asset.Path"/>) of every indexed file with the given
+    /// extension, under any watched folder, in path order. For code that starts from a name typed by someone, which
+    /// <see cref="Find{T}"/> then resolves.
+    /// </summary>
+    public string[] Paths(string extension)
+    {
+        List<string> found = [];
+
+        lock (_lock)
+        {
+            foreach (string path in _idByPath.Keys)
+            {
+                if (path.EndsWith(extension, StringComparison.OrdinalIgnoreCase) && Relative(path) is { } relative)
+                    found.Add(relative);
+            }
+        }
+
+        found.Sort(StringComparer.Ordinal);
+        return [.. found];
+    }
+
+    /// <summary>
     /// The relative path of an asset, or null for an id nothing has.
     /// </summary>
     public string? PathOf(ulong id)

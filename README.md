@@ -11,17 +11,20 @@ Needs the .NET 10 SDK. Configurations: `Debug`, `Optimize` (optimised, full symb
 dotnet build Magic.slnx
 dotnet test Tests/Magic.UnitTests
 dotnet test Tests/Magic.IntegrationTests
-Build/net10.0/Debug/bin/Magic --project Samples/Cube
+Build/net10.0/Debug/bin/Magic --project Samples
 ```
+
+The Samples project opens a hub with the console up: `portal` lists the samples, `portal Cube` opens one, `summon
+Monkey` puts a model in front of the camera (Samples/README.md). The terminal the host was started from is a
+console too, so `--headless` runs are driven by typing there.
 
 `Magic --help` lists the options. Exit codes: 0 clean, 1 bad arguments or a crash, 2 an error was logged under
 `--fail-on-error`.
 
 Windows and Linux (Vulkan) are supported; macOS is not yet. `Tools/build-all.ps1 -Runtime linux-x64` builds the
 host, the gems and the samples for another platform into its own folder (`Build/net10.0/Debug-linux-x64/`); the
-solution itself refuses a runtime. The host project's launch profiles run every sample: "Lights Sample" on Windows,
-"Lights Sample (WSL)" as that Linux build in WSL (the samples are libraries, which the WSL launcher refuses), so run the
-script before the WSL profile. The WSL profile needs the ".NET Debugging with WSL" component of Visual Studio.
+solution itself refuses a runtime. The host project's "Magic (WSL)" launch profile runs that build in WSL, with the
+Samples project; run the script before it. It needs the ".NET Debugging with WSL" component of Visual Studio.
 
 ## How it works
 
@@ -58,9 +61,9 @@ script before the WSL profile. The WSL profile needs the ".NET Debugging with WS
 Magic/       The host: gem loader, services, contracts, core systems
 Gems/        Engine gems
 Resources/   Engine assets: shaders, materials, passes, models, textures
-Samples/     Example projects (Samples/README.md)
+Samples/     The samples, one project (Samples/README.md)
 Tests/       Unit and integration tests (Tests/README.md)
-Tools/       dotnet new templates for projects and gems (Tools/VSTemplates/README.md)
+Tools/       dotnet new templates for projects, gems and samples (Tools/VSTemplates/README.md)
 Build/       All build output (not checked in)
 ```
 

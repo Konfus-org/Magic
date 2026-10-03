@@ -79,7 +79,7 @@ No workloads to install. Before you start, make sure the engine builds and the C
 
 ```powershell
 dotnet build Magic.slnx
-Build\net10.0\Debug\bin\Magic.exe --project Samples\Cube
+Build\net10.0\Debug\bin\Magic.exe --project Samples
 ```
 
 ## Part 1: Three small Core changes
@@ -830,7 +830,7 @@ dotnet build Magic\Magic.csproj
 0 warnings, 0 errors, and `Build\net10.0\Debug\bin\Gems\Mcp.dll` exists. Run a sample as usual:
 
 ```powershell
-Build\net10.0\Debug\bin\Magic.exe --project Samples\Cube
+Build\net10.0\Debug\bin\Magic.exe --project Samples
 ```
 
 The log shows `Loaded gem: Mcp v1.0.0 (static)` and no "MCP server listening" line, because the variable is not set.
@@ -844,7 +844,7 @@ Terminal one, start the engine with the port set:
 
 ```powershell
 $env:MAGIC_MCP_PORT = "47800"
-Build\net10.0\Debug\bin\Magic.exe --project Samples\Cube
+Build\net10.0\Debug\bin\Magic.exe --project Samples
 ```
 
 The log now includes `MCP server listening on http://localhost:47800/mcp`.
@@ -1913,7 +1913,7 @@ dotnet run --project Wizard
 
 It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 
-1. Paste the full path of a sample into the box, for example that of `Samples\Cube` in your checkout
+1. Paste the full path of a project into the box, for example that of `Samples` in your checkout
    (a folder or its `.magic` file both work), and press **Play**.
 2. The engine window opens. The status on the right shows `Cube · frame N · 338 entities`, counting up.
 3. The console fills with the engine's log.
@@ -2142,7 +2142,7 @@ npm start
 ```
 
 1. A native window titled Wizard opens, showing the same page as the browser did, with a File / Edit / View menu.
-2. **Browse…** opens the native file dialog filtered to `.magic` files. Pick `Samples\Cube\Cube.magic`.
+2. **Browse…** opens the native file dialog filtered to `.magic` files. Pick `Samples\Samples.magic`.
 3. **Play** starts the engine, as before.
 4. Close the Wizard window while the engine is running. Within a few seconds the engine window closes too. Check
    that nothing is left behind:

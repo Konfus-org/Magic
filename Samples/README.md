@@ -1,21 +1,49 @@
 # Samples
 
-Each folder is a project: a `<Name>.magic` file naming the domain to open, `Assets/Domains/<Name>/` holding
-that domain, and `Assets/Scripts/` holding C# scripts that `<Name>.csproj` compiles into a dll. A sample builds
-into its own `Build/` tree, laid out like the engine's (`Build/net10.0/<Config>/bin/` and `obj/`), and the host
-finds the dll there. The samples sit in `Magic.slnx`, so `dotnet build Magic.slnx` builds the engine and all of them; a
-single one builds with `dotnet build Samples\Cube`. Run one from the repository root:
+One project: `Samples.magic` opens the Hub (a floor, a question mark and a camera to fly), with the console up, and
+every folder under `Assets/Domains/` is a sample to portal into. The scripts under `Assets/` compile into one dll
+(`Samples.csproj`, built into `Samples/Build/`), where the host finds it. Build everything and run it from the
+repository root:
 
 ```powershell
-Build\net10.0\Debug\bin\Magic.exe --project Samples\Cube
-Build\net10.0\Debug\bin\Magic.exe --project Samples\Grid
+dotnet build Magic-Wizard.slnx
+Build\net10.0\Debug\bin\Magic.exe --project Samples
 ```
+
+In Visual Studio, the host's "Magic" launch profile does the same, and "Magic (WSL)" runs the Linux build in WSL
+(`Tools\build-all.ps1 -Runtime linux-x64` first).
 
 Caches land in `Cache\` next to `Magic.exe`. Screenshots (`--screenshots 1 --screenshot-delay 60`) go to `Screenshots\` next to `Magic.exe` (`Build\net10.0\<Configuration>\bin\Screenshots\<Project>_<frame>.png`). Log files are written only by a Release build, to `Logs\` beside it (`Build\net10.0\Release\bin\Logs\<Project>_<date>_<n>.log`).
 
-In Visual Studio, set a sample as the startup project and press F5: each carries a launch profile
-(`Properties/launchSettings.json`) that starts `Magic.exe` from the engine's build tree with the sample as its
-project, from the repository root, with the same options as above.
+## The console
+
+The grave key opens it; `"console": true` in the `.magic` file has it open from the start, as the Samples project
+does. The terminal the host was started from is a console too: a line typed there runs the same way, so a
+`--headless` run is driven from it. `help` lists the commands; these come with the engine's `DefaultCheats` gem:
+
+| Command | Does |
+|---|---|
+| `portal` | Lists the domains there are: the sample list. |
+| `portal Lights` | Opens that domain in place of the world. A name, `Lights.domain`, or a path; `additive` opens it on top of the world instead. |
+| `portal Lights 0,5,-11` | The same, and once it is loaded puts the cameras that draw the main window at that position. `portal 0,5,-11` alone moves them now. |
+| `summon Monkey.fbx` | Puts the asset in the world 3 m in front of the camera: a model wearing the default material, a material (`summon Red.mat`) on a cube, a chunk (its entities under a root at the position), or a domain (opened on top). `summon Cube.fbx 0,1,0` says where. A bare name is enough when only one asset has it; `Monkey` is both a model and a domain, so it asks for the extension. |
+| `screenshot`, `restore shot.png`, `exit` | A screenshot of the main window, the world as it was when one was taken, and quit. |
+
+What is summoned sits under `World.Summoned` and goes when a portal replaces the world.
+
+## Adding a sample
+
+A sample is a folder under `Assets/Domains/`: its domain, its chunks, and whatever materials, shaders, textures and
+scripts it alone uses, each with its `.meta` id. Scripts go in `namespace Samples.<Name>`, since one dll holds them
+all and a chunk names a script by its class name, which must be unique. The `magicsample` template makes one
+(`Tools/VSTemplates/README.md`):
+
+```powershell
+dotnet new magicsample -n Fountain -o Samples\Assets
+dotnet build Samples
+```
+
+`portal` lists it from then on, and `portal Fountain` opens it. Add a row to the table below.
 
 ## Gems
 
@@ -27,30 +55,29 @@ The `.magic` file says which engine gems load, by their assembly name (the same 
 { "name": "Cube", "entryPoint": { "id": 3001 }, "gems": ["ZLogging", "FlecsEcs", "SDL", "SDLWindowing", "SDLRender"] }
 ```
 
-A project's own gems are never listed: any gem dll found under the project folder (each sample's
-`Build/net10.0/<Config>/bin/<Name>.dll`) loads and hot reloads like an engine gem. `obj`, `Cache` and dot
+A project's own gems are never listed: any gem dll found under the project folder (here
+`Build/net10.0/<Config>/bin/Samples.dll`) loads and hot reloads like an engine gem. `obj`, `Cache` and dot
 folders are skipped, so a build's intermediate copy of the dll does not count twice.
 
 ## Scripts
 
-A sample's scripts are assets: a `.cs` file under `Assets/Scripts/` with a `.meta` beside it, whose class a
-chunk attaches to an entity by the file's id. The sample's dll has no gem in it, only those classes.
+A sample's scripts are assets: a `.cs` file under its folder (`Assets/Domains/<Name>/Scripts/`) with a `.meta`
+beside it, whose class a chunk attaches to an entity by the file's id. The dll has no gem in it, only those classes.
 
 RenderTexture's `Spin.cs` is an `IBehavior` on the monkey: its `Update` turns that entity around the world's up
 axis. `0_0_0.chunk` lists it under the monkey's `"scripts"` with the speed picked for the scene.
 
-The two scripts every sample uses are shared, in `SampleShared/Assets/Scripts/` (see Moving around):
+The two scripts every sample uses are shared, in `Assets/Scripts/Shared/` (see Moving around):
 `CameraController.cs` is an `IBehavior` on the camera, and `OrbitSystem.cs` is an `ISystem`: one instance,
 attached to an entity of its own, that queries the cameras.
 
-Edit a script and rebuild the sample while it runs: the host sees the new dll and reloads the scripts without
-a restart.
+Edit a script and rebuild the Samples project while it runs: the host sees the new dll and reloads the scripts
+without a restart.
 
 ## Moving around
 
-`SampleShared/` is a gem every sample's csproj references, so its dll is built into each sample's `Build/` tree
-and loads with it. The gem adds `SampleShared/Assets/` to the asset folders, so every sample's `globals.chunk`
-names the same two scripts by id, with the speeds picked for the scene:
+`Assets/Scripts/Shared/` holds the two scripts every sample's `globals.chunk` names by id, with the speeds picked
+for the scene:
 
 ```json
 { "name": "Orbit", "scripts": [ { "id": 3051, "degreesPerSecond": 4 } ] },
@@ -134,7 +161,7 @@ the file and in `Tags`; the engine keeps a marker component under each so its qu
 | SplitScreen | Two cameras in one window: `"viewport": "top_half"` and `"bottom_half"`, each culled and drawn on its own | two views orbiting until you fly the top one; Debug-build Stats count both |
 | Grid | GPU-driven scale: 410 000 static entities in 400 chunks (1.28 km a side), 1024 small shapes and one 16 m tower in each, streamed by distance. Far chunks are stand-ins, and anything under a pixel is not drawn, so towards the horizon the small shapes go and the towers stay | `Streaming:` lines; `FPS:` above 60 in a Debug build (vsync off by default); every chunk in view loads, whatever the distance; `--set Render.ViewDist=200` limits it and `--set Assets.Budgets.Chunk=8` shows chunks out of view unloading |
 | Wall | Two-phase HiZ occlusion culling: a wall in front of a 16k grid | in a Debug build, the last `Stats:` visible count is a fraction of the instances |
-| Fallbacks | The render failure looks, one cube each: a surface that does not compile (magenta), a material whose shader is not an asset (magenta checker), a model that is not an asset (red checker on the unit cube), a texture that is not an asset (red checker). All glow and breathe, and each carries its reason as red `!!! ... !!!` text (always in a Debug build; in a Release build while F3 is on). Logs errors by design, so `--fail-on-error` returns 2 | fix `Assets/Shaders/BadCompile.surf.hlsl` or point `BadTexture.mat` at texture 36 while it runs and the cube heals |
+| Fallbacks | The render failure looks, one cube each: a surface that does not compile (magenta), a material whose shader is not an asset (magenta checker), a model that is not an asset (red checker on the unit cube), a texture that is not an asset (red checker). All glow and breathe, and each carries its reason as red `!!! ... !!!` text (always in a Debug build; in a Release build while F3 is on). Logs errors by design, so `--fail-on-error` returns 2 | fix `Domains/Fallbacks/Shaders/BadCompile.surf.hlsl` or point `BadTexture.mat` at texture 36 while it runs and the cube heals |
 
-Hot reload works on every file: edit `0_0_0.chunk` while Cube runs and the cube moves; edit `globals.chunk`
-and the camera or sun change; edit `Cube.domain` and the domain reopens.
+Hot reload works on every file: edit `Domains/Cube/0_0_0.chunk` while Cube is open and the cube moves; edit its
+`globals.chunk` and the camera or sun change; edit `Cube.domain` and the domain reopens.

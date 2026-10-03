@@ -103,6 +103,19 @@ public sealed class AssetsTests : IDisposable
     }
 
     [Fact]
+    public void Paths_lists_the_indexed_files_of_an_extension_in_path_order()
+    {
+        Write("Materials/B.mat", "{}", 80);
+        Write("Materials/A.mat", "{}", 81);
+        Write("S.vert.hlsl", "", 82);
+        using Services.Assets assets = Open();
+
+        string[] paths = assets.Paths(".mat");
+
+        Assert.Equal(["Materials/A.mat", "Materials/B.mat"], paths);
+    }
+
+    [Fact]
     public void An_unknown_id_loads_as_null()
     {
         using Services.Assets assets = Open();

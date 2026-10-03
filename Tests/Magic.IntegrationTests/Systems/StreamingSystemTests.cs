@@ -93,6 +93,16 @@ public sealed class StreamingSystemTests : IDisposable
     }
 
     [Fact]
+    public void A_summoned_chunk_spawns_under_a_root_at_the_position()
+    {
+        _world.Spawn(new Handle<Chunk>(3051), new Vector3(4, 5, 6));
+
+        StepUntil(() => _ecs.Lookup("World.Summoned.0_0_0.O").IsValid);
+
+        Assert.Equal(new Vector3(4, 5, 6), _ecs.Get<Transform>(_ecs.Lookup("World.Summoned.0_0_0")).Position);
+    }
+
+    [Fact]
     public void An_opened_domain_spawns_its_globals()
     {
         Open(Test);

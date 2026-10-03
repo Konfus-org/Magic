@@ -1,0 +1,53 @@
+{
+    "entities": [
+        {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": { "passes": [ { "id": 10030 } ] }
+            }
+        },
+        {
+            "name": "Orbit",
+            "scripts": [ { "id": 3051, "degreesPerSecond": 4 } ]
+        },
+        {
+            "name": "Camera",
+            "scripts": [ { "id": 3050, "speed": 6 } ],
+            "components": {
+                "Transform": {
+                    "position": { "x": 0, "y": 3, "z": -8 },
+                    "rotation": { "x": 0.13053, "y": 0, "z": 0, "w": 0.99144 },
+                    "scale": { "x": 1, "y": 1, "z": 1 }
+                },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Moon",
+            "components": {
+                "Transform": {
+                    "rotation": { "x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023 },
+                    "scale": { "x": 1, "y": 1, "z": 1 }
+                },
+                "DirectionalLight": {
+                    "color": { "x": 0.6, "y": 0.7, "z": 1 },
+                    "intensity": 0.25
+                }
+            }
+        },
+        {
+            "name": "Floor",
+            "tags": [ "static" ],
+            "components": {
+                "Transform": {
+                    "position": { "x": 0, "y": 0, "z": 0 },
+                    "scale": { "x": 16, "y": 1, "z": 16 }
+                },
+                "Renderer": {
+                    "model": { "id": 519 },
+                    "materials": { "slot0": { "id": 7381546209823741553 } }
+                }
+            }
+        }
+    ]
+}

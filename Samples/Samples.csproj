@@ -1,0 +1,37 @@
+<Project>
+
+  <!-- The engine's samples as one project: Samples.magic opens the Hub, and every folder under Assets\Domains\ is a
+       sample to portal into (see README.md). The scripts under Assets\ compile into a dll in this project's own
+       Build\ tree (see Directory.Build.props), where the host finds it. Build it with "dotnet build Samples";
+       rebuild while it runs to hot reload the scripts. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Script assets: classes the chunks attach to entities by the file's asset id. -->
+    <Compile Include="Assets\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Compile against the host, never copy it: the scripts share the host's loaded Magic.dll. -->
+    <ProjectReference Include="$(MagicRoot)Magic\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <!-- What the host says of the dll when it loads it. -->
+  <PropertyGroup>
+    <Description>The engine's samples: their scripts.</Description>
+    <Authors>Magic</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>
