@@ -1,4 +1,4 @@
-namespace Magic.Attributes;
+namespace Magic.Attributes.Assets;
 
 public enum AssetFormat
 {

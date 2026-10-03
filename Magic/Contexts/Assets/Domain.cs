@@ -1,4 +1,4 @@
-using Magic.Attributes;
+using Magic.Attributes.Assets;
 
 namespace Magic.Contexts.Assets;
 

@@ -1,4 +1,4 @@
-﻿using Magic.Attributes;
+﻿using Magic.Attributes.Assets;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;

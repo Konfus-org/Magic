@@ -8,9 +8,9 @@ using System.Numerics;
 namespace Samples.Assets.Scripts;
 
 /// <summary>
-/// Swings every camera around the world's up axis through the origin, keeping its height, distance and tilt, so a
-/// scene shows all its sides, and streams, with nobody at the controls. The first press of the right mouse button,
-/// which is how a <see cref="CameraController"/> is flown, ends it: the cameras are the user's from then on.
+/// Swings every camera around the world's up axis through the origin, keeping its height, distance and tilt, so a scene
+/// shows all its sides, and streams, with nobody at the controls. The first press of the right mouse button, which is
+/// how a <see cref="CameraController"/> is flown, ends it: the cameras are the user's from then on.
 /// </summary>
 internal sealed class OrbitSystem(IEcs ecs, IInput input) : ISystem
 {

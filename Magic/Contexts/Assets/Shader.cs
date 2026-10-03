@@ -1,4 +1,4 @@
-using Magic.Attributes;
+using Magic.Attributes.Assets;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 

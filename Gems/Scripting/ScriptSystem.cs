@@ -1,4 +1,4 @@
-﻿using Magic.Attributes;
+﻿using Magic.Attributes.Scripts;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -30,7 +30,7 @@ namespace ScriptingGem;
 /// </para>
 /// <para>
 /// While the world is loading behind the loading domain (<see cref="World.Loading"/> is open) scripts are held: they
-/// are not made until it is there, but for the classes marked <see cref="RunOnLoadingAttribute"/>, which are made
+/// are not made until it is there, but for the classes marked <see cref="ImpatientAttribute"/>, which are made
 /// and run as their entity spawns: the loading screen's own, and anything else that runs while the world loads.
 /// </para>
 /// </summary>
@@ -74,7 +74,7 @@ internal sealed class ScriptSystem : ISystem
         _services = services;
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
         _observer = ecs.Observe<Scripts>(ComponentEvent.Removed, _removed.Add);
-        _hooks = new Disposables<Hook>(new Hook(this, UpdateType.FixedUpdate), new Hook(this, UpdateType.LateUpdate), new Hook(this, UpdateType.Render));
+        _hooks = new Disposables<Hook>(new FixedUpdateHook(this), new LateUpdateHook(this), new RenderHook(this));
         _scheduled = new Disposables<IDisposable>([.. _hooks.Select(hook => scheduler.Add(ecs, hook))]);
     }
 
@@ -95,14 +95,14 @@ internal sealed class ScriptSystem : ISystem
 
     /// <summary>
     /// Whether the world is still loading behind the loading domain: scripts wait while it is, but for the classes
-    /// marked <see cref="RunOnLoadingAttribute"/>.
+    /// marked <see cref="ImpatientAttribute"/>.
     /// </summary>
     private bool Held => _world.Loading.IsValid && _world.StateOf(_world.Loading) != DomainState.Closed;
 
     /// <summary>
     /// Takes the entry when its script asset is a C# one (a <c>.cs</c> file, what the C# script loader resolves):
     /// the <c>id</c> of the script asset and the instance's values, one JSON object. It is made in this system's
-    /// next run, once the world is there unless its class is marked <see cref="RunOnLoadingAttribute"/>. Disposing
+    /// next run, once the world is there unless its class is marked <see cref="ImpatientAttribute"/>. Disposing
     /// the answer ends the instance; so does the entity going.
     /// </summary>
     internal IDisposable? Attach(Handle entity, JsonElement script)
@@ -329,7 +329,7 @@ internal sealed class ScriptSystem : ISystem
         if (loading.Result?.Type is not { } type)
             return true; // the asset manager logged why
 
-        if (Held && !type.IsDefined(typeof(RunOnLoadingAttribute), inherit: true))
+        if (Held && !type.IsDefined(typeof(ImpatientAttribute), inherit: true))
         {
             attached.Type = type; // made when its domain is there
             return false;
@@ -437,13 +437,20 @@ internal sealed class ScriptSystem : ISystem
     /// <summary>
     /// The behaviours' hook for one phase besides Update, which is this system's own.
     /// </summary>
-    private sealed class Hook(ScriptSystem scripts, UpdateType phase) : ISystem
+    private abstract class Hook(ScriptSystem scripts, UpdateType phase) : ISystem
     {
-        public UpdateType Phase => phase;
-
         public void Run(in Frame frame)
         {
             scripts.Call(phase, frame);
         }
     }
+
+    [Phase(UpdateType.FixedUpdate)]
+    private sealed class FixedUpdateHook(ScriptSystem scripts) : Hook(scripts, UpdateType.FixedUpdate);
+
+    [Phase(UpdateType.LateUpdate)]
+    private sealed class LateUpdateHook(ScriptSystem scripts) : Hook(scripts, UpdateType.LateUpdate);
+
+    [Phase(UpdateType.Render)]
+    private sealed class RenderHook(ScriptSystem scripts) : Hook(scripts, UpdateType.Render);
 }

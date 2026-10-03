@@ -1,5 +1,7 @@
+using Magic.Attributes.Scripts;
 using Magic.Contexts;
 using Magic.Interfaces;
+using System.Reflection;
 
 namespace Magic.Services;
 
@@ -18,7 +20,8 @@ public sealed class Scheduler
     }
 
     /// <summary>
-    /// Schedules <paramref name="system"/> on <paramref name="ecs"/> in its phase, after those already added.
+    /// Schedules <paramref name="system"/> on <paramref name="ecs"/> in the phase its class is marked with by
+    /// <see cref="PhaseAttribute"/>, <see cref="UpdateType.Update"/> when it is not, after those already added.
     /// Disposing the handle takes it off the schedule; the system itself stays the caller's to dispose. The ECS
     /// knows it by its type name, numbered from the second of a type on: one name is one system there.
     /// </summary>
@@ -29,7 +32,8 @@ public sealed class Scheduler
         if (count > 1)
             name = $"{name}_{count}";
 
-        return ecs.Schedule(name).On(system.Phase).Run(dt => system.Run(_currentFrame with { Delta = dt }));
+        UpdateType phase = system.GetType().GetCustomAttribute<PhaseAttribute>()?.Phase ?? UpdateType.Update;
+        return ecs.Schedule(name).On(phase).Run(dt => system.Run(_currentFrame with { Delta = dt }));
     }
 
     /// <summary>

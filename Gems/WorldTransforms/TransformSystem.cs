@@ -1,4 +1,5 @@
 ﻿using Magic.Contexts;
+using Magic.Attributes.Scripts;
 using Magic.Contexts.Components;
 using Magic.Interfaces;
 using Magic.Utils;
@@ -19,6 +20,7 @@ namespace WorldTransformsGem;
 /// parent's world as it is now, and passes go on until one changes nothing, so a child computed before its parent is
 /// put right by the next pass. That is a pass per level of entities that moved, at most <see cref="MaxPasses"/>.
 /// </summary>
+[Phase(UpdateType.LateUpdate)]
 internal sealed class TransformSystem : ISystem
 {
     /// <summary>
@@ -62,8 +64,6 @@ internal sealed class TransformSystem : ISystem
         _settling.Dispose();
         _retagged.Dispose();
     }
-
-    public UpdateType Phase => UpdateType.LateUpdate;
 
     /// <summary>
     /// One pass: gives new entities a <see cref="WorldTransform"/>, then recomputes every one that can change.

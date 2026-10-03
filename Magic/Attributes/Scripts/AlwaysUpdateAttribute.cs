@@ -1,4 +1,4 @@
-namespace Magic.Attributes;
+namespace Magic.Attributes.Scripts;
 
 /// <summary>
 /// Marks an <see cref="Interfaces.IBehavior"/> whose Update and LateUpdate must be called every frame however far

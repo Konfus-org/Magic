@@ -1,4 +1,5 @@
 ﻿using Magic.Contexts;
+using Magic.Attributes.Scripts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Events;
@@ -28,6 +29,7 @@ namespace DeferredRendererGem;
 /// <see cref="Debugging.Stats"/> with this system's own numbers. The renderer gem is static, so the one given here is
 /// kept; without one nothing is drawn.
 /// </summary>
+[Phase(UpdateType.Render)]
 internal sealed class RenderSystem : ISystem
 {
     /// <summary>
@@ -178,8 +180,6 @@ internal sealed class RenderSystem : ISystem
         _spots.Dispose();
         _glowing.Dispose();
     }
-
-    public UpdateType Phase => UpdateType.Render;
 
     /// <summary>
     /// The render state of the current renderer; null without one.

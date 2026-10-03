@@ -165,7 +165,8 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         }
 
         // A project keeps a build per configuration; the one matching the host comes first and so is the one loaded.
-        foreach (string path in listing.Payload.OrderBy(path => files.Segments(path).Contains(Configuration, StringComparer.OrdinalIgnoreCase) ? 0 : 1))
+        foreach (string path in listing.Payload.OrderBy(path =>
+            files.Segments(path).Contains(Configuration, StringComparer.OrdinalIgnoreCase) ? 0 : 1))
         {
             if (SourceOf(path) == source && !paths.Contains(path, StringComparer.OrdinalIgnoreCase))
                 paths.Add(path);

@@ -1,4 +1,4 @@
-using Magic.Attributes;
+using Magic.Attributes.Assets;
 using System.Text.Json.Serialization;
 
 namespace Magic.Contexts.Assets;
@@ -6,8 +6,8 @@ namespace Magic.Contexts.Assets;
 /// <summary>
 /// Something loaded from a file under the Resources or Assets root. Its <c>.meta</c> sidecar is this class as
 /// JSON: <see cref="Id"/>, <see cref="Version"/> and whatever import settings the type keeps there (see
-/// <see cref="Attributes.MetaDataAttribute"/>). The manager deserialises the sidecar as the asset type, then a
-/// loader (or the built-in JSON/text reading, see <see cref="Attributes.AssetFormatAttribute"/>) fills in the rest.
+/// <see cref="Attributes.Assets.MetaDataAttribute"/>). The manager deserialises the sidecar as the asset type, then a
+/// loader (or the built-in JSON/text reading, see <see cref="Attributes.Assets.AssetFormatAttribute"/>) fills in the rest.
 /// An asset is not modified after it is loaded: the manager pools it, so every Load of it gets the same object.
 /// </summary>
 public abstract class Asset

@@ -1,4 +1,4 @@
-namespace Magic.Attributes;
+namespace Magic.Attributes.Assets;
 
 /// <summary>
 /// Marks an asset property whose value lives in the asset's <c>.meta</c> sidecar rather than in the asset

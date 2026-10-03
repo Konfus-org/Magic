@@ -114,7 +114,7 @@ out of view go, the farthest first, and a nearer cube takes the place of the far
 
 A domain opened in place of the others (the entry point, or `World.Open` from a script) fills behind the loading
 domain: it is not drawn and its scripts wait until what the cameras want and the fill are there and the renderer has
-all of it, so it appears whole. `[RunOnLoading]` on a script class makes it run as soon as its entity spawns
+all of it, so it appears whole. `[Impatient]` on a script class makes it run as soon as its entity spawns
 all the same. The loading domain is the engine's (`Resources/Domains/Loading`: the project's icon over a bar) unless
 the `.magic` file names another, which is a domain like any other:
 

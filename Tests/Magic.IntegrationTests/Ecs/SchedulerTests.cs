@@ -1,4 +1,5 @@
 using FlecsGem;
+using Magic.Attributes.Scripts;
 using Magic.Contexts;
 using Magic.Contexts.Rendering;
 using Magic.Interfaces;
@@ -23,7 +24,7 @@ public sealed class SchedulerTests : IDisposable
     [Fact]
     public void An_added_system_runs_on_its_phase()
     {
-        using FirstSystem system = new([], UpdateType.FixedUpdate);
+        using FixedUpdateSystem system = new([]);
         using IDisposable scheduled = _scheduler.Add(_ecs,system);
 
         _ecs.FixedUpdate(FrameOf(1f));
@@ -34,7 +35,7 @@ public sealed class SchedulerTests : IDisposable
     [Fact]
     public void An_added_system_does_not_run_outside_its_phase()
     {
-        using FirstSystem system = new([], UpdateType.FixedUpdate);
+        using FixedUpdateSystem system = new([]);
         using IDisposable scheduled = _scheduler.Add(_ecs,system);
 
         _ecs.Update(FrameOf(1f));
@@ -57,7 +58,7 @@ public sealed class SchedulerTests : IDisposable
     [Fact]
     public void A_system_is_handed_the_delta_of_its_phase()
     {
-        using FirstSystem system = new([], UpdateType.FixedUpdate);
+        using FixedUpdateSystem system = new([]);
         using IDisposable scheduled = _scheduler.Add(_ecs,system);
         _scheduler.SetFrame(FrameOf(1f));
 
@@ -114,10 +115,8 @@ public sealed class SchedulerTests : IDisposable
     /// <summary>
     /// Notes its name in <paramref name="order"/> and keeps every frame it was run with.
     /// </summary>
-    private class FirstSystem(List<string> order, UpdateType phase = UpdateType.Update) : ISystem
+    private class FirstSystem(List<string> order) : ISystem
     {
-        public UpdateType Phase => phase;
-
         public List<Frame> Frames { get; } = [];
 
         public void Run(in Frame frame)
@@ -128,4 +127,7 @@ public sealed class SchedulerTests : IDisposable
     }
 
     private sealed class SecondSystem(List<string> order) : FirstSystem(order);
+
+    [Phase(UpdateType.FixedUpdate)]
+    private sealed class FixedUpdateSystem(List<string> order) : FirstSystem(order);
 }

@@ -1,4 +1,5 @@
 ﻿using Magic.Contexts;
+using Magic.Attributes.Scripts;
 using Magic.Contexts.Components;
 using Magic.Contexts.Settings;
 using Magic.Extensions;
@@ -17,6 +18,7 @@ namespace DebugToolsGem;
 /// in a Debug build, in a Release build only while the debug UI is on. Runs after the render system, so what that
 /// reports this frame shows this frame.
 /// </summary>
+[Phase(UpdateType.Overlay)]
 internal sealed class WorldText : ISystem
 {
     private readonly IWindowRegistry? _windows;
@@ -40,8 +42,6 @@ internal sealed class WorldText : ISystem
     {
         _cameras.Dispose();
     }
-
-    public UpdateType Phase => UpdateType.Overlay;
 
     public void Run(in Frame frame)
     {

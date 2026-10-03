@@ -1,4 +1,4 @@
-using Magic.Attributes;
+using Magic.Attributes.Assets;
 using Magic.Utils;
 using System.Numerics;
 using System.Runtime.InteropServices;

@@ -1,4 +1,5 @@
 ﻿using Magic.Contexts;
+using Magic.Attributes.Scripts;
 using Magic.Interfaces;
 using Magic.Utils;
 
@@ -10,6 +11,7 @@ namespace DebugToolsGem;
 /// oldest first. A message logged again while it shows is one line with how often. Shown while
 /// <see cref="Debugging.UI.Enabled"/>: always in a Debug build, in a Release build only while the debug UI is on.
 /// </summary>
+[Phase(UpdateType.Overlay)]
 internal sealed class ScreenLog : ISystem
 {
     private readonly List<DebugEntry> _entries = [];
@@ -18,8 +20,6 @@ internal sealed class ScreenLog : ISystem
     public void Dispose()
     {
     }
-
-    public UpdateType Phase => UpdateType.Overlay;
 
     public void Run(in Frame frame)
     {

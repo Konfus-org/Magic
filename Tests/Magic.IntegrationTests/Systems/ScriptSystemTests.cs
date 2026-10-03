@@ -1,5 +1,5 @@
 ﻿using FlecsGem;
-using Magic.Attributes;
+using Magic.Attributes.Scripts;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -354,7 +354,7 @@ public sealed class ScriptSystemTests : IDisposable
     }
 
     /// <summary>
-    /// Opens the Test domain behind the Loading domain and leaves it loading, which holds every script not marked RunOnLoading.
+    /// Opens the Test domain behind the Loading domain and leaves it loading, which holds every script not marked Impatient.
     /// </summary>
     private void HoldTheWorld()
     {
@@ -454,7 +454,7 @@ public sealed class ScriptSystemTests : IDisposable
         }
     }
 
-    [RunOnLoading]
+    [Impatient]
     private sealed class Early : IBehavior
     {
         public Early(Journal journal)

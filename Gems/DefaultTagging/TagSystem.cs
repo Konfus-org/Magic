@@ -1,4 +1,5 @@
 ﻿using Magic.Contexts;
+using Magic.Attributes.Scripts;
 using Magic.Contexts.Components;
 using Magic.Interfaces;
 
@@ -13,6 +14,7 @@ namespace DefaultTaggingGem;
 /// frame take effect in it. Setting <see cref="Tags"/> is what is seen; editing them in place through a reference is
 /// not. The streaming system puts the markers on with the tags when it spawns a chunk, so nothing moves twice.
 /// </summary>
+[Phase(UpdateType.LateUpdate)]
 internal sealed class TagSystem : ISystem
 {
     private readonly IEcs _ecs;
@@ -34,13 +36,11 @@ internal sealed class TagSystem : ISystem
         _retagged.Dispose();
     }
 
-    public UpdateType Phase => UpdateType.LateUpdate;
-
     public void Run(in Frame frame)
     {
         foreach (Handle entity in _changed)
         {
-            if (!_ecs.IsAlive(entity) || !_ecs.TryGet<Tags>(entity, out Tags tags))
+            if (!_ecs.IsAlive(entity) || !_ecs.TryGet(entity, out Tags tags))
                 continue;
 
             Mark<Static>(entity, tags.Has(Tag.Static));

@@ -1,4 +1,4 @@
-﻿using Magic.Attributes;
+﻿using Magic.Attributes.Scripts;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -12,7 +12,7 @@ namespace Magic.Behaviors;
 /// <see cref="Project.Icon"/>, before the renderer first draws with it. The material is one asset, so every entity
 /// drawn with it shows the icon. For a loading domain.
 /// </summary>
-[RunOnLoading]
+[Impatient]
 internal sealed class LoadingIcon : IBehavior
 {
     private readonly Handle _entity;

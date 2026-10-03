@@ -13,7 +13,7 @@ public interface IScripting
     /// <summary>
     /// Takes the entry when its script asset is one this runs, and answers what ends the instance; null when it is
     /// not. The instance is made in the provider's next run, once the world has loaded unless its class is marked
-    /// <see cref="Attributes.RunOnLoadingAttribute"/>. Destroying the entity ends its scripts on its own; disposing
+    /// <see cref="Attributes.Scripts.ImpatientAttribute"/>. Destroying the entity ends its scripts on its own; disposing
     /// the answer after that does nothing.
     /// </summary>
     IDisposable? Attach(Handle entity, JsonElement script);

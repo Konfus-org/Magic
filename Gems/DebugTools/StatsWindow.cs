@@ -57,6 +57,7 @@ internal sealed class StatsWindow : Window
         if (Open)
         {
             Begin(scrollable: true);
+
             string[] groups = Groups();
             Debugging.UI.Tabs("##groups", ref _tab, groups);
             if (_tab < groups.Length)

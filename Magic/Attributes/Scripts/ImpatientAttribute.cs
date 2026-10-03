@@ -1,4 +1,4 @@
-﻿namespace Magic.Attributes;
+﻿namespace Magic.Attributes.Scripts;
 
 /// <summary>
 /// Marks a script that is made, and run, as soon as its entity spawns, even while the world is still loading behind
@@ -7,6 +7,6 @@
 /// must exist from the start.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class)]
-public sealed class RunOnLoadingAttribute : Attribute
+public sealed class ImpatientAttribute : Attribute
 {
 }
