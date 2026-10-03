@@ -17,18 +17,18 @@ namespace DebugToolsGem;
 /// in a Debug build, in a Release build only while the debug UI is on. Runs after the render system, so what that
 /// reports this frame shows this frame.
 /// </summary>
-internal sealed class DebugUI3DSystem : ISystem
+internal sealed class WorldText : ISystem
 {
     private readonly IWindowRegistry? _windows;
     private readonly RenderSettings _settings;
     private readonly IEcsQuery<Camera, WorldTransform> _cameras;
     private readonly QueryChunkAction<Camera, WorldTransform> _collectViews;
-    private readonly List<DebugView> _views = [];
+    private readonly List<View> _views = [];
     private readonly List<DebugEntry> _entries = [];
     private Size _window;
     private uint _main;
 
-    public DebugUI3DSystem(IEcs ecs, IWindowRegistry? windows, RenderSettings settings)
+    public WorldText(IEcs ecs, IWindowRegistry? windows, RenderSettings settings)
     {
         _windows = windows;
         _settings = settings;
@@ -60,7 +60,7 @@ internal sealed class DebugUI3DSystem : ISystem
         _cameras.Run(_collectViews);
         foreach (DebugEntry entry in _entries)
         {
-            foreach (DebugView view in _views)
+            foreach (View view in _views)
             {
                 if (entry.Position is { } position && view.Project(position, Debugging.UI.TextDistance, out Vector2 pixel))
                     Debugging.UI.Text(pixel, entry.Text, entry.Color);
@@ -86,7 +86,7 @@ internal sealed class DebugUI3DSystem : ISystem
             Rectangle place = cameras[i].Viewport.ToPixels(_window.Width, _window.Height);
             float aspect = shape.Height > 0 ? (float)shape.Width / shape.Height : 1f;
             Matrix4x4 world = worlds[i].Value;
-            _views.Add(new DebugView(cameras[i].ViewProjection(world, aspect), world.Translation, place));
+            _views.Add(new View(cameras[i].ViewProjection(world, aspect), world.Translation, place));
         }
     }
 }

@@ -73,4 +73,16 @@ public interface IDebugUI
     /// One of <paramref name="options"/>, by index. True when changed.
     /// </summary>
     bool Choice(string label, ref int index, string[] options);
+
+    /// <summary>
+    /// A row of tabs across the window, one of <paramref name="options"/> selected by index; what is drawn after it is
+    /// the selected tab's content. <paramref name="label"/> only tells the bars of one window apart. True when changed.
+    /// </summary>
+    bool Tabs(string label, ref int index, string[] options);
+
+    /// <summary>
+    /// An item of the context menu a right-click anywhere in the window (or nested view) it is called in opens, in
+    /// the order called. True the frame it is clicked.
+    /// </summary>
+    bool MenuItem(string label);
 }

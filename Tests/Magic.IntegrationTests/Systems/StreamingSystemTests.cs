@@ -584,7 +584,7 @@ public sealed class StreamingSystemTests : IDisposable
     {
         OpenBehindLoading(Test);
         SpawnCamera();
-        StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") == 6);
+        StepUntil(() => _ecs.GetChildren(_ecs.Lookup("World.Test.Chunks")).Length == 8); // the two that draw sit hidden
 
         RegisterAll("Test");
         StepUntil(() => _world.StateOf(Test) == DomainState.Loaded);
@@ -597,7 +597,7 @@ public sealed class StreamingSystemTests : IDisposable
     {
         OpenBehindLoading(Test);
         SpawnCamera();
-        StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") == 6);
+        StepUntil(() => _ecs.GetChildren(_ecs.Lookup("World.Test.Chunks")).Length == 8); // the two that draw sit hidden
 
         RegisterAll("Test");
         StepUntil(() => _world.StateOf(Test) == DomainState.Loaded);

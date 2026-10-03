@@ -7,7 +7,7 @@ namespace DebugToolsGem;
 /// One camera's view of the main window, as the debug UI needs it to put text at a world position: the camera-relative
 /// view-projection, where the camera is, and the view's rectangle in window pixels.
 /// </summary>
-internal readonly record struct DebugView(Matrix4x4 ViewProjection, Vector3 Camera, RectangleF Pixels)
+internal readonly record struct View(Matrix4x4 ViewProjection, Vector3 Camera, RectangleF Pixels)
 {
     /// <summary>
     /// The pixel <paramref name="position"/> shows at; false when it is behind the camera, outside the view or

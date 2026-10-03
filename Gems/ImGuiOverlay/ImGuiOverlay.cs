@@ -22,7 +22,9 @@ namespace ImGuiOverlayGem;
 /// appends plain draw commands over the main window's swapchain image, then starts the next frame. It owns every GPU object
 /// it draws with (buffers, textures, sampler, one pipeline per swapchain format) and releases them when it is unloaded or
 /// reloaded; the renderer is static and outlives it. What to draw is up to whoever calls <see cref="Debugging.UI"/>, not this gem. Input comes from
-/// the frame's events, fed to ImGui in <see cref="Update"/>, which applies them when the next ImGui frame starts.
+/// the frame's events, fed to ImGui in <see cref="Update"/>, which applies them when the next ImGui frame starts. ImGui's
+/// own copy and paste (in a text field) go through the <see cref="IClipboard"/> when there is one; without a windowing gem
+/// they go nowhere.
 /// </summary>
 internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 {
@@ -41,6 +43,8 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     /// ImGui's -FLT_MIN width: up to the right edge of whatever the field is in.
     /// </summary>
     private const float Stretch = -1.17549435E-38f;
+
+    private const string ContextMenu = "##context";
 
     private static readonly VertexBufferLayout[] VertexBuffers = [new(0, (uint)sizeof(ImDrawVert))];
 
@@ -61,6 +65,8 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     private readonly Dictionary<string, float> _reserved = []; // nested view id: height of what followed it last frame
     private readonly Dictionary<string, DocumentBuffer> _documents = []; // by field id: the text's bytes, encoded once
     private readonly HashSet<string> _positioned = []; // windows given a first position
+    private readonly Dictionary<string, int> _tabs = []; // by tab bar id: the tab ImGui showed last frame
+    private readonly IClipboard? _clipboard;
     private readonly GpuSampler _sampler;
     private readonly CompiledShader? _vertexShader;
     private readonly CompiledShader? _fragmentShader;
@@ -75,11 +81,14 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     private int _depth;
     private ImFontLoader* _fontLoader; // ImGui's memory: the atlas keeps the pointer
     private GCHandle _font; // the Font asset the loader's callbacks read
+    private GCHandle _self; // this overlay, for ImGui's clipboard callbacks
+    private GCHandle _pasted; // the clipboard's text as the NUL-terminated UTF-8 ImGui reads, pinned until it asks again
 
-    public ImGuiOverlay(IWindowRegistry windows, IRendering rendering, Assets assets, Project project)
+    public ImGuiOverlay(IWindowRegistry windows, IRendering rendering, Assets assets, Project project, IClipboard? clipboard)
     {
         _windows = windows;
         _rendering = rendering;
+        _clipboard = clipboard;
 
         // cimgui.dll sits with the gems, not next to the exe where the loader looks by default.
         if (!LibraryLoader.CustomLoadFolders.Contains(project.EngineGems))
@@ -93,6 +102,14 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         io.BackendFlags |= ImGuiBackendFlags.RendererHasTextures | ImGuiBackendFlags.RendererHasVtxOffset;
         ApplyStyle();
         LoadFont(assets);
+        if (clipboard is not null)
+        {
+            _self = GCHandle.Alloc(this);
+            ImGuiPlatformIOPtr platform = ImGui.GetPlatformIO();
+            platform.PlatformClipboardUserData = (void*)GCHandle.ToIntPtr(_self);
+            platform.PlatformSetClipboardTextFn = (delegate* unmanaged[Cdecl]<ImGuiContext*, byte*, void>)&SetClipboard;
+            platform.PlatformGetClipboardTextFn = (delegate* unmanaged[Cdecl]<ImGuiContext*, byte*>)&GetClipboard;
+        }
 
         string includes = Path.Combine(project.Resources, "Shaders");
         _vertexShader = Compile(assets, rendering, "Overlay/Overlay.vert.hlsl", GpuStage.Vertex, includes);
@@ -104,6 +121,10 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
     public void Dispose()
     {
+        if (_self.IsAllocated)
+            _self.Free();
+        if (_pasted.IsAllocated)
+            _pasted.Free();
         foreach ((GpuTexture texture, _, _) in _textures.Values)
             _rendering.Release(texture);
         foreach (GpuPipeline pipeline in _pipelines.Values)
@@ -359,6 +380,79 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
         index = chosen;
         return true;
+    }
+
+    public bool Tabs(string label, ref int index, string[] options)
+    {
+        if (!ImGui.BeginTabBar(label))
+            return false;
+
+        // ImGui keeps its own selection: the caller's index is pushed only when it is not the tab ImGui last showed.
+        string id = $"{_openViews[_depth - 1].Id}/{label}";
+        int shown = _tabs.GetValueOrDefault(id, -1);
+        int chosen = index;
+        for (int i = 0; i < options.Length; i++)
+        {
+            ImGuiTabItemFlags flags = i == index && index != shown ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            if (!ImGui.BeginTabItem(options[i], flags))
+                continue;
+
+            chosen = i;
+            ImGui.EndTabItem();
+        }
+        ImGui.EndTabBar();
+
+        _tabs[id] = chosen;
+        if (chosen == index)
+            return false;
+
+        index = chosen;
+        return true;
+    }
+
+    public bool MenuItem(string label)
+    {
+        // Over the window's own items and nested views too (a document is one), not only its empty space.
+        const ImGuiHoveredFlags over = ImGuiHoveredFlags.ChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem | ImGuiHoveredFlags.AllowWhenBlockedByPopup;
+        if (ImGui.IsMouseReleased(ImGuiMouseButton.Right) && ImGui.IsWindowHovered(over))
+            ImGui.OpenPopup(ContextMenu);
+
+        if (!ImGui.BeginPopup(ContextMenu))
+            return false;
+
+        bool clicked = ImGui.MenuItem(label);
+        ImGui.EndPopup();
+        return clicked;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void SetClipboard(ImGuiContext* context, byte* text)
+    {
+        if (Self() is { _clipboard: { } clipboard })
+            clipboard.Text = Marshal.PtrToStringUTF8((nint)text) ?? "";
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static byte* GetClipboard(ImGuiContext* context)
+    {
+        if (Self() is not { _clipboard: { } clipboard } overlay)
+            return null;
+
+        if (overlay._pasted.IsAllocated)
+            overlay._pasted.Free();
+
+        byte[] bytes = Encoding.UTF8.GetBytes(clipboard.Text + char.MinValue);
+        overlay._pasted = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+        return (byte*)overlay._pasted.AddrOfPinnedObject();
+    }
+
+    /// <summary>
+    /// The overlay ImGui's clipboard callbacks are for: the one the platform user data names.
+    /// </summary>
+    private static ImGuiOverlay? Self()
+    {
+        void* user = ImGui.GetPlatformIO().PlatformClipboardUserData;
+        return user == null ? null : GCHandle.FromIntPtr((nint)user).Target as ImGuiOverlay;
     }
 
     /// <summary>

@@ -17,7 +17,8 @@ namespace SDLWindowingGem;
 /// Dispose) is the only one that can keep it truthful. A separate registry would either duplicate the
 /// table or need callbacks from the factory to stay in sync; neither buys anything. It publishes
 /// <see cref="EventType.FocusGained"/> and <see cref="EventType.FocusLost"/>; keyboard, text and mouse are the input
-/// gem's. Text input is on for every window, so <see cref="EventType.TextInput"/> always arrives.
+/// gem's. Text input is on for every window, so <see cref="EventType.TextInput"/> always arrives. The system clipboard
+/// (<see cref="IClipboard"/>) is here too: SDL reaches it through the video subsystem this class owns.
 /// <para>
 /// The OS ties a window to the thread that made it, which is the render thread (<see cref="ThreadId.Render"/>): the
 /// events arrive there, from the SDL gem's pump. A window can still be used from the main thread, by a script say:
@@ -25,7 +26,7 @@ namespace SDLWindowingGem;
 /// them, so reading one waits for nothing.
 /// </para>
 /// </summary>
-internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
+internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry, IClipboard
 {
     private readonly Assets _assets;
     private readonly Events _events;
@@ -87,6 +88,16 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
     public IWindow? Get(uint handle)
     {
         return _byHandle.TryGetValue(handle, out Window? window) && window.IsOpen ? window : null;
+    }
+
+    public string Text
+    {
+        get => SDL.HasClipboardText() ? SDL.GetClipboardText() ?? "" : "";
+        set
+        {
+            if (!SDL.SetClipboardText(value))
+                Debugging.Log.Warn($"The clipboard could not be set: {SDL.GetError()}");
+        }
     }
 
     public IWindow Create(string title, int width, int height, WindowMode mode)

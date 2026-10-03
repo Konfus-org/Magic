@@ -10,7 +10,7 @@ namespace DebugToolsGem;
 /// oldest first. A message logged again while it shows is one line with how often. Shown while
 /// <see cref="Debugging.UI.Enabled"/>: always in a Debug build, in a Release build only while the debug UI is on.
 /// </summary>
-internal sealed class ScreenLogSystem : ISystem
+internal sealed class ScreenLog : ISystem
 {
     private readonly List<DebugEntry> _entries = [];
     private readonly List<DebugLine> _lines = [];

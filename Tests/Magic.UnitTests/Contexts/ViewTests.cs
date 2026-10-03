@@ -6,14 +6,14 @@ using Xunit;
 
 namespace Magic.UnitTests.Contexts;
 
-public sealed class DebugViewTests
+public sealed class ViewTests
 {
     private static readonly Vector3 CameraPosition = new(100, 0, 0);
 
     /// <summary>
     /// A camera at <see cref="CameraPosition"/> looking along +Z, drawn into an 800 x 600 view whose top left is at pixel (10, 20).
     /// </summary>
-    private static readonly DebugView Ahead = new(
+    private static readonly View Ahead = new(
         Camera.Perspective(60f, 0.1f).ViewProjection(Matrix4x4.CreateTranslation(CameraPosition), 800f / 600f),
         CameraPosition,
         new RectangleF(10, 20, 800, 600));

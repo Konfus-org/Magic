@@ -5,6 +5,7 @@ using Magic.Interfaces;
 using Magic.Utils;
 using System.Drawing;
 using System.Reflection;
+using System.Text;
 
 namespace DebugToolsGem;
 
@@ -13,13 +14,13 @@ namespace DebugToolsGem;
 /// place. bool, enum, float and size values are edited live and the systems that read them pick the change up the next
 /// frame; a string is only read at start-up by whoever uses it, so it is shown as text.
 /// </summary>
-internal sealed class SettingsSystem : DebugWindowSystem
+internal sealed class SettingsWindow : Window
 {
     private readonly Settings _settings;
     private readonly (string Name, PropertyInfo Section, PropertyInfo[] Values)[] _sections;
     private readonly Dictionary<Type, string[]> _enumNames = [];
 
-    public SettingsSystem(Settings settings, IInput? input) : base("Settings", Key.F4, input)
+    public SettingsWindow(Settings settings, IInput? input, IClipboard? clipboard) : base("Settings", Key.F4, input, clipboard)
     {
         _settings = settings;
         _sections = [.. typeof(Settings).GetProperties()
@@ -43,6 +44,22 @@ internal sealed class SettingsSystem : DebugWindowSystem
                 DrawSetting(section, value);
         }
         Debugging.UI.End();
+    }
+
+    protected override string Contents()
+    {
+        StringBuilder text = new();
+        foreach ((string name, PropertyInfo sectionProperty, PropertyInfo[] values) in _sections)
+        {
+            object? section = sectionProperty.GetValue(_settings);
+            if (section is null)
+                continue;
+
+            foreach (PropertyInfo value in values)
+                text.Append(name).Append('.').Append(value.Name).Append(' ').Append(value.GetValue(section)).AppendLine();
+        }
+
+        return text.ToString();
     }
 
     private void DrawSetting(object section, PropertyInfo property)

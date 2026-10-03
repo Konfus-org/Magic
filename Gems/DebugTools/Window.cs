@@ -8,19 +8,22 @@ namespace DebugToolsGem;
 /// <summary>
 /// One debug UI window as a system: its <see cref="Key"/> opens and closes it, and while it is <see cref="Open"/> the
 /// debug UI shows (<see cref="Debugging.UI.Visible"/>), from the moment it opens, so it draws the same frame. Without
-/// an <see cref="IInput"/> (no input gem is loaded) its key does nothing.
+/// an <see cref="IInput"/> (no input gem is loaded) its key does nothing. Every window has a context menu with Copy,
+/// which puts its <see cref="Contents"/> on the <see cref="IClipboard"/>; without one Copy does nothing.
 /// </summary>
-internal abstract class DebugWindowSystem : ISystem
+internal abstract class Window : ISystem
 {
     private readonly IInput? _input;
+    private readonly IClipboard? _clipboard;
     private readonly string _title;
 
     private bool _visible;
 
-    protected DebugWindowSystem(string name, Key key, IInput? input)
+    protected Window(string name, Key key, IInput? input, IClipboard? clipboard)
     {
         Key = key;
         _input = input;
+        _clipboard = clipboard;
         _title = $"{name} ({(key == Key.Grave ? "`" : key.ToString())} to Toggle)";
     }
 
@@ -55,15 +58,23 @@ internal abstract class DebugWindowSystem : ISystem
     }
 
     /// <summary>
-    /// Opens the window, titled with its name and key, with a close button. Pair with <see cref="Debugging.UI.End"/>.
+    /// Opens the window, titled with its name and key, with a close button and its context menu. Pair with
+    /// <see cref="Debugging.UI.End"/>.
     /// </summary>
     protected void Begin(bool scrollable = false)
     {
         Debugging.UI.Begin(_title, ref _visible, scrollable);
+        if (Debugging.UI.MenuItem("Copy") && _clipboard is not null)
+            _clipboard.Text = Contents();
     }
 
     /// <summary>
     /// The window's frame: draw it while <see cref="Open"/>, and whatever else it does every frame.
     /// </summary>
     protected abstract void Draw(in Frame frame);
+
+    /// <summary>
+    /// What the window shows, as the text Copy puts on the clipboard.
+    /// </summary>
+    protected abstract string Contents();
 }

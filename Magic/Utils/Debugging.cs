@@ -410,6 +410,37 @@ public static class Debugging
         }
 
         /// <summary>
+        /// A row of tabs, one of <paramref name="options"/> selected by index; what follows is the selected tab's
+        /// content. True when changed.
+        /// </summary>
+        public static bool Tabs(string label, ref int index, string[] options)
+        {
+            if (!Visible)
+                return false;
+
+            bool changed = false;
+            foreach (IDebugUI ui in _uis)
+                changed |= ui.Tabs(label, ref index, options);
+
+            return changed;
+        }
+
+        /// <summary>
+        /// An item of the context menu a right-click in the window opens; true the frame it is clicked.
+        /// </summary>
+        public static bool MenuItem(string label)
+        {
+            if (!Visible)
+                return false;
+
+            bool clicked = false;
+            foreach (IDebugUI ui in _uis)
+                clicked |= ui.MenuItem(label);
+
+            return clicked;
+        }
+
+        /// <summary>
         /// Text centred on a pixel of the main window: what the 3D debug UI system makes of text in the world.
         /// </summary>
         public static void Text(Vector2 pixel, string text, Color color)

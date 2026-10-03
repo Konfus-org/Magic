@@ -15,7 +15,7 @@ namespace DebugToolsGem;
 /// logger itself, so it sees every line from the moment it exists. The terminal the host was started from is a
 /// console too: a line typed there runs the same way, in this system's frame, so a headless run is driven from it.
 /// </summary>
-internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
+internal sealed class ConsoleWindow : Window, ILogger
 {
     public const int ConsoleLines = 10_000;
 
@@ -28,7 +28,7 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
     private string _text = "";
     private bool _logChanged;
 
-    public ConsoleSystem(IInput? input, bool openAtStart) : base("Console", Key.Grave, input)
+    public ConsoleWindow(IInput? input, IClipboard? clipboard, bool openAtStart) : base("Console", Key.Grave, input, clipboard)
     {
         Debugging.Log.Register(this);
         Open = openAtStart;
@@ -95,6 +95,11 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
     /// <summary>
     /// The log as one text, rebuilt only when a line arrived since the last time.
     /// </summary>
+    protected override string Contents()
+    {
+        return LogText();
+    }
+
     private string LogText()
     {
         lock (_logLock)

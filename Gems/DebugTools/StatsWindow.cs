@@ -10,16 +10,21 @@ namespace DebugToolsGem;
 /// <summary>
 /// The engine's own numbers in one place: frames per second and frame time, the GC, and everything any system set in
 /// <see cref="Debugging.Stats"/> (what the transform, render and streaming systems are doing, the renderer's counters,
-/// the asset pools), grouped by the first part of the name. Drawn as the "Debug" window while open (F3), and logged
-/// (verbose, so only with --verbose) every <see cref="LogIntervalMs"/> whether open or not, so a headless or scripted
-/// run can have them too. Reads the stats, changes nothing but its own.
+/// the asset pools), grouped by the first part of the name: a tab per group, the group's values as a document under
+/// it. Drawn as the "Stats" window while open (F3), and logged (verbose, so only with --verbose) every
+/// <see cref="LogIntervalMs"/> whether open or not, so a headless or scripted run can have them too. Reads the stats,
+/// changes nothing but its own.
 /// </summary>
-internal sealed class DebuggerDisplaySystem : DebugWindowSystem
+internal sealed class StatsWindow : Window
 {
     public const double LogIntervalMs = 30000;
 
     private readonly List<(string Name, double Value)> _stats = [];
+    private readonly List<string> _groups = [];
     private readonly StringBuilder _line = new();
+
+    private string[] _tabs = [];
+    private int _tab;
 
     private double _frameMs;
     private double _lastFrameMs;
@@ -30,7 +35,7 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
     private TimeSpan _sampledPause;
     private readonly int[] _sampledCollections = new int[3];
 
-    public DebuggerDisplaySystem(IInput? input) : base("Debug", Key.F3, input)
+    public StatsWindow(IInput? input, IClipboard? clipboard) : base("Stats", Key.F3, input, clipboard)
     {
     }
 
@@ -51,18 +56,13 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
 
         if (Open)
         {
-            Begin();
-            string? group = null;
-            foreach ((string name, double value) in _stats)
+            Begin(scrollable: true);
+            string[] groups = Groups();
+            Debugging.UI.Tabs("##groups", ref _tab, groups);
+            if (_tab < groups.Length)
             {
-                string part = GroupOf(name);
-                if (part != group)
-                {
-                    group = part;
-                    Debugging.UI.Text(group);
-                }
-
-                Debugging.UI.Text($"  {name[(part.Length + 1)..]} {Format(value)}");
+                string text = Contents(groups[_tab]);
+                Debugging.UI.Document("##group", ref text, readOnly: true);
             }
 
             Debugging.UI.End();
@@ -113,6 +113,49 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
         _sampledAllocatedBytes = allocated;
         _sampledPause = pause;
         _sinceGcSampleMs = 0;
+    }
+
+    protected override string Contents()
+    {
+        return Contents(null);
+    }
+
+    /// <summary>
+    /// The stats of <paramref name="group"/> (every group when null), a name and value per line.
+    /// </summary>
+    private string Contents(string? group)
+    {
+        _line.Clear();
+        foreach ((string name, double value) in _stats)
+        {
+            string part = GroupOf(name);
+            if (group is null)
+                _line.Append(name).Append(' ').Append(Format(value)).AppendLine();
+            else if (part == group)
+                _line.Append(name, part.Length + 1, name.Length - part.Length - 1).Append(' ').Append(Format(value)).AppendLine();
+        }
+
+        return _line.ToString();
+    }
+
+    /// <summary>
+    /// The groups among the stats taken this frame, in their order: the same array while they do not change, so
+    /// the tabs are not rebuilt every frame.
+    /// </summary>
+    private string[] Groups()
+    {
+        _groups.Clear();
+        foreach ((string name, _) in _stats)
+        {
+            string group = GroupOf(name);
+            if (_groups.Count == 0 || _groups[^1] != group)
+                _groups.Add(group);
+        }
+
+        if (!_groups.SequenceEqual(_tabs))
+            _tabs = [.. _groups];
+
+        return _tabs;
     }
 
     private static string GroupOf(string name)
