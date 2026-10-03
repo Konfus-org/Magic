@@ -1,7 +1,7 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Rendering;
-using System.Numerics;
+using Magic.Mathematics;
 using Xunit;
 
 namespace Magic.UnitTests.Render;
@@ -12,7 +12,7 @@ public sealed class ParamLayoutTests
         // the default surface
         struct MaterialParams
         {
-            float4     color       : GiColor    = float4(0.8, 0.8, 0.8, 1.0);
+            Color      color       : GiColor    = Color(0.8, 0.8, 0.8, 1.0);
             float      roughness                = 0.6;
             float      metallic; // no default
             float3     emissive    : GiEmissive = float3(0.0, 0.0, 0.0);
@@ -61,7 +61,23 @@ public sealed class ParamLayoutTests
     {
         ParamLayout layout = Parse();
 
-        Assert.Equal("float4(0.8, 0.8, 0.8, 1.0)", layout.Fields[0].Default);
+        Assert.Equal("Color(0.8, 0.8, 0.8, 1.0)", layout.Fields[0].Default);
+    }
+
+    [Fact]
+    public void A_color_member_is_a_color()
+    {
+        ParamLayout layout = Parse();
+
+        Assert.Equal(ParamType.Color, layout.Fields[0].Type);
+    }
+
+    [Fact]
+    public void A_color_member_takes_a_whole_row()
+    {
+        ParamLayout layout = Parse();
+
+        Assert.Equal(16, layout.Fields[0].Size);
     }
 
     [Fact]
@@ -189,6 +205,14 @@ public sealed class ParamLayoutTests
     }
 
     [Fact]
+    public void Packing_writes_a_color_as_r_g_b_a_floats()
+    {
+        byte[] record = Write(new() { ["color"] = Param.Of(new Color(0.1f, 0.2f, 0.3f, 0.4f)) });
+
+        Assert.Equal([0.1f, 0.2f, 0.3f, 0.4f], Enumerable.Range(0, 4).Select(i => BitConverter.ToSingle(record, i * 4)));
+    }
+
+    [Fact]
     public void Packing_falls_back_to_the_declared_default()
     {
         byte[] record = Write([]);
@@ -240,13 +264,23 @@ public sealed class ParamLayoutTests
     }
 
     [Fact]
-    public void A_vector_default_parses_as_a_param()
+    public void A_color_default_parses_as_a_param()
     {
         ParamLayout layout = Parse();
 
         Param color = layout.Fields[0].DefaultParam;
 
-        Assert.Equal(new Vector4(0.8f, 0.8f, 0.8f, 1f), color.Vector);
+        Assert.Equal(new Color(0.8f, 0.8f, 0.8f, 1f), color.Color);
+    }
+
+    [Fact]
+    public void A_vector_default_parses_as_a_param()
+    {
+        ParamLayout layout = Parse();
+
+        Param tiles = layout.Fields[6].DefaultParam;
+
+        Assert.Equal((2f, 3f), (tiles.X, tiles.Y));
     }
 
     [Fact]

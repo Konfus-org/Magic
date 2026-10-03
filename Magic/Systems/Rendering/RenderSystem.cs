@@ -103,7 +103,7 @@ internal sealed class RenderSystem : ISystem
     private bool _warnedPassLists;
     private Handle _lastParent;    // of the entity registered last, and whether it or anything above it is hidden:
     private bool _lastParentHidden; // a chunk's entities share one, so it is looked up once a frame, not once each.
-                                    // Lights are not asked: their queries leave the hidden ones out
+                                    // Lights and glows ask once per span (one table: one parent), not per entity
 
     public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, IWindowRegistry? windows, IRendering? rendering, Threads threads)
     {
@@ -119,14 +119,14 @@ internal sealed class RenderSystem : ISystem
         _allInstances = ecs.Query<RenderInstance>().Build();
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
         _postProcessing = ecs.Query<PostProcessing>().Build();
-        _directional = ecs.Query<DirectionalLight, WorldTransform>().Without<Settled>().WithoutAbove<Hidden>().Build();
-        _points = ecs.Query<PointLight, WorldTransform>().Without<Settled>().WithoutAbove<Hidden>().Build();
-        _spots = ecs.Query<SpotLight, WorldTransform>().Without<Settled>().WithoutAbove<Hidden>().Build();
-        _glowing = ecs.Query<Glow, WorldTransform>().Without<Settled>().WithoutAbove<Hidden>().Build();
-        _directionalSettled = ecs.Query<DirectionalLight, WorldTransform>().With<Settled>().WithoutAbove<Hidden>().Build();
-        _pointsSettled = ecs.Query<PointLight, WorldTransform>().With<Settled>().WithoutAbove<Hidden>().Build();
-        _spotsSettled = ecs.Query<SpotLight, WorldTransform>().With<Settled>().WithoutAbove<Hidden>().Build();
-        _glowingSettled = ecs.Query<Glow, WorldTransform>().With<Settled>().WithoutAbove<Hidden>().Build();
+        _directional = ecs.Query<DirectionalLight, WorldTransform>().Without<Settled>().Build();
+        _points = ecs.Query<PointLight, WorldTransform>().Without<Settled>().Build();
+        _spots = ecs.Query<SpotLight, WorldTransform>().Without<Settled>().Build();
+        _glowing = ecs.Query<Glow, WorldTransform>().Without<Settled>().Build();
+        _directionalSettled = ecs.Query<DirectionalLight, WorldTransform>().With<Settled>().Build();
+        _pointsSettled = ecs.Query<PointLight, WorldTransform>().With<Settled>().Build();
+        _spotsSettled = ecs.Query<SpotLight, WorldTransform>().With<Settled>().Build();
+        _glowingSettled = ecs.Query<Glow, WorldTransform>().With<Settled>().Build();
         _collectedLights = _lights;
         _collectedGlows = _glows;
 
@@ -382,13 +382,13 @@ internal sealed class RenderSystem : ISystem
         {
             Preloads.Forget(ctx, id);
             if (ctx.Shaders.Entries.ContainsKey(id))
-                _ = ctx.Reloads.StartAsync(id, cancel => Preloads.ShadersAsync(ctx.Assets, [.. Shaders.Affected(ctx, id)], cancel));
+                ctx.Reloads.Start(id, cancel => Preloads.ShadersAsync(ctx.Assets, [.. Shaders.Affected(ctx, id)], cancel));
             else if (ctx.Passes.Contains(id))
-                _ = ctx.Reloads.StartAsync(id, cancel => Preloads.PassAsync(ctx.Assets, id, cancel));
+                ctx.Reloads.Start(id, cancel => Preloads.PassAsync(ctx.Assets, id, cancel));
             else if (ctx.Materials.Contains(id))
-                _ = ctx.Reloads.StartAsync(id, cancel => Preloads.MaterialAsync(ctx.Assets, new Handle<Material>(id), cancel));
+                ctx.Reloads.Start(id, cancel => Preloads.MaterialAsync(ctx.Assets, new Handle<Material>(id), cancel));
             else if (ctx.Textures.Contains(id))
-                _ = ctx.Reloads.StartAsync(id, cancel => Preloads.TextureAsync(ctx.Assets, id, cancel));
+                ctx.Reloads.Start(id, cancel => Preloads.TextureAsync(ctx.Assets, id, cancel));
 
             if (ctx.Meshes.Contains(id))
                 Debugging.Log.Warn($"Model {id} changed on disk; remove and re-add its entities to see the new geometry (live model reload arrives with streaming).");
@@ -677,8 +677,22 @@ internal sealed class RenderSystem : ISystem
         (_collectedLights, _collectedGlows) = (_lights, _glows);
     }
 
+    /// <summary>
+    /// <see cref="IsHidden"/> for all the entities a query hands over at once, asked of the first: they are rows of
+    /// one table, and an entity's parent and whether it carries <see cref="Hidden"/> are part of what table it is in,
+    /// so they share both. The queries do not look up the hierarchy themselves: a query that does is re-matched over
+    /// every table by the ECS each time a chunk's root is hidden or shown, a stall of many milliseconds while streaming.
+    /// </summary>
+    private bool IsHiddenTogether(ReadOnlySpan<Handle> entities)
+    {
+        return entities.Length > 0 && IsHiddenUnderLastParent(entities[0]);
+    }
+
     private void CollectDirectional(ReadOnlySpan<Handle> entities, Span<DirectionalLight> lights, Span<WorldTransform> worlds)
     {
+        if (IsHiddenTogether(entities))
+            return;
+
         for (int i = 0; i < lights.Length; i++)
         {
             _collectedLights.Add(new LightInstance(LightKind.Directional, lights[i].Color, lights[i].Intensity, 0f, 0f, 0f, lights[i].CastsShadows, worlds[i].Value));
@@ -687,6 +701,9 @@ internal sealed class RenderSystem : ISystem
 
     private void CollectPoints(ReadOnlySpan<Handle> entities, Span<PointLight> lights, Span<WorldTransform> worlds)
     {
+        if (IsHiddenTogether(entities))
+            return;
+
         for (int i = 0; i < lights.Length; i++)
         {
             _collectedLights.Add(new LightInstance(LightKind.Point, lights[i].Color, lights[i].Intensity, lights[i].Range, 0f, 0f, lights[i].CastsShadows, worlds[i].Value));
@@ -695,6 +712,9 @@ internal sealed class RenderSystem : ISystem
 
     private void CollectSpots(ReadOnlySpan<Handle> entities, Span<SpotLight> lights, Span<WorldTransform> worlds)
     {
+        if (IsHiddenTogether(entities))
+            return;
+
         for (int i = 0; i < lights.Length; i++)
         {
             _collectedLights.Add(new LightInstance(LightKind.Spot, lights[i].Color, lights[i].Intensity, lights[i].Range, lights[i].InnerAngle, lights[i].OuterAngle, lights[i].CastsShadows, worlds[i].Value));
@@ -703,6 +723,9 @@ internal sealed class RenderSystem : ISystem
 
     private void CollectGlows(ReadOnlySpan<Handle> entities, Span<Glow> glows, Span<WorldTransform> worlds)
     {
+        if (IsHiddenTogether(entities))
+            return;
+
         for (int i = 0; i < glows.Length; i++)
             _collectedGlows.Add(new GpuGlow { PositionRadius = new Vector4(worlds[i].Value.Translation, glows[i].Radius), Color = new Vector4(glows[i].Color, 1f) });
     }

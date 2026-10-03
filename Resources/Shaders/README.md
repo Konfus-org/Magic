@@ -184,7 +184,7 @@ These are the ones that break silently when ignored. Most were learned the hard 
 
 struct MaterialParams
 {
-    float4 color : GiColor = float4(0.8, 0.8, 0.8, 1.0);
+    Color color : GiColor = Color(0.8, 0.8, 0.8, 1.0);
     TextureRef colorMap : GiColorMap;
 };
 

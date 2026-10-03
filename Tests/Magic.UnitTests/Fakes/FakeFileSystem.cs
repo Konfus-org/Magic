@@ -27,6 +27,23 @@ internal sealed class FakeFileSystem : IFileSystem
     public Result<string> ReadText(string path) => Result<string>.Failure("fake");
     public Task<Result<byte[]>> ReadBinaryAsync(string path, CancellationToken cancel = default) => Task.FromResult(ReadBinary(path));
     public Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel = default) => Task.FromResult(ReadText(path));
+    public Result<T> Read<T>(string path, FileParser<T> parse) => Result<T>.Failure("fake");
+    public Task<Result<T>> ReadAsync<T>(string path, FileParser<T> parse, CancellationToken cancel = default) => Task.FromResult(Read(path, parse));
+
+    public async Task<Result<string>> HashAsync(IReadOnlyList<string> paths, CancellationToken cancel = default)
+    {
+        System.IO.Hashing.XxHash128 hash = new();
+        foreach (string path in paths)
+        {
+            Result<byte[]> read = await ReadBinaryAsync(path, cancel);
+            if (read.Failed)
+                return Result<string>.Failure(read.Message);
+
+            hash.Append(read.Payload);
+        }
+
+        return Result<string>.Success(Convert.ToHexString(hash.GetCurrentHash()));
+    }
     public Result<string[]> ReadDirectory(string path, string? filter = null) => Result<string[]>.Failure("fake");
     public Result<string[]> ReadDirectoryRecursive(string path, string? filter = null) => Result<string[]>.Failure("fake");
     public Result WriteText(string path, string text) => WriteBinary(path, System.Text.Encoding.UTF8.GetBytes(text));

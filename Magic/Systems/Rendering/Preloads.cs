@@ -232,14 +232,13 @@ internal static class Preloads
         if (ctx.Preloads.IsRunning(id))
             return false;
 
-        Task<Preloaded> job = ctx.Preloads.StartAsync(id, cancel => isModel
+        ctx.Preloads.Start(id, cancel => isModel
             ? ModelAsync(ctx.Assets, new Handle<Model>(id), cancel)
             : MaterialAsync(ctx.Assets, new Handle<Material>(id), cancel));
-        if (!job.IsCompletedSuccessfully)
+        if (!ctx.Preloads.TryTake(id, out Preloaded? loaded))
             return false;
 
-        ctx.Preloads.Remove(id);
-        ctx.Preloaded[id] = job.Result;
+        ctx.Preloaded[id] = loaded;
         return true;
     }
 

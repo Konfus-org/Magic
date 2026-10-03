@@ -59,6 +59,17 @@ exposed API (see `Tests/README.md`).
   `throw` that says what was expected. `[MemberNotNullWhen]` and `[MaybeNullWhen]` tell the compiler what a
   check proves (`Result<T>.Ok`, `RefCountTable.TryAcquire`).
 
+### Async
+
+- Every `await` says `.ConfigureAwait(false)`; the build fails without it (`CA2007`). Tests are the exception:
+  xUnit runs them on its own context.
+- A task is awaited, kept to be awaited later, or let go with `.FireAndForget()`, which logs what it throws. Never
+  dropped (`VSTHRD110`, `CS4014` fail the build), never discarded with `_ =`: that hides what it threw and says
+  nothing about what was meant.
+- Work that is tracked by whoever started it, such as `Pending.Start`, returns nothing, so there is no task to
+  forget.
+- Task-returning methods end in `Async` (`VSTHRD200`); no `async void` (`VSTHRD100`).
+
 ### Methods
 
 A method should read from top to bottom:

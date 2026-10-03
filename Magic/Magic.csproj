@@ -7,9 +7,6 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- The GPU structs mirror HLSL with fixed buffers (Contexts/Rendering/GpuStructs.cs). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- The Mage (Resources/Icons/Mage.svg) rasterised: Windows shows an exe's own icon on the taskbar when a
-         window appears before SDL_SetWindowIcon has been called, which the asynchronous icon load makes a race. -->
-    <ApplicationIcon>Mage.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

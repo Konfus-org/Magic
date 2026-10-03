@@ -267,6 +267,43 @@ public sealed class RenderSystemTests : IDisposable
         Assert.True(LastFlags().HasFlag(InstanceFlags.Hidden));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Hiding_an_entity_puts_out_the_lights_under_it(bool isStatic)
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        Handle parent = Spawn(Vector3.Zero);
+        Handle lamp = Spawn(new Vector3(1, 1, 1), isStatic);
+        _ecs.SetParent(lamp, parent);
+        _ecs.Set(lamp, new PointLight(Vector3.One, 1f, 5f));
+        RenderFrame();
+        RenderFrame();
+
+        _ecs.Set(parent, Tags.Of(Tag.Hidden));
+        RenderFrame();
+
+        Assert.Equal(0u, _rendering.Stats.Lights);
+    }
+
+    [Fact]
+    public void Showing_an_entity_lights_the_lights_under_it_again()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        Handle parent = Spawn(Vector3.Zero);
+        _ecs.Set(parent, Tags.Of(Tag.Hidden));
+        Handle lamp = Spawn(new Vector3(1, 1, 1), isStatic: true);
+        _ecs.SetParent(lamp, parent);
+        _ecs.Set(lamp, new PointLight(Vector3.One, 1f, 5f));
+        RenderFrame();
+        RenderFrame();
+
+        _ecs.Set(parent, default(Tags));
+        RenderFrame();
+
+        Assert.Equal(1u, _rendering.Stats.Lights);
+    }
+
     [Fact]
     public void Showing_an_entity_shows_the_instances_under_it()
     {

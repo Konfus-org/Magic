@@ -37,7 +37,7 @@ internal static class Passes
 
             // Not ready, so not run, until its file and its shader have arrived: the render system loads it then.
             table.Add(handle.Id, new PassState(handle.Id, "", new Pass(), false, 0, [], FrameTargets.LdrFormat, default, null, null));
-            _ = ctx.Reloads.StartAsync(handle.Id, cancel => Preloads.PassAsync(ctx.Assets, handle.Id, cancel));
+            ctx.Reloads.Start(handle.Id, cancel => Preloads.PassAsync(ctx.Assets, handle.Id, cancel));
         }
 
         foreach (ulong id in table.Held)
@@ -274,7 +274,7 @@ internal static class Passes
         ctx.Passes.Set(id, state with { ShaderId = shader.Id, Params = parameters });
         string source = composed.ToString();
         string salt = Shaders.ClosureHash(ctx, shader) + string.Join(",", state.Pass.Inputs);
-        _ = ctx.Passes.Compiles.StartAsync(state.Id, cancel => Shaders.CompileAsync(ctx, source, $"{state.Path}+{shader.Path}", compute ? GpuStage.Compute : GpuStage.Fragment, salt, cancel));
+        ctx.Passes.Compiles.Start(state.Id, cancel => Shaders.CompileAsync(ctx, source, $"{state.Path}+{shader.Path}", compute ? GpuStage.Compute : GpuStage.Fragment, salt, cancel));
     }
 
     /// <summary>

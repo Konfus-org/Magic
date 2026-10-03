@@ -10,7 +10,7 @@ public sealed class PendingTests
     {
         Pending<int, string> pending = new();
         List<(int Key, string Value)> done = [];
-        _ = pending.StartAsync(1, _ => Task.FromResult("a"));
+        pending.Start(1, _ => Task.FromResult("a"));
 
         pending.Poll(done, Record);
 
@@ -22,7 +22,7 @@ public sealed class PendingTests
     {
         Pending<int, string> pending = new();
         List<(int Key, string Value)> done = [];
-        _ = pending.StartAsync(1, _ => Task.FromResult("a"));
+        pending.Start(1, _ => Task.FromResult("a"));
         pending.Poll(done, Record);
 
         pending.Poll(done, Record);
@@ -35,7 +35,7 @@ public sealed class PendingTests
     {
         Pending<int, string> pending = new();
         List<(int Key, string Value)> done = [];
-        _ = pending.StartAsync(1, _ => new TaskCompletionSource<string>().Task);
+        pending.Start(1, _ => new TaskCompletionSource<string>().Task);
 
         pending.Poll(done, Record);
 
@@ -47,8 +47,8 @@ public sealed class PendingTests
     {
         Pending<int, string> pending = new();
         List<(int Key, string Value)> done = [];
-        _ = pending.StartAsync(1, _ => Task.FromResult("stale"));
-        _ = pending.StartAsync(1, _ => Task.FromResult("newest"));
+        pending.Start(1, _ => Task.FromResult("stale"));
+        pending.Start(1, _ => Task.FromResult("newest"));
 
         pending.Poll(done, Record);
 
@@ -60,13 +60,13 @@ public sealed class PendingTests
     {
         Pending<int, string> pending = new();
         CancellationToken stale = default;
-        _ = pending.StartAsync(1, cancel =>
+        pending.Start(1, cancel =>
         {
             stale = cancel;
             return new TaskCompletionSource<string>().Task;
         });
 
-        _ = pending.StartAsync(1, _ => Task.FromResult("newest"));
+        pending.Start(1, _ => Task.FromResult("newest"));
 
         Assert.True(stale.IsCancellationRequested);
     }
@@ -76,7 +76,7 @@ public sealed class PendingTests
     {
         Pending<int, string> pending = new();
         List<(int Key, string Value)> done = [];
-        _ = pending.StartAsync(1, _ => Task.FromException<string>(new InvalidOperationException("boom")));
+        pending.Start(1, _ => Task.FromException<string>(new InvalidOperationException("boom")));
 
         pending.Poll(done, Record);
 

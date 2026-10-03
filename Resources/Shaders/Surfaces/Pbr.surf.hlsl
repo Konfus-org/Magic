@@ -6,7 +6,7 @@
 
 struct MaterialParams
 {
-    float4 color : GiColor = float4(0.8, 0.8, 0.8, 1.0);
+    Color color : GiColor = Color(0.8, 0.8, 0.8, 1.0);
     float roughness = 0.6;
     float metallic = 0.0;
     float normalScale = 1.0;

@@ -57,7 +57,7 @@ internal static class RenderChecks
         uint cpuMin = 0, cpuMax = 0;
         foreach (ref readonly GpuInstance row in ctx.Instances.Rows)
         {
-            if (!row.Flags.HasFlag(InstanceFlags.Alive) || row.Flags.HasFlag(InstanceFlags.Hidden))
+            if ((row.Flags & InstanceFlags.Alive) == 0 || (row.Flags & InstanceFlags.Hidden) != 0)
                 continue;
 
             Vector3 center = new Vector3(row.Sphere.X, row.Sphere.Y, row.Sphere.Z) - camera;
@@ -69,7 +69,7 @@ internal static class RenderChecks
                 surely &= frustum.Intersects(new BoundingSphere(center, radius * 0.99f));
                 maybe &= frustum.Intersects(new BoundingSphere(center, radius * 1.01f));
                 float z = MathF.Max(Vector3.TransformNormal(center, frame.View).Z, frame.Near);
-                if (!row.Flags.HasFlag(InstanceFlags.NoSizeCull))
+                if ((row.Flags & InstanceFlags.NoSizeCull) == 0)
                 {
                     float pixels = row.CullRadius * frame.ProjScale.Y * frame.ViewSize.Y * 0.5f / z;
                     surely &= pixels >= frame.MinPixels * 1.02f;

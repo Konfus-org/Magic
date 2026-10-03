@@ -4,7 +4,7 @@
 
 struct MaterialParams
 {
-    float4 color = float4(0.2, 0.8, 0.2, 1.0);
+    Color color = Color(0.2, 0.8, 0.2, 1.0);
 };
 
 Surface EvaluateSurface(SurfaceInputs input, MaterialParams material)

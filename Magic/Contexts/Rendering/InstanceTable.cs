@@ -219,7 +219,7 @@ internal sealed class InstanceTable
     /// </summary>
     public void Hide(uint slot, bool hidden)
     {
-        if (!IsAlive(slot) || _cull[slot].Flags.HasFlag(InstanceFlags.Hidden) == hidden)
+        if (!IsAlive(slot) || ((_cull[slot].Flags & InstanceFlags.Hidden) != 0) == hidden)
             return;
 
         if (hidden)
@@ -230,7 +230,8 @@ internal sealed class InstanceTable
         MarkDirty(slot);
     }
 
-    public bool IsAlive(uint slot) => slot < HighWater && _cull[slot].Flags.HasFlag(InstanceFlags.Alive);
+    // Tested with a mask, not HasFlag: a Debug build boxes the enum for HasFlag, and this is asked per instance.
+    public bool IsAlive(uint slot) => slot < HighWater && (_cull[slot].Flags & InstanceFlags.Alive) != 0;
 
     public PipelineClass ClassOf(uint slot) => _classes[slot];
 

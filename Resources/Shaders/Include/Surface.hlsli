@@ -5,7 +5,7 @@
 //   struct MaterialParams { ... };                              // its parameters; a .mat file gives their values
 //   Surface EvaluateSurface(SurfaceInputs input, MaterialParams material);
 //
-// Members of MaterialParams may be float/int/uint/bool, their 2..4 vectors, or TextureRef. A member may
+// Members of MaterialParams may be float/int/uint/bool, their 2..4 vectors, Color, or TextureRef. A member may
 // carry a default ("= float4(1, 1, 1, 1)") and a role for global illumination (": GiColor", ": GiColorMap",
 // ": GiEmissive"); the renderer reads both and strips them before the compiler sees the struct. The
 // renderer packs a material's values into a GpuMaterial and generates LoadMaterialParams(slot) for the

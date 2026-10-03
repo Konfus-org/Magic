@@ -13,7 +13,9 @@ namespace Magic.Interfaces;
 // Cascade(): the last component type parameter is read from the entity's parent instead of the entity itself,
 // and chunks come parents before children. A chunk of root entities gets an empty span for it; every other
 // chunk gets a one-element span, the shared value of the parent all its entities have. In Each(...) an absent
-// parent reads as default. It is what a transform hierarchy needs and nothing else uses it (perf-driven, flagged).
+// parent reads as default. Mind that a cached query with it is re-matched over every table whenever the hierarchy or
+// the parent's component changes: the transform system, which it was made for, reads parents by hand instead and
+// repeats its pass until the order no longer matters, because the re-match stalled a streaming world every spawn.
 //
 // WithoutAbove<T>(): Without<T>() that also looks up the hierarchy: neither the entity nor anything above it has
 // T. It is decided when a T is added or removed, not per entity while iterating.

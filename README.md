@@ -18,7 +18,8 @@ Build/net10.0/Debug/bin/Magic --project Samples/Cube
 `--fail-on-error`.
 
 Windows and Linux (Vulkan) are supported; macOS is not yet. `-r <rid>` builds for another platform into its own
-folder (`Build/net10.0/Debug-linux-x64/`); the "Magic (WSL)" launch profile runs that build in WSL.
+folder (`Build/net10.0/Debug-linux-x64/`); the "(WSL)" launch profile of the host and of every sample runs that
+build in WSL, so build it with `-r linux-x64` first.
 
 ## How it works
 

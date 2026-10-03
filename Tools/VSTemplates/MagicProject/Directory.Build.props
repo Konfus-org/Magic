@@ -20,9 +20,9 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
 
-    <!-- Strict builds, as in the engine: nullable warnings and the null-forgiving '!' (NX0001-NX0003) are errors,
-         and code-style rules are checked by the build. -->
-    <WarningsAsErrors>$(WarningsAsErrors);nullable;NX0001;NX0002;NX0003</WarningsAsErrors>
+    <!-- Strict builds, as in the engine: nullable warnings are errors, and so are the rules the project's .editorconfig
+         (a copy of the engine's) marks as errors, checked by the build. -->
+    <WarningsAsErrors>$(WarningsAsErrors);nullable</WarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
 
     <!-- Build output, what the engine writes at run time, and other gems are not items of the root project. -->

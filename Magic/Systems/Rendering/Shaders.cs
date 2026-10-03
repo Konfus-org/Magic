@@ -250,17 +250,11 @@ internal static class Shaders
         if (!files.FileExists(bin) || !files.FileExists(meta))
             return false;
 
-        Result<byte[]> metaBytes = files.ReadBinary(meta);
+        Result<CompiledShader?> read;
         Result<byte[]> code = files.ReadBinary(bin);
-        if (metaBytes.Failed || code.Failed)
-        {
-            Debugging.Log.Debug($"Shader cache entry {key} unreadable: {(metaBytes.Failed ? metaBytes.Message : code.Message)}");
-            return false;
-        }
-
         try
         {
-            shader = JsonSerializer.Deserialize<CompiledShader>(metaBytes.Payload, MetaJson);
+            read = files.Read(meta, static bytes => JsonSerializer.Deserialize<CompiledShader>(bytes, MetaJson));
         }
         catch (JsonException ex)
         {
@@ -268,6 +262,13 @@ internal static class Shaders
             return false;
         }
 
+        if (read.Failed || code.Failed)
+        {
+            Debugging.Log.Debug($"Shader cache entry {key} unreadable: {(read.Failed ? read.Message : code.Message)}");
+            return false;
+        }
+
+        shader = read.Payload;
         if (shader is null)
             return false;
 

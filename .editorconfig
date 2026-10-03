@@ -260,7 +260,11 @@ dotnet_code_quality.CA2000.dispose_ownership_transfer_at_constructor = true
 
 # Async mistakes. CA2016: pass the token on. CA2012: a ValueTask is awaited once. CS4014: a task nobody awaits
 # loses what it threw. CA2007: engine awaits continue on any thread (ConfigureAwait(false)). CA1849: no blocking
-# call where there is an async one. CA1068: the token is the last parameter. VSTHRD200: the Async suffix.
+# call where there is an async one. CA1068: the token is the last parameter. VSTHRD200: the Async suffix. VSTHRD110: a
+# task is awaited, kept, or let go with Task.FireAndForget(), never dropped (CS4014 says so inside async methods only).
+# VSTHRD100: no async void; FireAndForget is how a task runs on its own.
+dotnet_diagnostic.VSTHRD110.severity = error
+dotnet_diagnostic.VSTHRD100.severity = error
 dotnet_diagnostic.CA2016.severity = error
 dotnet_diagnostic.CA2012.severity = error
 dotnet_diagnostic.CS4014.severity = error

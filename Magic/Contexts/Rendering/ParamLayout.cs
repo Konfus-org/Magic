@@ -12,6 +12,10 @@ internal enum ParamType : byte
     Int, Int2, Int3, Int4,
     Uint, Uint2, Uint3, Uint4,
     Bool,
+    /// <summary>
+    /// Four floats like <see cref="Float4"/>, but authored as r, g, b, a.
+    /// </summary>
+    Color,
     TextureRef
 }
 
@@ -24,7 +28,7 @@ internal sealed record ParamField(string Name, ParamType Type, string? Semantic,
     {
         ParamType.Float2 or ParamType.Int2 or ParamType.Uint2 => 2,
         ParamType.Float3 or ParamType.Int3 or ParamType.Uint3 => 3,
-        ParamType.Float4 or ParamType.Int4 or ParamType.Uint4 => 4,
+        ParamType.Float4 or ParamType.Int4 or ParamType.Uint4 or ParamType.Color => 4,
         _ => 1,
     };
 
@@ -35,7 +39,7 @@ internal sealed record ParamField(string Name, ParamType Type, string? Semantic,
     /// </summary>
     public Param DefaultParam { get; init; }
 
-    public bool IsFloat => Type is ParamType.Float or ParamType.Float2 or ParamType.Float3 or ParamType.Float4;
+    public bool IsFloat => Type is ParamType.Float or ParamType.Float2 or ParamType.Float3 or ParamType.Float4 or ParamType.Color;
 
     public bool IsInt => Type is ParamType.Int or ParamType.Int2 or ParamType.Int3 or ParamType.Int4;
 }
@@ -59,6 +63,7 @@ internal sealed partial class ParamLayout
         ["int"] = ParamType.Int, ["int2"] = ParamType.Int2, ["int3"] = ParamType.Int3, ["int4"] = ParamType.Int4,
         ["uint"] = ParamType.Uint, ["uint2"] = ParamType.Uint2, ["uint3"] = ParamType.Uint3, ["uint4"] = ParamType.Uint4,
         ["bool"] = ParamType.Bool,
+        ["Color"] = ParamType.Color,
         ["TextureRef"] = ParamType.TextureRef,
     };
 
@@ -111,7 +116,7 @@ internal sealed partial class ParamLayout
             string name = member.Groups["name"].Value;
             string typeName = member.Groups["type"].Value;
             if (!Types.TryGetValue(typeName, out ParamType type))
-                return Result<ParamLayout>.Failure($"{structName}.{name} has type {typeName}; allowed: float/int/uint/bool, their 2..4 vectors, TextureRef.");
+                return Result<ParamLayout>.Failure($"{structName}.{name} has type {typeName}; allowed: float/int/uint/bool, their 2..4 vectors, Color, TextureRef.");
             if (type == ParamType.TextureRef && !allowTextures)
                 return Result<ParamLayout>.Failure($"{structName}.{name}: a TextureRef is not allowed here.");
             if (fields.Exists(field => field.Name == name))
@@ -213,7 +218,9 @@ internal sealed partial class ParamLayout
                 default:
                     for (int component = 0; component < field.Components; component++)
                     {
-                        float value = component switch { 0 => param.X, 1 => param.Y, 2 => param.Z, _ => param.W };
+                        float value = field.Type == ParamType.Color
+                            ? component switch { 0 => param.R, 1 => param.G, 2 => param.B, _ => param.A }
+                            : component switch { 0 => param.X, 1 => param.Y, 2 => param.Z, _ => param.W };
                         if (field.IsFloat)
                             BitConverter.TryWriteBytes(dst[(component * 4)..], value);
                         else if (field.IsInt)
@@ -227,7 +234,8 @@ internal sealed partial class ParamLayout
     }
 
     /// <summary>
-    /// The declared default as a <see cref="Param"/>: the numbers in the initialiser in order, <c>true</c> as 1, anything else 0/none.
+    /// The declared default as a <see cref="Param"/>: the numbers in the initialiser in order (into r..a for a
+    /// <see cref="ParamType.Color"/>), <c>true</c> as 1, anything else 0/none.
     /// </summary>
     private static Param DefaultValue(ParamField field)
     {
@@ -251,6 +259,8 @@ internal sealed partial class ParamLayout
                 values[i] = ParseFloat(numbers[i].Value);
         }
 
+        if (field.Type == ParamType.Color)
+            return new Param { R = values[0], G = values[1], B = values[2], A = values[3] };
         return new Param { X = values[0], Y = values[1], Z = values[2], W = values[3] };
     }
 

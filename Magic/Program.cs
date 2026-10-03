@@ -280,7 +280,12 @@ internal static class Program
             return false;
         }
 
-        window = factory.Create(project.Name, options.Width, options.Height, options.WindowMode);
+#if DEBUG
+        string title = $"{project.Name} (DEBUG)";
+#else
+        string title = project.Name;
+#endif
+        window = factory.Create(title, options.Width, options.Height, options.WindowMode);
         window.Show();
 
         return true;

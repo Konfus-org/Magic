@@ -17,7 +17,7 @@ namespace Magic.Systems.DebugUI;
 /// </summary>
 internal sealed class DebuggerDisplaySystem : DebugWindowSystem
 {
-    public const double LogIntervalMs = 10000;
+    public const double LogIntervalMs = 30000;
 
     private readonly TransformSystem _transforms;
     private readonly RenderSystem _rendering;
@@ -28,6 +28,13 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
     private double _lastFrameMs;
     private double _windowWorstMs;
     private double _sinceLogMs;
+    private double _sinceGcSampleMs;
+    private long _sampledAllocatedBytes;
+    private TimeSpan _sampledPause;
+    private readonly int[] _sampledCollections = new int[3];
+    private double _allocatedMbPerSecond;
+    private double _pausePercent;
+    private readonly double[] _collectionsPerSecond = new double[3];
 
     public DebuggerDisplaySystem(TransformSystem transforms, RenderSystem rendering, StreamingSystem streaming, Assets assets, IInput? input) : base("Debug", Key.F3, input)
     {
@@ -46,6 +53,8 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
         double fps = _frameMs > 0 ? 1000 / _frameMs : 0;
         RenderStats render = _rendering.Stats;
         StreamingStats streaming = _streaming.Stats;
+        SampleGc(dtMs);
+        double heapMb = Megabytes(GC.GetTotalMemory(false));
 
         if (Open)
         {
@@ -55,6 +64,8 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
             Debugging.UI.Text($"Instances {render.Instances}, lights {render.Lights}");
             Debugging.UI.Text($"Draws {render.Draws}, dispatches {render.Dispatches}, pipelines pending {render.PipelinesPending}");
             Debugging.UI.Text($"Resident meshes {render.ResidentMeshes}, textures {render.ResidentTextures}; renderer sync {render.CpuSyncMs:F2} ms, record {render.CpuRecordMs:F2} ms, GPU wait {render.CpuWaitMs:F2} ms");
+            Debugging.UI.Text($"GC: heap {heapMb:F1} MB, allocating {_allocatedMbPerSecond:F2} MB/s, paused {_pausePercent:F1} %; " +
+                $"collections gen0 {GC.CollectionCount(0)} ({_collectionsPerSecond[0]:F1}/s), gen1 {GC.CollectionCount(1)} ({_collectionsPerSecond[1]:F1}/s), gen2 {GC.CollectionCount(2)} ({_collectionsPerSecond[2]:F1}/s)");
             Debugging.UI.Text($"Streaming: {streaming.Domains} domain(s), {streaming.Loaded} chunk(s) loaded ({streaming.Active} active, {streaming.StandIns} as stand-ins, " +
                 $"{streaming.Loading} loading, {streaming.Filling} to fill, {streaming.Kept} kept out of view; {Megabytes(streaming.Bytes):F1} / {Megabytes(streaming.Budget):F0} MB), {streaming.Entities} entities, {streaming.Cameras} camera(s){(streaming.Bootstrapping ? ", behind the loading domain" : "")}.");
             foreach (AssetPoolStats pool in _assets.PoolStats())
@@ -68,7 +79,9 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
             _sinceLogMs = 0;
             Debugging.Log.Verbose($"Frame {_frameMs:F2} ms ({fps:F0} fps, worst {_lastFrameMs:F2}): transforms {_transforms.LastMs:F2}, render sync {_rendering.SyncMs:F2}, " +
                 $"render {_rendering.RenderMs:F2} (renderer sync {render.CpuSyncMs:F2}, record {render.CpuRecordMs:F2}, GPU wait {render.CpuWaitMs:F2}) ms; " +
-                $"{render.Instances} instances, {render.Lights} lights, {render.Draws} draws, {render.Dispatches} dispatches.");
+                $"{render.Instances} instances, {render.Lights} lights, {render.Draws} draws, {render.Dispatches} dispatches; " +
+                $"GC heap {heapMb:F1} MB, allocating {_allocatedMbPerSecond:F2} MB/s, paused {_pausePercent:F1} %, " +
+                $"collections {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)}.");
         }
 
         if (fps < 30)
@@ -76,6 +89,33 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
 
         _lastFrameMs = _windowWorstMs;
         _windowWorstMs = 0;
+    }
+
+    /// <summary>
+    /// Rates over the last second rather than per frame, so they are readable: allocation in MB/s, collections per
+    /// generation per second, and the share of wall time the GC had threads paused.
+    /// </summary>
+    private void SampleGc(double dtMs)
+    {
+        _sinceGcSampleMs += dtMs;
+        if (_sinceGcSampleMs < 1000)
+            return;
+
+        long allocated = GC.GetTotalAllocatedBytes();
+        TimeSpan pause = GC.GetTotalPauseDuration();
+        double seconds = _sinceGcSampleMs / 1000d;
+        _allocatedMbPerSecond = Megabytes(allocated - _sampledAllocatedBytes) / seconds;
+        _pausePercent = (pause - _sampledPause).TotalMilliseconds / _sinceGcSampleMs * 100;
+        for (int generation = 0; generation < _sampledCollections.Length; generation++)
+        {
+            int count = GC.CollectionCount(generation);
+            _collectionsPerSecond[generation] = (count - _sampledCollections[generation]) / seconds;
+            _sampledCollections[generation] = count;
+        }
+
+        _sampledAllocatedBytes = allocated;
+        _sampledPause = pause;
+        _sinceGcSampleMs = 0;
     }
 
     private static double Megabytes(long bytes)

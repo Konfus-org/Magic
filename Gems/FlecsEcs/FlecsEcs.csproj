@@ -20,9 +20,11 @@
 
   <ItemGroup>
     <!-- The Debug package asserts on API misuse (wrong thread, dead entity, ...); Release skips the checks.
-         Both pull the native flecs library for the build's runtime in transitively. -->
-    <PackageReference Include="Flecs.NET.Debug" Version="4.0.3" Condition="'$(Configuration)' == 'Debug'" />
-    <PackageReference Include="Flecs.NET.Release" Version="4.0.3" Condition="'$(Configuration)' != 'Debug'" />
+         Both pull the native flecs library for the build's runtime in transitively. Every build takes Release:
+         the Debug native library re-matches its cached queries so slowly after chunks spawn that a Debug engine
+         build hitched 40 ms a frame while streaming. Build with -p:FlecsDebug=true to get the checks back. -->
+    <PackageReference Include="Flecs.NET.Debug" Version="4.0.3" Condition="'$(FlecsDebug)' == 'true'" />
+    <PackageReference Include="Flecs.NET.Release" Version="4.0.3" Condition="'$(FlecsDebug)' != 'true'" />
   </ItemGroup>
 
   <ItemGroup>

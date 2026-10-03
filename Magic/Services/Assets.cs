@@ -10,7 +10,6 @@ using Magic.Utils;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO.Hashing;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
@@ -509,15 +508,9 @@ public sealed class Assets : IDisposable
     /// </summary>
     private async Task<string?> HashAsync<T>(ulong id) where T : Asset
     {
-        if (FullPathOf(id) is not { } path
-            || await _files.ReadBinaryAsync(path).ConfigureAwait(false) is not { Ok: true } file
-            || await _files.ReadBinaryAsync(path + ".meta").ConfigureAwait(false) is not { Ok: true } sidecar)
+        // Streamed by the file system: a model is megabytes, and holding every one hashed would be most of the garbage.
+        if (FullPathOf(id) is not { } path || await _files.HashAsync([path, path + ".meta"]).ConfigureAwait(false) is not { Ok: true, Payload: var text })
             return null;
-
-        XxHash128 hash = new();
-        hash.Append(file.Payload);
-        hash.Append(sidecar.Payload);
-        string text = Convert.ToHexString(hash.GetCurrentHash());
 
         return _container.TryGet(out ILODGenerator<T>? generator) ? $"{text}-{generator.Version}" : text;
     }
@@ -543,12 +536,13 @@ public sealed class Assets : IDisposable
     /// </summary>
     private async Task<LodManifest?> ReadManifestAsync(string path, CancellationToken cancel)
     {
-        if (!_files.FileExists(path) || await _files.ReadTextAsync(path, cancel).ConfigureAwait(false) is not { Ok: true } text)
+        if (!_files.FileExists(path))
             return null;
 
         try
         {
-            return JsonSerializer.Deserialize<LodManifest>(text.Payload) is { Lods: not null, Dependencies: not null } manifest ? manifest : null;
+            Result<LodManifest?> read = await _files.ReadAsync(path, static bytes => JsonSerializer.Deserialize<LodManifest>(bytes), cancel).ConfigureAwait(false);
+            return read is { Ok: true, Payload: { Lods: not null, Dependencies: not null } manifest } ? manifest : null;
         }
         catch (JsonException)
         {
@@ -967,16 +961,17 @@ public sealed class Assets : IDisposable
             _failed.RemoveWhere(failed => failed.Id == id);
 
         // Its own LODs, and those a generator made of it for another asset (a chunk's stand-in of its models).
-        foreach ((Type Type, ulong Id) found in _lods.Keys)
+        // Walked, not through Keys: that copies every key into a list, and this runs once per file indexed.
+        foreach (KeyValuePair<(Type Type, ulong Id), Lazy<Task<Array>>> found in _lods)
         {
-            if (found.Id == id || (_lodDependencies.TryGetValue(found, out ulong[]? dependencies) && dependencies.Contains(id)))
-                _lods.TryRemove(found, out _);
+            if (found.Key.Id == id || (_lodDependencies.TryGetValue(found.Key, out ulong[]? dependencies) && dependencies.Contains(id)))
+                _lods.TryRemove(found.Key, out _);
         }
 
-        foreach ((Type Type, ulong Id) stamped in _stamps.Keys)
+        foreach (KeyValuePair<(Type Type, ulong Id), Lazy<Task<string?>>> stamped in _stamps)
         {
-            if (stamped.Id == id)
-                _stamps.TryRemove(stamped, out _);
+            if (stamped.Key.Id == id)
+                _stamps.TryRemove(stamped.Key, out _);
         }
     }
 
@@ -1018,11 +1013,11 @@ public sealed class Assets : IDisposable
     /// </summary>
     private async Task<T> SidecarAsync<T>(string path, CancellationToken cancel) where T : Asset
     {
-        Result<string> meta = await _files.ReadTextAsync(path + ".meta", cancel).ConfigureAwait(false);
+        Result<T?> meta = await _files.ReadAsync(path + ".meta", static bytes => JsonSerializer.Deserialize<T>(bytes, AssetJson.Options), cancel).ConfigureAwait(false);
         if (meta.Failed)
             throw new IOException($"could not read its sidecar. {meta.Message}");
 
-        T asset = JsonSerializer.Deserialize<T>(meta.Payload, AssetJson.Options) ?? throw new JsonException("the sidecar is null.");
+        T asset = meta.Payload ?? throw new JsonException("the sidecar is null.");
         asset.Path = Relative(path);
 
         return asset;
@@ -1031,7 +1026,8 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// Fills the sidecar's asset from the file by its <see cref="AssetFormat"/>: the host reads JSON and text itself; a
     /// custom format, which is also what a type without <see cref="AssetFormatAttribute"/> has, goes to the
-    /// <see cref="IAssetLoader{T}"/> a gem provides. With it comes about what the file's contents take in memory.
+    /// <see cref="IAssetLoader{T}"/> a gem provides. With it comes about what the file's contents take in memory:
+    /// JSON is read straight from the file's bytes into the asset, so its size on disk stands for that.
     /// </summary>
     private async Task<(T Asset, long FileBytes)> ReadAsync<T>(T asset, string path, CancellationToken cancel) where T : Asset
     {
@@ -1041,15 +1037,15 @@ public sealed class Assets : IDisposable
             case AssetFormat.Json:
             {
                 // The file is the same type; the sidecar's values win for what it owns.
-                string json = ValueOrThrow(await _files.ReadTextAsync(path, cancel).ConfigureAwait(false));
-                T content = JsonSerializer.Deserialize<T>(json, AssetJson.Options) ?? throw new JsonException("the file is null.");
+                (T? Content, int Bytes) read = ValueOrThrow(await _files.ReadAsync(path, static bytes => (JsonSerializer.Deserialize<T>(bytes, AssetJson.Options), bytes.Length), cancel).ConfigureAwait(false));
+                T content = read.Content ?? throw new JsonException("the file is null.");
                 content.Id = asset.Id;
                 content.Version = asset.Version;
                 content.Path = asset.Path;
                 foreach (PropertyInfo property in typeof(T).GetProperties().Where(candidate => candidate.IsDefined(typeof(MetaDataAttribute))))
                     property.SetValue(content, property.GetValue(asset));
 
-                return (content, json.Length * (long)sizeof(char));
+                return (content, read.Bytes);
             }
             case AssetFormat.Text:
             {
@@ -1159,23 +1155,41 @@ public sealed class Assets : IDisposable
         if (!_files.FileExists(metaPath))
             return null;
 
-        Result<string> read = _files.ReadText(metaPath);
-        if (read.Failed)
-        {
-            Debugging.Log.Warn($"Could not read {metaPath}: {read.Message}");
-            return 0;
-        }
-
         try
         {
-            using JsonDocument document = JsonDocument.Parse(read.Payload, new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
-            return document.RootElement.TryGetProperty("id", out JsonElement id) && id.TryGetUInt64(out ulong value) ? value : 0;
+            Result<ulong> read = _files.Read(metaPath, IdOf);
+            if (read.Failed)
+                Debugging.Log.Warn($"Could not read {metaPath}: {read.Message}");
+
+            return read.Failed ? 0 : read.Payload;
         }
         catch (JsonException ex)
         {
             Debugging.Log.Warn($"{metaPath} is not valid JSON: {ex.Message}");
             return 0;
         }
+    }
+
+    /// <summary>
+    /// The <c>id</c> at the top of a sidecar's JSON, or 0 when it has none; nothing else of the file is made.
+    /// </summary>
+    private static ulong IdOf(ReadOnlySpan<byte> json)
+    {
+        Utf8JsonReader reader = new(json, new JsonReaderOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+            return 0;
+
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            bool id = reader.ValueTextEquals("id"u8);
+            reader.Read();
+            if (id)
+                return reader.TokenType == JsonTokenType.Number && reader.TryGetUInt64(out ulong value) ? value : 0;
+
+            reader.Skip();
+        }
+
+        return 0;
     }
 
     /// <summary>

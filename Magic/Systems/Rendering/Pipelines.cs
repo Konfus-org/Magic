@@ -102,7 +102,7 @@ internal static class Pipelines
         if (everything && Shaders.GetByPath(ctx, VertexTemplate) is { } vertex)
         {
             // The classes restart once the new vertex shader is in (FinishCompile).
-            _ = ctx.Pipelines.Compiles.StartAsync(PipelineTable.VertexKey, cancel => Shaders.CompileAsync(ctx, vertex.Text, vertex.Path, GpuStage.Vertex, Shaders.ClosureHash(ctx, vertex), cancel));
+            ctx.Pipelines.Compiles.Start(PipelineTable.VertexKey, cancel => Shaders.CompileAsync(ctx, vertex.Text, vertex.Path, GpuStage.Vertex, Shaders.ClosureHash(ctx, vertex), cancel));
             return;
         }
 
@@ -184,7 +184,7 @@ internal static class Pipelines
         // The contract is included by the composed text, not by any asset, so its closure goes into the salt by hand;
         // otherwise editing it would serve stale bytecode from the cache.
         string salt = Shaders.ClosureHash(ctx, template) + Shaders.ClosureHash(ctx, surfaceShader) + contract.Text + Shaders.ClosureHash(ctx, contract);
-        _ = ctx.Pipelines.Compiles.StartAsync(cls, cancel => Shaders.CompileAsync(ctx, composed, $"{surface.Path}+{template.Path}:{cls.Variant}", GpuStage.Fragment, salt, cancel));
+        ctx.Pipelines.Compiles.Start(cls, cancel => Shaders.CompileAsync(ctx, composed, $"{surface.Path}+{template.Path}:{cls.Variant}", GpuStage.Fragment, salt, cancel));
     }
 
     /// <summary>

@@ -65,6 +65,26 @@ public interface IFileSystem
     Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel = default);
 
     /// <summary>
+    /// Reads a whole file into a buffer of this file system's own and hands its bytes (a UTF-8 byte order mark
+    /// dropped) to <paramref name="parse"/>, whose answer is the result: for a file that is read once and kept as
+    /// something else, as every JSON sidecar is, without making a text or an array of it on the way. The bytes
+    /// are only good inside the call. Fails like <see cref="ReadBinary"/>; what <paramref name="parse"/> throws
+    /// comes through as it is.
+    /// </summary>
+    Result<T> Read<T>(string path, FileParser<T> parse);
+
+    /// <summary>
+    /// <see cref="Read{T}"/> without holding a thread while the disk works. Cancelling throws <see cref="OperationCanceledException"/>.
+    /// </summary>
+    Task<Result<T>> ReadAsync<T>(string path, FileParser<T> parse, CancellationToken cancel = default);
+
+    /// <summary>
+    /// One XxHash128 of the files' contents, in the order given, as 32 hex characters; a failed result names the first
+    /// that could not be read. The files are streamed, never held whole: for a stamp of something big.
+    /// </summary>
+    Task<Result<string>> HashAsync(IReadOnlyList<string> paths, CancellationToken cancel = default);
+
+    /// <summary>
     /// Lists the entries of <paramref name="path"/> on the calling thread.
     /// </summary>
     Result<string[]> ReadDirectory(string path, string? filter = null);
@@ -108,3 +128,8 @@ public interface IFileSystem
     /// </summary>
     IDisposable Watch(string path, string? filter, Action<string> changed, bool recursive = false);
 }
+
+/// <summary>
+/// What <see cref="IFileSystem.Read{T}"/> makes of a file's bytes.
+/// </summary>
+public delegate T FileParser<out T>(ReadOnlySpan<byte> bytes);

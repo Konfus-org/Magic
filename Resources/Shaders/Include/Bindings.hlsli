@@ -46,4 +46,7 @@
 #error "No STAGE_VERTEX, STAGE_FRAGMENT or STAGE_COMPUTE: compile through IRendering.Compile, which defines the stage."
 #endif
 
+// A parameter that is a colour (r, g, b, a in a .mat or .pass file, Color in C#). A float4 to the shader.
+typedef float4 Color;
+
 #endif

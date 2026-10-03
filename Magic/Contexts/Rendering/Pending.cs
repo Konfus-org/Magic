@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Magic.Contexts.Rendering;
 
 /// <summary>
@@ -13,18 +15,32 @@ internal sealed class Pending<TKey, TValue> where TKey : notnull
     public int InFlight => _running.Count;
 
     /// <summary>
-    /// Starts the job with the token that is cancelled when another replaces it, and answers it. One that is done
-    /// already is still delivered by <see cref="Poll"/>, unless the caller takes it back with <see cref="Remove"/>.
+    /// Starts the job with the token that is cancelled when another replaces it. The job is this table's from here:
+    /// <see cref="Poll"/> delivers it, done or thrown, unless <see cref="TryTake"/> or <see cref="Remove"/> takes it first.
     /// </summary>
-    public Task<TValue> StartAsync(TKey key, Func<CancellationToken, Task<TValue>> start)
+    public void Start(TKey key, Func<CancellationToken, Task<TValue>> start)
     {
         Remove(key);
 
         CancellationTokenSource cancel = new();
-        Task<TValue> job = start(cancel.Token);
-        _running[key] = (job, cancel);
+        _running[key] = (start(cancel.Token), cancel);
+    }
 
-        return job;
+    /// <summary>
+    /// The value of <paramref name="key"/>'s job here and now, when it has already run to the end (a pooled asset);
+    /// the job is then delivered no more. False while it runs, or when it threw: <see cref="Poll"/> delivers that.
+    /// </summary>
+    public bool TryTake(TKey key, [MaybeNullWhen(false)] out TValue value)
+    {
+        if (!_running.TryGetValue(key, out (Task<TValue> Job, CancellationTokenSource Cancel) running) || !running.Job.IsCompletedSuccessfully)
+        {
+            value = default;
+            return false;
+        }
+
+        value = running.Job.Result;
+        Remove(key);
+        return true;
     }
 
     public bool IsRunning(TKey key)

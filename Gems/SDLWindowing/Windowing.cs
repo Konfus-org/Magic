@@ -1,6 +1,7 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
@@ -153,7 +154,8 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
         // The SDL_Window* stays private; the host only ever sees the id.
         private nint _window;
         private Size _size;
-        private CancellationTokenSource? _iconLoad; // the icon on its way, stopped when another is set or the window closes
+        private CancellationTokenSource? _iconCancel; // stops the icon on its way when another is set or the window closes
+        private Task<Texture?>? _iconLoad; // the icon's texture on its way, or there; null once shown, or when there is none
 
         /// <summary>
         /// On the render thread.
@@ -208,7 +210,8 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
         /// <summary>
         /// The texture shown as the window's icon; <see cref="Handle{T}.None"/> leaves the OS default. The texture
         /// is loaded without anyone waiting for it, and its top mip level handed to SDL, which keeps its own copy:
-        /// the icon shows a moment after it is set.
+        /// on a window already showing, the icon changes a moment after it is set. <see cref="Show"/> waits for it,
+        /// so a window never appears without its icon: the taskbar takes the icon a window has when it appears.
         /// </summary>
         public Handle<Texture> Icon
         {
@@ -216,12 +219,16 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
             set
             {
                 field = value;
-                StopIconLoad();
-                if (!value.IsValid)
-                    return;
+                OnRenderThread(() =>
+                {
+                    StopIconLoad();
+                    if (!value.IsValid)
+                        return;
 
-                _iconLoad = new CancellationTokenSource();
-                _ = ShowIconAsync(value, _iconLoad.Token);
+                    _iconCancel = new CancellationTokenSource();
+                    _iconLoad = LoadIconAsync(value, _iconCancel.Token);
+                    ShowIconWhenLoadedAsync(_iconLoad).FireAndForget();
+                });
             }
         }
 
@@ -271,7 +278,11 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
 
         public void Show()
         {
-            Change(() => SDL.ShowWindow(_window));
+            Change(() =>
+            {
+                ShowLoadedIcon();
+                SDL.ShowWindow(_window);
+            });
         }
 
         public void Hide()
@@ -311,52 +322,77 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
         }
 
         /// <summary>
-        /// Stops the icon on its way, if one is: its load ends without a word.
+        /// Stops the icon on its way, if one is: its load ends without a word. On the render thread.
         /// </summary>
         private void StopIconLoad()
         {
-            _iconLoad?.Cancel();
-            _iconLoad?.Dispose();
+            _iconCancel?.Cancel();
+            _iconCancel?.Dispose();
+            _iconCancel = null;
             _iconLoad = null;
         }
 
         /// <summary>
-        /// Loads the icon and hands it to the window on the render thread, unless another was set meanwhile;
-        /// <paramref name="cancel"/> stops it without a word.
+        /// Loads the icon's texture on the workers: null when it cannot be one, which is logged, or when
+        /// <paramref name="cancel"/> stops it, which is not. Never faults.
         /// </summary>
-        private async Task ShowIconAsync(Handle<Texture> handle, CancellationToken cancel)
+        private async Task<Texture?> LoadIconAsync(Handle<Texture> handle, CancellationToken cancel)
         {
             try
             {
                 Texture? icon = await _assets.LoadAsync(handle, cancel: cancel).ConfigureAwait(false);
                 if (icon is null)
-                    return; // the manager logged why
+                    return null; // the manager logged why
 
                 if (icon.Format is not (TextureFormat.Rgba8Unorm or TextureFormat.Rgba8Srgb) || icon.Levels.Length == 0)
                 {
                     Debugging.Log.Warn($"{icon.Path} cannot be a window icon: it is {icon.Format}, and an icon must be uncompressed RGBA.");
-                    return;
+                    return null;
                 }
 
-                _threads.Post(ThreadId.Render, () => ShowIcon(handle, icon));
+                return icon;
             }
             catch (OperationCanceledException)
             {
+                return null;
             }
             catch (Exception ex) when (ex is not OutOfMemoryException)
             {
                 Debugging.Log.Warn($"The window icon could not be loaded: {ex.Message}");
+                return null;
             }
+        }
+
+        /// <summary>
+        /// Hands the icon to the window on the render thread once it is loaded, for a window already showing.
+        /// </summary>
+        private async Task ShowIconWhenLoadedAsync(Task<Texture?> load)
+        {
+            await load.ConfigureAwait(false);
+            _threads.Post(ThreadId.Render, ShowLoadedIcon);
+        }
+
+        /// <summary>
+        /// Hands the icon on its way to the window, waiting for it when it is not there yet; nothing when there is
+        /// none, when it was shown already, or when another was set meanwhile. On the render thread.
+        /// </summary>
+        private void ShowLoadedIcon()
+        {
+            Task<Texture?>? load = _iconLoad;
+            if (load is null || _window == IntPtr.Zero)
+                return;
+
+            Texture? icon = load.GetAwaiter().GetResult(); // never faults, and the load needs nothing of this thread
+            _iconLoad = null;
+            if (icon is not null)
+                ShowIcon(icon);
         }
 
         /// <summary>
         /// On the render thread.
         /// </summary>
-        private void ShowIcon(Handle<Texture> handle, Texture icon)
+        private void ShowIcon(Texture icon)
         {
-            if (_window == IntPtr.Zero || Icon != handle)
-                return;
-
             // CreateSurfaceFrom wraps the pixels in place, so they stay pinned until SDL has taken its copy.
             TextureLevel level = icon.Levels[0];
             GCHandle pin = GCHandle.Alloc(icon.Pixels, GCHandleType.Pinned);
@@ -371,6 +407,8 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
 
                 if (!SDL.SetWindowIcon(_window, surface))
                     Debugging.Log.Warn($"Could not set {icon.Path} as the window icon: {SDL.GetError()}");
+                else if (OperatingSystem.IsWindows())
+                    Win32.CopyIconToClass(_window);
                 SDL.DestroySurface(surface);
             }
             finally
@@ -399,4 +437,44 @@ internal sealed class WindowManager : IGem, IWindowFactory, IWindowRegistry
             });
         }
     }
+}
+
+/// <summary>
+/// What SDL leaves out on Windows. Explorer asks a window for its icon, with a short timeout, as it makes the
+/// window's taskbar button; a thread busy with the GPU right after <see cref="IWindow.Show"/> misses the question,
+/// and Explorer falls back to the window class's icon, which SDL never sets, then to the exe's, which there is none
+/// of: a blank button. The class icon needs no answer, so it is set to the same icon.
+/// </summary>
+internal static class Win32
+{
+    private const uint WM_GETICON = 0x7F;
+    private const int ICON_SMALL = 0;
+    private const int ICON_BIG = 1;
+    private const int GCLP_HICONSM = -34;
+    private const int GCLP_HICON = -14;
+
+    /// <summary>
+    /// Sets the class icons of <paramref name="window"/>'s class (every SDL window shares it) to the icons SDL gave the
+    /// window. On the window's thread.
+    /// </summary>
+    public static void CopyIconToClass(nint window)
+    {
+        nint hwnd = SDL.GetPointerProperty(SDL.GetWindowProperties(window), SDL.Props.WindowWin32HWNDPointer, IntPtr.Zero);
+        if (hwnd == IntPtr.Zero)
+            return;
+
+        nint big = SendMessageW(hwnd, WM_GETICON, ICON_BIG, IntPtr.Zero);
+        if (big != IntPtr.Zero)
+            SetClassLongPtrW(hwnd, GCLP_HICON, big);
+
+        nint small = SendMessageW(hwnd, WM_GETICON, ICON_SMALL, IntPtr.Zero);
+        if (small != IntPtr.Zero)
+            SetClassLongPtrW(hwnd, GCLP_HICONSM, small);
+    }
+
+    [DllImport("user32.dll")]
+    private static extern nint SendMessageW(nint hwnd, uint message, nint wParam, nint lParam);
+
+    [DllImport("user32.dll")]
+    private static extern nint SetClassLongPtrW(nint hwnd, int index, nint value);
 }

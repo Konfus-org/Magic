@@ -5,7 +5,7 @@
 
 struct MaterialParams
 {
-    float4 color : GiEmissive = float4(1.0, 1.0, 1.0, 1.0);
+    Color color : GiEmissive = Color(1.0, 1.0, 1.0, 1.0);
     TextureRef colorMap : GiColorMap;
     float alphaCutoff = 0.5;
 };

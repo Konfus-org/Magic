@@ -1,5 +1,6 @@
 using Magic.Interfaces;
 using Magic.Utils;
+using System.IO.Hashing;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -13,6 +14,11 @@ namespace Magic.Services;
 internal sealed class FileSystem : IFileSystem
 {
     private const int BufferSize = 64 * 1024;
+
+    // A file that is read and parsed (text, JSON) goes through one of these, whole when it fits: a StreamReader would
+    // make a buffer of its own for every file, and the engine reads thousands of small ones (every asset's sidecar).
+    private static readonly Pool<byte[]> ReadBuffers = new(() => GC.AllocateUninitializedArray<byte>(BufferSize), keep: 64); // loads run many at once, each reading a few files
+    private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
 
     // The one place that knows what separates a path: everything else asks through IFileSystem.
     private static readonly char[] Separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
@@ -107,24 +113,7 @@ internal sealed class FileSystem : IFileSystem
         }
     }
 
-    /// <summary>
-    /// Reads a whole text file (UTF-8, a BOM is dropped) on the calling thread. Fails like <see cref="ReadBinary"/>.
-    /// </summary>
-    public Result<string> ReadText(string path)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(path);
-
-        try
-        {
-            using StreamReader reader = new(OpenRead(path, FileOptions.None), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, BufferSize);
-
-            return Result<string>.Success(reader.ReadToEnd());
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return Result<string>.Failure(ex.Message);
-        }
-    }
+    public Result<string> ReadText(string path) => Read(path, Text);
 
     public async Task<Result<byte[]>> ReadBinaryAsync(string path, CancellationToken cancel = default)
     {
@@ -149,21 +138,113 @@ internal sealed class FileSystem : IFileSystem
         }
     }
 
-    public async Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel = default)
+    public Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel = default) => ReadAsync(path, Text, cancel);
+
+    public Result<T> Read<T>(string path, FileParser<T> parse)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(parse);
 
         try
         {
-            using StreamReader reader = new(OpenRead(path, FileOptions.Asynchronous), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, BufferSize);
+            using FileStream stream = OpenRead(path, FileOptions.None);
+            if (stream.Length > int.MaxValue)
+                return Result<T>.Failure("Files larger than 2 GB cannot be read whole.");
 
-            return Result<string>.Success(await reader.ReadToEndAsync(cancel).ConfigureAwait(false));
+            int length = (int)stream.Length;
+            byte[] buffer = Rent(length, out bool pooled);
+            try
+            {
+                stream.ReadExactly(buffer, 0, length);
+                return Result<T>.Success(parse(WithoutBom(buffer.AsSpan(0, length))));
+            }
+            finally
+            {
+                if (pooled)
+                    ReadBuffers.Return(buffer);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Result<T>.Failure(ex.Message);
+        }
+    }
+
+    public async Task<Result<T>> ReadAsync<T>(string path, FileParser<T> parse, CancellationToken cancel = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(parse);
+
+        try
+        {
+            FileStream stream = OpenRead(path, FileOptions.Asynchronous);
+            await using ConfiguredAsyncDisposable disposing = stream.ConfigureAwait(false);
+            if (stream.Length > int.MaxValue)
+                return Result<T>.Failure("Files larger than 2 GB cannot be read whole.");
+
+            int length = (int)stream.Length;
+            byte[] buffer = Rent(length, out bool pooled);
+            try
+            {
+                await stream.ReadExactlyAsync(buffer.AsMemory(0, length), cancel).ConfigureAwait(false);
+                return Result<T>.Success(parse(WithoutBom(buffer.AsSpan(0, length))));
+            }
+            finally
+            {
+                if (pooled)
+                    ReadBuffers.Return(buffer);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Result<T>.Failure(ex.Message);
+        }
+    }
+
+    public async Task<Result<string>> HashAsync(IReadOnlyList<string> paths, CancellationToken cancel = default)
+    {
+        XxHash128 hash = new();
+        byte[] buffer = ReadBuffers.Rent();
+        try
+        {
+            foreach (string path in paths)
+            {
+                ArgumentException.ThrowIfNullOrWhiteSpace(path);
+                FileStream stream = OpenRead(path, FileOptions.Asynchronous | FileOptions.SequentialScan);
+                await using ConfiguredAsyncDisposable disposing = stream.ConfigureAwait(false);
+                for (int read; (read = await stream.ReadAsync(buffer, cancel).ConfigureAwait(false)) > 0;)
+                    hash.Append(buffer.AsSpan(0, read));
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return Result<string>.Failure(ex.Message);
         }
+        finally
+        {
+            ReadBuffers.Return(buffer);
+        }
+
+        return Result<string>.Success(Convert.ToHexString(hash.GetCurrentHash()));
     }
+
+    /// <summary>
+    /// A buffer a file of <paramref name="length"/> bytes fits in: one of the pool's when it does, otherwise one
+    /// of its own that is not returned.
+    /// </summary>
+    private static byte[] Rent(int length, out bool pooled)
+    {
+        pooled = length <= BufferSize;
+        return pooled ? ReadBuffers.Rent() : GC.AllocateUninitializedArray<byte>(length);
+    }
+
+    private static ReadOnlySpan<byte> WithoutBom(ReadOnlySpan<byte> bytes)
+    {
+        ReadOnlySpan<byte> bom = Encoding.UTF8.Preamble; // Utf8 itself writes none, so it has none to drop
+        return bytes.StartsWith(bom) ? bytes[bom.Length..] : bytes;
+    }
+
+    private static string Text(ReadOnlySpan<byte> bytes) => Utf8.GetString(bytes);
 
     /// <summary>
     /// Lists the entries of <paramref name="path"/> on the calling thread.
