@@ -10,7 +10,7 @@ namespace SDLGem;
 /// Owns SDL itself: <c>SDL_Init</c> on load, <c>SDL_Quit</c> on unload, the event pump every frame, and SDL's
 /// log output routed into <see cref="Debugging"/>. Provides nothing; gems built on SDL (windowing, input, image,
 /// ttf) name this one in their csproj's <c>GemDependsOn</c> and initialise only the subsystems they use, so that no
-/// single one of them can quit SDL under the others. Loading first, its Update pumps before theirs. SDL's events are
+/// single one of them can quit SDL under the others. Loading first, its Render pumps before theirs draw. SDL's events are
 /// not handed out: a gem that wants them registers an <c>SDL.AddEventWatch</c> callback, which SDL runs from this
 /// gem's pump for every event as it is queued.
 /// </summary>
@@ -39,11 +39,12 @@ internal sealed class Sdl : IGem
     }
 
     /// <summary>
-    /// Every frame on the main thread: SDL wants the OS message queue pumped from the thread that created the
+    /// Every frame on the render thread: SDL wants the OS message queue pumped from the thread that created the
     /// windows, and Windows flags a window as unresponsive if it is not. Event watches see each event as it enters
-    /// the queue; nothing here looks at them, so the queue is simply drained.
+    /// the queue, while the main thread waits for this hook, so what they write is not being read; what they publish
+    /// the next frame hears. Nothing here looks at the events, so the queue is simply drained.
     /// </summary>
-    public void Update(in Frame frame)
+    public void Render(in Frame frame)
     {
         while (SDL.PollEvent(out SDL.Event _))
         {

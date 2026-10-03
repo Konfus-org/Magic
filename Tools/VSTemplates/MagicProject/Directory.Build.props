@@ -20,6 +20,11 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
 
+    <!-- Strict builds, as in the engine: nullable warnings and the null-forgiving '!' (NX0001-NX0003) are errors,
+         and code-style rules are checked by the build. -->
+    <WarningsAsErrors>$(WarningsAsErrors);nullable;NX0001;NX0002;NX0003</WarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
     <!-- Build output, what the engine writes at run time, and other gems are not items of the root project. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);Build\**;bin\**;obj\**;Cache\**;Logs\**;Screenshots\**;Gems\**</DefaultItemExcludes>
   </PropertyGroup>
@@ -49,6 +54,10 @@
       <HintPath>$(MagicRoot)Build\$(TargetFramework)\$(Configuration)\bin\Magic.dll</HintPath>
       <Private>false</Private>
     </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Nullable.Extended.Analyzer" Version="1.15.6581" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- What the host needs to know about a gem before it constructs it, stamped into the assembly. Set in the gem's

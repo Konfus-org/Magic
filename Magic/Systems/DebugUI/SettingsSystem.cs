@@ -48,38 +48,36 @@ internal sealed class SettingsSystem : DebugWindowSystem
     private void DrawSetting(object section, PropertyInfo property)
     {
         Type type = property.PropertyType;
-        if (type == typeof(bool))
+        object? current = property.GetValue(section);
+        if (current is bool flag)
         {
-            bool value = (bool)property.GetValue(section)!;
-            if (Debugging.UI.Checkbox(property.Name, ref value))
-                property.SetValue(section, value);
+            if (Debugging.UI.Checkbox(property.Name, ref flag))
+                property.SetValue(section, flag);
         }
-        else if (type == typeof(float))
+        else if (current is float number)
         {
-            float value = (float)property.GetValue(section)!;
-            if (Debugging.UI.Slider(property.Name, ref value))
-                property.SetValue(section, value);
+            if (Debugging.UI.Slider(property.Name, ref number))
+                property.SetValue(section, number);
         }
-        else if (type == typeof(Size))
+        else if (current is Size size)
         {
-            Size value = (Size)property.GetValue(section)!;
-            float width = value.Width, height = value.Height;
+            float width = size.Width, height = size.Height;
             bool changed = Debugging.UI.Slider($"{property.Name}.Width", ref width);
             changed |= Debugging.UI.Slider($"{property.Name}.Height", ref height);
             if (changed)
                 property.SetValue(section, new Size(Math.Max(0, (int)MathF.Round(width)), Math.Max(0, (int)MathF.Round(height))));
         }
-        else if (type.IsEnum)
+        else if (current is Enum choice)
         {
             string[] names = EnumNames(type);
-            int index = Array.IndexOf(names, property.GetValue(section)!.ToString());
+            int index = Array.IndexOf(names, choice.ToString());
             if (Debugging.UI.Choice(property.Name, ref index, names))
                 property.SetValue(section, Enum.Parse(type, names[index]));
         }
         else if (type == typeof(string))
         {
             // Read once at start-up by whoever uses it, so there is nothing to change live: shown, not edited.
-            Debugging.UI.Text($"{property.Name}: {(string?)property.GetValue(section) ?? "default"} (set in the project file)");
+            Debugging.UI.Text($"{property.Name}: {(string?)current ?? "default"} (set in the project file)");
         }
     }
 

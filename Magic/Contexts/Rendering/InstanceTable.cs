@@ -23,7 +23,9 @@ internal sealed class InstanceTable
 
     public const int PageSize = 256;
 
-    /// <summary>What <see cref="NextPart"/> answers for an entity's last part.</summary>
+    /// <summary>
+    /// What <see cref="NextPart"/> answers for an entity's last part.
+    /// </summary>
     public const uint End = uint.MaxValue;
 
     private readonly Dictionary<long, int> _cellsByKey = [];
@@ -34,6 +36,9 @@ internal sealed class InstanceTable
     private GpuInstance[] _cull;
     private GpuInstanceXform[] _xform;
     private BoundingSphere[] _bounds;
+    private float[] _cullRadii; // as registered: 0 = that of the bounds
+    private Vector3[] _origins; // the model's point that sits at the entity's position
+    private uint[] _meshSlots;
     private PipelineClass[] _classes;
     private Handle<Material>[] _materials;
     private ulong[] _models;
@@ -45,6 +50,9 @@ internal sealed class InstanceTable
         _cull = new GpuInstance[capacity];
         _xform = new GpuInstanceXform[capacity];
         _bounds = new BoundingSphere[capacity];
+        _cullRadii = new float[capacity];
+        _origins = new Vector3[capacity];
+        _meshSlots = new uint[capacity];
         _classes = new PipelineClass[capacity];
         _materials = new Handle<Material>[capacity];
         _models = new ulong[capacity];
@@ -69,7 +77,9 @@ internal sealed class InstanceTable
 
     public GrowableBuffer PageBuffer { get; }
 
-    /// <summary>Slots ever handed out; rows below it may be dead (alive flag clear).</summary>
+    /// <summary>
+    /// Slots ever handed out; rows below it may be dead (alive flag clear).
+    /// </summary>
     public uint HighWater { get; private set; }
 
     public uint Alive { get; private set; }
@@ -82,16 +92,28 @@ internal sealed class InstanceTable
 
     public ReadOnlySpan<GpuInstanceXform> Xforms => _xform.AsSpan(0, (int)HighWater);
 
-    /// <summary>The cell table as the GPU reads it.</summary>
+    /// <summary>
+    /// The cell table as the GPU reads it.
+    /// </summary>
     public ReadOnlySpan<GpuCell> Cells => CollectionsMarshal.AsSpan(_cells);
 
-    /// <summary>The page table as the GPU reads it.</summary>
+    /// <summary>
+    /// The page table as the GPU reads it.
+    /// </summary>
     public ReadOnlySpan<GpuPage> Pages => CollectionsMarshal.AsSpan(_pages);
 
-    /// <summary>One flag per page: a row of it changed since the last upload.</summary>
+    /// <summary>
+    /// One flag per page: a row of it changed since the last upload.
+    /// </summary>
     public Span<bool> DirtyPages => _dirtyPages.AsSpan(0, _pages.Count);
 
     public bool AnyDirty { get; set; }
+
+    /// <summary>
+    /// The slots drawn as a failure: with a material that failed, or as the failure cube because their model did not
+    /// load. Kept by <c>Instancing</c>, which decides what an instance is drawn with.
+    /// </summary>
+    public HashSet<uint> Failed { get; } = [];
 
     public bool CellsDirty { get; set; } = true;
 
@@ -99,60 +121,79 @@ internal sealed class InstanceTable
 
     /// <summary>
     /// A slot for one drawn mesh of <paramref name="model"/> with the material <paramref name="source"/> packed as
-    /// <paramref name="material"/>.
+    /// <paramref name="material"/>. <paramref name="cullRadius"/> is the world-space radius it is size-culled by; 0 is
+    /// that of its bounds.
     /// </summary>
     public uint Add(
         ulong model,
         uint meshSlot,
         in BoundingSphere meshBounds,
+        float cullRadius,
         Handle<Material> source,
         MaterialSlot material,
         InstanceFlags flags,
         in Matrix4x4 world,
+        Vector3 origin,
         uint bucketGroup,
         bool isStatic)
     {
-        BoundingSphere sphere = meshBounds.Transform(world);
+        Matrix4x4 placed = Placed(world, origin);
+        BoundingSphere sphere = meshBounds.Transform(placed);
         uint slot = Allocate(sphere, isStatic);
         while (slot >= _cull.Length)
             Grow();
 
         HighWater = Math.Max(HighWater, slot + 1);
         _bounds[slot] = meshBounds;
+        _cullRadii[slot] = cullRadius;
+        _origins[slot] = origin;
+        _meshSlots[slot] = meshSlot;
         _classes[slot] = material.Class;
         _materials[slot] = source;
         _models[slot] = model;
         _next[slot] = End;
         _cull[slot] = new GpuInstance
         {
-            MeshSlot = meshSlot,
             MaterialSlot = material.Slot,
             BucketGroup = bucketGroup,
             Flags = InstanceFlags.Alive | flags,
         };
-        Write(slot, world, GpuInstanceXform.From(world));
+        Write(slot, placed, GpuInstanceXform.From(placed));
         Alive++;
 
         return slot;
     }
 
-    /// <summary><paramref name="next"/> is the part after <paramref name="slot"/> of the same entity.</summary>
+    /// <summary>
+    /// <paramref name="next"/> is the part after <paramref name="slot"/> of the same entity.
+    /// </summary>
     public void Link(uint slot, uint next)
     {
         _next[slot] = next;
     }
 
-    /// <summary>A new world matrix; one equal to the stored rows changes nothing, so nothing goes up.</summary>
+    /// <summary>
+    /// A new world matrix; one equal to the stored rows changes nothing, so nothing goes up.
+    /// </summary>
     public void Move(uint slot, in Matrix4x4 world)
     {
         if (!IsAlive(slot))
             return;
 
-        GpuInstanceXform rows = GpuInstanceXform.From(world);
+        Matrix4x4 placed = Placed(world, _origins[slot]);
+        GpuInstanceXform rows = GpuInstanceXform.From(placed);
         if (rows.R0 == _xform[slot].R0 && rows.R1 == _xform[slot].R1 && rows.R2 == _xform[slot].R2)
             return;
 
-        Write(slot, world, rows);
+        Write(slot, placed, rows);
+    }
+
+    /// <summary>
+    /// Where an instance is drawn: its entity's world matrix, with the model moved so that its origin is at the entity's position.
+    /// </summary>
+    private static Matrix4x4 Placed(in Matrix4x4 world, Vector3 origin)
+    {
+        return origin == Vector3.Zero ? world : Matrix4x4.CreateTranslation(-origin) * world;
     }
 
     public void Remove(uint slot)
@@ -161,6 +202,7 @@ internal sealed class InstanceTable
             return;
 
         _cull[slot].Flags = InstanceFlags.None;
+        Failed.Remove(slot);
 
         int pageIndex = (int)(slot / PageSize);
         Stack<uint> free = _pageFree[pageIndex];
@@ -172,22 +214,42 @@ internal sealed class InstanceTable
         MarkDirty(slot);
     }
 
+    /// <summary>
+    /// A hidden instance keeps its slot and everything it holds; the culler passes over it.
+    /// </summary>
+    public void Hide(uint slot, bool hidden)
+    {
+        if (!IsAlive(slot) || _cull[slot].Flags.HasFlag(InstanceFlags.Hidden) == hidden)
+            return;
+
+        if (hidden)
+            _cull[slot].Flags |= InstanceFlags.Hidden;
+        else
+            _cull[slot].Flags &= ~InstanceFlags.Hidden;
+
+        MarkDirty(slot);
+    }
+
     public bool IsAlive(uint slot) => slot < HighWater && _cull[slot].Flags.HasFlag(InstanceFlags.Alive);
 
     public PipelineClass ClassOf(uint slot) => _classes[slot];
 
     public uint BucketGroupOf(uint slot) => _cull[slot].BucketGroup;
 
-    public uint MeshSlotOf(uint slot) => _cull[slot].MeshSlot;
+    public uint MeshSlotOf(uint slot) => _meshSlots[slot];
 
     public Handle<Material> MaterialOf(uint slot) => _materials[slot];
 
     public ulong ModelOf(uint slot) => _models[slot];
 
-    /// <summary>The next part of the entity <paramref name="slot"/> belongs to, or <see cref="End"/>.</summary>
+    /// <summary>
+    /// The next part of the entity <paramref name="slot"/> belongs to, or <see cref="End"/>.
+    /// </summary>
     public uint NextPart(uint slot) => _next[slot];
 
-    /// <summary>The instance's material changed class: take its class, slot and bucket again.</summary>
+    /// <summary>
+    /// The instance's material changed class: take its class, slot and bucket again.
+    /// </summary>
     public void Reclass(uint slot, MaterialSlot material, uint bucketGroup)
     {
         if (!IsAlive(slot))
@@ -203,7 +265,9 @@ internal sealed class InstanceTable
         MarkDirty(slot);
     }
 
-    /// <summary>A slot for an instance with this world-space sphere; static ones land in the cell under their centre.</summary>
+    /// <summary>
+    /// A slot for an instance with this world-space sphere; static ones land in the cell under their centre.
+    /// </summary>
     private uint Allocate(in BoundingSphere sphere, bool isStatic)
     {
         int cellIndex = 0;
@@ -262,6 +326,7 @@ internal sealed class InstanceTable
         _xform[slot] = rows;
         BoundingSphere sphere = _bounds[slot].Transform(world);
         _cull[slot].Sphere = new Vector4(sphere.Center, sphere.Radius);
+        _cull[slot].CullRadius = _cullRadii[slot] > 0f ? _cullRadii[slot] : sphere.Radius;
 
         // A negative determinant mirrors the winding; the shaders flip front-face and normals for it.
         float det = (world.M11 * ((world.M22 * world.M33) - (world.M23 * world.M32)))
@@ -287,6 +352,9 @@ internal sealed class InstanceTable
         Array.Resize(ref _cull, size);
         Array.Resize(ref _xform, size);
         Array.Resize(ref _bounds, size);
+        Array.Resize(ref _cullRadii, size);
+        Array.Resize(ref _origins, size);
+        Array.Resize(ref _meshSlots, size);
         Array.Resize(ref _classes, size);
         Array.Resize(ref _materials, size);
         Array.Resize(ref _models, size);
@@ -307,7 +375,8 @@ internal sealed class InstanceTable
 /// owned by one class, drawn with a single indirect call of 64 commands. Each group owns a region of the visible-id list
 /// sized to the next power of two of its instance count; the template holds every slot's constant fields and its region
 /// base, and each view's draw args start every frame as a copy of it so the culler only has to count. Nothing is ever
-/// renumbered: a class that grows gets another chunk.
+/// renumbered: a class that grows gets another chunk. Beside the template, one <see cref="GpuLodRow"/> per group says
+/// which groups draw the lesser versions of its mesh, for the culler to pick from.
 /// </summary>
 internal sealed class Buckets
 {
@@ -320,33 +389,52 @@ internal sealed class Buckets
     private readonly RangeAllocator _visibleSpace;
     private readonly uint _visibleCapacity;
     private DrawArgs[] _template = new DrawArgs[GroupsPerChunk];
+    private GpuLodRow[] _lods = new GpuLodRow[GroupsPerChunk];
 
     public Buckets(IRendering gpu, uint visibleCapacity)
     {
         _visibleSpace = new RangeAllocator(visibleCapacity, 64 * 1024);
         _visibleCapacity = visibleCapacity;
         Template = new GrowableBuffer(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, ChunkBytes);
+        Lods = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead, GroupsPerChunk * GpuLodRow.Size);
     }
 
-    /// <summary>The CPU-written template each view's draw args start the frame as; the late pass seeds its own from this buffer.</summary>
+    /// <summary>
+    /// The CPU-written template each view's draw args start the frame as; the late pass seeds its own from this buffer.
+    /// </summary>
     public GrowableBuffer Template { get; }
 
     public ReadOnlySpan<DrawArgs> TemplateRows => _template;
 
+    /// <summary>
+    /// One row per group, as the culler reads them.
+    /// </summary>
+    public GrowableBuffer Lods { get; }
+
+    public ReadOnlySpan<GpuLodRow> LodRows => _lods;
+
     public bool Dirty { get; set; } = true;
 
-    /// <summary>One past the highest visible-id entry any group's region reaches: what a view's visible-id list must hold.</summary>
+    /// <summary>
+    /// One past the highest visible-id entry any group's region reaches: what a view's visible-id list must hold.
+    /// </summary>
     public uint VisibleHighWater { get; private set; } = 4;
 
     public int ChunkCount => _freeInChunk.Count;
 
-    /// <summary>The chunks of every class, for the draw loop: one indirect call per chunk.</summary>
+    /// <summary>
+    /// The chunks of every class, for the draw loop: one indirect call per chunk.
+    /// </summary>
     public Dictionary<PipelineClass, List<int>> ByClass { get; } = [];
 
-    /// <summary>True when every group of the chunk is free: its indirect call would draw nothing.</summary>
+    /// <summary>
+    /// True when every group of the chunk is free: its indirect call would draw nothing.
+    /// </summary>
     public bool IsEmpty(int chunk) => _freeInChunk[chunk].Count == GroupsPerChunk;
 
-    /// <summary>The group index an instance of this class and mesh belongs to, taking a reference.</summary>
+    /// <summary>
+    /// The group index an instance of this class and mesh belongs to, taking a reference.
+    /// </summary>
     public uint Acquire(PipelineClass cls, uint meshSlot, (uint FirstIndex, uint IndexCount, int VertexOffset) range)
     {
         if (!_groups.TryAcquire((cls, meshSlot), out Group group))
@@ -377,11 +465,34 @@ internal sealed class Buckets
         return group.Index;
     }
 
+    /// <summary>
+    /// Says which groups draw the lesser versions of <paramref name="group"/>'s mesh and under what height on screen,
+    /// the highest threshold first; more than <see cref="GpuLodRow.Capacity"/> are cut. The row goes when the group does.
+    /// </summary>
+    public void SetLods(uint group, ReadOnlySpan<(float Threshold, uint Group)> lods)
+    {
+        GpuLodRow row = new() { Count = (uint)Math.Min(lods.Length, GpuLodRow.Capacity) };
+        if (row.Count > 0)
+            (row.Thresholds.X, row.Group1) = lods[0];
+        if (row.Count > 1)
+            (row.Thresholds.Y, row.Group2) = lods[1];
+        if (row.Count > 2)
+            (row.Thresholds.Z, row.Group3) = lods[2];
+
+        ref GpuLodRow current = ref _lods[group];
+        if (current.Count == row.Count && current.Thresholds == row.Thresholds && current.Group1 == row.Group1 && current.Group2 == row.Group2 && current.Group3 == row.Group3)
+            return;
+
+        current = row;
+        Dirty = true;
+    }
+
     public void Release(PipelineClass cls, uint meshSlot)
     {
         if (!_groups.Release((cls, meshSlot), out Group group))
             return;
 
+        _lods[group.Index] = default;
         _visibleSpace.Free(group.Region);
         WriteTemplate(group with { Region = RangeAllocator.Allocation.None, Capacity = 0 });
         _freeInChunk[(int)group.Index / GroupsPerChunk].Push((int)group.Index % GroupsPerChunk);
@@ -406,7 +517,11 @@ internal sealed class Buckets
         chunks.Add(created);
 
         if (_template.Length < _freeInChunk.Count * GroupsPerChunk)
+        {
             Array.Resize(ref _template, _freeInChunk.Count * GroupsPerChunk);
+            Array.Resize(ref _lods, _freeInChunk.Count * GroupsPerChunk);
+        }
+
         Dirty = true;
 
         return (uint)(created * GroupsPerChunk);
@@ -425,6 +540,8 @@ internal sealed class Buckets
         Dirty = true;
     }
 
-    /// <summary>One draw-argument slot: its index, its region of the visible-id list and capacity, and the mesh range it draws.</summary>
+    /// <summary>
+    /// One draw-argument slot: its index, its region of the visible-id list and capacity, and the mesh range it draws.
+    /// </summary>
     private readonly record struct Group(uint Index, RangeAllocator.Allocation Region, uint Capacity, uint FirstIndex, uint IndexCount, int VertexOffset);
 }

@@ -12,16 +12,24 @@ public static class MatrixExtensions
 {
     extension(Matrix4x4 matrix)
     {
-        /// <summary>The first row: the local +X axis in world space, scale included.</summary>
+        /// <summary>
+        /// The first row: the local +X axis in world space, scale included.
+        /// </summary>
         public Vector3 Right => new(matrix.M11, matrix.M12, matrix.M13);
 
-        /// <summary>The second row: the local +Y axis in world space, scale included.</summary>
+        /// <summary>
+        /// The second row: the local +Y axis in world space, scale included.
+        /// </summary>
         public Vector3 Up => new(matrix.M21, matrix.M22, matrix.M23);
 
-        /// <summary>The third row: the local +Z axis in world space, scale included.</summary>
+        /// <summary>
+        /// The third row: the local +Z axis in world space, scale included.
+        /// </summary>
         public Vector3 Forward => new(matrix.M31, matrix.M32, matrix.M33);
 
-        /// <summary>The length of the longest axis: what a sphere's radius scales by, conservatively for non-uniform scale.</summary>
+        /// <summary>
+        /// The length of the longest axis: what a sphere's radius scales by, conservatively for non-uniform scale.
+        /// </summary>
         public float MaxScale => MathF.Sqrt(MathF.Max(matrix.Right.LengthSquared(), MathF.Max(matrix.Up.LengthSquared(), matrix.Forward.LengthSquared())));
     }
 
@@ -52,7 +60,9 @@ public static class MatrixExtensions
                 0f, 0f, near * far / range, 0f);
         }
 
-        /// <summary>Orthographic, reverse-Z: 1 at <paramref name="near"/>, 0 at <paramref name="far"/>.</summary>
+        /// <summary>
+        /// Orthographic, reverse-Z: 1 at <paramref name="near"/>, 0 at <paramref name="far"/>.
+        /// </summary>
         public static Matrix4x4 OrthographicReverseZ(float width, float height, float near, float far)
         {
             float range = far - near;

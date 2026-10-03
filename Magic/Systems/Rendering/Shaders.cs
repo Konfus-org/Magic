@@ -14,7 +14,7 @@ namespace Magic.Systems.Rendering;
 /// Shader text and shader bytecode. Text: the <see cref="Shader"/> assets in use, by id, each with its include closure and,
 /// for a surface shader, its parsed <see cref="SurfaceSource"/>; the asset manager keeps nothing and the compiler reads
 /// includes from disk on its own. A change to a shader or an include drops every entry built on it (<see cref="Invalidate"/>)
-/// and whoever used them asks again. Bytecode: the renderer compiles (<see cref="Interfaces.IRendering.Compile"/>), and the
+/// and whoever used them asks again. The text itself is loaded ahead of this thread and handed over (<see cref="Preloads"/>). Bytecode: the renderer compiles (<see cref="Interfaces.IRendering.Compile"/>), and the
 /// result is cached on disk by a hash of everything that went in, so a second start never compiles. Compiling is safe from
 /// any thread; the text cache is main thread only. Compile errors come back as text with the shader's name; only
 /// <see cref="CompileBuiltIn"/> throws.
@@ -28,7 +28,9 @@ internal static class Shaders
         return Cached(ctx, handle.Id)?.Shader;
     }
 
-    /// <summary><paramref name="path"/> relative to the shader root, like an <c>#include</c> writes it.</summary>
+    /// <summary>
+    /// <paramref name="path"/> relative to the shader root, like an <c>#include</c> writes it.
+    /// </summary>
     public static Shader? GetByPath(RenderContext ctx, string path)
     {
         ulong id = IdOf(ctx, path);
@@ -41,19 +43,25 @@ internal static class Shaders
         return Get(ctx, new Handle<Shader>(id));
     }
 
-    /// <summary>The id of a shader by path, or 0 when it is not an indexed asset.</summary>
+    /// <summary>
+    /// The id of a shader by path, or 0 when it is not an indexed asset.
+    /// </summary>
     public static ulong IdOf(RenderContext ctx, string path)
     {
         return ctx.Assets.Find<Shader>("Shaders/" + path).Id;
     }
 
-    /// <summary>A hash over the shader's transitive includes' text, to salt the compile cache key with.</summary>
+    /// <summary>
+    /// A hash over the shader's transitive includes' text, to salt the compile cache key with.
+    /// </summary>
     public static string ClosureHash(RenderContext ctx, Shader shader)
     {
         return Cached(ctx, shader.Id)?.ClosureHash ?? "";
     }
 
-    /// <summary>The parsed surface of a <c>.surf.hlsl</c>, or null when it is missing or was rejected (logged when it was read).</summary>
+    /// <summary>
+    /// The parsed surface of a <c>.surf.hlsl</c>, or null when it is missing or was rejected (logged when it was read).
+    /// </summary>
     public static SurfaceSource? Surface(RenderContext ctx, ulong id)
     {
         return Cached(ctx, id)?.Surface;
@@ -65,15 +73,24 @@ internal static class Shaders
     /// </summary>
     public static HashSet<ulong> Invalidate(RenderContext ctx, ulong id)
     {
+        HashSet<ulong> affected = Affected(ctx, id);
+        foreach (ulong shader in affected)
+            ctx.Shaders.Entries.Remove(shader);
+
+        return affected;
+    }
+
+    /// <summary>
+    /// A shader and every cached shader whose closure has it: what a change to it reaches.
+    /// </summary>
+    public static HashSet<ulong> Affected(RenderContext ctx, ulong id)
+    {
         HashSet<ulong> affected = [id];
         foreach (CachedShader cached in ctx.Shaders.Entries.Values)
         {
             if (Array.IndexOf(cached.Closure, id) >= 0)
                 affected.Add(cached.Shader.Id);
         }
-
-        foreach (ulong shader in affected)
-            ctx.Shaders.Entries.Remove(shader);
 
         return affected;
     }
@@ -93,16 +110,18 @@ internal static class Shaders
 
     /// <summary>
     /// From the disk cache, or compiled by the renderer and stored. Any thread, reading only what never changes: the
-    /// pipelines and passes run it on a worker (<c>Task.Run</c>) and collect the result through their <see cref="Compiles{TKey}"/>.
+    /// pipelines and passes run it on a worker (<see cref="CompileAsync"/>) and collect the result through their <see cref="Pending{TKey, TValue}"/>.
     /// </summary>
     /// <param name="salt">Anything else the result depends on (the hash of the includes' text), for the cache key.</param>
-    public static Result<CompiledShader> Compile(RenderContext ctx, string source, string name, GpuStage stage, string salt = "")
+    /// <param name="cancel">Throws <see cref="OperationCanceledException"/> before the compile itself, which cannot be stopped once begun.</param>
+    public static Result<CompiledShader> Compile(RenderContext ctx, string source, string name, GpuStage stage, string salt = "", CancellationToken cancel = default)
     {
         ShaderCache cache = ctx.Shaders;
         string key = CacheKey(cache, source, stage, salt);
         if (TryLoad(ctx.Files, cache, key, out CompiledShader? cached) && cached is not null)
             return Result<CompiledShader>.Success(cached);
 
+        cancel.ThrowIfCancellationRequested();
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         Result<CompiledShader> result = ctx.Gpu.Compile(source, name, stage, cache.IncludeDirectory);
         if (!result.Ok)
@@ -119,7 +138,27 @@ internal static class Shaders
         return result;
     }
 
-    /// <summary>The cache entry of a shader, loading it, its closure and its surface the first time; null when it is not an asset.</summary>
+    /// <summary>
+    /// <see cref="Compile"/> on a worker; one that has not begun when <paramref name="cancel"/> is cancelled never does.
+    /// </summary>
+    public static Task<Result<CompiledShader>> CompileAsync(RenderContext ctx, string source, string name, GpuStage stage, string salt, CancellationToken cancel)
+    {
+        return ctx.Threads.InvokeAsync(ThreadId.Worker, cancel => Compile(ctx, source, name, stage, salt, cancel), cancel);
+    }
+
+    /// <summary>
+    /// What a finished compile came to: its result, or what it threw as a failure.
+    /// </summary>
+    public static Result<CompiledShader> Outcome(Task<Result<CompiledShader>> job)
+    {
+        return job.IsCompletedSuccessfully
+            ? job.Result
+            : Result<CompiledShader>.Failure(job.Exception?.GetBaseException().Message ?? "compile faulted");
+    }
+
+    /// <summary>
+    /// The cache entry of a shader, loading it, its closure and its surface the first time; null when it is not an asset.
+    /// </summary>
     private static CachedShader? Cached(RenderContext ctx, ulong id)
     {
         if (id == 0)
@@ -127,7 +166,7 @@ internal static class Shaders
         if (ctx.Shaders.Entries.TryGetValue(id, out CachedShader? cached))
             return cached;
 
-        Shader? shader = ctx.Assets.Load(new Handle<Shader>(id));
+        Shader? shader = Preloads.Get<Shader>(ctx, id);
         if (shader is null)
             return null;
 
@@ -164,7 +203,9 @@ internal static class Shaders
         return Result<SurfaceSource>.Success(new SurfaceSource(id, path, stripped, layout.Payload));
     }
 
-    /// <summary>Every include the shader reaches, transitively, and a hash over their paths and text.</summary>
+    /// <summary>
+    /// Every include the shader reaches, transitively, and a hash over their paths and text.
+    /// </summary>
     private static (string Hash, ulong[] Closure) IncludeClosure(RenderContext ctx, Shader shader)
     {
         XxHash128 hash = new();
@@ -177,7 +218,7 @@ internal static class Shaders
             foreach (string include in pending.Pop().Includes)
             {
                 ulong id = IdOf(ctx, include);
-                if (id == 0 || seen.Contains(id) || ctx.Assets.Load(new Handle<Shader>(id)) is not { } included)
+                if (id == 0 || seen.Contains(id) || Preloads.Get<Shader>(ctx, id) is not { } included)
                     continue;
 
                 seen.Add(id);

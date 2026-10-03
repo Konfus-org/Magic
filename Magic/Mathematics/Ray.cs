@@ -2,7 +2,9 @@ using System.Numerics;
 
 namespace Magic.Mathematics;
 
-/// <summary>A half line. <see cref="Direction"/> is unit length.</summary>
+/// <summary>
+/// A half line. <see cref="Direction"/> is unit length.
+/// </summary>
 public readonly record struct Ray(Vector3 Origin, Vector3 Direction)
 {
     public Vector3 At(float t)
@@ -10,7 +12,9 @@ public readonly record struct Ray(Vector3 Origin, Vector3 Direction)
         return Origin + (Direction * t);
     }
 
-    /// <summary>Distance along the ray to the sphere, or null when it misses (a ray starting inside hits at 0).</summary>
+    /// <summary>
+    /// Distance along the ray to the sphere, or null when it misses (a ray starting inside hits at 0).
+    /// </summary>
     public float? Intersect(in BoundingSphere sphere)
     {
         Vector3 oc = Origin - sphere.Center;

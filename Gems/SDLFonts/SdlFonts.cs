@@ -34,7 +34,9 @@ internal sealed class SdlFonts : IGem, IAssetLoader<Font>
             return Rasterise(asset, bytes);
     }
 
-    /// <summary>Printable ASCII and Latin-1; enough for UI text until a sidecar setting says otherwise.</summary>
+    /// <summary>
+    /// Printable ASCII and Latin-1; enough for UI text until a sidecar setting says otherwise.
+    /// </summary>
     private static IEnumerable<uint> Codepoints()
     {
         for (uint codepoint = 32; codepoint <= 126; codepoint++)
@@ -170,7 +172,9 @@ internal sealed class SdlFonts : IGem, IAssetLoader<Font>
         return true;
     }
 
-    /// <summary>The surface's pixels as tightly packed RGBA rows (SDL pads rows to its pitch).</summary>
+    /// <summary>
+    /// The surface's pixels as tightly packed RGBA rows (SDL pads rows to its pitch).
+    /// </summary>
     private static byte[] Copy(nint surface, out int width, out int height)
     {
         SDL.Surface info = Marshal.PtrToStructure<SDL.Surface>(surface);

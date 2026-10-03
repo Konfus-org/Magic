@@ -1,11 +1,14 @@
 using FlecsGem;
 using Magic.Contexts;
+using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Xunit;
 
 namespace Magic.IntegrationTests.Ecs;
 
-/// <summary>Scheduled systems: which frame hook runs them, with what delta, in what order.</summary>
+/// <summary>
+/// Scheduled systems: which frame hook runs them, with what delta, in what order.
+/// </summary>
 public sealed class FlecsSystemTests
 {
     [Fact]
@@ -94,9 +97,15 @@ public sealed class FlecsSystemTests
     {
         using FlecsEcs ecs = new();
         Handle[] ids = new Handle[10_000];
-        ecs.Create(ids);
-        foreach (Handle id in ids)
-            ecs.Set(id, new Position());
+        using (ecs.Group())
+        {
+            for (int i = 0; i < ids.Length; i++)
+            {
+                ids[i] = ecs.Create();
+                ecs.Set(ids[i], new Position());
+            }
+        }
+
         int visits = 0;
         using IDisposable system = ecs.Schedule("Count").Query<Position>().Parallel()
             .Each((float _, Handle _, ref Position _) => Interlocked.Increment(ref visits));
@@ -121,6 +130,6 @@ public sealed class FlecsSystemTests
 
     private static Frame FrameOf(float delta)
     {
-        return new Frame(1, 0, delta, default);
+        return new Frame(1, 0, delta, default, new RenderCommands());
     }
 }

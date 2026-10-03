@@ -14,7 +14,9 @@ public interface IBehavior : IScript
     {
     }
 
-    /// <summary>Zero or more times a frame, with <see cref="Frame.Delta"/> the fixed step.</summary>
+    /// <summary>
+    /// Zero or more times a frame, with <see cref="Frame.Delta"/> the fixed step.
+    /// </summary>
     void FixedUpdate(in Frame frame)
     {
     }

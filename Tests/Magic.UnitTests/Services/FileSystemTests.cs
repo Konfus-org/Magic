@@ -3,7 +3,9 @@ using Xunit;
 
 namespace Magic.UnitTests.Services;
 
-/// <summary>The path methods only: pure string work. What touches disk is covered by the integration suite.</summary>
+/// <summary>
+/// The path methods only: pure string work. What touches disk is covered by the integration suite.
+/// </summary>
 public sealed class FileSystemTests
 {
     [Fact]

@@ -7,7 +7,9 @@ internal static class KeyExtensions
 {
     extension(Key key)
     {
-        /// <summary>ImGui has its own key enum; these are the keys a text field needs to edit, select and copy. Characters arrive as text.</summary>
+        /// <summary>
+        /// ImGui has its own key enum; these are the keys a text field needs to edit, select and copy. Characters arrive as text.
+        /// </summary>
         public ImGuiKey ToImGuiKey()
         {
             return key switch

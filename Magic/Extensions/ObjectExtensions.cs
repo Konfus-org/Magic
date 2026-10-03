@@ -56,7 +56,9 @@ internal static class ObjectExtensions
         }
     }
 
-    /// <summary>How to walk <paramref name="type"/>; <see cref="Plan.None"/> when it cannot hold a match or is already being worked out further up.</summary>
+    /// <summary>
+    /// How to walk <paramref name="type"/>; <see cref="Plan.None"/> when it cannot hold a match or is already being worked out further up.
+    /// </summary>
     private static Plan PlanOf(Type type, Type target, bool strict, ConditionalWeakTable<Type, Plan> plans, HashSet<Type> building)
     {
         type = Nullable.GetUnderlyingType(type) ?? type;
@@ -139,7 +141,9 @@ internal static class ObjectExtensions
         return true;
     }
 
-    /// <summary>What a collection holds: an array's element, or the T of the IEnumerable&lt;T&gt; it is (a dictionary's key and value pair).</summary>
+    /// <summary>
+    /// What a collection holds: an array's element, or the T of the IEnumerable&lt;T&gt; it is (a dictionary's key and value pair).
+    /// </summary>
     private static Type? ElementOf(Type type)
     {
         if (type.IsArray)
@@ -165,7 +169,9 @@ internal static class ObjectExtensions
         public static ConditionalWeakTable<Type, Plan> Strict { get; } = [];
     }
 
-    /// <summary>One type's walk: it is a match (<see cref="Match"/>), a collection (<see cref="Element"/>), or has <see cref="Members"/> that lead to one.</summary>
+    /// <summary>
+    /// One type's walk: it is a match (<see cref="Match"/>), a collection (<see cref="Element"/>), or has <see cref="Members"/> that lead to one.
+    /// </summary>
     private sealed class Plan
     {
         public static Plan None { get; } = new();

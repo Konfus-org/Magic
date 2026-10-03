@@ -1,4 +1,3 @@
-using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Utils;
 using System.Globalization;
@@ -16,7 +15,9 @@ internal enum ParamType : byte
     TextureRef
 }
 
-/// <summary>One member of a shader's parameter struct, where it sits in the packed record and what it defaults to.</summary>
+/// <summary>
+/// One member of a shader's parameter struct, where it sits in the packed record and what it defaults to.
+/// </summary>
 internal sealed record ParamField(string Name, ParamType Type, string? Semantic, string? Default, int Offset)
 {
     public int Components => Type switch
@@ -29,7 +30,9 @@ internal sealed record ParamField(string Name, ParamType Type, string? Semantic,
 
     public int Size => Components * 4;
 
-    /// <summary><see cref="Default"/> read once into a <see cref="Param"/> by <see cref="ParamLayout.Parse"/>, so packing never parses.</summary>
+    /// <summary>
+    /// <see cref="Default"/> read once into a <see cref="Param"/> by <see cref="ParamLayout.Parse"/>, so packing never parses.
+    /// </summary>
     public Param DefaultParam { get; init; }
 
     public bool IsFloat => Type is ParamType.Float or ParamType.Float2 or ParamType.Float3 or ParamType.Float4;
@@ -71,13 +74,19 @@ internal sealed partial class ParamLayout
 
     public ParamField[] Fields { get; }
 
-    /// <summary>Bytes of the packed record, a multiple of 16.</summary>
+    /// <summary>
+    /// Bytes of the packed record, a multiple of 16.
+    /// </summary>
     public int Size { get; }
 
-    /// <summary>Where the struct body sits in the text that was parsed (comments included), for stripping.</summary>
+    /// <summary>
+    /// Where the struct body sits in the text that was parsed (comments included), for stripping.
+    /// </summary>
     public (int Start, int End) StructSpan { get; }
 
-    /// <summary>Finds <c>struct name { ... };</c> in <paramref name="hlsl"/> and lays its members out.</summary>
+    /// <summary>
+    /// Finds <c>struct name { ... };</c> in <paramref name="hlsl"/> and lays its members out.
+    /// </summary>
     public static Result<ParamLayout> Parse(string hlsl, string structName, bool allowTextures)
     {
         Match match = StructPattern(structName).Match(hlsl);
@@ -147,19 +156,25 @@ internal sealed partial class ParamLayout
         return string.Concat(hlsl.AsSpan(0, span.Start), stripped, hlsl.AsSpan(span.End));
     }
 
-    /// <summary>HLSL that loads a record from <c>Materials[slot]</c> into the struct: the one place the packing is spelled out for the GPU.</summary>
+    /// <summary>
+    /// HLSL that loads a record from <c>Materials[slot]</c> into the struct: the one place the packing is spelled out for the GPU.
+    /// </summary>
     public string EmitLoader(string functionName, string bufferName)
     {
         return Emit(functionName, "(uint slot)", $"    GpuMaterial record = {bufferName}[slot];\n", "record.words");
     }
 
-    /// <summary>The same for parameters living in a <c>uint4[]</c> of a constant block (a data pass).</summary>
+    /// <summary>
+    /// The same for parameters living in a <c>uint4[]</c> of a constant block (a data pass).
+    /// </summary>
     public string EmitArrayLoader(string functionName, string arrayName)
     {
         return Emit(functionName, "()", "", arrayName);
     }
 
-    /// <summary>The names in <paramref name="values"/> the struct does not declare, for the caller to warn about once, where the values are loaded.</summary>
+    /// <summary>
+    /// The names in <paramref name="values"/> the struct does not declare, for the caller to warn about once, where the values are loaded.
+    /// </summary>
     public List<string> UnknownKeys(IReadOnlyDictionary<string, Param> values)
     {
         List<string> unknown = [];
@@ -211,7 +226,9 @@ internal sealed partial class ParamLayout
         }
     }
 
-    /// <summary>The declared default as a <see cref="Param"/>: the numbers in the initialiser in order, <c>true</c> as 1, anything else 0/none.</summary>
+    /// <summary>
+    /// The declared default as a <see cref="Param"/>: the numbers in the initialiser in order, <c>true</c> as 1, anything else 0/none.
+    /// </summary>
     private static Param DefaultValue(ParamField field)
     {
         if (field.Default is null)
@@ -319,16 +336,22 @@ internal sealed partial class ParamLayout
     private static partial Regex IdentifierPattern();
 }
 
-/// <summary>What a surface shader is compiled as: its variants make distinct pipeline classes.</summary>
+/// <summary>
+/// What a surface shader is compiled as: its variants make distinct pipeline classes.
+/// </summary>
 [Flags]
 internal enum SurfaceVariant : byte
 {
     None = 0,
     Masked = 1,
     DoubleSided = 2,
-    /// <summary>Compiled with FAILURE_FORCE 1: draws the shader-failure glow and never reads the record. Only the failure surface uses it.</summary>
+    /// <summary>
+    /// Compiled with FAILURE_FORCE 1: draws the shader-failure glow and never reads the record. Only the failure surface uses it.
+    /// </summary>
     FailureForced = 4
 }
 
-/// <summary>A surface shader as the renderer uses it: its text with defaults and roles removed, and its parameter layout.</summary>
+/// <summary>
+/// A surface shader as the renderer uses it: its text with defaults and roles removed, and its parameter layout.
+/// </summary>
 internal sealed record SurfaceSource(ulong Id, string Path, string Stripped, ParamLayout Layout);

@@ -120,4 +120,27 @@
     <AssemblyMetadata Include="MagicGem.DependsOn" Value="$(GemDependsOn)" />
   </ItemGroup>
 
+  <!-- Strict builds for everything of ours (engine, gems, samples, tests): the rules .editorconfig marks as errors
+       fail the build, and so does every nullable warning; any other warning stays a warning. The banned APIs
+       (BannedSymbols.txt) are the conventions a compiler cannot know: disk access through IFileSystem, threads
+       through Threads, output through the log. Nullable.Extended.Analyzer bans the null-forgiving '!' (NX0001-NX0003):
+       what is always there is not declared nullable, and what may be missing is handled. -->
+  <PropertyGroup>
+    <WarningsAsErrors>$(WarningsAsErrors);nullable</WarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- The compiler only reports unused usings (IDE0005) when it reads the doc comments; the file itself is
+         nobody's, so it stays in obj\. Not every public member or
+         parameter has a comment (CS1591, CS1573), and a cref may name a method without picking an overload (CS0419). -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <CopyDocumentationFileToOutputDirectory>false</CopyDocumentationFileToOutputDirectory>
+    <NoWarn>$(NoWarn);CS1591;CS1573;CS0419</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" PrivateAssets="all" />
+    <PackageReference Include="Nullable.Extended.Analyzer" Version="1.15.6581" PrivateAssets="all" />
+    <AdditionalFiles Include="$(MagicRoot)BannedSymbols.txt" Condition="'$(MagicBansApis)' != 'false'" />
+  </ItemGroup>
+
 </Project>

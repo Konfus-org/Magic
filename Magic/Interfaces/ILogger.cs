@@ -2,7 +2,9 @@
 
 public enum LogLevel
 {
-    /// <summary>Periodic and high-volume diagnostics (FPS, streaming). Written only with --verbose, whatever the minimum level.</summary>
+    /// <summary>
+    /// Periodic and high-volume diagnostics (FPS, streaming). Written only with --verbose, whatever the minimum level.
+    /// </summary>
     Verbose,
     Debug,
     Information,

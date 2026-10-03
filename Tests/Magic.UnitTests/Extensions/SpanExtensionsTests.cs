@@ -74,7 +74,68 @@ public sealed class SpanExtensionsTests
         Assert.Throws<ArgumentOutOfRangeException>(encode);
     }
 
-    /// <summary>The chunks after the signature, each with the bytes its CRC covers.</summary>
+    [Fact]
+    public void A_text_sits_between_the_header_and_the_data()
+    {
+        byte[] png = Pixels.Png(2, 1, ("Magic", "state"));
+
+        Assert.Equal(["IHDR", "iTXt", "IDAT", "IEND"], Chunks(png).Select(chunk => chunk.Type));
+    }
+
+    [Theory]
+    [InlineData("state")]
+    [InlineData("{\"name\":\"Zürich 東京\"}")]
+    [InlineData("")]
+    public void A_text_is_read_back_under_its_keyword(string text)
+    {
+        byte[] png = Pixels.Png(2, 1, ("Magic", text));
+
+        string? read = png.AsSpan().PngText("Magic");
+
+        Assert.Equal(text, read);
+    }
+
+    [Fact]
+    public void Each_text_is_read_back_under_its_own_keyword()
+    {
+        byte[] png = Pixels.Png(2, 1, ("First", "one"), ("Second", "two"));
+
+        string? read = png.AsSpan().PngText("Second");
+
+        Assert.Equal("two", read);
+    }
+
+    [Fact]
+    public void A_keyword_the_png_does_not_carry_reads_as_nothing()
+    {
+        byte[] png = Pixels.Png(2, 1, ("Magic", "state"));
+
+        string? read = png.AsSpan().PngText("Other");
+
+        Assert.Null(read);
+    }
+
+    [Fact]
+    public void Bytes_that_are_not_a_png_carry_no_text()
+    {
+        string? read = Pixels.AsSpan().PngText("Magic");
+
+        Assert.Null(read);
+    }
+
+    [Fact]
+    public void A_png_cut_short_carries_no_text()
+    {
+        byte[] png = Pixels.Png(2, 1, ("Magic", "state"));
+
+        string? read = png.AsSpan(0, 50).PngText("Magic");
+
+        Assert.Null(read);
+    }
+
+    /// <summary>
+    /// The chunks after the signature, each with the bytes its CRC covers.
+    /// </summary>
     private static List<(string Type, byte[] Data, byte[] CrcInput, uint Crc)> Chunks(byte[] png)
     {
         List<(string, byte[], byte[], uint)> chunks = [];

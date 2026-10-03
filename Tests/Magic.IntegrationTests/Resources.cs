@@ -3,13 +3,17 @@ using System.Reflection;
 
 namespace Magic.IntegrationTests;
 
-/// <summary>The repo's Resources folder, for the loader tests that decode the engine's own files.</summary>
+/// <summary>
+/// The repo's Resources folder, for the loader tests that decode the engine's own files.
+/// </summary>
 internal static class Resources
 {
-    /// <summary>The bytes of a file under Resources; the repo root is stamped into Magic.dll.</summary>
+    /// <summary>
+    /// The bytes of a file under Resources; the repo root is stamped into Magic.dll.
+    /// </summary>
     public static byte[] Read(string relative)
     {
-        string repo = typeof(Project).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().First(attribute => attribute.Key == "MagicRoot").Value!;
+        string repo = typeof(Project).Assembly.GetCustomAttributes<AssemblyMetadataAttribute>().First(attribute => attribute.Key == "MagicRoot").Value ?? throw new InvalidOperationException("Magic.dll carries no MagicRoot.");
 
         return File.ReadAllBytes(Path.Combine(repo, "Resources", relative));
     }

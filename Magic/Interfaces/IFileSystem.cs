@@ -15,42 +15,90 @@ public interface IFileSystem
 
     string Combine(params string[] parts);
 
-    /// <summary>The folder holding <paramref name="path"/>, or null at a root.</summary>
+    /// <summary>
+    /// The folder holding <paramref name="path"/>, or null at a root.
+    /// </summary>
     string? Parent(string path);
 
-    /// <summary><paramref name="path"/> relative to <paramref name="root"/>.</summary>
+    /// <summary>
+    /// <paramref name="path"/> relative to <paramref name="root"/>.
+    /// </summary>
     string Relative(string root, string path);
 
-    /// <summary>The folder and file names <paramref name="path"/> is made of, in order, without separators.</summary>
+    /// <summary>
+    /// The folder and file names <paramref name="path"/> is made of, in order, without separators.
+    /// </summary>
     string[] Segments(string path);
 
-    /// <summary>Is <paramref name="path"/> <paramref name="root"/> itself or somewhere beneath it?</summary>
+    /// <summary>
+    /// Is <paramref name="path"/> <paramref name="root"/> itself or somewhere beneath it?
+    /// </summary>
     bool IsUnder(string root, string path);
 
-    /// <summary>A file or a folder.</summary>
+    /// <summary>
+    /// A file or a folder.
+    /// </summary>
     bool Exists(string path);
 
     bool FileExists(string path);
 
     bool DirectoryExists(string path);
 
-    /// <summary>Reads a whole file on the calling thread. A failed result means it could not be read: missing, locked, or still being written.</summary>
+    /// <summary>
+    /// Reads a whole file on the calling thread. A failed result means it could not be read: missing, locked, or still being written.
+    /// </summary>
     Result<byte[]> ReadBinary(string path);
 
-    /// <summary>Reads a whole text file (UTF-8, a BOM is dropped) on the calling thread. Fails like <see cref="ReadBinary"/>.</summary>
+    /// <summary>
+    /// Reads a whole text file (UTF-8, a BOM is dropped) on the calling thread. Fails like <see cref="ReadBinary"/>.
+    /// </summary>
     Result<string> ReadText(string path);
 
-    /// <summary>Lists the entries of <paramref name="path"/> on the calling thread.</summary>
+    /// <summary>
+    /// <see cref="ReadBinary"/> without holding a thread while the disk works. Cancelling throws <see cref="OperationCanceledException"/>.
+    /// </summary>
+    Task<Result<byte[]>> ReadBinaryAsync(string path, CancellationToken cancel = default);
+
+    /// <summary>
+    /// <see cref="ReadText"/> without holding a thread while the disk works. Cancelling throws <see cref="OperationCanceledException"/>.
+    /// </summary>
+    Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel = default);
+
+    /// <summary>
+    /// Lists the entries of <paramref name="path"/> on the calling thread.
+    /// </summary>
     Result<string[]> ReadDirectory(string path, string? filter = null);
 
-    /// <summary>Lists the entries under <paramref name="path"/>, subfolders included, on the calling thread.</summary>
+    /// <summary>
+    /// Lists the entries under <paramref name="path"/>, subfolders included, on the calling thread.
+    /// </summary>
     Result<string[]> ReadDirectoryRecursive(string path, string? filter = null);
 
-    /// <summary>Writes a whole text file (UTF-8, no BOM) on the calling thread, creating its folder if needed.</summary>
+    /// <summary>
+    /// Writes a whole text file (UTF-8, no BOM) on the calling thread, creating its folder if needed.
+    /// </summary>
     Result WriteText(string path, string text);
 
-    /// <summary>Writes a whole binary file on the calling thread, creating its folder if needed.</summary>
+    /// <summary>
+    /// Writes a whole binary file on the calling thread, creating its folder if needed.
+    /// </summary>
     Result WriteBinary(string path, byte[] data);
+
+    /// <summary>
+    /// <see cref="WriteText"/> without holding a thread while the disk works. Cancelling throws <see cref="OperationCanceledException"/>.
+    /// </summary>
+    Task<Result> WriteTextAsync(string path, string text, CancellationToken cancel = default);
+
+    /// <summary>
+    /// <see cref="WriteBinary"/> without holding a thread while the disk works. Cancelling throws <see cref="OperationCanceledException"/>.
+    /// </summary>
+    Task<Result> WriteBinaryAsync(string path, byte[] data, CancellationToken cancel = default);
+
+    /// <summary>
+    /// Removes the folder at <paramref name="path"/> with everything under it, on the calling thread. One that is
+    /// not there is a success: it is gone either way.
+    /// </summary>
+    Result DeleteDirectory(string path);
 
     /// <summary>
     /// Reports every path under <paramref name="path"/> that was created, changed, renamed (both names) or removed to

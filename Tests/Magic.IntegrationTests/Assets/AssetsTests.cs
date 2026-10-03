@@ -42,7 +42,7 @@ public sealed class AssetsTests : IDisposable
 
         Material? material = assets.Load(Mat);
 
-        Assert.True(material!.DoubleSided);
+        Assert.True(material?.DoubleSided);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public sealed class AssetsTests : IDisposable
 
         Material? material = assets.Load(Mat);
 
-        Assert.Equal(80ul, material!.Id);
+        Assert.Equal(80ul, material?.Id);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public sealed class AssetsTests : IDisposable
 
         Material? material = assets.Load(Mat);
 
-        Assert.Equal("Materials/M.mat", material!.Path);
+        Assert.Equal("Materials/M.mat", material?.Path);
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class AssetsTests : IDisposable
 
         Shader? shader = assets.Load(new Handle<Shader>(81));
 
-        Assert.Equal("float4 main() { return 0; }", shader!.Text);
+        Assert.Equal("float4 main() { return 0; }", shader?.Text);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public sealed class AssetsTests : IDisposable
 
         Texture? texture = assets.Load(new Handle<Texture>(82));
 
-        Assert.Equal(3, texture!.Width);
+        Assert.Equal(3, texture?.Width);
     }
 
     [Fact]
@@ -282,6 +282,19 @@ public sealed class AssetsTests : IDisposable
     }
 
     [Fact]
+    public async Task An_async_load_with_dependencies_ends_its_progress_at_one()
+    {
+        Write("M.mat", """{ "shader": { "id": 81 } }""", 80);
+        Write("S.surf.hlsl", "void surface() {}", 81);
+        using Services.Assets assets = Open();
+        Told told = new();
+
+        await assets.LoadAsync(Mat, dependencies: true, told);
+
+        Assert.Equal(1f, told.Values[^1]);
+    }
+
+    [Fact]
     public void A_render_texture_a_material_names_is_not_loaded_as_a_texture()
     {
         Write("M.mat", """{ "params": { "color": { "texture": { "id": 83 } } } }""", 80);
@@ -332,11 +345,39 @@ public sealed class AssetsTests : IDisposable
         Write("M.mat", "{}", 80);
         using Services.Assets assets = Open();
         using CancellationTokenSource cancel = new();
-        cancel.Cancel();
+        await cancel.CancelAsync();
 
-        Func<Task> load = () => assets.LoadAsync(Mat, cancellationToken: cancel.Token);
+        Func<Task> load = () => assets.LoadAsync(Mat, cancel: cancel.Token);
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(load);
+    }
+
+    [Fact]
+    public async Task A_load_one_caller_cancels_still_arrives_for_another()
+    {
+        Write("M.mat", "{}", 80);
+        using Services.Assets assets = Open();
+        using CancellationTokenSource cancelled = new();
+        Task<Material?> first = assets.LoadAsync(Mat, cancel: cancelled.Token);
+        Task<Material?> second = assets.LoadAsync(Mat);
+
+        await cancelled.CancelAsync();
+
+        Assert.NotNull(await second);
+    }
+
+    [Fact]
+    public async Task An_asset_whose_only_load_was_cancelled_loads_the_next_time()
+    {
+        Write("M.mat", "{}", 80);
+        using Services.Assets assets = Open();
+        using CancellationTokenSource cancelled = new();
+        await cancelled.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => assets.LoadAsync(Mat, cancel: cancelled.Token));
+
+        Material? material = await assets.LoadAsync(Mat);
+
+        Assert.NotNull(material);
     }
 
     [Fact]
@@ -445,10 +486,12 @@ public sealed class AssetsTests : IDisposable
 
     private Services.Assets Open()
     {
-        return new Services.Assets(_project, new FileSystem(), _events, _container);
+        return new Services.Assets(_project, new FileSystem(), _events, _container, new Threads());
     }
 
-    /// <summary>Materials 90 to 93 of about 0.6 MB each in memory (300k characters), under a budget of 2 MB.</summary>
+    /// <summary>
+    /// Materials 90 to 93 of about 0.6 MB each in memory (300k characters), under a budget of 2 MB.
+    /// </summary>
     private Services.Assets OpenWithBigMaterialsAndRoomForThree()
     {
         for (int i = 0; i < 4; i++)
@@ -459,7 +502,9 @@ public sealed class AssetsTests : IDisposable
         return Open();
     }
 
-    /// <summary>Writes a file under Assets and the sidecar giving it <paramref name="id"/>; returns the file's full path.</summary>
+    /// <summary>
+    /// Writes a file under Assets and the sidecar giving it <paramref name="id"/>; returns the file's full path.
+    /// </summary>
     private string Write(string relative, string text, ulong id)
     {
         _root.Write($"Assets/{relative}.meta", $$"""{ "id": {{id}} }""");
@@ -467,7 +512,9 @@ public sealed class AssetsTests : IDisposable
         return _root.Write($"Assets/{relative}", text);
     }
 
-    /// <summary>Pumps the service like the frame loop until the watcher's changes have settled into exactly one event.</summary>
+    /// <summary>
+    /// Pumps the service like the frame loop until the watcher's changes have settled into exactly one event.
+    /// </summary>
     private Event NextEvent(Services.Assets assets)
     {
         List<Event> seen = [];
@@ -483,7 +530,9 @@ public sealed class AssetsTests : IDisposable
         return seen[0];
     }
 
-    /// <summary>A texture loader that records how many bytes it was handed as the width.</summary>
+    /// <summary>
+    /// A texture loader that records how many bytes it was handed as the width.
+    /// </summary>
     private sealed class LengthLoader : IAssetLoader<Texture>
     {
         public Result Load(Texture asset, byte[] bytes)
@@ -491,6 +540,19 @@ public sealed class AssetsTests : IDisposable
             asset.Width = bytes.Length;
 
             return bytes.Length == 0 ? Result.Failure("the file is empty.") : Result.Success();
+        }
+    }
+
+    /// <summary>
+    /// Keeps what it is told, in order.
+    /// </summary>
+    private sealed class Told : IProgress<float>
+    {
+        public List<float> Values { get; } = [];
+
+        public void Report(float value)
+        {
+            Values.Add(value);
         }
     }
 }

@@ -7,3 +7,5 @@ public struct Velocity { public float X, Y; }
 public struct Local { public int Value; }
 
 public struct Composed { public int Value; }
+
+public struct Marked;

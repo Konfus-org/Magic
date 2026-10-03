@@ -1,6 +1,7 @@
-// One group per visible page, one thread per instance slot of it: alive, in the frustum and big enough on
-// screen. A survivor is appended to its draw-args bucket (AppendVisible in Cull/Common.hlsli). Dispatched
-// indirectly from DispatchArgs (PageCull.comp).
+// One group per visible page, one thread per instance slot of it: alive, not hidden, in the frustum and big
+// enough on screen. A survivor is appended to its draw-args bucket, or to the bucket of a lesser version of its mesh
+// when it is small on screen, and to both while it blends from one to the other (AppendVisible in
+// Cull/Common.hlsli). Dispatched indirectly from DispatchArgs (PageCull.comp).
 //
 // Compiled with OCCLUSION 1 when occlusion culling is on: an instance last frame's depth pyramid hides is
 // held back instead, on the candidate list the late pass retests against this frame's pyramid. Candidates[0]
@@ -15,10 +16,11 @@
 StructuredBuffer<uint> VisiblePages : READ(0);
 StructuredBuffer<GpuPage> Pages : READ(1);
 StructuredBuffer<GpuInstance> Instances : READ(2);
+StructuredBuffer<GpuLodRow> Lods : READ(3);
 RWStructuredBuffer<GpuDrawArgs> DrawArgs : WRITE(0);
-RWStructuredBuffer<uint> VisibleIds : WRITE(1);
+RWStructuredBuffer<GpuVisible> VisibleIds : WRITE(1);
 #if OCCLUSION
-StructuredBuffer<float> HiZPrevious : READ(3);
+StructuredBuffer<float> HiZPrevious : READ(4);
 RWStructuredBuffer<uint> Candidates : WRITE(2);
 #endif
 
@@ -31,7 +33,7 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
 
     uint slot = page.firstInstance + groupThreadId.x;
     GpuInstance instance = Instances[slot];
-    if ((instance.flags & InstanceAlive) == 0u)
+    if ((instance.flags & (InstanceAlive | InstanceHidden)) != InstanceAlive)
         return;
 
     float3 center = ToView(instance.sphere.xyz);
@@ -39,7 +41,7 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     if (!SphereInFrustum(center, radius))
         return;
 
-    bool isSizeCulled = (instance.flags & InstanceNoSizeCull) == 0u && ScreenRadius(center, radius) < MinPixels;
+    bool isSizeCulled = (instance.flags & InstanceNoSizeCull) == 0u && ScreenRadius(center, instance.cullRadius) < MinPixels;
     if (isSizeCulled)
         return;
 
@@ -53,5 +55,5 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     }
 #endif
 
-    AppendVisible(DrawArgs, VisibleIds, instance.bucketGroup, slot);
+    AppendVisible(DrawArgs, VisibleIds, Lods, instance.bucketGroup, slot, center, radius);
 }

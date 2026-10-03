@@ -2,7 +2,9 @@ using Magic.Attributes;
 
 namespace Magic.Contexts.Assets;
 
-/// <summary>Pixel format of a target a pass creates.</summary>
+/// <summary>
+/// Pixel format of a target a pass creates.
+/// </summary>
 public enum TargetFormat : byte
 {
     Rgba8Srgb,
@@ -37,7 +39,9 @@ public sealed class PassOutput
 [AssetFormat(AssetFormat.Json)]
 public sealed class Pass : Asset
 {
-    /// <summary>A <c>.frag.hlsl</c> (drawn as a fullscreen triangle) or a <c>.comp.hlsl</c> (dispatched over the output).</summary>
+    /// <summary>
+    /// A <c>.frag.hlsl</c> (drawn as a fullscreen triangle) or a <c>.comp.hlsl</c> (dispatched over the output).
+    /// </summary>
     public Handle<Shader> Shader { get; set; }
 
     public string[] Inputs { get; set; } = [];

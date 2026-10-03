@@ -19,7 +19,7 @@ public sealed class GemsTests
     public void The_engine_folder_loads_only_the_listed_names(string name, int expected)
     {
         using TempFolder project = new();
-        using Gems gems = new(new Container(), new FileSystem(), new Events());
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
 
         gems.Load(EngineGems, [name], project.Path);
 
@@ -30,7 +30,7 @@ public sealed class GemsTests
     public void An_empty_list_loads_no_engine_gems()
     {
         using TempFolder project = new();
-        using Gems gems = new(new Container(), new FileSystem(), new Events());
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
 
         gems.Load(EngineGems, [], project.Path);
 
@@ -43,7 +43,7 @@ public sealed class GemsTests
         using TempFolder temp = new();
         string project = Path.Combine(temp.Path, "Project");
         Copy("TestGem", Path.Combine(project, "Scripts", "bin"));
-        using Gems gems = new(new Container(), new FileSystem(), new Events());
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
 
         // An engine folder beside the project, not inside it: inside would make this the engine's own project.
         gems.Load(Path.Combine(temp.Path, "NoEngineGemsHere"), [], project);
@@ -59,7 +59,7 @@ public sealed class GemsTests
         using TempFolder temp = new();
         string project = Path.Combine(temp.Path, "Project");
         Copy("TestGem", Path.Combine(project, folder, "Scripts"));
-        using Gems gems = new(new Container(), new FileSystem(), new Events());
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
 
         gems.Load(Path.Combine(temp.Path, "NoEngineGemsHere"), [], project);
 
@@ -69,9 +69,9 @@ public sealed class GemsTests
     [Fact]
     public void The_engine_as_its_own_project_does_not_load_its_gems_twice()
     {
-        using Gems gems = new(new Container(), new FileSystem(), new Events());
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
 
-        gems.Load(EngineGems, ["default"], Path.GetDirectoryName(EngineGems)!);
+        gems.Load(EngineGems, ["default"], Path.GetDirectoryName(EngineGems) ?? "");
 
         Assert.Single(gems.Loaded);
     }
@@ -83,7 +83,7 @@ public sealed class GemsTests
         string project = Path.Combine(temp.Path, "Project");
         Copy("TestGem", Path.Combine(project, "Build", "Debug", "bin"));
         Copy("TestGem", Path.Combine(project, "Build", "Release", "bin"));
-        using Gems gems = new(new Container(), new FileSystem(), new Events());
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
 
         gems.Load(Path.Combine(temp.Path, "NoEngineGemsHere"), [], project);
 
@@ -97,7 +97,7 @@ public sealed class GemsTests
         string project = Path.Combine(temp.Path, "Project");
         Copy("TestScripts", Path.Combine(project, "bin"));
         Events events = new();
-        using Gems gems = new(new Container(), new FileSystem(), events);
+        using Gems gems = new(new Container(), new FileSystem(), events, new Threads());
 
         gems.Load(Path.Combine(temp.Path, "NoEngineGemsHere"), [], project);
 
@@ -110,14 +110,16 @@ public sealed class GemsTests
         using TempFolder temp = new();
         string project = Path.Combine(temp.Path, "Project");
         Copy("TestScripts", Path.Combine(project, "bin"));
-        using Gems gems = new(new Container(), new FileSystem(), new Events());
+        using Gems gems = new(new Container(), new FileSystem(), new Events(), new Threads());
 
         gems.Load(Path.Combine(temp.Path, "NoEngineGemsHere"), [], project);
 
         Assert.Empty(gems.Loaded);
     }
 
-    /// <summary>Puts the dll called <paramref name="name"/> and its deps.json in <paramref name="folder"/>.</summary>
+    /// <summary>
+    /// Puts the dll called <paramref name="name"/> and its deps.json in <paramref name="folder"/>.
+    /// </summary>
     private static void Copy(string name, string folder)
     {
         Directory.CreateDirectory(folder);

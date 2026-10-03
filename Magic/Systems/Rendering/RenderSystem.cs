@@ -15,10 +15,12 @@ namespace Magic.Systems.Rendering;
 
 /// <summary>
 /// Draws the entities through whatever <see cref="IRendering"/> is loaded, which is only the GPU: everything else (the GPU
-/// tables, shaders and pipelines, culling, passes, hot reload) is here and in <c>Systems/Rendering</c>, its state in one
+/// tables, shaders and pipelines, culling, lighting, passes, hot reload) is here and in <c>Systems/Rendering</c>, its state in one
 /// <see cref="RenderContext"/>. <see cref="Run"/> runs in Render, after LateUpdate and the transforms, one way, top to bottom:
 /// asset changes reload; the entities are synced into the tables (every <see cref="Renderer"/> that has a
-/// <see cref="WorldTransform"/> and no <see cref="RenderInstance"/> yet is registered, the ones whose
+/// <see cref="WorldTransform"/> and no <see cref="RenderInstance"/> yet is registered once its model and materials
+/// have been loaded, which happens off this thread (<see cref="Preloads"/>) and is not waited for, and only as
+/// many a frame as fit in <see cref="RegisterBudgetMs"/> and <see cref="GeometryBudgetBytes"/>, the ones whose
 /// <see cref="Renderer"/> went away are forgotten and the ones set again are registered again, both told by observers so
 /// nothing is swept, and the non-static ones give their world matrices); what changed is uploaded; the frame is planned;
 /// and the plan is recorded into <see cref="Frame.DrawCommands"/>. Then the gems loaded after the ECS may add their own
@@ -27,12 +29,25 @@ namespace Magic.Systems.Rendering;
 /// </summary>
 internal sealed class RenderSystem : ISystem
 {
+    /// <summary>
+    /// Milliseconds a frame may spend registering new entities. The ones it does not get to wait, undrawn, for the
+    /// next frame, so a chunk that just spawned comes in over a few frames instead of holding one up.
+    /// </summary>
+    private const double RegisterBudgetMs = 2;
+
+    /// <summary>
+    /// Bytes of new geometry a frame may take on: every model seen for the first time is uploaded in the frame it is
+    /// registered in, and a few hundred megabytes at once (the stand-ins of every far chunk) stall it.
+    /// </summary>
+    private const long GeometryBudgetBytes = 8 * 1024 * 1024;
+
     private readonly IEcs _ecs;
     private readonly Assets _assets;
     private readonly IFileSystem _files;
     private readonly Project _project;
     private readonly IWindowRegistry? _windows;
     private readonly IRendering? _rendering;
+    private readonly Threads _threads;
     private readonly IEcsQuery<Renderer, WorldTransform> _unregistered;
     private readonly IEcsQuery<WorldTransform, RenderInstance> _movable;
     private readonly IEcsQuery<RenderInstance> _allInstances;
@@ -41,17 +56,35 @@ internal sealed class RenderSystem : ISystem
     private readonly IEcsQuery<DirectionalLight, WorldTransform> _directional;
     private readonly IEcsQuery<PointLight, WorldTransform> _points;
     private readonly IEcsQuery<SpotLight, WorldTransform> _spots;
+    private readonly IEcsQuery<Glow, WorldTransform> _glowing;
+    private readonly IEcsQuery<DirectionalLight, WorldTransform> _directionalSettled;
+    private readonly IEcsQuery<PointLight, WorldTransform> _pointsSettled;
+    private readonly IEcsQuery<SpotLight, WorldTransform> _spotsSettled;
+    private readonly IEcsQuery<Glow, WorldTransform> _glowingSettled;
+    private readonly IDisposable[] _onSettledChanged;
     private readonly IDisposable _onSet;
     private readonly IDisposable _onRemoved;
+    private readonly IDisposable _onHidden;
+    private readonly IDisposable _onShown;
 
     // Queued by the observers (which must not change the world), applied at the start of the next pass.
     private readonly List<(Handle Entity, RenderInstance Instance)> _removed = [];
     private readonly List<Handle> _changed = [];
+    private readonly List<Handle> _hiddenChanged = [];
 
     private readonly List<(Handle Entity, Renderer Renderer, Matrix4x4 World)> _toRegister = [];
     private readonly List<View> _views = [];
     private readonly List<LightInstance> _lights = [];
+    private readonly List<GpuGlow> _glows = [];
+
+    // The lights and glows that never move (static, their place computed): read when one of them changes, not every frame.
+    private readonly List<LightInstance> _settledLights = [];
+    private readonly List<GpuGlow> _settledGlows = [];
+    private List<LightInstance> _collectedLights;
+    private List<GpuGlow> _collectedGlows;
+    private bool _settledChanged = true;
     private readonly List<Handle> _toStrip = [];
+    private readonly List<(ulong Id, Preloaded Loaded)> _reloaded = [];
     private readonly FramePlan _plan = new();
 
     // One delegate each, not one per frame.
@@ -62,14 +95,19 @@ internal sealed class RenderSystem : ISystem
     private readonly QueryChunkAction<DirectionalLight, WorldTransform> _collectDirectional;
     private readonly QueryChunkAction<PointLight, WorldTransform> _collectPoints;
     private readonly QueryChunkAction<SpotLight, WorldTransform> _collectSpots;
+    private readonly QueryChunkAction<Glow, WorldTransform> _collectGlows;
 
     private BuiltWith? _builtWith; // null until the first run
     private PassList _passes;      // the world's post-processing this frame; empty without one
     private int _passLists;        // how many entities carry a PostProcessing this frame
     private bool _warnedPassLists;
+    private Handle _lastParent;    // of the entity registered last, and whether it or anything above it is hidden:
+    private bool _lastParentHidden; // a chunk's entities share one, so it is looked up once a frame, not once each.
+                                    // Lights are not asked: their queries leave the hidden ones out
 
-    public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, IWindowRegistry? windows, IRendering? rendering)
+    public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, IWindowRegistry? windows, IRendering? rendering, Threads threads)
     {
+        _threads = threads;
         _ecs = ecs;
         _assets = assets;
         _files = files;
@@ -77,15 +115,36 @@ internal sealed class RenderSystem : ISystem
         _windows = windows;
         _rendering = rendering;
         _unregistered = ecs.Query<Renderer, WorldTransform>().Without<RenderInstance>().Build();
-        _movable = ecs.Query<WorldTransform, RenderInstance>().Build();
+        _movable = ecs.Query<WorldTransform, RenderInstance>().Without<Settled>().Build(); // a settled static never moves
         _allInstances = ecs.Query<RenderInstance>().Build();
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
         _postProcessing = ecs.Query<PostProcessing>().Build();
-        _directional = ecs.Query<DirectionalLight, WorldTransform>().Build();
-        _points = ecs.Query<PointLight, WorldTransform>().Build();
-        _spots = ecs.Query<SpotLight, WorldTransform>().Build();
+        _directional = ecs.Query<DirectionalLight, WorldTransform>().Without<Settled>().WithoutAbove<Hidden>().Build();
+        _points = ecs.Query<PointLight, WorldTransform>().Without<Settled>().WithoutAbove<Hidden>().Build();
+        _spots = ecs.Query<SpotLight, WorldTransform>().Without<Settled>().WithoutAbove<Hidden>().Build();
+        _glowing = ecs.Query<Glow, WorldTransform>().Without<Settled>().WithoutAbove<Hidden>().Build();
+        _directionalSettled = ecs.Query<DirectionalLight, WorldTransform>().With<Settled>().WithoutAbove<Hidden>().Build();
+        _pointsSettled = ecs.Query<PointLight, WorldTransform>().With<Settled>().WithoutAbove<Hidden>().Build();
+        _spotsSettled = ecs.Query<SpotLight, WorldTransform>().With<Settled>().WithoutAbove<Hidden>().Build();
+        _glowingSettled = ecs.Query<Glow, WorldTransform>().With<Settled>().WithoutAbove<Hidden>().Build();
+        _collectedLights = _lights;
+        _collectedGlows = _glows;
+
+        // Anything that can change what the settled lights and glows are: one settling or unsettling, one set or taken
+        // away. Entities hidden or shown are seen through the hidden observers.
+        void Changed(Handle entity) => _settledChanged = true;
+        _onSettledChanged =
+        [
+            ecs.Observe<Settled>(ComponentEvent.Added, Changed), ecs.Observe<Settled>(ComponentEvent.Removed, Changed),
+            ecs.Observe<DirectionalLight>(ComponentEvent.Set, Changed), ecs.Observe<DirectionalLight>(ComponentEvent.Removed, Changed),
+            ecs.Observe<PointLight>(ComponentEvent.Set, Changed), ecs.Observe<PointLight>(ComponentEvent.Removed, Changed),
+            ecs.Observe<SpotLight>(ComponentEvent.Set, Changed), ecs.Observe<SpotLight>(ComponentEvent.Removed, Changed),
+            ecs.Observe<Glow>(ComponentEvent.Set, Changed), ecs.Observe<Glow>(ComponentEvent.Removed, Changed),
+        ];
         _onSet = ecs.Observe<Renderer>(ComponentEvent.Set, OnRendererSet);
         _onRemoved = ecs.Observe<Renderer>(ComponentEvent.Removed, OnRendererRemoved);
+        _onHidden = ecs.Observe<Hidden>(ComponentEvent.Added, _hiddenChanged.Add);
+        _onShown = ecs.Observe<Hidden>(ComponentEvent.Removed, _hiddenChanged.Add);
         _collectUnregistered = CollectUnregistered;
         _move = Move;
         _collectViews = CollectViews;
@@ -93,12 +152,21 @@ internal sealed class RenderSystem : ISystem
         _collectDirectional = CollectDirectional;
         _collectPoints = CollectPoints;
         _collectSpots = CollectSpots;
+        _collectGlows = CollectGlows;
     }
 
     public void Dispose()
     {
         _onSet.Dispose();
         _onRemoved.Dispose();
+        _onHidden.Dispose();
+        _onShown.Dispose();
+        foreach (IDisposable observer in _onSettledChanged)
+            observer.Dispose();
+        _directionalSettled.Dispose();
+        _pointsSettled.Dispose();
+        _spotsSettled.Dispose();
+        _glowingSettled.Dispose();
         _unregistered.Dispose();
         _movable.Dispose();
         _allInstances.Dispose();
@@ -107,19 +175,26 @@ internal sealed class RenderSystem : ISystem
         _directional.Dispose();
         _points.Dispose();
         _spots.Dispose();
+        _glowing.Dispose();
     }
 
     public UpdateType Phase => UpdateType.Render;
 
-    /// <summary>What the last frame did; default when there is no renderer.</summary>
+    /// <summary>
+    /// What the last frame did; default when there is no renderer.
+    /// </summary>
     public RenderStats Stats { get; private set; }
 
-    /// <summary>Milliseconds the last frame spent syncing the entities in, and recording plus the submit before it.</summary>
+    /// <summary>
+    /// Milliseconds the last frame spent syncing the entities in, and recording plus the submit before it.
+    /// </summary>
     public float SyncMs { get; private set; }
 
     public float RenderMs { get; private set; }
 
-    /// <summary>The render state of the current renderer; null without one.</summary>
+    /// <summary>
+    /// The render state of the current renderer; null without one.
+    /// </summary>
     private RenderContext? Context { get; set; }
 
     /// <summary>
@@ -135,19 +210,23 @@ internal sealed class RenderSystem : ISystem
         if (Context is not { } ctx)
             return;
 
-        // The previous frame was submitted and nothing of this one is uploaded yet: in a debugging renderer, the periodic
-        // culling check of what it drew.
-        if (ctx.Gpu.Debug && frame.Number % RenderChecks.VerifyEveryFrames == 0 && _plan.Views.Count > 0)
+        // The previous frame was submitted and nothing of this one is uploaded yet: in a debugging renderer, when asked
+        // for, the periodic culling check of what it drew.
+        if (ctx.Gpu.Debug && ctx.Settings.CullingCheck && frame.Number % RenderChecks.VerifyEveryFrames == 0 && _plan.Views.Count > 0)
             RenderChecks.Verify(ctx, _plan.Views[0].Buffers, _plan.Views[0].Constants);
 
-        // Reload: what changed on disk, and the compiles that finished.
+        // Reload: what changed on disk, and the loads and compiles that finished.
         ApplyAssetChanges(ctx, frame.Events.Span);
+        Preloads.Poll(ctx, frame.Number);
+        ApplyReloads(ctx, frame.Number);
         ctx.Pipelines.Compiles.Poll(ctx, Pipelines.FinishCompile);
         ctx.Passes.Compiles.Poll(ctx, Passes.FinishCompile);
 
         // Sync: the entities into the tables. The moves read every chunk's columns as they are: no copy, and statics and
         // unchanged matrices are skipped.
+        _settledChanged |= _hiddenChanged.Count > 0;
         Unregister(ctx);
+        ApplyHidden(ctx);
         Reregister(ctx);
         Register(ctx);
 
@@ -155,22 +234,30 @@ internal sealed class RenderSystem : ISystem
         _views.Clear();
         _cameras.Run(_collectViews);
         CollectPostProcessing();
+        CollectSettled();
         _lights.Clear();
+        _lights.AddRange(_settledLights);
         _directional.Run(_collectDirectional);
         _points.Run(_collectPoints);
         _spots.Run(_collectSpots);
+        _glows.Clear();
+        _glows.AddRange(_settledGlows);
+        _glowing.Run(_collectGlows);
 
         // Upload: what the tables changed.
         Textures.Flush(ctx);
         Materials.Flush(ctx);
         Meshes.Flush(ctx);
         Instancing.Flush(ctx);
+        Lighting.Upload(ctx, CollectionsMarshal.AsSpan(_lights));
+        Glows.Upload(ctx, CollectionsMarshal.AsSpan(_glows));
 
         long recording = Stopwatch.GetTimestamp();
         SyncMs = (float)Stopwatch.GetElapsedTime(started, recording).TotalMilliseconds;
 
         // Plan, then record: the plan is everything the commands are made from.
         Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), _passes, LightingConstants.From(CollectionsMarshal.AsSpan(_lights)), (float)frame.Time);
+        FailureLabels.Show(ctx);
         (int draws, int dispatches) = Scene.Record(ctx, frame.DrawCommands, _plan);
         float recordMs = (float)Stopwatch.GetElapsedTime(recording).TotalMilliseconds;
 
@@ -179,7 +266,7 @@ internal sealed class RenderSystem : ISystem
         RenderMs = recordMs + frame.DrawCommands.SubmitMs;
         Stats = new RenderStats(
             ctx.Instances.Alive, (uint)draws, (uint)dispatches, (uint)ctx.Pipelines.Pending,
-            (uint)ctx.Meshes.MeshCount, (uint)ctx.Textures.Count, SyncMs, RenderMs - waitMs, waitMs);
+            (uint)ctx.Meshes.MeshCount, (uint)ctx.Textures.Count, SyncMs, RenderMs - waitMs, waitMs, (uint)_lights.Count);
     }
 
     /// <summary>
@@ -200,7 +287,7 @@ internal sealed class RenderSystem : ISystem
         {
             try
             {
-                Context = CreateContext(_rendering, _assets, _files, _project);
+                Context = CreateContext(_rendering, _assets, _files, _project, _threads);
             }
             catch (InvalidOperationException ex)
             {
@@ -215,7 +302,7 @@ internal sealed class RenderSystem : ISystem
     /// A context for <paramref name="gpu"/>: the tables, the built-in shaders and the prewarmed failure pipelines. Throws
     /// when a built-in shader does not compile: nothing could be drawn.
     /// </summary>
-    private static RenderContext CreateContext(IRendering gpu, Assets assets, IFileSystem files, Project project)
+    private static RenderContext CreateContext(IRendering gpu, Assets assets, IFileSystem files, Project project, Threads threads)
     {
         GpuStructs.AssertLayout();
         RenderSettings settings = project.Settings.Render;
@@ -228,29 +315,34 @@ internal sealed class RenderSystem : ISystem
         if (failureSurface == 0)
             Debugging.Log.Error("Shaders/Surfaces/Failure.surf.hlsl is not an indexed asset: broken materials and shaders will draw grey or not at all.");
 
-        string? cache = settings.ShaderCache ? Path.Combine(Project.Cache, "Shaders", gpu.ShaderFormat) : null;
+        string? cache = settings.ShaderCache ? Path.Combine(project.Cache, "Shaders", gpu.ShaderFormat) : null;
         RenderContext ctx = new()
         {
             Gpu = gpu,
             Assets = assets,
             Files = files,
             Project = project,
+            Threads = threads,
             Settings = settings,
             Shaders = new ShaderCache(Path.Combine(project.Resources, "Shaders"), cache, gpu.ShaderFormat),
             Textures = new TextureTable(gpu, settings.Anisotropy),
-            Meshes = new MeshTable(gpu, 1 << 20, 1 << 21),
+            Meshes = new MeshTable(gpu, 1 << 22, 1 << 24),
             Materials = new MaterialTable(gpu, defaultSurface, failureSurface),
             Instances = new InstanceTable(gpu, 4096),
             Buckets = new Buckets(gpu, 1 << 22),
             LinearClamp = gpu.CreateSampler(new SamplerDesc(GpuFilter.Linear, GpuAddress.Clamp)),
             NearestClamp = gpu.CreateSampler(new SamplerDesc(GpuFilter.Nearest, GpuAddress.Clamp)),
+            Lights = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead, 64 * GpuLight.Size),
+            Glows = new GrowableBuffer(gpu, GpuBufferUsage.GraphicsRead, 64 * GpuGlow.Size),
         };
 
         Textures.CreateBase(ctx);
         Materials.AddBuiltIn(ctx);
         PipelineClass forced = new(failureSurface, SurfaceVariant.DoubleSided | SurfaceVariant.FailureForced);
-        ctx.Pipelines = new PipelineTable(Shaders.CompileBuiltIn(ctx, Pipelines.VertexTemplate, GpuStage.Vertex), forced, FrameTargets.HdrFormat, gpu.DepthFormat);
+        ctx.Pipelines = new PipelineTable(Shaders.CompileBuiltIn(ctx, Pipelines.VertexTemplate, GpuStage.Vertex), forced, GBuffer.ColorFormats, gpu.DepthFormat);
         ctx.Cull = Culling.Create(ctx);
+        ctx.Lighting = Lighting.Create(ctx);
+        ctx.GlowPipeline = Glows.Create(ctx);
         ctx.Passes = new PassTable(Shaders.CompileBuiltIn(ctx, "Passes/Fullscreen.vert.hlsl", GpuStage.Vertex));
 
         // The built-in surfaces compile now, so the first frames of a scripted run draw them, and the failure pipelines are
@@ -265,13 +357,14 @@ internal sealed class RenderSystem : ISystem
         if (gpu.Debug)
             RenderChecks.RunProbes(ctx);
 
+        ctx.Building = false;
         return ctx;
     }
 
     /// <summary>
-    /// Asset hot reload for the render state, before anything is recorded. Changed shaders drop everything built on them:
-    /// pipelines recompile and materials repack; materials and textures reload; the loaded passes follow their files and
-    /// shaders. When a material's class changed, every instance re-reads its class.
+    /// Asset hot reload for the render state, before anything is recorded: a changed shader, material, texture or pass
+    /// that is in use starts loading again off this thread, a shader with every shader that includes it. What is drawn
+    /// stays as it was until that arrives (<see cref="ApplyReloads"/>).
     /// </summary>
     private static void ApplyAssetChanges(RenderContext ctx, ReadOnlySpan<Event> events)
     {
@@ -285,37 +378,71 @@ internal sealed class RenderSystem : ISystem
         if (changed is null)
             return;
 
-        HashSet<ulong> shaders = [];
         foreach (ulong id in changed)
         {
+            Preloads.Forget(ctx, id);
             if (ctx.Shaders.Entries.ContainsKey(id))
-                shaders.UnionWith(Shaders.Invalidate(ctx, id));
-        }
+                _ = ctx.Reloads.StartAsync(id, cancel => Preloads.ShadersAsync(ctx.Assets, [.. Shaders.Affected(ctx, id)], cancel));
+            else if (ctx.Passes.Contains(id))
+                _ = ctx.Reloads.StartAsync(id, cancel => Preloads.PassAsync(ctx.Assets, id, cancel));
+            else if (ctx.Materials.Contains(id))
+                _ = ctx.Reloads.StartAsync(id, cancel => Preloads.MaterialAsync(ctx.Assets, new Handle<Material>(id), cancel));
+            else if (ctx.Textures.Contains(id))
+                _ = ctx.Reloads.StartAsync(id, cancel => Preloads.TextureAsync(ctx.Assets, id, cancel));
 
-        bool reclass = false;
-        if (shaders.Count > 0)
-        {
-            Pipelines.Invalidate(ctx, shaders);
-            reclass |= Materials.RepackShaders(ctx, shaders);
-            Debugging.Log.Info($"Shaders changed: {shaders.Count} shader(s) rebuild.");
+            if (ctx.Meshes.Contains(id))
+                Debugging.Log.Warn($"Model {id} changed on disk; remove and re-add its entities to see the new geometry (live model reload arrives with streaming).");
         }
+    }
 
-        // A changed .pass reloads; a pass whose shader (or an include of it) changed recompiles.
-        foreach ((ulong id, PassState pass) in ctx.Passes.Entries.ToArray())
+    /// <summary>
+    /// The changed assets that have arrived are applied, each with what its load brought in hand. A shader drops
+    /// everything built on it: its text and that of every shader including it is taken again, pipelines recompile,
+    /// materials repack and a pass on it recompiles. A pass loads from its file as it is now and compiles, a material
+    /// repacks, a texture is uploaded again. Records carry texture references resolved when they are written, and a
+    /// texture that failed or was repaired moves its materials to or from the failure surface, so the materials
+    /// repack after a texture; and when a material's class changed, every instance re-reads its class.
+    /// </summary>
+    private void ApplyReloads(RenderContext ctx, long frame)
+    {
+        _reloaded.Clear();
+        ctx.Reloads.Poll((ctx, _reloaded, frame), static (state, id, job) => state._reloaded.Add((id, Preloads.Outcome(state.ctx, id, job, state.frame))));
+        if (_reloaded.Count == 0)
+            return;
+
+        bool reclass = false, textures = false;
+        foreach ((ulong id, Preloaded loaded) in _reloaded)
         {
-            if (changed.Contains(id))
+            Preloads.Use(ctx, loaded);
+            if (ctx.Shaders.Entries.ContainsKey(id))
             {
+                HashSet<ulong> shaders = Shaders.Invalidate(ctx, id);
+
+                // Taken again now, while their text is in hand: what recompiles later (every pipeline, once a
+                // shared file's vertex shader is in) finds them there.
+                foreach (ulong shader in shaders)
+                    Shaders.Get(ctx, new Handle<Shader>(shader));
+
+                Pipelines.Invalidate(ctx, shaders);
+                reclass |= Materials.RepackShaders(ctx, shaders);
+                foreach ((ulong pass, PassState state) in ctx.Passes.Entries.ToArray())
+                {
+                    if (shaders.Contains(state.ShaderId))
+                        Passes.Compile(ctx, pass);
+                }
+
+                Debugging.Log.Info($"Shaders changed: {shaders.Count} shader(s) rebuild.");
+            }
+
+            if (ctx.Passes.TryGet(id, out PassState listed))
+            {
+                bool first = listed.Path.Length == 0; // just listed: this is its first load, not a reload
                 Passes.Load(ctx, id);
                 ctx.Passes.TryGet(id, out PassState reloaded);
-                Debugging.Log.Info($"Pass {pass.Path} reloaded{(reloaded.Error is null ? "" : " (disabled)")}.");
+                if (!first)
+                    Debugging.Log.Info($"Pass {listed.Path} reloaded{(reloaded.Error is null ? "" : " (disabled)")}.");
             }
-            else if (shaders.Contains(pass.ShaderId))
-                Passes.Compile(ctx, id);
-        }
 
-        bool textures = false;
-        foreach (ulong id in changed)
-        {
             if (ctx.Materials.Contains(id))
             {
                 reclass |= Materials.Reload(ctx, id);
@@ -329,12 +456,9 @@ internal sealed class RenderSystem : ISystem
                 Debugging.Log.Info($"Texture {id} uploaded again.");
             }
 
-            if (ctx.Meshes.Contains(id))
-                Debugging.Log.Warn($"Model {id} changed on disk; remove and re-add its entities to see the new geometry (live model reload arrives with streaming).");
+            Preloads.Done(ctx);
         }
 
-        // Records carry texture references resolved when they are written, and a texture that failed or was repaired
-        // moves its materials to or from the failure surface.
         if (textures)
             reclass |= Materials.RepackTextures(ctx);
 
@@ -355,7 +479,9 @@ internal sealed class RenderSystem : ISystem
             _removed.Add((entity, instance));
     }
 
-    /// <summary>The renderers the observers saw removed leave the render state.</summary>
+    /// <summary>
+    /// The renderers the observers saw removed leave the render state.
+    /// </summary>
     private void Unregister(RenderContext ctx)
     {
         foreach ((Handle entity, RenderInstance instance) in _removed)
@@ -368,7 +494,67 @@ internal sealed class RenderSystem : ISystem
         _removed.Clear();
     }
 
-    /// <summary>The renderers the observers saw set again are registered again, their <see cref="RenderInstance"/> taking the new handle in place.</summary>
+    /// <summary>
+    /// The entities the observers saw hidden or shown: every instance under one is hidden when it or anything above
+    /// it is, and drawn otherwise. One shown as another is destroyed changes places with it in this frame.
+    /// </summary>
+    private void ApplyHidden(RenderContext ctx)
+    {
+        _lastParent = Handle.None;
+        _lastParentHidden = false;
+        foreach (Handle entity in _hiddenChanged)
+        {
+            if (_ecs.IsAlive(entity))
+                Hide(ctx, entity, IsHidden(_ecs.GetParent(entity)));
+        }
+
+        _hiddenChanged.Clear();
+    }
+
+    private void Hide(RenderContext ctx, Handle entity, bool above)
+    {
+        bool hidden = above || _ecs.Has<Hidden>(entity);
+        if (_ecs.TryGet<RenderInstance>(entity, out RenderInstance instance))
+            Instancing.Hide(ctx, instance.Handle, hidden);
+
+        foreach (Handle child in _ecs.GetChildren(entity))
+            Hide(ctx, child, hidden);
+    }
+
+    /// <summary>
+    /// Whether the entity, or anything above it, is <see cref="Hidden"/>.
+    /// </summary>
+    private bool IsHidden(Handle entity)
+    {
+        for (; entity.IsValid; entity = _ecs.GetParent(entity))
+        {
+            if (_ecs.Has<Hidden>(entity))
+                return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// <see cref="IsHidden"/> for one of many entities asked about in a row: what is above its parent is looked up
+    /// once for all that share it.
+    /// </summary>
+    private bool IsHiddenUnderLastParent(Handle entity)
+    {
+        Handle parent = _ecs.GetParent(entity);
+        if (parent != _lastParent)
+        {
+            _lastParent = parent;
+            _lastParentHidden = IsHidden(parent);
+        }
+
+        return _lastParentHidden || _ecs.Has<Hidden>(entity);
+    }
+
+    /// <summary>
+    /// The renderers the observers saw set again are registered again, their <see cref="RenderInstance"/> taking the new
+    /// handle in place. One whose new model or materials have yet to arrive loses its instance and registers when they do.
+    /// </summary>
     private void Reregister(RenderContext ctx)
     {
         foreach (Handle entity in _changed)
@@ -377,7 +563,7 @@ internal sealed class RenderSystem : ISystem
                 continue;
 
             Instancing.Remove(ctx, instance.Handle);
-            if (_ecs.TryGet<Renderer>(entity, out Renderer renderer) && _ecs.TryGet<WorldTransform>(entity, out WorldTransform world))
+            if (_ecs.TryGet<Renderer>(entity, out Renderer renderer) && _ecs.TryGet<WorldTransform>(entity, out WorldTransform world) && Preloads.Ready(ctx, renderer))
                 Add(ctx, entity, renderer, world.Value);
             else
                 _ecs.Remove<RenderInstance>(entity);
@@ -394,14 +580,33 @@ internal sealed class RenderSystem : ISystem
         // Collected first: giving an entity its RenderInstance moves it out of the chunk being read.
         _toRegister.Clear();
         _unregistered.Run(_collectUnregistered);
+        long started = Stopwatch.GetTimestamp();
+        List<(uint FirstVertex, uint FirstIndex, Vertex[] Vertices, uint[] Indices)> uploads = ctx.Meshes.Pending;
+        int counted = uploads.Count, added = 0;
+        long geometry = 0;
         foreach ((Handle entity, Renderer renderer, Matrix4x4 world) in _toRegister)
+        {
+            // One whose assets are still loading is looked at again next frame; until then it is not drawn.
+            if (!Preloads.Ready(ctx, renderer))
+                continue;
+
             Add(ctx, entity, renderer, world);
+            for (; counted < uploads.Count; counted++)
+                geometry += ((long)uploads[counted].Vertices.Length * Vertex.Size) + ((long)uploads[counted].Indices.Length * sizeof(uint));
+
+            // The rest next frame: this one has done its share.
+            if (geometry >= GeometryBudgetBytes || (++added % 32 == 0 && Stopwatch.GetElapsedTime(started).TotalMilliseconds >= RegisterBudgetMs))
+                break;
+        }
     }
 
     private void Add(RenderContext ctx, Handle entity, in Renderer renderer, in Matrix4x4 world)
     {
-        bool isStatic = _ecs.TryGet<Tags>(entity, out Tags tags) && tags.Has(Tag.Static);
-        uint handle = Instancing.Add(ctx, new InstanceDesc(renderer.Model, renderer.Materials, renderer.Flags, world, isStatic));
+        bool isStatic = _ecs.Has<Static>(entity);
+        bool hidden = IsHiddenUnderLastParent(entity);
+        Preloads.Use(ctx, renderer);
+        uint handle = Instancing.Add(ctx, new InstanceDesc(renderer.Model, renderer.Materials, renderer.Flags, renderer.CullRadius, world, isStatic, hidden));
+        Preloads.Done(ctx);
         _ecs.Set(entity, new RenderInstance { Handle = handle, Static = isStatic });
     }
 
@@ -413,16 +618,25 @@ internal sealed class RenderSystem : ISystem
 
     private void Move(ReadOnlySpan<Handle> entities, Span<WorldTransform> worlds, Span<RenderInstance> instances)
     {
-        Instancing.Move(Context!, instances, worlds);
+        if (Context is { } ctx)
+            Instancing.Move(ctx, instances, worlds);
     }
 
     private void CollectViews(ReadOnlySpan<Handle> entities, Span<Camera> cameras, Span<WorldTransform> worlds)
     {
         for (int i = 0; i < cameras.Length; i++)
+        {
+            // A hidden camera draws nothing: that of a domain still loading behind the loading domain, say.
+            if (IsHiddenUnderLastParent(entities[i]))
+                continue;
+
             _views.Add(new View(cameras[i], worlds[i].Value));
+        }
     }
 
-    /// <summary>The world's one <see cref="PostProcessing"/>; of several the first is followed, warned about once while it lasts.</summary>
+    /// <summary>
+    /// The world's one <see cref="PostProcessing"/>; of several the first is followed, warned about once while it lasts.
+    /// </summary>
     private void CollectPostProcessing()
     {
         _passes = default;
@@ -443,29 +657,64 @@ internal sealed class RenderSystem : ISystem
         _passLists += postProcessing.Length;
     }
 
+    /// <summary>
+    /// The lights and glows that never move, read again when one of them changed (the observers and the hidden
+    /// changes say when): most of a big scene's lights are these, and a frame then only reads the ones that can move.
+    /// </summary>
+    private void CollectSettled()
+    {
+        if (!_settledChanged)
+            return;
+
+        _settledChanged = false;
+        _settledLights.Clear();
+        _settledGlows.Clear();
+        (_collectedLights, _collectedGlows) = (_settledLights, _settledGlows);
+        _directionalSettled.Run(_collectDirectional);
+        _pointsSettled.Run(_collectPoints);
+        _spotsSettled.Run(_collectSpots);
+        _glowingSettled.Run(_collectGlows);
+        (_collectedLights, _collectedGlows) = (_lights, _glows);
+    }
+
     private void CollectDirectional(ReadOnlySpan<Handle> entities, Span<DirectionalLight> lights, Span<WorldTransform> worlds)
     {
         for (int i = 0; i < lights.Length; i++)
-            _lights.Add(new LightInstance(LightKind.Directional, lights[i].Color, lights[i].Intensity, 0f, 0f, 0f, lights[i].CastsShadows, worlds[i].Value));
+        {
+            _collectedLights.Add(new LightInstance(LightKind.Directional, lights[i].Color, lights[i].Intensity, 0f, 0f, 0f, lights[i].CastsShadows, worlds[i].Value));
+        }
     }
 
     private void CollectPoints(ReadOnlySpan<Handle> entities, Span<PointLight> lights, Span<WorldTransform> worlds)
     {
         for (int i = 0; i < lights.Length; i++)
-            _lights.Add(new LightInstance(LightKind.Point, lights[i].Color, lights[i].Intensity, lights[i].Range, 0f, 0f, lights[i].CastsShadows, worlds[i].Value));
+        {
+            _collectedLights.Add(new LightInstance(LightKind.Point, lights[i].Color, lights[i].Intensity, lights[i].Range, 0f, 0f, lights[i].CastsShadows, worlds[i].Value));
+        }
     }
 
     private void CollectSpots(ReadOnlySpan<Handle> entities, Span<SpotLight> lights, Span<WorldTransform> worlds)
     {
         for (int i = 0; i < lights.Length; i++)
-            _lights.Add(new LightInstance(LightKind.Spot, lights[i].Color, lights[i].Intensity, lights[i].Range, lights[i].InnerAngle, lights[i].OuterAngle, lights[i].CastsShadows, worlds[i].Value));
+        {
+            _collectedLights.Add(new LightInstance(LightKind.Spot, lights[i].Color, lights[i].Intensity, lights[i].Range, lights[i].InnerAngle, lights[i].OuterAngle, lights[i].CastsShadows, worlds[i].Value));
+        }
     }
 
-    /// <summary>Drops every <see cref="RenderInstance"/>: they index a render state that is gone.</summary>
+    private void CollectGlows(ReadOnlySpan<Handle> entities, Span<Glow> glows, Span<WorldTransform> worlds)
+    {
+        for (int i = 0; i < glows.Length; i++)
+            _collectedGlows.Add(new GpuGlow { PositionRadius = new Vector4(worlds[i].Value.Translation, glows[i].Radius), Color = new Vector4(glows[i].Color, 1f) });
+    }
+
+    /// <summary>
+    /// Drops every <see cref="RenderInstance"/>: they index a render state that is gone.
+    /// </summary>
     private void StripInstances()
     {
         _removed.Clear();
         _changed.Clear();
+        _hiddenChanged.Clear();
 
         if (_allInstances.Count() == 0)
             return;
@@ -478,7 +727,9 @@ internal sealed class RenderSystem : ISystem
         Debugging.Log.Info($"Rendering changed: {_toStrip.Count} instance(s) will register again.");
     }
 
-    /// <summary>The render settings a <see cref="RenderContext"/> is built from: when one of them changes, it is built again.</summary>
+    /// <summary>
+    /// The render settings a <see cref="RenderContext"/> is built from: when one of them changes, it is built again.
+    /// </summary>
     private readonly record struct BuiltWith(bool OcclusionCulling, float Anisotropy, bool ShaderCache)
     {
         public static BuiltWith From(RenderSettings settings)

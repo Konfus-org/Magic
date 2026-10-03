@@ -28,13 +28,17 @@ internal sealed record PassState(
 /// </summary>
 internal sealed class PassTable(CompiledShader fullscreenVertex) : RefCountTable<ulong, PassState>
 {
-    /// <summary>More inputs than a pass can bind.</summary>
+    /// <summary>
+    /// More inputs than a pass can bind.
+    /// </summary>
     public const int MaxInputs = 16;
 
     public CompiledShader FullscreenVertex { get; } = fullscreenVertex;
 
-    /// <summary>The ids the pass list named when it was last synced: one reference each.</summary>
+    /// <summary>
+    /// The ids the pass list named when it was last synced: one reference each.
+    /// </summary>
     public List<ulong> Held { get; } = [];
 
-    public Compiles<ulong> Compiles { get; } = new();
+    public Pending<ulong, Result<CompiledShader>> Compiles { get; } = new();
 }

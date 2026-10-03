@@ -81,7 +81,9 @@ public readonly struct Frustum
         return true;
     }
 
-    /// <summary>True when the box is wholly on the outside of the plane (the p-vertex test).</summary>
+    /// <summary>
+    /// True when the box is wholly on the outside of the plane (the p-vertex test).
+    /// </summary>
     private static bool Outside(in Plane plane, in Aabb box)
     {
         Vector3 p = new(

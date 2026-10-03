@@ -1,16 +1,15 @@
 using CommandLine;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Components;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
-using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Systems;
 using Magic.Utils;
 using System.Diagnostics;
 using System.Reflection;
+using System.Runtime;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -19,24 +18,39 @@ namespace Magic;
 /// <summary>
 /// The host: parses the command line, loads the project and its gems, opens the main window and runs the frame loop.
 /// Each frame builds one <see cref="Frame"/> and hands it down, phase by phase, to every gem; the ECS gem runs the
-/// systems added to the <see cref="Scheduler"/>, the Core ones among them (see <see cref="Step"/>). Exit codes: 0 clean, 1 bad arguments, no project, no window or a crash, 2 errors were logged
+/// systems added to the <see cref="Scheduler"/>, the Core ones among them (see <see cref="Step"/>). Two threads
+/// share the work: the one the process starts on owns the windows and the GPU, as the OS wants, so it is the render
+/// thread (<see cref="ThreadId.Render"/>); the frame loop runs on a main thread started beside it
+/// (<see cref="ThreadId.Main"/>) and hands it each frame's Render hooks and the submit. Start-up and shutdown happen
+/// on the first, alone. Exit codes: 0 clean, 1 bad arguments, no project, no window or a crash, 2 errors were logged
 /// and <c>--fail-on-error</c> asked.
 /// </summary>
 internal static class Program
 {
-    /// <summary>FixedUpdate runs at this constant step, so simulation stays deterministic whatever the frame rate.</summary>
+    /// <summary>
+    /// FixedUpdate runs at this constant step, so simulation stays deterministic whatever the frame rate.
+    /// </summary>
     private const float FixedDelta = 1f / 60f;
 
-    /// <summary>After a stall (breakpoint, window drag) do not try to catch up forever.</summary>
+    /// <summary>
+    /// After a stall (breakpoint, window drag) do not try to catch up forever.
+    /// </summary>
     private const double MaxDelta = 0.25;
 
     private static long _lastSlowLog;
+
+    /// <summary>
+    /// The last frame's submit, running on the render thread; the next frame's drawing queues behind it.
+    /// </summary>
+    private static Task _submitted = Task.CompletedTask;
 
     private static int Main(string[] args)
     {
         using Parser parser = new(with =>
         {
+#pragma warning disable RS0030 // the command line's own help, before any logger is up
             with.HelpWriter = Console.Error;
+#pragma warning restore RS0030
             with.CaseInsensitiveEnumValues = true;
         });
 
@@ -46,57 +60,73 @@ internal static class Program
     private static int Run(Options options)
     {
         if (options.Validate() is { } problem)
-        {
-            Console.Error.WriteLine(problem);
-            return 1;
-        }
+            return Fail(problem);
 
-        Debugging.MinimumLevel = options.LogLevel;
-        Debugging.Verbose = options.Verbose;
+        Debugging.Log.MinimumLevel = options.LogLevel;
+        Debugging.Log.EnableVerbose = options.Verbose;
+
+        // A game would rather have the heap grow than have every thread stopped for a full collection mid-frame.
+        GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
 
         try
         {
             using CancellationTokenSource shutdown = ListenForCtrlC();
-            IFileSystem files = new FileSystem();
 
+            IFileSystem files = new FileSystem();
             Result<Project> loaded = LoadProject(options, files, FindEngineRoot(files));
             if (loaded.Failed)
                 return Fail(loaded.Message);
 
             // The host's services, which gem constructors ask for by type; gems add theirs as they load.
-            Container container = new();
-            Events events = new();
-            Scheduler scheduler = new();
-            World world = new(events);
-            using Assets assets = new(loaded.Payload, files, events, container); // indexes Resources and the project's Assets
-            Project project = loaded.Payload.Icon.IsValid
-                ? loaded.Payload
-                : loaded.Payload with { Icon = assets.Find<Texture>("Icons/Mage.svg") }; // the engine's own icon unless the project names one
+            Container services = CoreServices.Create(loaded.Payload, files);
+            using Threads threads = services.Get<Threads>();
+            threads.Claim(ThreadId.Render); // this thread, the one the process started on, is the render thread: work for it waits for RunUntil below
+            using Assets assets = services.Get<Assets>();
+            Events events = services.Get<Events>();
+            Project project = services.Get<Project>();
 
-            container.Add(project);
-            container.Add(files);
-            container.Add(events);
-            container.Add(assets);
-            container.Add(scheduler);
-            container.Add(world);
-            Debugging.Log.Info($"Project {project.Name}: root {project.Root}; assets {project.Assets}; cache {Project.Cache}; resources {project.Resources}; engine gems {project.EngineGems}; gems [{string.Join(", ", project.Gems)}].");
+            Debugging.Log.Info($"Project {project.Name}: root {project.Root}; assets {project.Assets}; cache {project.Cache}; resources {project.Resources}; engine gems {project.EngineGems}; gems [{string.Join(", ", project.Gems)}].");
 
-            using Gems gems = new(container, files, events);
+            using Gems gems = new(services, files, events, threads);
             gems.Load(project.EngineGems, project.Gems, project.Root);
 
-            // The renderer gem is static, so the one loaded now is the run's; null when no gem provides one.
-            IRendering? rendering = container.Get<IRendering>();
-            using CoreSystems? systems = CoreSystems.Create(container.Get<IEcs>(), container.Get<IInput>(), container.Get<IWindowRegistry>(), rendering, scheduler, assets, files, project, container); // disposed before the gems go
+            using CoreSystems? systems = CoreSystems.Create(services); // disposed before the gems go
 
-            if (!TryOpenMainWindow(options, container.Get<IWindowFactory>(), project, out IWindow? mainWindow))
+            // What a gem provides may not be there: the window factory, the renderer.
+            services.TryGet(out IWindowFactory? windowFactory);
+            services.TryGet(out IRendering? rendering);
+            services.TryGet(out IEcs? ecs);
+
+            if (!TryOpenMainWindow(options, windowFactory, project, out IWindow? mainWindow))
                 return 1;
             using IWindow? _ = mainWindow;
 
+            World world = services.Get<World>();
             OpenEntryPoint(options, project, assets, world);
 
-            MainLoop(options, new Engine(files, project, events, assets, gems, scheduler, rendering, mainWindow, new RenderCommands()), shutdown.Token);
+            // The frame loop runs on the main thread while this one draws what it is handed, until the loop ends.
+            Engine engine = new(
+                files,
+                project,
+                events,
+                assets,
+                world,
+                ecs,
+                gems,
+                services.Get<Scheduler>(),
+                threads,
+                rendering,
+                mainWindow,
+                new RenderCommands());
+            Task loop = threads.StartAsync(ThreadId.Main, () =>
+            {
+                MainLoop(options, engine, shutdown.Token);
+                _submitted.Wait(); // the last frame is on screen before anything is torn down
+            });
+            threads.RunUntil(ThreadId.Render, loop);
+            loop.GetAwaiter().GetResult(); // what the loop threw is thrown here
 
-            return ExitCode(options);
+            return options.FailOnError && Debugging.Log.Errors > 0 ? 2 : 0;
         }
         catch (Exception ex)
         {
@@ -105,23 +135,37 @@ internal static class Program
         }
     }
 
-    /// <summary>Opens the domain to start in: --entry-point, else the project's entry point. It is spawned in the first frame.</summary>
+    /// <summary>
+    /// Opens the domain to start in: --entry-point, else the project's entry point. It streams in from the first
+    /// frame on, behind the loading domain: --loading, else the project's.
+    /// </summary>
     private static void OpenEntryPoint(Options options, Project project, Assets assets, World world)
     {
+        if (options.Loading is { } loading)
+        {
+            world.Loading = assets.Find<Domain>(loading);
+            if (!world.Loading.IsValid)
+                Debugging.Log.Error($"--loading {loading}: no such asset under Resources or Assets.");
+        }
+
         Handle<Domain> entryPoint = options.EntryPoint is { } path ? assets.Find<Domain>(path) : project.EntryPoint;
         if (options.EntryPoint is not null && !entryPoint.IsValid)
             Debugging.Log.Error($"--entry-point {options.EntryPoint}: no such asset under Resources or Assets.");
-        else if (entryPoint.IsValid)
-            world.Open(entryPoint);
-        else
+        else if (!entryPoint.IsValid)
             Debugging.Log.Info("No entry point to open: set \"entryPoint\" in the .magic file or pass --entry-point.");
+        else if (world.Open(entryPoint) is { Failed: true } opened)
+            Debugging.Log.Error(opened.Message);
     }
 
-    /// <summary>Ctrl+C ends the loop cleanly instead of killing the process mid-frame (gems get their Dispose, logs flush).</summary>
+    /// <summary>
+    /// Ctrl+C ends the loop cleanly instead of killing the process mid-frame (gems get their Dispose, logs flush).
+    /// </summary>
     private static CancellationTokenSource ListenForCtrlC()
     {
         CancellationTokenSource shutdown = new();
+#pragma warning disable RS0030 // Ctrl+C is the console's to report
         Console.CancelKeyPress += (_, cancel) =>
+#pragma warning restore RS0030
         {
             cancel.Cancel = true;
             shutdown.Cancel();
@@ -172,7 +216,7 @@ internal static class Program
                 return Result<Project>.Failure($"Project {path} is not valid JSON: {ex.Message}");
             }
 
-            root = files.Parent(path)!;
+            root = files.Parent(path) ?? root;
             Debugging.Log.Info($"Project file: {path}");
         }
 
@@ -256,67 +300,79 @@ internal static class Program
         string lifetime = options.Lifetime > 0 ? $" for {options.Lifetime} frames" : "";
         Debugging.Log.Info($"Entering the main loop on thread {Environment.CurrentManagedThreadId}{headless}{lifetime}.");
 
-        Stopwatch clock = Stopwatch.StartNew();
-        double last = 0;
-        double accumulator = 0;
-        double worstMs = 0;
-        double firstFrameMs = 0;
-        long number = 0;
-        int screenshotsLeft = options.Screenshots;
-        long nextScreenshot = options.ScreenshotDelay;
         bool quit = false;
         using IDisposable quitting = engine.Events.Watch(EventType.Quit, _ => quit = true);
 
+        Stopwatch clock = Stopwatch.StartNew();
+        long frameIndex = 0;
+        double lastFrameTimeSeconds = 0;
+        double fixedUpdateAccumulatorSeconds = 0;
+        double worstFrameMs = 0;
+        double firstFrameMs = 0;
+
+        int screenshotsLeft = options.Screenshots;
+        long screenshotDelay = options.ScreenshotDelay;
+
         while (!shutdown.IsCancellationRequested && !quit && (engine.MainWindow?.IsOpen ?? true))
         {
-            number++;
+            frameIndex++;
             double now = clock.Elapsed.TotalSeconds;
-            double delta = Math.Min(now - last, MaxDelta);
-            last = now;
-            accumulator += delta;
-            worstMs = Math.Max(worstMs, delta * 1000d);
+            double delta = Math.Min(now - lastFrameTimeSeconds, MaxDelta);
+            lastFrameTimeSeconds = now;
+            fixedUpdateAccumulatorSeconds += delta;
+            worstFrameMs = Math.Max(worstFrameMs, delta * 1000d);
 
             long stepStarted = Stopwatch.GetTimestamp();
-            Step(engine, number, now, (float)delta, ref accumulator);
-            if (number == 1)
+            Step(engine, frameIndex, now, (float)delta, ref fixedUpdateAccumulatorSeconds);
+            if (frameIndex == 1)
                 firstFrameMs = Stopwatch.GetElapsedTime(stepStarted).TotalMilliseconds;
 
             // End of frame: whatever the renderer presented this frame is what a screenshot shows.
-            if (screenshotsLeft > 0 && number >= nextScreenshot && engine.MainWindow is not null)
+            if (screenshotsLeft > 0 && frameIndex >= screenshotDelay && engine.MainWindow is not null)
             {
-                Screenshot(engine.Rendering, engine.Files, engine.Project, engine.MainWindow, number);
+                long frameNumber = frameIndex;
+                engine.Threads.Invoke(ThreadId.Render, () => Screenshot(engine, frameNumber));
                 screenshotsLeft--;
-                nextScreenshot += options.ScreenshotInterval;
+                screenshotDelay += options.ScreenshotInterval;
             }
 
-            if (options.Lifetime > 0 && number >= options.Lifetime)
+            if (options.Lifetime > 0 && frameIndex >= options.Lifetime)
             {
                 Debugging.Log.Info($"Lifetime of {options.Lifetime} frames reached.");
                 break;
             }
         }
 
-        LogSummary(number, clock.Elapsed.TotalMilliseconds, firstFrameMs, worstMs, shutdown.IsCancellationRequested);
+        LogSummary(frameIndex, clock.Elapsed.TotalMilliseconds, firstFrameMs, worstFrameMs, shutdown.IsCancellationRequested);
     }
 
     /// <summary>
-    /// One frame, top to bottom. Gem and asset changes land first and are published; then one <see cref="Frame"/>
-    /// carrying every event since the last frame goes down: each phase calls every gem in load order, and the ECS
-    /// gem's hook runs the phase's systems, which the scheduler hands that frame.
+    /// One frame, top to bottom, on the main thread. What other threads posted to it runs first; gem and asset
+    /// changes land and are published; then one <see cref="Frame"/> carrying every event since the last frame goes
+    /// down: each phase calls every gem in load order, and the ECS gem's hook runs the phase's systems, which the
+    /// scheduler hands that frame. The Render phase runs on the render thread while this one waits for it; the
+    /// submit that follows runs there too, and is not waited for: the next frame begins at once, and only its own
+    /// Render phase queues behind it, so the simulation is never more than a frame ahead of what is shown.
     /// </summary>
     private static void Step(Engine engine, long number, double time, float delta, ref double accumulator)
     {
         long started = Stopwatch.GetTimestamp();
 
+        Threads threads = engine.Threads;
+        threads.RunPending(ThreadId.Main);
+
         engine.Gems.ProcessChanges();
         engine.Assets.ProcessChanges();
-        Frame frame = new(number, time, delta, engine.Events.NextFrame(), engine.DrawCommands);
-        IGem[] gems = engine.Gems.Loaded;
-        engine.Scheduler.SetFrame(frame);
+
         long afterChanges = Stopwatch.GetTimestamp();
 
+        Frame frame = new(number, time, delta, engine.Events.NextFrame(), engine.DrawCommands);
+        engine.Scheduler.SetFrame(frame);
+
+        IGem[] gems = engine.Gems.Loaded;
         foreach (IGem gem in gems)
             gem.Update(frame);
+
         long afterUpdate = Stopwatch.GetTimestamp();
 
         int fixedSteps = 0;
@@ -326,27 +382,41 @@ internal static class Program
             foreach (IGem gem in gems)
                 gem.FixedUpdate(step);
         }
+
         long afterFixed = Stopwatch.GetTimestamp();
 
         foreach (IGem gem in gems)
             gem.LateUpdate(frame);
+
         long afterLate = Stopwatch.GetTimestamp();
 
         // The ECS gem loads before anything that draws, so the render system records the scene first and whatever a
-        // later gem draws in its Render hook lands on top of it; then it all goes.
-        foreach (IGem gem in gems)
-            gem.Render(frame);
+        // later gem draws in its Render hook lands on top of it. A submit that threw is thrown here, a frame late.
+        if (_submitted.IsFaulted)
+            _submitted.GetAwaiter().GetResult();
+
+        threads.Invoke(ThreadId.Render, () =>
+        {
+            foreach (IGem gem in gems)
+                gem.Render(frame);
+        });
 
         // Without a renderer nothing runs the commands, and without the Core systems nothing recorded a scene, but a gem
         // may still have drawn: its commands still go. How long it took stays on the list, for the next frame's stats.
-        long submitting = Stopwatch.GetTimestamp();
         RenderCommands commands = frame.DrawCommands;
-        if (engine.Rendering is not null)
-            commands.WaitMs = engine.Rendering.Submit(commands);
-        else
-            commands.Clear();
+        IRendering? rendering = engine.Rendering;
+        _submitted = threads.InvokeAsync(ThreadId.Render, _ =>
+        {
+            long submitting = Stopwatch.GetTimestamp();
+            if (rendering is not null)
+                commands.WaitMs = rendering.Submit(commands);
+            else
+                commands.Clear();
+
+            commands.SubmitMs = (float)Stopwatch.GetElapsedTime(submitting).TotalMilliseconds;
+        });
+
         long finished = Stopwatch.GetTimestamp();
-        commands.SubmitMs = (float)Ms(submitting, finished);
 
         // A slow frame says where it went, at most every few seconds.
         double totalMs = Stopwatch.GetElapsedTime(started, finished).TotalMilliseconds;
@@ -354,7 +424,7 @@ internal static class Program
             return;
 
         _lastSlowLog = Environment.TickCount64;
-        Debugging.Log.Verbose($"Slow frame ({totalMs:F1} ms): changes {Ms(started, afterChanges):F1}, update {Ms(afterChanges, afterUpdate):F1}, fixed {Ms(afterUpdate, afterFixed):F1} ({fixedSteps} steps), late {Ms(afterFixed, afterLate):F1}, render {Ms(afterLate, finished):F1}.");
+        Debugging.Log.Verbose($"Slow frame ({totalMs:F1} ms): changes {Ms(started, afterChanges):F1}, update {Ms(afterChanges, afterUpdate):F1}, fixed {Ms(afterUpdate, afterFixed):F1} ({fixedSteps} steps), late {Ms(afterFixed, afterLate):F1}, render {Ms(afterLate, finished):F1} (with the wait for the frame before to be submitted).");
 
         static double Ms(long from, long to)
         {
@@ -368,36 +438,44 @@ internal static class Program
         double restMs = frames > 1 ? (totalMs - firstFrameMs) / (frames - 1) : totalMs;
         Debugging.Log.Info($"Ran {frames} frames in {totalMs:F0} ms: first {firstFrameMs:F0} ms, then {restMs:F2} ms average, {worstFrameMs:F2} ms worst.");
 
+        // What the collector cost: every pause is a frame that waited.
+        Debugging.Log.Info($"Garbage collection: {GC.GetTotalAllocatedBytes() / (1024d * 1024d):F0} MB allocated, {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)} collections (gen 0/1/2), {GC.GetTotalPauseDuration().TotalMilliseconds:F0} ms paused.");
+
         if (stoppedByCtrlC)
             Debugging.Log.Info("Stopped by Ctrl+C.");
 
-        if (Debugging.Errors > 0)
-            Debugging.Log.Warn($"{Debugging.Errors} message(s) were logged at Error or above this run.");
+        if (Debugging.Log.Errors > 0)
+            Debugging.Log.Warn($"{Debugging.Log.Errors} message(s) were logged at Error or above this run.");
     }
 
-    private static int ExitCode(Options options)
-    {
-        return options.FailOnError && Debugging.Errors > 0 ? 2 : 0;
-    }
-
-    /// <summary>An error before any logger gem is up would only sit in the log queue; say it on stderr as well. Always 1, the exit code.</summary>
+    /// <summary>
+    /// An error before any logger gem is up would only sit in the log queue; say it on stderr as well. Always 1, the exit code.
+    /// </summary>
     private static int Fail(string message)
     {
         Debugging.Assert(false, message);
         return 1;
     }
 
-    /// <summary>Writes what the window last showed to <see cref="Project.Screenshots"/>. Every failure is logged as an error: a screenshot that was asked for and not taken is a failed run.</summary>
-    private static void Screenshot(IRendering? rendering, IFileSystem files, Project project, IWindow window, long frame)
+    /// <summary>
+    /// Writes what the window last showed, with the world's state in it, to <see cref="Project.Screenshots"/>. Every failure is logged as an error: a screenshot that was asked for and not taken is a failed run.
+    /// </summary>
+    private static void Screenshot(Engine engine, long frame)
     {
-        if (rendering is null)
+        if (engine.Rendering is null)
         {
             Debugging.Log.Error($"Screenshot at frame {frame} skipped: no loaded gem provides {nameof(IRendering)}.");
             return;
         }
 
-        string path = files.Combine(Project.Screenshots, $"{project.Name}_{frame:D6}.png");
-        Result taken = rendering.Screenshot(window, files, path);
+        if (engine.MainWindow is null)
+        {
+            Debugging.Log.Error($"Screenshot at frame {frame} skipped: no loaded gem provides {nameof(IWindow)} or we are headless.");
+            return;
+        }
+
+        string path = engine.Files.Combine(Project.Screenshots, $"{engine.Project.Name}_{frame:D6}.png");
+        Result taken = Debugging.Screenshot.Capture(engine.Files, engine.Rendering, engine.MainWindow, engine.World, engine.Ecs, path);
         if (taken.Failed)
         {
             Debugging.Log.Error($"Screenshot at frame {frame} failed: {taken.Message}");
@@ -407,14 +485,19 @@ internal static class Program
         Debugging.Log.Info($"Screenshot at frame {frame}: {path}.");
     }
 
-    /// <summary>Everything a frame needs, built once by <see cref="Run"/> and disposed with it.</summary>
+    /// <summary>
+    /// Everything a frame needs, built once by <see cref="Run"/> and disposed with it.
+    /// </summary>
     private readonly record struct Engine(
         IFileSystem Files,
         Project Project,
         Events Events,
         Assets Assets,
+        World World,
+        IEcs? Ecs,
         Gems Gems,
         Scheduler Scheduler,
+        Threads Threads,
         IRendering? Rendering,
         IWindow? MainWindow,
         RenderCommands DrawCommands);

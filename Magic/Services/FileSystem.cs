@@ -1,10 +1,15 @@
 using Magic.Interfaces;
 using Magic.Utils;
+using System.Runtime.CompilerServices;
 using System.Text;
+
+#pragma warning disable RS0030 // this is the IFileSystem that everything else goes through
 
 namespace Magic.Services;
 
-/// <summary>The real disk. See <see cref="IFileSystem"/>.</summary>
+/// <summary>
+/// The real disk. See <see cref="IFileSystem"/>.
+/// </summary>
 internal sealed class FileSystem : IFileSystem
 {
     private const int BufferSize = 64 * 1024;
@@ -77,14 +82,16 @@ internal sealed class FileSystem : IFileSystem
         return File.Exists(path) || Directory.Exists(path);
     }
 
-    /// <summary>Reads a whole file on the calling thread. A failed result means it could not be read: missing, locked, or still being written.</summary>
+    /// <summary>
+    /// Reads a whole file on the calling thread. A failed result means it could not be read: missing, locked, or still being written.
+    /// </summary>
     public Result<byte[]> ReadBinary(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         try
         {
-            using FileStream stream = OpenRead(path);
+            using FileStream stream = OpenRead(path, FileOptions.None);
 
             if (stream.Length > int.MaxValue)
                 return Result<byte[]>.Failure("Files larger than 2 GB cannot be loaded into a byte array.");
@@ -100,14 +107,16 @@ internal sealed class FileSystem : IFileSystem
         }
     }
 
-    /// <summary>Reads a whole text file (UTF-8, a BOM is dropped) on the calling thread. Fails like <see cref="ReadBinary"/>.</summary>
+    /// <summary>
+    /// Reads a whole text file (UTF-8, a BOM is dropped) on the calling thread. Fails like <see cref="ReadBinary"/>.
+    /// </summary>
     public Result<string> ReadText(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
         try
         {
-            using StreamReader reader = new(OpenRead(path), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, BufferSize);
+            using StreamReader reader = new(OpenRead(path, FileOptions.None), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, BufferSize);
 
             return Result<string>.Success(reader.ReadToEnd());
         }
@@ -117,7 +126,48 @@ internal sealed class FileSystem : IFileSystem
         }
     }
 
-    /// <summary>Lists the entries of <paramref name="path"/> on the calling thread.</summary>
+    public async Task<Result<byte[]>> ReadBinaryAsync(string path, CancellationToken cancel = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        try
+        {
+            FileStream stream = OpenRead(path, FileOptions.Asynchronous);
+            await using ConfiguredAsyncDisposable disposing = stream.ConfigureAwait(false);
+
+            if (stream.Length > int.MaxValue)
+                return Result<byte[]>.Failure("Files larger than 2 GB cannot be loaded into a byte array.");
+
+            byte[] data = GC.AllocateUninitializedArray<byte>((int)stream.Length);
+            await stream.ReadExactlyAsync(data, cancel).ConfigureAwait(false);
+
+            return Result<byte[]>.Success(data);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Result<byte[]>.Failure(ex.Message);
+        }
+    }
+
+    public async Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        try
+        {
+            using StreamReader reader = new(OpenRead(path, FileOptions.Asynchronous), Encoding.UTF8, detectEncodingFromByteOrderMarks: true, BufferSize);
+
+            return Result<string>.Success(await reader.ReadToEndAsync(cancel).ConfigureAwait(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Result<string>.Failure(ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Lists the entries of <paramref name="path"/> on the calling thread.
+    /// </summary>
     public Result<string[]> ReadDirectory(string path, string? filter = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -125,7 +175,9 @@ internal sealed class FileSystem : IFileSystem
         return EnumerateDirectory(path, filter, SearchOption.TopDirectoryOnly);
     }
 
-    /// <summary>Lists the entries under <paramref name="path"/>, subfolders included, on the calling thread.</summary>
+    /// <summary>
+    /// Lists the entries under <paramref name="path"/>, subfolders included, on the calling thread.
+    /// </summary>
     public Result<string[]> ReadDirectoryRecursive(string path, string? filter = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -133,7 +185,9 @@ internal sealed class FileSystem : IFileSystem
         return EnumerateDirectory(path, filter, SearchOption.AllDirectories);
     }
 
-    /// <summary>Writes a whole text file (UTF-8, no BOM) on the calling thread, creating its folder if needed.</summary>
+    /// <summary>
+    /// Writes a whole text file (UTF-8, no BOM) on the calling thread, creating its folder if needed.
+    /// </summary>
     public Result WriteText(string path, string text)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -152,7 +206,9 @@ internal sealed class FileSystem : IFileSystem
         }
     }
 
-    /// <summary>Writes a whole binary file on the calling thread, creating its folder if needed.</summary>
+    /// <summary>
+    /// Writes a whole binary file on the calling thread, creating its folder if needed.
+    /// </summary>
     public Result WriteBinary(string path, byte[] data)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -163,6 +219,62 @@ internal sealed class FileSystem : IFileSystem
             CreateParentDirectory(path);
             File.WriteAllBytes(path, data);
 
+            return Result.Success();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Result.Failure(ex.Message);
+        }
+    }
+
+    public async Task<Result> WriteTextAsync(string path, string text, CancellationToken cancel = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(text);
+
+        try
+        {
+            CreateParentDirectory(path);
+            await File.WriteAllTextAsync(path, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancel).ConfigureAwait(false);
+
+            return Result.Success();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Result.Failure(ex.Message);
+        }
+    }
+
+    public async Task<Result> WriteBinaryAsync(string path, byte[] data, CancellationToken cancel = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(data);
+
+        try
+        {
+            CreateParentDirectory(path);
+            await File.WriteAllBytesAsync(path, data, cancel).ConfigureAwait(false);
+
+            return Result.Success();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Result.Failure(ex.Message);
+        }
+    }
+
+    public Result DeleteDirectory(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+
+            return Result.Success();
+        }
+        catch (DirectoryNotFoundException)
+        {
             return Result.Success();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -214,7 +326,7 @@ internal sealed class FileSystem : IFileSystem
     /// editors rewrite while it runs, so a writer landing mid-read fails on this side, where the caller can
     /// retry, never on the writer's.
     /// </summary>
-    private static FileStream OpenRead(string path)
+    private static FileStream OpenRead(string path, FileOptions options)
     {
         return new FileStream(
             path,
@@ -224,7 +336,7 @@ internal sealed class FileSystem : IFileSystem
                 Access = FileAccess.Read,
                 Share = FileShare.ReadWrite | FileShare.Delete,
                 BufferSize = BufferSize,
-                Options = FileOptions.SequentialScan
+                Options = FileOptions.SequentialScan | options
             });
     }
 

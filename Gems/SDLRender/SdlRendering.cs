@@ -71,7 +71,9 @@ internal sealed class SdlRendering : IGem, IRendering
 
     public GpuFormat DepthFormat => Gpu.DepthFormat.ToEngine();
 
-    /// <summary>Made on first use, so it is made with whatever <see cref="Debug"/> Core set when it took this renderer.</summary>
+    /// <summary>
+    /// Made on first use, so it is made with whatever <see cref="Debug"/> Core set when it took this renderer.
+    /// </summary>
     private GpuDevice Gpu => _device ??= new GpuDevice(_project.Settings.Render, Debug, _files, _project.EngineGems);
 
     public GpuBuffer CreateBuffer(GpuBufferUsage usage, uint bytes)
@@ -126,7 +128,9 @@ internal sealed class SdlRendering : IGem, IRendering
         return Compiler.Compile(hlsl, name, stage, includeDirectory, Gpu.ShaderFormat);
     }
 
-    /// <summary>A graphics pipeline; its two shader objects only live while it is made.</summary>
+    /// <summary>
+    /// A graphics pipeline; its two shader objects only live while it is made.
+    /// </summary>
     public GpuPipeline CreatePipeline(PipelineDesc desc)
     {
         Gpu.AssertMainThread();
@@ -155,7 +159,9 @@ internal sealed class SdlRendering : IGem, IRendering
             }
 
             bool depth = desc.Depth != GpuFormat.Invalid;
-            SDL.GPUColorTargetDescription[] targets = [new SDL.GPUColorTargetDescription { Format = desc.Color.ToSdl(), BlendState = desc.AlphaBlend ? AlphaBlend : default }];
+            SDL.GPUColorTargetDescription[] targets = new SDL.GPUColorTargetDescription[desc.Colors.Length];
+            for (int i = 0; i < targets.Length; i++)
+                targets[i] = new SDL.GPUColorTargetDescription { Format = desc.Colors[i].ToSdl(), BlendState = desc.AlphaBlend ? AlphaBlend : default };
             SDL.GPUGraphicsPipelineCreateInfo info = new()
             {
                 VertexShader = vertex,
@@ -339,7 +345,9 @@ internal sealed class SdlRendering : IGem, IRendering
         }
     }
 
-    /// <summary>A vertex or fragment shader object from compiled bytecode.</summary>
+    /// <summary>
+    /// A vertex or fragment shader object from compiled bytecode.
+    /// </summary>
     private nint CreateShader(CompiledShader shader)
     {
         SDL.GPUShaderCreateInfo info = new()
@@ -354,7 +362,9 @@ internal sealed class SdlRendering : IGem, IRendering
         return GpuDevice.ThrowOnError(SDL.CreateGPUShader(Gpu.Handle, in info, shader.Code, "main"), "SDL_CreateGPUShader");
     }
 
-    /// <summary>Every upload and copy queued since the last submit, in order, in one copy pass.</summary>
+    /// <summary>
+    /// Every upload and copy queued since the last submit, in order, in one copy pass.
+    /// </summary>
     private void RunTransfers(nint commandBuffer)
     {
         if (_transfers.Count == 0)
@@ -401,7 +411,9 @@ internal sealed class SdlRendering : IGem, IRendering
         _transfers.Clear();
     }
 
-    /// <summary>A region with its size filled in: a width or height of 0 is the whole level.</summary>
+    /// <summary>
+    /// A region with its size filled in: a width or height of 0 is the whole level.
+    /// </summary>
     private SDL.GPUTextureRegion ToSdlRegion(in TextureRegion region)
     {
         TextureObject stored = _textures[region.Texture.Id];
@@ -440,16 +452,21 @@ internal sealed class SdlRendering : IGem, IRendering
 
                     target = (width, height);
                     SDL.GPULoadOp load = command.Load.ToSdl();
-                    Span<SDL.GPUColorTargetInfo> colors =
-                    [
-                        new SDL.GPUColorTargetInfo
+
+                    // One colour target, or the run of them: the first is the one resolved above.
+                    ReadOnlySpan<GpuBinding> run = bindings.Slice(command.Run.Start, command.Run.Length);
+                    Span<SDL.GPUColorTargetInfo> colors = stackalloc SDL.GPUColorTargetInfo[Math.Max(1, run.Length)];
+                    for (int i = 0; i < colors.Length; i++)
+                    {
+                        colors[i] = new SDL.GPUColorTargetInfo
                         {
-                            Texture = color,
+                            Texture = i == 0 ? color : _textures[run[i].Texture.Id].Handle,
                             ClearColor = new SDL.FColor { R = command.ClearColor.X, G = command.ClearColor.Y, B = command.ClearColor.Z, A = command.ClearColor.W },
                             LoadOp = load,
                             StoreOp = SDL.GPUStoreOp.Store,
-                        },
-                    ];
+                        };
+                    }
+
                     if (command.Depth.IsValid)
                     {
                         SDL.GPUDepthStencilTargetInfo depth = new()
@@ -461,10 +478,10 @@ internal sealed class SdlRendering : IGem, IRendering
                             StencilLoadOp = SDL.GPULoadOp.DontCare,
                             StencilStoreOp = SDL.GPUStoreOp.DontCare,
                         };
-                        render = SDL.BeginGPURenderPass(commandBuffer, colors, 1, in depth);
+                        render = SDL.BeginGPURenderPass(commandBuffer, colors, (uint)colors.Length, in depth);
                     }
                     else
-                        render = SDL.BeginGPURenderPass(commandBuffer, colors, 1, 0);
+                        render = SDL.BeginGPURenderPass(commandBuffer, colors, (uint)colors.Length, 0);
                     break;
                 }
                 case RenderCommandType.EndRenderPass:
@@ -621,7 +638,9 @@ internal sealed class SdlRendering : IGem, IRendering
         return waited;
     }
 
-    /// <summary>A texture's SDL object and size; a window's swapchain image is acquired the first time the frame names it (0 when there is none).</summary>
+    /// <summary>
+    /// A texture's SDL object and size; a window's swapchain image is acquired the first time the frame names it (0 when there is none).
+    /// </summary>
     private (nint Texture, uint Width, uint Height) ResolveTexture(nint commandBuffer, GpuTexture texture, ref long waited)
     {
         if (!texture.IsWindow)
@@ -650,7 +669,9 @@ internal sealed class SdlRendering : IGem, IRendering
         return acquired;
     }
 
-    /// <summary>What was released since the last submit leaves the handle tables; the SDL objects go once no frame in flight uses them.</summary>
+    /// <summary>
+    /// What was released since the last submit leaves the handle tables; the SDL objects go once no frame in flight uses them.
+    /// </summary>
     private void FreeReleased()
     {
         foreach ((GpuDevice.Kind kind, uint id) in _releasing)
@@ -684,7 +705,9 @@ internal sealed class SdlRendering : IGem, IRendering
 
     private enum TransferKind : byte { Buffer, Texture, TextureCopy }
 
-    /// <summary>One queued upload (staged bytes into a buffer or a texture region) or texture copy (<see cref="Source"/> into <see cref="Region"/>).</summary>
+    /// <summary>
+    /// One queued upload (staged bytes into a buffer or a texture region) or texture copy (<see cref="Source"/> into <see cref="Region"/>).
+    /// </summary>
     private readonly record struct Transfer(TransferKind Kind, nint Staged, uint StagedOffset, GpuBuffer Buffer, uint BufferOffset, uint Size, TextureRegion Region, TextureRegion Source);
 
     private readonly record struct TextureObject(nint Handle, uint Width, uint Height);
@@ -692,7 +715,9 @@ internal sealed class SdlRendering : IGem, IRendering
     private readonly record struct PipelineObject(nint Handle, bool Compute);
 }
 
-/// <summary>SDL objects by handle id: dense, id 0 never used, freed ids used again.</summary>
+/// <summary>
+/// SDL objects by handle id: dense, id 0 never used, freed ids used again.
+/// </summary>
 internal sealed class HandleTable<T> where T : struct
 {
     private readonly List<T> _items = [default];
@@ -717,7 +742,9 @@ internal sealed class HandleTable<T> where T : struct
         return (uint)(_items.Count - 1);
     }
 
-    /// <summary>Forgets the id, handing back what it held.</summary>
+    /// <summary>
+    /// Forgets the id, handing back what it held.
+    /// </summary>
     public T Free(uint id)
     {
         if (id == 0 || id >= _items.Count || !_alive[(int)id])

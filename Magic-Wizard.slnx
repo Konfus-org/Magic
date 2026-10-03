@@ -10,6 +10,7 @@
     <Project Path="Gems/DefaultCheats/DefaultCheats.csproj" Id="45ab667a-667c-4ea8-bc5b-72d5108546f3" />
     <Project Path="Gems/FlecsEcs/FlecsEcs.csproj" />
     <Project Path="Gems/ImGuiOverlay/ImGuiOverlay.csproj" />
+    <Project Path="Gems/MeshLods/MeshLods.csproj" />
     <Project Path="Gems/SDL/SDL.csproj" Id="dc93ae9f-b3ed-4220-b9eb-a7bf52ec8d68" />
     <Project Path="Gems/SDLImage/SDLImage.csproj" />
     <Project Path="Gems/SDLInput/SDLInput.csproj" />
@@ -23,6 +24,9 @@
     <Project Path="Samples/SampleShared/SampleShared.csproj" />
     <Project Path="Samples/Fallbacks/Fallbacks.csproj" />
     <Project Path="Samples/Grid/Grid.csproj" />
+    <Project Path="Samples/Lods/Lods.csproj" />
+    <Project Path="Samples/Lights/Lights.csproj" />
+    <Project Path="Samples/LightStress/LightStress.csproj" />
     <Project Path="Samples/Monkey/Monkey.csproj" />
     <Project Path="Samples/RenderTexture/RenderTexture.csproj" />
     <Project Path="Samples/SplitScreen/SplitScreen.csproj" />

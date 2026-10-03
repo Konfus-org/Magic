@@ -3,7 +3,6 @@ using HexaGen.Runtime;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
-using Magic.Contexts.Input;
 using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Magic.Services;
@@ -28,9 +27,19 @@ namespace ImGuiOverlayGem;
 internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 {
     private const int InputBytes = 256;
+
+    // Text anchored in the world sits on a dark plate, so it reads over anything behind it.
+    private const uint WorldTextPlate = 0xC0000000;
+    private const uint LinesShadow = 0xFF000000;
+    private static readonly Vector2 WorldTextPadding = new(4f, 2f);
+
+    // Where the list down the left of the window starts.
+    private static readonly Vector2 LinesMargin = new(8f, 8f);
     private const string FontPath = "Fonts/MontserratMedium.otf";
 
-    /// <summary>ImGui's -FLT_MIN width: up to the right edge of whatever the field is in.</summary>
+    /// <summary>
+    /// ImGui's -FLT_MIN width: up to the right edge of whatever the field is in.
+    /// </summary>
     private const float Stretch = -1.17549435E-38f;
 
     private static readonly VertexBufferLayout[] VertexBuffers = [new(0, (uint)sizeof(ImDrawVert))];
@@ -109,7 +118,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
             _font.Free();
     }
 
-    /// <summary>Feeds the main window's input events to ImGui.</summary>
+    /// <summary>
+    /// Feeds the main window's input events to ImGui.
+    /// </summary>
     public void Update(in Frame frame)
     {
         ImGui.SetCurrentContext(_context);
@@ -145,7 +156,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         }
     }
 
-    /// <summary>Ends the frame the widgets went into, draws it over the main window, and starts the next.</summary>
+    /// <summary>
+    /// Ends the frame the widgets went into, draws it over the main window, and starts the next.
+    /// </summary>
     public void Render(in Frame frame)
     {
         ImGui.SetCurrentContext(_context);
@@ -170,7 +183,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
             Begin(title, closable, scrollable);
     }
 
-    /// <summary>The window or nested view; a window gets a close button writing to <paramref name="visible"/> unless it is null.</summary>
+    /// <summary>
+    /// The window or nested view; a window gets a close button writing to <paramref name="visible"/> unless it is null.
+    /// </summary>
     private void Begin(string title, bool* visible, bool scrollable)
     {
         int depth = _depth++;
@@ -226,9 +241,47 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         _openViews[_depth - 1].Closed.Add((level.Id, ImGui.GetCursorPosY()));
     }
 
-    public void Text(string text)
+    public void Text(string text, Color color)
     {
+        ImGui.PushStyleColor(ImGuiCol.Text, Packed(color));
         ImGui.TextUnformatted(text);
+        ImGui.PopStyleColor();
+    }
+
+    public void Text(Vector2 pixel, string text, Color color)
+    {
+        // ImGui lays out in the window's own units, which a scaled display makes fewer than its pixels.
+        Vector2 center = pixel / ImGui.GetIO().DisplayFramebufferScale;
+        Vector2 size = ImGui.CalcTextSize(text);
+        Vector2 corner = center - (size * 0.5f);
+
+        ImDrawListPtr over = ImGui.GetForegroundDrawList();
+        over.AddRectFilled(corner - WorldTextPadding, corner + size + WorldTextPadding, WorldTextPlate, 3f);
+        over.AddText(corner, Packed(color), text);
+    }
+
+    public void Lines(ReadOnlySpan<DebugLine> lines)
+    {
+        // As many as fit under each other, the last ones: the first are the oldest.
+        float lineHeight = ImGui.GetTextLineHeightWithSpacing();
+        int fitting = Math.Max(1, (int)((ImGui.GetIO().DisplaySize.Y - (2f * LinesMargin.Y)) / lineHeight));
+        ImDrawListPtr over = ImGui.GetForegroundDrawList();
+        Vector2 at = LinesMargin;
+        foreach (DebugLine line in lines[Math.Max(0, lines.Length - fitting)..])
+        {
+            // No plate behind the list: a dark copy one pixel down and right keeps it readable over a bright scene.
+            over.AddText(at + Vector2.One, LinesShadow, line.Text);
+            over.AddText(at, Packed(line.Color), line.Text);
+            at.Y += lineHeight;
+        }
+    }
+
+    /// <summary>
+    /// The colour as ImGui packs one: alpha, blue, green, red from the top byte down.
+    /// </summary>
+    private static uint Packed(Color color)
+    {
+        return ((uint)color.A << 24) | ((uint)color.B << 16) | ((uint)color.G << 8) | color.R;
     }
 
     public bool Button(string label)
@@ -327,7 +380,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         return hidden < 0 ? "##" + label : label[hidden..];
     }
 
-    /// <summary>One of the overlay shaders, or null (logged) when it is missing or does not compile: then nothing is drawn.</summary>
+    /// <summary>
+    /// One of the overlay shaders, or null (logged) when it is missing or does not compile: then nothing is drawn.
+    /// </summary>
     private static CompiledShader? Compile(Assets assets, IRendering rendering, string path, GpuStage stage, string includes)
     {
         Shader? shader = assets.Load(assets.Find<Shader>("Shaders/" + path));
@@ -344,7 +399,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         return compiled.Ok ? compiled.Payload : null;
     }
 
-    /// <summary>The engine's look: violet glass, lilac edges, pink where something is held, white text, everything rounded.</summary>
+    /// <summary>
+    /// The engine's look: violet glass, lilac edges, pink where something is held, white text, everything rounded.
+    /// </summary>
     private static void ApplyStyle()
     {
         ImGui.StyleColorsDark();
@@ -446,22 +503,26 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         config.Destroy(); // the atlas took a copy
     }
 
-    private static Font FontOf(ImFontConfig* source)
+    private static Font? FontOf(ImFontConfig* source)
     {
-        return (Font)GCHandle.FromIntPtr(*(nint*)source->FontData).Target!;
+        return GCHandle.FromIntPtr(*(nint*)source->FontData).Target as Font;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static byte ContainsGlyph(ImFontAtlas* atlas, ImFontConfig* source, uint codepoint)
     {
-        return (byte)(FontOf(source).Glyphs.ContainsKey(codepoint) ? 1 : 0);
+        return (byte)(FontOf(source) is { } font && font.Glyphs.ContainsKey(codepoint) ? 1 : 0);
     }
 
-    /// <summary>The line metrics of the font at the size ImGui draws it.</summary>
+    /// <summary>
+    /// The line metrics of the font at the size ImGui draws it.
+    /// </summary>
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static byte InitBaked(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData)
     {
-        Font font = FontOf(source);
+        if (FontOf(source) is not { } font)
+            return 0;
+
         float scale = baked->Size / font.LineHeight;
         baked->Ascent = font.Ascent * scale;
         baked->Descent = (font.Ascent - font.LineHeight) * scale;
@@ -476,8 +537,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static byte LoadGlyph(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData, uint codepoint, ImFontGlyph* glyph, float* advance)
     {
-        Font font = FontOf(source);
-        if (!font.Glyphs.TryGetValue(codepoint, out Glyph loaded))
+        if (FontOf(source) is not { } font || !font.Glyphs.TryGetValue(codepoint, out Glyph loaded))
             return 0;
 
         float scale = baked->Size / font.LineHeight;
@@ -522,7 +582,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         ImGui.NewFrame();
     }
 
-    /// <summary>ImGui's draw lists as one upload each of vertices (in window pixels) and indices, then one render pass of draws over the window.</summary>
+    /// <summary>
+    /// ImGui's draw lists as one upload each of vertices (in window pixels) and indices, then one render pass of draws over the window.
+    /// </summary>
     private void Draw(ImDrawDataPtr data, IWindow window, RenderCommands commands)
     {
         int vertexCount = data.TotalVtxCount, indexCount = data.TotalIdxCount;
@@ -597,7 +659,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         commands.EndRenderPass();
     }
 
-    /// <summary>The pipeline for the window's swapchain format, made the first time; none when the shaders did not compile.</summary>
+    /// <summary>
+    /// The pipeline for the window's swapchain format, made the first time; none when the shaders did not compile.
+    /// </summary>
     private GpuPipeline Pipeline(uint window)
     {
         if (_vertexShader is null || _fragmentShader is null)
@@ -621,7 +685,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         return pipeline;
     }
 
-    /// <summary>The bytes into the buffer, made (again) bigger first when they do not fit.</summary>
+    /// <summary>
+    /// The bytes into the buffer, made (again) bigger first when they do not fit.
+    /// </summary>
     private void Upload(ref GpuBuffer buffer, ref uint size, GpuBufferUsage usage, ReadOnlySpan<byte> bytes)
     {
         if (!buffer.IsValid || size < bytes.Length)
@@ -670,7 +736,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         }
     }
 
-    /// <summary>The texture's pixels into its GPU texture, made again when the size changed.</summary>
+    /// <summary>
+    /// The texture's pixels into its GPU texture, made again when the size changed.
+    /// </summary>
     private void UpdateTexture(uint id, ImTextureDataPtr texture)
     {
         if (!_textures.TryGetValue(id, out (GpuTexture Texture, int Width, int Height) known))
@@ -686,7 +754,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         _rendering.Upload(new TextureRegion(known.Texture), Rgba(texture));
     }
 
-    /// <summary>The texture's pixels as RGBA8: as they are, or Alpha8 made white with the coverage as alpha.</summary>
+    /// <summary>
+    /// The texture's pixels as RGBA8: as they are, or Alpha8 made white with the coverage as alpha.
+    /// </summary>
     private static byte[] Rgba(ImTextureDataPtr texture)
     {
         int count = texture.Width * texture.Height;
@@ -704,7 +774,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         return rgba;
     }
 
-    /// <summary>One open <see cref="Begin"/>: a window, or a view nested in one, and the views nested in it that closed where.</summary>
+    /// <summary>
+    /// One open <see cref="Begin"/>: a window, or a view nested in one, and the views nested in it that closed where.
+    /// </summary>
     private sealed class Level
     {
         public string Id { get; set; } = "";
@@ -716,7 +788,9 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         public List<(string Id, float ClosedAt)> Closed { get; } = [];
     }
 
-    /// <summary>A document's text as the NUL-terminated UTF-8 ImGui edits, with room to type into unless read-only.</summary>
+    /// <summary>
+    /// A document's text as the NUL-terminated UTF-8 ImGui edits, with room to type into unless read-only.
+    /// </summary>
     private sealed class DocumentBuffer
     {
         public DocumentBuffer(string text, bool readOnly)

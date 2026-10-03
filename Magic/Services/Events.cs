@@ -22,7 +22,9 @@ public sealed class Events
             _queued.Add(e);
     }
 
-    /// <summary>Calls <paramref name="handler"/> with every event of <paramref name="type"/>, main thread, until disposed.</summary>
+    /// <summary>
+    /// Calls <paramref name="handler"/> with every event of <paramref name="type"/>, main thread, until disposed.
+    /// </summary>
     public IDisposable Watch(EventType type, Action<Event> handler)
     {
         Watcher watcher = new(this, type, handler);
@@ -31,7 +33,9 @@ public sealed class Events
         return watcher;
     }
 
-    /// <summary>Main thread, once a frame: takes the queue, runs the watchers over it and returns it for the frame.</summary>
+    /// <summary>
+    /// Main thread, once a frame: takes the queue, runs the watchers over it and returns it for the frame.
+    /// </summary>
     public Event[] NextFrame()
     {
         Event[] events;

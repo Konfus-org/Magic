@@ -2,7 +2,9 @@ using Magic.Attributes;
 
 namespace Magic.Contexts.Assets;
 
-/// <summary>Pixel format of the stored data. The <c>Srgb</c> variants decode to linear when sampled.</summary>
+/// <summary>
+/// Pixel format of the stored data. The <c>Srgb</c> variants decode to linear when sampled.
+/// </summary>
 public enum TextureFormat : byte
 {
     Rgba8Unorm,
@@ -28,7 +30,9 @@ public enum TextureUsage : byte
     Ui
 }
 
-/// <summary>What sampling outside 0..1 reads.</summary>
+/// <summary>
+/// What sampling outside 0..1 reads.
+/// </summary>
 public enum TextureWrap : byte
 {
     Repeat,
@@ -36,7 +40,9 @@ public enum TextureWrap : byte
     MirroredRepeat
 }
 
-/// <summary><see cref="Nearest"/> is for pixel art and lookup tables; everything else filters.</summary>
+/// <summary>
+/// <see cref="Nearest"/> is for pixel art and lookup tables; everything else filters.
+/// </summary>
 public enum TextureFilter : byte
 {
     Linear,
@@ -53,7 +59,9 @@ public enum TextureChannels : byte
     Rgb
 }
 
-/// <summary>One mip level: its size and where its bytes sit in <see cref="Texture.Pixels"/>.</summary>
+/// <summary>
+/// One mip level: its size and where its bytes sit in <see cref="Texture.Pixels"/>.
+/// </summary>
 public readonly record struct TextureLevel(int Width, int Height, int Offset, int Size);
 
 /// <summary>
@@ -77,21 +85,27 @@ public sealed class Texture : Asset
     [MetaData]
     public TextureUsage Usage { get; set; }
 
-    /// <summary>Only honoured for textures bound on their own; pooled material textures share one sampler.</summary>
+    /// <summary>
+    /// Only honoured for textures bound on their own; pooled material textures share one sampler.
+    /// </summary>
     [MetaData]
     public TextureWrap Wrap { get; set; }
 
     [MetaData]
     public TextureFilter Filter { get; set; }
 
-    /// <summary>Whether a mip chain was asked for; <see cref="Levels"/> says whether one was produced.</summary>
+    /// <summary>
+    /// Whether a mip chain was asked for; <see cref="Levels"/> says whether one was produced.
+    /// </summary>
     [MetaData]
     public bool Mipmaps { get; set; } = true;
 
     [MetaData]
     public TextureChannels Channels { get; set; }
 
-    /// <summary>For a vector image (svg): the pixel size to rasterise it at, or 0 for the size the file states.</summary>
+    /// <summary>
+    /// For a vector image (svg): the pixel size to rasterise it at, or 0 for the size the file states.
+    /// </summary>
     [MetaData]
     public int Size { get; set; }
 

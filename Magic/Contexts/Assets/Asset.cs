@@ -1,3 +1,4 @@
+using Magic.Attributes;
 using System.Text.Json.Serialization;
 
 namespace Magic.Contexts.Assets;
@@ -11,21 +12,36 @@ namespace Magic.Contexts.Assets;
 /// </summary>
 public abstract class Asset
 {
-    /// <summary>The id from the sidecar; what a <see cref="Handle{T}"/> carries.</summary>
+    /// <summary>
+    /// The id from the sidecar; what a <see cref="Handle{T}"/> carries.
+    /// </summary>
     public ulong Id { get; set; }
 
     public int Version { get; set; } = 1;
 
-    /// <summary>Relative to the root it was found under (Resources or Assets), forward slashes.</summary>
+    /// <summary>
+    /// Relative to the root it was found under (Resources or Assets), forward slashes.
+    /// </summary>
     [JsonIgnore]
     public string Path { get; set; } = "";
 
     [JsonIgnore]
     public string Name => System.IO.Path.GetFileNameWithoutExtension(Path);
 
-    /// <summary>The folder <see cref="Path"/> is in, in the same form (forward slashes, no trailing one); empty at the root.</summary>
+    /// <summary>
+    /// The folder <see cref="Path"/> is in, in the same form (forward slashes, no trailing one); empty at the root.
+    /// </summary>
     [JsonIgnore]
     public string Folder => Path[..Math.Max(0, Path.LastIndexOf('/'))];
+
+    /// <summary>
+    /// Lesser versions of this asset, cheaper stand-ins of the same type: the id of each by its threshold (for a
+    /// model the height on screen, as a fraction of the view's, under which it is drawn; for a chunk the metres from
+    /// a camera beyond which it is spawned). Written in the sidecar by whoever authored them; an asset with none
+    /// gets the ones an <see cref="Interfaces.ILODGenerator{T}"/> makes, when a gem provides one for its type.
+    /// </summary>
+    [MetaData]
+    public Dictionary<float, ulong> Lods { get; set; } = [];
 
     /// <summary>
     /// Roughly what the loaded asset holds in memory, for the pool's budgets; 0 means about its file's size. Types whose

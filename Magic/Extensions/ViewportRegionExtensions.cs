@@ -7,7 +7,9 @@ public static class ViewportRegionExtensions
 {
     extension(ViewportRegion region)
     {
-        /// <summary>The pixels of a <paramref name="width"/> × <paramref name="height"/> target the region covers, origin top left.</summary>
+        /// <summary>
+        /// The pixels of a <paramref name="width"/> × <paramref name="height"/> target the region covers, origin top left.
+        /// </summary>
         public Rectangle ToPixels(int width, int height)
         {
             int hw = width / 2, hh = height / 2;

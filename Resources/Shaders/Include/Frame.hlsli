@@ -36,16 +36,16 @@ cbuffer Frame : UNIFORM(0)
 
     uint2 HiZSize;          // level 0 of the depth pyramid, in texels
     uint HiZFirstLevel;     // the first level the pyramid build pass being dispatched writes
-    uint FramePad;
+    float LodBias;          // scales an instance's height on screen before its LOD thresholds
 
     float3 SunDirection;    // the direction the sun's light travels, normalised
-    float SunDirectionPad;
+    float Far;              // the far plane's view-space distance; infinite for a perspective view without one
 
     float3 SunColor;        // linear colour times intensity
     float SunColorPad;
 
     float3 Ambient;         // linear
-    float AmbientPad;
+    uint LightCount;        // rows in the lights buffer (Include/Structs.hlsli GpuLight): the point and spot lights
 
 #ifdef FRAME_APPEND
     FRAME_APPEND

@@ -3,7 +3,9 @@ using System.Numerics;
 
 namespace Magic.Mathematics;
 
-/// <summary>A sphere; what the GPU culls against. The default has radius 0, which means "unknown".</summary>
+/// <summary>
+/// A sphere; what the GPU culls against. The default has radius 0, which means "unknown".
+/// </summary>
 public readonly record struct BoundingSphere(Vector3 Center, float Radius)
 {
     /// <summary>

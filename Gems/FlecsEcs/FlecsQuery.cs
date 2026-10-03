@@ -23,10 +23,20 @@ internal abstract unsafe class FlecsQueryBuilder(FlecsEcs ecs, int terms)
 
     protected FlecsEcs Owner { get; } = ecs;
 
-    /// <summary>Marks the last component term as read from the parent, breadth first, optional.</summary>
+    /// <summary>
+    /// Marks the last component term as read from the parent, breadth first, optional.
+    /// </summary>
     protected void CascadeLast()
     {
         Builder.TermAt(terms - 1).Cascade(Ecs.ChildOf).Optional();
+    }
+
+    /// <summary>
+    /// Adds "not T" on the entity or anything above it.
+    /// </summary>
+    protected void WithoutSelfOrParents<T>() where T : unmanaged
+    {
+        Builder.Without<T>().Self().Up(Ecs.ChildOf);
     }
 }
 
@@ -56,6 +66,8 @@ internal sealed class FlecsQueryBuilder<T1> : FlecsQueryBuilder, IEcsQueryBuilde
 
     public IEcsQueryBuilder<T1> Without<T>() where T : unmanaged { Builder.Without<T>(); return this; }
 
+    public IEcsQueryBuilder<T1> WithoutAbove<T>() where T : unmanaged { WithoutSelfOrParents<T>(); return this; }
+
     public IEcsQueryBuilder<T1> Cascade() { CascadeLast(); return this; }
 
     public IEcsQuery<T1> Build() => new FlecsQuery<T1>(Owner, Builder.Build());
@@ -69,6 +81,8 @@ internal sealed class FlecsQueryBuilder<T1, T2> : FlecsQueryBuilder, IEcsQueryBu
     public IEcsQueryBuilder<T1, T2> With<T>() where T : unmanaged { Builder.With<T>(); return this; }
 
     public IEcsQueryBuilder<T1, T2> Without<T>() where T : unmanaged { Builder.Without<T>(); return this; }
+
+    public IEcsQueryBuilder<T1, T2> WithoutAbove<T>() where T : unmanaged { WithoutSelfOrParents<T>(); return this; }
 
     public IEcsQueryBuilder<T1, T2> Cascade() { CascadeLast(); return this; }
 
@@ -84,6 +98,8 @@ internal sealed class FlecsQueryBuilder<T1, T2, T3> : FlecsQueryBuilder, IEcsQue
 
     public IEcsQueryBuilder<T1, T2, T3> Without<T>() where T : unmanaged { Builder.Without<T>(); return this; }
 
+    public IEcsQueryBuilder<T1, T2, T3> WithoutAbove<T>() where T : unmanaged { WithoutSelfOrParents<T>(); return this; }
+
     public IEcsQueryBuilder<T1, T2, T3> Cascade() { CascadeLast(); return this; }
 
     public IEcsQuery<T1, T2, T3> Build() => new FlecsQuery<T1, T2, T3>(Owner, Builder.Build());
@@ -97,6 +113,8 @@ internal sealed class FlecsQueryBuilder<T1, T2, T3, T4> : FlecsQueryBuilder, IEc
     public IEcsQueryBuilder<T1, T2, T3, T4> With<T>() where T : unmanaged { Builder.With<T>(); return this; }
 
     public IEcsQueryBuilder<T1, T2, T3, T4> Without<T>() where T : unmanaged { Builder.Without<T>(); return this; }
+
+    public IEcsQueryBuilder<T1, T2, T3, T4> WithoutAbove<T>() where T : unmanaged { WithoutSelfOrParents<T>(); return this; }
 
     public IEcsQueryBuilder<T1, T2, T3, T4> Cascade() { CascadeLast(); return this; }
 

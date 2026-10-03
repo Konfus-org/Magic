@@ -65,7 +65,9 @@ public sealed class FrustumTests
         Assert.Equal(Vector3.Zero, far.Normal);
     }
 
-    /// <summary>A 90° camera at the origin looking down +Z, with an infinite far plane.</summary>
+    /// <summary>
+    /// A 90° camera at the origin looking down +Z, with an infinite far plane.
+    /// </summary>
     private static Frustum Frustum90()
     {
         return Frustum.FromViewProjection(Matrix4x4.PerspectiveReverseZ(float.DegreesToRadians(90f), 1f, 0.1f));

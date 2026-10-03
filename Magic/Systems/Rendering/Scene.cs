@@ -1,5 +1,3 @@
-using Magic.Contexts;
-using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Extensions;
@@ -13,8 +11,8 @@ namespace Magic.Systems.Rendering;
 /// <summary>
 /// A frame of the scene, in two steps. <see cref="Plan"/> decides it: which render targets, which views in each and
 /// their rectangles, with every texture and buffer sized and every view's constants built. <see cref="Record"/> then
-/// turns the plan into commands and changes nothing: for each target, cull, draw early, with occlusion build the pyramid
-/// and draw late, run the data passes, and present: blit the result to the window's swapchain image, or into every mip
+/// turns the plan into commands and changes nothing: for each target, cull, draw early into the gbuffer, with occlusion
+/// build the pyramid and draw late, light the gbuffer into Hdr, run the data passes, and present: blit the result to the window's swapchain image, or into every mip
 /// level of the render texture's pool layer. Render textures go first, so a window drawn after them this frame samples
 /// what they show now. A main window no camera draws into is cleared, so whatever a gem draws over it later lands on
 /// something defined.
@@ -47,7 +45,9 @@ internal static class Scene
             plan.ClearWindow = main;
     }
 
-    /// <summary>The plan as commands. Returns the draws and dispatches recorded.</summary>
+    /// <summary>
+    /// The plan as commands. Returns the draws and dispatches recorded.
+    /// </summary>
     public static (int Draws, int Dispatches) Record(RenderContext ctx, RenderCommands commands, FramePlan plan)
     {
         (int draws, int dispatches) = (0, 0);
@@ -69,7 +69,9 @@ internal static class Scene
         return (draws, dispatches);
     }
 
-    /// <summary>The targets of one kind (render textures, or windows) that are not planned yet, each with its passes' outputs and its views.</summary>
+    /// <summary>
+    /// The targets of one kind (render textures, or windows) that are not planned yet, each with its passes' outputs and its views.
+    /// </summary>
     private static void PlanTargets(
         RenderContext ctx,
         FramePlan plan,
@@ -104,14 +106,17 @@ internal static class Scene
         }
     }
 
-    /// <summary>One view of a target: its rectangle, its buffers made ready for this frame, and its constants.</summary>
+    /// <summary>
+    /// One view of a target: its rectangle, its buffers made ready for this frame, and its constants.
+    /// </summary>
     private static ViewPlan PlanView(RenderContext ctx, in View view, int index, FrameTargets targets, in LightingConstants lighting, float time)
     {
         Rectangle rect = view.Camera.Viewport.ToPixels((int)targets.Width, (int)targets.Height);
         ViewBuffers buffers = Culling.View(ctx, index);
         Culling.Prepare(ctx, buffers, rect.Width, rect.Height);
+        Lighting.Prepare(ctx, buffers, rect.Width, rect.Height);
         FrameConstants constants = FrameConstants.Build(
-            view, rect, buffers.HiZSize, time, Culling.MinObjectPixels, lighting);
+            view, rect, buffers.HiZSize, time, Culling.MinObjectPixels, MathF.Max(0.01f, ctx.Settings.LodBias), lighting);
 
         return new ViewPlan(index, rect, buffers, constants);
     }
@@ -127,7 +132,9 @@ internal static class Scene
         return false;
     }
 
-    /// <summary>The window's targets at the settings' resolution (the window's own size without one); null when it is not open (warned once, its targets released) or minimised.</summary>
+    /// <summary>
+    /// The window's targets at the settings' resolution (the window's own size without one); null when it is not open (warned once, its targets released) or minimised.
+    /// </summary>
     private static FrameTargets? PlanWindow(RenderContext ctx, IWindowRegistry? windows, RenderTarget target)
     {
         if (target.Window == 0)
@@ -184,15 +191,17 @@ internal static class Scene
             gone.Release(ctx.Gpu);
     }
 
-    /// <summary>Window 0 is the main window.</summary>
+    /// <summary>
+    /// Window 0 is the main window.
+    /// </summary>
     private static RenderTarget Resolve(RenderTarget target, uint main)
     {
         return !target.IsTexture && target.Window == 0 ? RenderTarget.Of(main) : target;
     }
 
     /// <summary>
-    /// One render target: cull and draw its views into its textures (early, then with occlusion the late pass), run the
-    /// data passes, present. Returns the draws and dispatches recorded.
+    /// One render target: cull and draw its views into its gbuffer (early, then with occlusion the late pass), light
+    /// each view into Hdr, run the data passes, present. Returns the draws and dispatches recorded.
     /// </summary>
     private static (int Draws, int Dispatches) RecordTarget(
         RenderContext ctx,
@@ -208,9 +217,15 @@ internal static class Scene
             dispatches += Culling.RecordEarly(ctx, commands, view.Buffers, view.Constants);
 
         // Early draws: everything the previous frame's pyramid did not hide.
-        commands.BeginRenderPass(targets.Hdr.Texture, GpuLoad.Clear, targets.Depth.Texture);
+        Span<GpuTexture> gbuffer = stackalloc GpuTexture[GBuffer.ColorFormats.Length];
+        targets.GBuffer.Colors(gbuffer);
+        commands.BeginRenderPass(gbuffer, GpuLoad.Clear, targets.Depth.Texture);
         foreach (ref readonly ViewPlan view in views)
+        {
             draws += DrawView(ctx, commands, view, view.Buffers.DrawArgsEarly.Handle);
+            draws += Glows.Record(ctx, commands, view);
+        }
+
         commands.EndRenderPass();
 
         if (ctx.Settings.OcclusionCulling)
@@ -219,11 +234,25 @@ internal static class Scene
             foreach (ref readonly ViewPlan view in views)
                 dispatches += Culling.RecordLate(ctx, commands, view.Buffers, view.Constants, targets.Depth.Texture);
 
-            commands.BeginRenderPass(targets.Hdr.Texture, GpuLoad.Load, targets.Depth.Texture);
+            commands.BeginRenderPass(gbuffer, GpuLoad.Load, targets.Depth.Texture);
             foreach (ref readonly ViewPlan view in views)
-                draws += DrawView(ctx, commands, view, view.Buffers.DrawArgsLate!.Handle);
+            {
+                if (view.Buffers.Occlusion is { } occlusion)
+                    draws += DrawView(ctx, commands, view, occlusion.DrawArgsLate.Handle);
+            }
             commands.EndRenderPass();
         }
+
+        // The lighting writes every pixel of a view into Hdr, and nothing else of it: when the views leave part of
+        // the target uncovered, that part is cleared first.
+        if (views.Length != 1 || views[0].Rect != new Rectangle(0, 0, (int)targets.Width, (int)targets.Height))
+        {
+            commands.BeginRenderPass(targets.Hdr.Texture, GpuLoad.Clear);
+            commands.EndRenderPass();
+        }
+
+        foreach (ref readonly ViewPlan view in views)
+            dispatches += Lighting.Record(ctx, commands, targets, view);
 
         // Ldr is what is shown and what a screenshot reads. A tonemap pass writes it; when no listed pass did (none
         // listed, or it is still compiling or broken) the linear scene is copied into it, so neither is ever stale.

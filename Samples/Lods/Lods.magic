@@ -1,0 +1,5 @@
+{
+    "name": "Lods",
+    "gems": ["default", "Lods"],
+    "entryPoint": { "id": 3061 }
+}

@@ -1,7 +1,6 @@
 using Magic.Contexts.Assets;
 using Magic.Extensions;
 using Magic.Mathematics;
-using System.Drawing;
 using System.Numerics;
 using System.Text.Json.Serialization;
 
@@ -78,7 +77,9 @@ public struct Camera : IComponent, IEquatable<Camera>
 
     public Projection Projection { get; set; }
 
-    /// <summary>Vertical field of view in degrees; for an orthographic camera, the vertical size in metres.</summary>
+    /// <summary>
+    /// Vertical field of view in degrees; for an orthographic camera, the vertical size in metres.
+    /// </summary>
     public float FieldOfView
     {
         readonly get => _fieldOfView == 0f ? 60f : _fieldOfView;
@@ -110,13 +111,17 @@ public struct Camera : IComponent, IEquatable<Camera>
         return new() { Projection = Projection.Perspective, FieldOfView = fovDegrees, Near = near, Far = far };
     }
 
-    /// <summary><paramref name="size"/> is the vertical extent in metres; the width follows the viewport's aspect.</summary>
+    /// <summary>
+    /// <paramref name="size"/> is the vertical extent in metres; the width follows the viewport's aspect.
+    /// </summary>
     public static Camera Orthographic(float size, float near, float far)
     {
         return new() { Projection = Projection.Orthographic, FieldOfView = size, Near = near, Far = far };
     }
 
-    /// <summary>The rotation-only view matrix for a camera at <paramref name="world"/>: the inverse of its orientation.</summary>
+    /// <summary>
+    /// The rotation-only view matrix for a camera at <paramref name="world"/>: the inverse of its orientation.
+    /// </summary>
     public static Matrix4x4 ViewMatrix(in Matrix4x4 world)
     {
         Vector3 right = Vector3.Normalize(world.Right);
@@ -139,13 +144,17 @@ public struct Camera : IComponent, IEquatable<Camera>
         return Matrix4x4.PerspectiveReverseZ(float.DegreesToRadians(FieldOfView), aspect, Near, Far);
     }
 
-    /// <summary>Camera-relative: <see cref="ViewMatrix"/> times <see cref="ProjectionMatrix"/>.</summary>
+    /// <summary>
+    /// Camera-relative: <see cref="ViewMatrix"/> times <see cref="ProjectionMatrix"/>.
+    /// </summary>
     public readonly Matrix4x4 ViewProjection(in Matrix4x4 world, float aspect)
     {
         return ViewMatrix(world) * ProjectionMatrix(aspect);
     }
 
-    /// <summary>The camera-relative view volume: test positions taken relative to <c>world.Translation</c>.</summary>
+    /// <summary>
+    /// The camera-relative view volume: test positions taken relative to <c>world.Translation</c>.
+    /// </summary>
     public readonly Frustum Frustum(in Matrix4x4 world, float aspect)
     {
         return Mathematics.Frustum.FromViewProjection(ViewProjection(world, aspect));
@@ -171,7 +180,9 @@ public struct Camera : IComponent, IEquatable<Camera>
         return new Ray(world.Translation, direction);
     }
 
-    /// <summary>By the values the camera reads as, so <c>{}</c> equals <see cref="Default"/> spelled out.</summary>
+    /// <summary>
+    /// By the values the camera reads as, so <c>{}</c> equals <see cref="Default"/> spelled out.
+    /// </summary>
     public readonly bool Equals(Camera other)
     {
         return Projection == other.Projection && FieldOfView == other.FieldOfView && Near == other.Near && Far == other.Far

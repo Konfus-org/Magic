@@ -1,6 +1,5 @@
 using Flecs.NET.Bindings;
 using Flecs.NET.Core;
-using Magic;
 using Magic.Contexts;
 using Magic.Interfaces;
 using System.Runtime.CompilerServices;
@@ -89,7 +88,7 @@ internal abstract unsafe class FlecsSystemBuilder(FlecsEcs ecs, string name, Upd
 
     protected FlecsEcs Owner { get; } = ecs;
 
-    protected IDisposable Schedule(Ecs.RunCallback run, Delegate callback)
+    protected IDisposable Schedule(Ecs.RunCallback run)
     {
         return new FlecsSystem(Owner, Builder.Run(run).Entity.Id);
     }
@@ -118,7 +117,7 @@ internal sealed unsafe class FlecsSystemBuilder<T1> : FlecsSystemBuilder, IEcsPi
             for (int i = 0, count = iter->count; i < count; i++)
                 action(dt, new Handle(iter->entities[i]), ref Unsafe.Add(ref c1, i * s1));
         }
-    }, action);
+    });
 
     public IDisposable Run(PipelineChunkAction<T1> action) => Schedule((Iter it) =>
     {
@@ -126,7 +125,7 @@ internal sealed unsafe class FlecsSystemBuilder<T1> : FlecsSystemBuilder, IEcsPi
 
         while (it.Next())
             action(dt, FlecsIter.Entities(it.Handle), FlecsIter.Column<T1>(it.Handle, 0));
-    }, action);
+    });
 }
 
 internal sealed unsafe class FlecsSystemBuilder<T1, T2> : FlecsSystemBuilder, IEcsPipelineBuilder<T1, T2>
@@ -153,7 +152,7 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2> : FlecsSystemBuilder, IE
             for (int i = 0, count = iter->count; i < count; i++)
                 action(dt, new Handle(iter->entities[i]), ref Unsafe.Add(ref c1, i * s1), ref Unsafe.Add(ref c2, i * s2));
         }
-    }, action);
+    });
 
     public IDisposable Run(PipelineChunkAction<T1, T2> action) => Schedule((Iter it) =>
     {
@@ -161,7 +160,7 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2> : FlecsSystemBuilder, IE
 
         while (it.Next())
             action(dt, FlecsIter.Entities(it.Handle), FlecsIter.Column<T1>(it.Handle, 0), FlecsIter.Column<T2>(it.Handle, 1));
-    }, action);
+    });
 }
 
 internal sealed unsafe class FlecsSystemBuilder<T1, T2, T3> : FlecsSystemBuilder, IEcsPipelineBuilder<T1, T2, T3>
@@ -196,7 +195,7 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2, T3> : FlecsSystemBuilder
                     ref Unsafe.Add(ref c3, i * s3));
             }
         }
-    }, action);
+    });
 
     public IDisposable Run(PipelineChunkAction<T1, T2, T3> action) => Schedule((Iter it) =>
     {
@@ -211,7 +210,7 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2, T3> : FlecsSystemBuilder
                 FlecsIter.Column<T2>(it.Handle, 1),
                 FlecsIter.Column<T3>(it.Handle, 2));
         }
-    }, action);
+    });
 }
 
 internal sealed unsafe class FlecsSystemBuilder<T1, T2, T3, T4> : FlecsSystemBuilder, IEcsPipelineBuilder<T1, T2, T3, T4>
@@ -248,7 +247,7 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2, T3, T4> : FlecsSystemBui
                     ref Unsafe.Add(ref c4, i * s4));
             }
         }
-    }, action);
+    });
 
     public IDisposable Run(PipelineChunkAction<T1, T2, T3, T4> action) => Schedule((Iter it) =>
     {
@@ -264,5 +263,5 @@ internal sealed unsafe class FlecsSystemBuilder<T1, T2, T3, T4> : FlecsSystemBui
                 FlecsIter.Column<T3>(it.Handle, 2),
                 FlecsIter.Column<T4>(it.Handle, 3));
         }
-    }, action);
+    });
 }

@@ -2,13 +2,17 @@ using Magic.Contexts.Assets;
 
 namespace Magic.Contexts.Components;
 
-/// <summary>Per-instance opt-outs from work the renderer does by default.</summary>
+/// <summary>
+/// Per-instance opt-outs from work the renderer does by default.
+/// </summary>
 [Flags]
 public enum RenderFlags : byte
 {
     None = 0,
 
-    /// <summary>Never cull for being small on screen: a distant landmark that must always be there.</summary>
+    /// <summary>
+    /// Never cull for being small on screen: a distant landmark that must always be there.
+    /// </summary>
     NoSizeCull = 1,
 }
 
@@ -24,6 +28,14 @@ public struct Renderer : IComponent
     public MaterialSlots Materials { get; set; }
 
     public RenderFlags Flags { get; set; }
+
+    /// <summary>
+    /// Metres. The radius the renderer judges by when it culls what is too small on screen to see; 0, the default, is
+    /// the model's own bounds. Set it on a model that is many small things in one, such as a chunk's stand-in, to the
+    /// size of those things: it then goes when they would, not when the whole of it would. In world space, whatever
+    /// the entity's scale.
+    /// </summary>
+    public float CullRadius { get; set; }
 }
 
 /// <summary>
@@ -74,6 +86,8 @@ public struct MaterialSlots
         }
     }
 
-    /// <summary>Slot 0 set, the rest empty: what most renderers need.</summary>
+    /// <summary>
+    /// Slot 0 set, the rest empty: what most renderers need.
+    /// </summary>
     public static MaterialSlots Of(Handle<Material> first) => new() { Slot0 = first };
 }

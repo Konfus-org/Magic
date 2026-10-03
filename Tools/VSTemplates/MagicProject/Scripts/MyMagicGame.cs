@@ -19,7 +19,9 @@ internal sealed class MyMagicGame(IEcs ecs) : IGem
         _moving.Dispose();
     }
 
-    /// <summary>Once a frame; frame.Delta is in seconds.</summary>
+    /// <summary>
+    /// Once a frame; frame.Delta is in seconds.
+    /// </summary>
     public void Update(in Frame frame)
     {
         float delta = frame.Delta;

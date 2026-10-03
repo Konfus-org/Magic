@@ -3,7 +3,9 @@ using SDL3;
 
 namespace SDLInputGem;
 
-/// <summary>SDL's key codes and modifiers as the engine's.</summary>
+/// <summary>
+/// SDL's key codes and modifiers as the engine's.
+/// </summary>
 internal static class SdlKeyExtensions
 {
     extension(SDL.Keycode key)

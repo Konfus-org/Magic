@@ -31,7 +31,9 @@ public sealed partial class Shader : Asset
 
     public string EntryPoint { get; set; } = "main";
 
-    /// <summary>From the file name: <c>.vert.hlsl</c>, <c>.frag.hlsl</c>, <c>.comp.hlsl</c>, <c>.surf.hlsl</c>; anything else (<c>.hlsli</c>) is an include.</summary>
+    /// <summary>
+    /// From the file name: <c>.vert.hlsl</c>, <c>.frag.hlsl</c>, <c>.comp.hlsl</c>, <c>.surf.hlsl</c>; anything else (<c>.hlsli</c>) is an include.
+    /// </summary>
     [JsonIgnore]
     public ShaderStage Stage => Path switch
     {

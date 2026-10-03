@@ -5,10 +5,14 @@ using System.Numerics;
 
 namespace RenderTexture;
 
-/// <summary>Turns its entity around the world's up axis, so the security camera's picture on the monitor visibly moves.</summary>
+/// <summary>
+/// Turns its entity around the world's up axis, so the security camera's picture on the monitor visibly moves.
+/// </summary>
 internal sealed class Spin(Handle entity, IEcs ecs) : IBehavior
 {
-    /// <summary>The chunk sets it beside the script's id.</summary>
+    /// <summary>
+    /// The chunk sets it beside the script's id.
+    /// </summary>
     public float DegreesPerSecond { get; set; }
 
     public void Update(in Frame frame)

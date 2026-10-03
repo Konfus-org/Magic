@@ -11,7 +11,9 @@ internal static class TypeExtensions
 {
     extension(Type type)
     {
-        /// <summary>The constructor instances are made with: the public one with the most parameters, or null.</summary>
+        /// <summary>
+        /// The constructor instances are made with: the public one with the most parameters, or null.
+        /// </summary>
         public ConstructorInfo? Constructor()
         {
             return type.GetConstructors().MaxBy(c => c.GetParameters().Length);
@@ -33,7 +35,7 @@ internal static class TypeExtensions
             {
                 Type wanted = parameters[i].ParameterType;
                 arguments[i] = Array.Find(extras, wanted.IsInstanceOfType)
-                    ?? container.Get(wanted)
+                    ?? (container.TryGet(wanted, out object? provided) ? provided : null)
                     ?? throw new InvalidOperationException($"{type.FullName} needs a {wanted.Name}, which nothing provides.");
             }
 

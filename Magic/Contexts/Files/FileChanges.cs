@@ -20,7 +20,9 @@ internal sealed class FileChanges
             _pending[path] = Stopwatch.GetTimestamp();
     }
 
-    /// <summary>Removes and returns every path quiet for <see cref="Settle"/>, in no particular order.</summary>
+    /// <summary>
+    /// Removes and returns every path quiet for <see cref="Settle"/>, in no particular order.
+    /// </summary>
     public string[] TakeSettled()
     {
         lock (_lock)

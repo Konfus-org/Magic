@@ -3,7 +3,9 @@ using SDL3;
 
 namespace SDLRenderGem;
 
-/// <summary>The engine's GPU enums to SDL's, and the one way back (a swapchain's format).</summary>
+/// <summary>
+/// The engine's GPU enums to SDL's, and the one way back (a swapchain's format).
+/// </summary>
 internal static class FormatExtensions
 {
     extension(GpuFormat format)
@@ -82,6 +84,7 @@ internal static class FormatExtensions
         {
             return format switch
             {
+                GpuVertexFormat.Float => SDL.GPUVertexElementFormat.Float,
                 GpuVertexFormat.Float2 => SDL.GPUVertexElementFormat.Float2,
                 GpuVertexFormat.Float3 => SDL.GPUVertexElementFormat.Float3,
                 GpuVertexFormat.Float4 => SDL.GPUVertexElementFormat.Float4,

@@ -49,7 +49,9 @@ internal static unsafe class FlecsIter
         return ref MemoryMarshal.GetReference(column);
     }
 
-    /// <summary>What an absent optional field reads as in Each(): a default that nobody keeps.</summary>
+    /// <summary>
+    /// What an absent optional field reads as in Each(): a default that nobody keeps.
+    /// </summary>
     private static class Absent<T> where T : unmanaged
     {
         [ThreadStatic]

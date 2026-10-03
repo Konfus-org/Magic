@@ -12,6 +12,12 @@
 #define INSTANCES_PER_PAGE 256   // CullEarly: one group per page (InstanceTable.PageSize)
 #define CANDIDATES_PER_GROUP 256 // CullLate's group, and SeedLateArgs' division into groups
 
+// The share of a LOD threshold over which an instance blends from one version of its mesh into the next.
+// Culling.LodBlend, which the CPU defines when it compiles the cull shaders; without it nothing blends.
+#ifndef LOD_BLEND
+#define LOD_BLEND 0.0
+#endif
+
 // A world-space point in view space: relative to the camera, rotated by the view matrix.
 float3 ToView(float3 world)
 {
@@ -135,17 +141,79 @@ bool IsOccluded(StructuredBuffer<float> hiZ, float3 center, float radius)
     return isHidden;
 }
 
-// A survivor takes the next instanceCount of its bucket's draw arguments and puts its slot at the bucket's
-// firstInstance plus that, in the visible-id list the vertex stage reads through the instance-rate buffer.
-void AppendVisible(
+// A survivor takes the next instanceCount of a bucket's draw arguments and puts its slot at the bucket's
+// firstInstance plus that, in the visible list the vertex stage reads through the instance-rate buffer.
+void AppendToBucket(
     RWStructuredBuffer<GpuDrawArgs> drawArgs,
-    RWStructuredBuffer<uint> visibleIds,
+    RWStructuredBuffer<GpuVisible> visibleIds,
     uint bucket,
-    uint slot)
+    uint slot,
+    float lodFade)
 {
     uint index;
     InterlockedAdd(drawArgs[bucket].instanceCount, 1u, index);
-    visibleIds[drawArgs[bucket].firstInstance + index] = slot;
+
+    GpuVisible visible;
+    visible.slot = slot;
+    visible.lodFade = lodFade;
+    visibleIds[drawArgs[bucket].firstInstance + index] = visible;
+}
+
+// A survivor of the given bucket is drawn in the bucket its size on screen asks for: its own, or that of a
+// lesser version of its mesh once it is small enough. It never switches from one to the next: from a
+// threshold down to LOD_BLEND of it further, it is drawn in both, the finer one dithered out as the lesser one
+// is dithered in (GpuVisible.lodFade), so every bucket a mesh's versions draw in has room for all its
+// instances (Instancing.Group). The early and the late pass both ask, with the same sphere and constants, so
+// they agree. An orthographic view keeps the full mesh.
+void AppendVisible(
+    RWStructuredBuffer<GpuDrawArgs> drawArgs,
+    RWStructuredBuffer<GpuVisible> visibleIds,
+    StructuredBuffer<GpuLodRow> lods,
+    uint bucket,
+    uint slot,
+    float3 center,
+    float radius)
+{
+    GpuLodRow row = lods[bucket];
+    float height = ScreenRadius(center, radius) * 2.0 / ViewSize.y * LodBias;
+    bool isPerspective = IsOrthographic == 0u;
+
+    // The thresholds fall from x to z, so each one passed makes the bucket picked so far the finer one.
+    uint finer = bucket;
+    uint picked = bucket;
+    float threshold = 0.0;
+    [branch] if (isPerspective && row.count > 0u && height < row.thresholds.x)
+    {
+        picked = row.group1;
+        threshold = row.thresholds.x;
+    }
+
+    [branch] if (isPerspective && row.count > 1u && height < row.thresholds.y)
+    {
+        finer = picked;
+        picked = row.group2;
+        threshold = row.thresholds.y;
+    }
+
+    [branch] if (isPerspective && row.count > 2u && height < row.thresholds.z)
+    {
+        finer = picked;
+        picked = row.group3;
+        threshold = row.thresholds.z;
+    }
+
+    // How much of the finer version is left: all of it at the threshold, none LOD_BLEND of the threshold under.
+    float blendHeight = max(threshold * LOD_BLEND, 1e-6);
+    float finerShare = picked != finer ? saturate((height - threshold + blendHeight) / blendHeight) : 0.0;
+    [branch] if (finerShare > 0.0)
+    {
+        AppendToBucket(drawArgs, visibleIds, finer, slot, finerShare);
+        AppendToBucket(drawArgs, visibleIds, picked, slot, -finerShare);
+    }
+    else
+    {
+        AppendToBucket(drawArgs, visibleIds, picked, slot, 1.0);
+    }
 }
 
 #endif

@@ -16,13 +16,19 @@ internal sealed class CameraController(Handle entity, IEcs ecs, IInput input) : 
 {
     private const float MaxPitch = 89f * MathF.PI / 180f;
 
-    /// <summary>Metres per second; the chunk sets it beside the script's id.</summary>
+    /// <summary>
+    /// Metres per second; the chunk sets it beside the script's id.
+    /// </summary>
     public float Speed { get; set; } = 5f;
 
-    /// <summary>What <see cref="Speed"/> is multiplied by while shift is held.</summary>
+    /// <summary>
+    /// What <see cref="Speed"/> is multiplied by while shift is held.
+    /// </summary>
     public float Boost { get; set; } = 4f;
 
-    /// <summary>Degrees turned per point the mouse moves.</summary>
+    /// <summary>
+    /// Degrees turned per point the mouse moves.
+    /// </summary>
     public float Sensitivity { get; set; } = 0.15f;
 
     public void Update(in Frame frame)

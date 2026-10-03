@@ -12,12 +12,14 @@ namespace Magic.Systems.Rendering;
 /// Everything <see cref="IRendering.Debug"/> turns on, in one place, through the same <see cref="IRendering"/> the frame uses: start-up
 /// checks of the conventions every shader is written against (a clockwise triangle is the one that survives back-face
 /// culling; a System.Numerics matrix uploaded untransposed and applied with <c>mul(M, v)</c> agrees with
-/// <c>Vector4.Transform</c>, on this backend), and a periodic check of the GPU cull against a CPU cull of the same rows. A
+/// <c>Vector4.Transform</c>, on this backend), and, with <see cref="Contexts.Settings.RenderSettings.CullingCheck"/>, a periodic check of the GPU cull against a CPU cull of the same rows. A
 /// failure is logged as an error, so a run with <c>--fail-on-error</c> fails.
 /// </summary>
 internal static class RenderChecks
 {
-    /// <summary>How often <see cref="Verify"/> runs: its readbacks stall the frame.</summary>
+    /// <summary>
+    /// How often <see cref="Verify"/> runs: its readbacks stall the frame.
+    /// </summary>
     public const int VerifyEveryFrames = 60;
 
     public static void RunProbes(RenderContext ctx)
@@ -46,7 +48,7 @@ internal static class RenderChecks
 
         uint early = VisibleCount(earlyArgs.Payload);
         // Without occlusion the late pass never runs, so there are no late args.
-        uint late = view.DrawArgsLate is { } lateArgs && ctx.Gpu.Read(lateArgs.Handle, argsBytes) is { Ok: true } read ? VisibleCount(read.Payload) : 0;
+        uint late = view.Occlusion is { } occlusion && ctx.Gpu.Read(occlusion.DrawArgsLate.Handle, argsBytes) is { Ok: true } read ? VisibleCount(read.Payload) : 0;
 
         // The CPU side of the frustum and size tests, from the Core maths rather than the shader. A 2% band around each
         // threshold, because edge instances flip between the two float paths.
@@ -55,35 +57,50 @@ internal static class RenderChecks
         uint cpuMin = 0, cpuMax = 0;
         foreach (ref readonly GpuInstance row in ctx.Instances.Rows)
         {
-            if (!row.Flags.HasFlag(InstanceFlags.Alive))
+            if (!row.Flags.HasFlag(InstanceFlags.Alive) || row.Flags.HasFlag(InstanceFlags.Hidden))
                 continue;
 
             Vector3 center = new Vector3(row.Sphere.X, row.Sphere.Y, row.Sphere.Z) - camera;
             float radius = row.Sphere.W;
             bool surely = true, maybe = true;
+            bool surelyBlends = false, maybeBlends = false;
             if (frame.IsOrthographic == 0)
             {
                 surely &= frustum.Intersects(new BoundingSphere(center, radius * 0.99f));
                 maybe &= frustum.Intersects(new BoundingSphere(center, radius * 1.01f));
+                float z = MathF.Max(Vector3.TransformNormal(center, frame.View).Z, frame.Near);
                 if (!row.Flags.HasFlag(InstanceFlags.NoSizeCull))
                 {
-                    float z = Vector3.TransformNormal(center, frame.View).Z;
-                    float pixels = radius * frame.ProjScale.Y * frame.ViewSize.Y * 0.5f / MathF.Max(z, frame.Near);
+                    float pixels = row.CullRadius * frame.ProjScale.Y * frame.ViewSize.Y * 0.5f / z;
                     surely &= pixels >= frame.MinPixels * 1.02f;
                     maybe &= pixels >= frame.MinPixels * 0.98f;
+                }
+
+                // Blending between two versions of its mesh, it is drawn in both: the last threshold it is under decides.
+                float height = radius * frame.ProjScale.Y / z * frame.LodBias;
+                GpuLodRow lods = ctx.Buckets.LodRows[(int)row.BucketGroup];
+                for (int i = 0; i < lods.Count; i++)
+                {
+                    float threshold = lods.Thresholds[i];
+                    float blendEnd = threshold * (1f - Culling.LodBlend);
+                    maybeBlends |= height > blendEnd * 0.98f && height < threshold * 1.02f;
+                    if (height < threshold * 0.98f)
+                        surelyBlends = height > blendEnd * 1.02f;
+                    else if (height < threshold * 1.02f)
+                        surelyBlends = false;
                 }
             }
 
             if (surely)
-                cpuMin++;
+                cpuMin += surelyBlends ? 2u : 1u;
             if (maybe)
-                cpuMax++;
+                cpuMax += maybeBlends ? 2u : 1u;
         }
 
         uint gpuCount = early + late;
         uint alive = ctx.Instances.Alive;
         // Occlusion only ever removes: with it on, the GPU may draw fewer than the CPU's frustum-only count.
-        bool ok = view.DrawArgsLate is not null ? gpuCount <= cpuMax : gpuCount >= cpuMin && gpuCount <= cpuMax;
+        bool ok = view.Occlusion is not null ? gpuCount <= cpuMax : gpuCount >= cpuMin && gpuCount <= cpuMax;
         if (!ok)
             Debugging.Log.Error($"Culling: GPU drew {early} + {late} instances, the CPU reference says {cpuMin}..{cpuMax} (of {alive} alive).");
         else
@@ -99,7 +116,9 @@ internal static class RenderChecks
         return count;
     }
 
-    /// <summary>Two triangles straight from a vertex buffer in NDC, one wound each way; only the clockwise one may survive.</summary>
+    /// <summary>
+    /// Two triangles straight from a vertex buffer in NDC, one wound each way; only the clockwise one may survive.
+    /// </summary>
     private static void CheckWinding(RenderContext ctx)
     {
         TriangleVertex[] vertices =

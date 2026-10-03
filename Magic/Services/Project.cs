@@ -17,12 +17,6 @@ public sealed record Project
 
     public Handle<Texture> Icon { get; init; } = Handle<Texture>.None;
 
-    /// <summary>Per-subsystem settings; <c>--set Section.Key=value</c> on the command line overrides them.</summary>
-    public Settings Settings { get; init; } = new();
-
-    /// <summary>The domain opened at start-up (<c>"entryPoint": { "id": N }</c>); <c>--entry-point</c> overrides it. None starts in an empty world.</summary>
-    public Handle<Domain> EntryPoint { get; init; } = Handle<Domain>.None;
-
     /// <summary>
     /// The engine gems to load, by assembly name (the name <c>GemDependsOn</c> uses); <c>"default"</c> stands for
     /// every gem in <see cref="EngineGems"/>. Left out of the file it is <c>["default"]</c>; <c>[]</c> loads none.
@@ -30,15 +24,37 @@ public sealed record Project
     /// </summary>
     public string[] Gems { get; init; } = ["default"];
 
-    /// <summary>Where Assets live.</summary>
+    /// <summary>
+    /// Per-subsystem settings; <c>--set Section.Key=value</c> on the command line overrides them.
+    /// </summary>
+    public Settings Settings { get; init; } = new();
+
+    /// <summary>
+    /// The domain opened at start-up (<c>"entryPoint": { "id": N }</c>); <c>--entry-point</c> overrides it. None starts in an empty world.
+    /// </summary>
+    public Handle<Domain> EntryPoint { get; init; } = Handle<Domain>.None;
+
+    /// <summary>
+    /// The domain shown while another is opened in its place and fills (<c>"loading": { "id": N }</c>);
+    /// <c>--loading</c> overrides it. Left out, it is the engine's own: the project's icon over a bar.
+    /// </summary>
+    public Handle<Domain> Loading { get; init; } = Handle<Domain>.None;
+
+    /// <summary>
+    /// Where Assets live.
+    /// </summary>
     [JsonIgnore]
     public string Root { get; init; } = "";
 
-    /// <summary>The engine's own gem folder, where <see cref="Gems"/> are looked for (and native dlls sit).</summary>
+    /// <summary>
+    /// The engine's own gem folder, where <see cref="Gems"/> are looked for (and native dlls sit).
+    /// </summary>
     [JsonIgnore]
     public string EngineGems { get; init; } = "";
 
-    /// <summary>Built in resources.</summary>
+    /// <summary>
+    /// Built in resources.
+    /// </summary>
     [JsonIgnore]
     public string Resources { get; init; } = "";
 
@@ -50,13 +66,17 @@ public sealed record Project
     [JsonIgnore]
     public static string Logs => Path.Combine(AppContext.BaseDirectory, "Logs");
 
-    /// <summary>Where <c>--screenshots</c> PNGs go: <c>Screenshots</c> next to <see cref="Logs"/>, for the same reason.</summary>
+    /// <summary>
+    /// Where <c>--screenshots</c> PNGs go: <c>Screenshots</c> next to <see cref="Logs"/>, for the same reason.
+    /// </summary>
     [JsonIgnore]
     public static string Screenshots => Path.Combine(AppContext.BaseDirectory, "Screenshots");
 
-    /// <summary>Import, shader and other caches: <c>Cache</c> next to <see cref="Logs"/>, for the same reason.</summary>
+    /// <summary>
+    /// Shader, LOD and other caches: <c>Cache</c> next to <see cref="Logs"/>, for the same reason, unless whoever builds the project says otherwise.
+    /// </summary>
     [JsonIgnore]
-    public static string Cache => Path.Combine(AppContext.BaseDirectory, "Cache");
+    public string Cache { get; init; } = Path.Combine(AppContext.BaseDirectory, "Cache");
 
     [JsonIgnore]
     public string Assets => Path.Combine(Root, "Assets");

@@ -55,13 +55,20 @@ internal sealed class Options
     [Option("entry-point", HelpText = "Open this domain at start-up instead of the project's entry point: a path under Resources or Assets, like Domains/Cube/Cube.domain.")]
     public string? EntryPoint { get; set; }
 
+    [Option("loading", HelpText = "Show this domain while another opens instead of the project's loading domain: a path under Resources or Assets, like Domains/Loading/Loading.domain.")]
+    public string? Loading { get; set; }
+
     [Option("set", HelpText = "Override project settings: --set Render.Resolution.Width=1280 Render.Resolution.Height=720 Render.Vsync=false (Section.Key=value, space separated).")]
     public IEnumerable<string> Set { get; set; } = [];
 
-    /// <summary>The frame the last screenshot lands on, or 0 when none are taken.</summary>
+    /// <summary>
+    /// The frame the last screenshot lands on, or 0 when none are taken.
+    /// </summary>
     public long LastScreenshotFrame => Screenshots == 0 ? 0 : ScreenshotDelay + ((Screenshots - 1) * ScreenshotInterval);
 
-    /// <summary>The first thing wrong with the values, or null when they can be run.</summary>
+    /// <summary>
+    /// The first thing wrong with the values, or null when they can be run.
+    /// </summary>
     public string? Validate()
     {
         if (Lifetime < 0)

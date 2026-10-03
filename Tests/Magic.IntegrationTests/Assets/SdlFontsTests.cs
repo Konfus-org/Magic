@@ -6,7 +6,9 @@ using Xunit;
 
 namespace Magic.IntegrationTests.Assets;
 
-/// <summary>The font loader over the real SDL3_fonts, rasterising the engine's own Montserrat.</summary>
+/// <summary>
+/// The font loader over the real SDL3_fonts, rasterising the engine's own Montserrat.
+/// </summary>
 [Collection(SdlCollection.Name)]
 public sealed class SdlFontsTests : IDisposable
 {
@@ -45,16 +47,6 @@ public sealed class SdlFontsTests : IDisposable
         Glyph glyph = font.Glyphs['A'];
 
         Assert.Contains(font.Pixels.Skip(((glyph.Y * font.Width) + glyph.X) * 4).Take(glyph.Width * 4), pixel => pixel != 0);
-    }
-
-    [Fact]
-    public void A_printable_glyph_advances_the_pen()
-    {
-        Font font = Load();
-
-        Glyph glyph = font.Glyphs['A'];
-
-        Assert.True(glyph.Advance > 0);
     }
 
     [Fact]

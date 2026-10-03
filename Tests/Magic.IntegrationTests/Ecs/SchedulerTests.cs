@@ -1,12 +1,15 @@
 using FlecsGem;
 using Magic.Contexts;
+using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Magic.Services;
 using Xunit;
 
 namespace Magic.IntegrationTests.Ecs;
 
-/// <summary>Systems added to the scheduler, run by the real Flecs gem's frame hooks.</summary>
+/// <summary>
+/// Systems added to the scheduler, run by the real Flecs gem's frame hooks.
+/// </summary>
 public sealed class SchedulerTests : IDisposable
 {
     private readonly FlecsEcs _ecs = new();
@@ -20,7 +23,7 @@ public sealed class SchedulerTests : IDisposable
     [Fact]
     public void An_added_system_runs_on_its_phase()
     {
-        FirstSystem system = new([], UpdateType.FixedUpdate);
+        using FirstSystem system = new([], UpdateType.FixedUpdate);
         using IDisposable scheduled = _scheduler.Add(_ecs,system);
 
         _ecs.FixedUpdate(FrameOf(1f));
@@ -31,7 +34,7 @@ public sealed class SchedulerTests : IDisposable
     [Fact]
     public void An_added_system_does_not_run_outside_its_phase()
     {
-        FirstSystem system = new([], UpdateType.FixedUpdate);
+        using FirstSystem system = new([], UpdateType.FixedUpdate);
         using IDisposable scheduled = _scheduler.Add(_ecs,system);
 
         _ecs.Update(FrameOf(1f));
@@ -42,9 +45,9 @@ public sealed class SchedulerTests : IDisposable
     [Fact]
     public void A_system_is_handed_the_frame_that_was_begun()
     {
-        FirstSystem system = new([]);
+        using FirstSystem system = new([]);
         using IDisposable scheduled = _scheduler.Add(_ecs,system);
-        _scheduler.SetFrame(new Frame(7, 0, 1f, default));
+        _scheduler.SetFrame(new Frame(7, 0, 1f, default, new RenderCommands()));
 
         _ecs.Update(FrameOf(1f));
 
@@ -54,7 +57,7 @@ public sealed class SchedulerTests : IDisposable
     [Fact]
     public void A_system_is_handed_the_delta_of_its_phase()
     {
-        FirstSystem system = new([], UpdateType.FixedUpdate);
+        using FirstSystem system = new([], UpdateType.FixedUpdate);
         using IDisposable scheduled = _scheduler.Add(_ecs,system);
         _scheduler.SetFrame(FrameOf(1f));
 
@@ -67,8 +70,10 @@ public sealed class SchedulerTests : IDisposable
     public void Systems_on_one_phase_run_in_the_order_they_were_added()
     {
         List<string> order = [];
-        using IDisposable first = _scheduler.Add(_ecs,new FirstSystem(order));
-        using IDisposable second = _scheduler.Add(_ecs,new SecondSystem(order));
+        using FirstSystem firstSystem = new(order);
+        using SecondSystem secondSystem = new(order);
+        using IDisposable first = _scheduler.Add(_ecs, firstSystem);
+        using IDisposable second = _scheduler.Add(_ecs, secondSystem);
 
         _ecs.Update(FrameOf(1f));
 
@@ -79,8 +84,10 @@ public sealed class SchedulerTests : IDisposable
     public void Two_systems_of_one_type_both_run()
     {
         List<string> order = [];
-        using IDisposable first = _scheduler.Add(_ecs, new FirstSystem(order));
-        using IDisposable second = _scheduler.Add(_ecs, new FirstSystem(order));
+        using FirstSystem firstSystem = new(order);
+        using FirstSystem secondSystem = new(order);
+        using IDisposable first = _scheduler.Add(_ecs, firstSystem);
+        using IDisposable second = _scheduler.Add(_ecs, secondSystem);
 
         _ecs.Update(FrameOf(1f));
 
@@ -90,7 +97,7 @@ public sealed class SchedulerTests : IDisposable
     [Fact]
     public void A_system_whose_handle_was_disposed_no_longer_runs()
     {
-        FirstSystem system = new([]);
+        using FirstSystem system = new([]);
         IDisposable scheduled = _scheduler.Add(_ecs,system);
 
         scheduled.Dispose();
@@ -101,10 +108,12 @@ public sealed class SchedulerTests : IDisposable
 
     private static Frame FrameOf(float delta)
     {
-        return new Frame(1, 0, delta, default);
+        return new Frame(1, 0, delta, default, new RenderCommands());
     }
 
-    /// <summary>Notes its name in <paramref name="order"/> and keeps every frame it was run with.</summary>
+    /// <summary>
+    /// Notes its name in <paramref name="order"/> and keeps every frame it was run with.
+    /// </summary>
     private class FirstSystem(List<string> order, UpdateType phase = UpdateType.Update) : ISystem
     {
         public UpdateType Phase => phase;

@@ -210,15 +210,15 @@ csharp_preserve_single_line_statements = true
 
 # Naming rules
 
-dotnet_naming_rule.interface_should_be_begins_with_i.severity = suggestion
+dotnet_naming_rule.interface_should_be_begins_with_i.severity = error
 dotnet_naming_rule.interface_should_be_begins_with_i.symbols = interface
 dotnet_naming_rule.interface_should_be_begins_with_i.style = begins_with_i
 
-dotnet_naming_rule.types_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.types_should_be_pascal_case.severity = error
 dotnet_naming_rule.types_should_be_pascal_case.symbols = types
 dotnet_naming_rule.types_should_be_pascal_case.style = pascal_case
 
-dotnet_naming_rule.non_field_members_should_be_pascal_case.severity = suggestion
+dotnet_naming_rule.non_field_members_should_be_pascal_case.severity = error
 dotnet_naming_rule.non_field_members_should_be_pascal_case.symbols = non_field_members
 dotnet_naming_rule.non_field_members_should_be_pascal_case.style = pascal_case
 
@@ -247,3 +247,64 @@ dotnet_naming_style.begins_with_i.required_prefix = I
 dotnet_naming_style.begins_with_i.required_suffix = 
 dotnet_naming_style.begins_with_i.word_separator = 
 dotnet_naming_style.begins_with_i.capitalization = pascal_case
+
+#### Build errors ####
+
+# Whatever is disposable gets disposed: forgetting is a build error, not a leak found later.
+# CA2000: dispose a local before it goes out of scope. CA2213: dispose disposable fields.
+# CA1001: a type that owns disposable fields is disposable itself.
+dotnet_diagnostic.CA2000.severity = error
+dotnet_diagnostic.CA2213.severity = error
+dotnet_diagnostic.CA1001.severity = error
+dotnet_code_quality.CA2000.dispose_ownership_transfer_at_constructor = true
+
+# Async mistakes. CA2016: pass the token on. CA2012: a ValueTask is awaited once. CS4014: a task nobody awaits
+# loses what it threw. CA2007: engine awaits continue on any thread (ConfigureAwait(false)). CA1849: no blocking
+# call where there is an async one. CA1068: the token is the last parameter. VSTHRD200: the Async suffix.
+dotnet_diagnostic.CA2016.severity = error
+dotnet_diagnostic.CA2012.severity = error
+dotnet_diagnostic.CS4014.severity = error
+dotnet_diagnostic.CA2007.severity = error
+dotnet_diagnostic.CA1849.severity = error
+dotnet_diagnostic.CA1068.severity = error
+dotnet_diagnostic.VSTHRD200.severity = error
+
+# The frame loop is synchronous and has its own threads: it may block on a task (VSTHRD002; CA1849 still forbids
+# it inside async methods), and a Lazy<Task> is fine without Visual Studio's AsyncLazy (VSTHRD011).
+dotnet_diagnostic.VSTHRD002.severity = none
+dotnet_diagnostic.VSTHRD011.severity = none
+
+# VSTHRD003 is about Visual Studio's JoinableTaskFactory, which the engine does not have; VSTHRD103 says what
+# CA1849 says already.
+dotnet_diagnostic.VSTHRD003.severity = none
+dotnet_diagnostic.VSTHRD103.severity = none
+
+# Plain mistakes. CA2002: no lock on a weak identity. CA2011: a setter that assigns itself. CA2245: x = x.
+# CA1806: a result that matters is ignored. CA2201: no bare Exception. CA1852: what nothing derives from is sealed.
+dotnet_diagnostic.CA2002.severity = error
+dotnet_diagnostic.CA2011.severity = error
+dotnet_diagnostic.CA2245.severity = error
+dotnet_diagnostic.CA1806.severity = error
+dotnet_diagnostic.CA2201.severity = error
+dotnet_diagnostic.CA1852.severity = error
+
+# Dead code. IDE0005: unused usings. IDE0051/IDE0052: private members never used or never read. IDE0060: unused parameters.
+dotnet_diagnostic.IDE0005.severity = error
+dotnet_diagnostic.IDE0051.severity = error
+dotnet_diagnostic.IDE0052.severity = error
+dotnet_diagnostic.IDE0060.severity = error
+
+# Banned APIs (BannedSymbols.txt).
+dotnet_diagnostic.RS0030.severity = error
+
+# No null-forgiving '!' (Nullable.Extended.Analyzer): on an expression (NX0001), on null or default (NX0002), inside
+# a lambda (NX0003). What is always there is not declared nullable; what may be missing is handled. The analyzer
+# lets a "// ! reason" comment above the line excuse one: we do not write those.
+dotnet_diagnostic.NX0001.severity = error
+dotnet_diagnostic.NX0002.severity = error
+dotnet_diagnostic.NX0003.severity = error
+
+# Tests: xUnit runs them on its own context, so no ConfigureAwait; test methods carry no Async suffix.
+[Tests/**.cs]
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.VSTHRD200.severity = none

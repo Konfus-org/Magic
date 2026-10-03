@@ -1,0 +1,57 @@
+{
+    "entities": [
+        {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": { "passes": [ { "id": 10030 } ] }
+            }
+        },
+        { "name": "Orbit", "scripts": [ { "id": 3051, "degreesPerSecond": 0 } ] },
+        {
+            "name": "Camera",
+            "scripts": [ { "id": 3050, "speed": 40 } ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 6,
+                        "z": -20
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": {
+                    "rotation": {
+                        "x": 0.33224,
+                        "y": -0.2324,
+                        "z": 0.08483,
+                        "w": 0.91017
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "DirectionalLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    },
+                    "intensity": 3,
+                    "castsShadows": true
+                }
+            }
+        }
+    ]
+}

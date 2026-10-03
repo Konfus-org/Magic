@@ -1,0 +1,147 @@
+{
+    "entities": [
+        {
+            "name": "Camera",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": -1.732
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Backdrop",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 2
+                    },
+                    "scale": {
+                        "x": 20,
+                        "y": 20,
+                        "z": 0.05
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 710
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Icon",
+            "scripts": [
+                {
+                    "id": 721
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0.2,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 1,
+                        "w": 0
+                    },
+                    "scale": {
+                        "x": 0.45,
+                        "y": 0.45,
+                        "z": 0.005
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 711
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "BarBack",
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -0.6,
+                        "y": -0.45,
+                        "z": 0
+                    },
+                    "scale": {
+                        "x": 0.6,
+                        "y": 0.03,
+                        "z": 0.005
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 520
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 712
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "BarFill",
+            "scripts": [
+                {
+                    "id": 720,
+                    "width": 0.6
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -0.6,
+                        "y": -0.45,
+                        "z": -0.02
+                    },
+                    "scale": {
+                        "x": 0.001,
+                        "y": 0.03,
+                        "z": 0.005
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 520
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 713
+                        }
+                    }
+                }
+            }
+        }
+    ]
+}

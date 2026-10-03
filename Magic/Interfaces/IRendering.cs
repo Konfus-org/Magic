@@ -8,7 +8,8 @@ namespace Magic.Interfaces;
 /// (SDL GPU today; Vulkan or anything else would implement the same). It keeps no caches and knows nothing of assets,
 /// entities or windows beyond presenting to them: the host's render system and any gem that draws decide everything and
 /// hold every handle. The gem is static: loaded once, never hot reloaded, so a handle is good for the whole run.
-/// Main thread only, except <see cref="Compile"/>.
+/// Render thread only (<see cref="Contexts.ThreadId.Render"/>: a gem's constructor, Dispose and Render hook are on
+/// it), except <see cref="Compile"/>.
 /// </summary>
 public interface IRendering
 {
@@ -19,13 +20,19 @@ public interface IRendering
     /// </summary>
     bool Debug { get; set; }
 
-    /// <summary>The GPU's name, for logs.</summary>
+    /// <summary>
+    /// The GPU's name, for logs.
+    /// </summary>
     string Device { get; }
 
-    /// <summary>The bytecode format <see cref="Compile"/> produces (e.g. <c>SPIRV</c>, <c>DXIL</c>): part of a shader cache key.</summary>
+    /// <summary>
+    /// The bytecode format <see cref="Compile"/> produces (e.g. <c>SPIRV</c>, <c>DXIL</c>): part of a shader cache key.
+    /// </summary>
     string ShaderFormat { get; }
 
-    /// <summary>The depth format this device renders depth targets in.</summary>
+    /// <summary>
+    /// The depth format this device renders depth targets in.
+    /// </summary>
     GpuFormat DepthFormat { get; }
 
     GpuBuffer CreateBuffer(GpuBufferUsage usage, uint bytes);
@@ -46,16 +53,24 @@ public interface IRendering
 
     GpuPipeline CreateComputePipeline(CompiledShader shader);
 
-    /// <summary>Copies <paramref name="data"/> now; it reaches the buffer at the start of the next <see cref="Submit"/>, in call order with the other uploads and copies.</summary>
+    /// <summary>
+    /// Copies <paramref name="data"/> now; it reaches the buffer at the start of the next <see cref="Submit"/>, in call order with the other uploads and copies.
+    /// </summary>
     void Upload(GpuBuffer buffer, uint offset, ReadOnlySpan<byte> data);
 
-    /// <summary>Tightly packed pixels for one region of a texture, queued like the buffer upload.</summary>
+    /// <summary>
+    /// Tightly packed pixels for one region of a texture, queued like the buffer upload.
+    /// </summary>
     void Upload(in TextureRegion region, ReadOnlySpan<byte> data);
 
-    /// <summary>A texture region (its size) into another, queued in order with the uploads.</summary>
+    /// <summary>
+    /// A texture region (its size) into another, queued in order with the uploads.
+    /// </summary>
     void Copy(in TextureRegion source, in TextureRegion destination);
 
-    /// <summary>Released once no frame in flight can still use it. 0 does nothing.</summary>
+    /// <summary>
+    /// Released once no frame in flight can still use it. 0 does nothing.
+    /// </summary>
     void Release(GpuBuffer buffer);
 
     void Release(GpuTexture texture);
@@ -64,7 +79,9 @@ public interface IRendering
 
     void Release(GpuPipeline pipeline);
 
-    /// <summary>The format of the window's swapchain images, for pipelines that draw into them; <see cref="GpuFormat.Invalid"/> when it is not open.</summary>
+    /// <summary>
+    /// The format of the window's swapchain images, for pipelines that draw into them; <see cref="GpuFormat.Invalid"/> when it is not open.
+    /// </summary>
     GpuFormat WindowFormat(uint window);
 
     /// <summary>
@@ -74,7 +91,9 @@ public interface IRendering
     /// </summary>
     float Submit(RenderCommands commands);
 
-    /// <summary>The start of a buffer, after everything submitted. Waits for the GPU: debug checks only.</summary>
+    /// <summary>
+    /// The start of a buffer, after everything submitted. Waits for the GPU: debug checks only.
+    /// </summary>
     Result<byte[]> Read(GpuBuffer buffer, uint bytes);
 
     /// <summary>

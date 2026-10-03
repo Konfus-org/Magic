@@ -49,6 +49,16 @@ exposed API (see `Tests/README.md`).
 - The exception is interop and data structs, where layout or the JSON shape depends on fields
   (`[StructLayout]`, GPU structs, ECS components). They keep their public fields.
 
+### Null
+
+- The null-forgiving `!` (`value!`, `null!`, `default!`) is not allowed; the build fails on it (`NX0001`-`NX0003`,
+  from Nullable.Extended.Analyzer), and on every nullable warning. No `// !` comment to excuse one either.
+- What is always there is not declared nullable: pass it in, make it `required`, or group what comes and goes
+  together into one optional object (`ViewBuffers.Occlusion`).
+- What may be missing is handled where it is read: a guard clause, `is not { } value`, `??` with a fallback or a
+  `throw` that says what was expected. `[MemberNotNullWhen]` and `[MaybeNullWhen]` tell the compiler what a
+  check proves (`Result<T>.Ok`, `RefCountTable.TryAcquire`).
+
 ### Methods
 
 A method should read from top to bottom:
@@ -71,6 +81,15 @@ Separate these steps with a blank line. Long methods are fine as long as they re
 - No single-letter locals or lambda parameters, except loop counters, `x`/`y`/`z`, and the coefficients of a
   published formula. Established short words (`ctx`, `cls`, `sb`, `dt`, `ex`) stay.
 - A local does not change meaning within a method, and does not shadow a type.
+- Every method that returns a `Task` or `ValueTask` ends in `Async`, private helpers included
+  (`LoadAsync`, `GenerateAsync`, `LoadFileAsync`). A method that waits for the same work on the calling thread has
+  the name without it (`Assets.Load` beside `LoadAsync`, `World.Open` beside `OpenAsync`). Test methods are the
+  exception: their name is the sentence they check.
+- An async method takes a `CancellationToken cancel` as its last parameter and passes it to everything it awaits,
+  unless nothing in it could stop. Long work whose share done can be measured (a load with its dependencies, LOD
+  generation, opening a domain) also takes an `IProgress<float>? progress`, 0 to 1, just before the token; a
+  single step (one file read, a hand-off to a thread, a compile) does not. Both are optional (`= null`,
+  `= default`) on a service's public methods and required on interfaces and private helpers.
 
 ### Extensions
 
@@ -80,6 +99,15 @@ folder. Related types (a family of enums converted the same way) share one class
 ### Comments
 
 - XML doc comments on types and non-obvious members. Say why, not what.
+- `<summary>` tags sit on their own lines, even for a one-line summary:
+
+  ```csharp
+  /// <summary>
+  /// Where Assets live.
+  /// </summary>
+  ```
+
+  Not `/// <summary>Where Assets live.</summary>`.
 - No divider comments (`// ---- Section ----`, `// ====`) and no `#region`.
 
 # Cross Platform

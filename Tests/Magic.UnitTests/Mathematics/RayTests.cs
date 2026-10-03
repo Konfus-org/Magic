@@ -15,7 +15,7 @@ public sealed class RayTests
 
         float? hit = ray.Intersect(new BoundingSphere(new Vector3(0, 0, 10), 1f));
 
-        Assert.Equal(9f, hit!.Value, 1e-5f);
+        Assert.Equal(9f, Assert.NotNull(hit), 1e-5f);
     }
 
     [Fact]
@@ -45,7 +45,7 @@ public sealed class RayTests
 
         float? hit = ray.Intersect(BoxAhead);
 
-        Assert.Equal(4f, hit!.Value, 1e-5f);
+        Assert.Equal(4f, Assert.NotNull(hit), 1e-5f);
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public sealed class RayTests
 
         float? hit = ray.Intersect(BoxAhead);
 
-        Assert.Equal(distance, hit!.Value, 1e-5f);
+        Assert.Equal(distance, Assert.NotNull(hit), 1e-5f);
     }
 
     [Theory]

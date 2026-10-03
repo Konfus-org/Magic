@@ -10,17 +10,45 @@ namespace Magic.Contexts.Assets;
 /// (signed integers) sits at that grid coordinate and streams in and out with the cameras; any other name
 /// (<c>globals.chunk</c> by convention) is loaded with the domain and stays. Only the spawner reads
 /// the entities; the ECS never sees a chunk.
+/// <para>
+/// The file is JSON, <c>{ "entities": [ ... ] }</c>, and a loaded chunk is that file's bytes and nothing more
+/// (<see cref="Data"/>): thousands stream in and out, and the spawner reads the bytes straight into components
+/// without anything in between. <see cref="Entities"/> is the same file as objects, read the first time it is asked
+/// for, for whoever would rather walk it (a stand-in generator) and for writing a chunk.
+/// </para>
 /// </summary>
-[AssetFormat(AssetFormat.Json)]
+[AssetFormat(AssetFormat.Binary)]
 public sealed class Chunk : Asset
 {
-    public Entity[] Entities { get; set; } = [];
+    private Entity[]? _entities;
 
-    /// <summary>The grid coordinate parsed from the file name (<c>x_y_z</c>); null for a global chunk.</summary>
+    /// <summary>
+    /// The file as it is on disk: UTF-8 JSON.
+    /// </summary>
+    [JsonIgnore]
+    public byte[] Data { get; set; } = [];
+
+    /// <summary>
+    /// <see cref="Data"/> without a byte order mark, as a JSON reader wants it.
+    /// </summary>
+    [JsonIgnore]
+    public ReadOnlySpan<byte> Json => Data.AsSpan().StartsWith(Bom) ? Data.AsSpan(Bom.Length) : Data;
+
+    public Entity[] Entities
+    {
+        get => _entities ??= Data.Length == 0 ? [] : JsonSerializer.Deserialize<File>(Json, AssetJson.Options)?.Entities ?? [];
+        set => _entities = value;
+    }
+
+    /// <summary>
+    /// The grid coordinate parsed from the file name (<c>x_y_z</c>); null for a global chunk.
+    /// </summary>
     [JsonIgnore]
     public (int X, int Y, int Z)? Coordinate => ParseCoordinate(Name);
 
-    /// <summary>The coordinate a chunk file name denotes, or null when the name is not <c>x_y_z</c>.</summary>
+    /// <summary>
+    /// The coordinate a chunk file name denotes, or null when the name is not <c>x_y_z</c>.
+    /// </summary>
     public static (int X, int Y, int Z)? ParseCoordinate(string name)
     {
         string[] parts = name.Split('_');
@@ -35,7 +63,11 @@ public sealed class Chunk : Asset
         return null;
     }
 
-    /// <summary>The file name a coordinate's chunk has, without the folder.</summary>
+    private static ReadOnlySpan<byte> Bom => [0xEF, 0xBB, 0xBF];
+
+    /// <summary>
+    /// The file name a coordinate's chunk has, without the folder.
+    /// </summary>
     public static string FileName(int x, int y, int z) => string.Create(CultureInfo.InvariantCulture, $"{x}_{y}_{z}.chunk");
 
     /// <summary>
@@ -48,16 +80,24 @@ public sealed class Chunk : Asset
     {
         private Dictionary<string, JsonElement> _components = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>0 = none; otherwise stable within the world and stored as <see cref="Components.EntityId"/>.</summary>
+        /// <summary>
+        /// 0 = none; otherwise stable within the world and stored as <see cref="Components.EntityId"/>.
+        /// </summary>
         public ulong Id { get; set; }
 
-        /// <summary>Unique among siblings, no '.'; unnamed is fine (the grid samples name nothing).</summary>
+        /// <summary>
+        /// Unique among siblings, no '.'; unnamed is fine (the grid samples name nothing).
+        /// </summary>
         public string? Name { get; set; }
 
-        /// <summary>Applied with <see cref="Components.Tag.Of"/>; more than <see cref="Components.Tags.Capacity"/> is a warning and the rest are dropped.</summary>
+        /// <summary>
+        /// Applied with <see cref="Components.Tag.Of"/>; more than <see cref="Components.Tags.Capacity"/> is a warning and the rest are dropped.
+        /// </summary>
         public string[] Tags { get; set; } = [];
 
-        /// <summary>Keys are matched without regard to case; the serializer's own dictionary is rewrapped to keep it so.</summary>
+        /// <summary>
+        /// Keys are matched without regard to case; the serializer's own dictionary is rewrapped to keep it so.
+        /// </summary>
         public Dictionary<string, JsonElement> Components
         {
             get => _components;
@@ -74,5 +114,13 @@ public sealed class Chunk : Asset
         public JsonElement[] Scripts { get; set; } = [];
 
         public Entity[] Children { get; set; } = [];
+    }
+
+    /// <summary>
+    /// What a chunk file holds.
+    /// </summary>
+    private sealed class File
+    {
+        public Entity[] Entities { get; set; } = [];
     }
 }

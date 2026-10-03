@@ -10,9 +10,13 @@ namespace Magic.Interfaces;
 /// </summary>
 public interface ISystem : IScript
 {
-    /// <summary>The phase the system runs in.</summary>
+    /// <summary>
+    /// The phase the system runs in.
+    /// </summary>
     UpdateType Phase => UpdateType.Update;
 
-    /// <summary>One run, with the frame it is part of; in <see cref="UpdateType.FixedUpdate"/> its delta is the fixed step.</summary>
+    /// <summary>
+    /// One run, with the frame it is part of; in <see cref="UpdateType.FixedUpdate"/> its delta is the fixed step.
+    /// </summary>
     void Run(in Frame frame);
 }

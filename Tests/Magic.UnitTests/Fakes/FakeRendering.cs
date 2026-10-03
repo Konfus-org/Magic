@@ -5,7 +5,9 @@ using System.Collections.Concurrent;
 
 namespace Magic.UnitTests.Fakes;
 
-/// <summary>An <see cref="IRendering"/> that makes handles, compiles every shader to one byte, and records what it is handed.</summary>
+/// <summary>
+/// An <see cref="IRendering"/> that makes handles, compiles every shader to one byte, and records what it is handed.
+/// </summary>
 internal sealed class FakeRendering : IRendering
 {
     private uint _next = 1;
@@ -13,12 +15,16 @@ internal sealed class FakeRendering : IRendering
     public List<RenderCommandType[]> Submitted { get; } = [];
     public List<byte[]> Uploaded { get; } = [];
 
-    /// <summary>The HLSL of every compile, in no order: compiles run on workers.</summary>
+    /// <summary>
+    /// The HLSL of every compile, in no order: compiles run on workers.
+    /// </summary>
     public ConcurrentBag<string> Compiled { get; } = [];
 
     public int Released { get; private set; }
 
-    /// <summary>What every window last showed, as <see cref="Read(GpuTexture)"/> answers it; null when nothing was.</summary>
+    /// <summary>
+    /// What every window last showed, as <see cref="Read(GpuTexture)"/> answers it; null when nothing was.
+    /// </summary>
     public CapturedFrame? Shown { get; set; }
 
     public bool Debug { get; set; }

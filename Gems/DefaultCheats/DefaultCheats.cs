@@ -1,4 +1,4 @@
-using Magic.Extensions;
+using Magic.Contexts;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
@@ -17,10 +17,18 @@ internal sealed class DefaultCheats : IGem
     private readonly IWindowRegistry _windows;
     private readonly IFileSystem _files;
     private readonly Project _project;
+    private readonly Threads _threads;
+    private readonly World _world;
+    private readonly Events _events;
+    private readonly IEcs _ecs;
     private readonly IDisposable[] _cheatRegistrations;
 
-    public DefaultCheats(IRendering rendering, IWindowRegistry windows, IFileSystem files, World world, Project project)
+    public DefaultCheats(IRendering rendering, IWindowRegistry windows, IFileSystem files, World world, Project project, Threads threads, Events events, IEcs ecs)
     {
+        _world = world;
+        _events = events;
+        _ecs = ecs;
+        _threads = threads;
         _rendering = rendering;
         _windows = windows;
         _files = files;
@@ -28,6 +36,7 @@ internal sealed class DefaultCheats : IGem
         _cheatRegistrations =
         [
             Debugging.Commands.Register("screenshot", _ => Screenshot()),
+            Debugging.Commands.Register("restore", Restore),
             Debugging.Commands.Register("exit", _ => world.End()),
         ];
     }
@@ -38,7 +47,9 @@ internal sealed class DefaultCheats : IGem
             registration.Dispose();
     }
 
-    /// <summary>The main window as it was last shown, to <see cref="Project.Screenshots"/>, named by the time.</summary>
+    /// <summary>
+    /// The main window as it was last shown, with the world's state in it, to <see cref="Project.Screenshots"/>, named by the time.
+    /// </summary>
     private void Screenshot()
     {
         if (_windows.Main is not { } window)
@@ -48,7 +59,7 @@ internal sealed class DefaultCheats : IGem
         }
 
         string path = _files.Combine(Project.Screenshots, $"{_project.Name}_{DateTime.Now:yyyyMMdd_HHmmss}.png");
-        Result taken = _rendering.Screenshot(window, _files, path);
+        Result taken = _threads.Invoke(ThreadId.Render, () => Debugging.Screenshot.Capture(_files, _rendering, window, _world, _ecs, path)); // a console command runs on the main thread
         if (taken.Failed)
         {
             Debugging.Log.Warn($"Screenshot failed: {taken.Message}");
@@ -56,5 +67,28 @@ internal sealed class DefaultCheats : IGem
         }
 
         Debugging.Log.Info($"Screenshot: {path}.");
+    }
+
+    /// <summary>
+    /// <c>restore shot.png</c>: the world as it was when that screenshot was taken. A path that is not a file is
+    /// looked for in <see cref="Project.Screenshots"/>.
+    /// </summary>
+    private void Restore(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Debugging.Log.Warn("Usage: restore <screenshot.png>");
+            return;
+        }
+
+        string path = _files.FileExists(args[0]) ? args[0] : _files.Combine(Project.Screenshots, args[0]);
+        Result restored = Debugging.Screenshot.Restore(_files, _world, _events, _ecs, path);
+        if (restored.Failed)
+        {
+            Debugging.Log.Warn($"Restore failed: {restored.Message}");
+            return;
+        }
+
+        Debugging.Log.Info($"Restored from {path}.");
     }
 }

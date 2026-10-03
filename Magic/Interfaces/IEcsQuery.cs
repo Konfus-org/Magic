@@ -14,12 +14,17 @@ namespace Magic.Interfaces;
 // and chunks come parents before children. A chunk of root entities gets an empty span for it; every other
 // chunk gets a one-element span, the shared value of the parent all its entities have. In Each(...) an absent
 // parent reads as default. It is what a transform hierarchy needs and nothing else uses it (perf-driven, flagged).
+//
+// WithoutAbove<T>(): Without<T>() that also looks up the hierarchy: neither the entity nor anything above it has
+// T. It is decided when a T is added or removed, not per entity while iterating.
 
 public interface IEcsQueryBuilder<T1> where T1 : unmanaged
 {
     IEcsQueryBuilder<T1> With<T>() where T : unmanaged;
 
     IEcsQueryBuilder<T1> Without<T>() where T : unmanaged;
+
+    IEcsQueryBuilder<T1> WithoutAbove<T>() where T : unmanaged;
 
     IEcsQueryBuilder<T1> Cascade();
 
@@ -32,6 +37,8 @@ public interface IEcsQueryBuilder<T1, T2> where T1 : unmanaged where T2 : unmana
 
     IEcsQueryBuilder<T1, T2> Without<T>() where T : unmanaged;
 
+    IEcsQueryBuilder<T1, T2> WithoutAbove<T>() where T : unmanaged;
+
     IEcsQueryBuilder<T1, T2> Cascade();
 
     IEcsQuery<T1, T2> Build();
@@ -42,6 +49,8 @@ public interface IEcsQueryBuilder<T1, T2, T3> where T1 : unmanaged where T2 : un
     IEcsQueryBuilder<T1, T2, T3> With<T>() where T : unmanaged;
 
     IEcsQueryBuilder<T1, T2, T3> Without<T>() where T : unmanaged;
+
+    IEcsQueryBuilder<T1, T2, T3> WithoutAbove<T>() where T : unmanaged;
 
     IEcsQueryBuilder<T1, T2, T3> Cascade();
 
@@ -54,12 +63,16 @@ public interface IEcsQueryBuilder<T1, T2, T3, T4> where T1 : unmanaged where T2 
 
     IEcsQueryBuilder<T1, T2, T3, T4> Without<T>() where T : unmanaged;
 
+    IEcsQueryBuilder<T1, T2, T3, T4> WithoutAbove<T>() where T : unmanaged;
+
     IEcsQueryBuilder<T1, T2, T3, T4> Cascade();
 
     IEcsQuery<T1, T2, T3, T4> Build();
 }
 
-/// <summary>A built query. Dispose it when its owner (usually a gem) goes away.</summary>
+/// <summary>
+/// A built query. Dispose it when its owner (usually a gem) goes away.
+/// </summary>
 public interface IEcsQuery<T1> : IDisposable where T1 : unmanaged
 {
     void Each(QueryEachAction<T1> action);

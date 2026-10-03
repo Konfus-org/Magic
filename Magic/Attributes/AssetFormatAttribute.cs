@@ -13,6 +13,12 @@ public enum AssetFormat
     Text,
 
     /// <summary>
+    /// The file is taken as it is; its bytes go into the class's <c>public byte[] Data { get; set; }</c>, for a type
+    /// whose own code reads them when and how it needs to.
+    /// </summary>
+    Binary,
+
+    /// <summary>
     /// The file is read by the <see cref="Interfaces.IAssetLoader{T}"/> a gem exports for the type.
     /// </summary>
     Custom

@@ -9,14 +9,16 @@ using System.Runtime.InteropServices;
 namespace SDLRenderGem;
 
 /// <summary>
-/// The SDL GPU device and its frames: the one owner of frame fences (<see cref="Begin"/> waits for the frame that last used
+/// The SDL GPU device and its frames: the one owner of frame fences (<see cref="BeginFrame"/> waits for the frame that last used
 /// this frame's slot and releases what was freed during it; <see cref="Submit"/> puts the new fence in the slot), deferred
 /// release of every object, the windows claimed for it, and synchronous readback. Every SDL GPU call belongs to the thread
 /// that created the device (<see cref="AssertMainThread"/>).
 /// </summary>
 internal sealed class GpuDevice : IDisposable
 {
-    /// <summary>Frames the CPU may record ahead of the GPU; SDL is told the same.</summary>
+    /// <summary>
+    /// Frames the CPU may record ahead of the GPU; SDL is told the same.
+    /// </summary>
     public const int FramesInFlight = 2;
 
     private readonly int _mainThread = Environment.CurrentManagedThreadId;
@@ -126,7 +128,9 @@ internal sealed class GpuDevice : IDisposable
 
     public SDL.GPUTextureFormat DepthFormat { get; }
 
-    /// <summary>Where uploads are written until the next submit's copy pass moves them.</summary>
+    /// <summary>
+    /// Where uploads are written until the next submit's copy pass moves them.
+    /// </summary>
     public Staging Staging { get; }
 
     [Conditional("DEBUG")]
@@ -136,7 +140,9 @@ internal sealed class GpuDevice : IDisposable
             throw new InvalidOperationException($"SDL GPU calls belong to thread {_mainThread}; this is thread {Environment.CurrentManagedThreadId}.");
     }
 
-    /// <summary>Throws with SDL's error text when an SDL call reported failure.</summary>
+    /// <summary>
+    /// Throws with SDL's error text when an SDL call reported failure.
+    /// </summary>
     public static void ThrowOnError(bool ok, string what)
     {
         if (!ok)
@@ -152,7 +158,7 @@ internal sealed class GpuDevice : IDisposable
 
     /// <summary>
     /// Starts a frame: waits until the frame that last used this slot is done, releases what was freed during it, and
-    /// returns a command buffer. Every <see cref="Begin"/> is followed by one <see cref="Submit"/>.
+    /// returns a command buffer. Every <see cref="BeginFrame"/> is followed by one <see cref="Submit"/>.
     /// </summary>
     public nint BeginFrame()
     {
@@ -176,7 +182,9 @@ internal sealed class GpuDevice : IDisposable
         return ThrowOnError(SDL.AcquireGPUCommandBuffer(Handle), "SDL_AcquireGPUCommandBuffer");
     }
 
-    /// <summary>Submits the frame; its fence, and everything freed since the last submit, go into its slot.</summary>
+    /// <summary>
+    /// Submits the frame; its fence, and everything freed since the last submit, go into its slot.
+    /// </summary>
     public void Submit(nint commandBuffer)
     {
         Staging.Unmap();
@@ -227,7 +235,9 @@ internal sealed class GpuDevice : IDisposable
         return ThrowOnError(SDL.CreateGPUTransferBuffer(Handle, in info), "SDL_CreateGPUTransferBuffer");
     }
 
-    /// <summary>Released once the frames in flight now are done with it: it goes with the next submit's fence.</summary>
+    /// <summary>
+    /// Released once the frames in flight now are done with it: it goes with the next submit's fence.
+    /// </summary>
     public void Defer(Kind kind, nint handle)
     {
         if (handle != 0)
@@ -280,7 +290,9 @@ internal sealed class GpuDevice : IDisposable
         }
     }
 
-    /// <summary>Waits for the GPU and releases everything still deferred; the caller has released its own objects first.</summary>
+    /// <summary>
+    /// Waits for the GPU and releases everything still deferred; the caller has released its own objects first.
+    /// </summary>
     /// <summary>
     /// <see cref="RenderSettings.Vsync"/> changed (the settings window): every claimed window's swapchain follows. Called
     /// between frames, where SDL allows it.
@@ -310,7 +322,9 @@ internal sealed class GpuDevice : IDisposable
 
     public enum Kind : byte { Buffer, Texture, TransferBuffer, Sampler, GraphicsPipeline, ComputePipeline }
 
-    /// <summary>One frame slot: the fence of the frame that last used it and what was freed while it was recorded.</summary>
+    /// <summary>
+    /// One frame slot: the fence of the frame that last used it and what was freed while it was recorded.
+    /// </summary>
     private sealed class InFlight
     {
         public nint Fence { get; set; }
@@ -349,7 +363,9 @@ internal sealed class Staging : IDisposable
         _buffer = 0;
     }
 
-    /// <summary>Copies <paramref name="data"/> in; the transfer buffer and offset a copy pass reads it from, valid until the frame is submitted.</summary>
+    /// <summary>
+    /// Copies <paramref name="data"/> in; the transfer buffer and offset a copy pass reads it from, valid until the frame is submitted.
+    /// </summary>
     public unsafe (nint TransferBuffer, uint Offset) Stage(ReadOnlySpan<byte> data)
     {
         _device.AssertMainThread();
@@ -372,7 +388,9 @@ internal sealed class Staging : IDisposable
         return (_buffer, aligned);
     }
 
-    /// <summary>End of the frame's staging, before submit.</summary>
+    /// <summary>
+    /// End of the frame's staging, before submit.
+    /// </summary>
     public void Unmap()
     {
         if (_mapped == 0)
@@ -382,7 +400,9 @@ internal sealed class Staging : IDisposable
         _mapped = 0;
     }
 
-    /// <summary>A bigger buffer for the rest of this frame and the frames after; what was staged stays in the old one until it is done.</summary>
+    /// <summary>
+    /// A bigger buffer for the rest of this frame and the frames after; what was staged stays in the old one until it is done.
+    /// </summary>
     private void Grow(uint needed)
     {
         Unmap();

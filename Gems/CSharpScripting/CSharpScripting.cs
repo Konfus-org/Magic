@@ -29,7 +29,7 @@ internal sealed class CSharpScripting : IGem, IAssetLoader<Script>
     }
 
     /// <summary>
-    /// Every script class there is. Only what references the host can declare one, and an assembly being unloaded is
+    /// Every script class there is. Only the host and what references it can declare one, and an assembly being unloaded is
     /// no longer in a context that is listed, so a reloaded project's old classes are not found beside the new.
     /// </summary>
     private static IEnumerable<Type> Scripts()
@@ -37,7 +37,7 @@ internal sealed class CSharpScripting : IGem, IAssetLoader<Script>
         string? host = typeof(IScript).Assembly.GetName().Name;
         foreach (Assembly assembly in AssemblyLoadContext.All.SelectMany(context => context.Assemblies))
         {
-            if (assembly.IsDynamic || !assembly.GetReferencedAssemblies().Any(reference => reference.Name == host))
+            if (assembly.IsDynamic || (assembly != typeof(IScript).Assembly && !assembly.GetReferencedAssemblies().Any(reference => reference.Name == host)))
                 continue;
 
             Type[] types;

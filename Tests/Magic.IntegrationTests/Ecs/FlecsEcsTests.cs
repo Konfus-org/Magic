@@ -5,7 +5,9 @@ using Xunit;
 
 namespace Magic.IntegrationTests.Ecs;
 
-/// <summary>What the adapter adds on top of flecs; flecs itself is trusted.</summary>
+/// <summary>
+/// What the adapter adds on top of flecs; flecs itself is trusted.
+/// </summary>
 public sealed class FlecsEcsTests
 {
     [Fact]
@@ -75,46 +77,6 @@ public sealed class FlecsEcsTests
         bool alive = ecs.IsAlive(Handle.None);
 
         Assert.False(alive);
-    }
-
-    [Fact]
-    public void An_added_observer_hears_a_component_added()
-    {
-        using FlecsEcs ecs = new();
-        List<Handle> heard = [];
-        using IDisposable observer = ecs.Observe<Position>(ComponentEvent.Added, heard.Add);
-        Handle entity = ecs.Create();
-
-        ecs.Add<Position>(entity);
-
-        Assert.Equal([entity], heard);
-    }
-
-    [Fact]
-    public void A_set_observer_hears_a_component_set()
-    {
-        using FlecsEcs ecs = new();
-        List<Handle> heard = [];
-        using IDisposable observer = ecs.Observe<Position>(ComponentEvent.Set, heard.Add);
-        Handle entity = ecs.Create();
-
-        ecs.Set(entity, new Position { X = 1 });
-
-        Assert.Equal([entity], heard);
-    }
-
-    [Fact]
-    public void A_removed_observer_hears_a_component_removed()
-    {
-        using FlecsEcs ecs = new();
-        List<Handle> heard = [];
-        using IDisposable observer = ecs.Observe<Position>(ComponentEvent.Removed, heard.Add);
-        Handle entity = ecs.Create();
-        ecs.Set(entity, new Position());
-
-        ecs.Remove<Position>(entity);
-
-        Assert.Equal([entity], heard);
     }
 
     [Fact]

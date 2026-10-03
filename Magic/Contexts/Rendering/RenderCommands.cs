@@ -8,11 +8,13 @@ namespace Magic.Contexts.Rendering;
 /// <summary>
 /// One frame's GPU commands, in order, with the bindings and bytes they point into. The host's render system records
 /// the scene into it, then any gem appends its own in its Render hook (so they draw on top), then the renderer runs it
-/// with <see cref="Interfaces.IRendering.Submit"/> and it is cleared. One method per command; main thread only.
+/// with <see cref="Interfaces.IRendering.Submit"/> and it is cleared. One method per command; render thread only (a gem's Render hook).
 /// </summary>
 public sealed class RenderCommands
 {
-    /// <summary>What an empty target is cleared to.</summary>
+    /// <summary>
+    /// What an empty target is cleared to.
+    /// </summary>
     public static readonly Vector4 ClearColor = new(0.02f, 0.03f, 0.08f, 1f);
 
     private readonly List<RenderCommand> _commands = [];
@@ -27,13 +29,19 @@ public sealed class RenderCommands
 
     public int Count => _commands.Count;
 
-    /// <summary>Milliseconds the last submit of this list took; 0 before the first.</summary>
+    /// <summary>
+    /// Milliseconds the last submit of this list took; 0 before the first.
+    /// </summary>
     public float SubmitMs { get; internal set; }
 
-    /// <summary>How much of <see cref="SubmitMs"/> was spent blocked on the GPU.</summary>
+    /// <summary>
+    /// How much of <see cref="SubmitMs"/> was spent blocked on the GPU.
+    /// </summary>
     public float WaitMs { get; internal set; }
 
-    /// <summary>The run a command points at.</summary>
+    /// <summary>
+    /// The run a command points at.
+    /// </summary>
     public ReadOnlySpan<GpuBinding> BindingsOf(in RenderCommand command)
     {
         return Bindings.Slice(command.Run.Start, command.Run.Length);
@@ -51,10 +59,25 @@ public sealed class RenderCommands
         _bytes.Clear();
     }
 
-    /// <summary>A render pass into <paramref name="color"/> and, when valid, <paramref name="depth"/>, both loaded or cleared by <paramref name="load"/>.</summary>
+    /// <summary>
+    /// A render pass into <paramref name="color"/> and, when valid, <paramref name="depth"/>, both loaded or cleared by <paramref name="load"/>.
+    /// </summary>
     public void BeginRenderPass(GpuTexture color, GpuLoad load, GpuTexture depth = default)
     {
         _commands.Add(new RenderCommand(RenderCommandType.BeginRenderPass, Texture: color, Depth: depth, Load: load, ClearColor: ClearColor));
+    }
+
+    /// <summary>
+    /// A render pass into several colour targets at once, one per <c>SV_Target</c> of the pipelines drawn in it, and,
+    /// when valid, <paramref name="depth"/>; all loaded or cleared by <paramref name="load"/>.
+    /// </summary>
+    public void BeginRenderPass(ReadOnlySpan<GpuTexture> colors, GpuLoad load, GpuTexture depth = default)
+    {
+        int start = _bindings.Count;
+        foreach (GpuTexture color in colors)
+            _bindings.Add(new GpuBinding(Texture: color));
+
+        _commands.Add(new RenderCommand(RenderCommandType.BeginRenderPass, Texture: colors[0], Depth: depth, Load: load, ClearColor: ClearColor, Run: (start, colors.Length)));
     }
 
     public void EndRenderPass()
@@ -62,7 +85,9 @@ public sealed class RenderCommands
         _commands.Add(new RenderCommand(RenderCommandType.EndRenderPass));
     }
 
-    /// <summary>A compute pass writing <paramref name="writes"/> (buffers, or textures as storage).</summary>
+    /// <summary>
+    /// A compute pass writing <paramref name="writes"/> (buffers, or textures as storage).
+    /// </summary>
     public void BeginComputePass(ReadOnlySpan<GpuBinding> writes)
     {
         _commands.Add(new RenderCommand(RenderCommandType.BeginComputePass, Run: Add(writes)));
@@ -111,13 +136,17 @@ public sealed class RenderCommands
         _commands.Add(new RenderCommand(RenderCommandType.BindStorageBuffers, Stage: stage, Slot: slot, Run: (start, buffers.Length)));
     }
 
-    /// <summary>Textures with their samplers (<see cref="GpuBinding.Texture"/> + <see cref="GpuBinding.Sampler"/>).</summary>
+    /// <summary>
+    /// Textures with their samplers (<see cref="GpuBinding.Texture"/> + <see cref="GpuBinding.Sampler"/>).
+    /// </summary>
     public void BindTextures(GpuStage stage, uint slot, ReadOnlySpan<GpuBinding> textures)
     {
         _commands.Add(new RenderCommand(RenderCommandType.BindTextures, Stage: stage, Slot: slot, Run: Add(textures)));
     }
 
-    /// <summary>The stage's constant block (binding 0), copied now.</summary>
+    /// <summary>
+    /// The stage's constant block (binding 0), copied now.
+    /// </summary>
     public void Push<T>(GpuStage stage, in T value) where T : unmanaged
     {
         int start = _bytes.Count;

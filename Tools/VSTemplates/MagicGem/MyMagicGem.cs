@@ -25,7 +25,9 @@ internal sealed class MyMagicGem : IGem
         // ECS query): the host tracks none of them, and one left behind keeps the old assembly alive after a reload.
     }
 
-    /// <summary>Once a frame, after the gems it depends on. frame.Delta is in seconds; frame.Events holds what happened since the last frame.</summary>
+    /// <summary>
+    /// Once a frame, after the gems it depends on. frame.Delta is in seconds; frame.Events holds what happened since the last frame.
+    /// </summary>
     public void Update(in Frame frame)
     {
     }

@@ -12,6 +12,7 @@
 // FAILURE_FORCE 1 instead: the records of that class still have the broken surface's layout, so the kind is
 // fixed here and the record is never read.
 
+#include "Include/Failure.hlsli"
 #include "Include/Surface.hlsli"
 
 #ifndef FAILURE_FORCE
@@ -23,15 +24,6 @@ static const uint FailureRecord = 2u;
 static const uint FailureMesh = 3u;
 static const uint FailureTexture = 4u;
 
-// Emissive above 1 so the glow still reads as one after the tonemap.
-static const float FailureGlow = 2.0;
-
-// The tonemap flattens a saturated colour above ~0.5, so the pulse's floor sits well below it for the
-// breathing to be plain, but never at zero: a failed object stays visible.
-static const float PulseMin = 0.05;
-static const float PulseMax = 1.0;
-static const float PulsePeriod = 2.0; // seconds
-
 // Checker cells per unit of uv. A mesh failure is coarser so the unit cube reads as one object rather than
 // a texture.
 static const float CheckerCells = 8.0;
@@ -42,19 +34,13 @@ struct MaterialParams
     uint kind = 2;
 };
 
-float FailurePulse(float time)
-{
-    float wave = sin(time * 2.0 * Pi / PulsePeriod) * 0.5 + 0.5;
-    return lerp(PulseMin, PulseMax, wave);
-}
-
 // The pattern in uv space: solid magenta for a shader failure (and any kind this file does not know), else
 // a checker of the kind's colour and black.
 float3 FailurePattern(uint kind, float2 uv)
 {
     bool isRed = kind == FailureMesh || kind == FailureTexture;
     bool isCheckered = kind == FailureRecord || isRed;
-    float3 color = isRed ? float3(1.0, 0.0, 0.0) : float3(1.0, 0.0, 1.0);
+    float3 color = isRed ? float3(1.0, 0.0, 0.0) : FailureColor;
 
     int2 cell = (int2)floor(uv * (kind == FailureMesh ? CheckerCellsMesh : CheckerCells));
     bool isLit = ((cell.x + cell.y) & 1) == 0;

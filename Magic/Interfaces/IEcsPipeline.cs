@@ -17,7 +17,9 @@ public enum UpdateType
 
 public interface IEcsPipelineBuilder
 {
-    /// <summary>The phase the system runs in. Defaults to <see cref="UpdateType.Update"/>.</summary>
+    /// <summary>
+    /// The phase the system runs in. Defaults to <see cref="UpdateType.Update"/>.
+    /// </summary>
     IEcsPipelineBuilder On(UpdateType phase);
 
     IEcsPipelineBuilder<T1> Query<T1>() where T1 : unmanaged;

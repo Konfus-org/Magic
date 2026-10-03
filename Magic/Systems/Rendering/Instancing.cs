@@ -4,6 +4,7 @@ using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Extensions;
 using Magic.Interfaces;
+using System.Numerics;
 
 namespace Magic.Systems.Rendering;
 
@@ -13,12 +14,18 @@ namespace Magic.Systems.Rendering;
 /// </summary>
 internal static class Instancing
 {
-    /// <summary>Registers one entity's model (one instance per part, chained) and returns the handle that names it: its first part's slot.</summary>
+    /// <summary>
+    /// Registers one entity's model (one instance per part, chained) and returns the handle that names it: its first part's slot.
+    /// </summary>
     public static uint Add(RenderContext ctx, in InstanceDesc desc)
     {
         (uint MeshSlot, int MaterialSlot)[] parts = Meshes.Acquire(ctx, desc.Model);
         InstanceFlags flags = desc.Flags.HasFlag(RenderFlags.NoSizeCull) ? InstanceFlags.NoSizeCull : InstanceFlags.None;
+        if (desc.Hidden)
+            flags |= InstanceFlags.Hidden;
+
         InstanceTable instances = ctx.Instances;
+        Vector3 origin = Meshes.Origin(ctx, desc.Model);
         uint handle = 0, previous = InstanceTable.End;
         for (int i = 0; i < parts.Length; i++)
         {
@@ -26,7 +33,8 @@ internal static class Instancing
             Handle<Material> source = desc.Materials[Math.Clamp(parts[i].MaterialSlot, 0, MaterialSlots.Capacity - 1)];
             MaterialSlot material = Drawn(ctx, meshSlot, Materials.Acquire(ctx, source));
             uint group = Group(ctx, material.Class, meshSlot);
-            uint slot = instances.Add(desc.Model.Id, meshSlot, ctx.Meshes.Bounds(meshSlot), source, material, flags, desc.World, group, desc.Static);
+            uint slot = instances.Add(desc.Model.Id, meshSlot, ctx.Meshes.Bounds(meshSlot), desc.CullRadius, source, material, flags, desc.World, origin, group, desc.Static);
+            MarkFailed(ctx, slot, material);
             if (i == 0)
                 handle = slot; // unique while the entity lives
             else
@@ -38,7 +46,9 @@ internal static class Instancing
         return handle;
     }
 
-    /// <summary>New world matrices, straight from the ECS columns; static instances are skipped, unchanged matrices send nothing.</summary>
+    /// <summary>
+    /// New world matrices, straight from the ECS columns; static instances are skipped, unchanged matrices send nothing.
+    /// </summary>
     public static void Move(RenderContext ctx, ReadOnlySpan<RenderInstance> moved, ReadOnlySpan<WorldTransform> worlds)
     {
         InstanceTable instances = ctx.Instances;
@@ -53,6 +63,16 @@ internal static class Instancing
         }
     }
 
+    /// <summary>
+    /// Hides or shows every part of the entity <paramref name="handle"/> names.
+    /// </summary>
+    public static void Hide(RenderContext ctx, uint handle, bool hidden)
+    {
+        InstanceTable instances = ctx.Instances;
+        for (uint slot = handle; slot < instances.HighWater; slot = instances.NextPart(slot))
+            instances.Hide(slot, hidden);
+    }
+
     public static void Remove(RenderContext ctx, uint handle)
     {
         InstanceTable instances = ctx.Instances;
@@ -63,8 +83,7 @@ internal static class Instancing
         for (uint slot = handle; slot < instances.HighWater;)
         {
             uint next = instances.NextPart(slot);
-            ctx.Buckets.Release(instances.ClassOf(slot), instances.MeshSlotOf(slot));
-            Pipelines.Release(ctx, instances.ClassOf(slot));
+            Ungroup(ctx, instances.ClassOf(slot), instances.MeshSlotOf(slot));
             Materials.Release(ctx, instances.MaterialOf(slot));
             instances.Remove(slot);
             slot = next;
@@ -73,7 +92,9 @@ internal static class Instancing
         Meshes.Release(ctx, model);
     }
 
-    /// <summary>A material changed class: every instance takes its material's slot and class again, moving draw group when its class changed.</summary>
+    /// <summary>
+    /// A material changed class: every instance takes its material's slot and class again, moving draw group when its class changed.
+    /// </summary>
     public static void Reclass(RenderContext ctx)
     {
         InstanceTable instances = ctx.Instances;
@@ -88,16 +109,18 @@ internal static class Instancing
             uint group = instances.BucketGroupOf(slot);
             if (previous != material.Class)
             {
-                ctx.Buckets.Release(previous, meshSlot);
                 group = Group(ctx, material.Class, meshSlot);
-                Pipelines.Release(ctx, previous);
+                Ungroup(ctx, previous, meshSlot);
             }
 
             instances.Reclass(slot, material, group);
+            MarkFailed(ctx, slot, material);
         }
     }
 
-    /// <summary>Uploads every page with a changed row, the cell and page tables and the draw-group template when they changed.</summary>
+    /// <summary>
+    /// Uploads every page with a changed row, the cell and page tables and the draw-group template when they changed.
+    /// </summary>
     public static void Flush(RenderContext ctx)
     {
         IRendering gpu = ctx.Gpu;
@@ -123,6 +146,8 @@ internal static class Instancing
         {
             buckets.Template.Ensure(gpu, (uint)buckets.TemplateRows.Length * DrawArgs.Size);
             gpu.Upload(buckets.Template.Handle, 0, buckets.TemplateRows);
+            buckets.Lods.Ensure(gpu, (uint)buckets.LodRows.Length * GpuLodRow.Size);
+            gpu.Upload(buckets.Lods.Handle, 0, buckets.LodRows);
             buckets.Dirty = false;
         }
     }
@@ -136,14 +161,53 @@ internal static class Instancing
         return meshSlot == 0 ? ctx.Materials.SlotOf(MaterialTable.MeshFailureSlot) : own;
     }
 
-    /// <summary>The draw group of a class and mesh, taking a reference to it and to the class's pipeline; a class seen for the first time starts compiling its pipeline.</summary>
+    /// <summary>
+    /// Notes whether the instance is drawn as a failure: with a material that failed (the mesh failure among them).
+    /// </summary>
+    private static void MarkFailed(RenderContext ctx, uint slot, MaterialSlot drawn)
+    {
+        if (ctx.Materials.States[drawn.Slot] is { Failure: not 0 })
+            ctx.Instances.Failed.Add(slot);
+        else
+            ctx.Instances.Failed.Remove(slot);
+    }
+
+    /// <summary>
+    /// The draw group of a class and mesh, taking a reference to it and to the class's pipeline; a class seen for the
+    /// first time starts compiling its pipeline. A reference is taken to the group of each of the mesh's lesser versions
+    /// too, since the culler may draw the instance in any of them, and the group is told which they are.
+    /// </summary>
     private static uint Group(RenderContext ctx, PipelineClass cls, uint meshSlot)
     {
         Pipelines.Acquire(ctx, cls);
-        return ctx.Buckets.Acquire(cls, meshSlot, ctx.Meshes.Range(meshSlot));
+        uint group = ctx.Buckets.Acquire(cls, meshSlot, ctx.Meshes.Range(meshSlot));
+        (float Threshold, uint MeshSlot)[] lods = ctx.Meshes.Lods(meshSlot);
+        if (lods.Length == 0)
+            return group;
+
+        Span<(float Threshold, uint Group)> groups = stackalloc (float, uint)[lods.Length];
+        for (int i = 0; i < lods.Length; i++)
+            groups[i] = (lods[i].Threshold, ctx.Buckets.Acquire(cls, lods[i].MeshSlot, ctx.Meshes.Range(lods[i].MeshSlot)));
+
+        ctx.Buckets.SetLods(group, groups);
+        return group;
     }
 
-    /// <summary>Every run of adjacent dirty pages in one upload each; a grown buffer takes every row again.</summary>
+    /// <summary>
+    /// Gives back what <see cref="Group"/> took.
+    /// </summary>
+    private static void Ungroup(RenderContext ctx, PipelineClass cls, uint meshSlot)
+    {
+        foreach ((_, uint lod) in ctx.Meshes.Lods(meshSlot))
+            ctx.Buckets.Release(cls, lod);
+
+        ctx.Buckets.Release(cls, meshSlot);
+        Pipelines.Release(ctx, cls);
+    }
+
+    /// <summary>
+    /// Every run of adjacent dirty pages in one upload each; a grown buffer takes every row again.
+    /// </summary>
     private static void FlushInstances(RenderContext ctx)
     {
         InstanceTable instances = ctx.Instances;

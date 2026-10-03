@@ -13,9 +13,13 @@ public sealed class Domain : Asset
 {
     public int Seed { get; set; }
 
-    /// <summary>Metres; chunk <c>x_y_z</c> spans <c>[x * size, (x + 1) * size)</c> on each axis.</summary>
+    /// <summary>
+    /// Metres; chunk <c>x_y_z</c> spans <c>[x * size, (x + 1) * size)</c> on each axis.
+    /// </summary>
     public float ChunkSize { get; set; } = 64f;
 
-    /// <summary>Game time in seconds.</summary>
+    /// <summary>
+    /// Game time in seconds.
+    /// </summary>
     public double Time { get; set; }
 }

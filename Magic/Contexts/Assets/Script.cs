@@ -9,7 +9,9 @@ namespace Magic.Contexts.Assets;
 /// </summary>
 public sealed class Script : Asset
 {
-    /// <summary>The script's class, of the project assembly loaded now; a reloaded project has a new one.</summary>
+    /// <summary>
+    /// The script's class, of the project assembly loaded now; a reloaded project has a new one.
+    /// </summary>
     [JsonIgnore]
     public Type? Type { get; set; }
 }

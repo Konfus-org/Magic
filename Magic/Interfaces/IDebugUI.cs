@@ -1,3 +1,7 @@
+using Magic.Contexts;
+using System.Drawing;
+using System.Numerics;
+
 namespace Magic.Interfaces;
 
 /// <summary>
@@ -25,18 +29,38 @@ public interface IDebugUI
 
     void End();
 
-    void Text(string text);
+    void Text(string text, Color color);
 
-    /// <summary>True when the button was clicked.</summary>
+    /// <summary>
+    /// Text centred on a pixel of the main window, outside any window and drawn over everything: what text in the
+    /// world (<see cref="Utils.Debugging.UI.Text(Vector3, string, Color?)"/>) becomes once it is projected.
+    /// </summary>
+    void Text(Vector2 pixel, string text, Color color);
+
+    /// <summary>
+    /// Lines down the left of the main window, top to bottom, drawn over everything: no window, no background, no
+    /// scrollbar. When there are more than fit, the first ones are left out.
+    /// </summary>
+    void Lines(ReadOnlySpan<DebugLine> lines);
+
+    /// <summary>
+    /// True when the button was clicked.
+    /// </summary>
     bool Button(string label);
 
-    /// <summary>A one-line text field editing <paramref name="text"/>; true when Enter was pressed in it. Takes the keyboard when its panel appears.</summary>
+    /// <summary>
+    /// A one-line text field editing <paramref name="text"/>; true when Enter was pressed in it. Takes the keyboard when its panel appears.
+    /// </summary>
     bool Input(string label, ref string text);
 
-    /// <summary>Multi-line text editing <paramref name="text"/>, as tall as its lines; <paramref name="readOnly"/> text can still be selected and copied. True when changed.</summary>
+    /// <summary>
+    /// Multi-line text editing <paramref name="text"/>, as tall as its lines; <paramref name="readOnly"/> text can still be selected and copied. True when changed.
+    /// </summary>
     bool Document(string label, ref string text, bool readOnly = false);
 
-    /// <summary>True when changed.</summary>
+    /// <summary>
+    /// True when changed.
+    /// </summary>
     bool Checkbox(string label, ref bool value);
 
     /// <summary>
@@ -45,6 +69,8 @@ public interface IDebugUI
     /// </summary>
     bool Slider(string label, ref float value, float min = 0f, float max = 0f);
 
-    /// <summary>One of <paramref name="options"/>, by index. True when changed.</summary>
+    /// <summary>
+    /// One of <paramref name="options"/>, by index. True when changed.
+    /// </summary>
     bool Choice(string label, ref int index, string[] options);
 }

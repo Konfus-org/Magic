@@ -23,7 +23,9 @@ internal sealed class GrowableBuffer
 
     public uint Size { get; private set; }
 
-    /// <summary>Makes sure <paramref name="bytes"/> fit; true when the buffer was replaced (its contents are gone).</summary>
+    /// <summary>
+    /// Makes sure <paramref name="bytes"/> fit; true when the buffer was replaced (its contents are gone).
+    /// </summary>
     public bool Ensure(IRendering gpu, uint bytes)
     {
         if (bytes <= Size)

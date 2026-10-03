@@ -6,19 +6,25 @@ using System.Numerics;
 
 namespace Magic.Contexts.Rendering;
 
-/// <summary>A loaded model: the mesh slots it owns and its parts on them.</summary>
-internal readonly record struct ModelEntry(uint[] Slots, (uint MeshSlot, int MaterialSlot)[] Parts);
+/// <summary>
+/// A loaded model: the mesh slots it owns, those of its lesser versions among them, its parts on its own, and its
+/// <see cref="Model.Origin"/> as it was when it was placed.
+/// </summary>
+internal readonly record struct ModelEntry(uint[] Slots, (uint MeshSlot, int MaterialSlot)[] Parts, Vector3 Origin);
 
 /// <summary>
 /// Every model in use, id to <see cref="ModelEntry"/>, reference counted, and every mesh of them on the GPU: vertices and
 /// indices sub-allocated from one mega vertex buffer and one mega index buffer, so all geometry is drawn from the same two
 /// bindings and the culler only has to write draw arguments. A model that could not be loaded keeps an entry too, on
 /// slot 0, a unit cube only ever used for that: the instance is flagged and the failure shader paints it red.
-/// <see cref="Pending"/> is the geometry not uploaded yet.
+/// A mesh may have lesser versions (LODs), meshes of their own that it names with the height on screen under which each
+/// is drawn in its place. <see cref="Pending"/> is the geometry not uploaded yet.
 /// </summary>
 internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
 {
-    /// <summary>What anything that cannot be drawn is: one part on slot 0 with material slot 0.</summary>
+    /// <summary>
+    /// What anything that cannot be drawn is: one part on slot 0 with material slot 0.
+    /// </summary>
     public static readonly (uint MeshSlot, int MaterialSlot)[] Placeholder = [(0, 0)];
 
     private readonly RangeAllocator _vertexSpace;
@@ -41,10 +47,14 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
 
     public GpuBuffer IndexBuffer { get; }
 
-    /// <summary>The meshes placed, the failure cube among them.</summary>
+    /// <summary>
+    /// The meshes placed, the failure cube among them.
+    /// </summary>
     public int MeshCount => _placements.Used;
 
-    /// <summary>Geometry placed since the last upload: where it goes (in vertices and indices) and what it is.</summary>
+    /// <summary>
+    /// Geometry placed since the last upload: where it goes (in vertices and indices) and what it is.
+    /// </summary>
     public List<(uint FirstVertex, uint FirstIndex, Vertex[] Vertices, uint[] Indices)> Pending { get; } = [];
 
     public BoundingSphere Bounds(uint slot)
@@ -52,14 +62,34 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
         return _placements[slot]?.Bounds ?? default;
     }
 
-    /// <summary>What a draw of the slot needs: index range and vertex base.</summary>
+    /// <summary>
+    /// The slot's lesser versions, the highest threshold first; none for most.
+    /// </summary>
+    public (float Threshold, uint MeshSlot)[] Lods(uint slot)
+    {
+        return _placements[slot]?.Lods ?? [];
+    }
+
+    public void SetLods(uint slot, (float Threshold, uint MeshSlot)[] lods)
+    {
+        if (_placements[slot] is { } placement)
+            placement.Lods = lods;
+    }
+
+    /// <summary>
+    /// What a draw of the slot needs: index range and vertex base.
+    /// </summary>
     public (uint FirstIndex, uint IndexCount, int VertexOffset) Range(uint slot)
     {
-        Placement placement = _placements[slot] ?? _placements[0]!;
+        if ((_placements[slot] ?? _placements[0]) is not { } placement)
+            return default;
+
         return (placement.Indices.Offset, placement.IndexCount, (int)placement.Vertices.Offset);
     }
 
-    /// <summary>A slot for the mesh, its geometry queued for upload; slot 0, the failure cube, when the buffers are full (logged).</summary>
+    /// <summary>
+    /// A slot for the mesh, its geometry queued for upload; slot 0, the failure cube, when the buffers are full (logged).
+    /// </summary>
     public uint Place(Mesh mesh)
     {
         if (mesh.Bounds.Radius == 0f && mesh.Vertices.Length > 0)
@@ -79,7 +109,9 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
         return _placements.Add(new Placement(vertices, indices, (uint)mesh.Indices.Length, mesh.Bounds));
     }
 
-    /// <summary>Gives the slot's ranges back; the failure cube stays.</summary>
+    /// <summary>
+    /// Gives the slot's ranges back; the failure cube stays.
+    /// </summary>
     public void Remove(uint slot)
     {
         if (slot == 0 || _placements[slot] is not { } placement)
@@ -90,7 +122,9 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
         _placements.Remove(slot);
     }
 
-    /// <summary>A 2 m cube, -1..1, clockwise from outside, one normal per face, tangents along the face's u, uvs per face.</summary>
+    /// <summary>
+    /// A 2 m cube, -1..1, clockwise from outside, one normal per face, tangents along the face's u, uvs per face.
+    /// </summary>
     private static Mesh UnitCube()
     {
         (Vector3 N, Vector3 U, Vector3 V)[] faces =
@@ -120,6 +154,11 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
         return new Mesh { Vertices = vertices, Indices = indices };
     }
 
-    /// <summary>Where one mesh lives in the mega buffers, and its bounds.</summary>
-    private sealed record Placement(RangeAllocator.Allocation Vertices, RangeAllocator.Allocation Indices, uint IndexCount, BoundingSphere Bounds);
+    /// <summary>
+    /// Where one mesh lives in the mega buffers, and its bounds.
+    /// </summary>
+    private sealed record Placement(RangeAllocator.Allocation Vertices, RangeAllocator.Allocation Indices, uint IndexCount, BoundingSphere Bounds)
+    {
+        public (float Threshold, uint MeshSlot)[] Lods { get; set; } = [];
+    }
 }

@@ -11,13 +11,19 @@ namespace Magic.Interfaces;
 /// </summary>
 public interface IInput
 {
-    /// <summary>Where the mouse is, in points of the window it is over (<see cref="IWindow.Size"/>), top left (0, 0).</summary>
+    /// <summary>
+    /// Where the mouse is, in points of the window it is over (<see cref="IWindow.Size"/>), top left (0, 0).
+    /// </summary>
     Vector2 MousePosition { get; }
 
-    /// <summary>How far the mouse moved since the last frame, in points.</summary>
+    /// <summary>
+    /// How far the mouse moved since the last frame, in points.
+    /// </summary>
     Vector2 MouseDelta { get; }
 
-    /// <summary>Wheel movement since the last frame: +Y away from the user, +X to the right.</summary>
+    /// <summary>
+    /// Wheel movement since the last frame: +Y away from the user, +X to the right.
+    /// </summary>
     Vector2 MouseWheel { get; }
 
     bool IsDown(Key key);
@@ -40,6 +46,8 @@ public interface IInput
 
     bool WasReleased(int gamepad, GamepadButton button);
 
-    /// <summary>Raw, no dead zone: see <see cref="GamepadAxis"/> for the ranges.</summary>
+    /// <summary>
+    /// Raw, no dead zone: see <see cref="GamepadAxis"/> for the ranges.
+    /// </summary>
     float Axis(int gamepad, GamepadAxis axis);
 }

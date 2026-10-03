@@ -7,6 +7,9 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- The GPU structs mirror HLSL with fixed buffers (Contexts/Rendering/GpuStructs.cs). -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- The Mage (Resources/Icons/Mage.svg) rasterised: Windows shows an exe's own icon on the taskbar when a
+         window appears before SDL_SetWindowIcon has been called, which the asynchronous icon load makes a race. -->
+    <ApplicationIcon>Mage.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -35,6 +38,11 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="$(MagicRoot)Resources\**" Link="Resources\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+  <!-- The engine's own scripts (the loading screen's) are assets like a project's, and like a project's they are
+       compiled by the build of what they belong to: this one. -->
+  <ItemGroup>
+    <Compile Include="$(MagicRoot)Resources\Scripts\**\*.cs" Link="Resources\Scripts\%(RecursiveDir)%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup Condition="'$(ShipResources)' == 'true'">
     <None Update="$(MagicRoot)Resources\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

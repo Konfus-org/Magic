@@ -10,7 +10,7 @@ namespace Magic.Systems.Rendering;
 
 /// <summary>
 /// The custom passes: the <c>.pass</c> assets the world's <see cref="PostProcessing"/> lists, loaded while
-/// listed and unloaded when not, validated, compiled (on a worker; the pass is skipped until ready) and
+/// listed and unloaded when not, validated, compiled (both off the render thread; the pass is skipped until ready) and
 /// run after the scene over each render target, in the order of its list. A pass is a fullscreen fragment shader or a
 /// compute shader with the pass contract of <c>Include/Pass.hlsli</c>: its inputs bound in order, its parameters packed
 /// after the frame constants, its output a named target (a new one is created, and made again when the pass changes its
@@ -22,7 +22,7 @@ internal static class Passes
     private const GpuTextureUsage OutputUsage = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite;
 
     /// <summary>
-    /// Before a frame is planned: every pass of <paramref name="list"/> is loaded (its compile started), and every
+    /// Before a frame is planned: every pass of <paramref name="list"/> is in the table (its load started), and every
     /// loaded pass no longer in it is unloaded, its pipeline released.
     /// </summary>
     public static void Sync(RenderContext ctx, PassList list)
@@ -35,13 +35,14 @@ internal static class Passes
             if (table.TryAcquire(handle.Id, out _))
                 continue;
 
+            // Not ready, so not run, until its file and its shader have arrived: the render system loads it then.
             table.Add(handle.Id, new PassState(handle.Id, "", new Pass(), false, 0, [], FrameTargets.LdrFormat, default, null, null));
-            Load(ctx, handle.Id);
+            _ = ctx.Reloads.StartAsync(handle.Id, cancel => Preloads.PassAsync(ctx.Assets, handle.Id, cancel));
         }
 
         foreach (ulong id in table.Held)
         {
-            if (!table.Release(id, out PassState state))
+            if (!table.Release(id, out PassState? state))
                 continue;
 
             ctx.Gpu.Release(state.Pipeline);
@@ -87,13 +88,13 @@ internal static class Passes
                 continue;
             }
 
-            if (differs)
+            if (differs || output is null)
             {
                 output = targets.Define(ctx.Gpu, pass.Pass.Output.Name, pass.OutputFormat, OutputUsage, pass.Pass.Output.Scale);
                 targets.Ensure(ctx.Gpu, targets.Width, targets.Height);
             }
 
-            output!.InUse = true;
+            output.InUse = true;
             if (pass.PingPong)
             {
                 targets.TwinOf(ctx.Gpu, output);
@@ -129,19 +130,24 @@ internal static class Passes
         Span<GpuBinding> bindings = stackalloc GpuBinding[PassTable.MaxInputs];
         foreach (PassState pass in passes)
         {
-            FrameTargets.Target output = targets.Get(pass.Pass.Output.Name)!;
+            // Prepare plans only passes that compiled and whose targets are there; one that is not is left out.
+            if (targets.Get(pass.Pass.Output.Name) is not { } output || pass.Compiled is not { } shader)
+                continue;
+
             Span<GpuBinding> inputs = bindings[..pass.Pass.Inputs.Length];
-            for (int i = 0; i < inputs.Length; i++)
+            int bound = 0;
+            for (; bound < inputs.Length && targets.Get(pass.Pass.Inputs[bound]) is { } input; bound++)
             {
-                FrameTargets.Target input = targets.Get(pass.Pass.Inputs[i])!;
                 bool nearest = input.IsDepth || input.Format is GpuFormat.R32Float;
-                inputs[i] = new GpuBinding(Texture: input.Texture, Sampler: nearest ? ctx.NearestClamp : ctx.LinearClamp);
+                inputs[bound] = new GpuBinding(Texture: input.Texture, Sampler: nearest ? ctx.NearestClamp : ctx.LinearClamp);
             }
+
+            if (bound < inputs.Length)
+                continue;
 
             PassConstants constants = new() { Frame = frame };
             pass.Params.CopyTo(MemoryMarshal.AsBytes(MemoryMarshal.CreateSpan(ref constants, 1))[FrameConstants.Size..]);
             GpuTexture outputTexture = pass.PingPong ? output.Twin : output.Texture;
-            CompiledShader shader = pass.Compiled!;
             if (shader.Stage == GpuStage.Compute)
             {
                 commands.Push(GpuStage.Compute, constants);
@@ -184,7 +190,7 @@ internal static class Passes
         if (!ctx.Passes.TryGet(id, out PassState state))
             return;
 
-        Pass? pass = ctx.Assets.Load(new Handle<Pass>(id));
+        Pass? pass = Preloads.Get<Pass>(ctx, id);
         if (pass is null)
         {
             Disable(ctx, id, "the file could not be read.");
@@ -268,15 +274,16 @@ internal static class Passes
         ctx.Passes.Set(id, state with { ShaderId = shader.Id, Params = parameters });
         string source = composed.ToString();
         string salt = Shaders.ClosureHash(ctx, shader) + string.Join(",", state.Pass.Inputs);
-        ctx.Passes.Compiles.Start(state.Id, Task.Run(() => Shaders.Compile(ctx, source, $"{state.Path}+{shader.Path}", compute ? GpuStage.Compute : GpuStage.Fragment, salt)));
+        _ = ctx.Passes.Compiles.StartAsync(state.Id, cancel => Shaders.CompileAsync(ctx, source, $"{state.Path}+{shader.Path}", compute ? GpuStage.Compute : GpuStage.Fragment, salt, cancel));
     }
 
     /// <summary>
     /// A compile finished: the pass gets its new pipeline, or is disabled with the error. Main thread: the render system
     /// polls the table's compiles with it once per frame.
     /// </summary>
-    public static void FinishCompile(RenderContext ctx, ulong id, Result<CompiledShader> result)
+    public static void FinishCompile(RenderContext ctx, ulong id, Task<Result<CompiledShader>> job)
     {
+        Result<CompiledShader> result = Shaders.Outcome(job);
         if (!ctx.Passes.TryGet(id, out PassState state))
             return; // removed while compiling
         if (result.Failed)
@@ -309,7 +316,7 @@ internal static class Passes
     }
 
     /// <summary>
-    /// The first input of <paramref name="pass"/> that is not a target yet: neither one of the engine's (Hdr, Ldr, Depth)
+    /// The first input of <paramref name="pass"/> that is not a target yet: neither one of the engine's (Hdr, Ldr, Depth, the gbuffer's)
     /// nor written by a pass earlier in this frame's list. Null when it has them all.
     /// </summary>
     private static string? MissingInput(FrameTargets targets, PassState pass)
@@ -317,8 +324,7 @@ internal static class Passes
         foreach (string input in pass.Pass.Inputs)
         {
             FrameTargets.Target? target = targets.Get(input);
-            bool builtIn = target is not null && (target == targets.Hdr || target == targets.Ldr || target == targets.Depth);
-            if (target is null || !(builtIn || target.InUse))
+            if (target is null || !(target.IsBuiltIn || target.InUse))
                 return input;
         }
 
@@ -338,7 +344,9 @@ internal static class Passes
         };
     }
 
-    /// <summary>Disables the pass with <paramref name="message"/>, logged when it is new.</summary>
+    /// <summary>
+    /// Disables the pass with <paramref name="message"/>, logged when it is new.
+    /// </summary>
     private static void Disable(RenderContext ctx, ulong id, string message)
     {
         if (!ctx.Passes.TryGet(id, out PassState state))

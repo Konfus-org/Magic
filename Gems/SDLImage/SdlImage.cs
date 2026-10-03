@@ -97,7 +97,9 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
         return Result.Success();
     }
 
-    /// <summary>The surface's pixels as tightly packed RGBA rows (SDL pads rows to its pitch).</summary>
+    /// <summary>
+    /// The surface's pixels as tightly packed RGBA rows (SDL pads rows to its pitch).
+    /// </summary>
     private static byte[] Copy(nint surface, out int width, out int height)
     {
         SDL.Surface info = Marshal.PtrToStructure<SDL.Surface>(surface);

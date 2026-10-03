@@ -1,6 +1,8 @@
 namespace Magic.Contexts.Rendering;
 
-/// <summary>A buffer made by <see cref="Interfaces.IRendering.CreateBuffer"/>; 0 is none.</summary>
+/// <summary>
+/// A buffer made by <see cref="Interfaces.IRendering.CreateBuffer"/>; 0 is none.
+/// </summary>
 public readonly record struct GpuBuffer(uint Id)
 {
     public bool IsValid => Id != 0;
@@ -18,10 +20,14 @@ public readonly record struct GpuTexture(uint Id)
 
     public bool IsWindow => (Id & WindowBit) != 0;
 
-    /// <summary>The <see cref="Interfaces.IWindow.Handle"/> of a swapchain image.</summary>
+    /// <summary>
+    /// The <see cref="Interfaces.IWindow.Handle"/> of a swapchain image.
+    /// </summary>
     public uint WindowHandle => Id & ~WindowBit;
 
-    /// <summary>This frame's swapchain image of the window with this <see cref="Interfaces.IWindow.Handle"/>.</summary>
+    /// <summary>
+    /// This frame's swapchain image of the window with this <see cref="Interfaces.IWindow.Handle"/>.
+    /// </summary>
     public static GpuTexture Window(uint window)
     {
         return new GpuTexture(WindowBit | window);
@@ -33,7 +39,9 @@ public readonly record struct GpuSampler(uint Id)
     public bool IsValid => Id != 0;
 }
 
-/// <summary>A graphics or compute pipeline; which one it is was fixed when it was made.</summary>
+/// <summary>
+/// A graphics or compute pipeline; which one it is was fixed when it was made.
+/// </summary>
 public readonly record struct GpuPipeline(uint Id)
 {
     public bool IsValid => Id != 0;
@@ -46,7 +54,9 @@ public enum GpuStage : byte
     Compute
 }
 
-/// <summary>The texture formats the engine uses; <see cref="Interfaces.IRendering.DepthFormat"/> says which depth one the device has.</summary>
+/// <summary>
+/// The texture formats the engine uses; <see cref="Interfaces.IRendering.DepthFormat"/> says which depth one the device has.
+/// </summary>
 public enum GpuFormat : byte
 {
     Invalid,
@@ -122,6 +132,7 @@ public enum GpuCompare : byte
 
 public enum GpuVertexFormat : byte
 {
+    Float,
     Float2,
     Float3,
     Float4,
@@ -129,7 +140,9 @@ public enum GpuVertexFormat : byte
     Ubyte4Norm
 }
 
-/// <summary>What a render pass does with a target's old contents.</summary>
+/// <summary>
+/// What a render pass does with a target's old contents.
+/// </summary>
 public enum GpuLoad : byte
 {
     Load,
@@ -141,20 +154,25 @@ public readonly record struct TextureDesc(GpuFormat Format, GpuTextureUsage Usag
 
 public readonly record struct SamplerDesc(GpuFilter Filter, GpuAddress Address, float Anisotropy = 0f);
 
-/// <summary>One mip level of one layer, or a rectangle of it; <see cref="Width"/> and <see cref="Height"/> of 0 mean the whole level.</summary>
+/// <summary>
+/// One mip level of one layer, or a rectangle of it; <see cref="Width"/> and <see cref="Height"/> of 0 mean the whole level.
+/// </summary>
 public readonly record struct TextureRegion(GpuTexture Texture, uint Level = 0, uint Layer = 0, uint X = 0, uint Y = 0, uint Width = 0, uint Height = 0);
 
-/// <summary>One vertex buffer slot of a pipeline: its stride and whether it steps per instance.</summary>
+/// <summary>
+/// One vertex buffer slot of a pipeline: its stride and whether it steps per instance.
+/// </summary>
 public readonly record struct VertexBufferLayout(uint Slot, uint Pitch, bool PerInstance = false);
 
 public readonly record struct VertexAttribute(uint Location, uint Slot, GpuVertexFormat Format, uint Offset);
 
 /// <summary>
-/// A graphics pipeline, as data: both shaders, the vertex layout, one colour target and an optional depth target. The
-/// defaults are the engine's conventions (clockwise front faces, reverse-Z), so a backend reads them rather than knowing them.
+/// A graphics pipeline, as data: both shaders, the vertex layout, the colour targets (one per <c>SV_Target</c> the
+/// fragment shader writes, in order) and an optional depth target. The defaults are the engine's conventions (clockwise
+/// front faces, reverse-Z), so a backend reads them rather than knowing them.
 /// Depth is tested and written whenever <see cref="Depth"/> is set.
 /// </summary>
-public sealed record PipelineDesc(CompiledShader Vertex, CompiledShader Fragment, GpuFormat Color)
+public sealed record PipelineDesc(CompiledShader Vertex, CompiledShader Fragment, params GpuFormat[] Colors)
 {
     public VertexBufferLayout[] Buffers { get; init; } = [];
 
@@ -168,7 +186,9 @@ public sealed record PipelineDesc(CompiledShader Vertex, CompiledShader Fragment
 
     public GpuCompare DepthCompare { get; init; } = GpuCompare.GreaterOrEqual;
 
-    /// <summary>Straight alpha over what is there, for UI.</summary>
+    /// <summary>
+    /// Straight alpha over what is there, for UI.
+    /// </summary>
     public bool AlphaBlend { get; init; }
 }
 
@@ -201,8 +221,12 @@ public sealed class CompiledShader
     public uint ThreadCountZ { get; set; }
 }
 
-/// <summary>One binding of a run a command binds: a buffer, or a texture with (for sampling) its sampler.</summary>
+/// <summary>
+/// One binding of a run a command binds: a buffer, or a texture with (for sampling) its sampler.
+/// </summary>
 public readonly record struct GpuBinding(GpuBuffer Buffer = default, GpuTexture Texture = default, GpuSampler Sampler = default);
 
-/// <summary>One captured frame: 8-bit RGBA, rows tightly packed top to bottom, <c>Width * Height * 4</c> bytes.</summary>
+/// <summary>
+/// One captured frame: 8-bit RGBA, rows tightly packed top to bottom, <c>Width * Height * 4</c> bytes.
+/// </summary>
 public readonly record struct CapturedFrame(int Width, int Height, byte[] Pixels);

@@ -18,6 +18,7 @@ namespace FlecsGem;
 internal sealed unsafe class FlecsEcs : IGem, IEcs
 {
     private readonly FlecsEntity _singletons;
+    private readonly FlecsGroup _group;
 
     public FlecsEcs()
     {
@@ -25,6 +26,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
         Native.SetThreads(Math.Max(1, Environment.ProcessorCount - 1));
         Phases = new Phases(Native);
         _singletons = Native.Entity("Singletons");
+        _group = new FlecsGroup(this);
     }
 
     public void Dispose()
@@ -33,17 +35,22 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
             return;
 
         IsDisposed = true;
+        _group.Dispose(); // a group left open lands before the world goes
         Native.Dispose(); // destroys every entity, query and system with it
     }
 
     public int EntityCount => Native.Count(Ecs.Any);
 
-    /// <summary>Phase tags and pipelines, one per <see cref="UpdateType"/>.</summary>
+    /// <summary>
+    /// Phase tags and pipelines, one per <see cref="UpdateType"/>.
+    /// </summary>
     internal Phases Phases { get; }
 
     internal FlecsWorldHandle Native { get; }
 
-    /// <summary>True once the flecs world is gone; handles created from it become no-ops.</summary>
+    /// <summary>
+    /// True once the flecs world is gone; handles created from it become no-ops.
+    /// </summary>
     internal bool IsDisposed { get; private set; }
 
     public void Update(in Frame frame)
@@ -70,6 +77,9 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
     {
         // Anonymous first, then parent, then name: naming an entity that already has a parent scopes the
         // name to its siblings, which is what "unique among siblings" means.
+        if (_group.IsOpen)
+            return _group.Create(name, parent);
+
         FlecsEntity entity = Native.Entity();
         if (parent.IsValid)
             entity.ChildOf(parent.Id);
@@ -80,20 +90,16 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
         return new Handle(entity.Id);
     }
 
-    public void Create(Span<Handle> ids)
+    public IDisposable Group()
     {
-        if (ids.IsEmpty)
-            return;
+        _group.Open();
 
-        // One table insert for the whole batch; the ids come back in a buffer flecs owns until the next bulk call.
-        flecs.ecs_bulk_desc_t desc = default;
-        desc.count = ids.Length;
-        ulong* created = flecs.ecs_bulk_init(Native.Handle, &desc);
-        new ReadOnlySpan<ulong>(created, ids.Length).CopyTo(MemoryMarshal.Cast<Handle, ulong>(ids));
+        return _group;
     }
 
     public void Destroy(Handle entity)
     {
+        ApplyGroupFor(entity);
         ToEntity(entity).Destruct();
     }
 
@@ -125,6 +131,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void SetName(Handle entity, string? name)
     {
+        ApplyGroupFor(entity);
         if (name is null)
             flecs.ecs_set_name(Native.Handle, entity.Id, null);
         else
@@ -143,6 +150,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void SetParent(Handle entity, Handle parent)
     {
+        ApplyGroupFor(entity);
         FlecsEntity native = ToEntity(entity);
         if (parent.IsValid)
             native.ChildOf(parent.Id);
@@ -160,6 +168,9 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void Set<T>(Handle entity, in T value) where T : unmanaged
     {
+        if (_group.IsOpen && _group.TryGive(entity.Id, Type<T>.Id(Native), Layout<T>.IsTag ? default : MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value))))
+            return;
+
         ToEntity(entity).Set(value);
     }
 
@@ -192,6 +203,11 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void Add<T>(Handle entity) where T : unmanaged
     {
+        // An entity made in an open group has nothing yet: the component is kept for it, at its default.
+        T blank = default;
+        if (_group.IsOpen && _group.TryGive(entity.Id, Type<T>.Id(Native), Layout<T>.IsTag ? default : MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in blank))))
+            return;
+
         FlecsEntity native = ToEntity(entity);
         if (native.Has<T>())
             return;
@@ -206,6 +222,7 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
 
     public void Remove<T>(Handle entity) where T : unmanaged
     {
+        ApplyGroupFor(entity);
         ToEntity(entity).Remove<T>();
     }
 
@@ -261,6 +278,17 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
         return new FlecsSystem(this, observer.Entity.Id);
     }
 
+    /// <summary>
+    /// What an open group holds back is applied now when <paramref name="entity"/> is one of the entities it made:
+    /// for a change a group does not keep (a removal, a new parent or name, its destruction), which needs the
+    /// entity as it stands.
+    /// </summary>
+    private void ApplyGroupFor(Handle entity)
+    {
+        if (_group.IsOpen && _group.Holds(entity.Id))
+            _group.Apply();
+    }
+
     private void RunPhase(UpdateType phase, float dt)
     {
         if (IsDisposed)
@@ -274,7 +302,9 @@ internal sealed unsafe class FlecsEcs : IGem, IEcs
         return Native.Entity(entity.Id);
     }
 
-    /// <summary>Whether <typeparamref name="T"/> is a tag (a struct with no fields), which flecs stores no memory for.</summary>
+    /// <summary>
+    /// Whether <typeparamref name="T"/> is a tag (a struct with no fields), which flecs stores no memory for.
+    /// </summary>
     private static class Layout<T> where T : unmanaged
     {
         public static readonly bool IsTag = typeof(T)

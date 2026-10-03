@@ -21,7 +21,7 @@ public sealed class RefCountTableTests
         RefCountTable<ulong, string> table = new();
         table.Add(1, "one");
 
-        table.TryAcquire(1, out string value);
+        table.TryAcquire(1, out string? value);
 
         Assert.Equal("one", value);
     }
@@ -55,7 +55,7 @@ public sealed class RefCountTableTests
         RefCountTable<ulong, string> table = new();
         table.Add(1, "one");
 
-        table.Release(1, out string value);
+        table.Release(1, out string? value);
 
         Assert.Equal("one", value);
     }
@@ -89,7 +89,7 @@ public sealed class RefCountTableTests
 
         table.Set(1, "uno");
 
-        table.TryGet(1, out string value);
+        table.TryGet(1, out string? value);
         Assert.Equal("uno", value);
     }
 

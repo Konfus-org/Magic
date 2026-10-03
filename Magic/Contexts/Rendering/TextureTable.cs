@@ -15,10 +15,14 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
 {
     public const int Classes = 8;
 
-    /// <summary>No texture: the surface's factor stands alone.</summary>
+    /// <summary>
+    /// No texture: the surface's factor stands alone.
+    /// </summary>
     public const uint None = uint.MaxValue;
 
-    /// <summary>A texture that did not load. Never a real reference: real ones keep the class (0..7) in the top 16 bits.</summary>
+    /// <summary>
+    /// A texture that did not load. Never a real reference: real ones keep the class (0..7) in the top 16 bits.
+    /// </summary>
     public const uint Failed = uint.MaxValue - 1;
 
     /// <summary>
@@ -55,18 +59,26 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
         }
     }
 
-    /// <summary>The same for all eight arrays.</summary>
+    /// <summary>
+    /// The same for all eight arrays.
+    /// </summary>
     public GpuSampler Sampler { get; }
 
     public PoolClass[] Pools { get; } = new PoolClass[Classes];
 
-    /// <summary>The render textures among the entries (a material samples them): their layer and the size a camera draws them at.</summary>
+    /// <summary>
+    /// The render textures among the entries (a material samples them): their layer and the size a camera draws them at.
+    /// </summary>
     public Dictionary<ulong, RenderedTexture> Rendered { get; } = [];
 
-    /// <summary>Fitted mip chains waiting for upload: class, layer, the pixels and where each level starts (the last offset ends the chain).</summary>
+    /// <summary>
+    /// Fitted mip chains waiting for upload: class, layer, the pixels and where each level starts (the last offset ends the chain).
+    /// </summary>
     public List<(int Class, uint Layer, byte[] Pixels, int[] Offsets)> Pending { get; } = [];
 
-    /// <summary>The packed reference of a texture already in the pool, without taking a reference; <see cref="None"/> otherwise.</summary>
+    /// <summary>
+    /// The packed reference of a texture already in the pool, without taking a reference; <see cref="None"/> otherwise.
+    /// </summary>
     public uint Lookup(Handle<Assets.Texture> handle)
     {
         return TryGet(handle.Id, out uint packed) ? packed : None;
@@ -78,7 +90,9 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
             Pools[packed >> 16].Free.Push(packed & 0xFFFF);
     }
 
-    /// <summary>A layer in the class, making its array (or a bigger one) as needed; false when the class is at the cap.</summary>
+    /// <summary>
+    /// A layer in the class, making its array (or a bigger one) as needed; false when the class is at the cap.
+    /// </summary>
     public bool TryAllocateLayer(IRendering gpu, PoolClass pool, out uint layer)
     {
         if (!pool.Texture.IsValid)
@@ -109,7 +123,9 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
         return true;
     }
 
-    /// <summary>The pool size a source of this size lands in, capped at <see cref="MaxSize"/>.</summary>
+    /// <summary>
+    /// The pool size a source of this size lands in, capped at <see cref="MaxSize"/>.
+    /// </summary>
     public int SizeFor(int width, int height)
     {
         int largest = Math.Max(width, height);
@@ -133,13 +149,17 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
         return srgb ? GpuFormat.Rgba8Srgb : GpuFormat.Rgba8Unorm;
     }
 
-    /// <summary>The sRGB arrays are also blit targets: render textures live in them, drawn into from Ldr (the same format).</summary>
+    /// <summary>
+    /// The sRGB arrays are also blit targets: render textures live in them, drawn into from Ldr (the same format).
+    /// </summary>
     private static GpuTextureUsage Usage(bool srgb)
     {
         return srgb ? GpuTextureUsage.Sampler | GpuTextureUsage.ColorTarget : GpuTextureUsage.Sampler;
     }
 
-    /// <summary>One array of the pool: its size and colour space, texture, layers in use and free, and a bigger array waiting for its copy.</summary>
+    /// <summary>
+    /// One array of the pool: its size and colour space, texture, layers in use and free, and a bigger array waiting for its copy.
+    /// </summary>
     public sealed class PoolClass
     {
         public int Size { get; set; }
@@ -162,7 +182,9 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
     }
 }
 
-/// <summary>A render texture's pool layer (<see cref="Packed"/>) and the size cameras draw it at.</summary>
+/// <summary>
+/// A render texture's pool layer (<see cref="Packed"/>) and the size cameras draw it at.
+/// </summary>
 internal readonly record struct RenderedTexture(uint Packed, int Width, int Height)
 {
     public int Class => (int)(Packed >> 16);

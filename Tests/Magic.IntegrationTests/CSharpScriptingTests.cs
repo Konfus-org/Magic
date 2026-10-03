@@ -6,13 +6,15 @@ using Xunit;
 
 namespace Magic.IntegrationTests;
 
-/// <summary>The scripting gem finding script classes among the loaded assemblies, this one included.</summary>
+/// <summary>
+/// The scripting gem finding script classes among the loaded assemblies, this one included.
+/// </summary>
 public sealed class CSharpScriptingTests
 {
     [Fact]
     public void A_script_loads_as_the_class_named_like_its_file()
     {
-        CSharpScripting scripting = new();
+        using CSharpScripting scripting = new();
         Script script = new() { Path = "Scripts/NamedLikeItsFile.cs" };
 
         scripting.Load(script, []);
@@ -23,7 +25,7 @@ public sealed class CSharpScriptingTests
     [Fact]
     public void A_script_no_class_is_named_like_fails_to_load()
     {
-        CSharpScripting scripting = new();
+        using CSharpScripting scripting = new();
         Script script = new() { Path = "Scripts/NoSuchClassAnywhere.cs" };
 
         Result loaded = scripting.Load(script, []);
@@ -34,7 +36,7 @@ public sealed class CSharpScriptingTests
     [Fact]
     public void A_class_that_is_not_a_script_is_not_found()
     {
-        CSharpScripting scripting = new();
+        using CSharpScripting scripting = new();
         Script script = new() { Path = "Scripts/CSharpScriptingTests.cs" };
 
         Result loaded = scripting.Load(script, []);

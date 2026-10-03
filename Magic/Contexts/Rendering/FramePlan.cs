@@ -2,7 +2,9 @@ using System.Drawing;
 
 namespace Magic.Contexts.Rendering;
 
-/// <summary>One view drawn into one render target this frame: which view, its rectangle in the target, its buffers and its constants.</summary>
+/// <summary>
+/// One view drawn into one render target this frame: which view, its rectangle in the target, its buffers and its constants.
+/// </summary>
 internal readonly record struct ViewPlan(int Index, Rectangle Rect, ViewBuffers Buffers, FrameConstants Constants);
 
 /// <summary>
@@ -22,10 +24,14 @@ internal sealed class FramePlan
 
     public List<ViewPlan> Views { get; } = [];
 
-    /// <summary>The passes that run this frame, each target's next to each other in the order they run.</summary>
+    /// <summary>
+    /// The passes that run this frame, each target's next to each other in the order they run.
+    /// </summary>
     public List<PassState> Passes { get; } = [];
 
-    /// <summary>The main window to clear because no view draws into it; 0 for none.</summary>
+    /// <summary>
+    /// The main window to clear because no view draws into it; 0 for none.
+    /// </summary>
     public uint ClearWindow { get; set; }
 
     public void Clear()

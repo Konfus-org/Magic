@@ -13,9 +13,9 @@ namespace SDLInputGem;
 /// <summary>
 /// SDL's keyboard, mouse and gamepads as <see cref="IInput"/>, and keyboard, text and mouse as published
 /// <see cref="Event"/>s for whoever needs every one in order (text fields, the debug UI). An event watch sees each
-/// event as the SDL gem's pump queues it, on the main thread, and updates the live state; <see cref="Update"/>, which
-/// runs right after the pump (this gem depends on SDL, so it loads after it), copies that into the frame state every
-/// reader sees. Gamepads are opened as they connect and kept in the first free slot.
+/// event as the SDL gem's pump queues it, at the end of a frame on the render thread while the main thread waits,
+/// and updates the live state; <see cref="Update"/>, at the start of the next frame, copies that into the frame
+/// state every reader sees. Gamepads are opened as they connect and kept in the first free slot.
 /// </summary>
 internal sealed class SdlInput : IGem, IInput
 {
@@ -93,7 +93,9 @@ internal sealed class SdlInput : IGem, IInput
 
     public float Axis(int gamepad, GamepadAxis axis) => Slot(gamepad)?.Axes[(int)axis] ?? 0f;
 
-    /// <summary>Makes what arrived since the last frame the state every reader sees until the next.</summary>
+    /// <summary>
+    /// Makes what arrived since the last frame the state every reader sees until the next.
+    /// </summary>
     public void Update(in Frame frame)
     {
         _keys.Latch();
@@ -119,7 +121,9 @@ internal sealed class SdlInput : IGem, IInput
         return Array.Find(_gamepads, gamepad => gamepad?.Id == id);
     }
 
-    /// <summary>Sees every event as it is queued; always lets it through for whoever else watches.</summary>
+    /// <summary>
+    /// Sees every event as it is queued; always lets it through for whoever else watches.
+    /// </summary>
     private bool OnEvent(IntPtr userdata, ref SDL.Event e)
     {
         switch ((SDL.EventType)e.Type)
@@ -192,10 +196,10 @@ internal sealed class SdlInput : IGem, IInput
     private void OnGamepadRemoved(uint id)
     {
         int slot = Array.FindIndex(_gamepads, gamepad => gamepad?.Id == id);
-        if (slot < 0)
+        if (slot < 0 || _gamepads[slot] is not { } gamepad)
             return;
 
-        SDL.CloseGamepad(_gamepads[slot]!.Handle);
+        SDL.CloseGamepad(gamepad.Handle);
         _gamepads[slot] = null;
         Debugging.Log.Info($"Gamepad {slot} disconnected.");
     }
@@ -214,7 +218,7 @@ internal sealed class SdlInput : IGem, IInput
 
     /// <summary>
     /// Down, pressed and released per button: live as events arrive, frame as readers see it. A press stays pressed
-    /// until the next <see cref="Tick"/> even if the button was let go again in between.
+    /// until the next <see cref="Latch"/> even if the button was let go again in between.
     /// </summary>
     private sealed class Buttons(int count)
     {

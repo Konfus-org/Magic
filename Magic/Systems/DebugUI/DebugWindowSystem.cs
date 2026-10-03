@@ -41,7 +41,9 @@ internal abstract class DebugWindowSystem : ISystem
         }
     }
 
-    /// <summary>Toggles the window on its key, then draws it: <see cref="Draw"/> is called every frame, open or not.</summary>
+    /// <summary>
+    /// Toggles the window on its key, then draws it: <see cref="Draw"/> is called every frame, open or not.
+    /// </summary>
     public void Run(in Frame frame)
     {
         if (_input?.WasPressed(Key) == true)
@@ -52,12 +54,16 @@ internal abstract class DebugWindowSystem : ISystem
         Open = _visible; // closed by its button: only now, so the frame's End still reached the UI
     }
 
-    /// <summary>Opens the window, titled with its name and key, with a close button. Pair with <see cref="Debugging.UI.End"/>.</summary>
+    /// <summary>
+    /// Opens the window, titled with its name and key, with a close button. Pair with <see cref="Debugging.UI.End"/>.
+    /// </summary>
     protected void Begin(bool scrollable = false)
     {
         Debugging.UI.Begin(_title, ref _visible, scrollable);
     }
 
-    /// <summary>The window's frame: draw it while <see cref="Open"/>, and whatever else it does every frame.</summary>
+    /// <summary>
+    /// The window's frame: draw it while <see cref="Open"/>, and whatever else it does every frame.
+    /// </summary>
     protected abstract void Draw(in Frame frame);
 }

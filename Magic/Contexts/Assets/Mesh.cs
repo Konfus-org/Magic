@@ -15,7 +15,9 @@ namespace Magic.Contexts.Assets;
 [StructLayout(LayoutKind.Sequential)]
 public struct Vertex
 {
-    /// <summary>Bytes per vertex; the shaders and the vertex buffer layout assume exactly this.</summary>
+    /// <summary>
+    /// Bytes per vertex; the shaders and the vertex buffer layout assume exactly this.
+    /// </summary>
     public const int Size = 48;
 
     public Vector3 Position;
@@ -42,20 +44,28 @@ public sealed class Mesh
 
     public uint[] Indices { get; set; } = [];
 
-    /// <summary>The box around every vertex, in the mesh's own space.</summary>
+    /// <summary>
+    /// The box around every vertex, in the mesh's own space.
+    /// </summary>
     public Aabb Box { get; set; }
 
-    /// <summary>The sphere around <see cref="Box"/>; what the renderer culls with. Radius 0 means not computed.</summary>
+    /// <summary>
+    /// The sphere around <see cref="Box"/>; what the renderer culls with. Radius 0 means not computed.
+    /// </summary>
     public BoundingSphere Bounds { get; set; }
 
-    /// <summary>Sets <see cref="Box"/> and <see cref="Bounds"/> from <see cref="Vertices"/>; the loader calls it once.</summary>
+    /// <summary>
+    /// Sets <see cref="Box"/> and <see cref="Bounds"/> from <see cref="Vertices"/>; the loader calls it once.
+    /// </summary>
     public void ComputeBounds()
     {
         Box = BoxAround(Vertices);
         Bounds = Box.Sphere;
     }
 
-    /// <summary>Over the positions of the vertices, without copying them out first.</summary>
+    /// <summary>
+    /// Over the positions of the vertices, without copying them out first.
+    /// </summary>
     private static Aabb BoxAround(ReadOnlySpan<Vertex> vertices)
     {
         if (vertices.IsEmpty)

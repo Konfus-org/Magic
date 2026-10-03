@@ -4,11 +4,16 @@ using Magic.Utils;
 
 namespace Magic.Contexts.Rendering;
 
-/// <summary>What an instance needs to know about its material: its record slot and the pipeline class that draws it.</summary>
+/// <summary>
+/// What an instance needs to know about its material: its record slot and the pipeline class that draws it.
+/// </summary>
 internal readonly record struct MaterialSlot(uint Slot, PipelineClass Class);
 
-/// <summary>One material as packed: the loaded asset (null when it failed), its class, the failure kind (0 for none) and the textures it holds.</summary>
-internal sealed record MaterialState(uint Slot, Material? Material, PipelineClass Class, uint Failure, Handle<Texture>[] Textures);
+/// <summary>
+/// One material as packed: the loaded asset (null when it failed), its class, the failure kind (0 for none), the
+/// textures it holds, and why it failed in a few words (null for none), for whoever shows it.
+/// </summary>
+internal sealed record MaterialState(uint Slot, Material? Material, PipelineClass Class, uint Failure, Handle<Texture>[] Textures, string? Error = null);
 
 /// <summary>
 /// Every material in use, id to slot, reference counted: its packed <see cref="GpuMaterial"/> on the GPU, by slot, each
@@ -19,10 +24,14 @@ internal sealed record MaterialState(uint Slot, Material? Material, PipelineClas
 /// </summary>
 internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong failureSurface) : RefCountTable<ulong, uint>
 {
-    /// <summary>The failure kinds of Surfaces/Failure.surf.hlsl a record carries.</summary>
+    /// <summary>
+    /// The failure kinds of Surfaces/Failure.surf.hlsl a record carries.
+    /// </summary>
     public const uint FailureShader = 1, FailureMissing = 2, FailureMesh = 3, FailureTexture = 4;
 
-    /// <summary>The slot every instance whose model did not load draws with.</summary>
+    /// <summary>
+    /// The slot every instance whose model did not load draws with.
+    /// </summary>
     public const uint MeshFailureSlot = 1;
 
     public ulong DefaultSurface { get; } = defaultSurface;
@@ -33,19 +42,27 @@ internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong 
 
     public Slots<MaterialState> States { get; } = new();
 
-    /// <summary>Every slot's record, one after the other; grows with <see cref="States"/>.</summary>
+    /// <summary>
+    /// Every slot's record, one after the other; grows with <see cref="States"/>.
+    /// </summary>
     public byte[] RecordBytes { get; private set; } = new byte[64 * GpuMaterial.Size];
 
     public bool Dirty { get; set; } = true;
 
-    public PipelineClass PlaceholderClass => States[0]!.Class;
+    public PipelineClass PlaceholderClass => SlotOf(0).Class;
 
+    /// <summary>
+    /// Throws for a slot that holds no material: nothing may draw with one.
+    /// </summary>
     public MaterialSlot SlotOf(uint slot)
     {
-        return new MaterialSlot(slot, States[slot]!.Class);
+        MaterialState state = States[slot] ?? throw new InvalidOperationException($"Material slot {slot} is empty.");
+        return new MaterialSlot(slot, state.Class);
     }
 
-    /// <summary>The bytes of a slot's record in the mirror.</summary>
+    /// <summary>
+    /// The bytes of a slot's record in the mirror.
+    /// </summary>
     public Span<byte> Record(uint slot)
     {
         int end = ((int)slot + 1) * GpuMaterial.Size;

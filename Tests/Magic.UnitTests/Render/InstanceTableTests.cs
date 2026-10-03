@@ -36,7 +36,7 @@ public sealed class InstanceTableTests
     {
         InstanceTable table = Table();
 
-        uint slot = table.Add(514, 3, UnitSphere(), default, default, InstanceFlags.None, Matrix4x4.Identity, 0, isStatic: false);
+        uint slot = table.Add(514, 3, UnitSphere(), 0f, default, default, InstanceFlags.None, Matrix4x4.Identity, Vector3.Zero, 0, isStatic: false);
 
         Assert.Equal(514ul, table.ModelOf(slot));
     }
@@ -46,7 +46,7 @@ public sealed class InstanceTableTests
     {
         InstanceTable table = Table();
 
-        uint slot = table.Add(514, 3, UnitSphere(), new Handle<Material>(77), default, InstanceFlags.None, Matrix4x4.Identity, 0, isStatic: false);
+        uint slot = table.Add(514, 3, UnitSphere(), 0f, new Handle<Material>(77), default, InstanceFlags.None, Matrix4x4.Identity, Vector3.Zero, 0, isStatic: false);
 
         Assert.Equal(new Handle<Material>(77), table.MaterialOf(slot));
     }
@@ -146,6 +146,57 @@ public sealed class InstanceTableTests
         return new InstanceTable(new FakeRendering(), 16);
     }
 
+    [Fact]
+    public void An_instance_is_size_culled_by_its_bounds_unless_told_otherwise()
+    {
+        InstanceTable table = new(new FakeRendering(), 16);
+
+        uint slot = table.Add(1, 1, UnitSphere(), 0f, default, default, InstanceFlags.None, Matrix4x4.CreateScale(3f), Vector3.Zero, 0, isStatic: false);
+
+        Assert.Equal(3f, table.Rows[(int)slot].CullRadius, 1e-4f);
+    }
+
+    [Fact]
+    public void An_instance_given_a_cull_radius_is_size_culled_by_it()
+    {
+        InstanceTable table = new(new FakeRendering(), 16);
+
+        uint slot = table.Add(1, 1, UnitSphere(), 0.5f, default, default, InstanceFlags.None, Matrix4x4.CreateScale(3f), Vector3.Zero, 0, isStatic: false);
+
+        Assert.Equal(0.5f, table.Rows[(int)slot].CullRadius);
+    }
+
+    [Fact]
+    public void An_instance_is_drawn_with_its_models_origin_at_its_place()
+    {
+        InstanceTable table = new(new FakeRendering(), 16);
+
+        uint slot = table.Add(1, 1, UnitSphere(), 0f, default, default, InstanceFlags.None, Matrix4x4.CreateTranslation(10f, 0f, 0f), new Vector3(-0.5f, 0f, 0f), 0, isStatic: false);
+
+        Assert.Equal(10.5f, table.Rows[(int)slot].Sphere.X, 1e-4f);
+    }
+
+    [Fact]
+    public void A_scaled_instance_grows_away_from_its_models_origin()
+    {
+        InstanceTable table = new(new FakeRendering(), 16);
+
+        uint slot = table.Add(1, 1, UnitSphere(), 0f, default, default, InstanceFlags.None, Matrix4x4.CreateScale(4f, 1f, 1f), new Vector3(-0.5f, 0f, 0f), 0, isStatic: false);
+
+        Assert.Equal(2f, table.Rows[(int)slot].Sphere.X, 1e-4f);
+    }
+
+    [Fact]
+    public void A_moved_instance_keeps_its_models_origin_at_its_place()
+    {
+        InstanceTable table = new(new FakeRendering(), 16);
+        uint slot = table.Add(1, 1, UnitSphere(), 0f, default, default, InstanceFlags.None, Matrix4x4.Identity, new Vector3(-0.5f, 0f, 0f), 0, isStatic: false);
+
+        table.Move(slot, Matrix4x4.CreateTranslation(10f, 0f, 0f));
+
+        Assert.Equal(10.5f, table.Rows[(int)slot].Sphere.X, 1e-4f);
+    }
+
     private static BoundingSphere UnitSphere()
     {
         return new BoundingSphere(Vector3.Zero, 1f);
@@ -153,6 +204,6 @@ public sealed class InstanceTableTests
 
     private static uint Add(InstanceTable table, Vector3 position, bool isStatic = false)
     {
-        return table.Add(1, 1, UnitSphere(), default, default, InstanceFlags.None, Matrix4x4.CreateTranslation(position), 0, isStatic);
+        return table.Add(1, 1, UnitSphere(), 0f, default, default, InstanceFlags.None, Matrix4x4.CreateTranslation(position), Vector3.Zero, 0, isStatic);
     }
 }

@@ -28,7 +28,9 @@ public struct PassList
 
     private Handle<Pass> _first;
 
-    /// <summary>The passes before the first empty handle.</summary>
+    /// <summary>
+    /// The passes before the first empty handle.
+    /// </summary>
     public readonly int Count
     {
         get

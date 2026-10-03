@@ -7,12 +7,18 @@ namespace Magic.Interfaces;
 /// </summary>
 public interface IWindowRegistry
 {
-    /// <summary>The first window opened and still open, or null before it exists or after it closed.</summary>
+    /// <summary>
+    /// The first window opened and still open, or null before it exists or after it closed.
+    /// </summary>
     IWindow? Main { get; }
 
-    /// <summary>Every open window, in creation order. A snapshot: safe to iterate while windows close.</summary>
+    /// <summary>
+    /// Every open window, in creation order. A snapshot: safe to iterate while windows close.
+    /// </summary>
     IReadOnlyList<IWindow> Windows { get; }
 
-    /// <summary>The window with this <see cref="IWindow.Handle"/>, or null if it is not open.</summary>
+    /// <summary>
+    /// The window with this <see cref="IWindow.Handle"/>, or null if it is not open.
+    /// </summary>
     IWindow? Get(uint handle);
 }

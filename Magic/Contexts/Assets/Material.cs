@@ -2,15 +2,21 @@ using Magic.Attributes;
 
 namespace Magic.Contexts.Assets;
 
-/// <summary>How a material's surface is composited; it picks the pipeline the renderer draws it with.</summary>
+/// <summary>
+/// How a material's surface is composited; it picks the pipeline the renderer draws it with.
+/// </summary>
 public enum MaterialType : byte
 {
     Opaque,
 
-    /// <summary>Opaque, but fragments the surface shader declares transparent below its cutoff are discarded.</summary>
+    /// <summary>
+    /// Opaque, but fragments the surface shader declares transparent below its cutoff are discarded.
+    /// </summary>
     Masked,
 
-    /// <summary>Blended over what is behind it, drawn after everything opaque.</summary>
+    /// <summary>
+    /// Blended over what is behind it, drawn after everything opaque.
+    /// </summary>
     Transparent
 }
 

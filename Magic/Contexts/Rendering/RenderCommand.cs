@@ -3,59 +3,90 @@ using System.Numerics;
 
 namespace Magic.Contexts.Rendering;
 
-/// <summary>What a <see cref="RenderCommand"/> does; the comment on each says which fields it uses.</summary>
+/// <summary>
+/// What a <see cref="RenderCommand"/> does; the comment on each says which fields it uses.
+/// </summary>
 public enum RenderCommandType : byte
 {
     /// <summary>
-    /// <see cref="RenderCommand.Texture"/> = colour target, <see cref="RenderCommand.Depth"/> = depth target or none,
-    /// <see cref="RenderCommand.Load"/> for both, <see cref="RenderCommand.ClearColor"/> (depth clears to 0, reverse-Z far).
+    /// <see cref="RenderCommand.Texture"/> = colour target, or Run = the colour targets when there are several,
+    /// <see cref="RenderCommand.Depth"/> = depth target or none, <see cref="RenderCommand.Load"/> for all of them,
+    /// <see cref="RenderCommand.ClearColor"/> (depth clears to 0, reverse-Z far).
     /// </summary>
     BeginRenderPass,
 
     EndRenderPass,
 
-    /// <summary>The run (<see cref="RenderCommand.Run"/>) of buffers and textures the pass writes.</summary>
+    /// <summary>
+    /// The run (<see cref="RenderCommand.Run"/>) of buffers and textures the pass writes.
+    /// </summary>
     BeginComputePass,
 
     EndComputePass,
 
-    /// <summary><see cref="RenderCommand.Rect"/>, in target pixels.</summary>
+    /// <summary>
+    /// <see cref="RenderCommand.Rect"/>, in target pixels.
+    /// </summary>
     SetViewport,
 
-    /// <summary>Rect.</summary>
+    /// <summary>
+    /// Rect.
+    /// </summary>
     SetScissor,
 
-    /// <summary><see cref="RenderCommand.Pipeline"/>, graphics inside a render pass, compute inside a compute pass.</summary>
+    /// <summary>
+    /// <see cref="RenderCommand.Pipeline"/>, graphics inside a render pass, compute inside a compute pass.
+    /// </summary>
     BindPipeline,
 
-    /// <summary><see cref="RenderCommand.Slot"/> = first slot, Run = the buffers.</summary>
+    /// <summary>
+    /// <see cref="RenderCommand.Slot"/> = first slot, Run = the buffers.
+    /// </summary>
     BindVertexBuffers,
 
-    /// <summary><see cref="RenderCommand.Buffer"/>, <see cref="RenderCommand.Wide"/> = 32-bit indices (else 16).</summary>
+    /// <summary>
+    /// <see cref="RenderCommand.Buffer"/>, <see cref="RenderCommand.Wide"/> = 32-bit indices (else 16).
+    /// </summary>
     BindIndexBuffer,
 
-    /// <summary><see cref="RenderCommand.Stage"/>, Slot, Run = the read-only buffers.</summary>
+    /// <summary>
+    /// <see cref="RenderCommand.Stage"/>, Slot, Run = the read-only buffers.
+    /// </summary>
     BindStorageBuffers,
 
-    /// <summary>Stage, Slot, Run = the textures, each with its sampler.</summary>
+    /// <summary>
+    /// Stage, Slot, Run = the textures, each with its sampler.
+    /// </summary>
     BindTextures,
 
-    /// <summary>Stage, Run = the bytes (in <see cref="RenderCommands.Bytes"/>) of the stage's one constant block.</summary>
+    /// <summary>
+    /// Stage, Run = the bytes (in <see cref="RenderCommands.Bytes"/>) of the stage's one constant block.
+    /// </summary>
     PushConstants,
 
-    /// <summary><see cref="RenderCommand.Count"/> vertices from <see cref="RenderCommand.First"/>, <see cref="RenderCommand.Instances"/>.</summary>
+    /// <summary>
+    /// <see cref="RenderCommand.Count"/> vertices from <see cref="RenderCommand.First"/>, <see cref="RenderCommand.Instances"/>.
+    /// </summary>
     Draw,
 
-    /// <summary>Count indices from First, <see cref="RenderCommand.VertexOffset"/> added, Instances from <see cref="RenderCommand.FirstInstance"/>.</summary>
+    /// <summary>
+    /// Count indices from First, <see cref="RenderCommand.VertexOffset"/> added, Instances from <see cref="RenderCommand.FirstInstance"/>.
+    /// </summary>
     DrawIndexed,
 
-    /// <summary>Count indexed draws read from Buffer at <see cref="RenderCommand.Offset"/>.</summary>
+    /// <summary>
+    /// Count indexed draws read from Buffer at <see cref="RenderCommand.Offset"/>.
+    /// </summary>
     DrawIndexedIndirect,
 
-    /// <summary><see cref="RenderCommand.Groups"/>.</summary>
+    /// <summary>
+    /// <see cref="RenderCommand.Groups"/>.
+    /// </summary>
     Dispatch,
 
-    /// <summary>The groups read from Buffer at Offset.</summary>
+    /// <summary>
+    /// The groups read from Buffer at Offset.
+    /// </summary>
     DispatchIndirect,
 
     /// <summary>

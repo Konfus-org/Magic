@@ -52,11 +52,11 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
             Begin();
             Debugging.UI.Text($"Frame {_frameMs:F2} ms ({fps:F0} fps), worst {_lastFrameMs:F2} ms");
             Debugging.UI.Text($"Transforms {_transforms.LastMs:F2} ms, render sync {_rendering.SyncMs:F2} ms, render {_rendering.RenderMs:F2} ms");
-            Debugging.UI.Text($"Instances {render.Instances}");
+            Debugging.UI.Text($"Instances {render.Instances}, lights {render.Lights}");
             Debugging.UI.Text($"Draws {render.Draws}, dispatches {render.Dispatches}, pipelines pending {render.PipelinesPending}");
             Debugging.UI.Text($"Resident meshes {render.ResidentMeshes}, textures {render.ResidentTextures}; renderer sync {render.CpuSyncMs:F2} ms, record {render.CpuRecordMs:F2} ms, GPU wait {render.CpuWaitMs:F2} ms");
-            Debugging.UI.Text($"Streaming: {streaming.Domains} domain(s), {streaming.Loaded} chunk(s) loaded ({streaming.Active} active, " +
-                $"{streaming.Loading} loading, {streaming.PendingUnload} unloading), {streaming.Entities} entities, {streaming.Cameras} camera(s).");
+            Debugging.UI.Text($"Streaming: {streaming.Domains} domain(s), {streaming.Loaded} chunk(s) loaded ({streaming.Active} active, {streaming.StandIns} as stand-ins, " +
+                $"{streaming.Loading} loading, {streaming.Filling} to fill, {streaming.Kept} kept out of view; {Megabytes(streaming.Bytes):F1} / {Megabytes(streaming.Budget):F0} MB), {streaming.Entities} entities, {streaming.Cameras} camera(s){(streaming.Bootstrapping ? ", behind the loading domain" : "")}.");
             foreach (AssetPoolStats pool in _assets.PoolStats())
                 Debugging.UI.Text($"Pool {pool.Type} {pool.Count} ({Megabytes(pool.Bytes):F1} / {Megabytes(pool.Budget):F0} MB), hits {pool.Hits}, misses {pool.Misses}");
             Debugging.UI.End();
@@ -68,7 +68,7 @@ internal sealed class DebuggerDisplaySystem : DebugWindowSystem
             _sinceLogMs = 0;
             Debugging.Log.Verbose($"Frame {_frameMs:F2} ms ({fps:F0} fps, worst {_lastFrameMs:F2}): transforms {_transforms.LastMs:F2}, render sync {_rendering.SyncMs:F2}, " +
                 $"render {_rendering.RenderMs:F2} (renderer sync {render.CpuSyncMs:F2}, record {render.CpuRecordMs:F2}, GPU wait {render.CpuWaitMs:F2}) ms; " +
-                $"{render.Instances} instances, {render.Draws} draws, {render.Dispatches} dispatches.");
+                $"{render.Instances} instances, {render.Lights} lights, {render.Draws} draws, {render.Dispatches} dispatches.");
         }
 
         if (fps < 30)

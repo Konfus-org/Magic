@@ -6,10 +6,11 @@ namespace Magic.Contexts.Rendering;
 
 /// <summary>
 /// The textures one <see cref="RenderTarget"/> is drawn through, sized to it (a window's pixels, a render texture's
-/// size) and made again when that changes. The frame renders into <c>Hdr</c> with <c>Depth</c>, the passes end in
-/// <c>Ldr</c> (the tonemap writes it; without one <c>Hdr</c> is copied into it, so it is always what was shown and what
-/// a screenshot reads back), and presenting blits it to the window's swapchain or into the render texture's pool
-/// layer. A data pass may add targets of its own by name; they last while a listed pass writes them.
+/// size) and made again when that changes. The scene is drawn into the <see cref="GBuffer"/>, the lighting writes
+/// <c>Hdr</c> from it, the passes end in <c>Ldr</c> (the tonemap writes it; without one <c>Hdr</c> is copied into it,
+/// so it is always what was shown and what a screenshot reads back), and presenting blits it to the window's swapchain
+/// or into the render texture's pool layer. A data pass may add targets of its own by name; they last while a listed
+/// pass writes them.
 /// </summary>
 internal sealed class FrameTargets
 {
@@ -23,9 +24,16 @@ internal sealed class FrameTargets
     {
         RenderTarget = target;
 
-        Hdr = _targets["Hdr"] = new Target { Format = HdrFormat, Usage = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler };
-        Ldr = _targets["Ldr"] = new Target { Format = LdrFormat, Usage = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler };
-        Depth = _targets["Depth"] = new Target { Format = depthFormat, Usage = GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler, IsDepth = true };
+        const GpuTextureUsage drawn = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler;
+        Hdr = _targets["Hdr"] = new Target { Format = HdrFormat, Usage = drawn | GpuTextureUsage.ComputeWrite, IsBuiltIn = true };
+        Ldr = _targets["Ldr"] = new Target { Format = LdrFormat, Usage = drawn, IsBuiltIn = true };
+        Depth = _targets["Depth"] = new Target { Format = depthFormat, Usage = GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler, IsDepth = true, IsBuiltIn = true };
+        GBuffer = new GBuffer(
+            _targets["Emissive"] = new Target { Format = GBuffer.EmissiveFormat, Usage = drawn, IsBuiltIn = true },
+            _targets["Albedo"] = new Target { Format = GBuffer.AlbedoFormat, Usage = drawn, IsBuiltIn = true },
+            _targets["Normal"] = new Target { Format = GBuffer.NormalFormat, Usage = drawn, IsBuiltIn = true },
+            _targets["Material"] = new Target { Format = GBuffer.MaterialFormat, Usage = drawn, IsBuiltIn = true },
+            Depth);
     }
 
     public RenderTarget RenderTarget { get; }
@@ -40,10 +48,16 @@ internal sealed class FrameTargets
 
     public Target Depth { get; }
 
-    /// <summary>What is wrong with the passes listed for this target, as last logged; null when nothing is.</summary>
+    public GBuffer GBuffer { get; }
+
+    /// <summary>
+    /// What is wrong with the passes listed for this target, as last logged; null when nothing is.
+    /// </summary>
     public string? PassProblem { get; set; }
 
-    /// <summary>The texture format a pass output is: the engine's own for Hdr and Ldr, else what the pass asks for.</summary>
+    /// <summary>
+    /// The texture format a pass output is: the engine's own for Hdr and Ldr, else what the pass asks for.
+    /// </summary>
     public static GpuFormat Format(PassOutput output)
     {
         if (string.Equals(output.Name, "Hdr", StringComparison.OrdinalIgnoreCase))
@@ -63,7 +77,9 @@ internal sealed class FrameTargets
         };
     }
 
-    /// <summary>After a ping-pong pass: what was written becomes the target.</summary>
+    /// <summary>
+    /// After a ping-pong pass: what was written becomes the target.
+    /// </summary>
     public static void Swap(Target target)
     {
         (target.Texture, target.Twin) = (target.Twin, target.Texture);
@@ -74,7 +90,9 @@ internal sealed class FrameTargets
         return _targets.GetValueOrDefault(name);
     }
 
-    /// <summary>Declares a target; an existing one keeps its texture unless the format or scale changed (then <see cref="Ensure"/> makes a new one).</summary>
+    /// <summary>
+    /// Declares a target; an existing one keeps its texture unless the format or scale changed (then <see cref="Ensure"/> makes a new one).
+    /// </summary>
     public Target Define(IRendering gpu, string name, GpuFormat format, GpuTextureUsage usage, float scale)
     {
         if (_targets.TryGetValue(name, out Target? existing))
@@ -95,7 +113,9 @@ internal sealed class FrameTargets
         return target;
     }
 
-    /// <summary>Makes every target match the render target's size, creating missing ones.</summary>
+    /// <summary>
+    /// Makes every target match the render target's size, creating missing ones.
+    /// </summary>
     public void Ensure(IRendering gpu, uint width, uint height)
     {
         if (width == 0 || height == 0)
@@ -118,7 +138,9 @@ internal sealed class FrameTargets
         }
     }
 
-    /// <summary>The texture a pass writes when it also reads <paramref name="target"/>; created on first use.</summary>
+    /// <summary>
+    /// The texture a pass writes when it also reads <paramref name="target"/>; created on first use.
+    /// </summary>
     public GpuTexture TwinOf(IRendering gpu, Target target)
     {
         if (!target.Twin.IsValid)
@@ -127,7 +149,9 @@ internal sealed class FrameTargets
         return target.Twin;
     }
 
-    /// <summary>Before this frame's passes take their outputs: no target is in use by one yet.</summary>
+    /// <summary>
+    /// Before this frame's passes take their outputs: no target is in use by one yet.
+    /// </summary>
     public void ClearUse()
     {
         foreach (Target target in _targets.Values)
@@ -148,7 +172,7 @@ internal sealed class FrameTargets
                 target.Twin = default;
             }
 
-            if (target.InUse || target == Hdr || target == Ldr || target == Depth)
+            if (target.InUse || target.IsBuiltIn)
                 continue;
 
             ReleaseTextures(gpu, target);
@@ -174,7 +198,9 @@ internal sealed class FrameTargets
         target.Width = target.Height = 0;
     }
 
-    /// <summary>A texture a pass can read or write, by name.</summary>
+    /// <summary>
+    /// A texture a pass can read or write, by name.
+    /// </summary>
     public sealed class Target
     {
         public GpuFormat Format { get; set; }
@@ -185,7 +211,9 @@ internal sealed class FrameTargets
 
         public GpuTexture Texture { get; set; }
 
-        /// <summary>For a pass that reads and writes the same target: it writes here, then the two swap.</summary>
+        /// <summary>
+        /// For a pass that reads and writes the same target: it writes here, then the two swap.
+        /// </summary>
         public GpuTexture Twin { get; set; }
 
         public uint Width { get; set; }
@@ -194,10 +222,19 @@ internal sealed class FrameTargets
 
         public bool IsDepth { get; set; }
 
-        /// <summary>A pass of this frame writes it.</summary>
+        /// <summary>
+        /// One of the engine's own (Hdr, Ldr, Depth, the gbuffer's): always there, whatever passes are listed.
+        /// </summary>
+        public bool IsBuiltIn { get; init; }
+
+        /// <summary>
+        /// A pass of this frame writes it.
+        /// </summary>
         public bool InUse { get; set; }
 
-        /// <summary>A pass of this frame reads and writes it, so it needs its <see cref="Twin"/>.</summary>
+        /// <summary>
+        /// A pass of this frame reads and writes it, so it needs its <see cref="Twin"/>.
+        /// </summary>
         public bool TwinInUse { get; set; }
     }
 }

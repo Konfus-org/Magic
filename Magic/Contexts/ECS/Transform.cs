@@ -1,10 +1,11 @@
 using Magic.Extensions;
-using Magic.Mathematics;
 using System.Numerics;
 
 namespace Magic.Contexts.Components;
 
-/// <summary>Where an entity is, which way it faces and how big it is, relative to its parent.</summary>
+/// <summary>
+/// Where an entity is, which way it faces and how big it is, relative to its parent.
+/// </summary>
 public struct Transform : IComponent
 {
     public static readonly Transform Identity = new()

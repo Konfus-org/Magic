@@ -10,4 +10,6 @@ public sealed class Settings
     public RenderSettings Render { get; set; } = new();
 
     public AssetSettings Assets { get; set; } = new();
+
+    public StreamingSettings Streaming { get; set; } = new();
 }

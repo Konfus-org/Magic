@@ -9,7 +9,9 @@ namespace Magic.UnitTests.Fakes;
 /// </summary>
 internal sealed class FakeFileSystem : IFileSystem
 {
-    /// <summary>Every file written, by path.</summary>
+    /// <summary>
+    /// Every file written, by path.
+    /// </summary>
     public Dictionary<string, byte[]> Written { get; } = [];
 
     public string FullPath(string path) => path;
@@ -23,6 +25,8 @@ internal sealed class FakeFileSystem : IFileSystem
     public bool DirectoryExists(string path) => false;
     public Result<byte[]> ReadBinary(string path) => Result<byte[]>.Failure("fake");
     public Result<string> ReadText(string path) => Result<string>.Failure("fake");
+    public Task<Result<byte[]>> ReadBinaryAsync(string path, CancellationToken cancel = default) => Task.FromResult(ReadBinary(path));
+    public Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel = default) => Task.FromResult(ReadText(path));
     public Result<string[]> ReadDirectory(string path, string? filter = null) => Result<string[]>.Failure("fake");
     public Result<string[]> ReadDirectoryRecursive(string path, string? filter = null) => Result<string[]>.Failure("fake");
     public Result WriteText(string path, string text) => WriteBinary(path, System.Text.Encoding.UTF8.GetBytes(text));
@@ -30,6 +34,17 @@ internal sealed class FakeFileSystem : IFileSystem
     public Result WriteBinary(string path, byte[] data)
     {
         Written[path] = data;
+        return Result.Success();
+    }
+
+    public Task<Result> WriteTextAsync(string path, string text, CancellationToken cancel = default) => Task.FromResult(WriteText(path, text));
+    public Task<Result> WriteBinaryAsync(string path, byte[] data, CancellationToken cancel = default) => Task.FromResult(WriteBinary(path, data));
+
+    public Result DeleteDirectory(string path)
+    {
+        foreach (string file in Written.Keys.Where(file => IsUnder(path, file)).ToArray())
+            Written.Remove(file);
+
         return Result.Success();
     }
 

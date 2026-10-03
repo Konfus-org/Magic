@@ -1,0 +1,81 @@
+{
+    "entities": [
+        {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": {
+                    "passes": [
+                        {
+                            "id": 10030
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Orbit",
+            "scripts": [
+                {
+                    "id": 3051,
+                    "degreesPerSecond": 4
+                }
+            ]
+        },
+        {
+            "name": "Camera",
+            "scripts": [
+                {
+                    "id": 3050,
+                    "speed": 40
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 30,
+                        "z": -680
+                    },
+                    "rotation": {
+                        "x": 0.22495,
+                        "y": 0.0,
+                        "z": -0.0,
+                        "w": 0.97437
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Moon",
+            "components": {
+                "Transform": {
+                    "rotation": {
+                        "x": 0.41554,
+                        "y": 0.2661,
+                        "z": -0.12854,
+                        "w": 0.86023
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "DirectionalLight": {
+                    "color": {
+                        "x": 0.6,
+                        "y": 0.7,
+                        "z": 1
+                    },
+                    "intensity": 0.15
+                }
+            }
+        }
+    ]
+}

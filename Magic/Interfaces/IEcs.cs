@@ -2,16 +2,24 @@ using Magic.Contexts;
 
 namespace Magic.Interfaces;
 
-/// <summary>What happened to a component, for <see cref="IEcs.Observe{T}"/>.</summary>
+/// <summary>
+/// What happened to a component, for <see cref="IEcs.Observe{T}"/>.
+/// </summary>
 public enum ComponentEvent : byte
 {
-    /// <summary>The component was added to an entity (before any value was set).</summary>
+    /// <summary>
+    /// The component was added to an entity (before any value was set).
+    /// </summary>
     Added,
 
-    /// <summary>A value was set, including the first one.</summary>
+    /// <summary>
+    /// A value was set, including the first one.
+    /// </summary>
     Set,
 
-    /// <summary>The component is about to go, because it is being removed or its entity destroyed; it can still be read.</summary>
+    /// <summary>
+    /// The component is about to go, because it is being removed or its entity destroyed; it can still be read.
+    /// </summary>
     Removed
 }
 
@@ -30,9 +38,26 @@ public interface IEcs
     Handle Create(string? name = null, Handle parent = default);
 
     /// <summary>
-    /// Creates <c>ids.Length</c> entities in one go and writes their handles into <paramref name="ids"/>.
+    /// Groups the entities made until the answer is disposed, so they are made together: the ones given the same
+    /// parent and the same components are inserted in one go, their values copied side by side, instead of each
+    /// being moved once for every component it is given. The way to make many entities, a chunk's say. Inside the
+    /// group the calls are the usual ones (<see cref="Create"/>, <see cref="Set{T}"/>,
+    /// <see cref="Add{T}"/>), and the handles they answer are good at once, as parents too; but what an entity made
+    /// in the group was given cannot be read back (<see cref="Get{T}"/>, <see cref="Has{T}"/>, <see cref="Lookup"/>,
+    /// a query), and no observer hears of it, until the group ends. Only entities made in the group are held back:
+    /// any other entity changes at once, as always. Removing from, renaming, reparenting or destroying an entity
+    /// made in the group ends the holding back early, for all of them. Groups may be nested; the outermost
+    /// applies. Main thread.
+    /// <code>
+    /// using (ecs.Group())
+    /// {
+    ///     Handle entity = ecs.Create(parent: root);
+    ///     ecs.Set(entity, transform);
+    ///     ecs.Set(entity, renderer);
+    /// }
+    /// </code>
     /// </summary>
-    void Create(Span<Handle> ids);
+    IDisposable Group();
 
     /// <summary>
     /// Destroys the entity and all of its children.

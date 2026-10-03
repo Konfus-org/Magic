@@ -8,8 +8,9 @@
 StructuredBuffer<uint> Candidates : READ(0); // [0] = count, then slots
 StructuredBuffer<GpuInstance> Instances : READ(1);
 StructuredBuffer<float> HiZ : READ(2);       // this frame's pyramid
+StructuredBuffer<GpuLodRow> Lods : READ(3);
 RWStructuredBuffer<GpuDrawArgs> DrawArgs : WRITE(0); // the late args
-RWStructuredBuffer<uint> VisibleIds : WRITE(1);
+RWStructuredBuffer<GpuVisible> VisibleIds : WRITE(1);
 
 [numthreads(CANDIDATES_PER_GROUP, 1, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
@@ -19,8 +20,10 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
     uint slot = Candidates[1u + threadId.x];
     GpuInstance instance = Instances[slot];
-    if (IsOccluded(HiZ, ToView(instance.sphere.xyz), instance.sphere.w))
+    float3 center = ToView(instance.sphere.xyz);
+    float radius = instance.sphere.w;
+    if (IsOccluded(HiZ, center, radius))
         return;
 
-    AppendVisible(DrawArgs, VisibleIds, instance.bucketGroup, slot);
+    AppendVisible(DrawArgs, VisibleIds, Lods, instance.bucketGroup, slot, center, radius);
 }

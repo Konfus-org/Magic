@@ -1,3 +1,4 @@
+using Magic.Contexts;
 using Magic.Contexts.Events;
 using Magic.Contexts.Files;
 using Magic.Extensions;
@@ -33,20 +34,28 @@ namespace Magic;
 /// (<c>"default"</c> for all of them), and the project's folder, searched top to bottom, from which everything loads.
 /// One name loads once: of a project gem built in several configurations, the build in the host's own is taken.
 ///
-/// Gems only change on the main thread: <see cref="Load"/> at startup, <see cref="ProcessChanges"/> at the top of
-/// every frame, and <see cref="Dispose"/> on the way out. The folder watchers only queue changes.
+/// Gems only change on one thread, the one that draws (their constructors and Dispose may touch the GPU and the
+/// windows): <see cref="Load"/> at startup, <see cref="ProcessChanges"/> at the top of every frame, which hands a
+/// settled change over to that thread and waits for it, and <see cref="Dispose"/> on the way out. The folder
+/// watchers only queue changes.
 /// </summary>
-internal sealed class Gems(Container container, IFileSystem files, Events events) : IDisposable
+internal sealed class Gems(Container container, IFileSystem files, Events events, Threads threads) : IDisposable
 {
-    /// <summary>The list entry that stands for every gem in the engine folder.</summary>
+    /// <summary>
+    /// The list entry that stands for every gem in the engine folder.
+    /// </summary>
     internal const string Default = "default";
 
     private static readonly Assembly Host = typeof(IGem).Assembly;
 
-    /// <summary>The services the Core systems are constructed with and keep: a gem providing one cannot be reloaded, static or not.</summary>
+    /// <summary>
+    /// The services the Core systems are constructed with and keep: a gem providing one cannot be reloaded, static or not.
+    /// </summary>
     private static readonly Type[] CoreServices = [typeof(IEcs), typeof(IInput), typeof(IWindowRegistry), typeof(IRendering)];
 
-    /// <summary>The configuration the host was built in (Debug, Release...), which is a folder of a project's build output.</summary>
+    /// <summary>
+    /// The configuration the host was built in (Debug, Release...), which is a folder of a project's build output.
+    /// </summary>
     private static readonly string Configuration = Host.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "";
 
     private readonly List<Gem> _gems = []; // in load order
@@ -55,7 +64,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     private readonly FileChanges _changes = new();
     private readonly List<WeakReference<GemLoadContext>> _unloaded = [];
 
-    /// <summary>Every loaded gem, in load order (dependencies first): the order the frame loop calls them in.</summary>
+    /// <summary>
+    /// Every loaded gem, in load order (dependencies first): the order the frame loop calls them in.
+    /// </summary>
     public IGem[] Loaded { get; private set; } = [];
 
     public void Dispose()
@@ -102,7 +113,17 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     {
         CheckUnloaded();
 
-        foreach (string path in _changes.TakeSettled())
+        string[] settled = _changes.TakeSettled();
+        if (settled.Length > 0)
+            threads.Invoke(ThreadId.Render, () => Apply(settled));
+    }
+
+    /// <summary>
+    /// Reloads or unloads the gem of every changed file. On the render thread, while the main thread waits.
+    /// </summary>
+    private void Apply(string[] changed)
+    {
+        foreach (string path in changed)
         {
             if (SourceOf(path) is null)
                 continue;
@@ -121,7 +142,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         }
     }
 
-    /// <summary>Registers a source, lists the dlls it accepts into <paramref name="paths"/> (once each) and watches it.</summary>
+    /// <summary>
+    /// Registers a source, lists the dlls it accepts into <paramref name="paths"/> (once each) and watches it.
+    /// </summary>
     private void Add(GemSource source, List<string> paths)
     {
         _sources.Add(source);
@@ -145,7 +168,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         _watchers.Add(files.Watch(source.Directory, "*.dll", _changes.Add, source.Recursive));
     }
 
-    /// <summary>The source <paramref name="path"/> falls under, engine folder first; null when no source accepts it.</summary>
+    /// <summary>
+    /// The source <paramref name="path"/> falls under, engine folder first; null when no source accepts it.
+    /// </summary>
     private GemSource? SourceOf(string path)
     {
         return _sources.Find(source => source.Accepts(files, path));
@@ -391,7 +416,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         Load([.. group.Select(member => member.Path)], state);
     }
 
-    /// <summary>Unloads the gem at <paramref name="path"/> and everything depending on it, dependents first.</summary>
+    /// <summary>
+    /// Unloads the gem at <paramref name="path"/> and everything depending on it, dependents first.
+    /// </summary>
     private void Unload(string path)
     {
         if (Find(path) is not { } gem || WithDependents(gem) is not { } group)
@@ -410,14 +437,18 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         gem.Context.Unload();
     }
 
-    /// <summary>The set of gems changed: the frame loop's list follows, and whoever caches types by name hears of it next frame.</summary>
+    /// <summary>
+    /// The set of gems changed: the frame loop's list follows, and whoever caches types by name hears of it next frame.
+    /// </summary>
     private void PublishChanged()
     {
         Loaded = [.. _gems.Select(loaded => loaded.Instance).OfType<IGem>()];
         events.Publish(new Event(EventType.GemsChanged));
     }
 
-    /// <summary>Takes the gem out of the container and Debugging and disposes it; a logger is flushed before it goes.</summary>
+    /// <summary>
+    /// Takes the gem out of the container and Debugging and disposes it; a logger is flushed before it goes.
+    /// </summary>
     private void Teardown(Gem gem)
     {
         if (gem.Instance is null)
@@ -479,7 +510,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         return [.. _gems.Where(group.Contains)];
     }
 
-    /// <summary>The loaded gem at <paramref name="pathOrName"/>, or failing that with that name (as GemDependsOn refers to it).</summary>
+    /// <summary>
+    /// The loaded gem at <paramref name="pathOrName"/>, or failing that with that name (as GemDependsOn refers to it).
+    /// </summary>
     private Gem? Find(string pathOrName)
     {
         return _gems.Find(loaded => string.Equals(loaded.Path, pathOrName, StringComparison.OrdinalIgnoreCase))
@@ -518,7 +551,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         {
             Context = context;
             Type = type;
-            Name = assembly.GetName().Name!;
+            Name = assembly.GetName().Name ?? "?";
             Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "?";
             IsStatic = bool.TryParse(Metadata(assembly, "MagicGem.Static"), out bool isStatic) && isStatic;
             DependsOn = Metadata(assembly, "MagicGem.DependsOn")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
@@ -528,7 +561,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
         public GemLoadContext Context { get; }
 
-        /// <summary>The gem's class; null for a project's scripts.</summary>
+        /// <summary>
+        /// The gem's class; null for a project's scripts.
+        /// </summary>
         public Type? Type { get; }
 
         public string Path => Context.Path;
@@ -539,13 +574,19 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 
         public bool IsStatic { get; }
 
-        /// <summary>Names of gems this one must load after and unload before.</summary>
+        /// <summary>
+        /// Names of gems this one must load after and unload before.
+        /// </summary>
         public string[] DependsOn { get; }
 
-        /// <summary>The Core interfaces the gem class implements: what it is put in the container under.</summary>
+        /// <summary>
+        /// The Core interfaces the gem class implements: what it is put in the container under.
+        /// </summary>
         public HashSet<Type> Provides { get; }
 
-        /// <summary>Its constructor's parameter types: host services or other gems' interfaces.</summary>
+        /// <summary>
+        /// Its constructor's parameter types: host services or other gems' interfaces.
+        /// </summary>
         public HashSet<Type> Requires { get; }
 
         public IGem? Instance { get; set; }
@@ -595,7 +636,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             return libraryPath is null ? IntPtr.Zero : LoadUnmanagedDllFromPath(libraryPath);
         }
 
-        /// <summary>Loads an assembly from its bytes, with its portable pdb when one sits next to it (symbols are optional).</summary>
+        /// <summary>
+        /// Loads an assembly from its bytes, with its portable pdb when one sits next to it (symbols are optional).
+        /// </summary>
         private Assembly LoadBytes(string file, byte[] assembly)
         {
             string pdbPath = System.IO.Path.ChangeExtension(file, ".pdb");
@@ -611,7 +654,9 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// </summary>
     private sealed record GemSource(string Directory, bool Recursive, HashSet<string>? Names)
     {
-        /// <summary>Does <paramref name="path"/> lie in this source's territory?</summary>
+        /// <summary>
+        /// Does <paramref name="path"/> lie in this source's territory?
+        /// </summary>
         public bool Accepts(IFileSystem files, string path)
         {
             if (!files.IsUnder(Directory, path))

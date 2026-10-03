@@ -55,7 +55,9 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
         Debugging.UI.End();
     }
 
-    /// <summary>The log as one text, rebuilt only when a line arrived since the last time.</summary>
+    /// <summary>
+    /// The log as one text, rebuilt only when a line arrived since the last time.
+    /// </summary>
     private string LogText()
     {
         lock (_logLock)
@@ -73,7 +75,9 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
         }
     }
 
-    /// <summary>Runs one typed line: <c>help</c> and <c>clear</c> are the console's own, anything else the command of that name.</summary>
+    /// <summary>
+    /// Runs one typed line: <c>help</c> and <c>clear</c> are the console's own, anything else the command of that name.
+    /// </summary>
     private void Execute(string line)
     {
         Debugging.Log.Info($"> {line}");
@@ -97,7 +101,9 @@ internal sealed class ConsoleSystem : DebugWindowSystem, ILogger
             Debugging.Log.Warn($"Unknown command '{words[0]}'. Type help for the list.");
     }
 
-    /// <summary>Whitespace separates arguments; double quotes keep spaces inside one.</summary>
+    /// <summary>
+    /// Whitespace separates arguments; double quotes keep spaces inside one.
+    /// </summary>
     private static string[] Split(string line)
     {
         List<string> words = [];

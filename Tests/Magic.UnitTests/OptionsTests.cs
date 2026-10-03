@@ -141,7 +141,9 @@ public sealed class OptionsTests
         Assert.Equal(expected, last);
     }
 
-    /// <summary>Every value at the lowest Validate accepts, so a test changes only the one it is about.</summary>
+    /// <summary>
+    /// Every value at the lowest Validate accepts, so a test changes only the one it is about.
+    /// </summary>
     private static Options Runnable()
     {
         return new Options { ScreenshotDelay = 1, ScreenshotInterval = 1, Width = 1, Height = 1, LogLevel = LogLevel.Debug };

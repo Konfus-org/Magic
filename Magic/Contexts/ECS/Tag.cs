@@ -11,12 +11,21 @@ public readonly record struct Tag(int Id)
 {
     public static readonly Tag None = default;
 
-    /// <summary>Never moves: its world transform is computed once and the renderer uploads it once.</summary>
+    /// <summary>
+    /// Never moves: its world transform is computed once and the renderer uploads it once.
+    /// </summary>
     public static readonly Tag Static = Of("static");
+
+    /// <summary>
+    /// Not drawn, nor anything under it: no renderer, light or glow of it shows. Everything else goes on.
+    /// </summary>
+    public static readonly Tag Hidden = Of("hidden");
 
     public bool IsValid => Id != 0;
 
-    /// <summary>FNV-1a over the UTF-16 code units; 0 is reserved, so a name that hashes to it gets 1.</summary>
+    /// <summary>
+    /// FNV-1a over the UTF-16 code units; 0 is reserved, so a name that hashes to it gets 1.
+    /// </summary>
     public static Tag Of(string name)
     {
         ArgumentException.ThrowIfNullOrEmpty(name);
@@ -59,7 +68,9 @@ public struct Tags
         return false;
     }
 
-    /// <summary>Adds the tag; false when it is already there or the container is full.</summary>
+    /// <summary>
+    /// Adds the tag; false when it is already there or the container is full.
+    /// </summary>
     public bool Add(Tag tag)
     {
         if (!tag.IsValid || Has(tag))

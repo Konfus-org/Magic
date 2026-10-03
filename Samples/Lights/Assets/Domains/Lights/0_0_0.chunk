@@ -1,0 +1,606 @@
+{
+    "entities": [
+        {
+            "name": "Floor",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    "scale": {
+                        "x": 16,
+                        "y": 1,
+                        "z": 16
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Sphere",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 4.0,
+                        "y": 0.5,
+                        "z": 0.0
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Cube",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 2.0,
+                        "y": 0.5,
+                        "z": 3.4641
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 7381546209823741553
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Torus",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -2.0,
+                        "y": 0.3,
+                        "z": 3.4641
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 518
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Cone",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -4.0,
+                        "y": 0.5,
+                        "z": 0.0
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 513
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 7381546209823741553
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Cylinder",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -2.0,
+                        "y": 0.5,
+                        "z": -3.4641
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 515
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Capsule",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 2.0,
+                        "y": 0.6,
+                        "z": -3.4641
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 512
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 7381546209823741553
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Monkey",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0,
+                        "y": 1,
+                        "z": 0,
+                        "w": 0
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 516
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Red",
+            "scripts": [
+                {
+                    "id": 3210,
+                    "radius": 2.5,
+                    "height": 0.8,
+                    "bob": 0.4,
+                    "degreesPerSecond": 50,
+                    "phase": 0.0
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 2.5,
+                        "y": 0.8,
+                        "z": 0.0
+                    },
+                    "scale": {
+                        "x": 0.15,
+                        "y": 0.15,
+                        "z": 0.15
+                    }
+                },
+                "PointLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 0.1,
+                        "z": 0.1
+                    },
+                    "intensity": 5,
+                    "range": 7
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3220
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Green",
+            "scripts": [
+                {
+                    "id": 3210,
+                    "radius": 5.5,
+                    "height": 1.2,
+                    "bob": 0.4,
+                    "degreesPerSecond": -35,
+                    "phase": 60.0
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 2.75,
+                        "y": 1.2,
+                        "z": 4.76314
+                    },
+                    "scale": {
+                        "x": 0.15,
+                        "y": 0.15,
+                        "z": 0.15
+                    }
+                },
+                "PointLight": {
+                    "color": {
+                        "x": 0.1,
+                        "y": 1,
+                        "z": 0.1
+                    },
+                    "intensity": 5,
+                    "range": 7
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3221
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Blue",
+            "scripts": [
+                {
+                    "id": 3210,
+                    "radius": 3.5,
+                    "height": 2.2,
+                    "bob": 0.4,
+                    "degreesPerSecond": 70,
+                    "phase": 120.0
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -1.75,
+                        "y": 2.2,
+                        "z": 3.03109
+                    },
+                    "scale": {
+                        "x": 0.15,
+                        "y": 0.15,
+                        "z": 0.15
+                    }
+                },
+                "PointLight": {
+                    "color": {
+                        "x": 0.15,
+                        "y": 0.3,
+                        "z": 1
+                    },
+                    "intensity": 5,
+                    "range": 7
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3222
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Yellow",
+            "scripts": [
+                {
+                    "id": 3210,
+                    "radius": 6.5,
+                    "height": 0.6,
+                    "bob": 0.4,
+                    "degreesPerSecond": 25,
+                    "phase": 180.0
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -6.5,
+                        "y": 0.6,
+                        "z": 0.0
+                    },
+                    "scale": {
+                        "x": 0.15,
+                        "y": 0.15,
+                        "z": 0.15
+                    }
+                },
+                "PointLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 0.85,
+                        "z": 0.1
+                    },
+                    "intensity": 5,
+                    "range": 7
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3223
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Magenta",
+            "scripts": [
+                {
+                    "id": 3210,
+                    "radius": 1.5,
+                    "height": 2.8,
+                    "bob": 0.4,
+                    "degreesPerSecond": -90,
+                    "phase": 240.0
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -0.75,
+                        "y": 2.8,
+                        "z": -1.29904
+                    },
+                    "scale": {
+                        "x": 0.15,
+                        "y": 0.15,
+                        "z": 0.15
+                    }
+                },
+                "PointLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 0.1,
+                        "z": 1
+                    },
+                    "intensity": 5,
+                    "range": 7
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3224
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Cyan",
+            "scripts": [
+                {
+                    "id": 3210,
+                    "radius": 7.5,
+                    "height": 1.6,
+                    "bob": 0.4,
+                    "degreesPerSecond": -20,
+                    "phase": 300.0
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 3.75,
+                        "y": 1.6,
+                        "z": -6.49519
+                    },
+                    "scale": {
+                        "x": 0.15,
+                        "y": 0.15,
+                        "z": 0.15
+                    }
+                },
+                "PointLight": {
+                    "color": {
+                        "x": 0.1,
+                        "y": 1,
+                        "z": 1
+                    },
+                    "intensity": 5,
+                    "range": 7
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3225
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "WarmSpot",
+            "scripts": [
+                {
+                    "id": 3211,
+                    "degreesPerSecond": 40
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -4,
+                        "y": 6,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0.42262,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.90631
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "SpotLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 0.75,
+                        "z": 0.45
+                    },
+                    "intensity": 40,
+                    "range": 16,
+                    "innerAngle": 0.35,
+                    "outerAngle": 0.6
+                }
+            }
+        },
+        {
+            "name": "CoolSpot",
+            "scripts": [
+                {
+                    "id": 3211,
+                    "degreesPerSecond": -55
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 4,
+                        "y": 6,
+                        "z": 0
+                    },
+                    "rotation": {
+                        "x": 0.48481,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.87462
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "SpotLight": {
+                    "color": {
+                        "x": 0.5,
+                        "y": 0.7,
+                        "z": 1
+                    },
+                    "intensity": 40,
+                    "range": 16,
+                    "innerAngle": 0.35,
+                    "outerAngle": 0.6
+                }
+            }
+        }
+    ]
+}

@@ -5,7 +5,9 @@ using System.Drawing;
 
 namespace Magic.UnitTests.Fakes;
 
-/// <summary>One open 800 x 600 window, the main one.</summary>
+/// <summary>
+/// One open 800 x 600 window, the main one.
+/// </summary>
 internal sealed class FakeWindows : IWindowRegistry, IWindow
 {
     public IWindow? Main => this;

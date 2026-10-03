@@ -1,6 +1,8 @@
 namespace Magic.Contexts.Input;
 
-/// <summary>A key, by what it means on the current keyboard layout (so <see cref="A"/> is the key that types a).</summary>
+/// <summary>
+/// A key, by what it means on the current keyboard layout (so <see cref="A"/> is the key that types a).
+/// </summary>
 public enum Key
 {
     Unknown,
@@ -32,7 +34,9 @@ public enum MouseButton : byte
     X2,
 }
 
-/// <summary>Gamepad buttons by position, not label: <see cref="South"/> is A on Xbox, Cross on PlayStation.</summary>
+/// <summary>
+/// Gamepad buttons by position, not label: <see cref="South"/> is A on Xbox, Cross on PlayStation.
+/// </summary>
 public enum GamepadButton
 {
     South,
@@ -52,7 +56,9 @@ public enum GamepadButton
     DPadRight,
 }
 
-/// <summary>Sticks run -1 to 1 (+X right, +Y down), triggers 0 to 1.</summary>
+/// <summary>
+/// Sticks run -1 to 1 (+X right, +Y down), triggers 0 to 1.
+/// </summary>
 public enum GamepadAxis
 {
     LeftX,

@@ -5,7 +5,9 @@ using Xunit;
 
 namespace Magic.IntegrationTests.Ecs;
 
-/// <summary>The adapter's own iteration over flecs' tables, and the parent column first cascade shares.</summary>
+/// <summary>
+/// The adapter's own iteration over flecs' tables, and the parent column first cascade shares.
+/// </summary>
 public sealed class FlecsQueryTests
 {
     [Fact]
@@ -88,6 +90,45 @@ public sealed class FlecsQueryTests
         query.Each((Handle _, ref Local _, ref Composed _, ref Composed parent) => parentValue = parent.Value);
 
         Assert.Equal(0, parentValue);
+    }
+
+    [Fact]
+    public void WithoutAbove_skips_an_entity_that_has_the_component()
+    {
+        using FlecsEcs ecs = new();
+        Handle entity = Spawn(ecs, 1);
+        ecs.Add<Marked>(entity);
+        using IEcsQuery<Position> query = ecs.Query<Position>().WithoutAbove<Marked>().Build();
+
+        Assert.Equal(0, query.Count());
+    }
+
+    [Fact]
+    public void WithoutAbove_skips_an_entity_under_one_that_has_the_component()
+    {
+        using FlecsEcs ecs = new();
+        Handle root = ecs.Create();
+        ecs.Add<Marked>(root);
+        Handle middle = ecs.Create("Middle", root);
+        ecs.SetParent(Spawn(ecs, 1), middle);
+        using IEcsQuery<Position> query = ecs.Query<Position>().WithoutAbove<Marked>().Build();
+
+        Assert.Equal(0, query.Count());
+    }
+
+    [Fact]
+    public void WithoutAbove_matches_again_once_the_component_above_is_removed()
+    {
+        using FlecsEcs ecs = new();
+        Handle root = ecs.Create();
+        ecs.Add<Marked>(root);
+        ecs.SetParent(Spawn(ecs, 1), root);
+        using IEcsQuery<Position> query = ecs.Query<Position>().WithoutAbove<Marked>().Build();
+        query.Count();
+
+        ecs.Remove<Marked>(root);
+
+        Assert.Equal(1, query.Count());
     }
 
     private static Handle Spawn(FlecsEcs ecs, float x)

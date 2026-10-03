@@ -1,0 +1,10 @@
+T:System.IO.File;Disk access goes through IFileSystem, so it can be faked in a test.
+T:System.IO.Directory;Disk access goes through IFileSystem, so it can be faked in a test.
+T:System.IO.FileInfo;Disk access goes through IFileSystem, so it can be faked in a test.
+T:System.IO.DirectoryInfo;Disk access goes through IFileSystem, so it can be faked in a test.
+T:System.IO.FileStream;Disk access goes through IFileSystem, so it can be faked in a test.
+M:System.Threading.Thread.#ctor(System.Threading.ThreadStart);Threads are made by the Threads service (Threads.Create).
+M:System.Threading.Thread.#ctor(System.Threading.ThreadStart,System.Int32);Threads are made by the Threads service (Threads.Create).
+M:System.Threading.Thread.#ctor(System.Threading.ParameterizedThreadStart);Threads are made by the Threads service (Threads.Create).
+M:System.Threading.Thread.#ctor(System.Threading.ParameterizedThreadStart,System.Int32);Threads are made by the Threads service (Threads.Create).
+T:System.Console;Output goes through Debugging.Log, which the logger gems write.

@@ -15,7 +15,8 @@ namespace AssimpGem;
 /// vertices and converting to engine space: left handed, +X right, +Y up, +Z forward, 1 unit = 1 metre = 1
 /// Blender unit, triangles wound clockwise seen from outside. Assimp hands every format over right handed,
 /// +Y up, with the model's front at +Z (glTF's convention), so the conversion is one X mirror plus a winding
-/// flip for every format, and a unit fix for FBX only.
+/// flip for every format, and a unit fix for FBX only. A model in the engine's own file form (<c>.model</c>, what a
+/// generated LOD is written as) is in engine space already and is read as it is.
 /// </summary>
 internal sealed class AssimpModels : IGem, IAssetLoader<Model>
 {
@@ -34,6 +35,9 @@ internal sealed class AssimpModels : IGem, IAssetLoader<Model>
 
     public Result Load(Model asset, byte[] bytes)
     {
+        if (Model.IsNative(bytes))
+            return asset.Read(bytes);
+
         using AssimpContext context = new(); // not shared: an importer instance serves one import at a time
         context.SetConfig(new FBXPreservePivotsConfig(false));
 

@@ -14,7 +14,9 @@ namespace Magic.Systems.Rendering;
 /// </summary>
 internal static class Textures
 {
-    /// <summary>A packed reference for the texture, loading it the first time; <see cref="TextureTable.Failed"/> when it cannot be used.</summary>
+    /// <summary>
+    /// A packed reference for the texture, loading it the first time; <see cref="TextureTable.Failed"/> when it cannot be used.
+    /// </summary>
     public static uint Acquire(RenderContext ctx, Handle<Texture> handle)
     {
         if (!handle.IsValid)
@@ -37,7 +39,9 @@ internal static class Textures
         ctx.Textures.Rendered.Remove(handle.Id);
     }
 
-    /// <summary>The texture changed on disk: uploaded into a layer again (a fixed texture gets one, a broken one loses its). Materials rebuild their records after.</summary>
+    /// <summary>
+    /// The texture changed on disk: uploaded into a layer again (a fixed texture gets one, a broken one loses its). Materials rebuild their records after.
+    /// </summary>
     public static void Reload(RenderContext ctx, ulong id)
     {
         if (!ctx.Textures.TryGet(id, out uint packed))
@@ -48,7 +52,9 @@ internal static class Textures
         ctx.Textures.Set(id, Load(ctx, id));
     }
 
-    /// <summary>Copies grown arrays over and uploads what was acquired since the last frame.</summary>
+    /// <summary>
+    /// Copies grown arrays over and uploads what was acquired since the last frame.
+    /// </summary>
     public static void Flush(RenderContext ctx)
     {
         IRendering gpu = ctx.Gpu;
@@ -93,7 +99,9 @@ internal static class Textures
         table.Pending.Clear();
     }
 
-    /// <summary>All eight arrays with the one sampler, t0..t7 of the fragment stage; an absent class binds the 256 array of its format.</summary>
+    /// <summary>
+    /// All eight arrays with the one sampler, t0..t7 of the fragment stage; an absent class binds the 256 array of its format.
+    /// </summary>
     public static void Bindings(RenderContext ctx, Span<GpuBinding> bindings)
     {
         TextureTable table = ctx.Textures;
@@ -104,20 +112,24 @@ internal static class Textures
         }
     }
 
-    /// <summary>Makes the two 256 arrays, which every absent class binds in its place.</summary>
+    /// <summary>
+    /// Makes the two 256 arrays, which every absent class binds in its place.
+    /// </summary>
     public static void CreateBase(RenderContext ctx)
     {
         ctx.Textures.Create(ctx.Gpu, ctx.Textures.Pools[0]);
         ctx.Textures.Create(ctx.Gpu, ctx.Textures.Pools[4]);
     }
 
-    /// <summary>Loads, fits and queues the texture; its packed reference, or <see cref="TextureTable.Failed"/> (logged) when it cannot be used.</summary>
+    /// <summary>
+    /// Loads, fits and queues the texture; its packed reference, or <see cref="TextureTable.Failed"/> (logged) when it cannot be used.
+    /// </summary>
     private static uint Load(RenderContext ctx, ulong id)
     {
         if (RenderTexture.IsAt(ctx.Assets.PathOf(id)))
             return LoadRendered(ctx, id);
 
-        Texture? texture = ctx.Assets.Load(new Handle<Texture>(id));
+        Texture? texture = Preloads.Get<Texture>(ctx, id);
         if (texture is null)
             return TextureTable.Failed; // the asset manager logged why
 
@@ -148,7 +160,7 @@ internal static class Textures
     /// </summary>
     private static uint LoadRendered(RenderContext ctx, ulong id)
     {
-        RenderTexture? texture = ctx.Assets.Load(new Handle<RenderTexture>(id));
+        RenderTexture? texture = Preloads.Get<RenderTexture>(ctx, id);
         if (texture is null)
             return TextureTable.Failed; // the asset manager logged why
 
@@ -223,7 +235,9 @@ internal static class Textures
         return (pixels, offsets);
     }
 
-    /// <summary>Whether the loader's levels are the pool's chain for <paramref name="size"/>: square, halving, tightly packed.</summary>
+    /// <summary>
+    /// Whether the loader's levels are the pool's chain for <paramref name="size"/>: square, halving, tightly packed.
+    /// </summary>
     private static bool HasChain(Texture texture, int size, int levels)
     {
         if (texture.Levels.Length != levels)

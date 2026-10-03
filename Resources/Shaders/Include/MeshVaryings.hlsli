@@ -13,6 +13,7 @@ struct MeshVaryings
     float2 uv : TEXCOORD3;
     nointerpolation uint material : TEXCOORD4; // slot in the material table
     nointerpolation uint flags : TEXCOORD5;    // GpuInstance.flags
+    nointerpolation float lodFade : TEXCOORD6; // GpuVisible.lodFade
     float4 position : SV_Position;
 };
 

@@ -17,13 +17,13 @@ namespace Magic.Systems.Rendering;
 /// </summary>
 internal static class Pipelines
 {
-    public const string Template = "Templates/Forward.frag.hlsl";
+    public const string Template = "Templates/GBuffer.frag.hlsl";
     public const string VertexTemplate = "Templates/Mesh.vert.hlsl";
     private const string Contract = "Include/Surface.hlsli";
 
-    // The fixed 48-byte vertex in slot 0 plus the instance slot from an instance-rate buffer in slot 1: the index is never
-    // taken from SV_InstanceID, whose relation to first_instance differs between backends.
-    private static readonly VertexBufferLayout[] VertexBuffers = [new(0, Vertex.Size), new(1, 4, PerInstance: true)];
+    // The fixed 48-byte vertex in slot 0 plus the instance slot and its LOD fade (GpuVisible) from an instance-rate buffer
+    // in slot 1: the index is never taken from SV_InstanceID, whose relation to first_instance differs between backends.
+    private static readonly VertexBufferLayout[] VertexBuffers = [new(0, Vertex.Size), new(1, GpuVisible.Size, PerInstance: true)];
 
     private static readonly VertexAttribute[] VertexAttributes =
     [
@@ -32,9 +32,12 @@ internal static class Pipelines
         new(2, 0, GpuVertexFormat.Float4, 24),
         new(3, 0, GpuVertexFormat.Float2, 40),
         new(4, 1, GpuVertexFormat.Uint, 0),
+        new(5, 1, GpuVertexFormat.Float, 4),
     ];
 
-    /// <summary>Takes a reference to the class, starting its first compile when it is new.</summary>
+    /// <summary>
+    /// Takes a reference to the class, starting its first compile when it is new.
+    /// </summary>
     public static void Acquire(RenderContext ctx, PipelineClass cls)
     {
         if (ctx.Pipelines.TryAcquire(cls, out _))
@@ -60,7 +63,9 @@ internal static class Pipelines
             ctx.Shaders.Entries.Remove(cls.Surface);
     }
 
-    /// <summary>The pipeline for the class: 0 while its first compile runs, the forced failure pipeline once that compile failed. Reads only.</summary>
+    /// <summary>
+    /// The pipeline for the class: 0 while its first compile runs, the forced failure pipeline once that compile failed. Reads only.
+    /// </summary>
     public static GpuPipeline Get(RenderContext ctx, PipelineClass cls)
     {
         PipelineTable table = ctx.Pipelines;
@@ -71,7 +76,9 @@ internal static class Pipelines
         return built.Pipeline;
     }
 
-    /// <summary>Compiles the class now, on this thread, so the first frame can draw it. The reference it takes is kept for good.</summary>
+    /// <summary>
+    /// Compiles the class now, on this thread, so the first frame can draw it. The reference it takes is kept for good.
+    /// </summary>
     public static void Prewarm(RenderContext ctx, PipelineClass cls)
     {
         Acquire(ctx, cls);
@@ -95,7 +102,7 @@ internal static class Pipelines
         if (everything && Shaders.GetByPath(ctx, VertexTemplate) is { } vertex)
         {
             // The classes restart once the new vertex shader is in (FinishCompile).
-            ctx.Pipelines.Compiles.Start(PipelineTable.VertexKey, Task.Run(() => Shaders.Compile(ctx, vertex.Text, vertex.Path, GpuStage.Vertex, Shaders.ClosureHash(ctx, vertex))));
+            _ = ctx.Pipelines.Compiles.StartAsync(PipelineTable.VertexKey, cancel => Shaders.CompileAsync(ctx, vertex.Text, vertex.Path, GpuStage.Vertex, Shaders.ClosureHash(ctx, vertex), cancel));
             return;
         }
 
@@ -110,8 +117,9 @@ internal static class Pipelines
     /// A compile finished: the vertex shader is swapped, or the class gets its pipeline (or keeps its last one and the
     /// error). Main thread: the render system polls the table's compiles with it once per frame.
     /// </summary>
-    public static void FinishCompile(RenderContext ctx, PipelineClass cls, Result<CompiledShader> result)
+    public static void FinishCompile(RenderContext ctx, PipelineClass cls, Task<Result<CompiledShader>> job)
     {
+        Result<CompiledShader> result = Shaders.Outcome(job);
         PipelineTable table = ctx.Pipelines;
         if (cls == PipelineTable.VertexKey)
         {
@@ -140,7 +148,7 @@ internal static class Pipelines
 
         try
         {
-            PipelineDesc desc = new(table.VertexShader, result.Payload, table.ColorFormat)
+            PipelineDesc desc = new(table.VertexShader, result.Payload, table.ColorFormats)
             {
                 Buffers = VertexBuffers,
                 Attributes = VertexAttributes,
@@ -176,7 +184,7 @@ internal static class Pipelines
         // The contract is included by the composed text, not by any asset, so its closure goes into the salt by hand;
         // otherwise editing it would serve stale bytecode from the cache.
         string salt = Shaders.ClosureHash(ctx, template) + Shaders.ClosureHash(ctx, surfaceShader) + contract.Text + Shaders.ClosureHash(ctx, contract);
-        ctx.Pipelines.Compiles.Start(cls, Task.Run(() => Shaders.Compile(ctx, composed, $"{surface.Path}+{template.Path}:{cls.Variant}", GpuStage.Fragment, salt)));
+        _ = ctx.Pipelines.Compiles.StartAsync(cls, cancel => Shaders.CompileAsync(ctx, composed, $"{surface.Path}+{template.Path}:{cls.Variant}", GpuStage.Fragment, salt, cancel));
     }
 
     /// <summary>

@@ -17,7 +17,9 @@ internal sealed class OrbitSystem(IEcs ecs, IInput input) : ISystem
     private readonly IEcsQuery<Transform, Camera> _cameras = ecs.Query<Transform, Camera>().Build();
     private bool _stopped;
 
-    /// <summary>The chunk sets it beside the script's id.</summary>
+    /// <summary>
+    /// The chunk sets it beside the script's id.
+    /// </summary>
     public float DegreesPerSecond { get; set; } = 20f;
 
     public void Dispose()

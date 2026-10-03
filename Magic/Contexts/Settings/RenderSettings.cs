@@ -9,10 +9,14 @@ namespace Magic.Contexts.Settings;
 /// </summary>
 public sealed class RenderSettings
 {
-    /// <summary><c>"vulkan"</c>, <c>"direct3d12"</c>, or null for SDL's choice. The <c>SDL_GPU_DRIVER</c> environment variable still wins.</summary>
+    /// <summary>
+    /// <c>"vulkan"</c>, <c>"direct3d12"</c>, or null for SDL's choice. The <c>SDL_GPU_DRIVER</c> environment variable still wins.
+    /// </summary>
     public string? Backend { get; set; }
 
-    /// <summary>Present on the display's refresh. On by default, except in a Debug build, where frame times are worth more uncapped.</summary>
+    /// <summary>
+    /// Present on the display's refresh. On by default, except in a Debug build, where frame times are worth more uncapped.
+    /// </summary>
 #if DEBUG
     public bool Vsync { get; set; }
 #else
@@ -26,19 +30,40 @@ public sealed class RenderSettings
     /// </summary>
     public Size Resolution { get; set; }
 
-    /// <summary>Hide what last frame's depth pyramid covers. Off saves the pyramid and the late pass, for GPUs where they cost more than they cull.</summary>
+    /// <summary>
+    /// In a debugging renderer, compare what the GPU culled with a CPU cull of the same instances once a second or
+    /// so, and log an error when they disagree. It reads the GPU back and walks every instance, which stalls the
+    /// frame it runs in (tens of milliseconds with a hundred thousand instances), so it is off unless asked for:
+    /// <c>--set Render.CullingCheck=true</c>, for a run that is there to check.
+    /// </summary>
+    public bool CullingCheck { get; set; }
+
+    /// <summary>
+    /// Hide what last frame's depth pyramid covers. Off saves the pyramid and the late pass, for GPUs where they cost more than they cull.
+    /// </summary>
     public bool OcclusionCulling { get; set; } = true;
 
-    /// <summary>Anisotropic filtering of material textures: 1 is off, 16 the most.</summary>
+    /// <summary>
+    /// Anisotropic filtering of material textures: 1 is off, 16 the most.
+    /// </summary>
     public float Anisotropy { get; set; } = 8f;
 
     /// <summary>
-    /// Metres a camera sees: the open domains' chunks its frustum touches within this are loaded. <see cref="float.PositiveInfinity"/>
-    /// (<c>"Infinity"</c> in a file or <c>--set</c>) is every chunk in view. The chunks within one chunk size of a camera
-    /// are loaded whatever this says and wherever it looks.
+    /// Metres a camera sees: the open domains' chunks its frustum touches within this are loaded. The default,
+    /// <see cref="float.PositiveInfinity"/> (<c>"Infinity"</c> in a file or <c>--set</c>), is every chunk in view. The
+    /// chunks within one chunk size of a camera are loaded whatever this says and wherever it looks.
     /// </summary>
-    public float ViewDist { get; set; } = 500f;
+    public float ViewDist { get; set; } = float.PositiveInfinity;
 
-    /// <summary>Keep compiled shaders under the cache folder next to the executable.</summary>
+    /// <summary>
+    /// How readily a lesser version (a LOD) is used in place of the full one: 1 is at the thresholds the LODs were
+    /// made for; above 1 keeps detail longer (2 switches a model at half the size on screen, a chunk at twice the
+    /// distance), below 1 gives it up sooner.
+    /// </summary>
+    public float LodBias { get; set; } = 1f;
+
+    /// <summary>
+    /// Keep compiled shaders under the cache folder next to the executable.
+    /// </summary>
     public bool ShaderCache { get; set; } = true;
 }

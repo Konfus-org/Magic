@@ -3,17 +3,23 @@ using System.Text.Json.Serialization;
 
 namespace Magic.Mathematics;
 
-/// <summary>An axis-aligned box. <see cref="Min"/> ≤ <see cref="Max"/> per axis; the default is empty at the origin.</summary>
+/// <summary>
+/// An axis-aligned box. <see cref="Min"/> ≤ <see cref="Max"/> per axis; the default is empty at the origin.
+/// </summary>
 public readonly record struct Aabb(Vector3 Min, Vector3 Max)
 {
     [JsonIgnore]
     public Vector3 Center => (Min + Max) * 0.5f;
 
-    /// <summary>Half the size per axis.</summary>
+    /// <summary>
+    /// Half the size per axis.
+    /// </summary>
     [JsonIgnore]
     public Vector3 Extents => (Max - Min) * 0.5f;
 
-    /// <summary>The sphere through the box's corners: centred on it, radius half its diagonal.</summary>
+    /// <summary>
+    /// The sphere through the box's corners: centred on it, radius half its diagonal.
+    /// </summary>
     [JsonIgnore]
     public BoundingSphere Sphere => new(Center, Extents.Length());
 
@@ -32,7 +38,9 @@ public readonly record struct Aabb(Vector3 Min, Vector3 Max)
         return new Aabb(min, max);
     }
 
-    /// <summary>The box around this box's eight transformed corners (Arvo's method: no corner loop).</summary>
+    /// <summary>
+    /// The box around this box's eight transformed corners (Arvo's method: no corner loop).
+    /// </summary>
     public Aabb Transform(in Matrix4x4 m)
     {
         Vector3 center = Vector3.Transform(Center, m);
@@ -55,7 +63,9 @@ public readonly record struct Aabb(Vector3 Min, Vector3 Max)
         return p.X >= Min.X && p.Y >= Min.Y && p.Z >= Min.Z && p.X <= Max.X && p.Y <= Max.Y && p.Z <= Max.Z;
     }
 
-    /// <summary>The squared distance from <paramref name="p"/> to the closest point of the box; 0 inside.</summary>
+    /// <summary>
+    /// The squared distance from <paramref name="p"/> to the closest point of the box; 0 inside.
+    /// </summary>
     public float DistanceSquared(Vector3 p)
     {
         Vector3 closest = Vector3.Clamp(p, Min, Max);

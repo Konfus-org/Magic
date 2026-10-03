@@ -10,7 +10,7 @@ namespace Magic.IntegrationTests.Input;
 
 /// <summary>
 /// The input gem over a real SDL, fed with pushed events: SDL runs the gem's watch as each is queued, and a
-/// <see cref="Step"/> is one frame's Update (the SDL gem's pump, then the input gem's).
+/// <see cref="Step"/> is the SDL gem's pump, which ends a frame, then the input gem's Update, which begins the next.
 /// </summary>
 [Collection(SdlCollection.Name)]
 public sealed class SdlInputTests : IDisposable
@@ -150,10 +150,12 @@ public sealed class SdlInputTests : IDisposable
         Assert.False(_input.IsConnected(gamepad));
     }
 
-    /// <summary>One frame's Update, in load order.</summary>
+    /// <summary>
+    /// One frame's Update, in load order.
+    /// </summary>
     private void Step()
     {
-        _sdl.Update(default);
+        _sdl.Render(default);
         _input.Update(default);
     }
 

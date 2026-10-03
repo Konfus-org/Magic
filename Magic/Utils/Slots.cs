@@ -10,20 +10,28 @@ internal sealed class Slots<T> where T : class
     private readonly List<T?> _values = [];
     private readonly Stack<uint> _free = [];
 
-    /// <summary>One past the highest slot ever handed out; slots below it may be empty.</summary>
+    /// <summary>
+    /// One past the highest slot ever handed out; slots below it may be empty.
+    /// </summary>
     public int Count => _values.Count;
 
-    /// <summary>The slots handed out and not given back.</summary>
+    /// <summary>
+    /// The slots handed out and not given back.
+    /// </summary>
     public int Used => _values.Count - _free.Count;
 
-    /// <summary>The value in the slot; null for one that is empty.</summary>
+    /// <summary>
+    /// The value in the slot; null for one that is empty.
+    /// </summary>
     public T? this[uint slot]
     {
         get => _values[(int)slot];
         set => _values[(int)slot] = value;
     }
 
-    /// <summary>A slot holding <paramref name="value"/>; null reserves one to be filled later.</summary>
+    /// <summary>
+    /// A slot holding <paramref name="value"/>; null reserves one to be filled later.
+    /// </summary>
     public uint Add(T? value = null)
     {
         if (_free.Count > 0)
@@ -37,7 +45,9 @@ internal sealed class Slots<T> where T : class
         return (uint)_values.Count - 1;
     }
 
-    /// <summary>Empties the slot and gives it back.</summary>
+    /// <summary>
+    /// Empties the slot and gives it back.
+    /// </summary>
     public void Remove(uint slot)
     {
         _values[(int)slot] = null;

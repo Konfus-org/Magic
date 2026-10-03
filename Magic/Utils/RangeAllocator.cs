@@ -39,7 +39,9 @@ internal sealed class RangeAllocator
         InsertNodeIntoBin(size, 0);
     }
 
-    /// <summary>Bytes still free (fragmentation may keep some of them unusable for a given request).</summary>
+    /// <summary>
+    /// Bytes still free (fragmentation may keep some of them unusable for a given request).
+    /// </summary>
     public uint FreeStorage { get; private set; }
 
     public Allocation Allocate(uint size)
@@ -138,7 +140,9 @@ internal sealed class RangeAllocator
         }
     }
 
-    /// <summary>A free node for the range, at the head of its size bin.</summary>
+    /// <summary>
+    /// A free node for the range, at the head of its size bin.
+    /// </summary>
     private uint InsertNodeIntoBin(uint size, uint offset)
     {
         uint binIndex = Bin(size, roundUp: false);
@@ -159,7 +163,9 @@ internal sealed class RangeAllocator
         return nodeIndex;
     }
 
-    /// <summary>Takes a free node out of its size bin; the node itself is the caller's to reuse or recycle.</summary>
+    /// <summary>
+    /// Takes a free node out of its size bin; the node itself is the caller's to reuse or recycle.
+    /// </summary>
     private void Unlink(uint nodeIndex)
     {
         ref Node node = ref _nodes[nodeIndex];

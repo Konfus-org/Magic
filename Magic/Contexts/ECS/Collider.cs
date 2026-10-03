@@ -4,20 +4,30 @@ namespace Magic.Contexts.Components;
 
 public enum ColliderShape : byte
 {
-    /// <summary>Centred on the entity, <see cref="Collider.Radius"/>.</summary>
+    /// <summary>
+    /// Centred on the entity, <see cref="Collider.Radius"/>.
+    /// </summary>
     Sphere,
 
-    /// <summary>Along the local Y axis, <see cref="Collider.Radius"/> and <see cref="Collider.Height"/> end to end, caps included.</summary>
+    /// <summary>
+    /// Along the local Y axis, <see cref="Collider.Radius"/> and <see cref="Collider.Height"/> end to end, caps included.
+    /// </summary>
     Capsule,
 
-    /// <summary>Centred on the entity, <see cref="Collider.HalfExtents"/> per axis.</summary>
+    /// <summary>
+    /// Centred on the entity, <see cref="Collider.HalfExtents"/> per axis.
+    /// </summary>
     Cube,
 
-    /// <summary>The entity's own <see cref="Renderer"/> model, every mesh of it.</summary>
+    /// <summary>
+    /// The entity's own <see cref="Renderer"/> model, every mesh of it.
+    /// </summary>
     Mesh
 }
 
-/// <summary>A collision shape on the entity; only the fields its <see cref="Shape"/> names matter. Build one with the factory methods.</summary>
+/// <summary>
+/// A collision shape on the entity; only the fields its <see cref="Shape"/> names matter. Build one with the factory methods.
+/// </summary>
 public struct Collider : IComponent
 {
     public ColliderShape Shape { get; set; }

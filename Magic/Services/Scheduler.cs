@@ -32,7 +32,9 @@ public sealed class Scheduler
         return ecs.Schedule(name).On(system.Phase).Run(dt => system.Run(_currentFrame with { Delta = dt }));
     }
 
-    /// <summary>The frame the systems are handed from here on.</summary>
+    /// <summary>
+    /// The frame the systems are handed from here on.
+    /// </summary>
     internal void SetFrame(in Frame frame)
     {
         _currentFrame = frame;

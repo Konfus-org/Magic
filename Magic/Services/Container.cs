@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Magic.Services;
 
 /// <summary>
@@ -23,7 +25,9 @@ internal sealed class Container
         _entries.Add((contract, instance));
     }
 
-    /// <summary>Removes every contract <paramref name="instance"/> was added under.</summary>
+    /// <summary>
+    /// Removes every contract <paramref name="instance"/> was added under.
+    /// </summary>
     public void Remove(object instance)
     {
         _entries.RemoveAll(entry => ReferenceEquals(entry.Instance, instance));
@@ -34,15 +38,38 @@ internal sealed class Container
         return _entries.Exists(entry => entry.Contract == contract);
     }
 
-    /// <summary>The first instance added under <paramref name="contract"/>, or null.</summary>
-    public object? Get(Type contract)
+    /// <summary>
+    /// The first instance added under <paramref name="contract"/>, which is expected to be there: throws
+    /// <see cref="InvalidOperationException"/> when nothing was. For what may be missing, <see cref="TryGet(Type, out object?)"/>.
+    /// </summary>
+    public object Get(Type contract)
     {
-        return _entries.Find(entry => entry.Contract == contract).Instance;
+        return TryGet(contract, out object? instance)
+            ? instance
+            : throw new InvalidOperationException($"Nothing provides {contract.FullName}.");
     }
 
-    public T? Get<T>() where T : class
+    /// <inheritdoc cref="Get(Type)"/>
+    public T Get<T>() where T : class
     {
-        return (T?)Get(typeof(T));
+        return (T)Get(typeof(T));
+    }
+
+    /// <summary>
+    /// The first instance added under <paramref name="contract"/>, for what may not be there: false, and null, when nothing was.
+    /// </summary>
+    public bool TryGet(Type contract, [NotNullWhen(true)] out object? instance)
+    {
+        instance = _entries.Find(entry => entry.Contract == contract).Instance;
+        return instance is not null;
+    }
+
+    /// <inheritdoc cref="TryGet(Type, out object?)"/>
+    public bool TryGet<T>([NotNullWhen(true)] out T? instance) where T : class
+    {
+        bool found = TryGet(typeof(T), out object? untyped);
+        instance = (T?)untyped;
+        return found;
     }
 
     public T[] All<T>() where T : class

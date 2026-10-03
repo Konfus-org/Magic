@@ -146,7 +146,7 @@ public sealed class ParamLayoutTests
     public void Stripping_leaves_an_initialiser_inside_a_comment()
     {
         const string hlsl = "struct MaterialParams\n{\n    float scale; // scale = 2\n};\n";
-        ParamLayout layout = ParamLayout.Parse(hlsl, "MaterialParams", true).Payload;
+        ParamLayout layout = ParamLayout.Parse(hlsl, "MaterialParams", true).Payload ?? throw new InvalidOperationException("The struct did not parse.");
 
         string stripped = ParamLayout.BlankDefaults(hlsl, layout.StructSpan);
 
@@ -261,10 +261,12 @@ public sealed class ParamLayoutTests
 
     private static ParamLayout Parse()
     {
-        return ParamLayout.Parse(Pbr, "MaterialParams", allowTextures: true).Payload;
+        return ParamLayout.Parse(Pbr, "MaterialParams", allowTextures: true).Payload ?? throw new InvalidOperationException("The struct did not parse.");
     }
 
-    /// <summary>Packs <paramref name="values"/> into a record; texture 36 resolves to 0x00020005.</summary>
+    /// <summary>
+    /// Packs <paramref name="values"/> into a record; texture 36 resolves to 0x00020005.
+    /// </summary>
     private static byte[] Write(Dictionary<string, Param> values)
     {
         byte[] record = new byte[ParamLayout.RecordBytes];
