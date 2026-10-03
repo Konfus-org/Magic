@@ -166,7 +166,7 @@ which means two files may never differ by case alone.
 - A native library is referenced by its logical name (`"SDL3"`, never `"SDL3.dll"`). Its binaries come from a
   NuGet package per platform, picked by `$(MagicPlatform)` or a condition on `$(MagicRuntime)`.
 - No csproj names a runtime identifier. It comes from `Directory.Build.props`: the build machine's own, or
-  `-r <rid>`.
+  `-r <rid>` on a project (`Tools/build-all.ps1 -Runtime <rid>` for all of them; a solution refuses it).
 
 ## Graphics
 

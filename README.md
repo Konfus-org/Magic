@@ -17,9 +17,11 @@ Build/net10.0/Debug/bin/Magic --project Samples/Cube
 `Magic --help` lists the options. Exit codes: 0 clean, 1 bad arguments or a crash, 2 an error was logged under
 `--fail-on-error`.
 
-Windows and Linux (Vulkan) are supported; macOS is not yet. `-r <rid>` builds for another platform into its own
-folder (`Build/net10.0/Debug-linux-x64/`); the host project's "<sample> (WSL)" launch profiles run that build in
-WSL (the samples are libraries, which the WSL launcher refuses), so build it with `-r linux-x64` first.
+Windows and Linux (Vulkan) are supported; macOS is not yet. `Tools/build-all.ps1 -Runtime linux-x64` builds the
+host, the gems and the samples for another platform into its own folder (`Build/net10.0/Debug-linux-x64/`); the
+solution itself refuses a runtime. The host project's launch profiles run every sample: "Lights" on Windows,
+"Lights (WSL)" as that Linux build in WSL (the samples are libraries, which the WSL launcher refuses), so run the
+script before the WSL profile. The WSL profile needs the ".NET Debugging with WSL" component of Visual Studio.
 
 ## How it works
 
