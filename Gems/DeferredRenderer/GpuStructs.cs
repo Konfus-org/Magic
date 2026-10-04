@@ -1,4 +1,5 @@
-﻿using Magic.Contexts.Components;
+using Magic.Contexts.Components;
+using Magic.Contexts.Settings;
 using Magic.Extensions;
 using System.Drawing;
 using System.Numerics;
@@ -141,6 +142,7 @@ internal enum InstanceFlags : uint
     Mirrored = 1u << 1,
     NoSizeCull = 1u << 2,
     Hidden = 1u << 3,
+    NoShadow = 1u << 4,
 }
 
 /// <summary>
@@ -268,6 +270,227 @@ internal struct FrameConstants
             LightCount = lighting.LightCount,
         };
     }
+
+    /// <summary>
+    /// The constants of one shadow view, a cascade of the sun or a face of a local light, looking from <paramref name="eye"/>
+    /// into its <paramref name="tile"/> of the atlas: positions are relative to the eye, <see cref="MinPixels"/> is in the
+    /// tile's texels, and the LOD bias is the shadow views' own.
+    /// </summary>
+    public static FrameConstants ForShadowView(
+        in Matrix4x4 viewProj,
+        in Matrix4x4 rotation,
+        Vector3 eye,
+        Rectangle tile,
+        in Matrix4x4 projection,
+        float near,
+        float far,
+        bool isOrthographic,
+        RenderSettings settings,
+        long frame)
+    {
+        return new FrameConstants
+        {
+            ViewProj = viewProj,
+            View = rotation,
+            CameraPos = eye,
+            Time = frame,
+            ViewSize = new Vector2(tile.Width, tile.Height),
+            ViewTexel = new Vector2(1f / Math.Max(1, tile.Width), 1f / Math.Max(1, tile.Height)),
+            ViewOrigin = new Vector2(tile.X, tile.Y),
+            ProjScale = new Vector2(projection.M11, projection.M22),
+            Near = near,
+            Far = far,
+            MinPixels = settings.Shadows.MinTexels,
+            IsOrthographic = isOrthographic ? 1u : 0u,
+            LodBias = MathF.Max(0.01f, settings.LodBias * settings.Shadows.LodBias),
+            SunDirection = Vector3.UnitY,
+        };
+    }
+}
+
+[InlineArray(Cascades.MaxCascades)]
+internal struct CascadeMatrices
+{
+    private Matrix4x4 _element;
+}
+
+[InlineArray(ShadowCullConstants.MaxPlanes)]
+internal struct ReceiverPlanes
+{
+    private Vector4 _element;
+}
+
+/// <summary>
+/// 464 B. A shadow view's cull constants: its frame block, then the planes of the receivers' volume swept towards the
+/// light (<c>Include/ShadowCull.hlsli</c>), relative to the view's eye, normals pointing in; none for a local light's face.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct ShadowCullConstants
+{
+    public const int MaxPlanes = Cascades.MaxReceiverPlanes;
+
+    public const int Size = FrameConstants.Size + (MaxPlanes * 16) + 16;
+
+    public FrameConstants Frame;
+    public ReceiverPlanes Planes;
+    public uint PlaneCount, Pad0, Pad1, Pad2;
+}
+
+[InlineArray(Cascades.MaxCascades)]
+internal struct CascadeRows
+{
+    private Vector4 _element;
+}
+
+/// <summary>
+/// 864 B. The lighting's constants: the frame block, then everything the shading reads beyond the camera's view, exactly
+/// as <c>Include/Shade.hlsli</c> appends it: the sun's cascades, the GI clipmap, the ambient occlusion, the debug view.
+/// Pushed to the shade dispatch and the ambient occlusion and GI passes; the light binning keeps the plain frame block.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct ShadeConstants
+{
+    public const int Size = FrameConstants.Size + 608;
+
+    public FrameConstants Frame;
+
+    /// <summary>
+    /// Camera-relative world to each cascade's clip space.
+    /// </summary>
+    public CascadeMatrices CascadeViewProj;
+
+    /// <summary>
+    /// Per cascade: X the view depth it ends at, Y metres per shadow texel, ZW its tile's uv origin in the atlas.
+    /// </summary>
+    public CascadeRows Cascade;
+
+    /// <summary>
+    /// X the cascade count, Y the blend fraction, Z the filter radius in metres, W the normal bias in texels.
+    /// </summary>
+    public Vector4 ShadowParams;
+
+    /// <summary>
+    /// XY a cascade tile's size in uv, ZW one atlas texel in uv.
+    /// </summary>
+    public Vector4 ShadowAtlasUv;
+
+    public uint ShadowFlags, ShadowRecordCount;
+    public float ShadowDepthBias, ShadowPad1;
+
+    public CascadeRows ClipmapOrigin, ClipmapCameraOffset;
+    public uint GiLevels, GiResolution, GiFlags, GiUpdateLevel;
+    public Vector4 GiInteriorTint, SkyColor, GiShift;
+
+    public Vector4 AoParams;
+    public uint AoSlices, AoSteps, AoFlags;
+    public float AoScale;
+
+    public uint DebugView, ShadePad0, ShadePad1, ShadePad2;
+
+    public const uint SunFlag = 1u;
+    public const uint LocalFlag = 2u;
+    public const uint AoEnabledFlag = 1u;
+    public const uint AoMultiBounceFlag = 2u;
+    public const uint GiEnabledFlag = 1u;
+
+    /// <summary>
+    /// A view's lighting constants: its frame block, the cascades fitted for it (none when <paramref name="cascades"/>
+    /// is null or holds none) and the atlas as laid out this frame.
+    /// </summary>
+    public static ShadeConstants Build(in FrameConstants frame, ShadowBuffers? cascades, ShadowState shadows, RenderSettings settings)
+    {
+        ShadowSettings shadowSettings = settings.Shadows;
+        AoSettings ao = settings.Ao;
+        ShadeConstants constants = new()
+        {
+            Frame = frame,
+            DebugView = (uint)settings.DebugView,
+            ShadowRecordCount = (uint)shadows.RecordRows.Count,
+            AoParams = new Vector4(ao.Radius, ao.MaxRadiusPixels, ao.Thickness, ao.Strength),
+            AoSlices = (uint)ao.Slices,
+            AoSteps = (uint)ao.Steps,
+            AoFlags = (ao.Enabled ? AoEnabledFlag : 0u) | (ao.MultiBounce ? AoMultiBounceFlag : 0u),
+            AoScale = AmbientOcclusion.Scale(ao),
+        };
+
+        if (!shadowSettings.Enabled || !shadows.Atlas.IsValid)
+            return constants;
+
+        float atlasWidth = shadows.AtlasWidth, atlasHeight = shadows.AtlasHeight;
+        constants.ShadowAtlasUv = new Vector4(shadows.CascadeResolution / atlasWidth, shadows.CascadeResolution / atlasHeight, 1f / atlasWidth, 1f / atlasHeight);
+        constants.ShadowFlags = shadows.RecordRows.Count > 0 ? LocalFlag : 0u;
+        constants.ShadowDepthBias = shadowSettings.DepthBias;
+        if (cascades is not { Count: > 0 })
+            return constants;
+
+        constants.ShadowFlags |= SunFlag;
+        constants.ShadowParams = new Vector4(cascades.Count, shadowSettings.BlendFraction, shadowSettings.FilterRadius, shadowSettings.NormalBias);
+        for (int i = 0; i < cascades.Count; i++)
+        {
+            Cascade cascade = cascades.Cascades[i];
+            Rectangle tile = cascades.Tile(i, shadows.CascadeResolution);
+            constants.CascadeViewProj[i] = cascade.ViewProj(frame.CameraPos);
+            constants.Cascade[i] = new Vector4(cascade.FarSplit, cascade.TexelWorld, tile.X / atlasWidth, tile.Y / atlasHeight);
+        }
+
+        return constants;
+    }
+}
+
+/// <summary>
+/// 48 B. A draw group's mesh box in the mesh's own space and the mesh's occupancy brick, for the GI's stamping.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct GpuGiGroup
+{
+    public const int Size = 48;
+
+    public Vector4 BoxMin, BoxMax;
+    public uint Brick, MeshSlot, Pad0, Pad1;
+}
+
+/// <summary>
+/// 32 B. What a material gives the GI: its albedo and what it emits, linear.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct GpuGiMaterial
+{
+    public const int Size = 32;
+
+    public Vector4 Albedo, Emissive;
+}
+
+/// <summary>
+/// Four unsigned words in a row.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct UintVector4(uint X, uint Y, uint Z, uint W);
+
+/// <summary>
+/// 304 B. A brick job's constants: the frame block, the mesh's box, and its triangles' place in the mega buffers (<c>Gi/Brick.hlsli</c>).
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct BrickConstants
+{
+    public const int Size = FrameConstants.Size + 48;
+
+    public FrameConstants Frame;
+    public Vector4 BoxMin, BoxMax;
+    public UintVector4 Job;
+}
+
+/// <summary>
+/// 96 B. One face of a local light's shadow, as the lighting reads it: where its page sits in the atlas, the camera-relative
+/// view-projection into it, and in X how many metres a texel of it is per metre from the light.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct GpuShadowRecord
+{
+    public const int Size = 96;
+
+    public Vector4 RectUv;
+    public Matrix4x4 ViewProj;
+    public Vector4 Params;
 }
 
 /// <summary>
@@ -283,13 +506,14 @@ internal unsafe struct PassConstants
 }
 
 /// <summary>
-/// 48 B. One point or spot light, in absolute world space. A point light is a spot whose cone never ends: its cosines
-/// are below any a direction can have.
+/// 64 B. One point or spot light, in absolute world space. A point light is a spot whose cone never ends: its cosines
+/// are below any a direction can have. <see cref="ShadowRecord"/> is the first <see cref="GpuShadowRecord"/> of its
+/// shadow faces (<see cref="ShadowFaces"/> of them, 1 or 6), or <see cref="ShadowState.None"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuLight
 {
-    public const int Size = 48;
+    public const int Size = 64;
 
     /// <summary>
     /// xyz the position, w the range in metres.
@@ -306,7 +530,9 @@ internal struct GpuLight
     /// </summary>
     public Vector4 DirectionOuterCos;
 
-    public static GpuLight From(in LightInstance light)
+    public uint ShadowRecord, ShadowFaces, ShadowPad0, ShadowPad1;
+
+    public static GpuLight From(in LightInstance light, uint shadowRecord, uint shadowFaces)
     {
         bool isSpot = light.Kind == LightKind.Spot;
         return new GpuLight
@@ -314,6 +540,8 @@ internal struct GpuLight
             PositionRange = new Vector4(light.World.Translation, light.Range),
             ColorInnerCos = new Vector4(light.Color * light.Intensity, isSpot ? MathF.Cos(light.InnerAngle * 0.5f) : -1f),
             DirectionOuterCos = new Vector4(Vector3.Normalize(light.World.Forward), isSpot ? MathF.Cos(light.OuterAngle * 0.5f) : -2f),
+            ShadowRecord = shadowRecord,
+            ShadowFaces = shadowFaces,
         };
     }
 }
@@ -347,14 +575,26 @@ internal struct LightingConstants
     public Vector3 SunColor;
     public Vector3 Ambient;
     public uint LightCount;
+    public bool SunCastsShadows;
 
-    public static LightingConstants From(ReadOnlySpan<LightInstance> lights)
+    /// <summary>
+    /// Whether a <see cref="Sky"/> entity set the ambient: the sky is then shown where nothing is drawn.
+    /// </summary>
+    public bool HasSky;
+
+    /// <summary>
+    /// The sky without a <see cref="Sky"/> entity: today's dim blue-grey.
+    /// </summary>
+    public static readonly Vector3 DefaultSky = new(0.15f, 0.16f, 0.2f);
+
+    public static LightingConstants From(ReadOnlySpan<LightInstance> lights, Vector3? sky)
     {
         LightingConstants constants = new()
         {
             SunDirection = Vector3.Normalize(new Vector3(0.3f, -0.8f, 0.5f)),
             SunColor = Vector3.Zero,
-            Ambient = new Vector3(0.15f, 0.16f, 0.2f),
+            Ambient = sky ?? DefaultSky,
+            HasSky = sky is not null,
         };
 
         bool hasSun = false;
@@ -371,6 +611,7 @@ internal struct LightingConstants
 
             constants.SunDirection = Vector3.Normalize(light.World.Forward);
             constants.SunColor = light.Color * light.Intensity;
+            constants.SunCastsShadows = light.CastsShadows;
             hasSun = true;
         }
 
@@ -383,6 +624,13 @@ internal static class GpuStructs
     public static void AssertLayout()
     {
         System.Diagnostics.Debug.Assert(Unsafe.SizeOf<GpuInstance>() == GpuInstance.Size);
+        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<GpuLight>() == GpuLight.Size);
+        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<GpuShadowRecord>() == GpuShadowRecord.Size);
+        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<ShadeConstants>() == ShadeConstants.Size);
+        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<ShadowCullConstants>() == ShadowCullConstants.Size);
+        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<GpuGiGroup>() == GpuGiGroup.Size);
+        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<GpuGiMaterial>() == GpuGiMaterial.Size);
+        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<BrickConstants>() == BrickConstants.Size);
         System.Diagnostics.Debug.Assert(Unsafe.SizeOf<GpuInstanceXform>() == GpuInstanceXform.Size);
         System.Diagnostics.Debug.Assert(Unsafe.SizeOf<GpuMaterial>() == GpuMaterial.Size);
         System.Diagnostics.Debug.Assert(Unsafe.SizeOf<GpuPage>() == GpuPage.Size);

@@ -71,7 +71,11 @@ public enum GpuFormat : byte
     R11G11B10Float,
     Rgb10A2Unorm,
     D32Float,
-    D24Unorm
+    D24Unorm,
+    R32Uint,
+    R8Unorm,
+    R16Unorm,
+    Rgba32Float
 }
 
 [Flags]
@@ -93,7 +97,19 @@ public enum GpuTextureUsage : byte
     Sampler = 1 << 0,
     ColorTarget = 1 << 1,
     DepthTarget = 1 << 2,
-    ComputeWrite = 1 << 3
+    ComputeWrite = 1 << 3,
+
+    /// <summary>
+    /// Read in a compute shader as a storage texture (no sampler), through <see cref="RenderCommands.BindStorageTextures"/>.
+    /// </summary>
+    ComputeRead = 1 << 4
+}
+
+public enum GpuTextureKind : byte
+{
+    Texture2D,
+    Texture2DArray,
+    Texture3D
 }
 
 public enum GpuFilter : byte
@@ -127,7 +143,8 @@ public enum GpuCompare : byte
     Less,
     LessOrEqual,
     Greater,
-    GreaterOrEqual
+    GreaterOrEqual,
+    Never
 }
 
 public enum GpuVertexFormat : byte
@@ -150,14 +167,23 @@ public enum GpuLoad : byte
     DontCare
 }
 
-public readonly record struct TextureDesc(GpuFormat Format, GpuTextureUsage Usage, uint Width, uint Height, uint Levels = 1, uint Layers = 1);
+/// <summary>
+/// A texture to make. <paramref name="Layers"/> above 1 makes a <see cref="GpuTextureKind.Texture2DArray"/> unless <paramref name="Kind"/>
+/// says otherwise; for a <see cref="GpuTextureKind.Texture3D"/> it is the depth.
+/// </summary>
+public readonly record struct TextureDesc(GpuFormat Format, GpuTextureUsage Usage, uint Width, uint Height, uint Levels = 1, uint Layers = 1, GpuTextureKind Kind = GpuTextureKind.Texture2D);
 
-public readonly record struct SamplerDesc(GpuFilter Filter, GpuAddress Address, float Anisotropy = 0f);
+/// <summary>
+/// A sampler; with <paramref name="Compare"/> a comparison sampler (<c>SamplerComparisonState</c>): a sample is 1 where
+/// <c>reference op stored</c> holds, filtered over the taps.
+/// </summary>
+public readonly record struct SamplerDesc(GpuFilter Filter, GpuAddress Address, float Anisotropy = 0f, GpuCompare? Compare = null);
 
 /// <summary>
 /// One mip level of one layer, or a rectangle of it; <see cref="Width"/> and <see cref="Height"/> of 0 mean the whole level.
+/// <see cref="Z"/> and <see cref="Depth"/> are the slices of a 3D texture, 0 depth being all of them.
 /// </summary>
-public readonly record struct TextureRegion(GpuTexture Texture, uint Level = 0, uint Layer = 0, uint X = 0, uint Y = 0, uint Width = 0, uint Height = 0);
+public readonly record struct TextureRegion(GpuTexture Texture, uint Level = 0, uint Layer = 0, uint X = 0, uint Y = 0, uint Width = 0, uint Height = 0, uint Z = 0, uint Depth = 0);
 
 /// <summary>
 /// One vertex buffer slot of a pipeline: its stride and whether it steps per instance.
@@ -168,9 +194,9 @@ public readonly record struct VertexAttribute(uint Location, uint Slot, GpuVerte
 
 /// <summary>
 /// A graphics pipeline, as data: both shaders, the vertex layout, the colour targets (one per <c>SV_Target</c> the
-/// fragment shader writes, in order) and an optional depth target. The defaults are the engine's conventions (clockwise
-/// front faces, reverse-Z), so a backend reads them rather than knowing them.
-/// Depth is tested and written whenever <see cref="Depth"/> is set.
+/// fragment shader writes, in order; none for a depth-only pipeline) and an optional depth target. The defaults are the
+/// engine's conventions (clockwise front faces, reverse-Z), so a backend reads them rather than knowing them.
+/// Depth is tested whenever <see cref="Depth"/> is set, and written unless <see cref="DepthWrite"/> is off.
 /// </summary>
 public sealed record PipelineDesc(CompiledShader Vertex, CompiledShader Fragment, params GpuFormat[] Colors)
 {
@@ -190,6 +216,23 @@ public sealed record PipelineDesc(CompiledShader Vertex, CompiledShader Fragment
     /// Straight alpha over what is there, for UI.
     /// </summary>
     public bool AlphaBlend { get; init; }
+
+    public bool DepthWrite { get; init; } = true;
+
+    /// <summary>
+    /// The rasteriser's depth bias: a constant (in the depth format's smallest steps) and a slope factor, both 0 for none.
+    /// Reverse-Z: negative pushes depth away from the viewer.
+    /// </summary>
+    public float DepthBias { get; init; }
+
+    public float DepthBiasSlope { get; init; }
+
+    public float DepthBiasClamp { get; init; }
+
+    /// <summary>
+    /// Off clamps depth to the planes instead of clipping at them, so a shadow caster behind the near plane still writes.
+    /// </summary>
+    public bool DepthClip { get; init; } = true;
 }
 
 /// <summary>
@@ -222,9 +265,10 @@ public sealed class CompiledShader
 }
 
 /// <summary>
-/// One binding of a run a command binds: a buffer, or a texture with (for sampling) its sampler.
+/// One binding of a run a command binds: a buffer, or a texture with (for sampling) its sampler. <see cref="Level"/> and
+/// <see cref="Layer"/> pick the mip and layer (or 3D slice) a compute pass writes a storage texture at.
 /// </summary>
-public readonly record struct GpuBinding(GpuBuffer Buffer = default, GpuTexture Texture = default, GpuSampler Sampler = default);
+public readonly record struct GpuBinding(GpuBuffer Buffer = default, GpuTexture Texture = default, GpuSampler Sampler = default, uint Level = 0, uint Layer = 0);
 
 /// <summary>
 /// One captured frame: 8-bit RGBA, rows tightly packed top to bottom, <c>Width * Height * 4</c> bytes.

@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Attributes.Scripts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -56,6 +56,7 @@ internal sealed class RenderSystem : ISystem
     private readonly IEcsQuery<RenderInstance> _allInstances;
     private readonly IEcsQuery<Camera, WorldTransform> _cameras;
     private readonly IEcsQuery<PostProcessing> _postProcessing;
+    private readonly IEcsQuery<Sky> _skies;
     private readonly IEcsQuery<DirectionalLight, WorldTransform> _directional;
     private readonly IEcsQuery<PointLight, WorldTransform> _points;
     private readonly IEcsQuery<SpotLight, WorldTransform> _spots;
@@ -95,6 +96,7 @@ internal sealed class RenderSystem : ISystem
     private readonly QueryChunkAction<WorldTransform, RenderInstance> _move;
     private readonly QueryChunkAction<Camera, WorldTransform> _collectViews;
     private readonly QueryChunkAction<PostProcessing> _collectPasses;
+    private readonly QueryChunkAction<Sky> _collectSky;
     private readonly QueryChunkAction<DirectionalLight, WorldTransform> _collectDirectional;
     private readonly QueryChunkAction<PointLight, WorldTransform> _collectPoints;
     private readonly QueryChunkAction<SpotLight, WorldTransform> _collectSpots;
@@ -104,6 +106,9 @@ internal sealed class RenderSystem : ISystem
     private PassList _passes;      // the world's post-processing this frame; empty without one
     private int _passLists;        // how many entities carry a PostProcessing this frame
     private bool _warnedPassLists;
+    private Vector3? _sky;         // the world's sky colour this frame; null without a Sky entity
+    private int _skyCount;           // how many entities carry a Sky this frame
+    private bool _warnedSkies;
     private Handle _lastParent;    // of the entity registered last, and whether it or anything above it is hidden:
     private bool _lastParentHidden; // a chunk's entities share one, so it is looked up once a frame, not once each.
                                     // Lights and glows ask once per span (one table: one parent), not per entity
@@ -122,6 +127,7 @@ internal sealed class RenderSystem : ISystem
         _allInstances = ecs.Query<RenderInstance>().Build();
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
         _postProcessing = ecs.Query<PostProcessing>().Build();
+        _skies = ecs.Query<Sky>().Build();
         _directional = ecs.Query<DirectionalLight, WorldTransform>().Without<Settled>().Build();
         _points = ecs.Query<PointLight, WorldTransform>().Without<Settled>().Build();
         _spots = ecs.Query<SpotLight, WorldTransform>().Without<Settled>().Build();
@@ -152,6 +158,7 @@ internal sealed class RenderSystem : ISystem
         _move = Move;
         _collectViews = CollectViews;
         _collectPasses = CollectPasses;
+        _collectSky = CollectSky;
         _collectDirectional = CollectDirectional;
         _collectPoints = CollectPoints;
         _collectSpots = CollectSpots;
@@ -175,6 +182,7 @@ internal sealed class RenderSystem : ISystem
         _allInstances.Dispose();
         _cameras.Dispose();
         _postProcessing.Dispose();
+        _skies.Dispose();
         _directional.Dispose();
         _points.Dispose();
         _spots.Dispose();
@@ -223,6 +231,7 @@ internal sealed class RenderSystem : ISystem
         _views.Clear();
         _cameras.Run(_collectViews);
         CollectPostProcessing();
+        CollectSkies();
         CollectSettled();
         _lights.Clear();
         _lights.AddRange(_settledLights);
@@ -238,6 +247,10 @@ internal sealed class RenderSystem : ISystem
         Materials.Flush(ctx);
         Meshes.Flush(ctx);
         Instancing.Flush(ctx);
+        Shadows.BeginFrame(ctx, frame.Number, CountPerspective(_views));
+        Shadows.SelectLocal(ctx, CollectionsMarshal.AsSpan(_lights), CollectionsMarshal.AsSpan(_views));
+        Shadows.UploadRecords(ctx);
+        Gi.Plan(ctx, CollectionsMarshal.AsSpan(_views), frame.Number);
         Lighting.Upload(ctx, CollectionsMarshal.AsSpan(_lights));
         Glows.Upload(ctx, CollectionsMarshal.AsSpan(_glows));
 
@@ -245,7 +258,7 @@ internal sealed class RenderSystem : ISystem
         double syncMs = Stopwatch.GetElapsedTime(started, recording).TotalMilliseconds;
 
         // Plan, then record: the plan is everything the commands are made from.
-        Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), _passes, LightingConstants.From(CollectionsMarshal.AsSpan(_lights)), (float)frame.Time);
+        Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), _passes, LightingConstants.From(CollectionsMarshal.AsSpan(_lights), _sky), (float)frame.Time);
         FailureLabels.Show(ctx);
         (int draws, int dispatches) = Scene.Record(ctx, frame.DrawCommands, _plan);
         float recordMs = (float)Stopwatch.GetElapsedTime(recording).TotalMilliseconds;
@@ -335,7 +348,12 @@ internal sealed class RenderSystem : ISystem
         ctx.Cull = Culling.Create(ctx);
         ctx.Lighting = Lighting.Create(ctx);
         ctx.GlowPipeline = Glows.Create(ctx);
+        ctx.Shadows = new ShadowState(ctx);
+        ctx.Ao = AmbientOcclusion.Create(ctx);
+        ctx.GiVolumes = new GiVolumes(gpu);
+        ctx.Gi = Gi.Create(ctx);
         ctx.Passes = new PassTable(Shaders.CompileBuiltIn(ctx, "Passes/Fullscreen.vert.hlsl", GpuStage.Vertex));
+        RegisterBuiltIns(ctx);
 
         // The built-in surfaces compile now, so the first frames of a scripted run draw them, and the failure pipelines are
         // ready before anything can fail.
@@ -351,6 +369,38 @@ internal sealed class RenderSystem : ISystem
 
         ctx.Building = false;
         return ctx;
+    }
+
+    /// <summary>
+    /// The engine's own pipelines, by the shaders they rebuild from when one changes.
+    /// </summary>
+    private static void RegisterBuiltIns(RenderContext ctx)
+    {
+        BuiltIns.Register(ctx, static c =>
+        {
+            foreach (GpuPipeline pipeline in (ReadOnlySpan<GpuPipeline>)[c.Cull.PageCull, c.Cull.CullEarly, c.Cull.SeedLate, c.Cull.CullLate, c.Cull.HiZBuild])
+                c.Gpu.Release(pipeline);
+            c.Cull = Culling.Create(c);
+        }, "Cull/PageCull.comp.hlsl", "Cull/CullEarly.comp.hlsl", "Cull/SeedLateArgs.comp.hlsl", "Cull/CullLate.comp.hlsl", "Cull/HiZBuild.comp.hlsl");
+        BuiltIns.Register(ctx, static c =>
+        {
+            foreach (GpuPipeline pipeline in (ReadOnlySpan<GpuPipeline>)[c.Lighting.LightCull, c.Lighting.LightCluster, c.Lighting.Shade])
+                c.Gpu.Release(pipeline);
+            c.Lighting = Lighting.Create(c);
+        }, "Lighting/LightCull.comp.hlsl", "Lighting/LightCluster.comp.hlsl", "Lighting/Lighting.comp.hlsl");
+        BuiltIns.Register(ctx, static c =>
+        {
+            c.Gpu.Release(c.GlowPipeline);
+            c.GlowPipeline = Glows.Create(c);
+        }, "Lighting/Glow.vert.hlsl", "Lighting/Glow.frag.hlsl");
+        BuiltIns.Register(ctx, Shadows.RebuildPipelines, ShadowState.CullShader, ShadowState.VertexShader, ShadowState.FragmentShader, ShadowState.ClearShader);
+        BuiltIns.Register(ctx, static c =>
+        {
+            c.Gpu.Release(c.Ao.Gtao);
+            c.Gpu.Release(c.Ao.Blur);
+            c.Ao = AmbientOcclusion.Create(c);
+        }, AmbientOcclusion.GtaoShader, AmbientOcclusion.BlurShader);
+        BuiltIns.Register(ctx, Gi.RebuildPipelines, Gi.AllShaders);
     }
 
     /// <summary>
@@ -416,6 +466,7 @@ internal sealed class RenderSystem : ISystem
                     Shaders.Get(ctx, new Handle<Shader>(shader));
 
                 Pipelines.Invalidate(ctx, shaders);
+                BuiltIns.Rebuild(ctx, shaders);
                 reclass |= Materials.RepackShaders(ctx, shaders);
                 foreach ((ulong pass, PassState state) in ctx.Passes.Entries.ToArray())
                 {
@@ -650,6 +701,29 @@ internal sealed class RenderSystem : ISystem
     }
 
     /// <summary>
+    /// The world's one <see cref="Sky"/>; of several the first is followed, warned about once; without one the default.
+    /// </summary>
+    private void CollectSkies()
+    {
+        _sky = null;
+        _skyCount = 0;
+        _skies.Run(_collectSky);
+
+        if (_skyCount > 1 && !_warnedSkies)
+            Debugging.Log.Warn($"{_skyCount} entities carry a Sky; the sky is global, so only the first is followed.");
+
+        _warnedSkies = _skyCount > 1;
+    }
+
+    private void CollectSky(ReadOnlySpan<Handle> entities, Span<Sky> skies)
+    {
+        if (_skyCount == 0 && skies.Length > 0)
+            _sky = skies[0].Color;
+
+        _skyCount += skies.Length;
+    }
+
+    /// <summary>
     /// The lights and glows that never move, read again when one of them changed (the observers and the hidden
     /// changes say when): most of a big scene's lights are these, and a frame then only reads the ones that can move.
     /// </summary>
@@ -720,6 +794,14 @@ internal sealed class RenderSystem : ISystem
 
         for (int i = 0; i < glows.Length; i++)
             _collectedGlows.Add(new GpuGlow { PositionRadius = new Vector4(worlds[i].Value.Translation, glows[i].Radius), Color = new Vector4(glows[i].Color, 1f) });
+    }
+
+    private static int CountPerspective(List<View> views)
+    {
+        int count = 0;
+        foreach (View view in views)
+            count += view.Camera.Projection == Projection.Perspective ? 1 : 0;
+        return count;
     }
 
     /// <summary>

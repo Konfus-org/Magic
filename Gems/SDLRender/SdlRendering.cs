@@ -87,9 +87,10 @@ internal sealed class SdlRendering : IGem, IRendering
     public GpuTexture CreateTexture(in TextureDesc desc)
     {
         Gpu.AssertMainThread();
+        GpuTextureKind kind = desc.Kind == GpuTextureKind.Texture2D && desc.Layers > 1 ? GpuTextureKind.Texture2DArray : desc.Kind;
         SDL.GPUTextureCreateInfo info = new()
         {
-            Type = desc.Layers > 1 ? SDL.GPUTextureType.TextureType2DArray : SDL.GPUTextureType.TextureType2D,
+            Type = kind.ToSdl(),
             Format = desc.Format.ToSdl(),
             Usage = desc.Usage.ToSdl(),
             Width = desc.Width,
@@ -99,7 +100,7 @@ internal sealed class SdlRendering : IGem, IRendering
             SampleCount = SDL.GPUSampleCount.SampleCount1,
         };
         nint handle = GpuDevice.ThrowOnError(SDL.CreateGPUTexture(Gpu.Handle, in info), "SDL_CreateGPUTexture");
-        return new GpuTexture(_textures.Add(new TextureObject(handle, desc.Width, desc.Height)));
+        return new GpuTexture(_textures.Add(new TextureObject(handle, desc.Width, desc.Height, kind == GpuTextureKind.Texture3D ? desc.Layers : 1)));
     }
 
     public GpuSampler CreateSampler(in SamplerDesc desc)
@@ -116,6 +117,9 @@ internal sealed class SdlRendering : IGem, IRendering
             AddressModeV = address,
             AddressModeW = address,
             MaxAnisotropy = desc.Anisotropy,
+            EnableAnisotropy = desc.Anisotropy > 1f,
+            EnableCompare = desc.Compare is not null,
+            CompareOp = desc.Compare?.ToSdl() ?? SDL.GPUCompareOp.Never,
             MinLod = 0f,
             MaxLod = 1000f,
         };
@@ -172,13 +176,18 @@ internal sealed class SdlRendering : IGem, IRendering
                     FillMode = SDL.GPUFillMode.Fill,
                     CullMode = desc.Cull.ToSdl(),
                     FrontFace = desc.FrontFace == GpuFrontFace.Clockwise ? SDL.GPUFrontFace.Clockwise : SDL.GPUFrontFace.CounterClockwise,
+                    EnableDepthBias = desc.DepthBias != 0f || desc.DepthBiasSlope != 0f,
+                    DepthBiasConstantFactor = desc.DepthBias,
+                    DepthBiasSlopeFactor = desc.DepthBiasSlope,
+                    DepthBiasClamp = desc.DepthBiasClamp,
+                    EnableDepthClip = desc.DepthClip,
                 },
                 MultisampleState = new SDL.GPUMultisampleState { SampleCount = SDL.GPUSampleCount.SampleCount1 },
                 DepthStencilState = new SDL.GPUDepthStencilState
                 {
                     CompareOp = desc.DepthCompare.ToSdl(),
                     EnableDepthTest = depth,
-                    EnableDepthWrite = depth,
+                    EnableDepthWrite = depth && desc.DepthWrite,
                 },
                 TargetInfo = new SDL.GPUGraphicsPipelineTargetInfo
                 {
@@ -247,6 +256,14 @@ internal sealed class SdlRendering : IGem, IRendering
     public void Copy(in TextureRegion source, in TextureRegion destination)
     {
         _transfers.Add(new Transfer(TransferKind.TextureCopy, 0, 0, default, 0, 0, destination, source));
+    }
+
+    public void Copy(GpuBuffer source, uint sourceOffset, GpuBuffer destination, uint destinationOffset, uint bytes)
+    {
+        if (bytes == 0 || !source.IsValid || !destination.IsValid)
+            return;
+
+        _transfers.Add(new Transfer(TransferKind.BufferCopy, 0, sourceOffset, destination, destinationOffset, bytes, default, default, source));
     }
 
     public void Release(GpuBuffer buffer)
@@ -401,7 +418,14 @@ internal sealed class SdlRendering : IGem, IRendering
                         X = transfer.Region.X,
                         Y = transfer.Region.Y,
                     };
-                    SDL.CopyGPUTextureToTexture(copyPass, in source, in destination, from.W, from.H, 1, false);
+                    SDL.CopyGPUTextureToTexture(copyPass, in source, in destination, from.W, from.H, from.D, false);
+                    break;
+                }
+                case TransferKind.BufferCopy:
+                {
+                    SDL.GPUBufferLocation source = new() { Buffer = _buffers[transfer.SourceBuffer.Id], Offset = transfer.StagedOffset };
+                    SDL.GPUBufferLocation destination = new() { Buffer = _buffers[transfer.Buffer.Id], Offset = transfer.BufferOffset };
+                    SDL.CopyGPUBufferToBuffer(copyPass, in source, in destination, transfer.Size, false);
                     break;
                 }
             }
@@ -419,7 +443,8 @@ internal sealed class SdlRendering : IGem, IRendering
         TextureObject stored = _textures[region.Texture.Id];
         uint width = region.Width != 0 ? region.Width : Math.Max(1, stored.Width >> (int)region.Level);
         uint height = region.Height != 0 ? region.Height : Math.Max(1, stored.Height >> (int)region.Level);
-        return new SDL.GPUTextureRegion { Texture = stored.Handle, MipLevel = region.Level, Layer = region.Layer, X = region.X, Y = region.Y, W = width, H = height, D = 1 };
+        uint depth = region.Depth != 0 ? region.Depth : Math.Max(1, stored.Depth >> (int)region.Level);
+        return new SDL.GPUTextureRegion { Texture = stored.Handle, MipLevel = region.Level, Layer = region.Layer, X = region.X, Y = region.Y, Z = region.Z, W = width, H = height, D = depth };
     }
 
     /// <summary>
@@ -443,6 +468,17 @@ internal sealed class SdlRendering : IGem, IRendering
             {
                 case RenderCommandType.BeginRenderPass:
                 {
+                    SDL.GPULoadOp load = command.Load.ToSdl();
+                    if (!command.Texture.IsValid)
+                    {
+                        // Depth only: the pass has no colour target at all.
+                        TextureObject depthOnly = _textures[command.Depth.Id];
+                        target = (depthOnly.Width, depthOnly.Height);
+                        SDL.GPUDepthStencilTargetInfo depthInfo = DepthTarget(depthOnly.Handle, load);
+                        render = SDL.BeginGPURenderPass(commandBuffer, 0, 0, in depthInfo);
+                        break;
+                    }
+
                     (nint color, uint width, uint height) = ResolveTexture(commandBuffer, command.Texture, ref waited);
                     if (color == 0)
                     {
@@ -451,7 +487,6 @@ internal sealed class SdlRendering : IGem, IRendering
                     }
 
                     target = (width, height);
-                    SDL.GPULoadOp load = command.Load.ToSdl();
 
                     // One colour target, or the run of them: the first is the one resolved above.
                     ReadOnlySpan<GpuBinding> run = bindings.Slice(command.Run.Start, command.Run.Length);
@@ -469,15 +504,7 @@ internal sealed class SdlRendering : IGem, IRendering
 
                     if (command.Depth.IsValid)
                     {
-                        SDL.GPUDepthStencilTargetInfo depth = new()
-                        {
-                            Texture = _textures[command.Depth.Id].Handle,
-                            ClearDepth = 0f, // reverse-Z: 0 is infinitely far
-                            LoadOp = load,
-                            StoreOp = SDL.GPUStoreOp.Store,
-                            StencilLoadOp = SDL.GPULoadOp.DontCare,
-                            StencilStoreOp = SDL.GPUStoreOp.DontCare,
-                        };
+                        SDL.GPUDepthStencilTargetInfo depth = DepthTarget(_textures[command.Depth.Id].Handle, load);
                         render = SDL.BeginGPURenderPass(commandBuffer, colors, (uint)colors.Length, in depth);
                     }
                     else
@@ -503,7 +530,7 @@ internal sealed class SdlRendering : IGem, IRendering
                     foreach (GpuBinding write in writes)
                     {
                         if (write.Texture.IsValid)
-                            textures[nextTexture++] = new SDL.GPUStorageTextureReadWriteBinding { Texture = _textures[write.Texture.Id].Handle };
+                            textures[nextTexture++] = new SDL.GPUStorageTextureReadWriteBinding { Texture = _textures[write.Texture.Id].Handle, MipLevel = write.Level, Layer = write.Layer };
                         else
                             buffers[nextBuffer++] = new SDL.GPUStorageBufferReadWriteBinding { Buffer = _buffers[write.Buffer.Id] };
                     }
@@ -581,6 +608,21 @@ internal sealed class SdlRendering : IGem, IRendering
                         SDL.BindGPUComputeSamplers(compute, command.Slot, textures, (uint)textures.Length);
                     break;
                 }
+                case RenderCommandType.BindStorageTextures:
+                {
+                    ReadOnlySpan<GpuBinding> run = bindings.Slice(command.Run.Start, command.Run.Length);
+                    nint[] textures = new nint[run.Length];
+                    for (int i = 0; i < run.Length; i++)
+                        textures[i] = _textures[run[i].Texture.Id].Handle;
+
+                    if (command.Stage == GpuStage.Vertex)
+                        SDL.BindGPUVertexStorageTextures(render, command.Slot, textures, (uint)textures.Length);
+                    else if (command.Stage == GpuStage.Fragment)
+                        SDL.BindGPUFragmentStorageTextures(render, command.Slot, textures, (uint)textures.Length);
+                    else
+                        SDL.BindGPUComputeStorageTextures(compute, command.Slot, textures, (uint)textures.Length);
+                    break;
+                }
                 case RenderCommandType.PushConstants:
                 {
                     ReadOnlySpan<byte> bytes = commands.BytesOf(in command);
@@ -636,6 +678,22 @@ internal sealed class SdlRendering : IGem, IRendering
         }
 
         return waited;
+    }
+
+    /// <summary>
+    /// A depth target loaded or cleared to 0 (reverse-Z: infinitely far), with no stencil.
+    /// </summary>
+    private static SDL.GPUDepthStencilTargetInfo DepthTarget(nint texture, SDL.GPULoadOp load)
+    {
+        return new SDL.GPUDepthStencilTargetInfo
+        {
+            Texture = texture,
+            ClearDepth = 0f,
+            LoadOp = load,
+            StoreOp = SDL.GPUStoreOp.Store,
+            StencilLoadOp = SDL.GPULoadOp.DontCare,
+            StencilStoreOp = SDL.GPUStoreOp.DontCare,
+        };
     }
 
     /// <summary>
@@ -703,14 +761,15 @@ internal sealed class SdlRendering : IGem, IRendering
         _releasing.Clear();
     }
 
-    private enum TransferKind : byte { Buffer, Texture, TextureCopy }
+    private enum TransferKind : byte { Buffer, Texture, TextureCopy, BufferCopy }
 
     /// <summary>
-    /// One queued upload (staged bytes into a buffer or a texture region) or texture copy (<see cref="Source"/> into <see cref="Region"/>).
+    /// One queued upload (staged bytes into a buffer or a texture region), texture copy (<see cref="Source"/> into
+    /// <see cref="Region"/>) or buffer copy (<see cref="SourceBuffer"/> at <see cref="StagedOffset"/> into <see cref="Buffer"/>).
     /// </summary>
-    private readonly record struct Transfer(TransferKind Kind, nint Staged, uint StagedOffset, GpuBuffer Buffer, uint BufferOffset, uint Size, TextureRegion Region, TextureRegion Source);
+    private readonly record struct Transfer(TransferKind Kind, nint Staged, uint StagedOffset, GpuBuffer Buffer, uint BufferOffset, uint Size, TextureRegion Region, TextureRegion Source, GpuBuffer SourceBuffer = default);
 
-    private readonly record struct TextureObject(nint Handle, uint Width, uint Height);
+    private readonly record struct TextureObject(nint Handle, uint Width, uint Height, uint Depth);
 
     private readonly record struct PipelineObject(nint Handle, bool Compute);
 }

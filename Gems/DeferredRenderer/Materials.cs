@@ -1,6 +1,9 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Utils;
+
+using Magic.Extensions;
+using System.Numerics;
 
 namespace DeferredRendererGem;
 
@@ -126,6 +129,9 @@ internal static class Materials
         uint bytes = (uint)table.States.Count * GpuMaterial.Size;
         table.Records.Ensure(ctx.Gpu, bytes);
         ctx.Gpu.Upload(table.Records.Handle, 0, table.RecordBytes.AsSpan(0, (int)bytes));
+        table.GiRow((uint)Math.Max(0, table.States.Count - 1));
+        table.GiRecords.Ensure(ctx.Gpu, (uint)table.States.Count * GpuGiMaterial.Size);
+        ctx.Gpu.Upload<GpuGiMaterial>(table.GiRecords.Handle, 0, table.GiRows.AsSpan(0, table.States.Count));
     }
 
     /// <summary>
@@ -148,7 +154,34 @@ internal static class Materials
         MaterialTable table = ctx.Materials;
         table.States[state.Slot] = state;
         Build(ctx, state, table.Record(state.Slot));
+        table.GiRow(state.Slot) = GiRowOf(ctx, state, table.Record(state.Slot));
         table.Dirty = true;
+    }
+
+    /// <summary>
+    /// What a material gives the GI, read back out of its packed record through the surface's parameters marked
+    /// <c>GiColor</c> and <c>GiEmissive</c>: a grey for a material that failed or whose surface marks nothing.
+    /// </summary>
+    private static GpuGiMaterial GiRowOf(RenderContext ctx, MaterialState state, ReadOnlySpan<byte> record)
+    {
+        GpuGiMaterial row = new() { Albedo = new Vector4(0.5f, 0.5f, 0.5f, 1f) };
+        if (state.Failure != 0 || Shaders.Surface(ctx, state.Class.Surface) is not { } surface)
+            return row;
+
+        foreach (ParamField field in surface.Layout.Fields)
+        {
+            if (!field.IsFloat || field.Semantic is not ("GiColor" or "GiEmissive"))
+                continue;
+
+            ReadOnlySpan<float> values = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, float>(record.Slice(field.Offset, field.Size));
+            Vector4 value = new(values[0], values.Length > 1 ? values[1] : values[0], values.Length > 2 ? values[2] : values[0], 1f);
+            if (field.Semantic == "GiColor")
+                row.Albedo = value;
+            else
+                row.Emissive = value;
+        }
+
+        return row;
     }
 
     /// <summary>

@@ -9,9 +9,9 @@ namespace Magic.Contexts.Rendering;
 public enum RenderCommandType : byte
 {
     /// <summary>
-    /// <see cref="RenderCommand.Texture"/> = colour target, or Run = the colour targets when there are several,
-    /// <see cref="RenderCommand.Depth"/> = depth target or none, <see cref="RenderCommand.Load"/> for all of them,
-    /// <see cref="RenderCommand.ClearColor"/> (depth clears to 0, reverse-Z far).
+    /// <see cref="RenderCommand.Texture"/> = colour target, or Run = the colour targets when there are several, or none
+    /// for a depth-only pass; <see cref="RenderCommand.Depth"/> = depth target or none, <see cref="RenderCommand.Load"/> for
+    /// all of them, <see cref="RenderCommand.ClearColor"/> (depth clears to 0, reverse-Z far).
     /// </summary>
     BeginRenderPass,
 
@@ -58,6 +58,11 @@ public enum RenderCommandType : byte
     /// Stage, Slot, Run = the textures, each with its sampler.
     /// </summary>
     BindTextures,
+
+    /// <summary>
+    /// Stage, Slot, Run = the textures read as storage (no sampler): <see cref="GpuTextureUsage.ComputeRead"/>.
+    /// </summary>
+    BindStorageTextures,
 
     /// <summary>
     /// Stage, Run = the bytes (in <see cref="RenderCommands.Bytes"/>) of the stage's one constant block.

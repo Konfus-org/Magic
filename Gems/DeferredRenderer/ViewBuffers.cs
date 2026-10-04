@@ -1,4 +1,4 @@
-﻿using Magic.Contexts.Rendering;
+using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 
 namespace DeferredRendererGem;
@@ -50,6 +50,11 @@ internal sealed class ViewBuffers
     /// The late pass's buffers and the depth pyramids; null without occlusion.
     /// </summary>
     public OcclusionBuffers? Occlusion { get; }
+
+    /// <summary>
+    /// The sun's cascades fitted for this view; null until it had any.
+    /// </summary>
+    public ShadowBuffers? Shadows { get; set; }
 
     public int HiZWidth { get; set; }
 

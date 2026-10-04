@@ -26,6 +26,10 @@ internal static class FormatExtensions
                 GpuFormat.Rgb10A2Unorm => SDL.GPUTextureFormat.R10G10B10A2Unorm,
                 GpuFormat.D32Float => SDL.GPUTextureFormat.D32Float,
                 GpuFormat.D24Unorm => SDL.GPUTextureFormat.D24Unorm,
+                GpuFormat.R32Uint => SDL.GPUTextureFormat.R32Uint,
+                GpuFormat.R8Unorm => SDL.GPUTextureFormat.R8Unorm,
+                GpuFormat.R16Unorm => SDL.GPUTextureFormat.R16Unorm,
+                GpuFormat.Rgba32Float => SDL.GPUTextureFormat.R32G32B32A32Float,
                 _ => SDL.GPUTextureFormat.Invalid,
             };
         }
@@ -45,6 +49,10 @@ internal static class FormatExtensions
                 SDL.GPUTextureFormat.R10G10B10A2Unorm => GpuFormat.Rgb10A2Unorm,
                 SDL.GPUTextureFormat.D32Float => GpuFormat.D32Float,
                 SDL.GPUTextureFormat.D24Unorm => GpuFormat.D24Unorm,
+                SDL.GPUTextureFormat.R32Uint => GpuFormat.R32Uint,
+                SDL.GPUTextureFormat.R8Unorm => GpuFormat.R8Unorm,
+                SDL.GPUTextureFormat.R16Unorm => GpuFormat.R16Unorm,
+                SDL.GPUTextureFormat.R32G32B32A32Float => GpuFormat.Rgba32Float,
                 _ => GpuFormat.Invalid,
             };
         }
@@ -74,7 +82,21 @@ internal static class FormatExtensions
             if (usage.HasFlag(GpuTextureUsage.ColorTarget)) flags |= SDL.GPUTextureUsageFlags.ColorTarget;
             if (usage.HasFlag(GpuTextureUsage.DepthTarget)) flags |= SDL.GPUTextureUsageFlags.DepthStencilTarget;
             if (usage.HasFlag(GpuTextureUsage.ComputeWrite)) flags |= SDL.GPUTextureUsageFlags.ComputeStorageWrite;
+            if (usage.HasFlag(GpuTextureUsage.ComputeRead)) flags |= SDL.GPUTextureUsageFlags.ComputeStorageRead;
             return flags;
+        }
+    }
+
+    extension(GpuTextureKind kind)
+    {
+        public SDL.GPUTextureType ToSdl()
+        {
+            return kind switch
+            {
+                GpuTextureKind.Texture2DArray => SDL.GPUTextureType.TextureType2DArray,
+                GpuTextureKind.Texture3D => SDL.GPUTextureType.TextureType3D,
+                _ => SDL.GPUTextureType.TextureType2D,
+            };
         }
     }
 
@@ -117,6 +139,7 @@ internal static class FormatExtensions
                 GpuCompare.LessOrEqual => SDL.GPUCompareOp.LessOrEqual,
                 GpuCompare.Greater => SDL.GPUCompareOp.Greater,
                 GpuCompare.GreaterOrEqual => SDL.GPUCompareOp.GreaterOrEqual,
+                GpuCompare.Never => SDL.GPUCompareOp.Never,
                 _ => SDL.GPUCompareOp.Always,
             };
         }

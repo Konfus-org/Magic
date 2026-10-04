@@ -1,4 +1,4 @@
-﻿using Magic.Contexts.Rendering;
+using Magic.Contexts.Rendering;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 using Magic.Mathematics;
@@ -34,8 +34,8 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
 
     public MeshTable(IRendering gpu, uint vertexCapacity, uint indexCapacity)
     {
-        VertexBuffer = gpu.CreateBuffer(GpuBufferUsage.Vertex, vertexCapacity * Vertex.Size);
-        IndexBuffer = gpu.CreateBuffer(GpuBufferUsage.Index, indexCapacity * 4);
+        VertexBuffer = gpu.CreateBuffer(GpuBufferUsage.Vertex | GpuBufferUsage.ComputeRead, vertexCapacity * Vertex.Size);
+        IndexBuffer = gpu.CreateBuffer(GpuBufferUsage.Index | GpuBufferUsage.ComputeRead, indexCapacity * 4);
         _vertexSpace = new RangeAllocator(vertexCapacity, 16 * 1024);
         _indexSpace = new RangeAllocator(indexCapacity, 16 * 1024);
 
@@ -61,6 +61,14 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
     public BoundingSphere Bounds(uint slot)
     {
         return _placements[slot]?.Bounds ?? default;
+    }
+
+    /// <summary>
+    /// The mesh's box in its own space.
+    /// </summary>
+    public Aabb Box(uint slot)
+    {
+        return _placements[slot]?.Box ?? default;
     }
 
     /// <summary>
@@ -107,7 +115,7 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
         }
 
         Pending.Add((vertices.Offset, indices.Offset, mesh.Vertices, mesh.Indices));
-        return _placements.Add(new Placement(vertices, indices, (uint)mesh.Indices.Length, mesh.Bounds));
+        return _placements.Add(new Placement(vertices, indices, (uint)mesh.Indices.Length, mesh.Bounds, mesh.Box));
     }
 
     /// <summary>
@@ -158,7 +166,7 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
     /// <summary>
     /// Where one mesh lives in the mega buffers, and its bounds.
     /// </summary>
-    private sealed record Placement(RangeAllocator.Allocation Vertices, RangeAllocator.Allocation Indices, uint IndexCount, BoundingSphere Bounds)
+    private sealed record Placement(RangeAllocator.Allocation Vertices, RangeAllocator.Allocation Indices, uint IndexCount, BoundingSphere Bounds, Aabb Box)
     {
         public (float Threshold, uint MeshSlot)[] Lods { get; set; } = [];
     }

@@ -1,4 +1,4 @@
-﻿# Samples
+# Samples
 
 One project: `Samples.magic` opens the Hub (a floor, a question mark and a camera to fly), with the console up, and
 every folder under `Assets/Domains/` is a sample to portal into. The scripts under `Assets/` compile into one dll
@@ -163,6 +163,7 @@ the file and in `Tags`; the engine keeps a marker component under each so its qu
 | SplitScreen | Two cameras in one window: `"viewport": "top_half"` and `"bottom_half"`, each culled and drawn on its own | two views orbiting until you fly the top one; Debug-build Stats count both |
 | Grid | GPU-driven scale: 410 000 static entities in 400 chunks (1.28 km a side), 1024 small shapes and one 16 m tower in each, streamed by distance. Far chunks are stand-ins, and anything under a pixel is not drawn, so towards the horizon the small shapes go and the towers stay | `Streaming:` lines; `FPS:` above 60 in a Debug build (vsync off by default); every chunk in view loads, whatever the distance; `--set Render.ViewDist=200` limits it and `--set Assets.Budgets.Chunk=8` shows chunks out of view unloading |
 | Wall | Two-phase HiZ occlusion culling: a wall in front of a 16k grid | in a Debug build, the last `Stats:` visible count is a fraction of the instances |
+| Cave | Shadows, GI and ambient occlusion together: a room of warm walls with one opening under a sun, a `Sky` entity (the sky's colour), a warm `PointLight` that casts shadows (its bulb's renderer says `"flags": "no_shadow"`) and a cool one that does not, a glowing pool of lava, and props for the contact shadows | the sun's cone through the door, in four colours with `--set Render.DebugView=Shadows`; the back of the room lit blue by the sky near the door and warm by the walls' bounce deeper in (`GiRadiance`), going dark with `--set Render.Gi.Enabled=false`; `SkyVisibility` white outside, grey inside; dark creases under the props and between the two crates (`Ao`) |
 | Fallbacks | The render failure looks, one cube each: a surface that does not compile (magenta), a material whose shader is not an asset (magenta checker), a model that is not an asset (red checker on the unit cube), a texture that is not an asset (red checker). All glow and breathe, and each carries its reason as red `!!! ... !!!` text (always in a Debug build; in a Release build while F3 is on). Logs errors by design, so `--fail-on-error` returns 2 | fix `Domains/Fallbacks/Shaders/BadCompile.surf.hlsl` or point `BadTexture.mat` at texture 36 while it runs and the cube heals |
 
 Hot reload works on every file: edit `Domains/Cube/0_0_0.chunk` while Cube is open and the cube moves; edit its

@@ -1,11 +1,14 @@
-﻿using System.Drawing;
+using Magic.Contexts.Rendering;
+using System.Drawing;
+using System.Numerics;
 
 namespace DeferredRendererGem;
 
 /// <summary>
-/// One view drawn into one render target this frame: which view, its rectangle in the target, its buffers and its constants.
+/// One view drawn into one render target this frame: which view, its rectangle in the target, its buffers, its constants,
+/// and the lighting's constants (the frame block with the shadows, GI and ambient occlusion appended).
 /// </summary>
-internal readonly record struct ViewPlan(int Index, Rectangle Rect, ViewBuffers Buffers, FrameConstants Constants);
+internal readonly record struct ViewPlan(int Index, Rectangle Rect, ViewBuffers Buffers, FrameConstants Constants, ShadeConstants Shade);
 
 /// <summary>
 /// One render target (window or render texture) drawn this frame: its textures, its run of <see cref="ViewPlan"/>s and
@@ -33,6 +36,11 @@ internal sealed class FramePlan
     /// The main window to clear because no view draws into it; 0 for none.
     /// </summary>
     public uint ClearWindow { get; set; }
+
+    /// <summary>
+    /// What shows where nothing is drawn: the sky's colour when a Sky entity set one, else the fixed clear colour.
+    /// </summary>
+    public Vector4 ClearColor { get; set; } = RenderCommands.ClearColor;
 
     public void Clear()
     {

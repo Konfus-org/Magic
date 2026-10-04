@@ -47,6 +47,7 @@ internal sealed class FakeRendering : IRendering
     public void Upload(GpuBuffer buffer, uint offset, ReadOnlySpan<byte> data) => Uploaded.Add(data.ToArray());
     public void Upload(in TextureRegion region, ReadOnlySpan<byte> data) { }
     public void Copy(in TextureRegion source, in TextureRegion destination) { }
+    public void Copy(GpuBuffer source, uint sourceOffset, GpuBuffer destination, uint destinationOffset, uint bytes) { }
     public void Release(GpuBuffer buffer) => Released++;
     public void Release(GpuTexture texture) => Released++;
     public void Release(GpuSampler sampler) => Released++;

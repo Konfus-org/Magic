@@ -1,6 +1,7 @@
 // What every culling pass shares: the visibility tests, all in camera-relative view space so they hold up
-// far from the origin, the depth pyramid's layout, and how a survivor is appended to its draw. Perspective
-// only: an orthographic view sets IsOrthographic and everything passes.
+// far from the origin, the depth pyramid's layout, and how a survivor is appended to its draw. The camera's
+// fast tests are for its symmetric perspective (an orthographic camera sets IsOrthographic and passes them);
+// the shadow views cull against six planes taken from their ViewProj, which fit any projection.
 
 #ifndef MAGIC_CULL_COMMON_HLSLI
 #define MAGIC_CULL_COMMON_HLSLI
@@ -68,10 +69,59 @@ bool BoxInFrustum(float3 boxMin, float3 boxMax)
     return IsOrthographic != 0u || isInside;
 }
 
-// Projected radius in pixels: radius * P22 * height / 2 over the view depth.
+// The six clip planes of ViewProj (Gribb and Hartmann), for camera-relative positions: normals pointing in,
+// normalised. mul(ViewProj, v) makes clip = (r0.v, r1.v, r2.v, r3.v) with ri the rows ViewProj[i]; inside is
+// -w <= x <= w, -w <= y <= w and, reverse-Z, 0 <= z <= w. An infinite perspective's far plane has a zero
+// normal and holds everything, as it should.
+struct ClipPlanes
+{
+    float4 planes[6];
+};
+
+ClipPlanes FrustumPlanes()
+{
+    float4 r0 = ViewProj[0], r1 = ViewProj[1], r2 = ViewProj[2], r3 = ViewProj[3];
+    ClipPlanes result;
+    result.planes[0] = r3 + r0;
+    result.planes[1] = r3 - r0;
+    result.planes[2] = r3 + r1;
+    result.planes[3] = r3 - r1;
+    result.planes[4] = r3 - r2;
+    result.planes[5] = r2;
+    [unroll] for (uint i = 0u; i < 6u; i++)
+        result.planes[i] /= max(length(result.planes[i].xyz), 1e-20);
+    return result;
+}
+
+// A camera-relative sphere touches the volume: not wholly outside any plane.
+bool SphereInPlanes(ClipPlanes clip, float3 centerRel, float radius)
+{
+    bool inside = true;
+    [unroll] for (uint i = 0u; i < 6u; i++)
+        inside = inside && dot(clip.planes[i].xyz, centerRel) + clip.planes[i].w >= -radius;
+    return inside;
+}
+
+// A camera-relative axis-aligned box touches the volume: its corner farthest along each plane's normal is inside it.
+bool BoxInPlanes(ClipPlanes clip, float3 boxMinRel, float3 boxMaxRel)
+{
+    bool inside = true;
+    [unroll] for (uint i = 0u; i < 6u; i++)
+    {
+        float3 normal = clip.planes[i].xyz;
+        float3 farthest = float3(normal.x > 0.0 ? boxMaxRel.x : boxMinRel.x, normal.y > 0.0 ? boxMaxRel.y : boxMinRel.y, normal.z > 0.0 ? boxMaxRel.z : boxMinRel.z);
+        inside = inside && dot(normal, farthest) + clip.planes[i].w >= 0.0;
+    }
+
+    return inside;
+}
+
+// Projected radius in pixels: radius * P22 * height / 2 over the view depth; for an orthographic view, whose P22 is
+// 2 over its height in metres, the radius in pixels at any depth.
 float ScreenRadius(float3 center, float radius)
 {
-    return radius * ProjScale.y * ViewSize.y * 0.5 / max(center.z, Near);
+    float depth = IsOrthographic != 0u ? 1.0 : max(center.z, Near);
+    return radius * ProjScale.y * ViewSize.y * 0.5 / depth;
 }
 
 // One axis of a view-space sphere's screen box (Mara and McGuire 2013): (c, z) rotated by -+atan(r / t),
@@ -164,7 +214,7 @@ void AppendToBucket(
 // threshold down to LOD_BLEND of it further, it is drawn in both, the finer one dithered out as the lesser one
 // is dithered in (GpuVisible.lodFade), so every bucket a mesh's versions draw in has room for all its
 // instances (Instancing.Group). The early and the late pass both ask, with the same sphere and constants, so
-// they agree. An orthographic view keeps the full mesh.
+// they agree. An orthographic view reads the height from its own scale, so a shadow cascade picks LODs too.
 void AppendVisible(
     RWStructuredBuffer<GpuDrawArgs> drawArgs,
     RWStructuredBuffer<GpuVisible> visibleIds,
@@ -176,26 +226,25 @@ void AppendVisible(
 {
     GpuLodRow row = lods[bucket];
     float height = ScreenRadius(center, radius) * 2.0 / ViewSize.y * LodBias;
-    bool isPerspective = IsOrthographic == 0u;
 
     // The thresholds fall from x to z, so each one passed makes the bucket picked so far the finer one.
     uint finer = bucket;
     uint picked = bucket;
     float threshold = 0.0;
-    [branch] if (isPerspective && row.count > 0u && height < row.thresholds.x)
+    [branch] if (row.count > 0u && height < row.thresholds.x)
     {
         picked = row.group1;
         threshold = row.thresholds.x;
     }
 
-    [branch] if (isPerspective && row.count > 1u && height < row.thresholds.y)
+    [branch] if (row.count > 1u && height < row.thresholds.y)
     {
         finer = picked;
         picked = row.group2;
         threshold = row.thresholds.y;
     }
 
-    [branch] if (isPerspective && row.count > 2u && height < row.thresholds.z)
+    [branch] if (row.count > 2u && height < row.thresholds.z)
     {
         finer = picked;
         picked = row.group3;

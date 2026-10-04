@@ -1,4 +1,4 @@
-﻿using Magic.Contexts.Rendering;
+using Magic.Contexts.Rendering;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Interfaces;
@@ -35,7 +35,13 @@ internal sealed class FrameTargets
             _targets["Normal"] = new Target { Format = GBuffer.NormalFormat, Usage = drawn, IsBuiltIn = true },
             _targets["Material"] = new Target { Format = GBuffer.MaterialFormat, Usage = drawn, IsBuiltIn = true },
             Depth);
+
+        const GpuTextureUsage computed = GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite;
+        AoRaw = _targets[AoRawName] = new Target { Format = AmbientOcclusion.RawFormat, Usage = computed, Scale = 0.5f, IsBuiltIn = true };
+        Ao = _targets["Ao"] = new Target { Format = AmbientOcclusion.Format, Usage = computed, IsBuiltIn = true };
     }
+
+    public const string AoRawName = "AoRaw";
 
     public RenderTarget RenderTarget { get; }
 
@@ -50,6 +56,13 @@ internal sealed class FrameTargets
     public Target Depth { get; }
 
     public GBuffer GBuffer { get; }
+
+    /// <summary>
+    /// The ambient occlusion as searched, at the setting's scale of the view, and as blurred into what the lighting reads.
+    /// </summary>
+    public Target AoRaw { get; }
+
+    public Target Ao { get; }
 
     /// <summary>
     /// What is wrong with the passes listed for this target, as last logged; null when nothing is.

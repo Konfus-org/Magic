@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Rendering;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
@@ -393,6 +393,7 @@ internal sealed class Buckets
     private readonly uint _visibleCapacity;
     private DrawArgs[] _template = new DrawArgs[GroupsPerChunk];
     private GpuLodRow[] _lods = new GpuLodRow[GroupsPerChunk];
+    private GpuGiGroup[] _giRows = new GpuGiGroup[GroupsPerChunk];
 
     public Buckets(IRendering gpu, uint visibleCapacity)
     {
@@ -400,6 +401,7 @@ internal sealed class Buckets
         _visibleCapacity = visibleCapacity;
         Template = new GrowableBuffer(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, ChunkBytes);
         Lods = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead, GroupsPerChunk * GpuLodRow.Size);
+        GiGroups = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead, GroupsPerChunk * GpuGiGroup.Size);
     }
 
     /// <summary>
@@ -415,6 +417,13 @@ internal sealed class Buckets
     public GrowableBuffer Lods { get; }
 
     public ReadOnlySpan<GpuLodRow> LodRows => _lods;
+
+    /// <summary>
+    /// One row per group for the GI: the mesh's box and brick.
+    /// </summary>
+    public GrowableBuffer GiGroups { get; }
+
+    public ReadOnlySpan<GpuGiGroup> GiRows => _giRows;
 
     public bool Dirty { get; set; } = true;
 
@@ -440,7 +449,16 @@ internal sealed class Buckets
     /// </summary>
     public uint Acquire(PipelineClass cls, uint meshSlot, (uint FirstIndex, uint IndexCount, int VertexOffset) range)
     {
-        if (!_groups.TryAcquire((cls, meshSlot), out Group group))
+        return Acquire(cls, meshSlot, range, out _);
+    }
+
+    /// <summary>
+    /// The group index, saying whether the group was made now (its GI row is then still to be set).
+    /// </summary>
+    public uint Acquire(PipelineClass cls, uint meshSlot, (uint FirstIndex, uint IndexCount, int VertexOffset) range, out bool created)
+    {
+        created = !_groups.TryAcquire((cls, meshSlot), out Group group);
+        if (created)
         {
             group = new Group(AllocateGroup(cls), RangeAllocator.Allocation.None, 0, range.FirstIndex, range.IndexCount, range.VertexOffset);
             _groups.Add((cls, meshSlot), group);
@@ -490,15 +508,29 @@ internal sealed class Buckets
         Dirty = true;
     }
 
-    public void Release(PipelineClass cls, uint meshSlot)
+    /// <summary>
+    /// Sets the GI row of a group: its mesh's box in the mesh's own space and the mesh's occupancy brick.
+    /// </summary>
+    public void SetGi(uint group, in Aabb box, uint brick, uint meshSlot)
+    {
+        _giRows[group] = new GpuGiGroup { BoxMin = new Vector4(box.Min, 0f), BoxMax = new Vector4(box.Max, 0f), Brick = brick, MeshSlot = meshSlot };
+        Dirty = true;
+    }
+
+    /// <summary>
+    /// Drops a reference; true when it was the last and the group is gone.
+    /// </summary>
+    public bool Release(PipelineClass cls, uint meshSlot)
     {
         if (!_groups.Release((cls, meshSlot), out Group group))
-            return;
+            return false;
 
         _lods[group.Index] = default;
+        _giRows[group.Index] = default;
         _visibleSpace.Free(group.Region);
         WriteTemplate(group with { Region = RangeAllocator.Allocation.None, Capacity = 0 });
         _freeInChunk[(int)group.Index / GroupsPerChunk].Push((int)group.Index % GroupsPerChunk);
+        return true;
     }
 
     private uint AllocateGroup(PipelineClass cls)
@@ -523,6 +555,7 @@ internal sealed class Buckets
         {
             Array.Resize(ref _template, _freeInChunk.Count * GroupsPerChunk);
             Array.Resize(ref _lods, _freeInChunk.Count * GroupsPerChunk);
+            Array.Resize(ref _giRows, _freeInChunk.Count * GroupsPerChunk);
         }
 
         Dirty = true;

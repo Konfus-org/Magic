@@ -13,13 +13,16 @@ the shaders are laid out and written.
 | `Templates/` | The mesh path the renderer composes around a surface: `Mesh.vert`, `GBuffer.frag`. |
 | `Surfaces/` | Surface shaders (`.surf.hlsl`): what a material looks like. `Failure.surf` is what anything broken is drawn with. |
 | `Cull/` | The GPU culling compute passes and what they share (`Common.hlsli`), `AppendVisible` among it: an instance small on screen is counted into the draw of a lesser version of its mesh (`GpuLodRow`, one per bucket, scaled by `LodBias`), and into both while it blends from one to the other (`LOD_BLEND`, dithered by `GpuVisible.lodFade` in `GBuffer.frag`). |
-| `Lighting/` | The lighting compute passes: `LightCull` bins the lights into screen tiles, `LightCluster` cuts every tile along its depth, `Lighting` shades the gbuffer into `Hdr`; `Common.hlsli` is what they share. `Glow.vert` / `Glow.frag` draw the glows: unlit dots for far lights. |
+| `Lighting/` | The lighting compute passes: `LightCull` bins the lights into screen tiles, `LightCluster` cuts every tile along its depth, `Lighting` shades the gbuffer into `Hdr`; `Common.hlsli` is what they share, `Shadows.hlsli` how a pixel reads the shadow atlas. `Glow.vert` / `Glow.frag` draw the glows: unlit dots for far lights. |
+| `Gi/` | The fake global illumination: one level of a voxel clipmap rebuilt per frame. Meshes are rasterised once into occupancy bricks (`BrickBuild`), the level's instances stamped through them (`CollectPages` → `CollectInstances` → `Stamp` → `Resolve`), the distance field taken (`Distance`, three axes), the sky each voxel sees traced (`Sky`), the lights binned (`LightGrid`) and the light injected and passed on (`Propagate`); `Include/Gi.hlsli` is how a pixel reads it. |
+| `Shadows/` | The shadow maps' raster side: `Shadow.vert` + the empty `Shadow.frag` draw every opaque class depth-only into the atlas, `ClearDepth.vert` clears one tile of it. `Cull/CullShadow.comp` culls one shadow view (a cascade of the sun or a face of a local light) against planes taken from its `ViewProj`. |
 | `Passes/` | Data passes (`.pass` assets): the fullscreen vertex shader, tonemap, vignette. |
 | `Overlay/` | 2D overlays (ImGui). |
 | `Test/` | Start-up probes of the conventions (`RenderChecks.cs`). |
 
-The frame runs them in this order: `PageCull` → `CullEarly` → draw → (with occlusion) `HiZBuild` →
-`SeedLateArgs` → `CullLate` → draw → `LightCull` → `LightCluster` → `Lighting` → passes → overlays.
+The frame runs them in this order: `CullShadow` per shadow view → the atlas depth pass → the GI's level
+(`Gi/`) → then per target `PageCull` → `CullEarly` → draw → (with occlusion) `HiZBuild` → `SeedLateArgs` →
+`CullLate` → draw → `Gtao` → `AoBlur` → `LightCull` → `LightCluster` → `Lighting` → passes → overlays.
 
 ## How a frame is rendered
 
@@ -67,8 +70,22 @@ reaches, not the objects in the scene.
   `Glow` where each of them was (lights within 8 m of each other share one): an unlit dot sized by the light's intensity, never under a pixel on screen and dimmed where it would be, drawn into the gbuffer
   as emission (`Glow.vert`, six vertices a glow from the vertex id). From far away the dot is what there is
   to see of a light, and it costs no lighting.
-- Shading is Lambert plus a Blinn-Phong highlight sized by roughness. No shadows yet, and nothing blended:
-  a transparent surface would need a forward pass after the lighting, which does not exist.
+- Shading is Lambert plus a Blinn-Phong highlight sized by roughness. Nothing is blended: a transparent
+  surface would need a forward pass after the lighting, which does not exist.
+- Shadows come from one depth atlas (`Shadows/`, `Lighting/Shadows.hlsli`). The sun has cascades along each
+  perspective view (`Settings.Render.Shadows.Cascades`), each a sphere around a slice of the frustum snapped
+  to its own texel grid so nothing shimmers, blended into the next over the last share of its range; the
+  nearest shadow-casting spot and point lights hold pages (six for a point light), drawn again in turn within
+  a per-frame budget, and the lighting finds a light's faces through `GpuShadowRecord` rows. Every shadow
+  view is culled on the GPU like a camera (`CullShadow`) and drawn with one depth-only pipeline; the
+  lighting reads the atlas with a comparison sampler, a disc of taps whose radius is constant in the world.
+  The lighting's constants are the frame block plus `Include/Shade.hlsli`'s append (`ShadeConstants`).
+- The ambient is not flat. Ambient occlusion (`Lighting/Gtao.comp.hlsl`, horizon based, at half resolution by
+  default, a fixed dither that `AoBlur` smooths, nothing temporal) darkens creases and gives a bent normal; the GI
+  volumes (`Gi/`) say how much sky a point sees, tint the interiors where it sees none, and add the light bounced
+  once off the voxels around it, all gathered along that bent normal. The sky's colour is the `Sky` component's;
+  without one, the old flat ambient. `Settings.Render.Ao` and `Settings.Render.Gi` hold the knobs, and
+  `Render.DebugView` shows any one of these inputs in place of the scene.
 - Culling is two-phase: what last frame's depth pyramid (HiZ) did not hide is drawn first, the pyramid is
   rebuilt from that depth, and what was held back is retested and drawn the same frame. Small instances
   move to a lesser LOD of their mesh on the GPU, dithered from one to the next.

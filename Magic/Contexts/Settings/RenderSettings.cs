@@ -66,4 +66,15 @@ public sealed class RenderSettings
     /// Keep compiled shaders under the cache folder next to the executable.
     /// </summary>
     public bool ShaderCache { get; set; } = true;
+
+    public ShadowSettings Shadows { get; set; } = new();
+
+    public AoSettings Ao { get; set; } = new();
+
+    public GiSettings Gi { get; set; } = new();
+
+    /// <summary>
+    /// What the lighting shows instead of the scene, for looking at one of its inputs; <see cref="RenderDebugView.None"/> is the scene.
+    /// </summary>
+    public RenderDebugView DebugView { get; set; }
 }

@@ -55,6 +55,25 @@ bool LightTouchesBox(GpuLight light, float3 boxMin, float3 boxMax)
     return dot(toBox, toBox) <= range * range;
 }
 
+// A point or spot light's colour as it arrives along lightToSurface (not normalised): inverse-square, eased
+// to nothing at the light's range so the edge of its reach is never a visible line, and for a spot faded
+// from the inner cone out to the outer one; and faded out as its whole reach gets too small on screen to see.
+float3 Arriving(GpuLight light, float3 lightToSurface)
+{
+    float distanceSquared = dot(lightToSurface, lightToSurface);
+    float range = light.positionRange.w;
+    float reach = distanceSquared / max(range * range, 1e-6);
+    float window = saturate(1.0 - reach * reach);
+    float falloff = window * window / (distanceSquared + 1.0);
+
+    float cosAngle = dot(NormalizeOrZero(lightToSurface), light.directionOuterCos.xyz);
+    float innerCos = light.colorInnerCos.w;
+    float outerCos = light.directionOuterCos.w;
+    float cone = saturate((cosAngle - outerCos) / max(innerCos - outerCos, 1e-4));
+
+    return light.colorInnerCos.rgb * (falloff * cone * LightScreenFade(light));
+}
+
 // How many times as deep the far end of a tile's drawn depth is as its near end, as a logarithm; never zero,
 // so a tile that is all at one depth has one slice that holds it.
 float LightSliceSpan(float tileNear, float tileFar)

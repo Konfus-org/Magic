@@ -278,7 +278,8 @@
                         "z": 0.1
                     },
                     "intensity": 5,
-                    "range": 7
+                    "range": 7,
+                    "castsShadows": true
                 },
                 "Renderer": {
                     "model": {
@@ -288,7 +289,8 @@
                         "slot0": {
                             "id": 3220
                         }
-                    }
+                    },
+                    "flags": "no_shadow"
                 }
             }
         },
@@ -324,7 +326,8 @@
                         "z": 0.1
                     },
                     "intensity": 5,
-                    "range": 7
+                    "range": 7,
+                    "castsShadows": true
                 },
                 "Renderer": {
                     "model": {
@@ -334,7 +337,8 @@
                         "slot0": {
                             "id": 3221
                         }
-                    }
+                    },
+                    "flags": "no_shadow"
                 }
             }
         },
@@ -370,7 +374,8 @@
                         "z": 1
                     },
                     "intensity": 5,
-                    "range": 7
+                    "range": 7,
+                    "castsShadows": true
                 },
                 "Renderer": {
                     "model": {
@@ -380,7 +385,8 @@
                         "slot0": {
                             "id": 3222
                         }
-                    }
+                    },
+                    "flags": "no_shadow"
                 }
             }
         },
@@ -426,7 +432,8 @@
                         "slot0": {
                             "id": 3223
                         }
-                    }
+                    },
+                    "flags": "no_shadow"
                 }
             }
         },
@@ -472,7 +479,8 @@
                         "slot0": {
                             "id": 3224
                         }
-                    }
+                    },
+                    "flags": "no_shadow"
                 }
             }
         },
@@ -518,7 +526,8 @@
                         "slot0": {
                             "id": 3225
                         }
-                    }
+                    },
+                    "flags": "no_shadow"
                 }
             }
         },
@@ -558,7 +567,8 @@
                     "intensity": 40,
                     "range": 16,
                     "innerAngle": 0.35,
-                    "outerAngle": 0.6
+                    "outerAngle": 0.6,
+                    "castsShadows": true
                 }
             }
         },
@@ -598,7 +608,8 @@
                     "intensity": 40,
                     "range": 16,
                     "innerAngle": 0.35,
-                    "outerAngle": 0.6
+                    "outerAngle": 0.6,
+                    "castsShadows": true
                 }
             }
         }

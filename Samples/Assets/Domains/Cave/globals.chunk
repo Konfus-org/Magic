@@ -1,0 +1,89 @@
+{
+    "entities": [
+        {
+            "name": "PostProcessing",
+            "components": {
+                "PostProcessing": {
+                    "passes": [
+                        {
+                            "id": 10030
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "name": "Sky",
+            "components": {
+                "Sky": {
+                    "color": {
+                        "x": 0.4,
+                        "y": 0.55,
+                        "z": 0.85
+                    }
+                }
+            }
+        },
+        {
+            "name": "Orbit",
+            "scripts": [
+                {
+                    "id": 3051,
+                    "degreesPerSecond": 3
+                }
+            ]
+        },
+        {
+            "name": "Camera",
+            "scripts": [
+                {
+                    "id": 3050,
+                    "speed": 6
+                }
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 1.7,
+                        "z": -4.5
+                    },
+                    "rotation": {
+                        "x": 0.08716,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.99619
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": {
+                    "rotation": {
+                        "x": 0.92388,
+                        "y": 0,
+                        "z": 0,
+                        "w": 0.38268
+                    }
+                },
+                "DirectionalLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 0.96,
+                        "z": 0.9
+                    },
+                    "intensity": 4,
+                    "castsShadows": true
+                }
+            }
+        }
+    ]
+}

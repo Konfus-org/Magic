@@ -1,0 +1,519 @@
+{
+    "entities": [
+        {
+            "name": "Ground",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0,
+                        "z": 0
+                    },
+                    "scale": {
+                        "x": 40,
+                        "y": 1,
+                        "z": 40
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 519
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Ceiling",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 5.1,
+                        "z": 0
+                    },
+                    "scale": {
+                        "x": 12.4,
+                        "y": 0.2,
+                        "z": 12.4
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3610
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "BackWall",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 2.5,
+                        "z": -6.1
+                    },
+                    "scale": {
+                        "x": 12.4,
+                        "y": 5,
+                        "z": 0.2
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3610
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "LeftWall",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -6.1,
+                        "y": 2.5,
+                        "z": 0
+                    },
+                    "scale": {
+                        "x": 0.2,
+                        "y": 5,
+                        "z": 12.4
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3610
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "RightWall",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 6.1,
+                        "y": 2.5,
+                        "z": 0
+                    },
+                    "scale": {
+                        "x": 0.2,
+                        "y": 5,
+                        "z": 12.4
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3610
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "FrontLeft",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -3.75,
+                        "y": 2.5,
+                        "z": 6.1
+                    },
+                    "scale": {
+                        "x": 4.5,
+                        "y": 5,
+                        "z": 0.2
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3610
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "FrontRight",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 3.75,
+                        "y": 2.5,
+                        "z": 6.1
+                    },
+                    "scale": {
+                        "x": 4.5,
+                        "y": 5,
+                        "z": 0.2
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3610
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Lintel",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 4.5,
+                        "z": 6.1
+                    },
+                    "scale": {
+                        "x": 3,
+                        "y": 1,
+                        "z": 0.2
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3610
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Monkey",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -3,
+                        "y": 1,
+                        "z": -3
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 516
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Crate",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 3,
+                        "y": 0.5,
+                        "z": -4
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "CreviceA",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 4,
+                        "y": 0.5,
+                        "z": 2
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "CreviceB",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 4,
+                        "y": 0.5,
+                        "z": 3.3
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 514
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Torus",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -2,
+                        "y": 0.3,
+                        "z": 3
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 518
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Ball",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 0,
+                        "y": 0.5,
+                        "z": 4.5
+                    },
+                    "scale": {
+                        "x": 1,
+                        "y": 1,
+                        "z": 1
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 12045873320119837722
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "Lava",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -4,
+                        "y": 0.05,
+                        "z": 3
+                    },
+                    "scale": {
+                        "x": 1.5,
+                        "y": 0.1,
+                        "z": 1.5
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 515
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3612
+                        }
+                    }
+                }
+            }
+        },
+        {
+            "name": "WarmLamp",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": -3,
+                        "y": 2.5,
+                        "z": -3
+                    },
+                    "scale": {
+                        "x": 0.15,
+                        "y": 0.15,
+                        "z": 0.15
+                    }
+                },
+                "Renderer": {
+                    "model": {
+                        "id": 517
+                    },
+                    "materials": {
+                        "slot0": {
+                            "id": 3611
+                        }
+                    },
+                    "flags": "no_shadow"
+                },
+                "PointLight": {
+                    "color": {
+                        "x": 1,
+                        "y": 0.6,
+                        "z": 0.3
+                    },
+                    "intensity": 3,
+                    "range": 8,
+                    "castsShadows": true
+                }
+            }
+        },
+        {
+            "name": "CoolLight",
+            "tags": [
+                "static"
+            ],
+            "components": {
+                "Transform": {
+                    "position": {
+                        "x": 3,
+                        "y": 1,
+                        "z": -4.5
+                    }
+                },
+                "PointLight": {
+                    "color": {
+                        "x": 0.3,
+                        "y": 0.5,
+                        "z": 1
+                    },
+                    "intensity": 2,
+                    "range": 6
+                }
+            }
+        }
+    ]
+}

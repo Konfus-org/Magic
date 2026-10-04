@@ -15,9 +15,11 @@
 // stand-in is lit exactly as the chunk is. Shading is Lambert plus a Blinn-Phong highlight sized by
 // roughness, in camera-relative world space so it holds up far from the origin.
 
+#include "Include/Shade.hlsli"
 #include "Include/DebugText.hlsli"
 #include "Include/Failure.hlsli"
 #include "Include/GBuffer.hlsli"
+#include "Lighting/Ambient.hlsli"
 #include "Lighting/Common.hlsli"
 
 #define GROUP_SIZE 8 // pixels a side per group
@@ -48,12 +50,33 @@ Texture2D Material : READ(3);
 SamplerState MaterialSampler : SAMPLER(3);
 Texture2D<float> Depth : READ(4);
 SamplerState DepthSampler : SAMPLER(4);
-StructuredBuffer<GpuLight> Lights : READ(5);
-StructuredBuffer<uint> Tiles : READ(6);
-StructuredBuffer<uint> Clusters : READ(7);
+Texture2D<float4> Ao : READ(5);
+SamplerState AoSampler : SAMPLER(5);
+Texture2D<float> ShadowAtlas : READ(6);
+SamplerComparisonState ShadowAtlasSampler : SAMPLER(6);
+Texture3D<float4> GiShR : READ(7);
+SamplerState GiShRSampler : SAMPLER(7);
+Texture3D<float4> GiShG : READ(8);
+SamplerState GiShGSampler : SAMPLER(8);
+Texture3D<float4> GiShB : READ(9);
+SamplerState GiShBSampler : SAMPLER(9);
+Texture3D<float> GiSkyVis : READ(10);
+SamplerState GiSkyVisSampler : SAMPLER(10);
+Texture3D<float4> GiAlbedo : READ(11);
+SamplerState GiAlbedoSampler : SAMPLER(11);
+StructuredBuffer<GpuLight> Lights : READ(12);
+StructuredBuffer<uint> Tiles : READ(13);
+StructuredBuffer<uint> Clusters : READ(14);
+StructuredBuffer<GpuShadowRecord> ShadowRecords : READ(15);
 
 [[vk::image_format("rgba16f")]]
 RWTexture2D<float4> Hdr : WRITE(0);
+
+#include "Lighting/Shadows.hlsli"
+#include "Include/Gi.hlsli"
+
+// The cascades' colours in the Shadows debug view: red, green, blue, yellow; white past the last.
+static const float3 CascadeTints[SHADOW_MAX_CASCADES + 1] = { float3(1.0, 0.2, 0.2), float3(0.2, 1.0, 0.2), float3(0.3, 0.4, 1.0), float3(1.0, 1.0, 0.2), float3(1.0, 1.0, 1.0) };
 
 // How much of a light's colour the surface sends to the camera, for light arriving from toLight: the
 // diffuse and the highlight together, zero when the surface faces away.
@@ -69,25 +92,6 @@ float3 Reflected(GBufferSurface surface, float3 toLight, float3 toCamera)
     float3 specularColor = lerp(float3(1.0, 1.0, 1.0), surface.baseColor, surface.metallic);
 
     return (diffuseColor * surface.occlusion + specularColor * specular) * facing;
-}
-
-// A point or spot light's colour as it arrives along lightToSurface (not normalised): inverse-square, eased
-// to nothing at the light's range so the edge of its reach is never a visible line, and for a spot faded
-// from the inner cone out to the outer one; and faded out as its whole reach gets too small on screen to see.
-float3 Arriving(GpuLight light, float3 lightToSurface)
-{
-    float distanceSquared = dot(lightToSurface, lightToSurface);
-    float range = light.positionRange.w;
-    float reach = distanceSquared / max(range * range, 1e-6);
-    float window = saturate(1.0 - reach * reach);
-    float falloff = window * window / (distanceSquared + 1.0);
-
-    float cosAngle = dot(NormalizeOrZero(lightToSurface), light.directionOuterCos.xyz);
-    float innerCos = light.colorInnerCos.w;
-    float outerCos = light.directionOuterCos.w;
-    float cone = saturate((cosAngle - outerCos) / max(innerCos - outerCos, 1e-4));
-
-    return light.colorInnerCos.rgb * (falloff * cone * LightScreenFade(light));
 }
 
 // Whether the pixel is ink of an overfull cluster's text. The message runs along the top of the tiles in
@@ -137,9 +141,37 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 position = ViewToWorld(ViewPosition(float2(viewPixel) + 0.5, viewDepth));
         float3 toCamera = IsOrthographic != 0u ? ViewToWorld(float3(0.0, 0.0, -1.0)) : NormalizeOrZero(-position);
 
+        // The ambient, darkened where the screen-space occlusion found the surface closed in, let bounce so a bright
+        // surface fills its own creases, and gathered along the bent normal (where the open sky is) once there is a GI
+        // volume to gather from.
+        float4 aoTexel = Ao.SampleLevel(AoSampler, uv, 0.0);
+        bool hasAo = (AoFlags & AoEnabledFlag) != 0u;
+        float visibility = hasAo ? lerp(1.0, aoTexel.w, AoParams.w) : 1.0;
+        float3 bentNormal = hasAo ? NormalizeOrZero(aoTexel.xyz * 2.0 - 1.0) : surface.normal;
         float3 diffuseColor = surface.baseColor * (1.0 - surface.metallic);
-        color += diffuseColor * Ambient * surface.occlusion;
-        color += SunColor * Reflected(surface, -SunDirection, toCamera);
+        float3 ambientOcclusion = (AoFlags & AoMultiBounceFlag) != 0u ? MultiBounceAo(visibility, diffuseColor) : visibility.xxx;
+
+        // The ambient: the sky where the volume says it is seen, the interior tint where not, and the bounced light,
+        // all gathered along the bent normal; the flat sky colour where no volume holds the pixel or the GI is off.
+        float3 ambient = Ambient;
+        float skyVisibility = 1.0;
+        [branch] if ((GiFlags & GiEnabledFlag) != 0u)
+        {
+            GiSample gi = GiAt(position, bentNormal);
+            float3 volumeAmbient = SkyColor.rgb * gi.skyVisibility + GiInteriorTint.rgb * (1.0 - gi.skyVisibility) + gi.irradiance * GiInteriorTint.w;
+            ambient = lerp(Ambient, volumeAmbient, gi.weight);
+            skyVisibility = lerp(1.0, gi.skyVisibility, gi.weight);
+        }
+
+        color += diffuseColor * ambient * surface.occlusion * ambientOcclusion;
+
+        // The sun, through its cascades.
+        float3 toSun = -SunDirection;
+        uint cascade = SHADOW_MAX_CASCADES;
+        float sunVisible = 1.0;
+        [branch] if ((ShadowFlags & ShadowSunFlag) != 0u)
+            sunVisible = SunShadow(position, surface.normal, viewDepth, saturate(dot(surface.normal, toSun)), cascade);
+        color += SunColor * sunVisible * Reflected(surface, toSun, toCamera);
 
         uint2 tile = viewPixel / LightTileSize;
         uint tilesAcross = (viewSize.x + LightTileSize - 1u) / LightTileSize;
@@ -154,7 +186,40 @@ void main(uint3 threadId : SV_DispatchThreadID)
         {
             GpuLight light = Lights[Clusters[row + 1u + index]];
             float3 lightToSurface = position - (light.positionRange.xyz - CameraPos);
-            color += Arriving(light, lightToSurface) * Reflected(surface, NormalizeOrZero(-lightToSurface), toCamera);
+            float shadow = 1.0;
+            [branch] if ((ShadowFlags & ShadowLocalFlag) != 0u && light.shadow.x != ShadowNone)
+                shadow = LocalShadow(light, position, surface.normal);
+            color += Arriving(light, lightToSurface) * shadow * Reflected(surface, NormalizeOrZero(-lightToSurface), toCamera);
+        }
+
+        [branch] if (DebugView == DebugViewShadows)
+            color = CascadeTints[min(cascade, (uint)SHADOW_MAX_CASCADES)] * lerp(0.15, 1.0, sunVisible);
+        else if (DebugView == DebugViewAo)
+            color = visibility.xxx;
+        else if (DebugView == DebugViewBentNormal)
+            color = bentNormal * 0.5 + 0.5;
+        else if (DebugView == DebugViewGiRadiance)
+            color = ambient;
+        else if (DebugView == DebugViewSkyVisibility)
+            color = skyVisibility.xxx;
+        else if (DebugView == DebugViewVoxelAlbedo || DebugView == DebugViewVoxelCoverage)
+        {
+            // The voxel the surface itself fills: half a voxel in from the pixel, in the finest level that holds it.
+            float4 voxelValue = float4(0.0, 0.0, 0.0, 0.0);
+            [loop] for (uint level = 0u; level < GiLevels; level++)
+            {
+                if (!GiLevelValid(level))
+                    continue;
+
+                float3 voxel = (position + ClipmapCameraOffset[level].xyz - surface.normal * 0.5 * GiVoxel(level)) / GiVoxel(level);
+                if (all(voxel >= 0.0) && all(voxel < (float)GiResolution))
+                {
+                    voxelValue = GiAlbedo.SampleLevel(GiAlbedoSampler, GiStackedUv(level, voxel), 0.0);
+                    break;
+                }
+            }
+
+            color = DebugView == DebugViewVoxelAlbedo ? voxelValue.rgb : voxelValue.aaa;
         }
 
         [branch] if (reaching > LightsPerCluster)

@@ -1,4 +1,4 @@
-﻿using Magic.Contexts.Rendering;
+using Magic.Contexts.Rendering;
 using Magic.Extensions;
 using Magic.Interfaces;
 using System.Buffers;
@@ -69,11 +69,12 @@ internal static class Lighting
     public static void Upload(RenderContext ctx, ReadOnlySpan<LightInstance> lights)
     {
         GpuLight[] rows = ArrayPool<GpuLight>.Shared.Rent(lights.Length);
+        ShadowState shadows = ctx.Shadows;
         int count = 0;
-        foreach (ref readonly LightInstance light in lights)
+        for (int i = 0; i < lights.Length; i++)
         {
-            if (light.Kind != LightKind.Directional)
-                rows[count++] = GpuLight.From(light);
+            if (lights[i].Kind != LightKind.Directional)
+                rows[count++] = GpuLight.From(lights[i], shadows.LightRecords[i], shadows.LightFaces[i]);
         }
 
         if (count > 0)
@@ -118,6 +119,8 @@ internal static class Lighting
         commands.Dispatch((across + ClusterGroup - 1) / ClusterGroup, (down + ClusterGroup - 1) / ClusterGroup, (Slices + ClusterGroup - 1) / ClusterGroup);
         commands.EndComputePass();
 
+        // The shade reads the shadow atlas and records too, through the lighting's own constants.
+        commands.Push(GpuStage.Compute, view.Shade);
         commands.BeginComputePass([new GpuBinding(Texture: targets.Hdr.Texture)]);
         commands.BindPipeline(ctx.Lighting.Shade);
         commands.BindTextures(GpuStage.Compute, 0,
@@ -127,8 +130,15 @@ internal static class Lighting
             new GpuBinding(Texture: gbuffer.Normal.Texture, Sampler: nearest),
             new GpuBinding(Texture: gbuffer.Material.Texture, Sampler: nearest),
             new GpuBinding(Texture: gbuffer.Depth.Texture, Sampler: nearest),
+            new GpuBinding(Texture: targets.Ao.Texture, Sampler: nearest),
+            new GpuBinding(Texture: Shadows.AtlasOrStub(ctx), Sampler: ctx.Shadows.Comparison),
+            new GpuBinding(Texture: ctx.GiVolumes.Sh[ctx.GiVolumes.Current][0], Sampler: ctx.LinearClamp),
+            new GpuBinding(Texture: ctx.GiVolumes.Sh[ctx.GiVolumes.Current][1], Sampler: ctx.LinearClamp),
+            new GpuBinding(Texture: ctx.GiVolumes.Sh[ctx.GiVolumes.Current][2], Sampler: ctx.LinearClamp),
+            new GpuBinding(Texture: ctx.GiVolumes.SkyVis, Sampler: ctx.LinearClamp),
+            new GpuBinding(Texture: ctx.GiVolumes.Albedo, Sampler: ctx.NearestClamp),
         ]);
-        commands.BindStorageBuffers(GpuStage.Compute, 0, [ctx.Lights.Handle, view.Buffers.LightTiles.Handle, view.Buffers.LightClusters.Handle]);
+        commands.BindStorageBuffers(GpuStage.Compute, 0, [ctx.Lights.Handle, view.Buffers.LightTiles.Handle, view.Buffers.LightClusters.Handle, ctx.Shadows.Records.Handle]);
         commands.Dispatch((uint)(view.Rect.Width + ShadeGroup - 1) / ShadeGroup, (uint)(view.Rect.Height + ShadeGroup - 1) / ShadeGroup);
         commands.EndComputePass();
 

@@ -14,6 +14,11 @@ public enum RenderFlags : byte
     /// Never cull for being small on screen: a distant landmark that must always be there.
     /// </summary>
     NoSizeCull = 1,
+
+    /// <summary>
+    /// Casts no shadow: a lamp's bulb around its light, say, which would otherwise shadow everything from inside.
+    /// </summary>
+    NoShadow = 2,
 }
 
 /// <summary>

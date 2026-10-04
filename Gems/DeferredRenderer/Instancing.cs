@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Extensions;
@@ -20,6 +20,8 @@ internal static class Instancing
     {
         (uint MeshSlot, int MaterialSlot)[] parts = Meshes.Acquire(ctx, desc.Model);
         InstanceFlags flags = desc.Flags.HasFlag(RenderFlags.NoSizeCull) ? InstanceFlags.NoSizeCull : InstanceFlags.None;
+        if (desc.Flags.HasFlag(RenderFlags.NoShadow))
+            flags |= InstanceFlags.NoShadow;
         if (desc.Hidden)
             flags |= InstanceFlags.Hidden;
 
@@ -147,6 +149,8 @@ internal static class Instancing
             gpu.Upload(buckets.Template.Handle, 0, buckets.TemplateRows);
             buckets.Lods.Ensure(gpu, (uint)buckets.LodRows.Length * GpuLodRow.Size);
             gpu.Upload(buckets.Lods.Handle, 0, buckets.LodRows);
+            buckets.GiGroups.Ensure(gpu, (uint)buckets.GiRows.Length * GpuGiGroup.Size);
+            gpu.Upload(buckets.GiGroups.Handle, 0, buckets.GiRows);
             buckets.Dirty = false;
         }
     }
@@ -179,14 +183,22 @@ internal static class Instancing
     private static uint Group(RenderContext ctx, PipelineClass cls, uint meshSlot)
     {
         Pipelines.Acquire(ctx, cls);
-        uint group = ctx.Buckets.Acquire(cls, meshSlot, ctx.Meshes.Range(meshSlot));
+        uint group = ctx.Buckets.Acquire(cls, meshSlot, ctx.Meshes.Range(meshSlot), out bool created);
+        if (created)
+            ctx.Buckets.SetGi(group, GiVolumes.InflateFlat(ctx.Meshes.Box(meshSlot)), ctx.Bricks.Acquire(meshSlot), meshSlot);
+
         (float Threshold, uint MeshSlot)[] lods = ctx.Meshes.Lods(meshSlot);
         if (lods.Length == 0)
             return group;
 
         Span<(float Threshold, uint Group)> groups = stackalloc (float, uint)[lods.Length];
         for (int i = 0; i < lods.Length; i++)
-            groups[i] = (lods[i].Threshold, ctx.Buckets.Acquire(cls, lods[i].MeshSlot, ctx.Meshes.Range(lods[i].MeshSlot)));
+        {
+            uint lodGroup = ctx.Buckets.Acquire(cls, lods[i].MeshSlot, ctx.Meshes.Range(lods[i].MeshSlot), out bool lodCreated);
+            if (lodCreated)
+                ctx.Buckets.SetGi(lodGroup, ctx.Meshes.Box(lods[i].MeshSlot), GiBricks.None, lods[i].MeshSlot);
+            groups[i] = (lods[i].Threshold, lodGroup);
+        }
 
         ctx.Buckets.SetLods(group, groups);
         return group;
@@ -200,7 +212,8 @@ internal static class Instancing
         foreach ((_, uint lod) in ctx.Meshes.Lods(meshSlot))
             ctx.Buckets.Release(cls, lod);
 
-        ctx.Buckets.Release(cls, meshSlot);
+        if (ctx.Buckets.Release(cls, meshSlot))
+            ctx.Bricks.ReleaseMesh(meshSlot);
         Pipelines.Release(ctx, cls);
     }
 

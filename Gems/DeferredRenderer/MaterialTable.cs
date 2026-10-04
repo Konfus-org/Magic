@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Rendering;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
@@ -42,6 +42,13 @@ internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong 
 
     public GrowableBuffer Records { get; } = new(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, 1024 * GpuMaterial.Size);
 
+    /// <summary>
+    /// One <see cref="GpuGiMaterial"/> per slot, beside the records, for the GI.
+    /// </summary>
+    public GrowableBuffer GiRecords { get; } = new(gpu, GpuBufferUsage.ComputeRead, 1024 * GpuGiMaterial.Size);
+
+    public GpuGiMaterial[] GiRows { get; private set; } = new GpuGiMaterial[64];
+
     public Slots<MaterialState> States { get; } = new();
 
     /// <summary>
@@ -60,6 +67,21 @@ internal sealed class MaterialTable(IRendering gpu, ulong defaultSurface, ulong 
     {
         MaterialState state = States[slot] ?? throw new InvalidOperationException($"Material slot {slot} is empty.");
         return new MaterialSlot(slot, state.Class);
+    }
+
+    /// <summary>
+    /// The slot's GI row, growing the rows to reach it.
+    /// </summary>
+    public ref GpuGiMaterial GiRow(uint slot)
+    {
+        if (slot >= GiRows.Length)
+        {
+            GpuGiMaterial[] grown = GiRows;
+            Array.Resize(ref grown, Math.Max((int)slot + 1, GiRows.Length * 2));
+            GiRows = grown;
+        }
+
+        return ref GiRows[slot];
     }
 
     /// <summary>

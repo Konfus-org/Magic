@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Input;
 using Magic.Contexts.Settings;
 using Magic.Interfaces;
@@ -17,14 +17,14 @@ namespace DebugToolsGem;
 internal sealed class SettingsWindow : Window
 {
     private readonly Settings _settings;
-    private readonly (string Name, PropertyInfo Section, PropertyInfo[] Values)[] _sections;
+    private readonly List<(string Name, Func<object?> Section, PropertyInfo[] Values)> _sections = [];
     private readonly Dictionary<Type, string[]> _enumNames = [];
 
     public SettingsWindow(Settings settings, IInput? input, IClipboard? clipboard) : base("Settings", Key.F4, input, clipboard)
     {
         _settings = settings;
-        _sections = [.. typeof(Settings).GetProperties()
-            .Select(section => (section.Name, section, section.PropertyType.GetProperties().Where(property => property.CanRead && property.CanWrite).ToArray()))];
+        foreach (PropertyInfo section in typeof(Settings).GetProperties())
+            AddSection(section.Name, () => section.GetValue(_settings), section.PropertyType);
     }
 
     protected override void Draw(in Frame frame)
@@ -33,9 +33,9 @@ internal sealed class SettingsWindow : Window
             return;
 
         Begin(scrollable: true);
-        foreach ((string name, PropertyInfo sectionProperty, PropertyInfo[] values) in _sections)
+        foreach ((string name, Func<object?> sectionOf, PropertyInfo[] values) in _sections)
         {
-            object? section = sectionProperty.GetValue(_settings);
+            object? section = sectionOf();
             if (section is null)
                 continue;
 
@@ -49,9 +49,9 @@ internal sealed class SettingsWindow : Window
     protected override string Contents()
     {
         StringBuilder text = new();
-        foreach ((string name, PropertyInfo sectionProperty, PropertyInfo[] values) in _sections)
+        foreach ((string name, Func<object?> sectionOf, PropertyInfo[] values) in _sections)
         {
-            object? section = sectionProperty.GetValue(_settings);
+            object? section = sectionOf();
             if (section is null)
                 continue;
 
@@ -60,6 +60,23 @@ internal sealed class SettingsWindow : Window
         }
 
         return text.ToString();
+    }
+
+    /// <summary>
+    /// A section is a settings class: its plain properties are edited under its name, and a property that is itself a
+    /// settings class is a section of its own under a dotted name (Render.Shadows).
+    /// </summary>
+    private void AddSection(string name, Func<object?> sectionOf, Type type)
+    {
+        PropertyInfo[] properties = type.GetProperties().Where(property => property.CanRead && property.CanWrite).ToArray();
+        _sections.Add((name, sectionOf, [.. properties.Where(property => !IsSection(property.PropertyType))]));
+        foreach (PropertyInfo nested in properties.Where(property => IsSection(property.PropertyType)))
+            AddSection($"{name}.{nested.Name}", () => sectionOf() is { } section ? nested.GetValue(section) : null, nested.PropertyType);
+    }
+
+    private static bool IsSection(Type type)
+    {
+        return type.IsClass && type != typeof(string);
     }
 
     private void DrawSetting(object section, PropertyInfo property)
@@ -75,6 +92,12 @@ internal sealed class SettingsWindow : Window
         {
             if (Debugging.UI.Slider(property.Name, ref number))
                 property.SetValue(section, number);
+        }
+        else if (current is int whole)
+        {
+            float slid = whole;
+            if (Debugging.UI.Slider(property.Name, ref slid))
+                property.SetValue(section, (int)MathF.Round(slid));
         }
         else if (current is Size size)
         {

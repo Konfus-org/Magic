@@ -1,9 +1,10 @@
-﻿using Magic.Contexts.Components;
+using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Utils;
 using System.Drawing;
+using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace DeferredRendererGem;
@@ -36,6 +37,7 @@ internal static class Scene
         float time)
     {
         plan.Clear();
+        plan.ClearColor = lighting.HasSky ? new Vector4(lighting.Ambient, 1f) : RenderCommands.ClearColor;
         Passes.Sync(ctx, passes);
         uint main = windows?.Main?.Handle ?? 0;
         PlanTargets(ctx, plan, windows, views, passes, main, textures: true, lighting, time);
@@ -52,10 +54,19 @@ internal static class Scene
     {
         (int draws, int dispatches) = (0, 0);
         ReadOnlySpan<ViewPlan> views = CollectionsMarshal.AsSpan(plan.Views);
+
+        // The shadow maps and the GI first: every target's lighting reads them, and nothing in them depends on a target.
+        if (views.Length > 0)
+        {
+            dispatches += Shadows.RecordCull(ctx, commands);
+            draws += Shadows.RecordDraw(ctx, commands);
+            dispatches += Gi.Record(ctx, commands, views[0].Shade);
+        }
+
         foreach (TargetPlan target in plan.Targets)
         {
             ReadOnlySpan<PassState> passes = CollectionsMarshal.AsSpan(plan.Passes).Slice(target.FirstPass, target.PassCount);
-            (int targetDraws, int targetDispatches) = RecordTarget(ctx, commands, target.FrameTargets, views.Slice(target.FirstView, target.ViewCount), passes);
+            (int targetDraws, int targetDispatches) = RecordTarget(ctx, commands, target.FrameTargets, views.Slice(target.FirstView, target.ViewCount), passes, plan.ClearColor);
             draws += targetDraws;
             dispatches += targetDispatches;
         }
@@ -115,10 +126,13 @@ internal static class Scene
         ViewBuffers buffers = Culling.View(ctx, index);
         Culling.Prepare(ctx, buffers, rect.Width, rect.Height);
         Lighting.Prepare(ctx, buffers, rect.Width, rect.Height);
+        Shadows.PlanCascades(ctx, view, rect, buffers, lighting);
         FrameConstants constants = FrameConstants.Build(
             view, rect, buffers.HiZSize, time, Culling.MinObjectPixels, MathF.Max(0.01f, ctx.Settings.LodBias), lighting);
+        ShadeConstants shade = ShadeConstants.Build(constants, buffers.Shadows, ctx.Shadows, ctx.Settings);
+        Gi.Fill(ctx, ref shade);
 
-        return new ViewPlan(index, rect, buffers, constants);
+        return new ViewPlan(index, rect, buffers, constants, shade);
     }
 
     private static bool IsPlanned(FramePlan plan, RenderTarget target)
@@ -181,6 +195,7 @@ internal static class Scene
         if (!ctx.Targets.TryGetValue(target, out FrameTargets? targets))
             ctx.Targets[target] = targets = new FrameTargets(target, ctx.Gpu.DepthFormat);
 
+        AmbientOcclusion.Prepare(ctx.Gpu, targets, ctx.Settings.Ao);
         targets.Ensure(ctx.Gpu, (uint)width, (uint)height);
         return targets;
     }
@@ -208,7 +223,8 @@ internal static class Scene
         RenderCommands commands,
         FrameTargets targets,
         ReadOnlySpan<ViewPlan> views,
-        ReadOnlySpan<PassState> passes)
+        ReadOnlySpan<PassState> passes,
+        Vector4 clearColor)
     {
         int draws = 0, dispatches = 0;
 
@@ -219,7 +235,7 @@ internal static class Scene
         // Early draws: everything the previous frame's pyramid did not hide.
         Span<GpuTexture> gbuffer = stackalloc GpuTexture[GBuffer.ColorFormats.Length];
         targets.GBuffer.Colors(gbuffer);
-        commands.BeginRenderPass(gbuffer, GpuLoad.Clear, targets.Depth.Texture);
+        commands.BeginRenderPass(gbuffer, GpuLoad.Clear, targets.Depth.Texture, clearColor);
         foreach (ref readonly ViewPlan view in views)
         {
             draws += DrawView(ctx, commands, view, view.Buffers.DrawArgsEarly.Handle);
@@ -243,11 +259,15 @@ internal static class Scene
             commands.EndRenderPass();
         }
 
+        // The ambient occlusion of each view, from what was just drawn.
+        foreach (ref readonly ViewPlan view in views)
+            dispatches += AmbientOcclusion.Record(commands, ctx.Ao, targets, view, ctx.NearestClamp, ctx.Settings.Ao);
+
         // The lighting writes every pixel of a view into Hdr, and nothing else of it: when the views leave part of
         // the target uncovered, that part is cleared first.
         if (views.Length != 1 || views[0].Rect != new Rectangle(0, 0, (int)targets.Width, (int)targets.Height))
         {
-            commands.BeginRenderPass(targets.Hdr.Texture, GpuLoad.Clear);
+            commands.BeginRenderPass(targets.Hdr.Texture, GpuLoad.Clear, clearColor: clearColor);
             commands.EndRenderPass();
         }
 

@@ -69,6 +69,11 @@ public interface IRendering
     void Copy(in TextureRegion source, in TextureRegion destination);
 
     /// <summary>
+    /// <paramref name="bytes"/> of one buffer into another, queued in order with the uploads.
+    /// </summary>
+    void Copy(GpuBuffer source, uint sourceOffset, GpuBuffer destination, uint destinationOffset, uint bytes);
+
+    /// <summary>
     /// Released once no frame in flight can still use it. 0 does nothing.
     /// </summary>
     void Release(GpuBuffer buffer);

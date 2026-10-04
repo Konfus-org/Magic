@@ -23,6 +23,7 @@ static const uint InstanceAlive = 1u << 0;
 static const uint InstanceMirrored = 1u << 1;
 static const uint InstanceNoSizeCull = 1u << 2;
 static const uint InstanceHidden = 1u << 3; // registered, not drawn
+static const uint InstanceNoShadow = 1u << 4; // drawn, but into no shadow map
 
 // 48 B: the three rows of transpose(world), so p' = (dot(r0, p), dot(r1, p), dot(r2, p)) with p.w = 1.
 struct GpuInstanceXform
@@ -88,13 +89,24 @@ struct GpuDrawArgs
     uint firstInstance;
 };
 
-// 48 B: one point or spot light, in absolute world space. A point light is a spot whose cone never ends: its
-// cosines are below any a direction can have, so nothing branches on the kind.
+// 64 B: one point or spot light, in absolute world space. A point light is a spot whose cone never ends: its
+// cosines are below any a direction can have, so nothing branches on the kind. shadow.x is the first of its
+// shadow records (GpuShadowRecord), 0xFFFFFFFF when it casts none this frame; shadow.y how many faces it has
+// (1 a spot, 6 a point).
 struct GpuLight
 {
     float4 positionRange;     // xyz position, w range in metres: nothing farther is lit
     float4 colorInnerCos;     // rgb linear colour times intensity, w cos(half the inner cone angle)
     float4 directionOuterCos; // xyz the direction the light travels, w cos(half the outer cone angle)
+    uint4 shadow;             // x first shadow record or none, y face count, zw unused
+};
+
+// 96 B: one face of a local light's shadow map, as the lighting reads it.
+struct GpuShadowRecord
+{
+    float4 rectUv;            // xy where its page starts in the atlas, zw the page's size, in uv
+    float4x4 viewProj;        // camera-relative world to the face's clip space, reverse-Z, finite far
+    float4 params;            // x metres per texel per metre from the light, y the near plane, zw unused
 };
 
 // The lights of a view are binned in two steps. First into screen tiles of LightTileSize pixels a side

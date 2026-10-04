@@ -1,4 +1,4 @@
-﻿using System.Drawing;
+using System.Drawing;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -50,24 +50,34 @@ public sealed class RenderCommands
     }
 
     /// <summary>
-    /// A render pass into <paramref name="color"/> and, when valid, <paramref name="depth"/>, both loaded or cleared by <paramref name="load"/>.
+    /// A render pass into <paramref name="color"/> and, when valid, <paramref name="depth"/>, both loaded or cleared by
+    /// <paramref name="load"/>; a clear is to <paramref name="clearColor"/>, or <see cref="ClearColor"/> without one.
     /// </summary>
-    public void BeginRenderPass(GpuTexture color, GpuLoad load, GpuTexture depth = default)
+    public void BeginRenderPass(GpuTexture color, GpuLoad load, GpuTexture depth = default, Vector4? clearColor = null)
     {
-        _commands.Add(new RenderCommand(RenderCommandType.BeginRenderPass, Texture: color, Depth: depth, Load: load, ClearColor: ClearColor));
+        _commands.Add(new RenderCommand(RenderCommandType.BeginRenderPass, Texture: color, Depth: depth, Load: load, ClearColor: clearColor ?? ClearColor));
+    }
+
+    /// <summary>
+    /// A render pass with no colour target: only <paramref name="depth"/>, loaded or cleared (to 0, reverse-Z far), for
+    /// pipelines made with no colour formats, such as shadow maps.
+    /// </summary>
+    public void BeginDepthPass(GpuTexture depth, GpuLoad load)
+    {
+        _commands.Add(new RenderCommand(RenderCommandType.BeginRenderPass, Depth: depth, Load: load));
     }
 
     /// <summary>
     /// A render pass into several colour targets at once, one per <c>SV_Target</c> of the pipelines drawn in it, and,
     /// when valid, <paramref name="depth"/>; all loaded or cleared by <paramref name="load"/>.
     /// </summary>
-    public void BeginRenderPass(ReadOnlySpan<GpuTexture> colors, GpuLoad load, GpuTexture depth = default)
+    public void BeginRenderPass(ReadOnlySpan<GpuTexture> colors, GpuLoad load, GpuTexture depth = default, Vector4? clearColor = null)
     {
         int start = _bindings.Count;
         foreach (GpuTexture color in colors)
             _bindings.Add(new GpuBinding(Texture: color));
 
-        _commands.Add(new RenderCommand(RenderCommandType.BeginRenderPass, Texture: colors[0], Depth: depth, Load: load, ClearColor: ClearColor, Run: (start, colors.Length)));
+        _commands.Add(new RenderCommand(RenderCommandType.BeginRenderPass, Texture: colors[0], Depth: depth, Load: load, ClearColor: clearColor ?? ClearColor, Run: (start, colors.Length)));
     }
 
     public void EndRenderPass()
@@ -132,6 +142,18 @@ public sealed class RenderCommands
     public void BindTextures(GpuStage stage, uint slot, ReadOnlySpan<GpuBinding> textures)
     {
         _commands.Add(new RenderCommand(RenderCommandType.BindTextures, Stage: stage, Slot: slot, Run: Add(textures)));
+    }
+
+    /// <summary>
+    /// Textures read as storage, without a sampler (<see cref="GpuTextureUsage.ComputeRead"/>).
+    /// </summary>
+    public void BindStorageTextures(GpuStage stage, uint slot, ReadOnlySpan<GpuTexture> textures)
+    {
+        int start = _bindings.Count;
+        foreach (GpuTexture texture in textures)
+            _bindings.Add(new GpuBinding(Texture: texture));
+
+        _commands.Add(new RenderCommand(RenderCommandType.BindStorageTextures, Stage: stage, Slot: slot, Run: (start, textures.Length)));
     }
 
     /// <summary>

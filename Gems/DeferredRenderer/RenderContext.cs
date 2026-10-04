@@ -1,4 +1,4 @@
-﻿using Magic.Contexts.Rendering;
+using Magic.Contexts.Rendering;
 using Magic.Contexts.Components;
 using Magic.Contexts.Settings;
 using Magic.Interfaces;
@@ -63,6 +63,27 @@ internal sealed class RenderContext
     public CullPipelines Cull { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
 
     public LightingPipelines Lighting { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
+
+    public AoPipelines Ao { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
+
+    public GiPipelines Gi { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
+
+    /// <summary>
+    /// The GI's volumes and buffers, and the occupancy bricks of the meshes in use.
+    /// </summary>
+    public GiVolumes GiVolumes { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
+
+    public GiBricks Bricks { get; } = new();
+
+    /// <summary>
+    /// The shadow maps: the atlas, its pipelines, the local lights' pages and this frame's shadow views.
+    /// </summary>
+    public ShadowState Shadows { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
+
+    /// <summary>
+    /// The engine's own pipelines by the shaders they are built from, for hot reload (<see cref="BuiltIns"/>).
+    /// </summary>
+    public List<(ulong[] Shaders, Action<RenderContext> Rebuild)> BuiltIns { get; } = [];
 
     /// <summary>
     /// The frame's point and spot lights, one <see cref="GpuLight"/> each, uploaded whole every frame.
