@@ -1,0 +1,22 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 16876925227830062480
+    },
+    "reads": [
+        {
+            "name": "Lights"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "writes": [
+        {
+            "name": "GiLightGrid"
+        }
+    ],
+    "dispatch": {
+        "per": "$lightCount"
+    }
+}

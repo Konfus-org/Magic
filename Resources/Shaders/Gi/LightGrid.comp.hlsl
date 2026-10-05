@@ -2,20 +2,23 @@
 // reaches, so a voxel asks only the lights near it. A cell more lights reach than it holds keeps the first ones.
 // The counts were zeroed by Resolve.comp.hlsl.
 
-#include "Include/Shade.hlsli"
+#include "Include/Frame.hlsli"
 #include "Gi/Common.hlsli"
 
 StructuredBuffer<GpuLight> Lights : READ(0);
 RWStructuredBuffer<uint> LightGrid : WRITE(0);
+StructuredBuffer<GpuGiState> GiState : READ(1);
+
+#include "Gi/State.hlsli"
 
 [numthreads(64, 1, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    if (threadId.x >= LightCount)
+    if (!GiRebuilding() || threadId.x >= LightCount)
         return;
 
     GpuLight light = Lights[threadId.x];
-    uint level = GiUpdateLevel;
+    uint level = GiUpdateLevel();
     float cellSize = GiExtent(level) / (float)GI_LIGHT_CELLS;
     float3 origin = GiOrigin(level);
     float3 center = light.positionRange.xyz;

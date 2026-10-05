@@ -1,0 +1,132 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 8240524676402022215
+    },
+    "reads": [
+        {
+            "name": "Emissive",
+            "filter": "nearest"
+        },
+        {
+            "name": "Albedo",
+            "filter": "nearest"
+        },
+        {
+            "name": "Normal",
+            "filter": "nearest"
+        },
+        {
+            "name": "Material",
+            "filter": "nearest"
+        },
+        {
+            "name": "Depth",
+            "filter": "nearest"
+        },
+        {
+            "name": "Ao",
+            "filter": "nearest"
+        },
+        {
+            "name": "ShadowAtlas",
+            "filter": "comparison"
+        },
+        {
+            "name": "GiShR0",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShR1",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShG0",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShG1",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShB0",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShB1",
+            "filter": "linear"
+        },
+        {
+            "name": "GiSkyVis",
+            "filter": "linear"
+        },
+        {
+            "name": "GiAlbedo",
+            "filter": "nearest"
+        },
+        {
+            "name": "Lights"
+        },
+        {
+            "name": "LightTiles"
+        },
+        {
+            "name": "LightClusters"
+        },
+        {
+            "name": "ShadowViews"
+        },
+        {
+            "name": "ShadowHeader"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "writes": [
+        {
+            "name": "Hdr"
+        }
+    ],
+    "dispatch": {
+        "per": "view"
+    },
+    "params": {
+        "debugView": {
+            "x": 0
+        },
+        "aoStrength": {
+            "x": 1
+        },
+        "aoMultiBounce": {
+            "x": 1
+        },
+        "shadowBlend": {
+            "x": 0.15
+        },
+        "shadowFilterRadius": {
+            "x": 0.03
+        },
+        "shadowNormalBias": {
+            "x": 1.5
+        },
+        "shadowDepthBias": {
+            "x": 1
+        },
+        "giIntensity": {
+            "x": 0.85
+        },
+        "giInteriorTint": {
+            "r": 0.03,
+            "g": 0.035,
+            "b": 0.05,
+            "a": 1
+        },
+        "giInteriorStrength": {
+            "x": 1
+        },
+        "giFadeVoxels": {
+            "x": 4
+        }
+    }
+}

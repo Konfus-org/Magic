@@ -1,0 +1,25 @@
+{
+    "kind": "quads",
+    "shader": {
+        "id": 4420873849978882327
+    },
+    "fragment": {
+        "id": 3958586061505171826
+    },
+    "reads": [
+        {
+            "name": "Glows"
+        }
+    ],
+    "draw": {
+        "colors": [
+            "Emissive",
+            "Albedo",
+            "Normal",
+            "Material"
+        ],
+        "depth": "Depth",
+        "load": "load",
+        "rows": "$glowCount"
+    }
+}

@@ -1,17 +1,17 @@
-// What the GI passes share: the clipmap's layout as the lighting constants carry it (Include/Shade.hlsli), the
-// brick atlas, the accumulation buffer one level is stamped through, the light grid, and the spherical
-// harmonics the bounced light is kept as. Needs Include/Shade.hlsli included first.
+// What the GI passes share: the brick atlas, the accumulation buffer one level is stamped through, the light
+// grid, and the spherical harmonics the bounced light is kept as. The clipmap's layout comes from the GI state
+// buffer the plan pass writes (Gi/State.hlsli, included after the shader declares GiState).
 //
-// A level is GiResolution voxels a side, its min corner at ClipmapOrigin[level].xyz (absolute world) and its
-// voxel ClipmapOrigin[level].w metres. Every per-level texture holds the levels stacked along Z, level l's
-// slab from l * GiResolution to (l + 1) * GiResolution, so one binding serves whatever the level count is.
+// A level is GiResolution() voxels a side, its min corner at GiOrigin(level) (absolute world) and its voxel
+// GiVoxel(level) metres. Every per-level texture holds the levels stacked along Z, level l's slab from
+// l * resolution to (l + 1) * resolution, so one binding serves whatever the level count is.
 
 #ifndef MAGIC_GI_COMMON_HLSLI
 #define MAGIC_GI_COMMON_HLSLI
 
 #include "Include/Structs.hlsli"
 
-// Twins: GiVolumes.BrickSize, BricksAcross, BricksDeep, AccumWords, LightCells, LightsPerCell, TaskChunk.
+// Twins: GiBricks.BrickSize, BricksAcross, BricksDeep, AccumWords, LightCells, LightsPerCell, TaskChunk.
 #define GI_BRICK 16u
 #define GI_BRICKS_ACROSS 16u
 #define GI_BRICKS_DEEP 8u
@@ -54,55 +54,6 @@ struct GpuVertexRaw
 };
 
 static const uint GiNoBrick = 0xFFFFFFFFu;
-
-// The clipmap's layout, from the lighting constants: only where Include/Shade.hlsli came first (the brick passes
-// carry their own block and need none of it).
-#ifdef MAGIC_SHADE_HLSLI
-float3 GiOrigin(uint level)
-{
-    return ClipmapOrigin[level].xyz;
-}
-
-float GiVoxel(uint level)
-{
-    return ClipmapOrigin[level].w;
-}
-
-float GiExtent(uint level)
-{
-    return GiVoxel(level) * (float)GiResolution;
-}
-
-// A world position in a level's voxel coordinates (0..GiResolution across the level).
-float3 GiVoxelCoord(uint level, float3 world)
-{
-    return (world - GiOrigin(level)) / GiVoxel(level);
-}
-
-// The uv of a voxel coordinate in a stacked per-level texture, kept half a texel inside the level's slab so a
-// trilinear sample never reads the neighbouring level.
-float3 GiStackedUv(uint level, float3 voxel)
-{
-    float res = (float)GiResolution;
-    float z = clamp(voxel.z, 0.5, res - 0.5) + (float)(level * GiResolution);
-    return float3(clamp(voxel.xy, 0.5, res - 0.5) / res, z / (res * (float)GiLevels));
-}
-
-int3 GiStackedTexel(uint level, uint3 voxel)
-{
-    return int3(voxel.x, voxel.y, voxel.z + level * GiResolution);
-}
-
-uint GiVoxelIndex(uint3 voxel)
-{
-    return voxel.x + GiResolution * (voxel.y + GiResolution * voxel.z);
-}
-
-bool GiLevelValid(uint level)
-{
-    return (GiFlags & (256u << level)) != 0u;
-}
-#endif
 
 uint3 GiBrickOffset(uint brick)
 {

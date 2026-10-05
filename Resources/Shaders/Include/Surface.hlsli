@@ -35,6 +35,9 @@
 #ifndef SURFACE_DOUBLE_SIDED
 #define SURFACE_DOUBLE_SIDED 0
 #endif
+#ifndef SURFACE_FORWARD
+#define SURFACE_FORWARD 0
+#endif
 
 // The texture pools (TextureTable.cs): pool = formatIndex * 4 + sizeIndex, formats [sRGB, linear], sizes
 // [256, 512, 1024, 2048]. A pool's index is its register index.
@@ -55,8 +58,13 @@ SamplerState PoolLinear1024Sampler : SAMPLER(6);
 Texture2DArray PoolLinear2048 : READ(7);
 SamplerState PoolLinear2048Sampler : SAMPLER(7);
 
-// Storage buffers follow the sampled textures in SDL's binding order.
+// Storage buffers follow the sampled textures in SDL's binding order: after the pools, and in the forward
+// template (SURFACE_FORWARD) after the eight textures it reads the lighting from too.
+#if SURFACE_FORWARD
+StructuredBuffer<GpuMaterial> Materials : READ(16);
+#else
 StructuredBuffer<GpuMaterial> Materials : READ(8);
+#endif
 
 typedef uint TextureRef;
 static const TextureRef TextureNone = 0xFFFFFFFFu;

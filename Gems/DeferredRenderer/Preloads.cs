@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Extensions;
@@ -9,7 +9,7 @@ namespace DeferredRendererGem;
 
 /// <summary>
 /// Loads what the render tables are about to ask for, off the render thread, and hands it to them: a model with its
-/// lesser versions, a material with its textures and its surface shader, a pass with its shader, a shader with the
+/// lesser versions, a material with its textures and its surface shader, a pass with its shaders, a shader with the
 /// files it includes. Whoever needs one asks whether it is <see cref="Ready"/>, which starts its load the first
 /// time, and holds back until it is: an entity is not registered, so it is not drawn, a changed file is not applied,
 /// a listed pass is not run. What arrived is a <see cref="Preloaded"/>, and while a table works with one
@@ -195,16 +195,38 @@ internal static class Preloads
     }
 
     /// <summary>
-    /// The pass with its shader, includes too.
+    /// The pass (a <c>.pass</c>, or a <c>.post</c>) with its shaders, includes too.
     /// </summary>
     public static async Task<Preloaded> PassAsync(Assets assets, ulong id, CancellationToken cancel)
     {
         Preloaded preloaded = new();
+        if (PassLoader.IsPost(assets.PathOf(id)))
+        {
+            Post? post = await assets.LoadAsync(new Handle<Post>(id), cancel: cancel).ConfigureAwait(false);
+            preloaded.Assets[id] = post;
+            if (post is not null)
+                await ShaderAsync(assets, post.Shader.Id, preloaded, cancel).ConfigureAwait(false);
+
+            return preloaded;
+        }
+
         Pass? pass = await assets.LoadAsync(new Handle<Pass>(id), cancel: cancel).ConfigureAwait(false);
         preloaded.Assets[id] = pass;
-        if (pass is not null)
-            await ShaderAsync(assets, pass.Shader.Id, preloaded, cancel).ConfigureAwait(false);
+        if (pass is null)
+            return preloaded;
 
+        await ShaderAsync(assets, pass.Shader.Id, preloaded, cancel).ConfigureAwait(false);
+        await ShaderAsync(assets, pass.Fragment.Id, preloaded, cancel).ConfigureAwait(false);
+        return preloaded;
+    }
+
+    /// <summary>
+    /// The pipeline's file; the passes it lists load on their own once it is read.
+    /// </summary>
+    public static async Task<Preloaded> PipelineAsync(Assets assets, ulong id, CancellationToken cancel)
+    {
+        Preloaded preloaded = new();
+        preloaded.Assets[id] = await assets.LoadAsync(new Handle<Pipeline>(id), cancel: cancel).ConfigureAwait(false);
         return preloaded;
     }
 

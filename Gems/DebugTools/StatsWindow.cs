@@ -10,8 +10,9 @@ namespace DebugToolsGem;
 /// <summary>
 /// The engine's own numbers in one place: frames per second and frame time, the GC, and everything any system set in
 /// <see cref="Debugging.Stats"/> (what the transform, render and streaming systems are doing, the renderer's counters,
-/// the asset pools), grouped by the first part of the name: a tab per group, the group's values as a document under
-/// it. Drawn as the "Stats" window while open (F3), and logged (verbose, so only with --verbose) every
+/// the asset pools), a tab per first part of the name (Frame, Rendering, Streaming), and under it the tab's values as
+/// a document: the plain ones first, then a block per sub-category (<c>Rendering.Gi</c>, <c>Streaming.Pool.Texture</c>)
+/// headed by its name. Drawn as the "Stats" window while open (F3), and logged (verbose, so only with --verbose) every
 /// <see cref="LogIntervalMs"/> whether open or not, so a headless or scripted run can have them too. Reads the stats,
 /// changes nothing but its own.
 /// </summary>
@@ -100,14 +101,14 @@ internal sealed class StatsWindow : Window
         long allocated = GC.GetTotalAllocatedBytes();
         TimeSpan pause = GC.GetTotalPauseDuration();
         double seconds = _sinceGcSampleMs / 1000d;
-        Debugging.Stats.Set("GC.HeapMB", Megabytes(GC.GetTotalMemory(false)));
-        Debugging.Stats.Set("GC.AllocatedMBPerSecond", Megabytes(allocated - _sampledAllocatedBytes) / seconds);
-        Debugging.Stats.Set("GC.PausedPercent", (pause - _sampledPause).TotalMilliseconds / _sinceGcSampleMs * 100);
+        Debugging.Stats.Set("Frame.GC.HeapMB", Megabytes(GC.GetTotalMemory(false)));
+        Debugging.Stats.Set("Frame.GC.AllocatedMBPerSecond", Megabytes(allocated - _sampledAllocatedBytes) / seconds);
+        Debugging.Stats.Set("Frame.GC.PausedPercent", (pause - _sampledPause).TotalMilliseconds / _sinceGcSampleMs * 100);
         for (int generation = 0; generation < _sampledCollections.Length; generation++)
         {
             int count = GC.CollectionCount(generation);
-            Debugging.Stats.Set($"GC.Gen{generation}Collections", count);
-            Debugging.Stats.Set($"GC.Gen{generation}PerSecond", (count - _sampledCollections[generation]) / seconds);
+            Debugging.Stats.Set($"Frame.GC.Gen{generation}Collections", count);
+            Debugging.Stats.Set($"Frame.GC.Gen{generation}PerSecond", (count - _sampledCollections[generation]) / seconds);
             _sampledCollections[generation] = count;
         }
 
@@ -122,18 +123,42 @@ internal sealed class StatsWindow : Window
     }
 
     /// <summary>
-    /// The stats of <paramref name="group"/> (every group when null), a name and value per line.
+    /// The stats of <paramref name="group"/> (every group when null), a name and value per line: the ones without a
+    /// sub-category first, then each sub-category under a line with its name, indented.
     /// </summary>
     private string Contents(string? group)
     {
         _line.Clear();
+        if (group is null)
+        {
+            foreach ((string name, double value) in _stats)
+                _line.Append(name).Append(' ').Append(Format(value)).AppendLine();
+
+            return _line.ToString();
+        }
+
         foreach ((string name, double value) in _stats)
         {
-            string part = GroupOf(name);
-            if (group is null)
-                _line.Append(name).Append(' ').Append(Format(value)).AppendLine();
-            else if (part == group)
-                _line.Append(name, part.Length + 1, name.Length - part.Length - 1).Append(' ').Append(Format(value)).AppendLine();
+            if (GroupOf(name) == group && SubOf(name).Length == 0)
+                _line.Append(NameOf(name)).Append(' ').Append(Format(value)).AppendLine();
+        }
+
+        string? sub = null;
+        foreach ((string name, double value) in _stats)
+        {
+            if (GroupOf(name) != group || SubOf(name).Length == 0)
+                continue;
+
+            if (sub != SubOf(name))
+            {
+                sub = SubOf(name);
+                if (_line.Length > 0)
+                    _line.AppendLine();
+
+                _line.Append(sub).AppendLine();
+            }
+
+            _line.Append("  ").Append(NameOf(name)).Append(' ').Append(Format(value)).AppendLine();
         }
 
         return _line.ToString();
@@ -159,10 +184,32 @@ internal sealed class StatsWindow : Window
         return _tabs;
     }
 
+    /// <summary>
+    /// The tab: the part before the first dot.
+    /// </summary>
     private static string GroupOf(string name)
     {
         int dot = name.IndexOf('.');
         return dot < 0 ? name : name[..dot];
+    }
+
+    /// <summary>
+    /// The sub-category: whatever lies between the first and the last dot; empty when there are fewer than two.
+    /// </summary>
+    private static string SubOf(string name)
+    {
+        int first = name.IndexOf('.');
+        int last = name.LastIndexOf('.');
+        return first < 0 || last == first ? "" : name[(first + 1)..last];
+    }
+
+    /// <summary>
+    /// The name itself: the part after the last dot.
+    /// </summary>
+    private static string NameOf(string name)
+    {
+        int dot = name.LastIndexOf('.');
+        return dot < 0 ? name : name[(dot + 1)..];
     }
 
     /// <summary>

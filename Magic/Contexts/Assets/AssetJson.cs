@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Magic.Contexts.Assets;
@@ -7,7 +7,7 @@ namespace Magic.Contexts.Assets;
 /// How every asset file and sidecar is read and written: camelCase keys, snake_case enum names
 /// (<c>clamp_to_edge</c>), fields included so System.Numerics vectors serialise as <c>{x, y, z, w}</c>,
 /// comments and trailing commas tolerated, infinities written by name. A <see cref="Handle{T}"/> is <c>{ "id": N }</c>;
-/// the one custom converter is <see cref="PassListConverter"/>, named by the type it reads.
+/// the one custom converter is <see cref="PostListConverter"/>, named by the type it reads.
 /// </summary>
 public static class AssetJson
 {

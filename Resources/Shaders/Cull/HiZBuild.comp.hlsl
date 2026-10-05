@@ -1,5 +1,5 @@
 // Builds six levels of the depth pyramid per dispatch, in a buffer so no texture is read and written in the
-// same pass: levels HiZFirstLevel .. HiZFirstLevel + 5, the first from the depth target (HiZFirstLevel = 0)
+// same pass: levels FirstLevel .. FirstLevel + 5, FirstLevel = PassIteration() * 6, the first from the depth target (PassIteration() = 0)
 // or from the level before it in the same buffer, the rest in group shared memory. Each group owns a
 // 32 x 32 tile of the first level, so the five levels after it (16, 8, 4, 2, 1 texels a side) stay inside
 // the group.
@@ -14,6 +14,7 @@
 #define TILE_SIZE 32      // texels a side of the first level one group builds
 #define GROUP_SIZE 16     // threads a side: each builds 2 x 2 texels of the tile
 static const uint LevelsAfterFirst = 5u; // the tile halved down to one texel
+static const uint LevelsPerPass = LevelsAfterFirst + 1u; // twin: Culling.HiZLevelsPerPass
 
 Texture2D<float> Depth : READ(0);
 SamplerState DepthSampler : SAMPLER(0);
@@ -55,8 +56,9 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     uint2 thread = groupThreadId.xy;
 
     // Where the first level reads from and writes to, worked out once per thread.
-    bool isFromDepth = HiZFirstLevel == 0u;
-    uint sourceLevel = isFromDepth ? 0u : HiZFirstLevel - 1u;
+    uint firstLevel = PassIteration() * LevelsPerPass;
+    bool isFromDepth = firstLevel == 0u;
+    uint sourceLevel = isFromDepth ? 0u : firstLevel - 1u;
     uint2 sourceSize = HiZLevelSize(sourceLevel);
     uint sourceOffset = HiZLevelOffset(sourceLevel);
 
@@ -65,7 +67,7 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     Depth.GetDimensions(depthWidth, depthHeight);
     float2 depthTexelSize = 1.0 / float2(depthWidth, depthHeight);
 
-    uint level = HiZFirstLevel;
+    uint level = firstLevel;
     uint2 levelSize = HiZLevelSize(level);
     uint levelOffset = isFromDepth ? 0u : sourceOffset + sourceSize.x * sourceSize.y;
 

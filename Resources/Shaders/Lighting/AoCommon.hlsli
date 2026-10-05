@@ -1,6 +1,6 @@
 // What the ambient occlusion passes share: how the raw result is packed between them, the spatial noise the
-// horizon search is jittered with, and the search radius in pixels. Needs Include/Shade.hlsli (the AO
-// constants) through Include/GBuffer.hlsli's frame block.
+// horizon search is jittered with, and the search radius in pixels. Needs the frame block through
+// Include/GBuffer.hlsli.
 //
 // The raw texel (Gtao.comp.hlsl writes it, AoBlur.comp.hlsl reads it) is rgba16f: x the visibility, y the
 // view depth it was computed at (the blur weighs its taps by depth), zw the bent normal in view space,
@@ -23,13 +23,14 @@ void AoNoise(uint2 pixel, out float rotation, out float offset)
     offset = (float)((y - x) & 3u) * 0.25;
 }
 
-// The search radius in pixels of the occlusion texture: the world radius projected at this depth, no less
-// than a texel and no more than the setting (a near surface would otherwise sample the whole screen).
-float AoPixelRadius(float viewDepth)
+// The search radius in pixels of the occlusion texture (scale of the view's): the world radius projected at
+// this depth, no less than a texel and no more than maxPixels (a near surface would otherwise sample the whole
+// screen).
+float AoPixelRadius(float viewDepth, float radiusMetres, float maxPixels, float scale)
 {
     float spread = IsOrthographic != 0u ? 1.0 : max(viewDepth, Near);
-    float pixels = AoParams.x * ProjScale.y * ViewSize.y * 0.5 / spread;
-    return clamp(pixels, 1.0, AoParams.y) * AoScale;
+    float pixels = radiusMetres * ProjScale.y * ViewSize.y * 0.5 / spread;
+    return clamp(pixels, 1.0, maxPixels) * scale;
 }
 
 // A unit vector to two numbers in -1..1 and back (octahedral mapping): the bent normal's two spare channels.

@@ -1,12 +1,15 @@
-// The light in the level being rebuilt, one thread per voxel, written into the other set of spherical harmonics:
-// what the voxel's occupied neighbours shine into it (their face towards it lit by the sun through its cascades,
-// by the lights of its grid cell through their shadow maps, and by what they emit, times their albedo), plus a
-// damped share of what its empty neighbours held last time (read where they were, since the level may have moved).
-// Light never crosses an occupied voxel, so a wall a voxel thick stops it. Every frame a level is rebuilt it
-// takes one more bounce from the frame before, settling on a fixed point: a geometric tail of bounces, with no
-// history buffer beyond the one set of harmonics and nothing stochastic.
+// The light in the level being rebuilt, one thread per voxel, written into the other set of spherical harmonics
+// by the way it travels (a surface gathers what travels against its normal, Include/Gi.hlsli): what the voxel's
+// occupied neighbours shine into it (their face towards it lit by the sun through its cascades and by the lights of
+// its grid cell through their shadow maps, times their albedo over pi as a matte face reflects it, plus what they
+// emit), and a damped share of what its empty neighbours held last time (read where they were, since the level may
+// have moved). Light never crosses an occupied voxel, so a wall a voxel thick stops it. Every frame a level is
+// rebuilt it takes one more bounce from the frame before, settling on a fixed point: a geometric tail of bounces,
+// with no history beyond the two sets of harmonics, each level's current light in the set its parity names (the
+// plan pass flips it each time the level is rebuilt), and nothing stochastic.
 
-#include "Include/Shade.hlsli"
+#include "Include/Frame.hlsli"
+#include "Include/Math.hlsli"
 #include "Gi/Common.hlsli"
 #include "Lighting/Common.hlsli"
 
@@ -14,25 +17,38 @@ Texture3D<float4> Albedo : READ(0);
 SamplerState AlbedoSampler : SAMPLER(0);
 Texture3D<float4> Emissive : READ(1);
 SamplerState EmissiveSampler : SAMPLER(1);
-Texture3D<float4> OldR : READ(2);
-SamplerState OldRSampler : SAMPLER(2);
-Texture3D<float4> OldG : READ(3);
-SamplerState OldGSampler : SAMPLER(3);
-Texture3D<float4> OldB : READ(4);
-SamplerState OldBSampler : SAMPLER(4);
-Texture2D<float> ShadowAtlas : READ(5);
-SamplerComparisonState ShadowAtlasSampler : SAMPLER(5);
-StructuredBuffer<GpuLight> Lights : READ(6);
-StructuredBuffer<uint> LightGrid : READ(7);
-StructuredBuffer<GpuShadowRecord> ShadowRecords : READ(8);
+Texture2D<float> ShadowAtlas : READ(2);
+SamplerComparisonState ShadowAtlasSampler : SAMPLER(2);
+StructuredBuffer<GpuLight> Lights : READ(3);
+StructuredBuffer<uint> LightGrid : READ(4);
+StructuredBuffer<GpuShadowView> ShadowViews : READ(5);
+StructuredBuffer<GpuShadowHeader> ShadowHeader : READ(6);
+StructuredBuffer<GpuGiState> GiState : READ(7);
 
+// Both light sets: the level's old light is loaded from the set its parity left, the new written into the other.
 [[vk::image_format("rgba16f")]]
-RWTexture3D<float4> NewR : WRITE(0);
+RWTexture3D<float4> ShR0 : WRITE(0);
 [[vk::image_format("rgba16f")]]
-RWTexture3D<float4> NewG : WRITE(1);
+RWTexture3D<float4> ShR1 : WRITE(1);
 [[vk::image_format("rgba16f")]]
-RWTexture3D<float4> NewB : WRITE(2);
+RWTexture3D<float4> ShG0 : WRITE(2);
+[[vk::image_format("rgba16f")]]
+RWTexture3D<float4> ShG1 : WRITE(3);
+[[vk::image_format("rgba16f")]]
+RWTexture3D<float4> ShB0 : WRITE(4);
+[[vk::image_format("rgba16f")]]
+RWTexture3D<float4> ShB1 : WRITE(5);
 
+struct PassParams
+{
+    float propagationDamping = 0.9;
+    float shadowFilterRadius = 0.03; // how the voxels read the shadow maps: as the lighting's settings
+    float shadowNormalBias = 1.5;
+    float shadowDepthBias = 1.0;
+};
+
+#include "Gi/State.hlsli"
+#define SHADOW_ONE_TAP 1 // a voxel face is far wider than any penumbra
 #include "Lighting/Shadows.hlsli"
 
 static const int3 Neighbours[6] = { int3(1, 0, 0), int3(-1, 0, 0), int3(0, 1, 0), int3(0, -1, 0), int3(0, 0, 1), int3(0, 0, -1) };
@@ -45,15 +61,37 @@ float4 VoxelAt(Texture3D<float4> volume, SamplerState volumeSampler, uint level,
     return volume.SampleLevel(volumeSampler, GiStackedUv(level, (float3)voxel + 0.5), 0.0);
 }
 
+// The level's light as it was, from the set its old parity left it in.
+float4 OldSh(RWTexture3D<float4> set0, RWTexture3D<float4> set1, uint oldParity, int3 texel)
+{
+    return oldParity == 0u ? set0[texel] : set1[texel];
+}
+
+void WriteSh(uint parity, int3 texel, float4 r, float4 g, float4 b)
+{
+    [branch] if (parity == 0u)
+    {
+        ShR0[texel] = r;
+        ShG0[texel] = g;
+        ShB0[texel] = b;
+    }
+    else
+    {
+        ShR1[texel] = r;
+        ShG1[texel] = g;
+        ShB1[texel] = b;
+    }
+}
+
 // The direct light on a point of a surface facing normal (camera relative, as the shadows want it).
-float3 DirectLight(float3 positionRel, float3 normal, uint3 cell)
+float3 DirectLight(ShadowFilter filter, float3 positionRel, float3 normal, uint3 cell)
 {
     float3 light = float3(0.0, 0.0, 0.0);
     float3 toSun = -SunDirection;
     float sunFacing = saturate(dot(normal, toSun));
     [branch] if (sunFacing > 0.0)
     {
-        float visible = (ShadowFlags & ShadowSunFlag) != 0u ? SunVisibilityAt(positionRel, normal) : 1.0;
+        float visible = (ShadowHeader[0].flags & ShadowSunFlag) != 0u ? SunVisibilityAt(filter, positionRel, normal) : 1.0;
         light += SunColor * sunFacing * visible;
     }
 
@@ -68,28 +106,64 @@ float3 DirectLight(float3 positionRel, float3 normal, uint3 cell)
             continue;
 
         float shadow = 1.0;
-        [branch] if ((ShadowFlags & ShadowLocalFlag) != 0u && local.shadow.x != ShadowNone)
-            shadow = LocalShadow(local, positionRel, normal);
+        [branch] if ((ShadowHeader[0].flags & ShadowLocalFlag) != 0u && local.shadow.x != ShadowNone)
+            shadow = LocalShadow(filter, local, positionRel, normal);
         light += Arriving(local, lightToSurface) * facing * shadow;
     }
 
     return light;
 }
 
+// What an occupied voxel holds: no light of its own, and none passes through it (an empty voxel only takes on what
+// its empty neighbours held), but a surface's filtered read reaches into the voxel it fills, so it keeps the
+// average of what its empty neighbours held last time rather than black.
+void WriteOccupied(uint level, int3 voxel, int3 texel, float3 shift, uint parity, bool oldValid)
+{
+    float4 r = float4(0.0, 0.0, 0.0, 0.0), g = r, b = r;
+    float count = 0.0;
+    int res = (int)GiResolution();
+    uint oldParity = parity ^ 1u;
+    [branch] if (oldValid)
+    {
+        [unroll] for (uint n = 0u; n < 6u; n++)
+        {
+            int3 other = voxel + Neighbours[n];
+            int3 old = other + (int3)shift;
+            if (any(other < 0) || any(other >= res) || any(old < 0) || any(old >= res))
+                continue;
+            if (VoxelAt(Albedo, AlbedoSampler, level, other).a >= GiOccupied)
+                continue;
+
+            int3 oldTexel = GiStackedTexel(level, (uint3)old);
+            r += OldSh(ShR0, ShR1, oldParity, oldTexel);
+            g += OldSh(ShG0, ShG1, oldParity, oldTexel);
+            b += OldSh(ShB0, ShB1, oldParity, oldTexel);
+            count += 1.0;
+        }
+    }
+
+    float share = count > 0.0 ? 1.0 / count : 0.0;
+    WriteSh(parity, texel, r * share, g * share, b * share);
+}
+
 [numthreads(4, 4, 4)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    if (any(threadId >= GiResolution))
+    if (!GiRebuilding() || any(threadId >= GiResolution()))
         return;
 
-    uint level = GiUpdateLevel;
+    uint level = GiUpdateLevel();
     int3 voxel = (int3)threadId;
-    int res = (int)GiResolution;
+    int res = (int)GiResolution();
     int3 texel = GiStackedTexel(level, threadId);
+    uint parity = GiParity(level);
+    uint oldParity = parity ^ 1u;
     float4 here = VoxelAt(Albedo, AlbedoSampler, level, voxel);
+    float3 shift = GiState[0].shift.xyz;
+    bool oldValid = GiLevelWasValid(level); // the other set holds this level once it was built
     [branch] if (here.a >= GiOccupied)
     {
-        NewR[texel] = NewG[texel] = NewB[texel] = float4(0.0, 0.0, 0.0, 0.0);
+        WriteOccupied(level, voxel, texel, shift, parity, oldValid);
         return;
     }
 
@@ -97,8 +171,9 @@ void main(uint3 threadId : SV_DispatchThreadID)
     float3 origin = GiOrigin(level);
     uint3 cell = (uint3)clamp(voxel * (int)GI_LIGHT_CELLS / res, 0, (int)GI_LIGHT_CELLS - 1);
     float4 shR = float4(0.0, 0.0, 0.0, 0.0), shG = shR, shB = shR;
-    float damping = GiShift.w;
-    bool oldValid = (GiFlags & 256u) != 0u && GiLevelValid(level); // the old set holds this level once it was built
+    PassParams passParams = LoadPassParams();
+    float damping = passParams.propagationDamping;
+    ShadowFilter filter = { 0.0, passParams.shadowFilterRadius, passParams.shadowNormalBias, passParams.shadowDepthBias };
     [unroll] for (uint n = 0u; n < 6u; n++)
     {
         int3 other = voxel + Neighbours[n];
@@ -111,9 +186,9 @@ void main(uint3 threadId : SV_DispatchThreadID)
         {
             // An occupied neighbour: its face towards this voxel, lit.
             float3 facePoint = origin + ((float3)other + 0.5 + toHere * 0.5) * voxelSize;
-            float3 direct = DirectLight(facePoint - CameraPos, toHere, cell);
+            float3 direct = DirectLight(filter, facePoint - CameraPos, toHere, cell);
             float3 emissive = VoxelAt(Emissive, EmissiveSampler, level, other).rgb;
-            float3 radiance = direct * neighbour.rgb + emissive;
+            float3 radiance = direct * neighbour.rgb / Pi + emissive;
             float4 lobe = ShLobe(toHere);
             shR += lobe * radiance.r;
             shG += lobe * radiance.g;
@@ -122,18 +197,17 @@ void main(uint3 threadId : SV_DispatchThreadID)
         else if (oldValid)
         {
             // An empty neighbour: what it held last time, where it was then, passed on this way.
-            int3 old = other + (int3)GiShift.xyz;
+            int3 old = other + (int3)shift;
             if (any(old < 0) || any(old >= res))
                 continue;
 
+            int3 oldTexel = GiStackedTexel(level, (uint3)old);
             float4 lobe = ShLobe(toHere) * (damping * NeighbourShare);
-            shR += lobe * ShIrradiance(VoxelAt(OldR, OldRSampler, level, old), toHere);
-            shG += lobe * ShIrradiance(VoxelAt(OldG, OldGSampler, level, old), toHere);
-            shB += lobe * ShIrradiance(VoxelAt(OldB, OldBSampler, level, old), toHere);
+            shR += lobe * ShIrradiance(OldSh(ShR0, ShR1, oldParity, oldTexel), toHere);
+            shG += lobe * ShIrradiance(OldSh(ShG0, ShG1, oldParity, oldTexel), toHere);
+            shB += lobe * ShIrradiance(OldSh(ShB0, ShB1, oldParity, oldTexel), toHere);
         }
     }
 
-    NewR[texel] = shR;
-    NewG[texel] = shG;
-    NewB[texel] = shB;
+    WriteSh(parity, texel, shR, shG, shB);
 }

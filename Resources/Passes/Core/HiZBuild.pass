@@ -1,0 +1,36 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 3135680498148328243
+    },
+    "each": {
+        "over": "count",
+        "max": 2
+    },
+    "creates": [
+        {
+            "name": "HiZ",
+            "kind": "buffer",
+            "per": "$hiZFloats",
+            "stride": 4,
+            "min": 4096,
+            "history": true,
+            "zero": true
+        }
+    ],
+    "reads": [
+        {
+            "name": "Depth",
+            "filter": "nearest"
+        }
+    ],
+    "writes": [
+        {
+            "name": "HiZ"
+        }
+    ],
+    "dispatch": {
+        "per": "view",
+        "tile": 64
+    }
+}

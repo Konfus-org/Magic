@@ -3,7 +3,7 @@
 // close in depth each is to the pixel, so the pattern goes but the darkening does not bleed across an edge
 // onto a surface at another depth. The bent normals average the same way. One thread per pixel of the view.
 
-#include "Include/Shade.hlsli"
+#include "Include/Frame.hlsli"
 #include "Lighting/AoCommon.hlsli"
 
 #define GROUP_SIZE 8
@@ -36,14 +36,15 @@ void main(uint3 threadId : SV_DispatchThreadID)
     uint2 pixel = (uint2)ViewOrigin + viewPixel;
     float depth = Depth.SampleLevel(DepthSampler, (float2(pixel) + 0.5) / float2(targetWidth, targetHeight), 0.0);
     float4 result = EncodeAo(float3(0.0, 0.0, 1.0), 1.0);
-    [branch] if (depth > 0.0 && (AoFlags & AoEnabledFlag) != 0u)
+    [branch] if (depth > 0.0)
     {
         float viewDepth = ViewDepth(depth);
+        float aoScale = rawSize.x / (float)targetWidth;
 
         // The raw texel under the pixel, and the 4 x 4 around it, kept inside the view's own rectangle of the raw target.
-        float2 aoOrigin = floor(ViewOrigin * AoScale);
-        float2 aoSize = ceil(ViewSize * AoScale);
-        float2 center = aoOrigin + (float2(viewPixel) + 0.5) * AoScale - 0.5;
+        float2 aoOrigin = floor(ViewOrigin * aoScale);
+        float2 aoSize = ceil(ViewSize * aoScale);
+        float2 center = aoOrigin + (float2(viewPixel) + 0.5) * aoScale - 0.5;
         float2 first = floor(center) - 1.0;
         float2 last = aoOrigin + aoSize - 1.0;
 

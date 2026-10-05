@@ -185,7 +185,7 @@ internal static class Instancing
         Pipelines.Acquire(ctx, cls);
         uint group = ctx.Buckets.Acquire(cls, meshSlot, ctx.Meshes.Range(meshSlot), out bool created);
         if (created)
-            ctx.Buckets.SetGi(group, GiVolumes.InflateFlat(ctx.Meshes.Box(meshSlot)), ctx.Bricks.Acquire(meshSlot), meshSlot);
+            ctx.Buckets.SetGi(group, GiBricks.InflateFlat(ctx.Meshes.Box(meshSlot)), ctx.Bricks.Acquire(meshSlot), meshSlot);
 
         (float Threshold, uint MeshSlot)[] lods = ctx.Meshes.Lods(meshSlot);
         if (lods.Length == 0)

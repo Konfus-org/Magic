@@ -1,0 +1,32 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 12342554174092210541
+    },
+    "creates": [
+        {
+            "name": "Ao",
+            "kind": "texture",
+            "format": "rgba8_unorm",
+            "scale": 1
+        }
+    ],
+    "reads": [
+        {
+            "name": "AoRaw",
+            "filter": "nearest"
+        },
+        {
+            "name": "Depth",
+            "filter": "nearest"
+        }
+    ],
+    "writes": [
+        {
+            "name": "Ao"
+        }
+    ],
+    "dispatch": {
+        "per": "view"
+    }
+}

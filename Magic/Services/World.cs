@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
 using Magic.Utils;
@@ -33,6 +33,12 @@ public sealed class World(Events events, Assets assets, Threads threads)
     /// sets another. <see cref="Handle{T}.None"/> shows none, and the opened domain is then drawn as it fills.
     /// </summary>
     public Handle<Domain> Loading { get; set; }
+
+    /// <summary>
+    /// How the scene is rendered: the <see cref="Pipeline"/> asset the renderer follows, the project's until a script
+    /// sets another. One that cannot be loaded draws nothing but the window's clear, logged once.
+    /// </summary>
+    public Handle<Pipeline> Pipeline { get; set; }
 
     /// <summary>
     /// Opens <paramref name="domain"/>: with <see cref="OpenMode.Replace"/> every open domain is closed first, with

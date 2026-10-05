@@ -1,0 +1,30 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 4979888633204104813
+    },
+    "each": {
+        "over": "bricks",
+        "max": 8
+    },
+    "reads": [
+        {
+            "name": "MeshVertices"
+        },
+        {
+            "name": "MeshIndices"
+        },
+        {
+            "name": "BrickJobs"
+        }
+    ],
+    "writes": [
+        {
+            "name": "BrickAtlas"
+        }
+    ],
+    "dispatch": {
+        "indirect": "BrickArgs",
+        "indirectStride": 16
+    }
+}

@@ -90,23 +90,96 @@ struct GpuDrawArgs
 };
 
 // 64 B: one point or spot light, in absolute world space. A point light is a spot whose cone never ends: its
-// cosines are below any a direction can have, so nothing branches on the kind. shadow.x is the first of its
-// shadow records (GpuShadowRecord), 0xFFFFFFFF when it casts none this frame; shadow.y how many faces it has
-// (1 a spot, 6 a point).
+// cosines are below any a direction can have, so nothing branches on the kind. shadow.x is the row of its first
+// shadow view (GpuShadowView), ShadowNone when it holds no pages this frame; shadow.y how many faces it has (1 a
+// spot, 6 a point); shadow.z bit 0 whether it may cast at all. The CPU uploads x and y as none; the GPU's local
+// shadow selection fills them in.
 struct GpuLight
 {
     float4 positionRange;     // xyz position, w range in metres: nothing farther is lit
     float4 colorInnerCos;     // rgb linear colour times intensity, w cos(half the inner cone angle)
     float4 directionOuterCos; // xyz the direction the light travels, w cos(half the outer cone angle)
-    uint4 shadow;             // x first shadow record or none, y face count, zw unused
+    uint4 shadow;             // x first shadow view row or none, y face count, z LightCastsShadows, w unused
 };
 
-// 96 B: one face of a local light's shadow map, as the lighting reads it.
-struct GpuShadowRecord
+// 400 B: one shadow view, a cascade of the sun or a face of a local light, as the GPU planned it
+// (Include/ShadowViews.hlsli): its tile of the atlas, its matrices relative to its own eye (a position relative
+// to the camera is moved by CameraPos - eye first), and the planes of the receivers' volume the casters are
+// culled against (none for a face). flags.y set means the tile is drawn again this frame; flags.w is the slice
+// of the visible-id buffer its draw reads from then.
+struct GpuShadowView
 {
-    float4 rectUv;            // xy where its page starts in the atlas, zw the page's size, in uv
-    float4x4 viewProj;        // camera-relative world to the face's clip space, reverse-Z, finite far
-    float4 params;            // x metres per texel per metre from the light, y the near plane, zw unused
+    float4x4 viewProj;        // eye-relative world to the tile's clip space, reverse-Z
+    float4x4 rotation;        // the view's rotation: rows right, up, forward
+    float4 eye;               // xyz the eye, absolute; w metres per texel (orthographic) or per texel per metre from the eye (perspective)
+    float4 tileUv;            // xy where the tile starts in the atlas, zw its size, in uv
+    float4 tileTexels;        // the same in texels
+    float4 range;             // x the view depth a cascade ends at (a face: the light's range), y near plane, z far plane, w tan(half the fov) for a face
+    uint4 flags;              // x ShadowView* bits, y refreshed this frame, z receiver plane count, w visible-id slice
+    float4 planes[12];        // the receivers' swept volume, relative to eye, normals pointing in
+};
+
+// 64 B: what the shadow planning passes tell the rest of the frame.
+struct GpuShadowHeader
+{
+    uint cascadeCount;
+    uint flags;               // Shadow*Flag bits
+    uint refreshedCount;      // rows drawn again this frame, listed in the refreshed buffer
+    uint generation;          // a hash of the layout: when it changes every tile is drawn again
+    float4 atlasTexel;        // xy one texel in uv, zw a cascade tile's size in uv
+    uint4 layout;             // x atlas width, y height, z cascade resolution, w page size, all in texels
+    uint4 slots;              // x local light slots, y rows in use, zw unused
+};
+
+// 48 B: a local light's hold on its pages between frames: what tells the light apart (its place and reach,
+// quantised) and when its faces were last drawn.
+struct GpuLocalShadowSlot
+{
+    float4 key;               // xyz position quantised, w range
+    float4 key2;              // xyz direction quantised, w cos(half the outer cone angle)
+    uint4 state;              // x used, y faces, z the frame last drawn (ShadowNone never), w the light's row this frame
+};
+
+// 128 B: the GI clipmap as the GPU plans it each frame (Gi/GiPlan.comp.hlsl, twin: GpuGiState): how many levels of
+// how many voxels, which level is rebuilt this frame, which have been built at least once (valid, bit per
+// level; previousValid as it was before this frame), where each level sits (origins: xyz the min corner,
+// absolute, w the voxel size), how many voxels the rebuilt level's origin moved (shift), and which of the two
+// light sets holds each level's current light (parity, one word per level).
+struct GpuGiState
+{
+    uint levels;
+    uint resolution;
+    uint updateLevel;
+    uint valid;
+    float4 origins[4];
+    float4 shift;
+    uint4 parity;
+    uint4 extra;              // x the layout's generation, y previousValid, zw unused
+};
+
+// 48 B: one occupancy brick to build (twin: GpuBrickJob): the mesh's box in its own space, where its triangles sit
+// in the mega buffers, and the brick of the atlas it fills.
+struct GpuBrickJob
+{
+    float4 boxMin;
+    float4 boxMax;
+    uint firstIndex;
+    uint indexCount;
+    int vertexOffset;
+    uint brick;
+};
+
+// 32 B: this frame's counts, uploaded by the CPU (twin: GpuCounts), so a pass sizes its work by them.
+struct GpuCounts
+{
+    uint pageCount;
+    uint chunkCount;
+    uint lightCount;
+    uint visibleHighWater;
+    uint glowCount;
+    uint frameIndex;
+    uint groupCount;
+    uint brickJobCount;
 };
 
 // The lights of a view are binned in two steps. First into screen tiles of LightTileSize pixels a side

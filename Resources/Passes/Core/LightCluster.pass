@@ -1,0 +1,33 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 8089524614310274384
+    },
+    "creates": [
+        {
+            "name": "LightClusters",
+            "kind": "buffer",
+            "per": "$viewTiles",
+            "stride": 4096,
+            "min": 4096
+        }
+    ],
+    "reads": [
+        {
+            "name": "Lights"
+        },
+        {
+            "name": "LightTiles"
+        }
+    ],
+    "writes": [
+        {
+            "name": "LightClusters"
+        }
+    ],
+    "dispatch": {
+        "per": "view",
+        "tile": 128,
+        "depth": 16
+    }
+}

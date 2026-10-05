@@ -1,0 +1,18 @@
+{
+    "kind": "fullscreen",
+    "shader": {
+        "id": 10067
+    },
+    "reads": [
+        {
+            "name": "Depth",
+            "filter": "nearest"
+        }
+    ],
+    "writes": [
+        {
+            "name": "Hdr",
+            "load": "load"
+        }
+    ]
+}

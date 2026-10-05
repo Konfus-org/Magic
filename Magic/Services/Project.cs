@@ -41,6 +41,12 @@ public sealed record Project
     public Handle<Domain> Loading { get; init; } = Handle<Domain>.None;
 
     /// <summary>
+    /// How the scene is rendered (<c>"pipeline": { "id": N }</c>, a <see cref="Pipeline"/> asset); <c>--pipeline</c>
+    /// overrides it. Left out, it is the engine's own <c>Pipelines/Default.pipeline</c>.
+    /// </summary>
+    public Handle<Pipeline> Pipeline { get; init; } = Handle<Pipeline>.None;
+
+    /// <summary>
     /// Whether the console window is open when the host starts (<c>"console": true</c>), for a project that is
     /// driven by typing: the samples. The grave key opens it either way.
     /// </summary>

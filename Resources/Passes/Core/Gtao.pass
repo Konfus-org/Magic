@@ -1,0 +1,50 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 8260596084233995265
+    },
+    "creates": [
+        {
+            "name": "AoRaw",
+            "kind": "texture",
+            "format": "rgba16_float",
+            "scale": 0.5
+        }
+    ],
+    "reads": [
+        {
+            "name": "Depth",
+            "filter": "nearest"
+        },
+        {
+            "name": "Normal",
+            "filter": "nearest"
+        }
+    ],
+    "writes": [
+        {
+            "name": "AoRaw"
+        }
+    ],
+    "dispatch": {
+        "per": "view",
+        "tile": 16
+    },
+    "params": {
+        "radius": {
+            "x": 1
+        },
+        "maxRadiusPixels": {
+            "x": 64
+        },
+        "thickness": {
+            "x": 0.5
+        },
+        "slices": {
+            "x": 3
+        },
+        "steps": {
+            "x": 4
+        }
+    }
+}

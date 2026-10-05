@@ -1,0 +1,28 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 12452793949985576477
+    },
+    "reads": [
+        {
+            "name": "Pages"
+        },
+        {
+            "name": "Cells"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "writes": [
+        {
+            "name": "GiPageList"
+        },
+        {
+            "name": "GiPageArgs"
+        }
+    ],
+    "dispatch": {
+        "per": "$pageCount"
+    }
+}

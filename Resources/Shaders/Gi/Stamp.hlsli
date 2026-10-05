@@ -28,7 +28,7 @@ bool Footprint(uint level, float3 worldMin, float3 worldMax, out int3 first, out
 {
     float voxel = GiVoxel(level);
     float3 origin = GiOrigin(level);
-    int res = (int)GiResolution;
+    int res = (int)GiResolution();
     first = clamp((int3)floor((worldMin - origin) / voxel), 0, res - 1);
     last = clamp((int3)floor((worldMax - origin) / voxel), 0, res - 1);
     bool inside = all(worldMax >= origin) && all(worldMin <= origin + GiExtent(level));

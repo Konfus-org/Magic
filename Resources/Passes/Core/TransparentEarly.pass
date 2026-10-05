@@ -1,0 +1,65 @@
+{
+    "kind": "draw",
+    "reads": [
+        {
+            "name": "ShadowAtlas",
+            "filter": "comparison"
+        },
+        {
+            "name": "GiShR0",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShR1",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShG0",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShG1",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShB0",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShB1",
+            "filter": "linear"
+        },
+        {
+            "name": "GiSkyVis",
+            "filter": "linear"
+        },
+        {
+            "name": "Lights"
+        },
+        {
+            "name": "LightTiles"
+        },
+        {
+            "name": "LightClusters"
+        },
+        {
+            "name": "ShadowViews"
+        },
+        {
+            "name": "ShadowHeader"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "draw": {
+        "pipeline": "forward",
+        "colors": [
+            "Hdr"
+        ],
+        "depth": "Depth",
+        "load": "load",
+        "args": "DrawArgsEarly",
+        "instances": "VisibleIds"
+    }
+}

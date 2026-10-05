@@ -532,10 +532,12 @@ public static class Debugging
     }
 
     /// <summary>
-    /// The engine's numbers in one place: whatever a system wants shown is <see cref="Set"/> under a dotted name
-    /// (<c>Render.Draws</c>, <c>Streaming.Loaded</c>, <c>Pool.Texture.Bytes</c>), from any thread, as often as it
-    /// changes; the debug display takes them all and prints them, grouped by the first part. Nothing here is
-    /// computed: a rate or an average is the caller's to make before setting it.
+    /// The engine's numbers in one place: whatever a system wants shown is <see cref="Set"/> under a dotted name,
+    /// from any thread, as often as it changes; the debug display takes them all and prints them. The first part is
+    /// the tab (<c>Frame</c>, <c>Rendering</c>, <c>Streaming</c>), the last the name, and anything between is a
+    /// sub-category shown as a block within the tab: <c>Rendering.Draws</c>, <c>Rendering.Gi.Bricks</c>,
+    /// <c>Streaming.Pool.Texture.Bytes</c>, <c>Frame.GC.HeapMB</c>. Nothing here is computed: a rate or an average
+    /// is the caller's to make before setting it.
     /// </summary>
     public static class Stats
     {

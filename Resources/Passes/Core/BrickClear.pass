@@ -1,0 +1,25 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 12987387584568571592
+    },
+    "each": {
+        "over": "bricks",
+        "max": 8
+    },
+    "reads": [
+        {
+            "name": "BrickJobs"
+        }
+    ],
+    "writes": [
+        {
+            "name": "BrickAtlas"
+        }
+    ],
+    "dispatch": {
+        "groups": [
+            64
+        ]
+    }
+}

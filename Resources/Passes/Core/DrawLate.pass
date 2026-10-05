@@ -1,0 +1,16 @@
+{
+    "kind": "draw",
+    "draw": {
+        "pipeline": "material",
+        "colors": [
+            "Emissive",
+            "Albedo",
+            "Normal",
+            "Material"
+        ],
+        "depth": "Depth",
+        "load": "load",
+        "args": "DrawArgsLate",
+        "instances": "VisibleIds"
+    }
+}

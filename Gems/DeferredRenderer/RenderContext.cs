@@ -6,19 +6,8 @@ using Magic.Interfaces;
 namespace DeferredRendererGem;
 
 /// <summary>
-/// The culling compute pipelines; the late-pass ones are 0 without occlusion.
-/// </summary>
-internal sealed record CullPipelines(GpuPipeline PageCull, GpuPipeline CullEarly, GpuPipeline SeedLate, GpuPipeline CullLate, GpuPipeline HiZBuild);
-
-/// <summary>
-/// The lighting compute pipelines: the two that bin the lights, into screen tiles and then into the tiles' depth
-/// slices, and the one that shades the gbuffer.
-/// </summary>
-internal sealed record LightingPipelines(GpuPipeline LightCull, GpuPipeline LightCluster, GpuPipeline Shade);
-
-/// <summary>
 /// Everything the host's render system keeps for one renderer: the GPU tables (meshes, textures, materials, instances, draw
-/// groups), the shader text and pipelines, the custom passes, each render target's textures and each view's buffers. Built when a renderer appears and dropped whole when it changes (a reload): its handles
+/// groups), the shader text and pipelines, the pipeline's passes and what they made, each render target's textures and each view's buffers. Built when a renderer appears and dropped whole when it changes (a reload): its handles
 /// mean nothing to another one. State only; <c>Systems/Rendering</c> does the work.
 /// </summary>
 internal sealed class RenderContext
@@ -58,32 +47,35 @@ internal sealed class RenderContext
     /// </summary>
     public PipelineTable Pipelines { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
 
-    public PassTable Passes { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
-
-    public CullPipelines Cull { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
-
-    public LightingPipelines Lighting { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
-
-    public AoPipelines Ao { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
-
-    public GiPipelines Gi { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
+    /// <summary>
+    /// The pipeline the frame follows and every pass it names.
+    /// </summary>
+    public PipelineState Pipeline { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
 
     /// <summary>
-    /// The GI's volumes and buffers, and the occupancy bricks of the meshes in use.
+    /// Every name a pass reads or writes, and what the passes created behind the names.
     /// </summary>
-    public GiVolumes GiVolumes { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
+    public ResourceRegistry Resources { get; } = new();
 
+    /// <summary>
+    /// The occupancy bricks of the meshes in use, and the atlas that holds them (<c>BrickAtlas</c> to a pass).
+    /// </summary>
     public GiBricks Bricks { get; } = new();
 
-    /// <summary>
-    /// The shadow maps: the atlas, its pipelines, the local lights' pages and this frame's shadow views.
-    /// </summary>
-    public ShadowState Shadows { get => field ?? throw new InvalidOperationException("The render context is read before it is built."); set; }
+    public required GpuTexture BrickAtlas { get; init; }
 
     /// <summary>
-    /// The engine's own pipelines by the shaders they are built from, for hot reload (<see cref="BuiltIns"/>).
+    /// This frame's brick jobs (<see cref="GpuBrickJob"/> rows) and their indirect dispatches, uploaded at Plan for the
+    /// passes that run once per job.
     /// </summary>
-    public List<(ulong[] Shaders, Action<RenderContext> Rebuild)> BuiltIns { get; } = [];
+    public required GrowableBuffer BrickJobs { get; init; }
+
+    public required GrowableBuffer BrickArgs { get; init; }
+
+    /// <summary>
+    /// An 8 x 8 x 8 volume bound in place of one a pass has not made.
+    /// </summary>
+    public required GpuTexture StubVolume { get; init; }
 
     /// <summary>
     /// The frame's point and spot lights, one <see cref="GpuLight"/> each, uploaded whole every frame.
@@ -97,11 +89,27 @@ internal sealed class RenderContext
 
     public uint GlowCount { get; set; }
 
-    public GpuPipeline GlowPipeline { get; set; }
+    /// <summary>
+    /// This frame's counts (<see cref="GpuCounts"/>), uploaded whole every frame for the passes that size their work by them.
+    /// </summary>
+    public required GrowableBuffer Counts { get; init; }
+
+    /// <summary>
+    /// A 1 x 1 depth texture and a 16-byte buffer, bound in place of what a pass has not made (a shadow atlas while no
+    /// shadow pass runs), so every binding is always there.
+    /// </summary>
+    public required GpuTexture StubDepth { get; init; }
+
+    public required GpuBuffer StubBuffer { get; init; }
 
     public required GpuSampler LinearClamp { get; init; }
 
     public required GpuSampler NearestClamp { get; init; }
+
+    /// <summary>
+    /// What a pass reads a shadow map with: a comparison against the fragment's depth, the closer side winning.
+    /// </summary>
+    public required GpuSampler Comparison { get; init; }
 
     /// <summary>
     /// Assets the tables are about to ask for, loading off the render thread, by id.
@@ -137,17 +145,7 @@ internal sealed class RenderContext
     public Dictionary<RenderTarget, FrameTargets> Targets { get; } = [];
 
     /// <summary>
-    /// By the view's index in the frame's view list.
-    /// </summary>
-    public List<ViewBuffers> Views { get; } = [];
-
-    /// <summary>
     /// Windows a camera targets that are not open, warned about once each.
     /// </summary>
     public HashSet<RenderTarget> MissingTargets { get; } = [];
-
-    /// <summary>
-    /// What a resized pyramid is cleared with; grows, never shrinks.
-    /// </summary>
-    public float[] Zeros { get; set; } = [];
 }

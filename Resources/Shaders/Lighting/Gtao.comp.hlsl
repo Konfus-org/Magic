@@ -4,15 +4,24 @@
 // surface's normal, is how much of the hemisphere the texel sees, and the arc's middle, summed over the
 // slices, is the bent normal: where the open sky is. Nothing temporal: the slices are rotated and the steps
 // offset by a fixed 4 x 4 pattern (AoCommon.hlsli) that AoBlur.comp.hlsl smooths out. Runs at the occlusion
-// target's resolution (AoScale of the view's), reading the full-resolution depth at every tap, and writes
-// the raw texel the blur reads. One thread per texel of the view's rectangle in the target.
+// target's resolution (its scale of the view's, read off the textures), reading the full-resolution depth at
+// every tap, and writes the raw texel the blur reads. One thread per texel of the view's rectangle in the target.
 
-#include "Include/Shade.hlsli"
+#include "Include/Frame.hlsli"
 #include "Lighting/AoCommon.hlsli"
 
 #define GROUP_SIZE 8
 
 static const float HalfPi = 1.57079633;
+
+struct PassParams
+{
+    float radius = 1.0;          // metres around a surface the occlusion is searched in
+    float maxRadiusPixels = 64.0; // the most pixels that radius may be on screen
+    float thickness = 0.5;       // share of the radius an occluder is taken to be thick
+    uint slices = 3;             // directions searched per texel
+    uint steps = 4;              // taps per direction
+};
 
 Texture2D<float> Depth : READ(0);
 SamplerState DepthSampler : SAMPLER(0);
@@ -35,37 +44,41 @@ float3 PositionAt(float2 viewPixel, float2 targetSize, out float viewDepth)
 [numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
-    uint2 aoSize = (uint2)ceil(ViewSize * AoScale);
+    PassParams passParams = LoadPassParams();
+    uint targetWidth, targetHeight;
+    Depth.GetDimensions(targetWidth, targetHeight);
+    uint aoWidth, aoHeight;
+    AoRaw.GetDimensions(aoWidth, aoHeight);
+    float aoScale = (float)aoWidth / (float)targetWidth;
+    uint2 aoSize = (uint2)ceil(ViewSize * aoScale);
     uint2 aoPixel = threadId.xy;
     if (any(aoPixel >= aoSize))
         return;
 
-    uint2 aoOrigin = (uint2)floor(ViewOrigin * AoScale);
-    uint targetWidth, targetHeight;
-    Depth.GetDimensions(targetWidth, targetHeight);
+    uint2 aoOrigin = (uint2)floor(ViewOrigin * aoScale);
     float2 targetSize = float2(targetWidth, targetHeight);
 
     // The texel's own surface, at its centre in full-resolution pixels.
-    float2 viewPixel = (float2(aoPixel) + 0.5) / AoScale;
+    float2 viewPixel = (float2(aoPixel) + 0.5) / aoScale;
     float viewDepth;
     float3 position = PositionAt(viewPixel, targetSize, viewDepth);
     float3 worldNormal = NormalizeOrZero(Normal.SampleLevel(NormalSampler, (ViewOrigin + viewPixel) / targetSize, 0.0).xyz * 2.0 - 1.0);
     float3 normal = ViewNormal(worldNormal);
     float3 toCamera = IsOrthographic != 0u ? float3(0.0, 0.0, -1.0) : NormalizeOrZero(-position);
-    float radius = AoPixelRadius(viewDepth);
+    float radius = AoPixelRadius(viewDepth, passParams.radius, passParams.maxRadiusPixels, aoScale);
 
     float4 result = EncodeAoRaw(1.0, viewDepth, normal);
-    [branch] if (viewDepth > 0.0 && radius >= 1.0 && (AoFlags & AoEnabledFlag) != 0u)
+    [branch] if (viewDepth > 0.0 && radius >= 1.0)
     {
         float rotation, offset;
         AoNoise(aoPixel, rotation, offset);
-        float thickness = AoParams.x * AoParams.z;
-        float fallRange = max(AoParams.x - thickness, 1e-4);
+        float thickness = passParams.radius * passParams.thickness;
+        float fallRange = max(passParams.radius - thickness, 1e-4);
 
         float visibility = 0.0;
         float3 bent = float3(0.0, 0.0, 0.0);
-        uint slices = max(AoSlices, 1u);
-        uint steps = max(AoSteps, 1u);
+        uint slices = max(passParams.slices, 1u);
+        uint steps = max(passParams.steps, 1u);
         [loop] for (uint slice = 0u; slice < slices; slice++)
         {
             float phi = (slice + rotation) * Pi / (float)slices;
@@ -85,7 +98,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
             [loop] for (uint step = 0u; step < steps; step++)
             {
                 float along = (step + offset) / (float)steps;
-                float distancePixels = max(along * along * radius, 1.0) / AoScale;
+                float distancePixels = max(along * along * radius, 1.0) / aoScale;
                 [unroll] for (int side = 0; side < 2; side++)
                 {
                     float sign2 = side == 0 ? -1.0 : 1.0;

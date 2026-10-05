@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Rendering;
 using Magic.Utils;
@@ -18,6 +18,11 @@ namespace DeferredRendererGem;
 internal static class Pipelines
 {
     public const string Template = "Templates/GBuffer.frag.hlsl";
+
+    /// <summary>
+    /// The template a transparent class is composed around: lit as it is drawn, blended over Hdr.
+    /// </summary>
+    public const string ForwardTemplate = "Templates/Forward.frag.hlsl";
     public const string VertexTemplate = "Templates/Mesh.vert.hlsl";
     private const string Contract = "Include/Surface.hlsli";
 
@@ -148,12 +153,15 @@ internal static class Pipelines
 
         try
         {
-            PipelineDesc desc = new(table.VertexShader, result.Payload, table.ColorFormats)
+            bool transparent = cls.Variant.HasFlag(SurfaceVariant.Transparent);
+            PipelineDesc desc = new(table.VertexShader, result.Payload, transparent ? [FrameTargets.HdrFormat] : table.ColorFormats)
             {
                 Buffers = VertexBuffers,
                 Attributes = VertexAttributes,
                 Depth = table.DepthFormat,
                 Cull = cls.Variant.HasFlag(SurfaceVariant.DoubleSided) ? GpuCull.None : GpuCull.Back,
+                AlphaBlend = transparent,
+                DepthWrite = !transparent,
             };
             GpuPipeline pipeline = ctx.Gpu.CreatePipeline(desc);
             ctx.Gpu.Release(built.Pipeline);
@@ -171,7 +179,7 @@ internal static class Pipelines
     {
         SurfaceSource? surface = Shaders.Surface(ctx, cls.Surface);
         Shader? surfaceShader = Shaders.Get(ctx, new Handle<Shader>(cls.Surface));
-        Shader? template = Shaders.GetByPath(ctx, Template);
+        Shader? template = Shaders.GetByPath(ctx, cls.Variant.HasFlag(SurfaceVariant.Transparent) ? ForwardTemplate : Template);
         Shader? contract = Shaders.GetByPath(ctx, Contract);
         if (surface is null || surfaceShader is null || template is null || contract is null)
         {
@@ -197,6 +205,7 @@ internal static class Pipelines
         StringBuilder sb = new(surface.Stripped.Length + templateText.Length + 512);
         sb.Append("#define SURFACE_MASKED ").Append(variant.HasFlag(SurfaceVariant.Masked) ? '1' : '0').Append('\n');
         sb.Append("#define SURFACE_DOUBLE_SIDED ").Append(variant.HasFlag(SurfaceVariant.DoubleSided) ? '1' : '0').Append('\n');
+        sb.Append("#define SURFACE_FORWARD ").Append(variant.HasFlag(SurfaceVariant.Transparent) ? '1' : '0').Append('\n');
         if (variant.HasFlag(SurfaceVariant.FailureForced))
             sb.Append("#define FAILURE_FORCE 1\n");
         sb.Append("#include \"Include/Surface.hlsli\"\n");

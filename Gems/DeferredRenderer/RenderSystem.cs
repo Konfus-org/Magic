@@ -5,6 +5,7 @@ using Magic.Contexts.Components;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
 using Magic.Contexts.Settings;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
@@ -16,7 +17,7 @@ namespace DeferredRendererGem;
 
 /// <summary>
 /// Draws the entities through whatever <see cref="IRendering"/> is loaded, which is only the GPU: everything else (the GPU
-/// tables, shaders and pipelines, culling, lighting, passes, hot reload) is here and in <c>Systems/Rendering</c>, its state in one
+/// tables, shaders and pipelines, culling, lighting, the pipeline's passes, hot reload) is here, its state in one
 /// <see cref="RenderContext"/>. <see cref="Run"/> runs in Render, after LateUpdate and the transforms, one way, top to bottom:
 /// asset changes reload; the entities are synced into the tables (every <see cref="Renderer"/> that has a
 /// <see cref="WorldTransform"/> and no <see cref="RenderInstance"/> yet is registered once its model and materials
@@ -44,10 +45,17 @@ internal sealed class RenderSystem : ISystem
     /// </summary>
     private const long GeometryBudgetBytes = 8 * 1024 * 1024;
 
+    /// <summary>
+    /// How many waiting entities a frame looks at: more than <see cref="RegisterBudgetMs"/> ever lets in. Copying out all
+    /// of them while a hundred thousand stream in cost more than registering the few hundred that fit.
+    /// </summary>
+    private const int RegisterCandidates = 1024;
+
     private readonly IEcs _ecs;
     private readonly Assets _assets;
     private readonly IFileSystem _files;
     private readonly Project _project;
+    private readonly World _world;
     private readonly IWindowRegistry? _windows;
     private readonly IRendering? _rendering;
     private readonly Threads _threads;
@@ -95,7 +103,7 @@ internal sealed class RenderSystem : ISystem
     private readonly QueryChunkAction<Renderer, WorldTransform> _collectUnregistered;
     private readonly QueryChunkAction<WorldTransform, RenderInstance> _move;
     private readonly QueryChunkAction<Camera, WorldTransform> _collectViews;
-    private readonly QueryChunkAction<PostProcessing> _collectPasses;
+    private readonly QueryChunkAction<PostProcessing> _collectPosts;
     private readonly QueryChunkAction<Sky> _collectSky;
     private readonly QueryChunkAction<DirectionalLight, WorldTransform> _collectDirectional;
     private readonly QueryChunkAction<PointLight, WorldTransform> _collectPoints;
@@ -103,9 +111,9 @@ internal sealed class RenderSystem : ISystem
     private readonly QueryChunkAction<Glow, WorldTransform> _collectGlows;
 
     private BuiltWith? _builtWith; // null until the first run
-    private PassList _passes;      // the world's post-processing this frame; empty without one
-    private int _passLists;        // how many entities carry a PostProcessing this frame
-    private bool _warnedPassLists;
+    private PostList _posts;       // the world's post-processing this frame; empty without one
+    private int _postLists;        // how many entities carry a PostProcessing this frame
+    private bool _warnedPostLists;
     private Vector3? _sky;         // the world's sky colour this frame; null without a Sky entity
     private int _skyCount;           // how many entities carry a Sky this frame
     private bool _warnedSkies;
@@ -113,13 +121,14 @@ internal sealed class RenderSystem : ISystem
     private bool _lastParentHidden; // a chunk's entities share one, so it is looked up once a frame, not once each.
                                     // Lights and glows ask once per span (one table: one parent), not per entity
 
-    public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, IWindowRegistry? windows, IRendering? rendering, Threads threads)
+    public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, World world, IWindowRegistry? windows, IRendering? rendering, Threads threads)
     {
         _threads = threads;
         _ecs = ecs;
         _assets = assets;
         _files = files;
         _project = project;
+        _world = world;
         _windows = windows;
         _rendering = rendering;
         _unregistered = ecs.Query<Renderer, WorldTransform>().Without<RenderInstance>().Build();
@@ -157,7 +166,7 @@ internal sealed class RenderSystem : ISystem
         _collectUnregistered = CollectUnregistered;
         _move = Move;
         _collectViews = CollectViews;
-        _collectPasses = CollectPasses;
+        _collectPosts = CollectPosts;
         _collectSky = CollectSky;
         _collectDirectional = CollectDirectional;
         _collectPoints = CollectPoints;
@@ -195,6 +204,11 @@ internal sealed class RenderSystem : ISystem
     private RenderContext? Context { get; set; }
 
     /// <summary>
+    /// The pipeline's passes and their parameters, over whatever context there is.
+    /// </summary>
+    public IPipelineTuning Tuning => field ??= new PipelineTuning(() => Context);
+
+    /// <summary>
     /// Syncs the entities into the render state and records the scene into <paramref name="frame"/>'s commands, drawing into
     /// the windows of the <see cref="IWindowRegistry"/>. Without a renderer it does nothing.
     /// </summary>
@@ -210,14 +224,17 @@ internal sealed class RenderSystem : ISystem
         // The previous frame was submitted and nothing of this one is uploaded yet: in a debugging renderer, when asked
         // for, the periodic culling check of what it drew.
         if (ctx.Gpu.Debug && ctx.Settings.CullingCheck && frame.Number % RenderChecks.VerifyEveryFrames == 0 && _plan.Views.Count > 0)
-            RenderChecks.Verify(ctx, _plan.Views[0].Buffers, _plan.Views[0].Constants);
+        {
+            RenderChecks.Verify(ctx, _plan.Views[0].Resources, _plan.Views[0].Constants);
+            RenderChecks.VerifyShadowPlan(ctx, _plan.Views[_plan.MainView].Constants);
+        }
 
         // Reload: what changed on disk, and the loads and compiles that finished.
         ApplyAssetChanges(ctx, frame.Events.Span);
         Preloads.Poll(ctx, frame.Number);
         ApplyReloads(ctx, frame.Number);
         ctx.Pipelines.Compiles.Poll(ctx, Pipelines.FinishCompile);
-        ctx.Passes.Compiles.Poll(ctx, Passes.FinishCompile);
+        ctx.Pipeline.Compiles.Poll(ctx, PassLoader.FinishCompile);
 
         // Sync: the entities into the tables. The moves read every chunk's columns as they are: no copy, and statics and
         // unchanged matrices are skipped.
@@ -247,32 +264,29 @@ internal sealed class RenderSystem : ISystem
         Materials.Flush(ctx);
         Meshes.Flush(ctx);
         Instancing.Flush(ctx);
-        Shadows.BeginFrame(ctx, frame.Number, CountPerspective(_views));
-        Shadows.SelectLocal(ctx, CollectionsMarshal.AsSpan(_lights), CollectionsMarshal.AsSpan(_views));
-        Shadows.UploadRecords(ctx);
-        Gi.Plan(ctx, CollectionsMarshal.AsSpan(_views), frame.Number);
-        Lighting.Upload(ctx, CollectionsMarshal.AsSpan(_lights));
-        Glows.Upload(ctx, CollectionsMarshal.AsSpan(_glows));
+        Lights.UploadLights(ctx, CollectionsMarshal.AsSpan(_lights));
+        Lights.UploadGlows(ctx, CollectionsMarshal.AsSpan(_glows));
 
         long recording = Stopwatch.GetTimestamp();
         double syncMs = Stopwatch.GetElapsedTime(started, recording).TotalMilliseconds;
 
         // Plan, then record: the plan is everything the commands are made from.
-        Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), _passes, LightingConstants.From(CollectionsMarshal.AsSpan(_lights), _sky), (float)frame.Time);
+        Handle<Pipeline> pipeline = _world.Pipeline.IsValid ? _world.Pipeline : _assets.Find<Pipeline>(Pipeline.DefaultPath);
+        Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), pipeline, _posts, LightingConstants.From(CollectionsMarshal.AsSpan(_lights), _sky), (float)frame.Time, frame.Number);
         FailureLabels.Show(ctx);
         (int draws, int dispatches) = Scene.Record(ctx, frame.DrawCommands, _plan);
         float recordMs = (float)Stopwatch.GetElapsedTime(recording).TotalMilliseconds;
 
         // The host submits after this, so Render.SubmitMs and Render.WaitMs (its stats) are the previous frame's.
-        Debugging.Stats.Set("Render.SyncMs", syncMs);
-        Debugging.Stats.Set("Render.RecordMs", recordMs);
-        Debugging.Stats.Set("Render.Instances", ctx.Instances.Alive);
-        Debugging.Stats.Set("Render.Lights", _lights.Count);
-        Debugging.Stats.Set("Render.Draws", draws);
-        Debugging.Stats.Set("Render.Dispatches", dispatches);
-        Debugging.Stats.Set("Render.PipelinesPending", ctx.Pipelines.Pending);
-        Debugging.Stats.Set("Render.ResidentMeshes", ctx.Meshes.MeshCount);
-        Debugging.Stats.Set("Render.ResidentTextures", ctx.Textures.Count);
+        Debugging.Stats.Set("Rendering.SyncMs", syncMs);
+        Debugging.Stats.Set("Rendering.RecordMs", recordMs);
+        Debugging.Stats.Set("Rendering.Instances", ctx.Instances.Alive);
+        Debugging.Stats.Set("Rendering.Lights", _lights.Count);
+        Debugging.Stats.Set("Rendering.Draws", draws);
+        Debugging.Stats.Set("Rendering.Dispatches", dispatches);
+        Debugging.Stats.Set("Rendering.PipelinesPending", ctx.Pipelines.Pending);
+        Debugging.Stats.Set("Rendering.ResidentMeshes", ctx.Meshes.MeshCount);
+        Debugging.Stats.Set("Rendering.ResidentTextures", ctx.Textures.Count);
     }
 
     /// <summary>
@@ -311,7 +325,7 @@ internal sealed class RenderSystem : ISystem
     {
         GpuStructs.AssertLayout();
         RenderSettings settings = project.Settings.Render;
-        Debugging.Log.Verbose($"Render settings: occlusion {settings.OcclusionCulling}, anisotropy {settings.Anisotropy}, resolution {(settings.Resolution.IsEmpty ? "the window's" : $"{settings.Resolution.Width} x {settings.Resolution.Height}")}.");
+        Debugging.Log.Verbose($"Render settings: anisotropy {settings.Anisotropy}, resolution {(settings.Resolution.IsEmpty ? "the window's" : $"{settings.Resolution.Width} x {settings.Resolution.Height}")}.");
 
         ulong defaultSurface = assets.Find<Shader>("Shaders/Surfaces/Pbr.surf.hlsl").Id;
         ulong failureSurface = assets.Find<Shader>("Shaders/Surfaces/Failure.surf.hlsl").Id;
@@ -337,23 +351,26 @@ internal sealed class RenderSystem : ISystem
             Buckets = new Buckets(gpu, 1 << 22),
             LinearClamp = gpu.CreateSampler(new SamplerDesc(GpuFilter.Linear, GpuAddress.Clamp)),
             NearestClamp = gpu.CreateSampler(new SamplerDesc(GpuFilter.Nearest, GpuAddress.Clamp)),
-            Lights = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead, 64 * GpuLight.Size),
+            Comparison = gpu.CreateSampler(new SamplerDesc(GpuFilter.Linear, GpuAddress.Clamp, Compare: GpuCompare.GreaterOrEqual)),
+            Lights = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite | GpuBufferUsage.GraphicsRead, 64 * GpuLight.Size),
             Glows = new GrowableBuffer(gpu, GpuBufferUsage.GraphicsRead, 64 * GpuGlow.Size),
+            Counts = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead | GpuBufferUsage.GraphicsRead, GpuCounts.Size),
+            StubDepth = gpu.CreateTexture(new TextureDesc(gpu.DepthFormat, GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler, 1, 1)),
+            StubBuffer = gpu.CreateBuffer(GpuBufferUsage.ComputeRead | GpuBufferUsage.GraphicsRead, 16),
+            StubVolume = gpu.CreateTexture(new TextureDesc(GpuFormat.Rgba8Unorm, GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite, 8, 8, Layers: 8, Kind: GpuTextureKind.Texture3D)),
+            BrickAtlas = gpu.CreateTexture(new TextureDesc(GpuFormat.R8Unorm, GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite, GiBricks.BricksAcross * GiBricks.BrickSize, GiBricks.BricksAcross * GiBricks.BrickSize, Layers: GiBricks.BricksDeep * GiBricks.BrickSize, Kind: GpuTextureKind.Texture3D)),
+            BrickJobs = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead, 64 * GpuBrickJob.Size),
+            BrickArgs = new GrowableBuffer(gpu, GpuBufferUsage.ComputeRead | GpuBufferUsage.Indirect, 64 * 16),
         };
+        gpu.Upload<uint>(ctx.StubBuffer, 0, [0, 0, 0, 0]);
 
         Textures.CreateBase(ctx);
         Materials.AddBuiltIn(ctx);
         PipelineClass forced = new(failureSurface, SurfaceVariant.DoubleSided | SurfaceVariant.FailureForced);
         ctx.Pipelines = new PipelineTable(Shaders.CompileBuiltIn(ctx, Pipelines.VertexTemplate, GpuStage.Vertex), forced, GBuffer.ColorFormats, gpu.DepthFormat);
-        ctx.Cull = Culling.Create(ctx);
-        ctx.Lighting = Lighting.Create(ctx);
-        ctx.GlowPipeline = Glows.Create(ctx);
-        ctx.Shadows = new ShadowState(ctx);
-        ctx.Ao = AmbientOcclusion.Create(ctx);
-        ctx.GiVolumes = new GiVolumes(gpu);
-        ctx.Gi = Gi.Create(ctx);
-        ctx.Passes = new PassTable(Shaders.CompileBuiltIn(ctx, "Passes/Fullscreen.vert.hlsl", GpuStage.Vertex));
-        RegisterBuiltIns(ctx);
+        CompiledShader fullscreen = Shaders.CompileBuiltIn(ctx, "Passes/Fullscreen.vert.hlsl", GpuStage.Vertex);
+        CompiledShader overlay = Shaders.CompileBuiltIn(ctx, "Passes/FailureOverlay.frag.hlsl", GpuStage.Fragment);
+        ctx.Pipeline = new PipelineState(fullscreen, gpu.CreatePipeline(new PipelineDesc(fullscreen, overlay, FrameTargets.LdrFormat) { Cull = GpuCull.None }));
 
         // The built-in surfaces compile now, so the first frames of a scripted run draw them, and the failure pipelines are
         // ready before anything can fail.
@@ -369,38 +386,6 @@ internal sealed class RenderSystem : ISystem
 
         ctx.Building = false;
         return ctx;
-    }
-
-    /// <summary>
-    /// The engine's own pipelines, by the shaders they rebuild from when one changes.
-    /// </summary>
-    private static void RegisterBuiltIns(RenderContext ctx)
-    {
-        BuiltIns.Register(ctx, static c =>
-        {
-            foreach (GpuPipeline pipeline in (ReadOnlySpan<GpuPipeline>)[c.Cull.PageCull, c.Cull.CullEarly, c.Cull.SeedLate, c.Cull.CullLate, c.Cull.HiZBuild])
-                c.Gpu.Release(pipeline);
-            c.Cull = Culling.Create(c);
-        }, "Cull/PageCull.comp.hlsl", "Cull/CullEarly.comp.hlsl", "Cull/SeedLateArgs.comp.hlsl", "Cull/CullLate.comp.hlsl", "Cull/HiZBuild.comp.hlsl");
-        BuiltIns.Register(ctx, static c =>
-        {
-            foreach (GpuPipeline pipeline in (ReadOnlySpan<GpuPipeline>)[c.Lighting.LightCull, c.Lighting.LightCluster, c.Lighting.Shade])
-                c.Gpu.Release(pipeline);
-            c.Lighting = Lighting.Create(c);
-        }, "Lighting/LightCull.comp.hlsl", "Lighting/LightCluster.comp.hlsl", "Lighting/Lighting.comp.hlsl");
-        BuiltIns.Register(ctx, static c =>
-        {
-            c.Gpu.Release(c.GlowPipeline);
-            c.GlowPipeline = Glows.Create(c);
-        }, "Lighting/Glow.vert.hlsl", "Lighting/Glow.frag.hlsl");
-        BuiltIns.Register(ctx, Shadows.RebuildPipelines, ShadowState.CullShader, ShadowState.VertexShader, ShadowState.FragmentShader, ShadowState.ClearShader);
-        BuiltIns.Register(ctx, static c =>
-        {
-            c.Gpu.Release(c.Ao.Gtao);
-            c.Gpu.Release(c.Ao.Blur);
-            c.Ao = AmbientOcclusion.Create(c);
-        }, AmbientOcclusion.GtaoShader, AmbientOcclusion.BlurShader);
-        BuiltIns.Register(ctx, Gi.RebuildPipelines, Gi.AllShaders);
     }
 
     /// <summary>
@@ -425,8 +410,10 @@ internal sealed class RenderSystem : ISystem
             Preloads.Forget(ctx, id);
             if (ctx.Shaders.Entries.ContainsKey(id))
                 ctx.Reloads.Start(id, cancel => Preloads.ShadersAsync(ctx.Assets, [.. Shaders.Affected(ctx, id)], cancel));
-            else if (ctx.Passes.Contains(id))
+            else if (ctx.Pipeline.Passes.Contains(id))
                 ctx.Reloads.Start(id, cancel => Preloads.PassAsync(ctx.Assets, id, cancel));
+            else if (ctx.Pipeline.Current.IsValid && id == ctx.Pipeline.Current.Id)
+                ctx.Reloads.Start(id, cancel => Preloads.PipelineAsync(ctx.Assets, id, cancel));
             else if (ctx.Materials.Contains(id))
                 ctx.Reloads.Start(id, cancel => Preloads.MaterialAsync(ctx.Assets, new Handle<Material>(id), cancel));
             else if (ctx.Textures.Contains(id))
@@ -466,25 +453,26 @@ internal sealed class RenderSystem : ISystem
                     Shaders.Get(ctx, new Handle<Shader>(shader));
 
                 Pipelines.Invalidate(ctx, shaders);
-                BuiltIns.Rebuild(ctx, shaders);
                 reclass |= Materials.RepackShaders(ctx, shaders);
-                foreach ((ulong pass, PassState state) in ctx.Passes.Entries.ToArray())
+                foreach ((ulong pass, PassState state) in ctx.Pipeline.Passes.Entries.ToArray())
                 {
-                    if (shaders.Contains(state.ShaderId))
-                        Passes.Compile(ctx, pass);
+                    if (shaders.Contains(state.ShaderId) || (state.FragmentId != 0 && shaders.Contains(state.FragmentId)))
+                        PassLoader.Compile(ctx, pass);
                 }
 
                 Debugging.Log.Info($"Shaders changed: {shaders.Count} shader(s) rebuild.");
             }
 
-            if (ctx.Passes.TryGet(id, out PassState listed))
+            if (ctx.Pipeline.Passes.TryGet(id, out PassState listed))
             {
                 bool first = listed.Path.Length == 0; // just listed: this is its first load, not a reload
-                Passes.Load(ctx, id);
-                ctx.Passes.TryGet(id, out PassState reloaded);
+                PassLoader.Load(ctx, id);
                 if (!first)
-                    Debugging.Log.Info($"Pass {listed.Path} reloaded{(reloaded.Error is null ? "" : " (disabled)")}.");
+                    Debugging.Log.Info($"Pass {listed.Path} reloaded{(listed.Error is null ? "" : " (disabled)")}.");
             }
+
+            if (ctx.Pipeline.Current.IsValid && id == ctx.Pipeline.Current.Id)
+                PipelineSync.Loaded(ctx);
 
             if (ctx.Materials.Contains(id))
             {
@@ -655,7 +643,8 @@ internal sealed class RenderSystem : ISystem
 
     private void CollectUnregistered(ReadOnlySpan<Handle> entities, Span<Renderer> renderers, Span<WorldTransform> worlds)
     {
-        for (int i = 0; i < entities.Length; i++)
+        int count = Math.Min(entities.Length, RegisterCandidates - _toRegister.Count);
+        for (int i = 0; i < count; i++)
             _toRegister.Add((entities[i], renderers[i], worlds[i].Value));
     }
 
@@ -682,22 +671,22 @@ internal sealed class RenderSystem : ISystem
     /// </summary>
     private void CollectPostProcessing()
     {
-        _passes = default;
-        _passLists = 0;
-        _postProcessing.Run(_collectPasses);
+        _posts = default;
+        _postLists = 0;
+        _postProcessing.Run(_collectPosts);
 
-        if (_passLists > 1 && !_warnedPassLists)
-            Debugging.Log.Warn($"{_passLists} entities carry a PostProcessing; post-processing is global, so only the first is followed.");
+        if (_postLists > 1 && !_warnedPostLists)
+            Debugging.Log.Warn($"{_postLists} entities carry a PostProcessing; post-processing is global, so only the first is followed.");
 
-        _warnedPassLists = _passLists > 1;
+        _warnedPostLists = _postLists > 1;
     }
 
-    private void CollectPasses(ReadOnlySpan<Handle> entities, Span<PostProcessing> postProcessing)
+    private void CollectPosts(ReadOnlySpan<Handle> entities, Span<PostProcessing> postProcessing)
     {
-        if (_passLists == 0 && postProcessing.Length > 0)
-            _passes = postProcessing[0].Passes;
+        if (_postLists == 0 && postProcessing.Length > 0)
+            _posts = postProcessing[0].Posts;
 
-        _passLists += postProcessing.Length;
+        _postLists += postProcessing.Length;
     }
 
     /// <summary>
@@ -796,14 +785,6 @@ internal sealed class RenderSystem : ISystem
             _collectedGlows.Add(new GpuGlow { PositionRadius = new Vector4(worlds[i].Value.Translation, glows[i].Radius), Color = new Vector4(glows[i].Color, 1f) });
     }
 
-    private static int CountPerspective(List<View> views)
-    {
-        int count = 0;
-        foreach (View view in views)
-            count += view.Camera.Projection == Projection.Perspective ? 1 : 0;
-        return count;
-    }
-
     /// <summary>
     /// Drops every <see cref="RenderInstance"/>: they index a render state that is gone.
     /// </summary>
@@ -827,11 +808,11 @@ internal sealed class RenderSystem : ISystem
     /// <summary>
     /// The render settings a <see cref="RenderContext"/> is built from: when one of them changes, it is built again.
     /// </summary>
-    private readonly record struct BuiltWith(bool OcclusionCulling, float Anisotropy, bool ShaderCache)
+    private readonly record struct BuiltWith(float Anisotropy, bool ShaderCache)
     {
         public static BuiltWith From(RenderSettings settings)
         {
-            return new BuiltWith(settings.OcclusionCulling, settings.Anisotropy, settings.ShaderCache);
+            return new BuiltWith(settings.Anisotropy, settings.ShaderCache);
         }
     }
 }

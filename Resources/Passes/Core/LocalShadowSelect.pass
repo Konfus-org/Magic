@@ -1,0 +1,66 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 10061
+    },
+    "creates": [
+        {
+            "name": "ShadowSlots",
+            "kind": "buffer",
+            "bytes": 768,
+            "zero": true
+        },
+        {
+            "name": "ShadowCullArgs",
+            "kind": "buffer",
+            "bytes": 16,
+            "usage": "indirect",
+            "zero": true
+        }
+    ],
+    "reads": [
+        {
+            "name": "Counts"
+        },
+        {
+            "name": "ShadowCandidates"
+        }
+    ],
+    "writes": [
+        {
+            "name": "Lights"
+        },
+        {
+            "name": "ShadowViews"
+        },
+        {
+            "name": "ShadowHeader"
+        },
+        {
+            "name": "ShadowSlots"
+        },
+        {
+            "name": "ShadowRefreshed"
+        },
+        {
+            "name": "ShadowCullArgs"
+        }
+    ],
+    "dispatch": {
+        "groups": [
+            1
+        ]
+    },
+    "params": {
+        "maxLocalLights": {
+            "x": 8
+        },
+        "facesPerFrame": {
+            "x": 4
+        },
+        "visibleSlots": {
+            "x": 10
+        }
+    },
+    "needs": "$shadowCasters"
+}

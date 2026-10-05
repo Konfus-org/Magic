@@ -1,16 +1,19 @@
 // Rasterises one mesh into its occupancy brick: one thread per triangle, which marks every cell of the brick's
 // GI_BRICK^3 grid over the mesh's box that the triangle touches (a separating-axis test against the cell's box),
 // so a hollow mesh gives a hollow brick, with walls at least a cell thick. Racing threads write the same 1, which
-// is fine. Runs once per mesh when it is first drawn, GiSettings.BricksPerFrame of them a frame.
+// is fine. Runs once per mesh when it is first drawn, as many a frame as the pass's each.max allows.
 
-#include "Gi/Brick.hlsli"
+#include "Include/Frame.hlsli"
 #include "Gi/Common.hlsli"
 
 StructuredBuffer<GpuVertexRaw> Vertices : READ(0);
 StructuredBuffer<uint> Indices : READ(1);
+StructuredBuffer<GpuBrickJob> BrickJobs : READ(2);
 
 [[vk::image_format("r8")]]
 RWTexture3D<float> BrickAtlas : WRITE(0);
+
+#include "Gi/Brick.hlsli"
 
 // Whether the projections of the triangle (by its three edge-plane distances) and the box (half extents h) onto an
 // axis are apart.
@@ -51,20 +54,21 @@ bool TriangleTouchesBox(float3 v0, float3 v1, float3 v2, float3 h)
 [numthreads(64, 1, 1)]
 void main(uint3 threadId : SV_DispatchThreadID)
 {
+    GpuBrickJob job = BrickJobOfPass();
     uint tri = threadId.x;
-    if (tri * 3u + 2u >= BrickJob.y)
+    if (tri * 3u + 2u >= job.indexCount)
         return;
 
-    uint first = BrickJob.x + tri * 3u;
-    float3 size = max(BrickBoxMax.xyz - BrickBoxMin.xyz, 1e-4);
+    uint first = job.firstIndex + tri * 3u;
+    float3 size = max(job.boxMax.xyz - job.boxMin.xyz, 1e-4);
     float3 scale = (float)GI_BRICK / size;
-    float3 v0 = (Vertices[Indices[first] + BrickJob.z].a.xyz - BrickBoxMin.xyz) * scale;
-    float3 v1 = (Vertices[Indices[first + 1u] + BrickJob.z].a.xyz - BrickBoxMin.xyz) * scale;
-    float3 v2 = (Vertices[Indices[first + 2u] + BrickJob.z].a.xyz - BrickBoxMin.xyz) * scale;
+    float3 v0 = (Vertices[Indices[first] + job.vertexOffset].a.xyz - job.boxMin.xyz) * scale;
+    float3 v1 = (Vertices[Indices[first + 1u] + job.vertexOffset].a.xyz - job.boxMin.xyz) * scale;
+    float3 v2 = (Vertices[Indices[first + 2u] + job.vertexOffset].a.xyz - job.boxMin.xyz) * scale;
 
     int3 lowest = clamp((int3)floor(min(min(v0, v1), v2)), 0, (int)GI_BRICK - 1);
     int3 highest = clamp((int3)floor(max(max(v0, v1), v2)), 0, (int)GI_BRICK - 1);
-    uint3 offset = GiBrickOffset(BrickJob.w);
+    uint3 offset = GiBrickOffset(job.brick);
     float3 halfCell = float3(0.5, 0.5, 0.5);
     [loop] for (int z = lowest.z; z <= highest.z; z++)
     {

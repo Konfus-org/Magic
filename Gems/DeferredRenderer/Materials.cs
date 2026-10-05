@@ -206,6 +206,8 @@ internal static class Materials
         {
             if (material.Type == MaterialType.Masked)
                 variant |= SurfaceVariant.Masked;
+            if (material.Type == MaterialType.Transparent)
+                variant |= SurfaceVariant.Transparent;
             if (material.DoubleSided)
                 variant |= SurfaceVariant.DoubleSided;
 

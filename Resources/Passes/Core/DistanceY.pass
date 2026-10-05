@@ -1,0 +1,27 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 7792370760702996282
+    },
+    "defines": [
+        "#define AXIS 1"
+    ],
+    "reads": [
+        {
+            "name": "GiScratchA",
+            "filter": "nearest"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "writes": [
+        {
+            "name": "GiScratchB"
+        }
+    ],
+    "dispatch": {
+        "per": "level:GiScratchB",
+        "depth": 1
+    }
+}

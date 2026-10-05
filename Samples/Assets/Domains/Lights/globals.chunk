@@ -4,7 +4,7 @@
             "name": "PostProcessing",
             "components": {
                 "PostProcessing": {
-                    "passes": [
+                    "posts": [
                         {
                             "id": 10030
                         }

@@ -303,7 +303,7 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// What every type's pool holds, as <c>Pool.&lt;Type&gt;.Count</c>, <c>Bytes</c>, <c>Budget</c>, <c>Hits</c> and <c>Misses</c>.
+    /// What every type's pool holds, as <c>Streaming.Pool.&lt;Type&gt;.Count</c>, <c>Bytes</c>, <c>Budget</c>, <c>Hits</c> and <c>Misses</c>.
     /// </summary>
     private void PublishPoolStats()
     {
@@ -311,11 +311,11 @@ public sealed class Assets : IDisposable
         {
             foreach ((Type type, Pool pool) in _pools)
             {
-                Debugging.Stats.Set($"Pool.{type.Name}.Count", pool.Entries.Count);
-                Debugging.Stats.Set($"Pool.{type.Name}.Bytes", pool.Bytes);
-                Debugging.Stats.Set($"Pool.{type.Name}.Budget", BudgetOf(type));
-                Debugging.Stats.Set($"Pool.{type.Name}.Hits", pool.Hits);
-                Debugging.Stats.Set($"Pool.{type.Name}.Misses", pool.Misses);
+                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Count", pool.Entries.Count);
+                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Bytes", pool.Bytes);
+                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Budget", BudgetOf(type));
+                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Hits", pool.Hits);
+                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Misses", pool.Misses);
             }
         }
     }

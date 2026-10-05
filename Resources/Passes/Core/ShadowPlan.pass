@@ -1,0 +1,88 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 10060
+    },
+    "creates": [
+        {
+            "name": "ShadowAtlas",
+            "kind": "texture",
+            "format": "depth",
+            "scale": 0,
+            "size": [
+                8192,
+                2560
+            ]
+        },
+        {
+            "name": "ShadowViews",
+            "kind": "buffer",
+            "bytes": 40000,
+            "zero": true
+        },
+        {
+            "name": "ShadowHeader",
+            "kind": "buffer",
+            "bytes": 64,
+            "zero": true
+        },
+        {
+            "name": "ShadowRefreshed",
+            "kind": "buffer",
+            "bytes": 400,
+            "zero": true
+        }
+    ],
+    "reads": [],
+    "writes": [
+        {
+            "name": "ShadowViews"
+        },
+        {
+            "name": "ShadowHeader"
+        },
+        {
+            "name": "ShadowRefreshed"
+        }
+    ],
+    "dispatch": {
+        "groups": [
+            1
+        ]
+    },
+    "params": {
+        "cascades": {
+            "x": 4
+        },
+        "cascadeResolution": {
+            "x": 2048
+        },
+        "distance": {
+            "x": 300
+        },
+        "splitLambda": {
+            "x": 0.7
+        },
+        "blendFraction": {
+            "x": 0.15
+        },
+        "casterRange": {
+            "x": 500
+        },
+        "staggerFar": {
+            "x": 1
+        },
+        "localResolution": {
+            "x": 256
+        },
+        "maxLocalLights": {
+            "x": 8
+        },
+        "atlasWidth": {
+            "x": 8192
+        },
+        "atlasHeight": {
+            "x": 2560
+        }
+    }
+}

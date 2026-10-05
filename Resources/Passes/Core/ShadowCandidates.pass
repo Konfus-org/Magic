@@ -1,0 +1,33 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 10066
+    },
+    "creates": [
+        {
+            "name": "ShadowCandidates",
+            "kind": "buffer",
+            "bytes": 8192,
+            "reset": [
+                "0"
+            ]
+        }
+    ],
+    "reads": [
+        {
+            "name": "Lights"
+        },
+        {
+            "name": "Counts"
+        }
+    ],
+    "writes": [
+        {
+            "name": "ShadowCandidates"
+        }
+    ],
+    "dispatch": {
+        "per": "$lightCount"
+    },
+    "needs": "$shadowCasters"
+}

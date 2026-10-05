@@ -457,7 +457,8 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
     /// <summary>
     /// Lays out a field: its label (up to any <c>##</c>) on the left, then the field stretched to the right edge. Returns
-    /// the field's hidden ImGui id.
+    /// the field's hidden ImGui id: the whole label, so fields sharing a <c>##</c> suffix (the parameters of one pass)
+    /// stay apart.
     /// </summary>
     private static string LabelField(string label)
     {
@@ -471,7 +472,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         }
 
         ImGui.SetNextItemWidth(Stretch);
-        return hidden < 0 ? "##" + label : label[hidden..];
+        return "##" + label;
     }
 
     /// <summary>

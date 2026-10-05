@@ -1,0 +1,242 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 10064
+    },
+    "creates": [
+        {
+            "name": "GiState",
+            "kind": "buffer",
+            "bytes": 128,
+            "zero": true
+        },
+        {
+            "name": "GiAlbedo",
+            "kind": "volume",
+            "format": "rgba8_unorm",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiEmissive",
+            "kind": "volume",
+            "format": "rgba16_float",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiSdf",
+            "kind": "volume",
+            "format": "r8_unorm",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiSkyVis",
+            "kind": "volume",
+            "format": "r8_unorm",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiScratchA",
+            "kind": "volume",
+            "format": "r8_unorm",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 1
+        },
+        {
+            "name": "GiScratchB",
+            "kind": "volume",
+            "format": "r8_unorm",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 1
+        },
+        {
+            "name": "GiShR0",
+            "kind": "volume",
+            "format": "rgba16_float",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiShR1",
+            "kind": "volume",
+            "format": "rgba16_float",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiShG0",
+            "kind": "volume",
+            "format": "rgba16_float",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiShG1",
+            "kind": "volume",
+            "format": "rgba16_float",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiShB0",
+            "kind": "volume",
+            "format": "rgba16_float",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiShB1",
+            "kind": "volume",
+            "format": "rgba16_float",
+            "scale": 0,
+            "size": [
+                48,
+                48,
+                48
+            ],
+            "levels": 3
+        },
+        {
+            "name": "GiAccum",
+            "kind": "buffer",
+            "bytes": 3538944
+        },
+        {
+            "name": "GiLightGrid",
+            "kind": "buffer",
+            "bytes": 540672
+        },
+        {
+            "name": "GiTasks",
+            "kind": "buffer",
+            "bytes": 524288
+        },
+        {
+            "name": "GiTaskArgs",
+            "kind": "buffer",
+            "bytes": 16,
+            "usage": "indirect",
+            "reset": [
+                "0",
+                "1",
+                "1",
+                "0"
+            ]
+        },
+        {
+            "name": "GiPageList",
+            "kind": "buffer",
+            "per": "$pageCount",
+            "stride": 4,
+            "min": 64
+        },
+        {
+            "name": "GiPageArgs",
+            "kind": "buffer",
+            "bytes": 16,
+            "usage": "indirect",
+            "reset": [
+                "0",
+                "1",
+                "1",
+                "$pageCount"
+            ]
+        },
+        {
+            "name": "GiCounters",
+            "kind": "buffer",
+            "bytes": 16,
+            "reset": [
+                "0",
+                "0",
+                "0",
+                "0"
+            ]
+        }
+    ],
+    "writes": [
+        {
+            "name": "GiState"
+        }
+    ],
+    "dispatch": {
+        "groups": [
+            1
+        ]
+    },
+    "params": {
+        "levels": {
+            "x": 3
+        },
+        "resolution": {
+            "x": 48
+        },
+        "voxelSize": {
+            "x": 1
+        },
+        "levelScale": {
+            "x": 4
+        },
+        "framesPerRebuild": {
+            "x": 2
+        }
+    }
+}

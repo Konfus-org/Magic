@@ -1,3 +1,5 @@
+using Magic.Contexts;
+using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Extensions;
@@ -12,8 +14,9 @@ namespace DeferredRendererGem;
 /// <summary>
 /// A frame of the scene, in two steps. <see cref="Plan"/> decides it: which render targets, which views in each and
 /// their rectangles, with every texture and buffer sized and every view's constants built. <see cref="Record"/> then
-/// turns the plan into commands and changes nothing: for each target, cull, draw early into the gbuffer, with occlusion
-/// build the pyramid and draw late, light the gbuffer into Hdr, run the data passes, and present: blit the result to the window's swapchain image, or into every mip
+/// turns the plan into commands and changes nothing: the frame-wide stages (shadows, GI), then for each target the
+/// pipeline's scene stage (cull and draw its views into the gbuffer), its lighting stage (into Hdr), its sky,
+/// transparency and post stages, and present: blit the result to the window's swapchain image, or into every mip
 /// level of the render texture's pool layer. Render textures go first, so a window drawn after them this frame samples
 /// what they show now. A main window no camera draws into is cleared, so whatever a gem draws over it later lands on
 /// something defined.
@@ -23,25 +26,45 @@ internal static class Scene
     private const int MaxResolution = 16384;
 
     /// <summary>
-    /// Fills <paramref name="plan"/> with this frame: every render target a view draws into, each once, render textures
-    /// first and then windows, each in view order, with its textures sized to it and the views that draw into it, next
-    /// to each other; <paramref name="passes"/> run over every one of them. Window 0 is the main window, so a target is always named by its real handle.
+    /// An instance whose cull radius projects to under this many pixels is culled, like one outside the frustum.
+    /// Higher culls more of the small and distant instances: fewer triangles and draws, but things pop in later.
+    /// </summary>
+    private const float MinObjectPixels = 1f;
+
+    /// <summary>
+    /// Fills <paramref name="plan"/> with this frame: the pipeline synced to what the world names (<paramref name="pipeline"/>
+    /// and <paramref name="posts"/>), then every render target a view draws into, each once, render textures first and
+    /// then windows, each in view order, with its textures sized to it, the views that draw into it next to each other,
+    /// and everything the passes create for it made ready. Window 0 is the main window, so a target is always named by
+    /// its real handle.
     /// </summary>
     public static void Plan(
         RenderContext ctx,
         FramePlan plan,
         IWindowRegistry? windows,
         ReadOnlySpan<View> views,
-        PassList passes,
+        Handle<Pipeline> pipeline,
+        PostList posts,
         in LightingConstants lighting,
-        float time)
+        float time,
+        long frameNumber)
     {
         plan.Clear();
         plan.ClearColor = lighting.HasSky ? new Vector4(lighting.Ambient, 1f) : RenderCommands.ClearColor;
-        Passes.Sync(ctx, passes);
+        PipelineSync.Sync(ctx, pipeline, posts);
+        plan.Counts = FrameCounts.Of(ctx, lighting.LightCount, (uint)UploadBrickJobs(ctx), lighting.ShadowCasters);
+        ctx.Gpu.Upload<GpuCounts>(ctx.Counts.Handle, 0, [GpuCounts.From(plan.Counts, (uint)frameNumber)]);
         uint main = windows?.Main?.Handle ?? 0;
-        PlanTargets(ctx, plan, windows, views, passes, main, textures: true, lighting, time);
-        PlanTargets(ctx, plan, windows, views, passes, main, textures: false, lighting, time);
+        PlanTargets(ctx, plan, windows, views, main, textures: true, lighting, time, frameNumber);
+        PlanTargets(ctx, plan, windows, views, main, textures: false, lighting, time, frameNumber);
+
+        if (plan.Views.Count > 0)
+        {
+            plan.MainView = Math.Max(0, plan.Views.FindIndex(view => view.Constants.IsOrthographic == 0));
+            ViewPlan mainView = plan.Views[plan.MainView];
+            plan.Views[plan.MainView] = mainView with { Constants = mainView.Constants with { Flags = mainView.Constants.Flags | FrameConstants.IsMainViewFlag } };
+            PrepareFrameStages(ctx, plan);
+        }
 
         if (main != 0 && !IsPlanned(plan, RenderTarget.Of(main)))
             plan.ClearWindow = main;
@@ -58,15 +81,17 @@ internal static class Scene
         // The shadow maps and the GI first: every target's lighting reads them, and nothing in them depends on a target.
         if (views.Length > 0)
         {
-            dispatches += Shadows.RecordCull(ctx, commands);
-            draws += Shadows.RecordDraw(ctx, commands);
-            dispatches += Gi.Record(ctx, commands, views[0].Shade);
+            (int shadowDraws, int shadowDispatches) = PassExecutor.RecordFrame(ctx, commands, plan, PipelineStage.Shadows);
+            draws += shadowDraws;
+            dispatches += shadowDispatches;
+            (int giDraws, int giDispatches) = PassExecutor.RecordFrame(ctx, commands, plan, PipelineStage.Gi);
+            draws += giDraws;
+            dispatches += giDispatches;
         }
 
         foreach (TargetPlan target in plan.Targets)
         {
-            ReadOnlySpan<PassState> passes = CollectionsMarshal.AsSpan(plan.Passes).Slice(target.FirstPass, target.PassCount);
-            (int targetDraws, int targetDispatches) = RecordTarget(ctx, commands, target.FrameTargets, views.Slice(target.FirstView, target.ViewCount), passes, plan.ClearColor);
+            (int targetDraws, int targetDispatches) = RecordTarget(ctx, commands, plan, target.FrameTargets, views.Slice(target.FirstView, target.ViewCount));
             draws += targetDraws;
             dispatches += targetDispatches;
         }
@@ -81,18 +106,19 @@ internal static class Scene
     }
 
     /// <summary>
-    /// The targets of one kind (render textures, or windows) that are not planned yet, each with its passes' outputs and its views.
+    /// The targets of one kind (render textures, or windows) that are not planned yet, each with its views and what the
+    /// passes create for it.
     /// </summary>
     private static void PlanTargets(
         RenderContext ctx,
         FramePlan plan,
         IWindowRegistry? windows,
         ReadOnlySpan<View> views,
-        PassList passes,
         uint main,
         bool textures,
         in LightingConstants lighting,
-        float time)
+        float time,
+        long frameNumber)
     {
         foreach (View view in views)
         {
@@ -104,35 +130,111 @@ internal static class Scene
             if (targets is null)
                 continue;
 
-            int firstPass = plan.Passes.Count;
-            Passes.Prepare(ctx, targets, passes, plan.Passes);
             int first = plan.Views.Count;
             for (int index = 0; index < views.Length; index++)
             {
                 if (Resolve(views[index].Camera.Target, main) == target)
-                    plan.Views.Add(PlanView(ctx, views[index], index, targets, lighting, time));
+                    plan.Views.Add(PlanView(ctx, views[index], index, targets, lighting, time, frameNumber));
             }
 
-            plan.Targets.Add(new TargetPlan(targets, first, plan.Views.Count - first, firstPass, plan.Passes.Count - firstPass));
+            PrepareTargetStages(ctx, plan, targets, CollectionsMarshal.AsSpan(plan.Views)[first..]);
+            plan.Targets.Add(new TargetPlan(targets, first, plan.Views.Count - first));
         }
     }
 
     /// <summary>
-    /// One view of a target: its rectangle, its buffers made ready for this frame, and its constants.
+    /// One view of a target: its rectangle and its constants.
     /// </summary>
-    private static ViewPlan PlanView(RenderContext ctx, in View view, int index, FrameTargets targets, in LightingConstants lighting, float time)
+    private static ViewPlan PlanView(RenderContext ctx, in View view, int index, FrameTargets targets, in LightingConstants lighting, float time, long frameNumber)
     {
         Rectangle rect = view.Camera.Viewport.ToPixels((int)targets.Width, (int)targets.Height);
-        ViewBuffers buffers = Culling.View(ctx, index);
-        Culling.Prepare(ctx, buffers, rect.Width, rect.Height);
-        Lighting.Prepare(ctx, buffers, rect.Width, rect.Height);
-        Shadows.PlanCascades(ctx, view, rect, buffers, lighting);
+        (int hiZWidth, int hiZHeight, int hiZLevels, _) = HiZ.Size(rect.Width, rect.Height);
         FrameConstants constants = FrameConstants.Build(
-            view, rect, buffers.HiZSize, time, Culling.MinObjectPixels, MathF.Max(0.01f, ctx.Settings.LodBias), lighting);
-        ShadeConstants shade = ShadeConstants.Build(constants, buffers.Shadows, ctx.Shadows, ctx.Settings);
-        Gi.Fill(ctx, ref shade);
+            view, rect, (hiZWidth, hiZHeight, hiZLevels), time, MinObjectPixels, MathF.Max(0.01f, ctx.Settings.LodBias), lighting,
+            (uint)frameNumber, (uint)index << FrameConstants.ViewIndexShift);
+        return new ViewPlan(index, rect, ctx.Resources.View(index), constants);
+    }
 
-        return new ViewPlan(index, rect, buffers, constants, shade);
+    /// <summary>
+    /// What the passes of the target and view stages create for this render target is made ready: a texture that follows
+    /// the target's size among its targets (in use this frame, so the rest can go), everything else in the target's or the
+    /// view's set, sized by this frame's counts. A pass that does not fit the target (its output is already in use in
+    /// another format) is left out of it this frame.
+    /// </summary>
+    private static void PrepareTargetStages(RenderContext ctx, FramePlan plan, FrameTargets targets, ReadOnlySpan<ViewPlan> views)
+    {
+        PipelineState pipeline = ctx.Pipeline;
+        targets.ClearUse();
+        FrameCounts counts = plan.Counts.WithTarget(targets.Width, targets.Height);
+        foreach (PipelineStage stage in (ReadOnlySpan<PipelineStage>)[PipelineStage.Scene, PipelineStage.Lighting, PipelineStage.Sky, PipelineStage.Transparency, PipelineStage.Post])
+        {
+            bool perView = PassState.ScopeOf(stage) == PassScope.View;
+            foreach (PassState pass in pipeline.Stages[(int)stage])
+            {
+                if (!pipeline.Runs(pass, plan.Counts))
+                    continue;
+
+                if (!perView)
+                {
+                    ctx.Resources.Ensure(ctx, pipeline, pass, targets.Resources, targets, counts);
+                    continue;
+                }
+
+                foreach (ref readonly ViewPlan view in views)
+                    ctx.Resources.Ensure(ctx, pipeline, pass, view.Resources, targets, counts.WithView(view.Rect, HiZ.Size(view.Rect.Width, view.Rect.Height).Floats));
+            }
+        }
+
+        targets.Ensure(ctx.Gpu, targets.Width, targets.Height);
+        targets.ReleaseUnused(ctx.Gpu);
+    }
+
+    /// <summary>
+    /// The occupancy bricks due this frame, as many as the passes that run once per brick allow (the most any of them
+    /// iterates), taken off the queue and uploaded with their dispatches; how many there are.
+    /// </summary>
+    private static int UploadBrickJobs(RenderContext ctx)
+    {
+        int budget = 0;
+        foreach (PassState pass in ctx.Pipeline.Stages[(int)PipelineStage.Gi])
+        {
+            if (pass.Ready && pass.Pass.Each.Over == EachOver.Bricks)
+                budget = Math.Max(budget, (int)pass.Pass.Each.Max);
+        }
+
+        if (budget == 0 || ctx.Bricks.Pending.Count == 0)
+            return 0;
+
+        Span<GpuBrickJob> jobs = stackalloc GpuBrickJob[PassValidator.MaxIterations];
+        Span<UintVector4> dispatches = stackalloc UintVector4[PassValidator.MaxIterations];
+        int count = ctx.Bricks.Jobs(ctx.Meshes, Math.Min(budget, PassValidator.MaxIterations), jobs, dispatches);
+        if (count == 0)
+            return 0;
+
+        ctx.BrickJobs.Ensure(ctx.Gpu, (uint)(count * GpuBrickJob.Size));
+        ctx.BrickArgs.Ensure(ctx.Gpu, (uint)(count * 16));
+        ctx.Gpu.Upload<GpuBrickJob>(ctx.BrickJobs.Handle, 0, jobs[..count]);
+        ctx.Gpu.Upload<UintVector4>(ctx.BrickArgs.Handle, 0, dispatches[..count]);
+        Debugging.Stats.Set("Rendering.Gi.Bricks", ctx.Bricks.Count);
+        Debugging.Stats.Set("Rendering.Gi.BricksPending", ctx.Bricks.Pending.Count);
+        Debugging.Stats.Set("Rendering.Gi.BricksDropped", ctx.Bricks.Dropped);
+        return count;
+    }
+
+    /// <summary>
+    /// What the frame-wide stages' passes create is made ready in the frame's set.
+    /// </summary>
+    private static void PrepareFrameStages(RenderContext ctx, FramePlan plan)
+    {
+        PipelineState pipeline = ctx.Pipeline;
+        foreach (PipelineStage stage in (ReadOnlySpan<PipelineStage>)[PipelineStage.Shadows, PipelineStage.Gi])
+        {
+            foreach (PassState pass in pipeline.Stages[(int)stage])
+            {
+                if (pipeline.Runs(pass, plan.Counts))
+                    ctx.Resources.Ensure(ctx, pipeline, pass, ctx.Resources.Frame, null, plan.Counts);
+            }
+        }
     }
 
     private static bool IsPlanned(FramePlan plan, RenderTarget target)
@@ -195,7 +297,6 @@ internal static class Scene
         if (!ctx.Targets.TryGetValue(target, out FrameTargets? targets))
             ctx.Targets[target] = targets = new FrameTargets(target, ctx.Gpu.DepthFormat);
 
-        AmbientOcclusion.Prepare(ctx.Gpu, targets, ctx.Settings.Ao);
         targets.Ensure(ctx.Gpu, (uint)width, (uint)height);
         return targets;
     }
@@ -215,53 +316,22 @@ internal static class Scene
     }
 
     /// <summary>
-    /// One render target: cull and draw its views into its gbuffer (early, then with occlusion the late pass), light
-    /// each view into Hdr, run the data passes, present. Returns the draws and dispatches recorded.
+    /// One render target: the scene stage culls and draws its views into its gbuffer, the lighting stage lights each view
+    /// into Hdr, the sky, transparency and post stages run, what failed is shown, and the result is presented. Returns
+    /// the draws and dispatches recorded.
     /// </summary>
     private static (int Draws, int Dispatches) RecordTarget(
         RenderContext ctx,
         RenderCommands commands,
+        FramePlan plan,
         FrameTargets targets,
-        ReadOnlySpan<ViewPlan> views,
-        ReadOnlySpan<PassState> passes,
-        Vector4 clearColor)
+        ReadOnlySpan<ViewPlan> views)
     {
         int draws = 0, dispatches = 0;
+        Vector4 clearColor = plan.ClearColor;
 
-        // Culling first (compute passes cannot sit inside the render pass), one set per view.
-        foreach (ref readonly ViewPlan view in views)
-            dispatches += Culling.RecordEarly(ctx, commands, view.Buffers, view.Constants);
-
-        // Early draws: everything the previous frame's pyramid did not hide.
-        Span<GpuTexture> gbuffer = stackalloc GpuTexture[GBuffer.ColorFormats.Length];
-        targets.GBuffer.Colors(gbuffer);
-        commands.BeginRenderPass(gbuffer, GpuLoad.Clear, targets.Depth.Texture, clearColor);
-        foreach (ref readonly ViewPlan view in views)
-        {
-            draws += DrawView(ctx, commands, view, view.Buffers.DrawArgsEarly.Handle);
-            draws += Glows.Record(ctx, commands, view);
-        }
-
-        commands.EndRenderPass();
-
-        if (ctx.Settings.OcclusionCulling)
-        {
-            // This frame's pyramid from what was just drawn, then the candidates that were held back.
-            foreach (ref readonly ViewPlan view in views)
-                dispatches += Culling.RecordLate(ctx, commands, view.Buffers, view.Constants, targets.Depth.Texture);
-
-            commands.BeginRenderPass(gbuffer, GpuLoad.Load, targets.Depth.Texture);
-            foreach (ref readonly ViewPlan view in views)
-            {
-                if (view.Buffers.Occlusion is { } occlusion)
-                    draws += DrawView(ctx, commands, view, occlusion.DrawArgsLate.Handle);
-            }
-            commands.EndRenderPass();
-        }
-
-        // The ambient occlusion of each view, from what was just drawn.
-        foreach (ref readonly ViewPlan view in views)
-            dispatches += AmbientOcclusion.Record(commands, ctx.Ao, targets, view, ctx.NearestClamp, ctx.Settings.Ao);
+        // The scene stage: cull, draw into the gbuffer, with occlusion build the pyramid and draw what was held back.
+        PassExecutor.RecordTarget(ctx, commands, plan, targets, views, PipelineStage.Scene, ref draws, ref dispatches);
 
         // The lighting writes every pixel of a view into Hdr, and nothing else of it: when the views leave part of
         // the target uncovered, that part is cleared first.
@@ -271,15 +341,17 @@ internal static class Scene
             commands.EndRenderPass();
         }
 
-        foreach (ref readonly ViewPlan view in views)
-            dispatches += Lighting.Record(ctx, commands, targets, view);
+        PassExecutor.RecordTarget(ctx, commands, plan, targets, views, PipelineStage.Lighting, ref draws, ref dispatches);
 
-        // Ldr is what is shown and what a screenshot reads. A tonemap pass writes it; when no listed pass did (none
+        // Ldr is what is shown and what a screenshot reads. A tonemap post writes it; when no listed post did (none
         // listed, or it is still compiling or broken) the linear scene is copied into it, so neither is ever stale.
-        bool wroteLdr = Passes.Record(ctx, commands, targets, passes, views[0].Constants, ref draws, ref dispatches);
+        PassExecutor.RecordTarget(ctx, commands, plan, targets, views, PipelineStage.Sky, ref draws, ref dispatches);
+        PassExecutor.RecordTarget(ctx, commands, plan, targets, views, PipelineStage.Transparency, ref draws, ref dispatches);
+        bool wroteLdr = PassExecutor.RecordTarget(ctx, commands, plan, targets, views, PipelineStage.Post, ref draws, ref dispatches);
         if (!wroteLdr)
             commands.Blit(targets.Hdr.Texture, new Rectangle(0, 0, (int)targets.Hdr.Width, (int)targets.Hdr.Height), new TextureRegion(targets.Ldr.Texture));
 
+        draws += FailureOverlay.Record(ctx, commands, targets, views[0].Constants);
         Present(ctx, commands, targets);
 
         return (draws, dispatches);
@@ -306,52 +378,5 @@ internal static class Scene
         uint size = (uint)pool.Size;
         for (uint level = 0; level < pool.Levels; level++, size = Math.Max(1, size / 2))
             commands.Blit(shown.Texture, area, new TextureRegion(pool.Texture, level, rendered.Layer, 0, 0, size, size));
-    }
-
-    /// <summary>
-    /// Draws what the culler left for one view: for every pipeline class, one indirect call per chunk of its draw args, the
-    /// vertex stage reading each instance's slot from the visible-id list through the instance-rate buffer. Nothing here
-    /// knows how many instances there are. Returns the draw calls recorded.
-    /// </summary>
-    private static int DrawView(RenderContext ctx, RenderCommands commands, in ViewPlan view, GpuBuffer drawArgs)
-    {
-        if (ctx.Buckets.ChunkCount == 0)
-            return 0;
-
-        commands.SetViewport(view.Rect);
-        commands.SetScissor(view.Rect);
-        commands.Push(GpuStage.Vertex, view.Constants);
-        commands.Push(GpuStage.Fragment, view.Constants);
-
-        commands.BindVertexBuffers(0, [ctx.Meshes.VertexBuffer, view.Buffers.VisibleIds.Handle]);
-        commands.BindIndexBuffer(ctx.Meshes.IndexBuffer, wide: true);
-        commands.BindStorageBuffers(GpuStage.Vertex, 0, [ctx.Instances.XformBuffer.Handle, ctx.Instances.CullBuffer.Handle]);
-        Span<GpuBinding> textures = stackalloc GpuBinding[TextureTable.Classes];
-        Textures.Bindings(ctx, textures);
-        commands.BindTextures(GpuStage.Fragment, 0, textures);
-        commands.BindStorageBuffers(GpuStage.Fragment, 0, [ctx.Materials.Records.Handle]);
-
-        int draws = 0;
-        foreach ((PipelineClass cls, List<int> chunks) in ctx.Buckets.ByClass)
-        {
-            if (chunks.Count == 0)
-                continue;
-
-            GpuPipeline pipeline = Pipelines.Get(ctx, cls); // none only while the class's first compile is still running
-            if (!pipeline.IsValid)
-                continue;
-
-            commands.BindPipeline(pipeline);
-            foreach (int chunk in chunks)
-            {
-                if (ctx.Buckets.IsEmpty(chunk))
-                    continue; // every group released: its 64 commands would draw nothing
-
-                commands.DrawIndexedIndirect(drawArgs, (uint)chunk * Buckets.ChunkBytes, Buckets.GroupsPerChunk);
-                draws++;
-            }
-        }
-
-        return draws;
     }
 }

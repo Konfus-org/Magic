@@ -1,0 +1,30 @@
+{
+    "kind": "draw",
+    "shader": {
+        "id": 7813797056278610780
+    },
+    "fragment": {
+        "id": 16841411220043911094
+    },
+    "each": {
+        "over": "count",
+        "max": 10
+    },
+    "reads": [
+        {
+            "name": "ShadowViews"
+        },
+        {
+            "name": "ShadowRefreshed"
+        }
+    ],
+    "draw": {
+        "pipeline": "depth",
+        "depth": "ShadowAtlas",
+        "load": "load",
+        "args": "ShadowDrawArgs",
+        "instances": "ShadowVisibleIds",
+        "depthBiasSlope": -2.0
+    },
+    "needs": "$shadowCasters"
+}

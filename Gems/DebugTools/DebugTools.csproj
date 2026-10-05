@@ -25,7 +25,7 @@
        GemDependsOn: names of gems (their assembly names, ';' separated) to load first though no service connects them. -->
   <PropertyGroup>
     <GemStatic>true</GemStatic>
-    <GemDependsOn></GemDependsOn>
+    <GemDependsOn>DeferredRenderer</GemDependsOn>
     <Description>The console, the settings and debug windows, text in the world and the on-screen log.</Description>
     <Authors>Konfus</Authors>
     <Version>1.0.0</Version>

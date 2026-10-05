@@ -1,0 +1,44 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 7162853700663242497
+    },
+    "creates": [
+        {
+            "name": "DrawArgsLate",
+            "kind": "buffer",
+            "per": "$groupCount",
+            "stride": 20,
+            "min": 1280,
+            "usage": "indirect"
+        },
+        {
+            "name": "DispatchArgsLate",
+            "kind": "buffer",
+            "bytes": 16,
+            "usage": "indirect"
+        }
+    ],
+    "reads": [
+        {
+            "name": "DrawTemplate"
+        },
+        {
+            "name": "DrawArgsEarly"
+        },
+        {
+            "name": "Candidates"
+        }
+    ],
+    "writes": [
+        {
+            "name": "DrawArgsLate"
+        },
+        {
+            "name": "DispatchArgsLate"
+        }
+    ],
+    "dispatch": {
+        "per": "$groupCount"
+    }
+}

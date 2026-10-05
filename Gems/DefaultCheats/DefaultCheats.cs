@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Events;
@@ -202,7 +202,7 @@ internal sealed class DefaultCheats : IGem
             case ".mat":
                 SpawnModel(name, _assets.Find<Model>("Models/Cube.fbx"), _assets.Find<Material>(path), position);
                 return;
-            case ".cs" or ".hlsl" or ".hlsli" or ".pass" or ".rtex" or ".ttf" or ".png" or ".jpg" or ".jpeg" or ".magic" or ".meta":
+            case ".cs" or ".hlsl" or ".hlsli" or ".pass" or ".post" or ".pipeline" or ".rtex" or ".ttf" or ".png" or ".jpg" or ".jpeg" or ".magic" or ".meta":
                 Debugging.Log.Warn($"{path} cannot be summoned: it is not a thing in the world.");
                 return;
         }

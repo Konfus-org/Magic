@@ -14,15 +14,18 @@ the shaders are laid out and written.
 | `Surfaces/` | Surface shaders (`.surf.hlsl`): what a material looks like. `Failure.surf` is what anything broken is drawn with. |
 | `Cull/` | The GPU culling compute passes and what they share (`Common.hlsli`), `AppendVisible` among it: an instance small on screen is counted into the draw of a lesser version of its mesh (`GpuLodRow`, one per bucket, scaled by `LodBias`), and into both while it blends from one to the other (`LOD_BLEND`, dithered by `GpuVisible.lodFade` in `GBuffer.frag`). |
 | `Lighting/` | The lighting compute passes: `LightCull` bins the lights into screen tiles, `LightCluster` cuts every tile along its depth, `Lighting` shades the gbuffer into `Hdr`; `Common.hlsli` is what they share, `Shadows.hlsli` how a pixel reads the shadow atlas. `Glow.vert` / `Glow.frag` draw the glows: unlit dots for far lights. |
-| `Gi/` | The fake global illumination: one level of a voxel clipmap rebuilt per frame. Meshes are rasterised once into occupancy bricks (`BrickBuild`), the level's instances stamped through them (`CollectPages` → `CollectInstances` → `Stamp` → `Resolve`), the distance field taken (`Distance`, three axes), the sky each voxel sees traced (`Sky`), the lights binned (`LightGrid`) and the light injected and passed on (`Propagate`); `Include/Gi.hlsli` is how a pixel reads it. |
-| `Shadows/` | The shadow maps' raster side: `Shadow.vert` + the empty `Shadow.frag` draw every opaque class depth-only into the atlas, `ClearDepth.vert` clears one tile of it. `Cull/CullShadow.comp` culls one shadow view (a cascade of the sun or a face of a local light) against planes taken from its `ViewProj`. |
-| `Passes/` | Data passes (`.pass` assets): the fullscreen vertex shader, tonemap, vignette. |
+| `Gi/` | The fake global illumination: one level of a voxel clipmap rebuilt every `framesPerRebuild` frames (`GiPlan.pass`, 2 by default; between rebuilds every GI pass returns at once). Meshes are rasterised once into occupancy bricks (`BrickBuild`), the level's instances stamped through them (`CollectPages` → `CollectInstances` → `Stamp` → `Resolve`), the distance field taken (`Distance`, three axes), the sky each voxel sees traced (`Sky`), the lights binned (`LightGrid`) and the light injected and passed on (`Propagate`); `Include/Gi.hlsli` is how a pixel reads it. |
+| `Shadows/` | The shadow maps, planned on the GPU: `ShadowPlan.comp` fits the sun's cascades to the main view and `LocalShadowSelect.comp` gives the nearest local lights their pages, both into shadow view rows (`Include/ShadowViews.hlsli`); `SeedShadowArgs.comp` starts every row's draw args; `Cull/CullShadow.comp` culls every refreshed row in one dispatch against planes taken from its `ViewProj`; `ClearDepth.vert` clears the refreshed tiles; `Shadow.vert` + the empty `Shadow.frag` draw every opaque class depth-only into its tile. |
+| `Passes/` | The posts (`.post` assets): the fullscreen vertex shader every fullscreen pass is drawn with, tonemap, vignette; and `FailureOverlay.frag`, how a broken pass shows on screen. |
 | `Overlay/` | 2D overlays (ImGui). |
 | `Test/` | Start-up probes of the conventions (`RenderChecks.cs`). |
 
 The frame runs them in this order: `CullShadow` per shadow view → the atlas depth pass → the GI's level
 (`Gi/`) → then per target `PageCull` → `CullEarly` → draw → (with occlusion) `HiZBuild` → `SeedLateArgs` →
-`CullLate` → draw → `Gtao` → `AoBlur` → `LightCull` → `LightCluster` → `Lighting` → passes → overlays.
+`CullLate` → draw → `Gtao` → `AoBlur` → `LightCull` → `LightCluster` → `Lighting` → the pipeline's sky,
+transparency and post stages → overlays. The pipeline asset (`Resources/Pipelines/Default.pipeline`, the
+project's `"pipeline"` or `--pipeline`) lists the passes of each stage; the posts come from the world's
+`PostProcessing`.
 
 ## How a frame is rendered
 
@@ -38,7 +41,7 @@ reaches, not the objects in the scene.
 
 | Target | Format | Holds |
 | --- | --- | --- |
-| `Emissive` | `R11G11B10Float` | What the surface emits, linear. The clear colour where nothing was drawn. |
+| `Emissive` | `R11G11B10Float` | What the surface emits, linear. Black where nothing was drawn. |
 | `Albedo` | `Rgba8Srgb` | Base colour. |
 | `Normal` | `Rgb10A2Unorm` | World-space normal, -1..1 packed into 0..1. |
 | `Material` | `Rgba8Unorm` | r roughness, g metallic, b occlusion. |
@@ -51,7 +54,7 @@ reaches, not the objects in the scene.
   relative to the camera, so it holds up far from the origin.
 - `Lighting.comp` writes every pixel of a view into `Hdr`: `Emissive` plus the light the surface reflects.
   A surface that should not be lit (`Unlit.surf`, `Failure.surf`) has a black base colour and emits its
-  colour; no flag says "unlit". A pixel nothing was drawn in keeps `Emissive`, the clear colour.
+  colour; no flag says "unlit". A pixel nothing was drawn in is painted by the sky stage (`Sky/Sky.frag`): the `Sky` component's colour, else the clear colour.
 - Lights: the sun (the first `DirectionalLight`) and a flat ambient are in the frame block. Every
   `PointLight` and `SpotLight` is a `GpuLight` row of the lights buffer, uploaded as it is, and binned on
   the GPU in two steps. `LightCull.comp` lists the lights that reach each 32-pixel screen tile, between the
@@ -70,22 +73,25 @@ reaches, not the objects in the scene.
   `Glow` where each of them was (lights within 8 m of each other share one): an unlit dot sized by the light's intensity, never under a pixel on screen and dimmed where it would be, drawn into the gbuffer
   as emission (`Glow.vert`, six vertices a glow from the vertex id). From far away the dot is what there is
   to see of a light, and it costs no lighting.
-- Shading is Lambert plus a Blinn-Phong highlight sized by roughness. Nothing is blended: a transparent
-  surface would need a forward pass after the lighting, which does not exist.
-- Shadows come from one depth atlas (`Shadows/`, `Lighting/Shadows.hlsli`). The sun has cascades along each
-  perspective view (`Settings.Render.Shadows.Cascades`), each a sphere around a slice of the frustum snapped
-  to its own texel grid so nothing shimmers, blended into the next over the last share of its range; the
-  nearest shadow-casting spot and point lights hold pages (six for a point light), drawn again in turn within
-  a per-frame budget, and the lighting finds a light's faces through `GpuShadowRecord` rows. Every shadow
-  view is culled on the GPU like a camera (`CullShadow`) and drawn with one depth-only pipeline; the
-  lighting reads the atlas with a comparison sampler, a disc of taps whose radius is constant in the world.
-  The lighting's constants are the frame block plus `Include/Shade.hlsli`'s append (`ShadeConstants`).
+- Shading is Lambert plus a Blinn-Phong highlight sized by roughness (`Lighting/Shading.hlsli`). A material of
+  `"type": "transparent"` is not drawn into the gbuffer: the transparency stage draws it after the sky with
+  `Templates/Forward.frag.hlsl`, lit the same way and blended over `Hdr`, depth tested and not written. Nothing is
+  sorted, which is right for one layer of glass and approximate for several.
+- Shadows come from one depth atlas (`Shadows/`, `Lighting/Shadows.hlsli`), planned entirely on the GPU by
+  the pipeline's shadow stage. The sun has cascades along the main view (the `ShadowPlan` pass's `cascades`),
+  each a sphere around a slice of the frustum snapped to its own texel grid so nothing shimmers, blended into
+  the next over the last share of its range; the nearest shadow-casting spot and point lights hold pages (six
+  for a point light), drawn again in turn within a per-frame budget (`LocalShadowSelect`), and the lighting
+  finds a light's faces through its `GpuShadowView` rows. Every refreshed view is culled on the GPU like a
+  camera (`CullShadow`) and drawn with one depth-only pipeline into its tile; the lighting reads the atlas
+  with a comparison sampler, a disc of taps whose radius is constant in the world. The CPU keeps the
+  reference maths (`Reference/Cascades.cs`) only to check the GPU's fit against (`Render.CullingCheck`).
 - The ambient is not flat. Ambient occlusion (`Lighting/Gtao.comp.hlsl`, horizon based, at half resolution by
   default, a fixed dither that `AoBlur` smooths, nothing temporal) darkens creases and gives a bent normal; the GI
   volumes (`Gi/`) say how much sky a point sees, tint the interiors where it sees none, and add the light bounced
   once off the voxels around it, all gathered along that bent normal. The sky's colour is the `Sky` component's;
-  without one, the old flat ambient. `Settings.Render.Ao` and `Settings.Render.Gi` hold the knobs, and
-  `Render.DebugView` shows any one of these inputs in place of the scene.
+  without one, the old flat ambient. The knobs are the passes' parameters (`Gtao.pass`, `GiPlan.pass`,
+  `Lighting.pass`, editable in F4), and the `debugView` parameter of `Passes/Core/Lighting.pass` shows any one of these inputs in place of the scene.
 - Culling is two-phase: what last frame's depth pyramid (HiZ) did not hide is drawn first, the pyramid is
   rebuilt from that depth, and what was held back is retested and drawn the same frame. Small instances
   move to a lesser LOD of their mesh on the GPU, dithered from one to the next.
@@ -103,8 +109,10 @@ These are the ones that break silently when ignored. Most were learned the hard 
   by hand. `READ(n)` numbers run across sampled textures, then storage textures, then storage buffers, in
   that order.
 - **One constant block per stage, at `UNIFORM(0)`.** DXC drops a block nothing reads and SDL needs the
-  blocks a stage uses to be consecutive from 0. Everything per-frame lives in `Include/Frame.hlsli`; a
-  header that needs more appends to it with `FRAME_APPEND`.
+  blocks a stage uses to be consecutive from 0. Everything per-frame lives in `Include/Frame.hlsli`: the
+  view's 256 bytes, then the pass's 128 (`PassRaw`: its parameters, and in the last row the executor's
+  `PassIteration()`); a header that still needs more appends to it with `FRAME_APPEND`. The CPU pushes
+  `PassConstants` (384 bytes) to every stage, whatever the shader reads of it.
 - **A GPU struct changes together with its C# twin** in `Magic/Contexts/Rendering/GpuStructs.cs`. Both sides
   read the same bytes blind. Storage-buffer structs are built from 16-byte members; the constant block is
   built from 16-byte rows (a `float3` with a scalar, two `float2`, four scalars).
@@ -222,7 +230,7 @@ Surface EvaluateSurface(SurfaceInputs input, MaterialParams material)
 Defaults and `Gi*` roles are read by the renderer and stripped before compilation. `SampleTexture(input,
 texture)` samples at the mesh uv; for any other uv pass its own derivatives to `SampleTextureGrad`.
 
-## Writing a pass
+## Writing a post
 
 ```hlsl
 #include "Include/Pass.hlsli"
@@ -240,17 +248,27 @@ float4 main(PassVaryings input) : SV_Target0
 }
 ```
 
-Each input named in the `.pass` file arrives as a `Texture2D` with a `<Name>Sampler`.
+Each input named in the `.post` file arrives as a `Texture2D` with a `<Name>Sampler`.
 
-A pass runs only when it is listed. Post-processing is global, not a camera's: one entity of its own carries a
-`PostProcessing` component whose `passes` are applied in the order written, over every render target.
+A post runs only when it is listed. Post-processing is global, not a camera's: one entity of its own carries a
+`PostProcessing` component whose `posts` are applied in the order written, over every render target.
 
 ```json
-{ "name": "PostProcessing", "components": { "PostProcessing": { "passes": [ { "id": 10030 }, { "id": 10031 } ] } } }
+{ "name": "PostProcessing", "components": { "PostProcessing": { "posts": [ { "id": 10030 }, { "id": 10031 } ] } } }
 ```
 
 - Nothing is implied, the tonemap included: without the component the linear scene is shown.
-- Up to 8 passes. Of several entities carrying the component, the first is followed and a warning is logged.
-- A pass is loaded while it is listed and unloaded, with the targets it made, when it is not.
+- Up to 8 posts. Of several entities carrying the component, the first is followed and a warning is logged.
+- A post is loaded while it is listed and unloaded, with the targets it made, when it is not.
 - An input must be `Hdr`, `Ldr`, `Depth`, one of the gbuffer's (`Emissive`, `Albedo`, `Normal`, `Material`) or
-  the output of a pass earlier in the same list. Passes run after the lighting, so `Hdr` is the lit scene.
+  the output of a post earlier in the same list. Posts run after the lighting, so `Hdr` is the lit scene.
+- A post that is wrong (its file, its shader, an input nothing wrote) is disabled with one logged error and shown
+  as a failure: a magenta band along the top of the image with its name, breathing like a broken material.
+
+## Writing a core pass
+
+A `.pass` file is the general form a post is the simple case of: a compute, fullscreen, draw or glows pass with
+the resources it reads, writes and creates named, listed in a stage of the `.pipeline`. Its shader declares its
+own bindings, in the order the file reads them (sampled textures, then storage textures, then buffers; writes
+textures then buffers), and the renderer holds the compiled counts against the file: every read must be used.
+`struct PassParams` works as in a post, and packs to at most 112 bytes.

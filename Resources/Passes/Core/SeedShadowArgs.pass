@@ -1,0 +1,45 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 10062
+    },
+    "creates": [
+        {
+            "name": "ShadowDrawArgs",
+            "kind": "buffer",
+            "per": "$groupCount",
+            "stride": 20,
+            "min": 1280,
+            "slots": 10,
+            "usage": "indirect"
+        },
+        {
+            "name": "ShadowVisibleIds",
+            "kind": "buffer",
+            "per": "$visibleHighWater",
+            "stride": 8,
+            "slots": 10,
+            "usage": "vertex"
+        }
+    ],
+    "reads": [
+        {
+            "name": "DrawTemplate"
+        },
+        {
+            "name": "Counts"
+        },
+        {
+            "name": "ShadowHeader"
+        }
+    ],
+    "writes": [
+        {
+            "name": "ShadowDrawArgs"
+        }
+    ],
+    "dispatch": {
+        "per": "$groupCount"
+    },
+    "needs": "$shadowCasters"
+}

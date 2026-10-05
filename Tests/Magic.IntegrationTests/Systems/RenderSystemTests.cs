@@ -1,10 +1,11 @@
-﻿using DefaultTaggingGem;
+using DefaultTaggingGem;
 using FlecsGem;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Contexts.Settings;
+using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
 using DeferredRendererGem;
@@ -24,6 +25,11 @@ namespace Magic.IntegrationTests.Systems;
 public sealed class RenderSystemTests : IDisposable
 {
     private static readonly Renderer Cube = new() { Model = new Handle<Model>(514) };
+
+    /// <summary>
+    /// A post under the temp Assets folder whose shader is not an asset: disabled as soon as it is read.
+    /// </summary>
+    private const ulong BrokenPostId = 9001;
 
     private readonly TempFolder _root = new();
     private readonly FlecsEcs _ecs = new();
@@ -47,13 +53,15 @@ public sealed class RenderSystemTests : IDisposable
             Resources = Path.Combine(repo, "Resources"),
             Settings = new Settings { Render = new RenderSettings { ShaderCache = false } },
         };
-        Directory.CreateDirectory(project.Assets);
+        Directory.CreateDirectory(Path.Combine(project.Assets, "Passes"));
+        File.WriteAllText(Path.Combine(project.Assets, "Passes", "Broken.post"), """{ "shader": { "id": 999999 }, "inputs": [ "Ldr" ], "output": { "name": "Ldr" } }""");
+        File.WriteAllText(Path.Combine(project.Assets, "Passes", "Broken.post.meta"), $$"""{ "id": {{BrokenPostId}}, "version": 1 }""");
 
         FileSystem files = new();
         _assets = new Services.Assets(project, files, new Events(), new Container(), new Threads());
         _tags = new TagSystem(_ecs);
         _transforms = new TransformSystem(_ecs);
-        _rendering = new RenderSystem(_ecs, _assets, files, project, _windows, _fake, new Threads());
+        _rendering = new RenderSystem(_ecs, _assets, files, project, new World(new Events(), _assets, new Threads()), _windows, _fake, new Threads());
     }
 
     public void Dispose()
@@ -75,7 +83,7 @@ public sealed class RenderSystemTests : IDisposable
 
         RenderUntil(() => _ecs.Has<RenderInstance>(mover));
 
-        Assert.Equal(1d, Debugging.Stats.Get("Render.Instances"));
+        Assert.Equal(1d, Debugging.Stats.Get("Rendering.Instances"));
     }
 
     [Theory]
@@ -95,21 +103,23 @@ public sealed class RenderSystemTests : IDisposable
     public void A_camera_frame_culls_on_the_gpu()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        RenderUntil(() => _fake.Submitted.Count > 0 && _fake.Submitted[^1].Contains(RenderCommandType.Dispatch));
 
         RenderFrame();
 
-        Assert.Contains(RenderCommandType.Dispatch, Assert.Single(_fake.Submitted));
+        Assert.Contains(RenderCommandType.Dispatch, _fake.Submitted[^1]);
     }
 
     [Fact]
     public void A_camera_frame_lights_the_scene_after_drawing_it()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        RenderUntil(() => _fake.Submitted.Count > 0 && Array.LastIndexOf(_fake.Submitted[^1], RenderCommandType.Dispatch) > Array.IndexOf(_fake.Submitted[^1], RenderCommandType.EndRenderPass));
 
         RenderFrame();
 
-        RenderCommandType[] frame = Assert.Single(_fake.Submitted);
-        Assert.True(Array.LastIndexOf(frame, RenderCommandType.Dispatch) > Array.LastIndexOf(frame, RenderCommandType.EndRenderPass));
+        RenderCommandType[] frame = _fake.Submitted[^1];
+        Assert.True(Array.LastIndexOf(frame, RenderCommandType.Dispatch) > Array.IndexOf(frame, RenderCommandType.EndRenderPass));
     }
 
     [Fact]
@@ -147,7 +157,7 @@ public sealed class RenderSystemTests : IDisposable
     public void A_listed_pass_is_compiled()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
-        _ecs.Set(Spawn(Vector3.Zero), new PostProcessing { Passes = TonemapOnly() });
+        _ecs.Set(Spawn(Vector3.Zero), new PostProcessing { Posts = TonemapOnly() });
 
         RenderUntil(() => PassSources().Length == 1);
 
@@ -162,6 +172,77 @@ public sealed class RenderSystemTests : IDisposable
         RenderFrame();
 
         Assert.Empty(PassSources());
+    }
+
+    [Fact]
+    public void A_listed_post_writes_what_is_shown_so_the_scene_is_not_copied_into_it()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        _ecs.Set(Spawn(Vector3.Zero), new PostProcessing { Posts = TonemapOnly() });
+        RenderUntil(() => _fake.Submitted.Count > 0 && _fake.Submitted[^1][^2] != RenderCommandType.Blit);
+
+        RenderFrame();
+
+        Assert.Equal([RenderCommandType.Draw, RenderCommandType.EndRenderPass, RenderCommandType.Blit], _fake.Submitted[^1][^3..]);
+    }
+
+    [Fact]
+    public void A_broken_post_is_disabled_with_an_error()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        _ecs.Set(Spawn(Vector3.Zero), new PostProcessing { Posts = BrokenOnly() });
+        int errors = Debugging.Log.Errors;
+
+        RenderUntil(() => Debugging.Log.Errors > errors);
+
+        Assert.True(Debugging.Log.Errors > errors);
+    }
+
+    [Fact]
+    public void A_broken_post_is_drawn_as_a_failure_over_what_is_shown()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        _ecs.Set(Spawn(Vector3.Zero), new PostProcessing { Posts = BrokenOnly() });
+        int errors = Debugging.Log.Errors;
+        RenderUntil(() => Debugging.Log.Errors > errors);
+
+        RenderFrame();
+
+        Assert.Equal(
+            [RenderCommandType.Blit, RenderCommandType.PushConstants, RenderCommandType.BeginRenderPass, RenderCommandType.BindPipeline, RenderCommandType.Draw, RenderCommandType.EndRenderPass, RenderCommandType.Blit],
+            _fake.Submitted[^1][^7..]);
+    }
+
+    [Fact]
+    public void A_core_pass_of_the_default_pipeline_is_compiled()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+
+        RenderUntil(() => _fake.Compiled.Any(source => source.Contains("Shaders/Lighting/Lighting.comp.hlsl\"")));
+
+        Assert.Contains(_fake.Compiled, source => source.Contains("Shaders/Lighting/Lighting.comp.hlsl\""));
+    }
+
+    [Fact]
+    public void The_pipeline_lists_its_passes_for_tuning_in_the_order_they_run()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+
+        RenderUntil(() => _rendering.Tuning.Passes.Count > 0);
+
+        Assert.Equal("Shadows", _rendering.Tuning.Passes[0].Stage);
+    }
+
+    [Fact]
+    public void A_tuned_parameter_is_what_the_pass_lists_after()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        RenderUntil(() => _rendering.Tuning.Passes.Any(pass => pass.Params.Any(parameter => parameter.Name == "debugView")));
+        TunablePass lighting = _rendering.Tuning.Passes.First(pass => pass.Params.Any(parameter => parameter.Name == "debugView"));
+
+        _rendering.Tuning.Set(lighting.Id, "debugView", Param.Of(3f));
+
+        Assert.Equal(3f, _rendering.Tuning.Passes.First(pass => pass.Id == lighting.Id).Params.First(parameter => parameter.Name == "debugView").Value.X);
     }
 
     [Fact]
@@ -223,7 +304,7 @@ public sealed class RenderSystemTests : IDisposable
         RenderFrame();
         RenderUntil(() => _ecs.Has<RenderInstance>(entity));
 
-        Assert.Equal(1d, Debugging.Stats.Get("Render.Instances"));
+        Assert.Equal(1d, Debugging.Stats.Get("Rendering.Instances"));
     }
 
     [Fact]
@@ -236,7 +317,7 @@ public sealed class RenderSystemTests : IDisposable
 
         RenderFrame();
 
-        Assert.Equal(0d, Debugging.Stats.Get("Render.Instances"));
+        Assert.Equal(0d, Debugging.Stats.Get("Rendering.Instances"));
     }
 
     [Fact]
@@ -284,7 +365,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, Tags.Of(Tag.Hidden));
         RenderFrame();
 
-        Assert.Equal(0d, Debugging.Stats.Get("Render.Lights"));
+        Assert.Equal(0d, Debugging.Stats.Get("Rendering.Lights"));
     }
 
     [Fact]
@@ -302,7 +383,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, default(Tags));
         RenderFrame();
 
-        Assert.Equal(1d, Debugging.Stats.Get("Render.Lights"));
+        Assert.Equal(1d, Debugging.Stats.Get("Rendering.Lights"));
     }
 
     [Fact]
@@ -332,7 +413,7 @@ public sealed class RenderSystemTests : IDisposable
 
         RenderFrame();
 
-        Assert.Equal(0d, Debugging.Stats.Get("Render.Lights"));
+        Assert.Equal(0d, Debugging.Stats.Get("Rendering.Lights"));
     }
 
     [Fact]
@@ -348,7 +429,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, default(Tags));
         RenderFrame();
 
-        Assert.Equal(1d, Debugging.Stats.Get("Render.Lights"));
+        Assert.Equal(1d, Debugging.Stats.Get("Rendering.Lights"));
     }
 
     [Theory]
@@ -431,12 +512,20 @@ public sealed class RenderSystemTests : IDisposable
     }
 
     /// <summary>
-    /// A list of the engine's tonemap pass, Resources/Passes/Tonemap.pass.
+    /// A list of the engine's tonemap post, Resources/Passes/Tonemap.post.
     /// </summary>
-    private static PassList TonemapOnly()
+    private static PostList TonemapOnly()
     {
-        PassList list = default;
-        list[0] = new Handle<Pass>(10030);
+        PostList list = default;
+        list[0] = new Handle<Post>(10030);
+
+        return list;
+    }
+
+    private static PostList BrokenOnly()
+    {
+        PostList list = default;
+        list[0] = new Handle<Post>(BrokenPostId);
 
         return list;
     }

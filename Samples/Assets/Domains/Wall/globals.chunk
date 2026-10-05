@@ -3,7 +3,7 @@
         {
             "name": "PostProcessing",
             "components": {
-                "PostProcessing": { "passes": [ { "id": 10030 } ] }
+                "PostProcessing": { "posts": [ { "id": 10030 } ] }
             }
         },
         { "name": "Orbit", "scripts": [ { "id": 3051, "degreesPerSecond": 6 } ] },

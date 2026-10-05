@@ -1,0 +1,46 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 5904702918322336387
+    },
+    "reads": [
+        {
+            "name": "GiPageList"
+        },
+        {
+            "name": "Pages"
+        },
+        {
+            "name": "Instances"
+        },
+        {
+            "name": "Xforms"
+        },
+        {
+            "name": "GiGroups"
+        },
+        {
+            "name": "GiMaterials"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "writes": [
+        {
+            "name": "GiAccum"
+        },
+        {
+            "name": "GiTasks"
+        },
+        {
+            "name": "GiTaskArgs"
+        },
+        {
+            "name": "GiCounters"
+        }
+    ],
+    "dispatch": {
+        "indirect": "GiPageArgs"
+    }
+}

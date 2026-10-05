@@ -1,5 +1,4 @@
 using Magic.Contexts.Rendering;
-using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Interfaces;
 
@@ -10,8 +9,8 @@ namespace DeferredRendererGem;
 /// size) and made again when that changes. The scene is drawn into the <see cref="GBuffer"/>, the lighting writes
 /// <c>Hdr</c> from it, the passes end in <c>Ldr</c> (the tonemap writes it; without one <c>Hdr</c> is copied into it,
 /// so it is always what was shown and what a screenshot reads back), and presenting blits it to the window's swapchain
-/// or into the render texture's pool layer. A data pass may add targets of its own by name; they last while a listed
-/// pass writes them.
+/// or into the render texture's pool layer. A pass may add targets of its own by name (a texture that follows the
+/// target's size); they last while a listed pass writes them.
 /// </summary>
 internal sealed class FrameTargets
 {
@@ -35,13 +34,7 @@ internal sealed class FrameTargets
             _targets["Normal"] = new Target { Format = GBuffer.NormalFormat, Usage = drawn, IsBuiltIn = true },
             _targets["Material"] = new Target { Format = GBuffer.MaterialFormat, Usage = drawn, IsBuiltIn = true },
             Depth);
-
-        const GpuTextureUsage computed = GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite;
-        AoRaw = _targets[AoRawName] = new Target { Format = AmbientOcclusion.RawFormat, Usage = computed, Scale = 0.5f, IsBuiltIn = true };
-        Ao = _targets["Ao"] = new Target { Format = AmbientOcclusion.Format, Usage = computed, IsBuiltIn = true };
     }
-
-    public const string AoRawName = "AoRaw";
 
     public RenderTarget RenderTarget { get; }
 
@@ -58,38 +51,10 @@ internal sealed class FrameTargets
     public GBuffer GBuffer { get; }
 
     /// <summary>
-    /// The ambient occlusion as searched, at the setting's scale of the view, and as blurred into what the lighting reads.
+    /// What the passes of a target or view stage created for this render target beyond its textures: fixed textures,
+    /// volumes and buffers, by name.
     /// </summary>
-    public Target AoRaw { get; }
-
-    public Target Ao { get; }
-
-    /// <summary>
-    /// What is wrong with the passes listed for this target, as last logged; null when nothing is.
-    /// </summary>
-    public string? PassProblem { get; set; }
-
-    /// <summary>
-    /// The texture format a pass output is: the engine's own for Hdr and Ldr, else what the pass asks for.
-    /// </summary>
-    public static GpuFormat Format(PassOutput output)
-    {
-        if (string.Equals(output.Name, "Hdr", StringComparison.OrdinalIgnoreCase))
-            return HdrFormat;
-        if (string.Equals(output.Name, "Ldr", StringComparison.OrdinalIgnoreCase))
-            return LdrFormat;
-
-        return output.Format switch
-        {
-            TargetFormat.Rgba8Unorm => GpuFormat.Rgba8Unorm,
-            TargetFormat.Rgba16Float => GpuFormat.Rgba16Float,
-            TargetFormat.R16Float => GpuFormat.R16Float,
-            TargetFormat.R32Float => GpuFormat.R32Float,
-            TargetFormat.Rg16Float => GpuFormat.Rg16Float,
-            TargetFormat.B10G11R11Float => GpuFormat.R11G11B10Float,
-            _ => LdrFormat,
-        };
-    }
+    public ResourceSet Resources { get; } = new();
 
     /// <summary>
     /// After a ping-pong pass: what was written becomes the target.
@@ -199,6 +164,7 @@ internal sealed class FrameTargets
         foreach (Target target in _targets.Values)
             ReleaseTextures(gpu, target);
 
+        ResourceRegistry.ReleaseSet(gpu, Resources);
         Width = Height = 0;
     }
 

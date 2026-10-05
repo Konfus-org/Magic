@@ -78,9 +78,9 @@ struct ClipPlanes
     float4 planes[6];
 };
 
-ClipPlanes FrustumPlanes()
+ClipPlanes FrustumPlanesOf(float4x4 viewProj)
 {
-    float4 r0 = ViewProj[0], r1 = ViewProj[1], r2 = ViewProj[2], r3 = ViewProj[3];
+    float4 r0 = viewProj[0], r1 = viewProj[1], r2 = viewProj[2], r3 = viewProj[3];
     ClipPlanes result;
     result.planes[0] = r3 + r0;
     result.planes[1] = r3 - r0;
@@ -91,6 +91,11 @@ ClipPlanes FrustumPlanes()
     [unroll] for (uint i = 0u; i < 6u; i++)
         result.planes[i] /= max(length(result.planes[i].xyz), 1e-20);
     return result;
+}
+
+ClipPlanes FrustumPlanes()
+{
+    return FrustumPlanesOf(ViewProj);
 }
 
 // A camera-relative sphere touches the volume: not wholly outside any plane.
@@ -191,41 +196,42 @@ bool IsOccluded(StructuredBuffer<float> hiZ, float3 center, float radius)
     return isHidden;
 }
 
-// A survivor takes the next instanceCount of a bucket's draw arguments and puts its slot at the bucket's
-// firstInstance plus that, in the visible list the vertex stage reads through the instance-rate buffer.
+// An instance into a bucket's draw: one more instance, its slot and fade at the next place of the bucket's
+// run of the visible list. argsOffset is where the view's slice of the draw args starts (0 for a camera).
 void AppendToBucket(
     RWStructuredBuffer<GpuDrawArgs> drawArgs,
     RWStructuredBuffer<GpuVisible> visibleIds,
+    uint argsOffset,
     uint bucket,
     uint slot,
     float lodFade)
 {
     uint index;
-    InterlockedAdd(drawArgs[bucket].instanceCount, 1u, index);
+    InterlockedAdd(drawArgs[argsOffset + bucket].instanceCount, 1u, index);
 
     GpuVisible visible;
     visible.slot = slot;
     visible.lodFade = lodFade;
-    visibleIds[drawArgs[bucket].firstInstance + index] = visible;
+    visibleIds[drawArgs[argsOffset + bucket].firstInstance + index] = visible;
 }
 
 // A survivor of the given bucket is drawn in the bucket its size on screen asks for: its own, or that of a
 // lesser version of its mesh once it is small enough. It never switches from one to the next: from a
 // threshold down to LOD_BLEND of it further, it is drawn in both, the finer one dithered out as the lesser one
 // is dithered in (GpuVisible.lodFade), so every bucket a mesh's versions draw in has room for all its
-// instances (Instancing.Group). The early and the late pass both ask, with the same sphere and constants, so
-// they agree. An orthographic view reads the height from its own scale, so a shadow cascade picks LODs too.
-void AppendVisible(
+// instances (Instancing.Group). height is the instance's height on screen as a share of the view's, scaled by
+// the LOD bias: the early and the late pass both ask with the same sphere and constants, so they agree, and a
+// shadow view asks in its own texels.
+void AppendVisibleHeight(
     RWStructuredBuffer<GpuDrawArgs> drawArgs,
     RWStructuredBuffer<GpuVisible> visibleIds,
     StructuredBuffer<GpuLodRow> lods,
+    uint argsOffset,
     uint bucket,
     uint slot,
-    float3 center,
-    float radius)
+    float height)
 {
     GpuLodRow row = lods[bucket];
-    float height = ScreenRadius(center, radius) * 2.0 / ViewSize.y * LodBias;
 
     // The thresholds fall from x to z, so each one passed makes the bucket picked so far the finer one.
     uint finer = bucket;
@@ -256,13 +262,27 @@ void AppendVisible(
     float finerShare = picked != finer ? saturate((height - threshold + blendHeight) / blendHeight) : 0.0;
     [branch] if (finerShare > 0.0)
     {
-        AppendToBucket(drawArgs, visibleIds, finer, slot, finerShare);
-        AppendToBucket(drawArgs, visibleIds, picked, slot, -finerShare);
+        AppendToBucket(drawArgs, visibleIds, argsOffset, finer, slot, finerShare);
+        AppendToBucket(drawArgs, visibleIds, argsOffset, picked, slot, -finerShare);
     }
     else
     {
-        AppendToBucket(drawArgs, visibleIds, picked, slot, 1.0);
+        AppendToBucket(drawArgs, visibleIds, argsOffset, picked, slot, 1.0);
     }
+}
+
+// The camera's version: the height from the view-space sphere and the frame's projection and LOD bias.
+void AppendVisible(
+    RWStructuredBuffer<GpuDrawArgs> drawArgs,
+    RWStructuredBuffer<GpuVisible> visibleIds,
+    StructuredBuffer<GpuLodRow> lods,
+    uint bucket,
+    uint slot,
+    float3 center,
+    float radius)
+{
+    float height = ScreenRadius(center, radius) * 2.0 / ViewSize.y * LodBias;
+    AppendVisibleHeight(drawArgs, visibleIds, lods, 0u, bucket, slot, height);
 }
 
 #endif

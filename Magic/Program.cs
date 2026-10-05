@@ -1,4 +1,4 @@
-﻿using CommandLine;
+using CommandLine;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
@@ -101,6 +101,7 @@ internal static class Program
             using IWindow? _ = mainWindow;
 
             World world = services.Get<World>();
+            ChoosePipeline(options, project, assets, world);
             OpenEntryPoint(options, project, assets, world);
 
             // The frame loop runs on the main thread while this one draws what it is handed, until the loop ends.
@@ -132,6 +133,21 @@ internal static class Program
             Fail($"Exception occurred, crashing...\nException:\n{ex}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// The pipeline the scene is rendered with: --pipeline, else the project's, else the engine's default. A path that
+    /// is not an asset is an error, and the next choice is taken.
+    /// </summary>
+    private static void ChoosePipeline(Options options, Project project, Assets assets, World world)
+    {
+        Handle<Pipeline> pipeline = options.Pipeline is { } path ? assets.Find<Pipeline>(path) : project.Pipeline;
+        if (options.Pipeline is not null && !pipeline.IsValid)
+            Debugging.Log.Error($"--pipeline {options.Pipeline}: no such asset under Resources or Assets.");
+        if (!pipeline.IsValid)
+            pipeline = assets.Find<Pipeline>(Pipeline.DefaultPath);
+
+        world.Pipeline = pipeline;
     }
 
     /// <summary>
@@ -413,11 +429,11 @@ internal static class Program
         {
             long submitting = Stopwatch.GetTimestamp();
             if (rendering is not null)
-                Debugging.Stats.Set("Render.WaitMs", rendering.Submit(commands));
+                Debugging.Stats.Set("Rendering.WaitMs", rendering.Submit(commands));
             else
                 commands.Clear();
 
-            Debugging.Stats.Set("Render.SubmitMs", Stopwatch.GetElapsedTime(submitting).TotalMilliseconds);
+            Debugging.Stats.Set("Rendering.SubmitMs", Stopwatch.GetElapsedTime(submitting).TotalMilliseconds);
         });
 
         long finished = Stopwatch.GetTimestamp();

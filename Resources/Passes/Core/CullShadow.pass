@@ -1,0 +1,52 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 8318291212120640964
+    },
+    "defines": [
+        "#define LOD_BLEND 0.25"
+    ],
+    "reads": [
+        {
+            "name": "Pages"
+        },
+        {
+            "name": "Cells"
+        },
+        {
+            "name": "Instances"
+        },
+        {
+            "name": "Lods"
+        },
+        {
+            "name": "ShadowViews"
+        },
+        {
+            "name": "ShadowRefreshed"
+        },
+        {
+            "name": "Counts"
+        }
+    ],
+    "writes": [
+        {
+            "name": "ShadowDrawArgs"
+        },
+        {
+            "name": "ShadowVisibleIds"
+        }
+    ],
+    "dispatch": {
+        "indirect": "ShadowCullArgs"
+    },
+    "params": {
+        "minTexels": {
+            "x": 1.5
+        },
+        "lodBias": {
+            "x": 0.5
+        }
+    },
+    "needs": "$shadowCasters"
+}

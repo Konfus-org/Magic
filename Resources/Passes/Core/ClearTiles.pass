@@ -1,0 +1,21 @@
+{
+    "kind": "quads",
+    "shader": {
+        "id": 11417388696322383508
+    },
+    "fragment": {
+        "id": 16841411220043911094
+    },
+    "reads": [
+        {
+            "name": "ShadowViews"
+        }
+    ],
+    "draw": {
+        "depth": "ShadowAtlas",
+        "load": "load",
+        "rows": "52",
+        "depthCompare": "always"
+    },
+    "needs": "$shadowCasters"
+}

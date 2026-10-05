@@ -1,0 +1,46 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 9076954935020229862
+    },
+    "creates": [
+        {
+            "name": "VisiblePages",
+            "kind": "buffer",
+            "per": "$pageCount",
+            "stride": 4,
+            "min": 64
+        },
+        {
+            "name": "DispatchArgs",
+            "kind": "buffer",
+            "bytes": 16,
+            "usage": "indirect",
+            "reset": [
+                "0",
+                "1",
+                "1",
+                "$pageCount"
+            ]
+        }
+    ],
+    "reads": [
+        {
+            "name": "Pages"
+        },
+        {
+            "name": "Cells"
+        }
+    ],
+    "writes": [
+        {
+            "name": "VisiblePages"
+        },
+        {
+            "name": "DispatchArgs"
+        }
+    ],
+    "dispatch": {
+        "per": "$pageCount"
+    }
+}

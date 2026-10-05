@@ -1,0 +1,28 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 983386487915956913
+    },
+    "reads": [
+        {
+            "name": "GiState"
+        }
+    ],
+    "writes": [
+        {
+            "name": "GiAlbedo"
+        },
+        {
+            "name": "GiEmissive"
+        },
+        {
+            "name": "GiAccum"
+        },
+        {
+            "name": "GiLightGrid"
+        }
+    ],
+    "dispatch": {
+        "per": "level:GiAlbedo"
+    }
+}

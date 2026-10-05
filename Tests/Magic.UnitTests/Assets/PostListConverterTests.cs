@@ -1,0 +1,63 @@
+using Magic.Contexts;
+using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
+using System.Text.Json;
+using Xunit;
+
+namespace Magic.UnitTests.Assets;
+
+public sealed class PostListConverterTests
+{
+    [Fact]
+    public void An_array_of_handles_is_read_in_its_order()
+    {
+        const string json = """{ "posts": [ { "id": 30 }, { "id": 10 }, { "id": 20 } ] }""";
+
+        PostProcessing component = JsonSerializer.Deserialize<PostProcessing>(json, AssetJson.Options);
+
+        Assert.Equal([30ul, 10ul, 20ul], Ids(component.Posts));
+    }
+
+    [Fact]
+    public void More_posts_than_fit_are_refused()
+    {
+        string handles = string.Join(", ", Enumerable.Range(1, PostList.Capacity + 1).Select(id => $$"""{ "id": {{id}} }"""));
+        string json = $$"""{ "posts": [ {{handles}} ] }""";
+
+        Action read = () => JsonSerializer.Deserialize<PostProcessing>(json, AssetJson.Options);
+
+        Assert.Throws<JsonException>(read);
+    }
+
+    [Fact]
+    public void Anything_but_an_array_is_refused()
+    {
+        const string json = """{ "posts": { "id": 30 } }""";
+
+        Action read = () => JsonSerializer.Deserialize<PostProcessing>(json, AssetJson.Options);
+
+        Assert.Throws<JsonException>(read);
+    }
+
+    [Fact]
+    public void A_written_list_reads_back_the_same()
+    {
+        PostList list = default;
+        list[0] = new Handle<Post>(30);
+        list[1] = new Handle<Post>(10);
+        string json = JsonSerializer.Serialize(new PostProcessing { Posts = list }, AssetJson.Options);
+
+        PostProcessing component = JsonSerializer.Deserialize<PostProcessing>(json, AssetJson.Options);
+
+        Assert.Equal([30ul, 10ul], Ids(component.Posts));
+    }
+
+    private static ulong[] Ids(PostList list)
+    {
+        ulong[] ids = new ulong[list.Count];
+        for (int i = 0; i < ids.Length; i++)
+            ids[i] = list[i].Id;
+
+        return ids;
+    }
+}

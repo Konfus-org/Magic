@@ -1,4 +1,4 @@
-﻿# Magic
+# Magic
 
 A small C# game engine. `Magic` is a host that loads a project and its gems (plugin dlls), opens a window and
 runs the frame loop. The ECS, windowing, rendering and logging all live in gems and hot reload while it runs.
@@ -57,8 +57,8 @@ Samples project; run the script before it. It needs the ".NET Debugging with WSL
 - **ECS** (`Magic/Interfaces/IEcs*.cs`, `Gems/FlecsEcs`): components are structs implementing `IComponent`;
   systems are `ISystem`s added to the `Scheduler`, in a phase (`Update`, `FixedUpdate`, `LateUpdate`, `Render`,
   then `Overlay` for what draws on top of the scene).
-- **Rendering** (`Gems/DeferredRenderer` over `Gems/SDLRender`): GPU-driven on SDL_GPU, with passes and
-  materials defined as data in `Resources/`.
+- **Rendering** (`Gems/DeferredRenderer` over `Gems/SDLRender`): GPU-driven on SDL_GPU, with the pipeline, its
+  passes, the posts and the materials defined as data in `Resources/`.
 - **Stats** (`Debugging.Stats`): any system sets a number under a dotted name; the debug display (F3) prints
   them all, grouped.
 
@@ -67,7 +67,7 @@ Samples project; run the script before it. It needs the ".NET Debugging with WSL
 ```
 Magic/       The host: gem loader, services, contracts, core systems
 Gems/        Engine gems
-Resources/   Engine assets: shaders, materials, passes, models, textures
+Resources/   Engine assets: shaders, materials, the pipeline and its passes, posts, models, textures
 Samples/     The samples, one project (Samples/README.md)
 Tests/       Unit and integration tests (Tests/README.md)
 Tools/       dotnet new templates for projects, gems and samples (Tools/VSTemplates/README.md)

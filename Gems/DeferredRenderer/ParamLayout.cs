@@ -1,4 +1,4 @@
-﻿using Magic.Contexts;
+using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Utils;
 using System.Globalization;
@@ -359,7 +359,11 @@ internal enum SurfaceVariant : byte
     /// <summary>
     /// Compiled with FAILURE_FORCE 1: draws the shader-failure glow and never reads the record. Only the failure surface uses it.
     /// </summary>
-    FailureForced = 4
+    FailureForced = 4,
+    /// <summary>
+    /// Blended over the lit scene by the transparency stage's forward draw, not drawn into the gbuffer.
+    /// </summary>
+    Transparent = 8
 }
 
 /// <summary>

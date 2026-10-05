@@ -3,8 +3,8 @@
 // coarser levels) takes its share of that voxel here and now; a bigger one is cut into GI_TASK_CHUNK^3 chunks of
 // its footprint, one task each for Stamp.comp.hlsl (TaskArgs, reset by the CPU to (0, 1, 1, 0), counts them).
 
-#include "Include/Shade.hlsli"
-#include "Gi/Stamp.hlsli"
+#include "Include/Frame.hlsli"
+#include "Gi/Common.hlsli"
 
 StructuredBuffer<uint> PageList : READ(0);
 StructuredBuffer<GpuPage> Pages : READ(1);
@@ -16,6 +16,10 @@ RWStructuredBuffer<uint> Accum : WRITE(0);
 RWStructuredBuffer<uint2> Tasks : WRITE(1);
 RWStructuredBuffer<uint> TaskArgs : WRITE(2);
 RWStructuredBuffer<uint> Counters : WRITE(3);
+StructuredBuffer<GpuGiState> GiState : READ(6);
+
+#include "Gi/State.hlsli"
+#include "Gi/Stamp.hlsli"
 
 static const uint MaxChunksPerInstance = 32768u;
 
@@ -31,7 +35,7 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     if ((instance.flags & (InstanceAlive | InstanceHidden)) != InstanceAlive)
         return;
 
-    uint level = GiUpdateLevel;
+    uint level = GiUpdateLevel();
     float voxel = GiVoxel(level);
     float3 levelMin = GiOrigin(level);
     float3 levelMax = levelMin + GiExtent(level);
@@ -57,7 +61,7 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     {
         float volume = 4.18879 * radius * radius * radius;
         float coverage = saturate(volume / (voxel * voxel * voxel));
-        uint3 at = (uint3)clamp((int3)floor((center - levelMin) / voxel), 0, (int)GiResolution - 1);
+        uint3 at = (uint3)clamp((int3)floor((center - levelMin) / voxel), 0, (int)GiResolution() - 1);
         Accumulate(Accum, GiVoxelIndex(at), coverage, material.albedo.rgb, material.emissive.rgb);
         return;
     }

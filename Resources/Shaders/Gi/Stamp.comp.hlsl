@@ -5,8 +5,8 @@
 // but a small thing in a big voxel of a coarse level does not. Dispatched indirectly from TaskArgs; a task index
 // past the capacity is never written, so the dispatch is clamped on the CPU side by the buffer's size.
 
-#include "Include/Shade.hlsli"
-#include "Gi/Stamp.hlsli"
+#include "Include/Frame.hlsli"
+#include "Gi/Common.hlsli"
 
 Texture3D<float> BrickAtlas : READ(0);
 SamplerState BrickAtlasSampler : SAMPLER(0);
@@ -16,6 +16,10 @@ StructuredBuffer<GpuInstanceXform> Xforms : READ(3);
 StructuredBuffer<GpuGiGroup> Groups : READ(4);
 StructuredBuffer<GpuGiMaterial> Materials : READ(5);
 RWStructuredBuffer<uint> Accum : WRITE(0);
+StructuredBuffer<GpuGiState> GiState : READ(6);
+
+#include "Gi/State.hlsli"
+#include "Gi/Stamp.hlsli"
 
 [numthreads(GI_TASK_CHUNK, GI_TASK_CHUNK, GI_TASK_CHUNK)]
 void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
@@ -29,7 +33,7 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     GpuInstanceXform world = Xforms[slot];
     GpuGiGroup group = Groups[instance.bucketGroup];
 
-    uint level = GiUpdateLevel;
+    uint level = GiUpdateLevel();
     float3 worldMin, worldMax;
     InstanceWorldBox(world, group.boxMin.xyz, group.boxMax.xyz, worldMin, worldMax);
     int3 first, last;

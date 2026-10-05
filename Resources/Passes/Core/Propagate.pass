@@ -1,0 +1,63 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 17416762377251325564
+    },
+    "reads": [
+        {
+            "name": "GiAlbedo",
+            "filter": "nearest"
+        },
+        {
+            "name": "GiEmissive",
+            "filter": "nearest"
+        },
+        {
+            "name": "ShadowAtlas",
+            "filter": "comparison"
+        },
+        {
+            "name": "Lights"
+        },
+        {
+            "name": "GiLightGrid"
+        },
+        {
+            "name": "ShadowViews"
+        },
+        {
+            "name": "ShadowHeader"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "writes": [
+        {
+            "name": "GiShR0"
+        },
+        {
+            "name": "GiShR1"
+        },
+        {
+            "name": "GiShG0"
+        },
+        {
+            "name": "GiShG1"
+        },
+        {
+            "name": "GiShB0"
+        },
+        {
+            "name": "GiShB1"
+        }
+    ],
+    "dispatch": {
+        "per": "level:GiShR0"
+    },
+    "params": {
+        "propagationDamping": {
+            "x": 0.9
+        }
+    }
+}

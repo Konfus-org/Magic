@@ -1,4 +1,4 @@
-﻿using Magic.Contexts.Rendering;
+using Magic.Contexts.Rendering;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Mathematics;
@@ -22,6 +22,12 @@ internal static class RenderChecks
     /// </summary>
     public const int VerifyEveryFrames = 60;
 
+    /// <summary>
+    /// The share of a LOD threshold over which an instance blends into the next version of its mesh: the cull passes'
+    /// <c>LOD_BLEND</c> (Resources/Passes/Core/CullEarly.pass), which the CPU's count has to agree with.
+    /// </summary>
+    private const float LodBlend = 0.25f;
+
     public static void RunProbes(RenderContext ctx)
     {
         CheckWinding(ctx);
@@ -29,17 +35,17 @@ internal static class RenderChecks
     }
 
     /// <summary>
-    /// Reads the view's draw args back (synchronously) and compares the GPU's early and late visible counts with the CPU's
-    /// bounds for frustum and size alone (occlusion has no CPU twin): the instances that are certainly visible and the ones
-    /// that possibly are.
+    /// Reads the view's draw args back (synchronously, by the names the scene passes create them under) and compares the
+    /// GPU's early and late visible counts with the CPU's bounds for frustum and size alone (occlusion has no CPU twin):
+    /// the instances that are certainly visible and the ones that possibly are. Nothing without a scene stage that made them.
     /// </summary>
-    public static void Verify(RenderContext ctx, ViewBuffers view, in FrameConstants frame)
+    public static void Verify(RenderContext ctx, ResourceSet view, in FrameConstants frame)
     {
         uint argsBytes = (uint)ctx.Buckets.ChunkCount * Buckets.ChunkBytes;
-        if (argsBytes == 0)
+        if (argsBytes == 0 || view.GetValueOrDefault("DrawArgsEarly") is not { Buffer: { } earlyBuffer })
             return;
 
-        Result<byte[]> earlyArgs = ctx.Gpu.Read(view.DrawArgsEarly.Handle, argsBytes);
+        Result<byte[]> earlyArgs = ctx.Gpu.Read(earlyBuffer.Handle, argsBytes);
         if (earlyArgs.Failed)
         {
             Debugging.Log.Error($"Culling check: reading the draw args failed: {earlyArgs.Message}");
@@ -48,7 +54,9 @@ internal static class RenderChecks
 
         uint early = VisibleCount(earlyArgs.Payload);
         // Without occlusion the late pass never runs, so there are no late args.
-        uint late = view.Occlusion is { } occlusion && ctx.Gpu.Read(occlusion.DrawArgsLate.Handle, argsBytes) is { Ok: true } read ? VisibleCount(read.Payload) : 0;
+        GrowableBuffer? lateBuffer = view.GetValueOrDefault("DrawArgsLate")?.Buffer;
+        bool occlusion = lateBuffer is not null;
+        uint late = lateBuffer is not null && ctx.Gpu.Read(lateBuffer.Handle, argsBytes) is { Ok: true } read ? VisibleCount(read.Payload) : 0;
 
         // The CPU side of the frustum and size tests, from the Core maths rather than the shader. A 2% band around each
         // threshold, because edge instances flip between the two float paths.
@@ -82,7 +90,7 @@ internal static class RenderChecks
                 for (int i = 0; i < lods.Count; i++)
                 {
                     float threshold = lods.Thresholds[i];
-                    float blendEnd = threshold * (1f - Culling.LodBlend);
+                    float blendEnd = threshold * (1f - LodBlend);
                     maybeBlends |= height > blendEnd * 0.98f && height < threshold * 1.02f;
                     if (height < threshold * 0.98f)
                         surelyBlends = height > blendEnd * 1.02f;
@@ -100,11 +108,86 @@ internal static class RenderChecks
         uint gpuCount = early + late;
         uint alive = ctx.Instances.Alive;
         // Occlusion only ever removes: with it on, the GPU may draw fewer than the CPU's frustum-only count.
-        bool ok = view.Occlusion is not null ? gpuCount <= cpuMax : gpuCount >= cpuMin && gpuCount <= cpuMax;
+        bool ok = occlusion ? gpuCount <= cpuMax : gpuCount >= cpuMin && gpuCount <= cpuMax;
         if (!ok)
             Debugging.Log.Error($"Culling: GPU drew {early} + {late} instances, the CPU reference says {cpuMin}..{cpuMax} (of {alive} alive).");
         else
             Debugging.Log.Verbose($"Culling verified: {early} early + {late} late of {alive} instances (frustum and size alone: {cpuMin}..{cpuMax}).");
+    }
+
+    /// <summary>
+    /// Reads the shadow views back (synchronously) and holds every cascade the GPU fitted this frame against the reference
+    /// fit of the same slice from the same camera and parameters (<see cref="Cascades.Fit"/>): the centre and the texel
+    /// size agree to within a texel. Nothing without a shadow plan pass, or while the sun casts no shadow.
+    /// </summary>
+    public static void VerifyShadowPlan(RenderContext ctx, in FrameConstants frame)
+    {
+        PassState? plan = null;
+        foreach (PassState pass in ctx.Pipeline.Stages[(int)Magic.Contexts.Assets.PipelineStage.Shadows])
+        {
+            if (pass.Ready && pass.Values.ContainsKey("cascades") && pass.Values.ContainsKey("distance"))
+                plan = pass;
+        }
+
+        ResourceScope scope = new(ctx, null, null);
+        if (plan is null || !scope.TryBuffer("ShadowViews", out GpuBuffer views, out _) || !scope.TryBuffer("ShadowHeader", out GpuBuffer header, out _))
+        {
+            Debugging.Log.Verbose($"Shadow plan check: nothing to check ({(plan is null ? "no shadow plan pass runs" : "the shadow views are not made")}).");
+            return;
+        }
+
+        Result<byte[]> headerBytes = ctx.Gpu.Read(header, GpuShadowHeader.Size);
+        Result<byte[]> viewBytes = ctx.Gpu.Read(views, (uint)(Cascades.MaxCascades * GpuShadowView.Size));
+        if (headerBytes.Failed || viewBytes.Failed)
+        {
+            Debugging.Log.Error($"Shadow plan check: reading the shadow views failed: {(headerBytes.Failed ? headerBytes.Message : viewBytes.Message)}");
+            return;
+        }
+
+        GpuShadowHeader planned = MemoryMarshal.Read<GpuShadowHeader>(headerBytes.Payload);
+        ReadOnlySpan<GpuShadowView> rows = MemoryMarshal.Cast<byte, GpuShadowView>(viewBytes.Payload);
+        if (planned.CascadeCount == 0)
+        {
+            Debugging.Log.Verbose("Shadow plan check: no cascades this frame (the sun casts no shadow).");
+            return;
+        }
+
+        float Value(string name, float fallback) => plan.Values.TryGetValue(name, out Magic.Contexts.Assets.Param value) ? value.X : fallback;
+        int count = (int)planned.CascadeCount;
+        int resolution = (int)Value("cascadeResolution", 2048f);
+        float distance = MathF.Max(Value("distance", 300f), frame.Near + 1f);
+        float lambda = Value("splitLambda", 0.7f);
+        float blend = Value("blendFraction", 0.15f);
+        float casterRange = Value("casterRange", 500f);
+
+        // The camera from its constants: the view rows are its axes.
+        Matrix4x4 cameraWorld = Matrix4x4.Transpose(frame.View);
+        cameraWorld.Translation = frame.CameraPos;
+        float tanHalf = 1f / frame.ProjScale.Y;
+        float fov = 2f * MathF.Atan(tanHalf);
+        float aspect = frame.ProjScale.Y / frame.ProjScale.X;
+        Matrix4x4 lightRotation = Cascades.LightRotation(frame.SunDirection);
+        Span<float> fars = stackalloc float[count];
+        Cascades.Split(frame.Near, distance, lambda, fars);
+
+        int checkedRows = 0;
+        for (int i = 0; i < count; i++)
+        {
+            GpuShadowView row = rows[i];
+            if (row.Flags.Y == 0)
+                continue; // kept from an earlier frame: fitted from an earlier camera
+
+            float nearSplit = i == 0 ? frame.Near : fars[i - 1] * (1f - blend);
+            Cascade expected = Cascades.Fit(cameraWorld, fov, aspect, nearSplit, fars[i], lightRotation, resolution, casterRange);
+            float texel = expected.TexelWorld;
+            Vector3 eye = new(row.Eye.X, row.Eye.Y, row.Eye.Z);
+            bool agrees = Vector3.Distance(eye, expected.Center) <= texel && MathF.Abs(row.Eye.W - texel) <= texel * 0.01f && MathF.Abs(row.Range.X - expected.FarSplit) <= 0.01f * expected.FarSplit;
+            if (!agrees)
+                Debugging.Log.Error($"Shadow plan: cascade {i} fitted at {eye} ({row.Eye.W:F4} m/texel, ends {row.Range.X:F1} m); the reference says {expected.Center} ({texel:F4} m/texel, ends {expected.FarSplit:F1} m).");
+            checkedRows++;
+        }
+
+        Debugging.Log.Verbose($"Shadow plan verified: {checkedRows} cascade(s) refitted this frame agree with the reference.");
     }
 
     private static uint VisibleCount(byte[] drawArgs)
@@ -223,7 +306,11 @@ internal static class RenderChecks
             gpu.Upload<MatrixProbeInput>(input, 0, [probe]);
             RenderCommands commands = new();
             commands.Push(GpuStage.Compute, projection);
-            Culling.Dispatch(commands, pipeline, [output], [input], 1);
+            commands.BeginComputePass([new GpuBinding(output)]);
+            commands.BindPipeline(pipeline);
+            commands.BindStorageBuffers(GpuStage.Compute, 0, [input]);
+            commands.Dispatch(1);
+            commands.EndComputePass();
             gpu.Submit(commands);
 
             Result<byte[]> read = gpu.Read(output, 32);

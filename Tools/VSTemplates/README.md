@@ -1,4 +1,4 @@
-﻿# Templates
+# Templates
 
 Three `dotnet new` templates: two projects, which Visual Studio lists in **File > New > Project** (search
 "Magic"), and an item; the `dotnet` CLI uses the short names. Install them, or reinstall after editing one, with
@@ -64,7 +64,7 @@ et10.0\Debugin\Magic.exe --project Samples
 ```
 
 In Visual Studio it is **Add > New Item** on the Samples project, with `Assets` as the location. The template leans
-on what the Samples project has (the shared `CameraController` and `OrbitSystem` scripts, the Tonemap pass), so it
+on what the Samples project has (the shared `CameraController` and `OrbitSystem` scripts, the Tonemap post), so it
 is of no use in a game project.
 
 ## Writing a gem

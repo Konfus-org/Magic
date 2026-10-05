@@ -1,0 +1,38 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 7927638224300200027
+    },
+    "reads": [
+        {
+            "name": "BrickAtlas",
+            "filter": "nearest"
+        },
+        {
+            "name": "GiTasks"
+        },
+        {
+            "name": "Instances"
+        },
+        {
+            "name": "Xforms"
+        },
+        {
+            "name": "GiGroups"
+        },
+        {
+            "name": "GiMaterials"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "writes": [
+        {
+            "name": "GiAccum"
+        }
+    ],
+    "dispatch": {
+        "indirect": "GiTaskArgs"
+    }
+}

@@ -5,7 +5,9 @@ namespace Magic.Contexts.Settings;
 /// <summary>
 /// The renderer's settings: one property per thing that can be turned, each with a default that suits a mid-range
 /// discrete GPU. Presets ("low", "ultra") are sets of these values and belong to the project or an editor, not here.
-/// Read every frame; changing one that the render state is built from builds it again.
+/// Read every frame; changing one that the render state is built from builds it again. How the scene is lit (the
+/// shadows, the ambient occlusion, the GI) is the pipeline's passes' own parameters (<c>Resources/Passes/Core</c>),
+/// edited live in the settings window's Pipeline section.
 /// </summary>
 public sealed class RenderSettings
 {
@@ -39,11 +41,6 @@ public sealed class RenderSettings
     public bool CullingCheck { get; set; }
 
     /// <summary>
-    /// Hide what last frame's depth pyramid covers. Off saves the pyramid and the late pass, for GPUs where they cost more than they cull.
-    /// </summary>
-    public bool OcclusionCulling { get; set; } = true;
-
-    /// <summary>
     /// Anisotropic filtering of material textures: 1 is off, 16 the most.
     /// </summary>
     public float Anisotropy { get; set; } = 8f;
@@ -66,15 +63,4 @@ public sealed class RenderSettings
     /// Keep compiled shaders under the cache folder next to the executable.
     /// </summary>
     public bool ShaderCache { get; set; } = true;
-
-    public ShadowSettings Shadows { get; set; } = new();
-
-    public AoSettings Ao { get; set; } = new();
-
-    public GiSettings Gi { get; set; } = new();
-
-    /// <summary>
-    /// What the lighting shows instead of the scene, for looking at one of its inputs; <see cref="RenderDebugView.None"/> is the scene.
-    /// </summary>
-    public RenderDebugView DebugView { get; set; }
 }

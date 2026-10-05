@@ -1,0 +1,69 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 18079342269583101260
+    },
+    "defines": [
+        "#define LOD_BLEND 0.25",
+        "#define OCCLUSION 1"
+    ],
+    "creates": [
+        {
+            "name": "DrawArgsEarly",
+            "kind": "buffer",
+            "per": "$groupCount",
+            "stride": 20,
+            "min": 1280,
+            "usage": "indirect",
+            "seed": "DrawTemplate"
+        },
+        {
+            "name": "VisibleIds",
+            "kind": "buffer",
+            "per": "$visibleHighWater",
+            "stride": 8,
+            "usage": "vertex"
+        },
+        {
+            "name": "Candidates",
+            "kind": "buffer",
+            "per": "$visibleHighWater",
+            "stride": 4,
+            "plus": 16,
+            "reset": [
+                "0"
+            ]
+        }
+    ],
+    "reads": [
+        {
+            "name": "VisiblePages"
+        },
+        {
+            "name": "Pages"
+        },
+        {
+            "name": "Instances"
+        },
+        {
+            "name": "Lods"
+        },
+        {
+            "name": "HiZPrevious"
+        }
+    ],
+    "writes": [
+        {
+            "name": "DrawArgsEarly"
+        },
+        {
+            "name": "VisibleIds"
+        },
+        {
+            "name": "Candidates"
+        }
+    ],
+    "dispatch": {
+        "indirect": "DispatchArgs"
+    }
+}

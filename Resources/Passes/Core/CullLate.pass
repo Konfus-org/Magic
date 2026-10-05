@@ -1,0 +1,34 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 18018215477209498587
+    },
+    "defines": [
+        "#define LOD_BLEND 0.25"
+    ],
+    "reads": [
+        {
+            "name": "Candidates"
+        },
+        {
+            "name": "Instances"
+        },
+        {
+            "name": "HiZ"
+        },
+        {
+            "name": "Lods"
+        }
+    ],
+    "writes": [
+        {
+            "name": "DrawArgsLate"
+        },
+        {
+            "name": "VisibleIds"
+        }
+    ],
+    "dispatch": {
+        "indirect": "DispatchArgsLate"
+    }
+}
