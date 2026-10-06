@@ -96,7 +96,7 @@ internal static class PassExecutor
                     else
                         RecordIterations(ctx, commands, pass, new ResourceScope(ctx, targets, null), views[0].Constants, plan.Counts.WithTarget(targets.Width, targets.Height), ref draws, ref dispatches);
 
-                    wroteLdr |= WritesName(pass.Pass, "Ldr");
+                    wroteLdr |= PassNames.Writes(pass.Pass, "Ldr");
                     break;
             }
         }
@@ -138,7 +138,7 @@ internal static class PassExecutor
 
         foreach (PassWrite write in pass.Pass.Writes)
         {
-            if (ReadsName(pass.Pass, write.Name) && scope.Target(write.Name) is { Twin.IsValid: true } target)
+            if (PassNames.Reads(pass.Pass, write.Name) && scope.Target(write.Name) is { Twin.IsValid: true } target)
                 FrameTargets.Swap(target);
         }
     }
@@ -537,7 +537,7 @@ internal static class PassExecutor
     /// </summary>
     private static bool WriteTexture(PassState pass, in ResourceScope scope, string name, out GpuTexture texture)
     {
-        if (pass.PingPong && ReadsName(pass.Pass, name) && scope.Target(name) is { Twin.IsValid: true } target)
+        if (pass.PingPong && PassNames.Reads(pass.Pass, name) && scope.Target(name) is { Twin.IsValid: true } target)
         {
             texture = target.Twin;
             return true;
@@ -570,28 +570,6 @@ internal static class PassExecutor
     private static uint Ceil(uint count, uint per)
     {
         return (Math.Max(1, count) + per - 1) / per;
-    }
-
-    private static bool WritesName(Pass pass, string name)
-    {
-        foreach (PassWrite write in pass.Writes)
-        {
-            if (string.Equals(write.Name, name, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool ReadsName(Pass pass, string name)
-    {
-        foreach (PassRead read in pass.Reads)
-        {
-            if (string.Equals(read.Name, name, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
     }
 
     /// <summary>

@@ -95,7 +95,7 @@ internal static class PassLoader
         state.Path = pass.Path;
         state.IsPost = isPost;
         state.Pass = pass;
-        state.PingPong = Array.Exists(pass.Writes, write => Array.Exists(pass.Reads, read => string.Equals(read.Name, write.Name, StringComparison.OrdinalIgnoreCase)));
+        state.PingPong = Array.Exists(pass.Writes, write => PassNames.Reads(pass, write.Name));
         state.Values = ValuesOf(pass, ctx.Settings.Values);
         state.Error = null;
         state.NeedsPipeline = false;

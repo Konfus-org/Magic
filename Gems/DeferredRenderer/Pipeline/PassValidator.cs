@@ -57,7 +57,7 @@ internal static class PassValidator
         {
             if (write.Name.Length == 0)
                 return Result.Failure("a write has no name.");
-            if (ReadsName(pass, write.Name) && CreateOf(pass, write.Name) is { } own && !(own.Kind == ResourceKind.Texture && own.Scale > 0f))
+            if (PassNames.Reads(pass, write.Name) && PassNames.CreateOf(pass, write.Name) is { } own && !(own.Kind == ResourceKind.Texture && own.Scale > 0f))
                 return Result.Failure($"reads and writes {write.Name}, which it creates fixed; a buffer or volume read back is a history (\"history\": true, read as {write.Name}Previous).");
         }
 
@@ -152,7 +152,7 @@ internal static class PassValidator
                     {
                         made[create.Name] = info;
                         if (create.History)
-                            made[create.Name + "Previous"] = info;
+                            made[create.Name + PassNames.Previous] = info;
                     }
                 }
             }
@@ -179,7 +179,7 @@ internal static class PassValidator
         foreach (PassRead read in pass.Reads)
         {
             // Last frame's history of something a later pass makes is there to read: order is no matter for it.
-            if (!made.ContainsKey(read.Name) && read.Name.EndsWith("Previous", StringComparison.OrdinalIgnoreCase) && ResourceRegistry.Describe(ctx, pipeline, read.Name) is { } history)
+            if (!made.ContainsKey(read.Name) && read.Name.EndsWith(PassNames.Previous, StringComparison.OrdinalIgnoreCase) && ResourceRegistry.Describe(ctx, pipeline, read.Name) is { } history)
                 made[read.Name] = history;
             if (Reach(read.Name, scope, made) is { } problem)
                 return problem;
@@ -269,7 +269,7 @@ internal static class PassValidator
             return Result.Failure("a create has no name.");
         if (ResourceRegistry.IsEngineName(create.Name))
             return Result.Failure($"creates {create.Name}, which is the engine's.");
-        if (create.Name.EndsWith("Previous", StringComparison.OrdinalIgnoreCase))
+        if (create.Name.EndsWith(PassNames.Previous, StringComparison.OrdinalIgnoreCase))
             return Result.Failure($"creates {create.Name}; a name ending in Previous is a history's.");
 
         switch (create.Kind)
@@ -324,7 +324,7 @@ internal static class PassValidator
         if (dispatch.Per.StartsWith("output:", StringComparison.Ordinal) || dispatch.Per.StartsWith("level:", StringComparison.Ordinal))
         {
             string name = dispatch.Per[(dispatch.Per.IndexOf(':') + 1)..];
-            if (!WritesName(pass, name))
+            if (!PassNames.Writes(pass, name))
                 return Result.Failure($"dispatches per {name}, which it does not write.");
         }
 
@@ -383,7 +383,7 @@ internal static class PassValidator
         (sampled, buffers) = (0, 0);
         foreach (PassRead read in pass.Reads)
         {
-            if (ResourceRegistry.IsEngineBuffer(read.Name) || CreateOf(pass, read.Name) is { Kind: ResourceKind.Buffer } || kindOf(read.Name) == ResourceKind.Buffer)
+            if (ResourceRegistry.IsEngineBuffer(read.Name) || PassNames.CreateOf(pass, read.Name) is { Kind: ResourceKind.Buffer } || kindOf(read.Name) == ResourceKind.Buffer)
                 buffers++;
             else
                 sampled++;
@@ -395,44 +395,11 @@ internal static class PassValidator
         (textures, buffers) = (0, 0);
         foreach (PassWrite write in pass.Writes)
         {
-            if (ResourceRegistry.IsEngineBuffer(write.Name) || CreateOf(pass, write.Name) is { Kind: ResourceKind.Buffer } || kindOf(write.Name) == ResourceKind.Buffer)
+            if (ResourceRegistry.IsEngineBuffer(write.Name) || PassNames.CreateOf(pass, write.Name) is { Kind: ResourceKind.Buffer } || kindOf(write.Name) == ResourceKind.Buffer)
                 buffers++;
             else
                 textures++;
         }
-    }
-
-    private static PassCreate? CreateOf(Pass pass, string name)
-    {
-        foreach (PassCreate create in pass.Creates)
-        {
-            if (string.Equals(create.Name, name, StringComparison.OrdinalIgnoreCase) || (create.History && string.Equals(create.Name + "Previous", name, StringComparison.OrdinalIgnoreCase)))
-                return create;
-        }
-
-        return null;
-    }
-
-    private static bool ReadsName(Pass pass, string name)
-    {
-        foreach (PassRead read in pass.Reads)
-        {
-            if (string.Equals(read.Name, name, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool WritesName(Pass pass, string name)
-    {
-        foreach (PassWrite write in pass.Writes)
-        {
-            if (string.Equals(write.Name, name, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
     }
 
     private static Result Mismatch(string what, uint shader, int file)

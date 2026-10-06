@@ -65,10 +65,6 @@ internal sealed class ResourceSet : Dictionary<string, Resource>
 /// </summary>
 internal sealed class ResourceRegistry
 {
-    private const string PreviousSuffix = "Previous";
-
-    private static readonly string[] EngineTextures = ["Depth", "Emissive", "Albedo", "Normal", "Material", "Hdr", "Ldr"];
-
     /// <summary>
     /// The engine's own volume: the occupancy bricks of the meshes, frame-wide, written by the brick passes.
     /// </summary>
@@ -116,14 +112,14 @@ internal sealed class ResourceRegistry
     /// <summary>
     /// Every name the engine provides: its textures, then its buffers.
     /// </summary>
-    public static readonly string[] EngineNames = [.. EngineTextures, BrickAtlasName, .. EngineBuffers.Select(buffer => buffer.Name)];
+    public static readonly string[] EngineNames = [.. FrameTargets.EngineTextures.Select(texture => texture.Name), BrickAtlasName, .. EngineBuffers.Select(buffer => buffer.Name)];
 
-    private static readonly HashSet<string> EngineTextureSet = new(EngineTextures, StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, EngineTexture> EngineTextureByName = FrameTargets.EngineTextures.ToDictionary(texture => texture.Name, StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, int> EngineBufferIndex = new(EngineBuffers.Select((buffer, index) => KeyValuePair.Create(buffer.Name, index)), StringComparer.OrdinalIgnoreCase);
 
     public static bool IsEngineTexture(string name)
     {
-        return EngineTextureSet.Contains(name);
+        return EngineTextureByName.ContainsKey(name);
     }
 
     public static bool IsEngineBuffer(string name)
@@ -146,7 +142,7 @@ internal sealed class ResourceRegistry
     /// </summary>
     public static bool IsComputeWritable(string name)
     {
-        return string.Equals(name, "Hdr", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "Ldr", StringComparison.OrdinalIgnoreCase) || IsEngineVolume(name);
+        return (EngineTextureByName.TryGetValue(name, out EngineTexture texture) && texture.ComputeWritable) || IsEngineVolume(name);
     }
 
     /// <summary>
@@ -154,7 +150,7 @@ internal sealed class ResourceRegistry
     /// </summary>
     public static bool IsDrawTarget(string name)
     {
-        return IsEngineTexture(name) && !string.Equals(name, "Ldr", StringComparison.OrdinalIgnoreCase);
+        return EngineTextureByName.TryGetValue(name, out EngineTexture texture) && texture.DrawTarget;
     }
 
     public static bool IsWritableEngineBuffer(string name)
@@ -206,10 +202,8 @@ internal sealed class ResourceRegistry
     public static ResourceInfo? Describe(RenderContext ctx, PipelineState pipeline, string name)
     {
         GpuFormat depth = ctx.Gpu.DepthFormat;
-        if (IsEngineTexture(name))
-        {
-            return new ResourceInfo(ResourceKind.Texture, PassScope.Target, EngineFormat(name, depth), IsEngine: true);
-        }
+        if (EngineTextureByName.TryGetValue(name, out EngineTexture engine))
+            return new ResourceInfo(ResourceKind.Texture, PassScope.Target, engine.Format ?? depth, IsEngine: true);
 
         if (IsEngineVolume(name))
             return new ResourceInfo(ResourceKind.Volume, PassScope.Frame, GpuFormat.R8Unorm, IsEngine: true);
@@ -223,9 +217,7 @@ internal sealed class ResourceRegistry
             {
                 foreach (PassCreate create in state.Pass.Creates)
                 {
-                    bool matches = string.Equals(create.Name, name, StringComparison.OrdinalIgnoreCase)
-                        || (create.History && string.Equals(create.Name + PreviousSuffix, name, StringComparison.OrdinalIgnoreCase));
-                    if (!matches)
+                    if (!PassNames.Matches(create, name))
                         continue;
 
                     PassScope scope = create.Kind == ResourceKind.Texture && create.Scale > 0f ? PassScope.Target : PassState.ScopeOf(state.Stage);
@@ -273,7 +265,7 @@ internal sealed class ResourceRegistry
         {
             foreach (PassWrite write in pass.Pass.Writes)
             {
-                if (!ReadsName(pass.Pass, write.Name) || targets.Get(write.Name) is not { } output)
+                if (!PassNames.Reads(pass.Pass, write.Name) || targets.Get(write.Name) is not { } output)
                     continue;
 
                 targets.TwinOf(gpu, output);
@@ -337,10 +329,7 @@ internal sealed class ResourceRegistry
             return false;
         }
 
-        GpuTextureUsage usage = create.Format == PassFormat.Depth
-            ? GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler
-            : GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite | GpuTextureUsage.ComputeRead;
-        FrameTargets.Target target = targets.Define(gpu, create.Name, format, usage, create.Scale);
+        FrameTargets.Target target = targets.Define(gpu, create.Name, format, UsageOf(create), create.Scale);
         targets.Ensure(gpu, targets.Width, targets.Height);
         target.InUse = true;
         return true;
@@ -429,10 +418,7 @@ internal sealed class ResourceRegistry
             return;
 
         gpu.Release(resource.Texture);
-        GpuTextureUsage usage = create.Format == PassFormat.Depth
-            ? GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler
-            : GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite | GpuTextureUsage.ComputeRead | (isVolume ? GpuTextureUsage.None : GpuTextureUsage.ColorTarget);
-        TextureDesc desc = new(format, usage, width, height, Layers: depth, Kind: isVolume ? GpuTextureKind.Texture3D : GpuTextureKind.Texture2D);
+        TextureDesc desc = new(format, UsageOf(create), width, height, Layers: depth, Kind: isVolume ? GpuTextureKind.Texture3D : GpuTextureKind.Texture2D);
         resource.Texture = gpu.CreateTexture(desc);
         resource.Width = width;
         resource.Height = height;
@@ -448,29 +434,17 @@ internal sealed class ResourceRegistry
         return uint.TryParse(word, out uint value) ? value : 0;
     }
 
-    private static bool ReadsName(Pass pass, string name)
+    /// <summary>
+    /// How a texture or volume a pass creates is made: a depth one is drawn into and sampled; any other is sampled,
+    /// written and read by compute, and (but a volume) drawn into.
+    /// </summary>
+    private static GpuTextureUsage UsageOf(PassCreate create)
     {
-        foreach (PassRead read in pass.Reads)
-        {
-            if (string.Equals(read.Name, name, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
+        if (create.Format == PassFormat.Depth)
+            return GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler;
 
-        return false;
-    }
-
-    private static GpuFormat EngineFormat(string name, GpuFormat depth)
-    {
-        return name.ToUpperInvariant() switch
-        {
-            "DEPTH" => depth,
-            "EMISSIVE" => GBuffer.EmissiveFormat,
-            "ALBEDO" => GBuffer.AlbedoFormat,
-            "NORMAL" => GBuffer.NormalFormat,
-            "MATERIAL" => GBuffer.MaterialFormat,
-            "HDR" => FrameTargets.HdrFormat,
-            _ => FrameTargets.LdrFormat,
-        };
+        GpuTextureUsage usage = GpuTextureUsage.Sampler | GpuTextureUsage.ComputeWrite | GpuTextureUsage.ComputeRead;
+        return create.Kind == ResourceKind.Volume ? usage : usage | GpuTextureUsage.ColorTarget;
     }
 
     private static (GpuBuffer Handle, uint Size) Of(GrowableBuffer buffer)
@@ -485,8 +459,6 @@ internal sealed class ResourceRegistry
 /// </summary>
 internal readonly struct ResourceScope(RenderContext ctx, FrameTargets? targets, ResourceSet? view)
 {
-    private const string PreviousSuffix = "Previous";
-
     /// <summary>
     /// The texture behind <paramref name="name"/> with its format; a ping-ponged target's current texture.
     /// </summary>
@@ -584,9 +556,9 @@ internal readonly struct ResourceScope(RenderContext ctx, FrameTargets? targets,
     {
         bool previous = false;
         Resource? found = Lookup(name);
-        if (found is null && name.EndsWith(PreviousSuffix, StringComparison.OrdinalIgnoreCase))
+        if (found is null && name.EndsWith(PassNames.Previous, StringComparison.OrdinalIgnoreCase))
         {
-            found = Lookup(name[..^PreviousSuffix.Length]);
+            found = Lookup(name.AsSpan(0, name.Length - PassNames.Previous.Length));
             previous = found is { Create.History: true };
             if (!previous)
                 found = null;
@@ -595,13 +567,16 @@ internal readonly struct ResourceScope(RenderContext ctx, FrameTargets? targets,
         return (found, previous);
     }
 
-    private Resource? Lookup(string name)
+    /// <summary>
+    /// By span, so a history's name is looked up without cutting a string off it each frame.
+    /// </summary>
+    private Resource? Lookup(ReadOnlySpan<char> name)
     {
-        if (view is not null && view.TryGetValue(name, out Resource? inView))
+        if (view is not null && view.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(name, out Resource? inView))
             return inView;
-        if (targets is not null && targets.Resources.TryGetValue(name, out Resource? inTarget))
+        if (targets is not null && targets.Resources.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(name, out Resource? inTarget))
             return inTarget;
 
-        return ctx.Resources.Frame.GetValueOrDefault(name);
+        return ctx.Resources.Frame.GetAlternateLookup<ReadOnlySpan<char>>().TryGetValue(name, out Resource? inFrame) ? inFrame : null;
     }
 }

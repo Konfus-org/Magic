@@ -18,22 +18,34 @@ internal sealed class FrameTargets
 
     public const GpuFormat HdrFormat = GpuFormat.Rgba16Float;
 
+    private const GpuTextureUsage Drawn = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler;
+
+    /// <summary>
+    /// The engine's own textures of every target, by the names passes use: the gbuffer's depth and colours
+    /// (<see cref="GBuffer"/>), the lit scene and the shown image. A null format is the device's depth format.
+    /// </summary>
+    public static readonly EngineTexture[] EngineTextures =
+    [
+        new("Depth", null, GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler, ComputeWritable: false, DrawTarget: true),
+        new("Emissive", GBuffer.EmissiveFormat, Drawn, ComputeWritable: false, DrawTarget: true),
+        new("Albedo", GBuffer.AlbedoFormat, Drawn, ComputeWritable: false, DrawTarget: true),
+        new("Normal", GBuffer.NormalFormat, Drawn, ComputeWritable: false, DrawTarget: true),
+        new("Material", GBuffer.MaterialFormat, Drawn, ComputeWritable: false, DrawTarget: true),
+        new("Hdr", HdrFormat, Drawn | GpuTextureUsage.ComputeWrite, ComputeWritable: true, DrawTarget: true),
+        new("Ldr", LdrFormat, Drawn, ComputeWritable: true, DrawTarget: false),
+    ];
+
     private readonly Dictionary<string, Target> _targets = new(StringComparer.OrdinalIgnoreCase);
 
     public FrameTargets(RenderTarget target, GpuFormat depthFormat)
     {
         RenderTarget = target;
 
-        const GpuTextureUsage drawn = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler;
-        Hdr = _targets["Hdr"] = new Target { Format = HdrFormat, Usage = drawn | GpuTextureUsage.ComputeWrite, IsBuiltIn = true };
-        Ldr = _targets["Ldr"] = new Target { Format = LdrFormat, Usage = drawn, IsBuiltIn = true };
-        Depth = _targets["Depth"] = new Target { Format = depthFormat, Usage = GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler, IsDepth = true, IsBuiltIn = true };
-        GBuffer = new GBuffer(
-            _targets["Emissive"] = new Target { Format = GBuffer.EmissiveFormat, Usage = drawn, IsBuiltIn = true },
-            _targets["Albedo"] = new Target { Format = GBuffer.AlbedoFormat, Usage = drawn, IsBuiltIn = true },
-            _targets["Normal"] = new Target { Format = GBuffer.NormalFormat, Usage = drawn, IsBuiltIn = true },
-            _targets["Material"] = new Target { Format = GBuffer.MaterialFormat, Usage = drawn, IsBuiltIn = true },
-            Depth);
+        foreach (EngineTexture engine in EngineTextures)
+            _targets[engine.Name] = new Target { Format = engine.Format ?? depthFormat, Usage = engine.Usage, IsDepth = engine.Format is null, IsBuiltIn = true };
+
+        Hdr = _targets["Hdr"];
+        Ldr = _targets["Ldr"];
     }
 
     public RenderTarget RenderTarget { get; }
@@ -45,10 +57,6 @@ internal sealed class FrameTargets
     public Target Hdr { get; }
 
     public Target Ldr { get; }
-
-    public Target Depth { get; }
-
-    public GBuffer GBuffer { get; }
 
     /// <summary>
     /// What the passes of a target or view stage created for this render target beyond its textures: fixed textures,
@@ -218,3 +226,9 @@ internal sealed class FrameTargets
         public bool TwinInUse { get; set; }
     }
 }
+
+/// <summary>
+/// One of the engine's own textures of a render target: its name, its format (null: the device's depth format), how it
+/// is made, and what a pass may do with it: write it from compute or a fullscreen pass, or draw into it.
+/// </summary>
+internal readonly record struct EngineTexture(string Name, GpuFormat? Format, GpuTextureUsage Usage, bool ComputeWritable, bool DrawTarget);
