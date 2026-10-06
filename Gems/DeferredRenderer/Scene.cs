@@ -79,15 +79,16 @@ internal static class Scene
         (int draws, int dispatches) = (0, 0);
         ReadOnlySpan<ViewPlan> views = CollectionsMarshal.AsSpan(plan.Views);
 
-        // The shadow maps and the GI first: every target's lighting reads them, and nothing in them depends on a target.
-        if (views.Length > 0)
+        // The frame-wide stages first (the shadow maps, the GI): every target's lighting reads them, and nothing in them
+        // depends on a target.
+        for (PipelineStage stage = 0; stage <= PipelineStage.Post && views.Length > 0; stage++)
         {
-            (int shadowDraws, int shadowDispatches) = PassExecutor.RecordFrame(ctx, commands, plan, PipelineStage.Shadows);
-            draws += shadowDraws;
-            dispatches += shadowDispatches;
-            (int giDraws, int giDispatches) = PassExecutor.RecordFrame(ctx, commands, plan, PipelineStage.Gi);
-            draws += giDraws;
-            dispatches += giDispatches;
+            if (PassState.ScopeOf(stage) != PassScope.Frame)
+                continue;
+
+            (int stageDraws, int stageDispatches) = PassExecutor.RecordFrame(ctx, commands, plan, stage);
+            draws += stageDraws;
+            dispatches += stageDispatches;
         }
 
         foreach (TargetPlan target in plan.Targets)
@@ -167,9 +168,13 @@ internal static class Scene
         PipelineState pipeline = ctx.Pipeline;
         targets.ClearUse();
         FrameCounts counts = plan.Counts.WithTarget(targets.Width, targets.Height);
-        foreach (PipelineStage stage in (ReadOnlySpan<PipelineStage>)[PipelineStage.Scene, PipelineStage.Lighting, PipelineStage.Sky, PipelineStage.Transparency, PipelineStage.Post])
+        for (PipelineStage stage = 0; stage <= PipelineStage.Post; stage++)
         {
-            bool perView = PassState.ScopeOf(stage) == PassScope.View;
+            PassScope scope = PassState.ScopeOf(stage);
+            if (scope == PassScope.Frame)
+                continue;
+
+            bool perView = scope == PassScope.View;
             foreach (PassState pass in pipeline.Stages[(int)stage])
             {
                 if (!pipeline.Runs(pass, plan.Counts))
@@ -232,8 +237,11 @@ internal static class Scene
     private static void PrepareFrameStages(RenderContext ctx, FramePlan plan)
     {
         PipelineState pipeline = ctx.Pipeline;
-        foreach (PipelineStage stage in (ReadOnlySpan<PipelineStage>)[PipelineStage.Shadows, PipelineStage.Gi])
+        for (PipelineStage stage = 0; stage <= PipelineStage.Post; stage++)
         {
+            if (PassState.ScopeOf(stage) != PassScope.Frame)
+                continue;
+
             foreach (PassState pass in pipeline.Stages[(int)stage])
             {
                 if (pipeline.Runs(pass, plan.Counts))
