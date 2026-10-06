@@ -1,6 +1,5 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Settings;
 using System.Text.Json.Serialization;
 
 namespace Magic.Services;
@@ -25,11 +24,6 @@ public sealed record Project
     public string[] Gems { get; init; } = ["default"];
 
     /// <summary>
-    /// Per-subsystem settings; <c>--set Section.Key=value</c> on the command line overrides them.
-    /// </summary>
-    public Settings Settings { get; init; } = new();
-
-    /// <summary>
     /// The domain opened at start-up (<c>"entryPoint": { "id": N }</c>); <c>--entry-point</c> overrides it. None starts in an empty world.
     /// </summary>
     public Handle<Domain> EntryPoint { get; init; } = Handle<Domain>.None;
@@ -41,16 +35,16 @@ public sealed record Project
     public Handle<Domain> Loading { get; init; } = Handle<Domain>.None;
 
     /// <summary>
+    /// The settings preset (<c>"preset": { "id": N }</c>, a <see cref="Contexts.Assets.Preset"/> asset); <c>--preset</c>
+    /// overrides it. Left out, it is the engine's own <c>Presets/Normal.preset</c>.
+    /// </summary>
+    public Handle<Preset> Preset { get; init; } = Handle<Preset>.None;
+
+    /// <summary>
     /// How the scene is rendered (<c>"pipeline": { "id": N }</c>, a <see cref="Pipeline"/> asset); <c>--pipeline</c>
     /// overrides it. Left out, it is the engine's own <c>Pipelines/Default.pipeline</c>.
     /// </summary>
     public Handle<Pipeline> Pipeline { get; init; } = Handle<Pipeline>.None;
-
-    /// <summary>
-    /// Whether the console window is open when the host starts (<c>"console": true</c>), for a project that is
-    /// driven by typing: the samples. The grave key opens it either way.
-    /// </summary>
-    public bool Console { get; init; }
 
     /// <summary>
     /// Where Assets live.

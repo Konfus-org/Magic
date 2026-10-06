@@ -1,4 +1,6 @@
 ﻿using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
+using Magic.Contexts.Settings;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
@@ -16,10 +18,10 @@ internal sealed class WorldStreaming : IGem, ILODGenerator<Chunk>
     private readonly StreamingSystem _system;
     private readonly IDisposable _scheduled;
 
-    public WorldStreaming(IEcs ecs, Assets assets, Project project, World world, Threads threads, IFileSystem files, Scheduler scheduler, IScripting[] scripting, IRendering? rendering)
+    public WorldStreaming(IEcs ecs, Assets assets, Types<IComponent> components, StreamingSettings settings, LodSettings lod, World world, Threads threads, IFileSystem files, Scheduler scheduler, IScripting[] scripting, IRendering? rendering)
     {
         _lods = new ChunkLods(assets, files);
-        _system = new StreamingSystem(ecs, assets, project, scripting, world, threads, rendering);
+        _system = new StreamingSystem(ecs, assets, components, settings, lod, scripting, world, threads, rendering);
         _scheduled = scheduler.Add(ecs, _system);
     }
 
@@ -31,7 +33,7 @@ internal sealed class WorldStreaming : IGem, ILODGenerator<Chunk>
 
     public int Version => _lods.Version;
 
-    public Task<Result<Dictionary<float, string>>> GenerateAsync(Chunk asset, string folder, IProgress<float>? progress, CancellationToken cancel)
+    public Task<Result<Lods>> GenerateAsync(Chunk asset, string folder, IProgress<float>? progress, CancellationToken cancel)
     {
         return _lods.GenerateAsync(asset, folder, progress, cancel);
     }

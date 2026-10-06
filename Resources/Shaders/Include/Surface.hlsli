@@ -38,6 +38,9 @@
 #ifndef SURFACE_FORWARD
 #define SURFACE_FORWARD 0
 #endif
+#ifndef SURFACE_IMPOSTOR
+#define SURFACE_IMPOSTOR 0
+#endif
 
 // The texture pools (TextureTable.cs): pool = formatIndex * 4 + sizeIndex, formats [sRGB, linear], sizes
 // [256, 512, 1024, 2048]. A pool's index is its register index.
@@ -59,9 +62,34 @@ Texture2DArray PoolLinear2048 : READ(7);
 SamplerState PoolLinear2048Sampler : SAMPLER(7);
 
 // Storage buffers follow the sampled textures in SDL's binding order: after the pools, and in the forward
-// template (SURFACE_FORWARD) after the eight textures it reads the lighting from too.
+// template (SURFACE_FORWARD) after the textures it reads the lighting from, the scene behind and the nearest
+// transparent depth (Templates/Forward.frag.hlsl).
 #if SURFACE_FORWARD
-StructuredBuffer<GpuMaterial> Materials : READ(16);
+#include "Include/Frame.hlsli"
+
+// What was drawn behind the transparent surfaces: the lit opaque scene and the sky, copied before any of them
+// (Resources/Passes/Core/TransparentPrepare.pass), so a surface can show it bent, blurred or tinted (refraction).
+Texture2D SceneColor : READ(13);
+SamplerState SceneColorSampler : SAMPLER(13);
+StructuredBuffer<GpuMaterial> Materials : READ(15);
+
+// The pixel of the render target a world position lands on.
+float2 ScenePixelOf(float3 worldPosition)
+{
+    float4 clip = mul(ViewProj, float4(worldPosition - CameraPos, 1.0));
+    float2 ndc = clip.xy / max(clip.w, 1e-5);
+    return ViewOrigin + float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * ViewSize;
+}
+
+// The scene behind at a pixel of the render target, kept inside the view.
+float3 SceneBehind(float2 pixel)
+{
+    float width;
+    float height;
+    SceneColor.GetDimensions(width, height);
+    float2 inside = clamp(pixel, ViewOrigin + 0.5, ViewOrigin + ViewSize - 0.5);
+    return SceneColor.SampleLevel(SceneColorSampler, inside / float2(width, height), 0.0).rgb;
+}
 #else
 StructuredBuffer<GpuMaterial> Materials : READ(8);
 #endif

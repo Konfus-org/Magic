@@ -1,3 +1,4 @@
+using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Extensions;
 using System.Drawing;
@@ -115,19 +116,24 @@ internal struct DrawArgs
 
 /// <summary>
 /// 32 B. The lesser versions of one bucket group's mesh, one row per group: the culler draws an instance of the group
-/// in <see cref="Group1"/> once it is under <c>Thresholds.X</c> of the view's height on screen, in
-/// <see cref="Group2"/> under <c>Thresholds.Y</c>, in <see cref="Group3"/> under <c>Thresholds.Z</c>.
-/// <see cref="Count"/> is how many of the three there are; 0 is a group whose mesh has none.
+/// in the group of <see cref="Groups"/> whose threshold (the same component of <see cref="Thresholds"/>) is the last it
+/// is under, as a fraction of the view's height on screen, the thresholds falling from X to W. A level whose threshold
+/// is 0 is not there; a group whose mesh has none has all four 0.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuLodRow
 {
     public const int Size = 32;
 
-    public const int Capacity = 3;
+    public const int Capacity = 4;
 
     public Vector4 Thresholds;
-    public uint Group1, Group2, Group3, Count;
+    public UintVector4 Groups;
+
+    /// <summary>
+    /// How many levels there are.
+    /// </summary>
+    public readonly int Count => Thresholds.W > 0f ? 4 : Thresholds.Z > 0f ? 3 : Thresholds.Y > 0f ? 2 : Thresholds.X > 0f ? 1 : 0;
 }
 
 /// <summary>
@@ -210,7 +216,7 @@ internal struct FrameConstants
     public uint Flags;
 
     /// <summary>
-    /// Scales an instance's height on screen before it is held against its LOD thresholds: <see cref="Magic.Contexts.Settings.RenderSettings.LodBias"/>.
+    /// Scales an instance's height on screen before it is held against its LOD thresholds: <see cref="Magic.Contexts.Settings.LodSettings.Bias"/>.
     /// </summary>
     public float LodBias;
 
@@ -241,6 +247,7 @@ internal struct FrameConstants
     public const uint HasSkyFlag = 1u;
     public const uint SunCastsShadowsFlag = 2u;
     public const uint IsMainViewFlag = 4u;
+    public const int DebugViewShift = 8; // the debug view in bits 8..15 (Include/Frame.hlsli's FrameDebugView)
     public const int ViewIndexShift = 16;
 
     /// <summary>
@@ -452,18 +459,29 @@ internal struct PassConstants
         Raw[PassRawWords.IterationWord] = iteration;
         Raw[PassRawWords.IterationWord + 1] = count;
     }
+
+    /// <summary>
+    /// The executor's row, last word: which transparent layers a forward draw draws (<see cref="TransparentLayers"/>).
+    /// </summary>
+    public void SetLayers(TransparentLayers layers)
+    {
+        Raw[PassRawWords.IterationWord + 3] = (uint)layers;
+    }
 }
 
 /// <summary>
-/// 64 B. One point or spot light, in absolute world space. A point light is a spot whose cone never ends: its cosines
-/// are below any a direction can have. The CPU uploads <see cref="ShadowRecord"/> as none and says in
+/// 80 B. One point, spot or area light, in absolute world space. A point light is a spot whose cone never ends: its
+/// cosines are below any a direction can have. An area light is a spot whose cone is its front half, falling off with
+/// the cosine (inner 1, outer 0), seen from the part of its rectangle a surface looks at (<see cref="Area"/>); its
+/// range is grown by half the rectangle's diagonal, so everything that measures reach from the middle still holds it.
+/// The CPU uploads <see cref="ShadowRecord"/> as none and says in
 /// <see cref="ShadowCasts"/> whether the light may cast; the GPU's local shadow selection fills in the row of its first
 /// shadow view and its face count.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuLight
 {
-    public const int Size = 64;
+    public const int Size = 80;
 
     /// <summary>
     /// xyz the position, w the range in metres.
@@ -480,23 +498,56 @@ internal struct GpuLight
     /// </summary>
     public Vector4 DirectionOuterCos;
 
+    /// <summary>
+    /// For an area light, xyz its rectangle's +X edge direction times half its width and w half its height; zero for a
+    /// point or spot.
+    /// </summary>
+    public Vector4 Area;
+
     public uint ShadowRecord, ShadowFaces, ShadowCasts, ShadowPad;
 
     public const uint None = uint.MaxValue;
 
     public static GpuLight From(in LightInstance light)
     {
+        Vector3 forward = Vector3.Normalize(light.World.Forward);
+        if (light.Kind == LightKind.Area)
+            return FromArea(light, forward);
+
         bool isSpot = light.Kind == LightKind.Spot;
         return new GpuLight
         {
             PositionRange = new Vector4(light.World.Translation, light.Range),
             ColorInnerCos = new Vector4(light.Color * light.Intensity, isSpot ? MathF.Cos(light.InnerAngle * 0.5f) : -1f),
-            DirectionOuterCos = new Vector4(Vector3.Normalize(light.World.Forward), isSpot ? MathF.Cos(light.OuterAngle * 0.5f) : -2f),
+            DirectionOuterCos = new Vector4(forward, isSpot ? MathF.Cos(light.OuterAngle * 0.5f) : -2f),
             ShadowRecord = None,
             ShadowFaces = 0,
             ShadowCasts = light.CastsShadows ? 1u : 0u,
         };
     }
+
+    private static GpuLight FromArea(in LightInstance light, Vector3 forward)
+    {
+        // The rectangle's +X edge square to its facing, so the shader can take +Y as their cross product.
+        Vector3 right = light.World.Right - (forward * Vector3.Dot(light.World.Right, forward));
+        right = right.LengthSquared() > 1e-12f ? Vector3.Normalize(right) : Vector3.UnitX;
+        Vector2 half = Vector2.Max(light.Size * 0.5f, new Vector2(MinAreaHalfSize));
+        return new GpuLight
+        {
+            PositionRange = new Vector4(light.World.Translation, light.Range + half.Length()),
+            ColorInnerCos = new Vector4(light.Color * light.Intensity, 1f),
+            DirectionOuterCos = new Vector4(forward, 0f),
+            Area = new Vector4(right * half.X, half.Y),
+            ShadowRecord = None,
+            ShadowFaces = 0,
+            ShadowCasts = light.CastsShadows ? 1u : 0u,
+        };
+    }
+
+    /// <summary>
+    /// The least half side an area light keeps, in metres: a zero width or height still marks it as an area light.
+    /// </summary>
+    private const float MinAreaHalfSize = 1e-3f;
 }
 
 /// <summary>

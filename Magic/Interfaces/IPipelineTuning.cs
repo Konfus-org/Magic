@@ -18,20 +18,21 @@ public enum TunableKind : byte
 }
 
 /// <summary>
-/// One parameter of a pass as it runs now: its name in the shader's <c>PassParams</c>, its kind, and its value.
+/// One parameter of a pass as it runs now: its name in the shader's <c>PassParams</c>, its kind, its value, and how the
+/// settings window shows it (its <see cref="ParamTuning.Group"/> always filled in: the param's, the pass's, or the stage's).
 /// </summary>
-public readonly record struct TunableParam(string Name, TunableKind Kind, Param Value);
+public readonly record struct TunableParam(string Name, TunableKind Kind, Param Value, ParamTuning Tuning);
 
 /// <summary>
-/// One pass of the pipeline as listed: its id, the stage it runs in, its name, what is wrong with it (null when
-/// nothing), and its parameters.
+/// One pass of the pipeline as listed: its id, the stage it runs in, its name, where the settings window shows it
+/// (<see cref="Pass.Group"/>, or the stage's name), what is wrong with it (null when nothing), and its parameters.
 /// </summary>
-public sealed record TunablePass(ulong Id, string Stage, string Name, string? Error, IReadOnlyList<TunableParam> Params);
+public sealed record TunablePass(ulong Id, string Stage, string Name, string Group, string? Error, IReadOnlyList<TunableParam> Params);
 
 /// <summary>
-/// The render pipeline's passes with their parameters, for editing live: exported by the renderer gem, read by the
-/// settings window. A value set here holds until the pass's file changes, and is never written to disk. Main thread
-/// only.
+/// The render pipeline's passes with their parameters as they run: exported by the renderer gem, listed by the
+/// settings window. A parameter is changed as any setting is, by its <c>"PassName.param"</c> key through
+/// <see cref="Services.Settings.Set"/>. Main thread only.
 /// </summary>
 public interface IPipelineTuning
 {
@@ -39,9 +40,4 @@ public interface IPipelineTuning
     /// Every pass listed this frame, in the order they run, the post-processing last.
     /// </summary>
     IReadOnlyList<TunablePass> Passes { get; }
-
-    /// <summary>
-    /// Sets a parameter of a pass; the pass runs with it from the next frame. Nothing for a name the pass does not declare.
-    /// </summary>
-    void Set(ulong pass, string name, Param value);
 }

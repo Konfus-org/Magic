@@ -42,11 +42,25 @@
     },
     "params": {
         "minTexels": {
-            "x": 1.5
+            "x": 0.5
         },
         "lodBias": {
             "x": 0.5
         }
     },
-    "needs": "$shadowCasters"
+    "needs": "$shadowCasters",
+    "tuning": {
+        "minTexels": {
+            "label": "Smallest caster (texels)",
+            "description": "Casters whose radius is under this many shadow texels are not drawn into the shadow maps; 0.5 drops only those less than a texel across.",
+            "min": 0,
+            "max": 8
+        },
+        "lodBias": {
+            "label": "Caster detail bias",
+            "description": "Level of detail used for shadow casters: lower switches to simpler versions sooner.",
+            "min": 0.1,
+            "max": 4
+        }
+    }
 }

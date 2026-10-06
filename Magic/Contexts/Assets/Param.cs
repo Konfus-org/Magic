@@ -1,5 +1,6 @@
 using Magic.Mathematics;
 using System.Numerics;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace Magic.Contexts.Assets;
@@ -70,5 +71,28 @@ public struct Param
     public static Param Of(Handle<Texture> texture)
     {
         return new Param { Texture = texture };
+    }
+
+    /// <summary>
+    /// A param as a preset or <c>--set</c> writes it: a number, <c>true</c>/<c>false</c>, <c>[x, y, z, w]</c> (which is also
+    /// <c>[r, g, b, a]</c>, so it serves a vector or a colour), or the full object. Null for anything else.
+    /// </summary>
+    public static Param? Of(JsonElement value)
+    {
+        switch (value.ValueKind)
+        {
+            case JsonValueKind.Number:
+                return Of(value.GetSingle());
+            case JsonValueKind.True or JsonValueKind.False:
+                return Of(value.GetBoolean());
+            case JsonValueKind.Array:
+                float[] numbers = [.. value.EnumerateArray().Take(4).Select(item => item.ValueKind == JsonValueKind.Number ? item.GetSingle() : 0f)];
+                Array.Resize(ref numbers, 4);
+                return new Param { X = numbers[0], Y = numbers[1], Z = numbers[2], W = numbers[3], R = numbers[0], G = numbers[1], B = numbers[2], A = numbers[3] };
+            case JsonValueKind.Object:
+                return value.Deserialize<Param>(AssetJson.Options);
+            default:
+                return null;
+        }
     }
 }

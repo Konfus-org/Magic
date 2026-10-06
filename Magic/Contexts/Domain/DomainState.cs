@@ -1,4 +1,4 @@
-namespace Magic.Contexts;
+namespace Magic.Contexts.Domain;
 
 /// <summary>
 /// How far a domain is in the world.

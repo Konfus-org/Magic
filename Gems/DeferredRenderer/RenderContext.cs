@@ -26,9 +26,19 @@ internal sealed class RenderContext
     public required Magic.Services.Threads Threads { get; init; }
 
     /// <summary>
-    /// The project's, read as they are every frame; a change to one the context is built from builds a new context.
+    /// The settings service: the pass parameters' values come from it.
     /// </summary>
-    public required RenderSettings Settings { get; init; }
+    public required Magic.Services.Settings Settings { get; init; }
+
+    /// <summary>
+    /// The level of detail bias, read as it is every frame.
+    /// </summary>
+    public required LodSettings Lod { get; init; }
+
+    /// <summary>
+    /// This renderer's own, read as they are every frame.
+    /// </summary>
+    public required DeferredSettings Deferred { get; init; }
 
     public required ShaderCache Shaders { get; init; }
 

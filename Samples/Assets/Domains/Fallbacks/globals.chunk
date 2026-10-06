@@ -19,7 +19,7 @@
             "name": "Sun",
             "components": {
                 "Transform": { "rotation": { "x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023 }, "scale": { "x": 1, "y": 1, "z": 1 } },
-                "DirectionalLight": { "color": { "x": 1, "y": 1, "z": 1 }, "intensity": 3 }
+                "DirectionalLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 3 }
             }
         }
     ]

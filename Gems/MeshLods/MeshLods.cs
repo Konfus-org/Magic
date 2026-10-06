@@ -1,4 +1,5 @@
 using Magic.Contexts.Assets;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Utils;
 using System.Numerics;
@@ -6,43 +7,53 @@ using System.Numerics;
 namespace MeshLods;
 
 /// <summary>
-/// Makes the lesser versions of a <see cref="Model"/> that has none: the same model with every mesh simplified by
-/// vertex clustering, once for each of <see cref="Levels"/>. A level lays a grid over a mesh's box, as many cells
-/// along its longest side as the level says, and merges the vertices of each cell into one (their average), dropping
-/// the triangles that collapse; so the error is one cell, a few pixels at the height on screen the level is drawn
-/// under. It is quick and takes any mesh, closed or not; hard edges smooth out and uv seams blur, which is why the
-/// first level only starts at a quarter of the view's height. Each lesser version is written as a <c>.model</c> with
-/// the model's own parts and slot names, mesh for mesh.
+/// Makes the lesser versions of a <see cref="Model"/> that has none: three meshes, each the model with every mesh
+/// simplified to a share of its triangles by Forstmann's fast quadric simplification (<see cref="QuadricSimplifier"/>,
+/// https://github.com/sp4cerat/Fast-Quadric-Mesh-Simplification), and last an impostor (<see cref="ImpostorBaker"/>): a
+/// card per mesh that always faces the camera and shows the model as baked from the nearest of eight directions, lit and
+/// shadowed through the normals baked with it and casting a shadow of its shape. Every model gets the impostor, however
+/// few its triangles (a box's two are fewer than its twelve); a mesh level that does not cut the triangles enough is left
+/// out. Each lesser version is written as a <c>.model</c> with the model's own parts and slot names, mesh for mesh, and the
+/// impostor's atlases as PNGs beside it, named by its <see cref="Lod"/>.
 /// </summary>
 internal sealed class MeshLods(IFileSystem files) : IGem, ILODGenerator<Model>
 {
-    /// <summary>
-    /// A mesh with fewer triangles than this is not worth simplifying: its lesser versions are itself.
-    /// </summary>
-    private const int MinTriangles = 64;
-
     /// <summary>
     /// A level is kept only when it has at most this share of the triangles of the one before it.
     /// </summary>
     private const float MinReduction = 0.7f;
 
     /// <summary>
-    /// The height on screen, as a fraction of the view's, under which each level is drawn, and its grid's cells along the longest side.
+    /// The height on screen, as a fraction of the view's, under which the impostor is drawn: a few pixels.
     /// </summary>
-    private static readonly (float Threshold, int Cells)[] Levels = [(0.25f, 64), (0.10f, 32), (0.04f, 16)];
+    private const float ImpostorThreshold = 0.006f;
 
-    public int Version => 1;
+    /// <summary>
+    /// How far a mesh level may move the surface, in pixels of a 1080-pixel-tall view at the height on screen it starts
+    /// at: what keeps the levels true to the shape however few triangles they were asked for.
+    /// </summary>
+    private const float MaxErrorPixels = 1.5f;
 
-    public async Task<Result<Dictionary<float, string>>> GenerateAsync(Model asset, string folder, IProgress<float>? progress, CancellationToken cancel)
+    /// <summary>
+    /// The height on screen, as a fraction of the view's, under which each mesh level is drawn, and its share of the
+    /// model's triangles.
+    /// </summary>
+    private static readonly (float Threshold, float Share)[] Levels = [(0.10f, 0.5f), (0.04f, 0.2f), (0.015f, 0.06f)];
+
+    public int Version => 6;
+
+    public async Task<Result<Lods>> GenerateAsync(Model asset, string folder, IProgress<float>? progress, CancellationToken cancel)
     {
-        Dictionary<float, string> lods = [];
+        List<Lod> lods = [];
         long previous = asset.Meshes.Sum(mesh => mesh.Indices.LongLength);
+        float size = Size(asset);
         for (int level = 0; level < Levels.Length; level++)
         {
             cancel.ThrowIfCancellationRequested();
-            progress?.Report((float)level / Levels.Length);
-            (float threshold, int cells) = Levels[level];
-            Mesh[] meshes = [.. asset.Meshes.Select(mesh => mesh.Indices.Length / 3 < MinTriangles ? mesh : Simplify(mesh, cells))];
+            progress?.Report((float)level / (Levels.Length + 1));
+            (float threshold, float share) = Levels[level];
+            float maxError = MaxErrorPixels * size / (threshold * 1080f);
+            Mesh[] meshes = [.. asset.Meshes.Select(mesh => QuadricSimplifier.Simplify(mesh, share, maxError))];
             long indices = meshes.Sum(mesh => mesh.Indices.LongLength);
             if (indices == 0 || indices > previous * MinReduction)
                 continue;
@@ -51,95 +62,67 @@ internal sealed class MeshLods(IFileSystem files) : IGem, ILODGenerator<Model>
             Model lesser = new() { Meshes = meshes, Parts = asset.Parts, SlotNames = asset.SlotNames };
             Result written = await files.WriteBinaryAsync(files.Combine(folder, name), lesser.ToBytes(), cancel).ConfigureAwait(false);
             if (written.Failed)
-                return Result<Dictionary<float, string>>.Failure(written.Message);
+                return Result<Lods>.Failure(written.Message);
 
-            lods[threshold] = name;
+            lods.Add(new Lod(threshold, Lods.IdOf(folder, name), []));
             previous = indices;
         }
 
+        cancel.ThrowIfCancellationRequested();
+        progress?.Report((float)Levels.Length / (Levels.Length + 1));
+        Result<Lod> impostor = await WriteImpostorAsync(asset, folder, cancel).ConfigureAwait(false);
+        if (impostor.Failed)
+            return Result<Lods>.Failure(impostor.Message);
+
+        lods.Add(impostor.Payload);
         progress?.Report(1f);
 
-        return Result<Dictionary<float, string>>.Success(lods);
+        return Result<Lods>.Success(new Lods([.. lods]));
     }
 
     /// <summary>
-    /// The mesh with the vertices of every grid cell merged into one: position, normal, tangent and uv averaged, the
-    /// bitangent sign the first one's. A triangle with two corners in one cell is dropped. A mesh that would lose
-    /// every triangle is returned as it is.
+    /// The model's biggest extent: what its height on screen is measured against.
     /// </summary>
-    private static Mesh Simplify(Mesh mesh, int cells)
+    private static float Size(Model model)
     {
-        Vector3 size = mesh.Box.Max - mesh.Box.Min;
-        float cell = MathF.Max(size.X, MathF.Max(size.Y, size.Z)) / cells;
-        if (cell <= 0f)
-            return mesh;
-
-        Dictionary<(int X, int Y, int Z), int> clusterOf = [];
-        List<Vertex> sums = [];
-        List<int> counts = [];
-        int[] remap = new int[mesh.Vertices.Length];
-        for (int i = 0; i < remap.Length; i++)
+        Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+        foreach (Vertex vertex in model.Meshes.SelectMany(mesh => mesh.Vertices))
         {
-            Vertex vertex = mesh.Vertices[i];
-            Vector3 at = (vertex.Position - mesh.Box.Min) / cell;
-            (int, int, int) key = ((int)at.X, (int)at.Y, (int)at.Z);
-            if (!clusterOf.TryGetValue(key, out int cluster))
+            min = Vector3.Min(min, vertex.Position);
+            max = Vector3.Max(max, vertex.Position);
+        }
+
+        Vector3 size = max - min;
+        return MathF.Max(1e-4f, MathF.Max(size.X, MathF.Max(size.Y, size.Z)));
+    }
+
+    /// <summary>
+    /// The impostor: its cards as <c>impostor.model</c> and each mesh's two atlases as PNGs.
+    /// </summary>
+    private async Task<Result<Lod>> WriteImpostorAsync(Model asset, string folder, CancellationToken cancel)
+    {
+        (Mesh Card, byte[] Surface, byte[] Normal)[] baked = ImpostorBaker.Bake(asset, asset.Id);
+        List<ulong> atlases = [];
+        for (int mesh = 0; mesh < baked.Length; mesh++)
+        {
+            (string Name, byte[] Pixels)[] images = [($"impostor{mesh}surface.png", baked[mesh].Surface), ($"impostor{mesh}normal.png", baked[mesh].Normal)];
+            foreach ((string name, byte[] pixels) in images)
             {
-                clusterOf[key] = cluster = sums.Count;
-                sums.Add(default);
-                counts.Add(0);
+                byte[] png = ((ReadOnlySpan<byte>)pixels).Png(ImpostorBaker.AtlasSize, ImpostorBaker.AtlasSize);
+                Result written = await files.WriteBinaryAsync(files.Combine(folder, name), png, cancel).ConfigureAwait(false);
+                if (written.Failed)
+                    return Result<Lod>.Failure(written.Message);
+
+                atlases.Add(Lods.IdOf(folder, name));
             }
-
-            Vertex sum = sums[cluster];
-            sum.Position += vertex.Position;
-            sum.Normal += vertex.Normal;
-            sum.Tangent = new Vector4(sum.Tangent.X + vertex.Tangent.X, sum.Tangent.Y + vertex.Tangent.Y, sum.Tangent.Z + vertex.Tangent.Z, counts[cluster] == 0 ? vertex.Tangent.W : sum.Tangent.W);
-            sum.Uv += vertex.Uv;
-            sums[cluster] = sum;
-            counts[cluster]++;
-            remap[i] = cluster;
         }
 
-        List<uint> indices = new(mesh.Indices.Length);
-        for (int i = 0; i + 2 < mesh.Indices.Length; i += 3)
-        {
-            int a = remap[mesh.Indices[i]], b = remap[mesh.Indices[i + 1]], c = remap[mesh.Indices[i + 2]];
-            if (a == b || b == c || a == c)
-                continue;
+        const string Cards = "impostor.model";
+        Model impostor = new() { Meshes = [.. baked.Select(mesh => mesh.Card)], Parts = asset.Parts, SlotNames = asset.SlotNames };
+        Result model = await files.WriteBinaryAsync(files.Combine(folder, Cards), impostor.ToBytes(), cancel).ConfigureAwait(false);
+        if (model.Failed)
+            return Result<Lod>.Failure(model.Message);
 
-            indices.Add((uint)a);
-            indices.Add((uint)b);
-            indices.Add((uint)c);
-        }
-
-        if (indices.Count == 0)
-            return mesh;
-
-        Vertex[] vertices = new Vertex[sums.Count];
-        for (int i = 0; i < vertices.Length; i++)
-        {
-            Vertex sum = sums[i];
-            Vector3 tangent = new(sum.Tangent.X, sum.Tangent.Y, sum.Tangent.Z);
-            vertices[i] = new Vertex
-            {
-                Position = sum.Position / counts[i],
-                Normal = NormalizeOr(sum.Normal, Vector3.UnitY),
-                Tangent = new Vector4(NormalizeOr(tangent, Vector3.UnitX), sum.Tangent.W),
-                Uv = sum.Uv / counts[i],
-            };
-        }
-
-        Mesh simplified = new() { Vertices = vertices, Indices = [.. indices] };
-        simplified.ComputeBounds();
-
-        return simplified;
-    }
-
-    /// <summary>
-    /// Normals that cancel out when averaged leave nothing to normalise.
-    /// </summary>
-    private static Vector3 NormalizeOr(Vector3 vector, Vector3 fallback)
-    {
-        return vector.LengthSquared() > 1e-12f ? Vector3.Normalize(vector) : fallback;
+        return Result<Lod>.Success(new Lod(ImpostorThreshold, Lods.IdOf(folder, Cards), [.. atlases]));
     }
 }

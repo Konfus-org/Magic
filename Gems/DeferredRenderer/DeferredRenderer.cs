@@ -1,3 +1,4 @@
+using Magic.Contexts.Settings;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -13,18 +14,13 @@ internal sealed class DeferredRenderer : IGem, IPipelineTuning
     private readonly RenderSystem _system;
     private readonly IDisposable _scheduled;
 
-    public DeferredRenderer(IEcs ecs, Assets assets, IFileSystem files, Project project, World world, Threads threads, Scheduler scheduler, IWindowRegistry? windows, IRendering? rendering)
+    public DeferredRenderer(IEcs ecs, Assets assets, IFileSystem files, Project project, Settings values, LodSettings lod, DeferredSettings settings, World world, Threads threads, Scheduler scheduler, IWindowRegistry? windows, IRendering? rendering)
     {
-        _system = new RenderSystem(ecs, assets, files, project, world, windows, rendering, threads);
+        _system = new RenderSystem(ecs, assets, files, project, values, lod, settings, world, windows, rendering, threads);
         _scheduled = scheduler.Add(ecs, _system);
     }
 
     public IReadOnlyList<TunablePass> Passes => _system.Tuning.Passes;
-
-    public void Set(ulong pass, string name, Magic.Contexts.Assets.Param value)
-    {
-        _system.Tuning.Set(pass, name, value);
-    }
 
     public void Dispose()
     {

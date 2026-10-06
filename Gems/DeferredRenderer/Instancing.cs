@@ -34,7 +34,11 @@ internal static class Instancing
             Handle<Material> source = desc.Materials[Math.Clamp(parts[i].MaterialSlot, 0, MaterialSlots.Capacity - 1)];
             MaterialSlot material = Drawn(ctx, meshSlot, Materials.Acquire(ctx, source));
             uint group = Group(ctx, material.Class, meshSlot);
-            uint slot = instances.Add(desc.Model.Id, meshSlot, ctx.Meshes.Bounds(meshSlot), desc.CullRadius, source, material, flags, desc.World, origin, group, desc.Static);
+
+            // A transparent part casts no shadow: it would shadow itself, flickering as the lights move, and block
+            // the light it lets through.
+            InstanceFlags partFlags = material.Class.Variant.HasFlag(SurfaceVariant.Transparent) ? flags | InstanceFlags.NoShadow : flags;
+            uint slot = instances.Add(desc.Model.Id, meshSlot, ctx.Meshes.Bounds(meshSlot), desc.CullRadius, source, material, partFlags, desc.World, origin, group, desc.Static);
             MarkFailed(ctx, slot, material);
             if (i == 0)
                 handle = slot; // unique while the entity lives
@@ -178,43 +182,71 @@ internal static class Instancing
     /// <summary>
     /// The draw group of a class and mesh, taking a reference to it and to the class's pipeline; a class seen for the
     /// first time starts compiling its pipeline. A reference is taken to the group of each of the mesh's lesser versions
-    /// too, since the culler may draw the instance in any of them, and the group is told which they are.
+    /// too, since the culler may draw the instance in any of them, and the group is told which they are. A mesh of cards
+    /// (a stand-in's small objects) is drawn as impostors, and has no voxels of its own in the GI.
     /// </summary>
-    private static uint Group(RenderContext ctx, PipelineClass cls, uint meshSlot)
+    private static uint Group(RenderContext ctx, PipelineClass material, uint meshSlot)
     {
+        PipelineClass cls = LodClass(ctx, material, meshSlot) ?? material;
         Pipelines.Acquire(ctx, cls);
         uint group = ctx.Buckets.Acquire(cls, meshSlot, ctx.Meshes.Range(meshSlot), out bool created);
         if (created)
-            ctx.Buckets.SetGi(group, GiBricks.InflateFlat(ctx.Meshes.Box(meshSlot)), ctx.Bricks.Acquire(meshSlot), meshSlot);
+            ctx.Buckets.SetGi(group, GiBricks.InflateFlat(ctx.Meshes.Box(meshSlot)), ctx.Meshes.IsImpostor(meshSlot) ? GiBricks.None : ctx.Bricks.Acquire(meshSlot), meshSlot);
 
         (float Threshold, uint MeshSlot)[] lods = ctx.Meshes.Lods(meshSlot);
         if (lods.Length == 0)
             return group;
 
         Span<(float Threshold, uint Group)> groups = stackalloc (float, uint)[lods.Length];
-        for (int i = 0; i < lods.Length; i++)
+        int count = 0;
+        foreach ((float threshold, uint lodSlot) in lods)
         {
-            uint lodGroup = ctx.Buckets.Acquire(cls, lods[i].MeshSlot, ctx.Meshes.Range(lods[i].MeshSlot), out bool lodCreated);
+            if (LodClass(ctx, cls, lodSlot) is not { } lodCls)
+                continue;
+
+            if (lodCls != cls)
+                Pipelines.Acquire(ctx, lodCls);
+            uint lodGroup = ctx.Buckets.Acquire(lodCls, lodSlot, ctx.Meshes.Range(lodSlot), out bool lodCreated);
             if (lodCreated)
-                ctx.Buckets.SetGi(lodGroup, ctx.Meshes.Box(lods[i].MeshSlot), GiBricks.None, lods[i].MeshSlot);
-            groups[i] = (lods[i].Threshold, lodGroup);
+                ctx.Buckets.SetGi(lodGroup, ctx.Meshes.Box(lodSlot), GiBricks.None, lodSlot);
+            groups[count++] = (threshold, lodGroup);
         }
 
-        ctx.Buckets.SetLods(group, groups);
+        ctx.Buckets.SetLods(group, groups[..count]);
         return group;
     }
 
     /// <summary>
     /// Gives back what <see cref="Group"/> took.
     /// </summary>
-    private static void Ungroup(RenderContext ctx, PipelineClass cls, uint meshSlot)
+    private static void Ungroup(RenderContext ctx, PipelineClass material, uint meshSlot)
     {
+        PipelineClass cls = LodClass(ctx, material, meshSlot) ?? material;
         foreach ((_, uint lod) in ctx.Meshes.Lods(meshSlot))
-            ctx.Buckets.Release(cls, lod);
+        {
+            if (LodClass(ctx, cls, lod) is not { } lodCls)
+                continue;
+
+            ctx.Buckets.Release(lodCls, lod);
+            if (lodCls != cls)
+                Pipelines.Release(ctx, lodCls);
+        }
 
         if (ctx.Buckets.Release(cls, meshSlot))
             ctx.Bricks.ReleaseMesh(meshSlot);
         Pipelines.Release(ctx, cls);
+    }
+
+    /// <summary>
+    /// The class a mesh, or a lesser version of one, drawn with <paramref name="cls"/> is drawn with: the same, or for an
+    /// impostor's cards its impostor variant; none (a level is left out) for a transparent class, which has no impostor.
+    /// </summary>
+    private static PipelineClass? LodClass(RenderContext ctx, PipelineClass cls, uint lodSlot)
+    {
+        if (!ctx.Meshes.IsImpostor(lodSlot))
+            return cls;
+
+        return cls.Variant.HasFlag(SurfaceVariant.Transparent) ? null : cls with { Variant = cls.Variant | SurfaceVariant.Impostor };
     }
 
     /// <summary>

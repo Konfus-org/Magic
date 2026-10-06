@@ -15,12 +15,12 @@ internal sealed class DebugTools : IGem
     private readonly Disposables<ISystem> _systems;
     private readonly Disposables<IDisposable> _scheduled;
 
-    public DebugTools(IEcs ecs, Project project, Scheduler scheduler, IInput? input, IWindowRegistry? windows, IClipboard? clipboard, IPipelineTuning? pipeline)
+    public DebugTools(IEcs ecs, Settings values, Assets assets, Scheduler scheduler, IInput? input, IWindowRegistry? windows, IClipboard? clipboard, IPipelineTuning? pipeline)
     {
-        ConsoleWindow console = new(input, clipboard, project.Console);
-        SettingsWindow settings = new(project.Settings, pipeline, input, clipboard);
+        ConsoleWindow console = new(input, clipboard);
+        SettingsWindow settings = new(values, assets, pipeline, input, clipboard);
         StatsWindow stats = new(input, clipboard);
-        WorldText worldText = new(ecs, windows, project.Settings.Render);
+        WorldText worldText = new(ecs, windows);
         ScreenLog screenLog = new();
 
         _systems = new Disposables<ISystem>(worldText, screenLog, stats, settings, console);

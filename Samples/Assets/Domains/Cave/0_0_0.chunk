@@ -481,9 +481,9 @@
                 },
                 "PointLight": {
                     "color": {
-                        "x": 1,
-                        "y": 0.6,
-                        "z": 0.3
+                        "r": 1,
+                        "g": 0.6,
+                        "b": 0.3
                     },
                     "intensity": 3,
                     "range": 8,
@@ -506,9 +506,9 @@
                 },
                 "PointLight": {
                     "color": {
-                        "x": 0.3,
-                        "y": 0.5,
-                        "z": 1
+                        "r": 0.3,
+                        "g": 0.5,
+                        "b": 1
                     },
                     "intensity": 2,
                     "range": 6

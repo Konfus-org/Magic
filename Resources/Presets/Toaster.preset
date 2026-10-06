@@ -1,0 +1,17 @@
+{
+    // For a machine that is mostly a heating element: less detail, a shorter view, fewer and coarser shadows.
+    "Lod.Bias": 0.5,
+    "Deferred.Anisotropy": 1,
+    "Streaming.Radius": 64,
+    "Streaming.ViewDist": 400,
+    "Assets.Budgets": { "Chunk": 512, "Texture": 256, "Model": 128 },
+    "ShadowPlan.cascades": 2,
+    "ShadowPlan.cascadeResolution": 1024,
+    "ShadowPlan.distance": 120,
+    "ShadowPlan.maxLocalLights": 2,
+    "LocalShadowSelect.maxLocalLights": 2,
+    "LocalShadowSelect.facesPerFrame": 2,
+    "Gtao.slices": 1,
+    "Gtao.steps": 2,
+    "GiPlan.framesPerRebuild": 4
+}

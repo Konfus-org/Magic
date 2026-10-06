@@ -2,6 +2,7 @@
 using Magic.Attributes.Scripts;
 using Magic.Interfaces;
 using Magic.Utils;
+using Magic.Contexts.Debug;
 
 namespace DebugToolsGem;
 

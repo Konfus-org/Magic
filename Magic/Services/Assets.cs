@@ -4,6 +4,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
 using Magic.Contexts.Files;
 using Magic.Contexts.Settings;
+using Magic.Contexts.Threading;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Utils;
@@ -14,6 +15,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text.Json;
+using AssetLods = Magic.Contexts.Assets.Lods; // Lods is also this class's method
 
 namespace Magic.Services;
 
@@ -36,15 +38,17 @@ internal readonly record struct AssetPoolStats(string Type, int Count, long Byte
 /// <see cref="EventType.AssetMoved"/> and <see cref="EventType.AssetRemoved"/>.
 /// <para>
 /// An asset may have lesser versions of itself (<see cref="Lods{T}"/>): the ones its sidecar names, else the ones the
-/// type's <see cref="ILODGenerator{T}"/> makes. Those are asset files like any other, in a folder of the cache named
-/// by the asset's id, a hash of its file and sidecar and the generator's version, so they are made once and made
+/// type's <see cref="ILODGenerator{T}"/> makes (<see cref="Contexts.Assets.Lods"/>, each level with the textures baked
+/// for it alone). Those are asset files like any other but with no sidecar (the index gives each the id its name does,
+/// <see cref="Contexts.Assets.Lods.IdOf"/>, and an impostor's atlases their import settings), in a folder of the cache
+/// named by the asset's id, a hash of its file and sidecar and the generator's version, so they are made once and made
 /// again when any of those changes; the folder's manifest also keeps the same of every other asset the generator
 /// loaded, so they are made again when one of those changes too. That folder is indexed as it is used and is not
 /// watched. A folder made of an earlier file or version is deleted when its asset's LODs are next asked for, and
 /// the folders of assets that are gone the first time any of their type's are.
 /// </para>
 /// </summary>
-public sealed class Assets : IDisposable
+public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
 {
     private const long Megabyte = 1024 * 1024;
 
@@ -53,7 +57,8 @@ public sealed class Assets : IDisposable
     /// </summary>
     private const double TrimmedTo = 0.9;
 
-    private readonly Project _project;
+    private static readonly AssetSettings DefaultBudgets = new();
+
     private readonly IFileSystem _files;
     private readonly Events _events;
     private readonly IServices _services;
@@ -68,11 +73,12 @@ public sealed class Assets : IDisposable
     private readonly HashSet<(Type Type, ulong Id)> _failed = []; // whatever the budget; until the file or the gems change
     private readonly ConcurrentDictionary<Type, Func<Assets, ulong, CancellationToken, Task<Asset?>>> _loads = new(); // LoadOneAsync by run-time type
     private readonly ConcurrentDictionary<Type, Func<Assets, ulong, CancellationToken, Task<Asset[]>>> _lodLoads = new(); // LoadLodsAsync by run-time type
-    private readonly ConcurrentDictionary<(Type Type, ulong Id), Lazy<Task<Array>>> _lods = new(); // found once; until the file or the gems change
+    private readonly ConcurrentDictionary<(Type Type, ulong Id), Lazy<Task<Lods>>> _lods = new(); // found once; until the file or the gems change
+    private readonly ConcurrentDictionary<ulong, bool> _atlases = new(); // generated impostor atlases, imported as Lods.AtlasImport says
     private readonly ConcurrentDictionary<(Type Type, ulong Id), ulong[]> _lodDependencies = new(); // the other assets each one's generated LODs were made from
     private readonly ConcurrentDictionary<(Type Type, ulong Id), Lazy<Task<string?>>> _stamps = new(); // hashed once; until the file or the gems change
     private readonly ConcurrentDictionary<Type, Func<Assets, ulong, CancellationToken, Task<string?>>> _stampsOf = new(); // StampAsync by run-time type
-    private readonly ConcurrentDictionary<string, Type?> _typesByName = new(); // asset types by full name, as a LOD manifest names them
+    private readonly ConcurrentDictionary<string, Type> _types = new(StringComparer.Ordinal); // every loaded asset type by full name, as a LOD manifest names it
     private readonly ConcurrentDictionary<Type, bool> _swept = new(); // types whose cache has been cleared of assets that are gone
     private readonly AsyncLocal<ConcurrentDictionary<(Type Type, ulong Id), bool>?> _generatorReads = new(); // what the generator running in this flow asked for
     private readonly string _lodCache;
@@ -80,7 +86,6 @@ public sealed class Assets : IDisposable
 
     internal Assets(Project project, IFileSystem files, Events events, IServices services, Threads threads)
     {
-        _project = project;
         _files = files;
         _events = events;
         _services = services;
@@ -258,7 +263,7 @@ public sealed class Assets : IDisposable
     /// whoever cannot wait awaits <see cref="LodsAsync{T}"/>. None when it has neither, cannot be loaded, or is a
     /// generated one itself. Found once per asset, until its file or the gems change. Any thread.
     /// </summary>
-    public (float Threshold, Handle<T> Asset)[] Lods<T>(Handle<T> handle) where T : Asset
+    public Lods Lods<T>(Handle<T> handle) where T : Asset
     {
         return LodsAsync(handle).GetAwaiter().GetResult();
     }
@@ -269,23 +274,23 @@ public sealed class Assets : IDisposable
     /// has them found again. It is the <paramref name="progress"/> of whoever asked first, too, that the generator
     /// tells how far it is; everyone's is told 1 at the end.
     /// </summary>
-    public async Task<(float Threshold, Handle<T> Asset)[]> LodsAsync<T>(Handle<T> handle, IProgress<float>? progress = null, CancellationToken cancel = default) where T : Asset
+    public async Task<Lods> LodsAsync<T>(Handle<T> handle, IProgress<float>? progress = null, CancellationToken cancel = default) where T : Asset
     {
         (Type, ulong) key = (typeof(T), handle.Id);
         _generatorReads.Value?.TryAdd(key, true);
         while (true)
         {
-            Lazy<Task<Array>> found = _lods.GetOrAdd(key, _ => new Lazy<Task<Array>>(() => _threads.InvokeAsync(ThreadId.Worker, cancel => FindLodsAsync(handle, progress, cancel), cancel).Unwrap()));
+            Lazy<Task<Lods>> found = _lods.GetOrAdd(key, _ => new Lazy<Task<Lods>>(() => _threads.InvokeAsync(ThreadId.Worker, cancel => FindLodsAsync(handle, progress, cancel), cancel).Unwrap()));
             try
             {
-                (float, Handle<T>)[] lods = ((float, Handle<T>)[])await found.Value.WaitAsync(cancel).ConfigureAwait(false);
+                Lods lods = await found.Value.WaitAsync(cancel).ConfigureAwait(false);
                 progress?.Report(1f);
 
                 return lods;
             }
             catch (OperationCanceledException) when (found.Value.IsCanceled)
             {
-                _lods.TryRemove(new KeyValuePair<(Type, ulong), Lazy<Task<Array>>>(key, found));
+                _lods.TryRemove(new KeyValuePair<(Type, ulong), Lazy<Task<Lods>>>(key, found));
                 cancel.ThrowIfCancellationRequested();
             }
         }
@@ -303,7 +308,7 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// What every type's pool holds, as <c>Streaming.Pool.&lt;Type&gt;.Count</c>, <c>Bytes</c>, <c>Budget</c>, <c>Hits</c> and <c>Misses</c>.
+    /// What every type's pool holds, as <c>Memory.Assets.&lt;Type&gt;.Loaded</c>, <c>UsedMB</c>, <c>BudgetMB</c>, <c>Hits</c> and <c>Misses</c>.
     /// </summary>
     private void PublishPoolStats()
     {
@@ -311,11 +316,11 @@ public sealed class Assets : IDisposable
         {
             foreach ((Type type, Pool pool) in _pools)
             {
-                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Count", pool.Entries.Count);
-                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Bytes", pool.Bytes);
-                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Budget", BudgetOf(type));
-                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Hits", pool.Hits);
-                Debugging.Stats.Set($"Streaming.Pool.{type.Name}.Misses", pool.Misses);
+                Debugging.Stats.Set($"Memory.Assets.{type.Name}.Loaded", pool.Entries.Count);
+                Debugging.Stats.Set($"Memory.Assets.{type.Name}.UsedMB", pool.Bytes / (double)Megabyte);
+                Debugging.Stats.Set($"Memory.Assets.{type.Name}.BudgetMB", BudgetOf(type) / (double)Megabyte);
+                Debugging.Stats.Set($"Memory.Assets.{type.Name}.Hits", pool.Hits);
+                Debugging.Stats.Set($"Memory.Assets.{type.Name}.Misses", pool.Misses);
             }
         }
     }
@@ -430,9 +435,9 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// What <see cref="LodsAsync{T}"/> answers the first time it is asked.
     /// </summary>
-    private async Task<Array> FindLodsAsync<T>(Handle<T> handle, IProgress<float>? progress, CancellationToken cancel) where T : Asset
+    private async Task<Lods> FindLodsAsync<T>(Handle<T> handle, IProgress<float>? progress, CancellationToken cancel) where T : Asset
     {
-        (float, Handle<T>)[] none = [];
+        Lods none = AssetLods.None;
         string? path = FullPathOf(handle.Id);
         if (path is null || _files.IsUnder(_lodCache, path))
             return none;
@@ -445,7 +450,7 @@ public sealed class Assets : IDisposable
         {
             Dictionary<float, ulong> authored = (await SidecarAsync<T>(path, cancel).ConfigureAwait(false)).Lods;
             if (authored.Count > 0)
-                return authored.OrderByDescending(lod => lod.Key).Select(lod => (lod.Key, new Handle<T>(lod.Value))).ToArray();
+                return new Lods([.. authored.OrderByDescending(lod => lod.Key).Select(lod => new Lod(lod.Key, lod.Value, []))]);
 
             if (!_services.TryGet(out ILODGenerator<T>? generator) || await StampAsync(handle, cancel).ConfigureAwait(false) is not { } stamp)
                 return none;
@@ -471,7 +476,7 @@ public sealed class Assets : IDisposable
                 ConcurrentDictionary<(Type Type, ulong Id), bool>? outer = _generatorReads.Value;
                 ConcurrentDictionary<(Type Type, ulong Id), bool> reads = new();
                 _generatorReads.Value = reads;
-                Result<Dictionary<float, string>> generated;
+                Result<Lods> generated;
                 try
                 {
                     generated = await generator.GenerateAsync(asset, folder, progress, cancel).ConfigureAwait(false);
@@ -494,7 +499,7 @@ public sealed class Assets : IDisposable
                 if (written.Failed)
                     Debugging.Log.Warn($"Could not write {manifestPath}: {written.Message}");
 
-                Debugging.Log.Info($"Generated {manifest.Lods.Count} LOD(s) of {typeof(T).Name} {handle.Id} ({asset.Path}): {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0} ms.");
+                Debugging.Log.Info($"Generated {manifest.Lods.Levels.Length} LOD(s) of {typeof(T).Name} {handle.Id} ({asset.Path}): {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0} ms.");
             }
         }
         catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
@@ -504,11 +509,17 @@ public sealed class Assets : IDisposable
         }
 
         _lodDependencies[(typeof(T), handle.Id)] = [.. manifest.Dependencies.Select(dependency => dependency.Id)];
-        Dictionary<float, string> names = manifest.Lods;
-        if (names.Count == 0)
+        if (manifest.Lods.Levels.Length == 0)
             return none;
 
-        // Everything in the folder is an asset: the LODs, and what they name in turn.
+        // Everything in the folder is an asset (the LODs, what they name in turn, an impostor's atlases), by the id its
+        // name gives it; an atlas is imported as data.
+        foreach (Lod level in manifest.Lods.Levels)
+        {
+            foreach (ulong atlas in level.Atlases)
+                _atlases[atlas] = true;
+        }
+
         if (_files.ReadDirectory(folder) is { Ok: true } listing)
         {
             foreach (string file in listing.Payload)
@@ -519,17 +530,8 @@ public sealed class Assets : IDisposable
             }
         }
 
-        List<(float, Handle<T>)> lods = [];
         lock (_lock)
-        {
-            foreach ((float threshold, string name) in names.OrderByDescending(lod => lod.Key))
-            {
-                if (_idByPath.TryGetValue(_files.FullPath(_files.Combine(folder, name)), out ulong id))
-                    lods.Add((threshold, new Handle<T>(id)));
-            }
-        }
-
-        return lods.ToArray();
+            return new Lods([.. manifest.Lods.Levels.Where(level => _pathById.ContainsKey(level.Asset)).OrderByDescending(level => level.Threshold)]);
     }
 
     /// <summary>
@@ -599,8 +601,7 @@ public sealed class Assets : IDisposable
     {
         foreach (LodDependency dependency in manifest.Dependencies)
         {
-            Type? type = _typesByName.GetOrAdd(dependency.Type, static name => AssetTypes().FirstOrDefault(candidate => candidate.FullName == name));
-            if (type is null || await StampAsync(type, dependency.Id, cancel).ConfigureAwait(false) != dependency.Stamp)
+            if (!_types.TryGetValue(dependency.Type, out Type? type) || await StampAsync(type, dependency.Id, cancel).ConfigureAwait(false) != dependency.Stamp)
                 return false;
         }
 
@@ -861,10 +862,15 @@ public sealed class Assets : IDisposable
     private static async Task<Asset[]> LoadLodsBoxedAsync<T>(Assets assets, ulong id, CancellationToken cancel) where T : Asset
     {
         List<Asset> loaded = [];
-        foreach ((_, Handle<T> lod) in await assets.LodsAsync(new Handle<T>(id), cancel: cancel).ConfigureAwait(false))
+        foreach (Lod level in (await assets.LodsAsync(new Handle<T>(id), cancel: cancel).ConfigureAwait(false)).Levels)
         {
-            if (await assets.LoadOneAsync(lod, cancel).ConfigureAwait(false) is { } asset)
+            if (await assets.LoadOneAsync(new Handle<T>(level.Asset), cancel).ConfigureAwait(false) is { } asset)
                 loaded.Add(asset);
+            foreach (ulong atlas in level.Atlases)
+            {
+                if (await assets.LoadOneAsync(new Handle<Texture>(atlas), cancel).ConfigureAwait(false) is { } texture)
+                    loaded.Add(texture);
+            }
         }
 
         return [.. loaded];
@@ -961,7 +967,7 @@ public sealed class Assets : IDisposable
     /// </summary>
     private long BudgetOf(Type type)
     {
-        AssetSettings settings = _project.Settings.Assets;
+        AssetSettings settings = Budgets;
         foreach ((string name, int megabytes) in settings.Budgets)
         {
             if (IsNamed(type, name))
@@ -1004,7 +1010,7 @@ public sealed class Assets : IDisposable
 
         // Its own LODs, and those a generator made of it for another asset (a chunk's stand-in of its models).
         // Walked, not through Keys: that copies every key into a list, and this runs once per file indexed.
-        foreach (KeyValuePair<(Type Type, ulong Id), Lazy<Task<Array>>> found in _lods)
+        foreach (KeyValuePair<(Type Type, ulong Id), Lazy<Task<Lods>>> found in _lods)
         {
             if (found.Key.Id == id || (_lodDependencies.TryGetValue(found.Key, out ulong[]? dependencies) && dependencies.Contains(id)))
                 _lods.TryRemove(found.Key, out _);
@@ -1018,36 +1024,53 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Gems came or went: the pools of their asset types go (they would keep an unloaded gem's assembly alive) with
-    /// whatever else was kept by type, failures are forgotten (a loader may have arrived), and the budget names are checked against the asset types there are now.
+    /// Gems came or went: scripts go (a script is a Core type, but what it holds is a class of a project assembly that
+    /// may just have gone), failures are forgotten (a loader may have arrived), so are LODs and stamps (a generator may
+    /// have come or gone), and the budget names are checked against the asset types there are now.
     /// </summary>
     private void OnGemsChanged()
     {
         lock (_lock)
         {
-            foreach (Type type in _pools.Keys.Where(pooled => pooled.Assembly.IsCollectible).ToArray())
-                Drop(type, "gems changed");
-
-            // A script is a Core type, but what it holds is a class of a project assembly that may just have gone.
             Drop(typeof(Script), "gems changed");
-
             _failed.Clear();
         }
 
-        _loads.Clear();
-        _lodLoads.Clear();
-        _lods.Clear(); // a generator may have come or gone
+        _lods.Clear();
         _lodDependencies.Clear();
         _stamps.Clear(); // they carry the generator's version
-        _stampsOf.Clear();
-        _typesByName.Clear();
 
-        Type[] types = AssetTypes();
-        foreach (string name in _project.Settings.Assets.Budgets.Keys)
+        foreach (string name in Budgets.Budgets.Keys)
         {
-            if (!types.Any(candidate => IsNamed(candidate, name)))
+            if (!_types.Values.Any(candidate => IsNamed(candidate, name)))
                 Debugging.Log.Warn($"Assets.Budgets: no asset type is called '{name}'.");
         }
+    }
+
+    /// <summary>
+    /// The budgets as the settings have them now; the defaults where nothing registered any (a tool, a test).
+    /// </summary>
+    private AssetSettings Budgets => _services.TryGet(out AssetSettings? settings) ? settings : DefaultBudgets;
+
+    object? IRegisterFromGem.Register(Type type)
+    {
+        _types[type.FullName ?? type.Name] = type;
+        return null;
+    }
+
+    /// <summary>
+    /// An asset type is going with its gem: its pool and whatever else is kept by it go, since they would keep the
+    /// gem's assembly alive.
+    /// </summary>
+    void IRegisterFromGem.Unregister(Type type)
+    {
+        _types.TryRemove(type.FullName ?? type.Name, out _);
+        lock (_lock)
+            Drop(type, "its gem went");
+
+        _loads.TryRemove(type, out _);
+        _lodLoads.TryRemove(type, out _);
+        _stampsOf.TryRemove(type, out _);
     }
 
     /// <summary>
@@ -1055,6 +1078,9 @@ public sealed class Assets : IDisposable
     /// </summary>
     private async Task<T> SidecarAsync<T>(string path, CancellationToken cancel) where T : Asset
     {
+        if (_files.IsUnder(_lodCache, path))
+            return GeneratedSidecar<T>(path);
+
         Result<T?> meta = await _files.ReadAsync(path + ".meta", static bytes => JsonSerializer.Deserialize<T>(bytes, AssetJson.Options), cancel).ConfigureAwait(false);
         if (meta.Failed)
             throw new IOException($"could not read its sidecar. {meta.Message}");
@@ -1062,6 +1088,20 @@ public sealed class Assets : IDisposable
         T asset = meta.Payload ?? throw new JsonException("the sidecar is null.");
         asset.Path = Relative(path);
 
+        return asset;
+    }
+
+    /// <summary>
+    /// What a generated file has in place of a sidecar: the id its name gives it, and for an impostor's atlas how it is
+    /// imported (<see cref="Lods.AtlasImport"/>).
+    /// </summary>
+    private T GeneratedSidecar<T>(string path) where T : Asset
+    {
+        ulong id = GeneratedId(path);
+        T asset = JsonSerializer.Deserialize<T>(_atlases.ContainsKey(id) ? AssetLods.AtlasImport : "{}", AssetJson.Options) ?? throw new JsonException("the import settings are null.");
+        asset.Id = id;
+        asset.Version = 1;
+        asset.Path = Relative(path);
         return asset;
     }
 
@@ -1132,7 +1172,8 @@ public sealed class Assets : IDisposable
     /// </summary>
     private void Index(string path, bool publish)
     {
-        ulong id = ReadId(path + ".meta") ?? Mint(path + ".meta");
+        // A generated file has no sidecar: its name gives its id (Lods.IdOf).
+        ulong id = _files.IsUnder(_lodCache, path) ? GeneratedId(path) : ReadId(path + ".meta") ?? Mint(path + ".meta");
         if (id == 0)
             return;
 
@@ -1190,6 +1231,11 @@ public sealed class Assets : IDisposable
         }
 
         _events.Publish(new Event(EventType.AssetRemoved, Id: id, Text: Relative(path)));
+    }
+
+    private static ulong GeneratedId(string path)
+    {
+        return AssetLods.IdOf(Path.GetDirectoryName(path) ?? "", Path.GetFileName(path));
     }
 
     private ulong? ReadId(string metaPath)
@@ -1298,35 +1344,6 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Every concrete asset type in Core and the assemblies that reference it (the gems).
-    /// </summary>
-    private static Type[] AssetTypes()
-    {
-        Assembly core = typeof(Asset).Assembly;
-        string? coreName = core.GetName().Name;
-        List<Type> found = [];
-        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (assembly.IsDynamic || (assembly != core && !assembly.GetReferencedAssemblies().Any(reference => reference.Name == coreName)))
-                continue;
-
-            Type[] types;
-            try
-            {
-                types = assembly.GetTypes();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                types = [.. ex.Types.OfType<Type>()];
-            }
-
-            found.AddRange(types.Where(candidate => !candidate.IsAbstract && typeof(Asset).IsAssignableFrom(candidate)));
-        }
-
-        return [.. found];
-    }
-
-    /// <summary>
     /// One asset type's loaded assets by id, with what they take and how often a Load found one. Used under the lock.
     /// </summary>
     private sealed class Pool
@@ -1379,7 +1396,7 @@ public sealed class Assets : IDisposable
     /// What a folder of generated LODs holds, as its <c>lods.json</c> says: each threshold's file, and every other
     /// asset the generator loaded to make them.
     /// </summary>
-    private sealed record LodManifest(Dictionary<float, string> Lods, LodDependency[] Dependencies);
+    private sealed record LodManifest(Lods Lods, LodDependency[] Dependencies);
 
     /// <summary>
     /// Another asset some generated LODs were made from: its type's full name, its id and its stamp at the time.

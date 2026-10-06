@@ -1,14 +1,23 @@
 {
     "shader": {
-        "id": 10001
+        "id": 10073
     },
     "type": "transparent",
     "params": {
-        "color": {
-            "r": 0.55,
-            "g": 0.75,
+        "tint": {
+            "r": 0.85,
+            "g": 0.95,
             "b": 1.0,
-            "a": 0.35
+            "a": 1
+        },
+        "ior": {
+            "x": 1.45
+        },
+        "thickness": {
+            "x": 0.3
+        },
+        "dispersion": {
+            "x": 0.015
         }
     }
 }

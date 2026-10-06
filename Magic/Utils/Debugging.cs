@@ -1,6 +1,8 @@
 ﻿using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
+using Magic.Contexts.Debug;
+using Magic.Contexts.Domain;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
 using Magic.Extensions;
@@ -426,6 +428,33 @@ public static class Debugging
         }
 
         /// <summary>
+        /// A header that folds away what is drawn under it; true while open.
+        /// </summary>
+        public static bool Header(string label)
+        {
+            if (!Visible)
+                return false;
+
+            bool open = false;
+            foreach (IDebugUI ui in _uis)
+                open |= ui.Header(label);
+
+            return open;
+        }
+
+        /// <summary>
+        /// <paramref name="text"/> shown while the mouse rests on the item drawn last.
+        /// </summary>
+        public static void Tooltip(string text)
+        {
+            if (!Visible)
+                return;
+
+            foreach (IDebugUI ui in _uis)
+                ui.Tooltip(text);
+        }
+
+        /// <summary>
         /// An item of the context menu a right-click in the window opens; true the frame it is clicked.
         /// </summary>
         public static bool MenuItem(string label)
@@ -534,9 +563,10 @@ public static class Debugging
     /// <summary>
     /// The engine's numbers in one place: whatever a system wants shown is <see cref="Set"/> under a dotted name,
     /// from any thread, as often as it changes; the debug display takes them all and prints them. The first part is
-    /// the tab (<c>Frame</c>, <c>Rendering</c>, <c>Streaming</c>), the last the name, and anything between is a
-    /// sub-category shown as a block within the tab: <c>Rendering.Draws</c>, <c>Rendering.Gi.Bricks</c>,
-    /// <c>Streaming.Pool.Texture.Bytes</c>, <c>Frame.GC.HeapMB</c>. Nothing here is computed: a rate or an average
+    /// the tab (<c>Frame</c>, <c>Memory</c>, <c>Rendering</c>, <c>Streaming</c>), the last the name, and anything between
+    /// is a sub-category shown as a block within the tab: <c>Rendering.Draws</c>, <c>Frame.Time.RenderSyncMs</c>,
+    /// <c>Memory.Assets.Texture.UsedMB</c>, <c>Memory.GC.HeapMB</c>. A tab holds what it is about, whoever sets it:
+    /// every per-frame timing goes under <c>Frame.Time</c>, every memory figure under <c>Memory</c>, in megabytes. Nothing here is computed: a rate or an average
     /// is the caller's to make before setting it.
     /// </summary>
     public static class Stats

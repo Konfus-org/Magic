@@ -1,8 +1,8 @@
 // How a pixel reads the GI volumes: the sky it sees, the interior tint where it does not, and the bounced light
 // gathered along a normal. The caller passes the fade (voxels from a level's edge over which it blends into the
 // next) and declares these before including it:
-//   Texture3D<float4> GiShR0, GiShR1, GiShG0, GiShG1, GiShB0, GiShB1 (the two light sets); Texture3D<float> GiSkyVis;
-//   a linear sampler for each (GiShR0Sampler ...); StructuredBuffer<GpuGiState> GiState.
+//   Texture3D<float4> GiShR, GiShG, GiShB (both light sets stacked, Gi/State.hlsli); Texture3D<float> GiSkyVis;
+//   a linear sampler for each (GiShRSampler ...); StructuredBuffer<GpuGiState> GiState.
 // The finest level holding the point is read, from the set its parity names, blended into the next over the last
 // fade voxels of its extent, and the point is pushed a voxel out along the normal first, so a surface reads the
 // air in front of it and not the voxel it fills.
@@ -29,23 +29,18 @@ float GiLevelWeight(float3 voxel, float fadeVoxels)
     return saturate(nearest / fade);
 }
 
-float4 GiShSample(Texture3D<float4> set0, SamplerState sampler0, Texture3D<float4> set1, SamplerState sampler1, uint parity, float3 uv)
-{
-    return parity == 0u ? set0.SampleLevel(sampler0, uv, 0.0) : set1.SampleLevel(sampler1, uv, 0.0);
-}
-
 // The light sets hold light by the way it travels (Gi/Propagate.comp.hlsl), so a surface gathers what travels
 // against its normal: what comes towards it, not what leaves it.
 GiSample GiRead(uint level, float3 voxel, float3 normal)
 {
     float3 towards = -normal;
     float3 uv = GiStackedUv(level, voxel);
-    uint parity = GiParity(level);
+    float3 lightUv = GiShUv(level, GiParity(level), voxel);
     GiSample sample;
     sample.irradiance = float3(
-        ShIrradiance(GiShSample(GiShR0, GiShR0Sampler, GiShR1, GiShR1Sampler, parity, uv), towards),
-        ShIrradiance(GiShSample(GiShG0, GiShG0Sampler, GiShG1, GiShG1Sampler, parity, uv), towards),
-        ShIrradiance(GiShSample(GiShB0, GiShB0Sampler, GiShB1, GiShB1Sampler, parity, uv), towards));
+        ShIrradiance(GiShR.SampleLevel(GiShRSampler, lightUv, 0.0), towards),
+        ShIrradiance(GiShG.SampleLevel(GiShGSampler, lightUv, 0.0), towards),
+        ShIrradiance(GiShB.SampleLevel(GiShBSampler, lightUv, 0.0), towards));
     sample.skyVisibility = GiSkyVis.SampleLevel(GiSkyVisSampler, uv, 0.0);
     sample.weight = 1.0;
     return sample;

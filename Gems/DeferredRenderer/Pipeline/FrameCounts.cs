@@ -19,6 +19,8 @@ internal readonly record struct FrameCounts(
     uint BrickJobs,
     uint HiZFloats,
     uint ShadowCasters,
+    uint TransparentChunks,
+    uint RefractiveChunks,
     uint ViewWidth,
     uint ViewHeight,
     uint ViewTiles,
@@ -31,7 +33,7 @@ internal readonly record struct FrameCounts(
     public static readonly string[] Names =
     [
         "$pageCount", "$chunkCount", "$groupCount", "$instanceHighWater", "$visibleHighWater", "$lightCount", "$glowCount",
-        "$meshCount", "$brickJobs", "$hiZFloats", "$shadowCasters", "$viewWidth", "$viewHeight", "$viewTiles", "$targetWidth", "$targetHeight",
+        "$meshCount", "$brickJobs", "$hiZFloats", "$shadowCasters", "$transparentChunks", "$refractiveChunks", "$viewWidth", "$viewHeight", "$viewTiles", "$targetWidth", "$targetHeight",
     ];
 
     /// <summary>
@@ -49,7 +51,29 @@ internal readonly record struct FrameCounts(
             ctx.GlowCount,
             (uint)ctx.Meshes.MeshCount,
             brickJobs,
-            0, shadowCasters, 0, 0, 0, 0, 0);
+            0, shadowCasters, CountChunks(ctx, SurfaceVariant.Transparent), CountChunks(ctx, SurfaceVariant.Refractive), 0, 0, 0, 0, 0);
+    }
+
+    /// <summary>
+    /// The bucket chunks of classes with <paramref name="variant"/> that hold anything: none transparent, and the
+    /// transparency stage is skipped; none refractive, and its glass layers are.
+    /// </summary>
+    private static uint CountChunks(RenderContext ctx, SurfaceVariant variant)
+    {
+        uint count = 0;
+        foreach ((PipelineClass cls, List<int> chunks) in ctx.Buckets.ByClass)
+        {
+            if (!cls.Variant.HasFlag(variant))
+                continue;
+
+            foreach (int chunk in chunks)
+            {
+                if (!ctx.Buckets.IsEmpty(chunk))
+                    count++;
+            }
+        }
+
+        return count;
     }
 
     public static bool IsName(string name)
@@ -92,6 +116,8 @@ internal readonly record struct FrameCounts(
             "$brickJobs" => BrickJobs,
             "$hiZFloats" => HiZFloats,
             "$shadowCasters" => ShadowCasters,
+            "$transparentChunks" => TransparentChunks,
+            "$refractiveChunks" => RefractiveChunks,
             "$viewWidth" => ViewWidth,
             "$viewHeight" => ViewHeight,
             "$viewTiles" => ViewTiles,

@@ -9,7 +9,7 @@ public sealed class FrameCountsTests
     [Fact]
     public void A_count_resolves_to_what_it_was_built_with()
     {
-        FrameCounts counts = new(PageCount: 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        FrameCounts counts = default(FrameCounts) with { PageCount = 7 };
 
         bool resolved = counts.TryResolve("$pageCount", out uint value);
 

@@ -5,6 +5,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using ScriptingGem;
@@ -13,6 +14,7 @@ using System.Numerics;
 using System.Reflection;
 using System.Text.Json;
 using Xunit;
+using Magic.Contexts.Domain;
 
 namespace Magic.IntegrationTests.Systems;
 

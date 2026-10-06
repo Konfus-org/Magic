@@ -55,6 +55,9 @@ internal sealed class RenderSystem : ISystem
     private readonly Assets _assets;
     private readonly IFileSystem _files;
     private readonly Project _project;
+    private readonly Settings _values;
+    private readonly LodSettings _lod;
+    private readonly DeferredSettings _settings;
     private readonly World _world;
     private readonly IWindowRegistry? _windows;
     private readonly IRendering? _rendering;
@@ -68,10 +71,12 @@ internal sealed class RenderSystem : ISystem
     private readonly IEcsQuery<DirectionalLight, WorldTransform> _directional;
     private readonly IEcsQuery<PointLight, WorldTransform> _points;
     private readonly IEcsQuery<SpotLight, WorldTransform> _spots;
+    private readonly IEcsQuery<AreaLight, WorldTransform> _areas;
     private readonly IEcsQuery<Glow, WorldTransform> _glowing;
     private readonly IEcsQuery<DirectionalLight, WorldTransform> _directionalSettled;
     private readonly IEcsQuery<PointLight, WorldTransform> _pointsSettled;
     private readonly IEcsQuery<SpotLight, WorldTransform> _spotsSettled;
+    private readonly IEcsQuery<AreaLight, WorldTransform> _areasSettled;
     private readonly IEcsQuery<Glow, WorldTransform> _glowingSettled;
     private readonly IDisposable[] _onSettledChanged;
     private readonly IDisposable _onSet;
@@ -108,9 +113,11 @@ internal sealed class RenderSystem : ISystem
     private readonly QueryChunkAction<DirectionalLight, WorldTransform> _collectDirectional;
     private readonly QueryChunkAction<PointLight, WorldTransform> _collectPoints;
     private readonly QueryChunkAction<SpotLight, WorldTransform> _collectSpots;
+    private readonly QueryChunkAction<AreaLight, WorldTransform> _collectAreas;
     private readonly QueryChunkAction<Glow, WorldTransform> _collectGlows;
 
-    private BuiltWith? _builtWith; // null until the first run
+    private uint? _builtFor; // the device generation the context was built for; null until the first run
+    private IReadOnlyDictionary<string, System.Text.Json.JsonElement>? _appliedValues; // the settings values the passes were made with
     private PostList _posts;       // the world's post-processing this frame; empty without one
     private int _postLists;        // how many entities carry a PostProcessing this frame
     private bool _warnedPostLists;
@@ -121,13 +128,16 @@ internal sealed class RenderSystem : ISystem
     private bool _lastParentHidden; // a chunk's entities share one, so it is looked up once a frame, not once each.
                                     // Lights and glows ask once per span (one table: one parent), not per entity
 
-    public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, World world, IWindowRegistry? windows, IRendering? rendering, Threads threads)
+    public RenderSystem(IEcs ecs, Assets assets, IFileSystem files, Project project, Settings values, LodSettings lod, DeferredSettings settings, World world, IWindowRegistry? windows, IRendering? rendering, Threads threads)
     {
         _threads = threads;
         _ecs = ecs;
         _assets = assets;
         _files = files;
         _project = project;
+        _values = values;
+        _lod = lod;
+        _settings = settings;
         _world = world;
         _windows = windows;
         _rendering = rendering;
@@ -140,10 +150,12 @@ internal sealed class RenderSystem : ISystem
         _directional = ecs.Query<DirectionalLight, WorldTransform>().Without<Settled>().Build();
         _points = ecs.Query<PointLight, WorldTransform>().Without<Settled>().Build();
         _spots = ecs.Query<SpotLight, WorldTransform>().Without<Settled>().Build();
+        _areas = ecs.Query<AreaLight, WorldTransform>().Without<Settled>().Build();
         _glowing = ecs.Query<Glow, WorldTransform>().Without<Settled>().Build();
         _directionalSettled = ecs.Query<DirectionalLight, WorldTransform>().With<Settled>().Build();
         _pointsSettled = ecs.Query<PointLight, WorldTransform>().With<Settled>().Build();
         _spotsSettled = ecs.Query<SpotLight, WorldTransform>().With<Settled>().Build();
+        _areasSettled = ecs.Query<AreaLight, WorldTransform>().With<Settled>().Build();
         _glowingSettled = ecs.Query<Glow, WorldTransform>().With<Settled>().Build();
         _collectedLights = _lights;
         _collectedGlows = _glows;
@@ -157,6 +169,7 @@ internal sealed class RenderSystem : ISystem
             ecs.Observe<DirectionalLight>(ComponentEvent.Set, Changed), ecs.Observe<DirectionalLight>(ComponentEvent.Removed, Changed),
             ecs.Observe<PointLight>(ComponentEvent.Set, Changed), ecs.Observe<PointLight>(ComponentEvent.Removed, Changed),
             ecs.Observe<SpotLight>(ComponentEvent.Set, Changed), ecs.Observe<SpotLight>(ComponentEvent.Removed, Changed),
+            ecs.Observe<AreaLight>(ComponentEvent.Set, Changed), ecs.Observe<AreaLight>(ComponentEvent.Removed, Changed),
             ecs.Observe<Glow>(ComponentEvent.Set, Changed), ecs.Observe<Glow>(ComponentEvent.Removed, Changed),
         ];
         _onSet = ecs.Observe<Renderer>(ComponentEvent.Set, OnRendererSet);
@@ -171,6 +184,7 @@ internal sealed class RenderSystem : ISystem
         _collectDirectional = CollectDirectional;
         _collectPoints = CollectPoints;
         _collectSpots = CollectSpots;
+        _collectAreas = CollectAreas;
         _collectGlows = CollectGlows;
     }
 
@@ -185,6 +199,7 @@ internal sealed class RenderSystem : ISystem
         _directionalSettled.Dispose();
         _pointsSettled.Dispose();
         _spotsSettled.Dispose();
+        _areasSettled.Dispose();
         _glowingSettled.Dispose();
         _unregistered.Dispose();
         _movable.Dispose();
@@ -195,6 +210,7 @@ internal sealed class RenderSystem : ISystem
         _directional.Dispose();
         _points.Dispose();
         _spots.Dispose();
+        _areas.Dispose();
         _glowing.Dispose();
     }
 
@@ -215,15 +231,25 @@ internal sealed class RenderSystem : ISystem
     public void Run(in Frame frame)
     {
         long started = Stopwatch.GetTimestamp();
-        if (_builtWith != BuiltWith.From(_project.Settings.Render))
+        if (_builtFor != (_rendering?.Generation ?? 0))
             RebuildContext();
 
         if (Context is not { } ctx)
             return;
 
+        ctx.Textures.UseAnisotropy(ctx.Gpu, _settings.Anisotropy);
+
+        // A preset was applied: every pass takes its values again.
+        if (!ReferenceEquals(_appliedValues, _values.Values))
+        {
+            if (_appliedValues is not null)
+                PassLoader.Reapply(ctx);
+            _appliedValues = _values.Values;
+        }
+
         // The previous frame was submitted and nothing of this one is uploaded yet: in a debugging renderer, when asked
         // for, the periodic culling check of what it drew.
-        if (ctx.Gpu.Debug && ctx.Settings.CullingCheck && frame.Number % RenderChecks.VerifyEveryFrames == 0 && _plan.Views.Count > 0)
+        if (ctx.Gpu.Debug && ctx.Deferred.CullingCheck && frame.Number % RenderChecks.VerifyEveryFrames == 0 && _plan.Views.Count > 0)
         {
             RenderChecks.Verify(ctx, _plan.Views[0].Resources, _plan.Views[0].Constants);
             RenderChecks.VerifyShadowPlan(ctx, _plan.Views[_plan.MainView].Constants);
@@ -255,6 +281,7 @@ internal sealed class RenderSystem : ISystem
         _directional.Run(_collectDirectional);
         _points.Run(_collectPoints);
         _spots.Run(_collectSpots);
+        _areas.Run(_collectAreas);
         _glows.Clear();
         _glows.AddRange(_settledGlows);
         _glowing.Run(_collectGlows);
@@ -272,32 +299,33 @@ internal sealed class RenderSystem : ISystem
 
         // Plan, then record: the plan is everything the commands are made from.
         Handle<Pipeline> pipeline = _world.Pipeline.IsValid ? _world.Pipeline : _assets.Find<Pipeline>(Pipeline.DefaultPath);
-        Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), pipeline, _posts, LightingConstants.From(CollectionsMarshal.AsSpan(_lights), _sky), (float)frame.Time, frame.Number);
+        Scene.Plan(ctx, _plan, _windows, CollectionsMarshal.AsSpan(_views), pipeline, ctx.Deferred.PostProcessing && ctx.Deferred.DebugView == DebugView.Normal ? _posts : default, LightingConstants.From(CollectionsMarshal.AsSpan(_lights), _sky), (float)frame.Time, frame.Number);
         FailureLabels.Show(ctx);
         (int draws, int dispatches) = Scene.Record(ctx, frame.DrawCommands, _plan);
         float recordMs = (float)Stopwatch.GetElapsedTime(recording).TotalMilliseconds;
 
         // The host submits after this, so Render.SubmitMs and Render.WaitMs (its stats) are the previous frame's.
-        Debugging.Stats.Set("Rendering.SyncMs", syncMs);
-        Debugging.Stats.Set("Rendering.RecordMs", recordMs);
+        Debugging.Stats.Set("Frame.Time.RenderSyncMs", syncMs);
+        Debugging.Stats.Set("Frame.Time.RenderRecordMs", recordMs);
         Debugging.Stats.Set("Rendering.Instances", ctx.Instances.Alive);
         Debugging.Stats.Set("Rendering.Lights", _lights.Count);
         Debugging.Stats.Set("Rendering.Draws", draws);
         Debugging.Stats.Set("Rendering.Dispatches", dispatches);
-        Debugging.Stats.Set("Rendering.PipelinesPending", ctx.Pipelines.Pending);
-        Debugging.Stats.Set("Rendering.ResidentMeshes", ctx.Meshes.MeshCount);
-        Debugging.Stats.Set("Rendering.ResidentTextures", ctx.Textures.Count);
+        Debugging.Stats.Set("Rendering.Resident.PipelinesCompiling", ctx.Pipelines.Pending);
+        Debugging.Stats.Set("Rendering.Resident.Meshes", ctx.Meshes.MeshCount);
+        Debugging.Stats.Set("Rendering.Resident.Textures", ctx.Textures.Count);
     }
 
     /// <summary>
-    /// The first run, or render settings a context is built from changed: every instance registered with the old
-    /// context is stale, and the old context goes. A renderer whose built-in shaders do not compile draws nothing,
-    /// logged once.
+    /// The first run, or the GPU device was made again (another backend): every instance registered with the old
+    /// context is stale, and the old context goes with the old device's objects. No setting builds it again, since
+    /// nothing here releases a context's GPU objects on the same device. A renderer whose built-in shaders do not
+    /// compile draws nothing, logged once.
     /// </summary>
     private void RebuildContext()
     {
-        if (_builtWith is not null)
-            Debugging.Log.Info("Render settings changed: the render state is built again.");
+        if (_builtFor is not null)
+            Debugging.Log.Info("The GPU device changed: the render state is built again.");
 
         StripInstances();
         Context = null;
@@ -306,7 +334,7 @@ internal sealed class RenderSystem : ISystem
         {
             try
             {
-                Context = CreateContext(_rendering, _assets, _files, _project, _threads);
+                Context = CreateContext(_rendering, _assets, _files, _project, _values, _lod, _settings, _threads);
             }
             catch (InvalidOperationException ex)
             {
@@ -314,18 +342,17 @@ internal sealed class RenderSystem : ISystem
             }
         }
 
-        _builtWith = BuiltWith.From(_project.Settings.Render);
+        _builtFor = _rendering?.Generation ?? 0;
     }
 
     /// <summary>
     /// A context for <paramref name="gpu"/>: the tables, the built-in shaders and the prewarmed failure pipelines. Throws
     /// when a built-in shader does not compile: nothing could be drawn.
     /// </summary>
-    private static RenderContext CreateContext(IRendering gpu, Assets assets, IFileSystem files, Project project, Threads threads)
+    private static RenderContext CreateContext(IRendering gpu, Assets assets, IFileSystem files, Project project, Settings values, LodSettings lod, DeferredSettings settings, Threads threads)
     {
         GpuStructs.AssertLayout();
-        RenderSettings settings = project.Settings.Render;
-        Debugging.Log.Verbose($"Render settings: anisotropy {settings.Anisotropy}, resolution {(settings.Resolution.IsEmpty ? "the window's" : $"{settings.Resolution.Width} x {settings.Resolution.Height}")}.");
+        Debugging.Log.Verbose($"Render settings: anisotropy {settings.Anisotropy}, scale {settings.Scale}, level of detail bias {lod.Bias}.");
 
         ulong defaultSurface = assets.Find<Shader>("Shaders/Surfaces/Pbr.surf.hlsl").Id;
         ulong failureSurface = assets.Find<Shader>("Shaders/Surfaces/Failure.surf.hlsl").Id;
@@ -334,7 +361,6 @@ internal sealed class RenderSystem : ISystem
         if (failureSurface == 0)
             Debugging.Log.Error("Shaders/Surfaces/Failure.surf.hlsl is not an indexed asset: broken materials and shaders will draw grey or not at all.");
 
-        string? cache = settings.ShaderCache ? Path.Combine(project.Cache, "Shaders", gpu.ShaderFormat) : null;
         RenderContext ctx = new()
         {
             Gpu = gpu,
@@ -342,8 +368,10 @@ internal sealed class RenderSystem : ISystem
             Files = files,
             Project = project,
             Threads = threads,
-            Settings = settings,
-            Shaders = new ShaderCache(Path.Combine(project.Resources, "Shaders"), cache, gpu.ShaderFormat),
+            Settings = values,
+            Lod = lod,
+            Deferred = settings,
+            Shaders = new ShaderCache(Path.Combine(project.Resources, "Shaders"), Path.Combine(project.Cache, "Shaders", gpu.ShaderFormat), gpu.ShaderFormat, settings),
             Textures = new TextureTable(gpu, settings.Anisotropy),
             Meshes = new MeshTable(gpu, 1 << 22, 1 << 24),
             Materials = new MaterialTable(gpu, defaultSurface, failureSurface),
@@ -380,6 +408,10 @@ internal sealed class RenderSystem : ISystem
             Pipelines.Prewarm(ctx, forced);
             Pipelines.Prewarm(ctx, new PipelineClass(failureSurface, SurfaceVariant.None));
         }
+
+        // The transparent surfaces' template and its includes are read now too, as the opaque one was by the prewarm, so
+        // the first transparent material does not stall the render thread on them.
+        Shaders.GetByPath(ctx, Pipelines.ForwardTemplate);
 
         if (gpu.Debug)
             RenderChecks.RunProbes(ctx);
@@ -707,7 +739,7 @@ internal sealed class RenderSystem : ISystem
     private void CollectSky(ReadOnlySpan<Handle> entities, Span<Sky> skies)
     {
         if (_skyCount == 0 && skies.Length > 0)
-            _sky = skies[0].Color;
+            _sky = skies[0].Color.Rgb;
 
         _skyCount += skies.Length;
     }
@@ -728,6 +760,7 @@ internal sealed class RenderSystem : ISystem
         _directionalSettled.Run(_collectDirectional);
         _pointsSettled.Run(_collectPoints);
         _spotsSettled.Run(_collectSpots);
+        _areasSettled.Run(_collectAreas);
         _glowingSettled.Run(_collectGlows);
         (_collectedLights, _collectedGlows) = (_lights, _glows);
     }
@@ -750,7 +783,7 @@ internal sealed class RenderSystem : ISystem
 
         for (int i = 0; i < lights.Length; i++)
         {
-            _collectedLights.Add(new LightInstance(LightKind.Directional, lights[i].Color, lights[i].Intensity, 0f, 0f, 0f, lights[i].CastsShadows, worlds[i].Value));
+            _collectedLights.Add(new LightInstance(LightKind.Directional, lights[i].Color.Rgb, lights[i].Intensity, 0f, 0f, 0f, Vector2.Zero, lights[i].CastsShadows, worlds[i].Value));
         }
     }
 
@@ -761,7 +794,7 @@ internal sealed class RenderSystem : ISystem
 
         for (int i = 0; i < lights.Length; i++)
         {
-            _collectedLights.Add(new LightInstance(LightKind.Point, lights[i].Color, lights[i].Intensity, lights[i].Range, 0f, 0f, lights[i].CastsShadows, worlds[i].Value));
+            _collectedLights.Add(new LightInstance(LightKind.Point, lights[i].Color.Rgb, lights[i].Intensity, lights[i].Range, 0f, 0f, Vector2.Zero, lights[i].CastsShadows, worlds[i].Value));
         }
     }
 
@@ -772,7 +805,18 @@ internal sealed class RenderSystem : ISystem
 
         for (int i = 0; i < lights.Length; i++)
         {
-            _collectedLights.Add(new LightInstance(LightKind.Spot, lights[i].Color, lights[i].Intensity, lights[i].Range, lights[i].InnerAngle, lights[i].OuterAngle, lights[i].CastsShadows, worlds[i].Value));
+            _collectedLights.Add(new LightInstance(LightKind.Spot, lights[i].Color.Rgb, lights[i].Intensity, lights[i].Range, lights[i].InnerAngle, lights[i].OuterAngle, Vector2.Zero, lights[i].CastsShadows, worlds[i].Value));
+        }
+    }
+
+    private void CollectAreas(ReadOnlySpan<Handle> entities, Span<AreaLight> lights, Span<WorldTransform> worlds)
+    {
+        if (IsHiddenTogether(entities))
+            return;
+
+        for (int i = 0; i < lights.Length; i++)
+        {
+            _collectedLights.Add(new LightInstance(LightKind.Area, lights[i].Color.Rgb, lights[i].Intensity, lights[i].Range, 0f, 0f, new Vector2(lights[i].Width, lights[i].Height), lights[i].CastsShadows, worlds[i].Value));
         }
     }
 
@@ -782,7 +826,7 @@ internal sealed class RenderSystem : ISystem
             return;
 
         for (int i = 0; i < glows.Length; i++)
-            _collectedGlows.Add(new GpuGlow { PositionRadius = new Vector4(worlds[i].Value.Translation, glows[i].Radius), Color = new Vector4(glows[i].Color, 1f) });
+            _collectedGlows.Add(new GpuGlow { PositionRadius = new Vector4(worlds[i].Value.Translation, glows[i].Radius), Color = new Vector4(glows[i].Color.Rgb, 1f) });
     }
 
     /// <summary>
@@ -803,16 +847,5 @@ internal sealed class RenderSystem : ISystem
             _ecs.Remove<RenderInstance>(entity);
 
         Debugging.Log.Info($"Rendering changed: {_toStrip.Count} instance(s) will register again.");
-    }
-
-    /// <summary>
-    /// The render settings a <see cref="RenderContext"/> is built from: when one of them changes, it is built again.
-    /// </summary>
-    private readonly record struct BuiltWith(float Anisotropy, bool ShaderCache)
-    {
-        public static BuiltWith From(RenderSettings settings)
-        {
-            return new BuiltWith(settings.Anisotropy, settings.ShaderCache);
-        }
     }
 }

@@ -50,7 +50,8 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
 
     public TextureTable(IRendering gpu, float anisotropy)
     {
-        Sampler = gpu.CreateSampler(new SamplerDesc(GpuFilter.Linear, GpuAddress.Repeat, Math.Clamp(anisotropy, 1f, 16f)));
+        Sampler = CreateSampler(gpu, anisotropy);
+        Anisotropy = anisotropy;
 
         // Only the two 256 arrays exist from the start; a bigger class is created the first time a texture lands in it,
         // and until then its slot binds the 256 array of the same format. Nothing samples an absent class, so nothing sees
@@ -65,7 +66,12 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
     /// <summary>
     /// The same for all eight arrays.
     /// </summary>
-    public GpuSampler Sampler { get; }
+    public GpuSampler Sampler { get; private set; }
+
+    /// <summary>
+    /// The anisotropy <see cref="Sampler"/> was made with.
+    /// </summary>
+    public float Anisotropy { get; private set; }
 
     public PoolClass[] Pools { get; } = new PoolClass[Classes];
 
@@ -145,6 +151,25 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
     {
         pool.Capacity = 4;
         pool.Texture = gpu.CreateTexture(new TextureDesc(Format(pool.Srgb), Usage(pool.Srgb), (uint)pool.Size, (uint)pool.Size, pool.Levels, pool.Capacity));
+    }
+
+    /// <summary>
+    /// <see cref="Sampler"/> made again when <paramref name="anisotropy"/> is not what it was made with; the old one is
+    /// released once no frame in flight uses it. The settings window drags it live, so it costs only the sampler.
+    /// </summary>
+    public void UseAnisotropy(IRendering gpu, float anisotropy)
+    {
+        if (anisotropy == Anisotropy)
+            return;
+
+        gpu.Release(Sampler);
+        Sampler = CreateSampler(gpu, anisotropy);
+        Anisotropy = anisotropy;
+    }
+
+    private static GpuSampler CreateSampler(IRendering gpu, float anisotropy)
+    {
+        return gpu.CreateSampler(new SamplerDesc(GpuFilter.Linear, GpuAddress.Repeat, Math.Clamp(anisotropy, 1f, 16f)));
     }
 
     private static GpuFormat Format(bool srgb)

@@ -363,7 +363,19 @@ internal enum SurfaceVariant : byte
     /// <summary>
     /// Blended over the lit scene by the transparency stage's forward draw, not drawn into the gbuffer.
     /// </summary>
-    Transparent = 8
+    Transparent = 8,
+
+    /// <summary>
+    /// A transparent surface that reads the scene behind it (<c>SceneBehind</c>, Include/Surface.hlsli): drawn after the
+    /// other transparents, in layers, so what is behind it includes them and the glass behind it.
+    /// </summary>
+    Refractive = 16,
+
+    /// <summary>
+    /// An impostor's card (the last LOD of a model): compiled with SURFACE_IMPOSTOR 1, the surface's inputs read from the
+    /// baked atlases (Include/Impostor.hlsli), drawn two-sided.
+    /// </summary>
+    Impostor = 32
 }
 
 /// <summary>

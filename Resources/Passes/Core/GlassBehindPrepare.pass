@@ -1,0 +1,27 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 10071
+    },
+    "needs": "$refractiveChunks",
+    "reads": [
+        {
+            "name": "Hdr",
+            "filter": "nearest"
+        }
+    ],
+    "writes": [
+        {
+            "name": "SceneColor"
+        },
+        {
+            "name": "TransparentAccum"
+        },
+        {
+            "name": "TransparentCoverage"
+        }
+    ],
+    "dispatch": {
+        "per": "view"
+    }
+}

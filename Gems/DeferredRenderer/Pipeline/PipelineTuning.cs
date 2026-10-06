@@ -5,8 +5,7 @@ namespace DeferredRendererGem;
 
 /// <summary>
 /// The passes of the current pipeline with their parameters, for the settings window (<see cref="IPipelineTuning"/>):
-/// reads the pass table of the render context there is, sets a value into a pass's live values and packs them again.
-/// Without a context (no renderer) it lists nothing.
+/// reads the pass table of the render context there is. Without a context (no renderer) it lists nothing.
 /// </summary>
 internal sealed class PipelineTuning(Func<RenderContext?> context) : IPipelineTuning
 {
@@ -28,24 +27,27 @@ internal sealed class PipelineTuning(Func<RenderContext?> context) : IPipelineTu
         }
     }
 
-    public void Set(ulong pass, string name, Param value)
+    /// <summary>
+    /// Where a stage's passes show in the settings window when their file names no group: lighting together, the
+    /// scene together, each post under its own name.
+    /// </summary>
+    private static string GroupOf(PipelineStage stage)
     {
-        if (context() is not { } ctx || !ctx.Pipeline.Passes.TryGet(pass, out PassState state) || state.Layout is not { } layout)
-            return;
-
-        foreach (ParamField field in layout.Fields)
+        return stage switch
         {
-            if (field.Name != name)
-                continue;
-
-            state.Values[name] = value;
-            PassLoader.Repack(ctx, pass);
-            return;
-        }
+            PipelineStage.Shadows => "Lighting/Shadows",
+            PipelineStage.Gi => "Lighting/Global illumination",
+            PipelineStage.Lighting => "Lighting/Lights",
+            PipelineStage.Sky => "Lighting/Sky",
+            PipelineStage.Scene => "Scene/Drawing",
+            PipelineStage.Transparency => "Scene/Transparency",
+            _ => "Post",
+        };
     }
 
     private static TunablePass Describe(RenderContext ctx, PassState pass)
     {
+        string group = pass.Pass.Group.Length > 0 ? pass.Pass.Group : GroupOf(pass.Stage);
         List<TunableParam> parameters = [];
         if (pass.Layout is { } layout)
         {
@@ -63,11 +65,14 @@ internal sealed class PipelineTuning(Func<RenderContext?> context) : IPipelineTu
                     _ => TunableKind.Float,
                 };
                 Param value = pass.Values.TryGetValue(field.Name, out Param set) ? set : field.DefaultParam;
-                parameters.Add(new TunableParam(field.Name, kind, value));
+                ParamTuning tuning = pass.Pass.Tuning.GetValueOrDefault(field.Name) ?? new ParamTuning();
+                if (tuning.Group.Length == 0)
+                    tuning = new ParamTuning { Group = group, Label = tuning.Label, Description = tuning.Description, Min = tuning.Min, Max = tuning.Max, Fixed = tuning.Fixed };
+                parameters.Add(new TunableParam(field.Name, kind, value, tuning));
             }
         }
 
         string? problem = pass.Error ?? (ctx.Pipeline.Unfit.Contains(pass.Id) ? "does not fit the pipeline" : (pass.Ready ? null : "loading"));
-        return new TunablePass(pass.Id, pass.Stage.ToString(), pass.Path.Length > 0 ? System.IO.Path.GetFileName(pass.Path) : pass.Id.ToString(), problem, parameters);
+        return new TunablePass(pass.Id, pass.Stage.ToString(), pass.Path.Length > 0 ? System.IO.Path.GetFileName(pass.Path) : pass.Id.ToString(), group, problem, parameters);
     }
 }

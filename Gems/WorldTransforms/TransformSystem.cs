@@ -73,7 +73,7 @@ internal sealed class TransformSystem : ISystem
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
         ComputeWorlds();
         double lastMs = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-        Debugging.Stats.Set("Streaming.Transforms.Ms", lastMs);
+        Debugging.Stats.Set("Frame.Time.TransformsMs", lastMs);
 
         if (lastMs > 20f && Environment.TickCount64 - _lastSlowLog > 5000)
         {

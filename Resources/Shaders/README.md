@@ -12,7 +12,7 @@ the shaders are laid out and written.
 | `Include/` | Headers. `Bindings` (registers), `Frame` (the one constant block), `Structs` (GPU tables, mirrored in `GpuStructs.cs`), `GBuffer` (what the scene is drawn into, and how it is packed), `Failure` (the glow of anything broken), `DebugText` (a bitmap font a shader draws text with), `Surface` (the surface shader contract), `Pass` (the data pass contract), `Instance`, `MeshVaryings`, `Math`. |
 | `Templates/` | The mesh path the renderer composes around a surface: `Mesh.vert`, `GBuffer.frag`. |
 | `Surfaces/` | Surface shaders (`.surf.hlsl`): what a material looks like. `Failure.surf` is what anything broken is drawn with. |
-| `Cull/` | The GPU culling compute passes and what they share (`Common.hlsli`), `AppendVisible` among it: an instance small on screen is counted into the draw of a lesser version of its mesh (`GpuLodRow`, one per bucket, scaled by `LodBias`), and into both while it blends from one to the other (`LOD_BLEND`, dithered by `GpuVisible.lodFade` in `GBuffer.frag`). |
+| `Cull/` | The GPU culling compute passes and what they share (`Common.hlsli`), `AppendVisible` among it: an instance small on screen is counted into the draw of a lesser version of its mesh (`GpuLodRow`, up to four per bucket, scaled by `LodBias`), and into both while it blends from one to the other (`LOD_BLEND`, dithered by `GpuVisible.lodFade` in `GBuffer.frag`). A model's last generated level is its impostor (`Include/Impostor.hlsli`): a card that faces the camera and shows the model baked from eight directions, drawn with the impostor variant of the instance's material class (`SURFACE_IMPOSTOR`), and into the shadow maps by `Shadows/ShadowImpostor.*` (`Passes/Core/ShadowImpostors.pass`). A far chunk's stand-in draws its small objects as the same cards, merged, each naming its model's impostor and turned as its object (tangent z). |
 | `Lighting/` | The lighting compute passes: `LightCull` bins the lights into screen tiles, `LightCluster` cuts every tile along its depth, `Lighting` shades the gbuffer into `Hdr`; `Common.hlsli` is what they share, `Shadows.hlsli` how a pixel reads the shadow atlas. `Glow.vert` / `Glow.frag` draw the glows: unlit dots for far lights. |
 | `Gi/` | The fake global illumination: one level of a voxel clipmap rebuilt every `framesPerRebuild` frames (`GiPlan.pass`, 2 by default; between rebuilds every GI pass returns at once). Meshes are rasterised once into occupancy bricks (`BrickBuild`), the level's instances stamped through them (`CollectPages` → `CollectInstances` → `Stamp` → `Resolve`), the distance field taken (`Distance`, three axes), the sky each voxel sees traced (`Sky`), the lights binned (`LightGrid`) and the light injected and passed on (`Propagate`); `Include/Gi.hlsli` is how a pixel reads it. |
 | `Shadows/` | The shadow maps, planned on the GPU: `ShadowPlan.comp` fits the sun's cascades to the main view and `LocalShadowSelect.comp` gives the nearest local lights their pages, both into shadow view rows (`Include/ShadowViews.hlsli`); `SeedShadowArgs.comp` starts every row's draw args; `Cull/CullShadow.comp` culls every refreshed row in one dispatch against planes taken from its `ViewProj`; `ClearDepth.vert` clears the refreshed tiles; `Shadow.vert` + the empty `Shadow.frag` draw every opaque class depth-only into its tile. |
@@ -56,7 +56,9 @@ reaches, not the objects in the scene.
   A surface that should not be lit (`Unlit.surf`, `Failure.surf`) has a black base colour and emits its
   colour; no flag says "unlit". A pixel nothing was drawn in is painted by the sky stage (`Sky/Sky.frag`): the `Sky` component's colour, else the clear colour.
 - Lights: the sun (the first `DirectionalLight`) and a flat ambient are in the frame block. Every
-  `PointLight` and `SpotLight` is a `GpuLight` row of the lights buffer, uploaded as it is, and binned on
+  `PointLight`, `SpotLight` and `AreaLight` is a `GpuLight` row of the lights buffer, uploaded as it is (an
+  area light is a spot whose cone is its front half, lit from the point of its rectangle nearest the surface and
+  highlighted from where the reflection meets it: `LightNearest` and `LightAlong` in `Lighting/Common.hlsli`), and binned on
   the GPU in two steps. `LightCull.comp` lists the lights that reach each 32-pixel screen tile, between the
   nearest and the farthest depth drawn in it (up to 1021). `LightCluster.comp` then cuts that depth into 16
   slices, even steps of its logarithm, and gives each the tile's lights that reach it (up to 63): a
@@ -75,8 +77,18 @@ reaches, not the objects in the scene.
   to see of a light, and it costs no lighting.
 - Shading is Lambert plus a Blinn-Phong highlight sized by roughness (`Lighting/Shading.hlsli`). A material of
   `"type": "transparent"` is not drawn into the gbuffer: the transparency stage draws it after the sky with
-  `Templates/Forward.frag.hlsl`, lit the same way and blended over `Hdr`, depth tested and not written. Nothing is
-  sorted, which is right for one layer of glass and approximate for several.
+  `Templates/Forward.frag.hlsl`, lit the same way (its lights from tiles that reach from the near plane to the
+  opaque depth, `TransparentLightCull`), depth tested and not written. Nothing is sorted: every layer adds its
+  colour, weighted by opacity and depth, into two targets (weighted blended order-independent transparency), and
+  `Transparency/Composite.comp.hlsl` puts their average over the scene by their coverage, so overlapping layers of
+  any colour come out the same in any order. `TransparentPrepare` first copies the lit scene into `SceneColor`, which
+  a forward surface reads through `ScenePixelOf`/`SceneBehind` (`Include/Surface.hlsli`) to bend what is behind it:
+  `Surfaces/Glass.surf.hlsl` refracts by an index of refraction, with dispersion and Fresnel. A surface that reads
+  `SceneBehind` is refractive and drawn after the others, in layers: the nearest glass depth (`GlassDepth*`, max
+  blended), then the glass behind it over a copy of the scene with the other transparents in (`GlassBehind*`), then
+  the nearest glass over a copy with those in too (`GlassNearest*`), so glass shows the tinted layers and the glass
+  behind it. Transparent parts cast no shadow. The stage needs `$transparentChunks` (the glass passes
+  `$refractiveChunks`), so a scene without transparent materials skips it.
 - Shadows come from one depth atlas (`Shadows/`, `Lighting/Shadows.hlsli`), planned entirely on the GPU by
   the pipeline's shadow stage. The sun has cascades along the main view (the `ShadowPlan` pass's `cascades`),
   each a sphere around a slice of the frustum snapped to its own texel grid so nothing shimmers, blended into
@@ -85,13 +97,13 @@ reaches, not the objects in the scene.
   finds a light's faces through its `GpuShadowView` rows. Every refreshed view is culled on the GPU like a
   camera (`CullShadow`) and drawn with one depth-only pipeline into its tile; the lighting reads the atlas
   with a comparison sampler, a disc of taps whose radius is constant in the world. The CPU keeps the
-  reference maths (`Reference/Cascades.cs`) only to check the GPU's fit against (`Render.CullingCheck`).
+  reference maths (`Reference/Cascades.cs`) only to check the GPU's fit against (`Deferred.CullingCheck`).
 - The ambient is not flat. Ambient occlusion (`Lighting/Gtao.comp.hlsl`, horizon based, at half resolution by
   default, a fixed dither that `AoBlur` smooths, nothing temporal) darkens creases and gives a bent normal; the GI
   volumes (`Gi/`) say how much sky a point sees, tint the interiors where it sees none, and add the light bounced
   once off the voxels around it, all gathered along that bent normal. The sky's colour is the `Sky` component's;
   without one, the old flat ambient. The knobs are the passes' parameters (`Gtao.pass`, `GiPlan.pass`,
-  `Lighting.pass`, editable in F4), and the `debugView` parameter of `Passes/Core/Lighting.pass` shows any one of these inputs in place of the scene.
+  `Lighting.pass`, editable in F4), and the `Deferred.DebugView` setting (F4, Debug tab) shows any one of these inputs, a gbuffer part or the level of detail in place of the scene.
 - Culling is two-phase: what last frame's depth pyramid (HiZ) did not hide is drawn first, the pyramid is
   rebuilt from that depth, and what was held back is retested and drawn the same frame. Small instances
   move to a lesser LOD of their mesh on the GPU, dithered from one to the next.

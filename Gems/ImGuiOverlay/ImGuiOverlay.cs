@@ -2,6 +2,7 @@ using Hexa.NET.ImGui;
 using HexaGen.Runtime;
 using Magic.Contexts;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Debug;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
 using Magic.Interfaces;
@@ -67,9 +68,12 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
     private readonly HashSet<string> _positioned = []; // windows given a first position
     private readonly Dictionary<string, int> _tabs = []; // by tab bar id: the tab ImGui showed last frame
     private readonly IClipboard? _clipboard;
-    private readonly GpuSampler _sampler;
-    private readonly CompiledShader? _vertexShader;
-    private readonly CompiledShader? _fragmentShader;
+    private readonly Assets _assets;
+    private readonly string _includes;
+    private GpuSampler _sampler;
+    private CompiledShader? _vertexShader;
+    private CompiledShader? _fragmentShader;
+    private uint _generation; // the renderer's device the GPU objects here were made on
 
     private ImDrawVert[] _vertices = new ImDrawVert[4096];
     private ushort[] _indices = new ushort[8192];
@@ -89,6 +93,8 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         _windows = windows;
         _rendering = rendering;
         _clipboard = clipboard;
+        _assets = assets;
+        _includes = Path.Combine(project.Resources, "Shaders");
 
         // cimgui.dll sits with the gems, not next to the exe where the loader looks by default.
         if (!LibraryLoader.CustomLoadFolders.Contains(project.EngineGems))
@@ -111,10 +117,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
             platform.PlatformGetClipboardTextFn = (delegate* unmanaged[Cdecl]<ImGuiContext*, byte*>)&GetClipboard;
         }
 
-        string includes = Path.Combine(project.Resources, "Shaders");
-        _vertexShader = Compile(assets, rendering, "Overlay/Overlay.vert.hlsl", GpuStage.Vertex, includes);
-        _fragmentShader = Compile(assets, rendering, "Overlay/Overlay.frag.hlsl", GpuStage.Fragment, includes);
-        _sampler = rendering.CreateSampler(new SamplerDesc(GpuFilter.Linear, GpuAddress.Clamp));
+        MakeGpuObjects();
 
         NewFrame(0);
     }
@@ -186,6 +189,8 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         ImGui.Render();
 
         ImDrawDataPtr data = ImGui.GetDrawData();
+        if (_generation != _rendering.Generation)
+            Remake(data);
         UpdateTextures(data);
         if (_windows.Main is { } main && frame.DrawCommands is not null)
             Draw(data, main, frame.DrawCommands);
@@ -408,6 +413,22 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
 
         index = chosen;
         return true;
+    }
+
+    public bool Header(string label)
+    {
+        return ImGui.CollapsingHeader(label, ImGuiTreeNodeFlags.DefaultOpen);
+    }
+
+    public void Tooltip(string text)
+    {
+        if (!ImGui.BeginItemTooltip())
+            return;
+
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 30f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+        ImGui.EndTooltip();
     }
 
     public bool MenuItem(string label)
@@ -773,7 +794,7 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
             Buffers = VertexBuffers,
             Attributes = VertexAttributes,
             Cull = GpuCull.None,
-            AlphaBlend = true,
+            Blends = [GpuBlend.Alpha],
         });
         _pipelines[format] = pipeline;
 
@@ -793,6 +814,41 @@ internal sealed unsafe class ImGuiOverlay : IGem, IDebugUI
         }
 
         _rendering.Upload(buffer, 0, bytes);
+    }
+
+    /// <summary>
+    /// The shaders, compiled for the renderer's format, and the sampler; the pipelines and buffers are made when first drawn.
+    /// </summary>
+    private void MakeGpuObjects()
+    {
+        _generation = _rendering.Generation;
+        _vertexShader = Compile(_assets, _rendering, "Overlay/Overlay.vert.hlsl", GpuStage.Vertex, _includes);
+        _fragmentShader = Compile(_assets, _rendering, "Overlay/Overlay.frag.hlsl", GpuStage.Fragment, _includes);
+        _sampler = _rendering.CreateSampler(new SamplerDesc(GpuFilter.Linear, GpuAddress.Clamp));
+    }
+
+    /// <summary>
+    /// The renderer made its device again: everything made on the old one is gone (nothing to release), so the shaders
+    /// (the format may differ), the sampler, the pipelines, the buffers and ImGui's textures are made again.
+    /// </summary>
+    private void Remake(ImDrawDataPtr data)
+    {
+        _pipelines.Clear();
+        _vertexBuffer = default;
+        _indexBuffer = default;
+        _vertexBytes = _indexBytes = 0;
+        MakeGpuObjects();
+
+        foreach (uint id in _textures.Keys.ToArray())
+            _textures[id] = (default, 0, 0);
+
+        ImVector<ImTextureDataPtr>* textures = data.Handle->Textures;
+        for (int i = 0; textures != null && i < textures->Size; i++)
+        {
+            ImTextureDataPtr texture = textures->Data[i];
+            if (texture.Status == ImTextureStatus.Ok)
+                UpdateTexture((uint)texture.TexID.Handle, texture);
+        }
     }
 
     /// <summary>

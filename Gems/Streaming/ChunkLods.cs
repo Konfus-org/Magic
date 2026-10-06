@@ -1,13 +1,12 @@
 ﻿using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Mathematics;
 using Magic.Services;
 using Magic.Utils;
-using System.IO.Hashing;
 using System.Numerics;
-using System.Text;
 using System.Text.Json;
 
 namespace StreamingGem;
@@ -23,8 +22,11 @@ namespace StreamingGem;
 /// chunk is in it, so far away its scripts do not run. The objects are sorted into sizes, four to a doubling of the radius, and every size is merged apart
 /// and drawn with the radius of its biggest object as its <see cref="Renderer.CullRadius"/>: the renderer then stops drawing a size when its
 /// objects would be too small on screen to see, at the resolution and field of view there are, exactly as it does
-/// for the objects of a chunk that is spawned whole. An object under <see cref="BoxUnder"/> metres in radius is drawn
-/// as its box (without normals, which the renderer draws flat: every face lit as the face it is), a larger one as the lowest LOD of its model;
+/// for the objects of a chunk that is spawned whole. An object under <see cref="CardUnder"/> metres in radius is drawn
+/// as its model's impostor card (<see cref="ImpostorCard"/>), turned as the object is, so it looks as it does at the
+/// far end of the whole chunk's LODs (its box, flat lit, when its model has no impostor or its material is
+/// transparent); a larger one as the lowest
+/// mesh LOD of its model;
 /// and when a chunk has more than <see cref="MaxVertices"/> or <see cref="MaxIndices"/> to show, the smallest objects
 /// are left out. The budget is small because every stand-in
 /// in view lives in the renderer's mesh buffers at once.
@@ -37,9 +39,10 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
     private const float Distance = 512f;
 
     /// <summary>
-    /// An object whose bounds have a smaller radius than this is its box in the stand-in: at <see cref="Distance"/> it is a few pixels.
+    /// An object whose bounds have a smaller radius than this is its impostor card in the stand-in: at
+    /// <see cref="Distance"/> it is a few pixels.
     /// </summary>
-    private const float BoxUnder = 4f;
+    private const float CardUnder = 4f;
 
     /// <summary>
     /// How finely objects are sorted by size. A size is culled as its biggest object would be, so the smallest of it
@@ -91,12 +94,12 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
     /// </summary>
     private const float GlowBrightness = 2f;
 
-    public int Version => 12;
+    public int Version => 14;
 
-    public async Task<Result<Dictionary<float, string>>> GenerateAsync(Chunk asset, string folder, IProgress<float>? progress, CancellationToken cancel)
+    public async Task<Result<Lods>> GenerateAsync(Chunk asset, string folder, IProgress<float>? progress, CancellationToken cancel)
     {
         // What the chunk draws, the biggest first, so that what does not fit is the smallest.
-        List<(Mesh Mesh, Matrix4x4 World, Handle<Material> Material, float Radius)> drawn = [];
+        List<Drawn> drawn = [];
         List<(Vector3 Position, Vector3 Power, float Range)> lights = [];
         for (int i = 0; i < asset.Entities.Length; i++)
         {
@@ -108,27 +111,40 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
 
         drawn.Sort((left, right) => right.Radius.CompareTo(left.Radius));
 
-        // By size (which quarter of a doubling its radius is in) and material; and the biggest radius of each size.
-        Dictionary<(int Size, Handle<Material> Material), (List<Vertex> Vertices, List<uint> Indices)> merged = [];
+        // A transparent material has no impostor, so its small objects stay boxes.
+        HashSet<Handle<Material>> transparent = [];
+        foreach (Handle<Material> material in drawn.Select(each => each.Material).Distinct())
+        {
+            if (await assets.LoadAsync(material, cancel: cancel).ConfigureAwait(false) is { Type: MaterialType.Transparent })
+                transparent.Add(material);
+        }
+
+        // By size (which quarter of a doubling its radius is in), material and whether it is cards, which the renderer
+        // draws as impostors; and the biggest radius of each size.
+        Dictionary<(int Size, Handle<Material> Material, bool Cards), (List<Vertex> Vertices, List<uint> Indices)> merged = [];
         Dictionary<int, float> biggest = [];
         int vertices = 0, indices = 0;
-        foreach ((Mesh mesh, Matrix4x4 world, Handle<Material> material, float radius) in drawn)
+        foreach ((Mesh mesh, Mesh? card, Matrix4x4 world, Handle<Material> material, float radius) in drawn)
         {
             if (radius <= 0f)
                 continue;
 
-            bool asBox = radius < BoxUnder;
-            int adding = asBox ? 8 : mesh.Vertices.Length;
-            int addingIndices = asBox ? 36 : mesh.Indices.Length;
+            bool small = radius < CardUnder;
+            Mesh? asCard = small && !transparent.Contains(material) ? card : null;
+            bool asBox = small && asCard is null;
+            int adding = asCard is not null ? asCard.Vertices.Length : asBox ? 8 : mesh.Vertices.Length;
+            int addingIndices = asCard is not null ? asCard.Indices.Length : asBox ? 36 : mesh.Indices.Length;
             if (vertices + adding > MaxVertices || indices + addingIndices > MaxIndices)
                 continue;
 
-            (int Size, Handle<Material>) size = ((int)MathF.Floor(MathF.Log2(radius) * SizesPerDoubling), material);
+            (int Size, Handle<Material>, bool) size = ((int)MathF.Floor(MathF.Log2(radius) * SizesPerDoubling), material, asCard is not null);
             biggest[size.Size] = MathF.Max(radius, biggest.GetValueOrDefault(size.Size));
             if (!merged.TryGetValue(size, out (List<Vertex> Vertices, List<uint> Indices) into))
                 merged[size] = into = ([], []);
 
-            if (asBox)
+            if (asCard is not null)
+                AddCard(asCard, world, into.Vertices, into.Indices);
+            else if (asBox)
                 AddBox(mesh.Box, world, into.Vertices, into.Indices);
             else
                 AddMesh(mesh, world, into.Vertices, into.Indices);
@@ -139,9 +155,8 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
 
         // One model, and one entity drawing it, per size and eight materials: a renderer has that many slots.
         List<Chunk.Entity> entities = Merged(lights);
-        string key = Path.GetFileName(folder);
         int models = 0;
-        foreach (KeyValuePair<(int Size, Handle<Material> Material), (List<Vertex> Vertices, List<uint> Indices)>[] group in merged
+        foreach (KeyValuePair<(int Size, Handle<Material> Material, bool Cards), (List<Vertex> Vertices, List<uint> Indices)>[] group in merged
             .GroupBy(part => part.Key.Size)
             .OrderByDescending(size => size.Key)
             .SelectMany(size => size.Chunk(MaterialSlots.Capacity)))
@@ -153,14 +168,12 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
                 SlotNames = [.. group.Select(part => part.Key.Material.Id.ToString())],
             };
 
-            // The stand-in names its model by id, so the id is decided here and written in the model's sidecar.
+            // The stand-in names its model by the id its file name gives it in the cache.
             string name = $"standin{models}.model";
-            ulong id = Math.Max(1, XxHash64.HashToUInt64(Encoding.UTF8.GetBytes($"{key}/{name}")));
+            ulong id = Lods.IdOf(folder, name);
             Result written = await files.WriteBinaryAsync(files.Combine(folder, name), model.ToBytes(), cancel).ConfigureAwait(false);
-            if (written.Ok)
-                written = await files.WriteTextAsync(files.Combine(folder, name + ".meta"), $"{{\n    \"id\": {id},\n    \"version\": 1\n}}\n", cancel).ConfigureAwait(false);
             if (written.Failed)
-                return Result<Dictionary<float, string>>.Failure(written.Message);
+                return Result<Lods>.Failure(written.Message);
 
             MaterialSlots materials = default;
             for (int i = 0; i < group.Length; i++)
@@ -181,23 +194,30 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
         Chunk standIn = new() { Entities = [.. entities] };
         Result saved = await files.WriteTextAsync(files.Combine(folder, "standin.chunk"), JsonSerializer.Serialize(standIn, AssetJson.Options), cancel).ConfigureAwait(false);
         if (saved.Failed)
-            return Result<Dictionary<float, string>>.Failure(saved.Message);
+            return Result<Lods>.Failure(saved.Message);
 
         progress?.Report(1f);
 
-        return Result<Dictionary<float, string>>.Success(new() { [Distance] = "standin.chunk" });
+        return Result<Lods>.Success(new Lods([new Lod(Distance, Lods.IdOf(folder, "standin.chunk"), [])]));
     }
 
     /// <summary>
+    /// What the chunk draws: one part of a static renderer's model, as the mesh shown for it (its lowest mesh LOD's when
+    /// that has the model's parts, else the model's own) and its impostor's card, if the model has one.
+    /// </summary>
+    private readonly record struct Drawn(Mesh Mesh, Mesh? Card, Matrix4x4 World, Handle<Material> Material, float Radius);
+
+    /// <summary>
     /// Adds every part of every static renderer under <paramref name="entity"/>, placed by the transforms above it: the
-    /// mesh of the model's lowest LOD when that has the model's parts, else the model's own. Every point and spot
+    /// mesh of the model's lowest mesh LOD when that has the model's parts, else the model's own, and the card of the
+    /// model's impostor. Every point and spot
     /// light under it goes into <paramref name="lights"/>, where the transforms put it.
     /// Nothing of an entity the chunk tags hidden, or of what is under it.
     /// </summary>
     private async Task CollectAsync(
         Chunk.Entity entity,
         Matrix4x4 parent,
-        List<(Mesh Mesh, Matrix4x4 World, Handle<Material> Material, float Radius)> drawn,
+        List<Drawn> drawn,
         List<(Vector3 Position, Vector3 Power, float Range)> lights,
         CancellationToken cancel)
     {
@@ -209,10 +229,14 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
         if (entity.Tags.Contains("static", StringComparer.OrdinalIgnoreCase) && Read<Renderer>(entity) is { } renderer)
         {
             Model? model = await assets.LoadAsync(renderer.Model, cancel: cancel).ConfigureAwait(false);
-            (float Threshold, Handle<Model> Asset)[] lods = model is null ? [] : await assets.LodsAsync(renderer.Model, cancel: cancel).ConfigureAwait(false);
-            Model? lowest = lods.Length > 0 ? await assets.LoadAsync(lods[^1].Asset, cancel: cancel).ConfigureAwait(false) : null;
+            // The lowest level that is a mesh, and the impostor (a level with atlases), whose card only faces a camera.
+            Lod[] levels = model is null ? [] : (await assets.LodsAsync(renderer.Model, cancel: cancel).ConfigureAwait(false)).Levels;
+            Lod[] meshes = [.. levels.Where(level => level.Atlases.Length == 0)];
+            Lod[] impostors = [.. levels.Where(level => level.Atlases.Length > 0)];
+            Model? lowest = meshes.Length > 0 ? await assets.LoadAsync(new Handle<Model>(meshes[^1].Asset), cancel: cancel).ConfigureAwait(false) : null;
+            Model? impostor = impostors.Length > 0 ? await assets.LoadAsync(new Handle<Model>(impostors[^1].Asset), cancel: cancel).ConfigureAwait(false) : null;
             if (model is not null)
-                Add(model, lowest is not null && lowest.Meshes.Length == model.Meshes.Length ? lowest : model, renderer, world, drawn);
+                Add(model, lowest is not null && lowest.Meshes.Length == model.Meshes.Length ? lowest : model, impostor, renderer, world, drawn);
         }
 
         foreach (Chunk.Entity child in entity.Children)
@@ -220,15 +244,18 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
     }
 
     /// <summary>
-    /// The entity's point or spot light as where it is, the light it gives (colour times intensity) and its range.
-    /// A spot gives its light into its cone only, so it counts for the share of all directions the cone is.
+    /// The entity's point, spot or area light as where it is, the light it gives (colour times intensity) and its range.
+    /// A spot gives its light into its cone only, so it counts for the share of all directions the cone is; an area
+    /// light shines from its front only, half of them, and reaches its range past its rectangle's corners.
     /// </summary>
     private static void AddLight(Chunk.Entity entity, in Matrix4x4 world, List<(Vector3 Position, Vector3 Power, float Range)> lights)
     {
         if (Read<PointLight>(entity) is { } point)
-            lights.Add((world.Translation, point.Color * point.Intensity, point.Range));
+            lights.Add((world.Translation, point.Color.Rgb * point.Intensity, point.Range));
         else if (Read<SpotLight>(entity) is { } spot)
-            lights.Add((world.Translation, spot.Color * spot.Intensity * ((1f - MathF.Cos(spot.OuterAngle * 0.5f)) * 0.5f), spot.Range));
+            lights.Add((world.Translation, spot.Color.Rgb * spot.Intensity * ((1f - MathF.Cos(spot.OuterAngle * 0.5f)) * 0.5f), spot.Range));
+        else if (Read<AreaLight>(entity) is { } area)
+            lights.Add((world.Translation, area.Color.Rgb * area.Intensity * 0.5f, area.Range + (new Vector2(area.Width, area.Height).Length() * 0.5f)));
     }
 
     /// <summary>
@@ -274,7 +301,7 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
                 Components = new Dictionary<string, JsonElement>
                 {
                     [nameof(Transform)] = JsonSerializer.SerializeToElement(Transform.Identity with { Position = middle / weight }, AssetJson.Options),
-                    [nameof(Glow)] = JsonSerializer.SerializeToElement(new Glow(power / intensity * GlowBrightness, radius), AssetJson.Options),
+                    [nameof(Glow)] = JsonSerializer.SerializeToElement(new Glow(ColorOf(power / intensity * GlowBrightness), radius), AssetJson.Options),
                 },
             });
         }
@@ -304,7 +331,7 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
                 Components = new Dictionary<string, JsonElement>
                 {
                     [nameof(Transform)] = JsonSerializer.SerializeToElement(Transform.Identity with { Position = middle }, AssetJson.Options),
-                    [nameof(PointLight)] = JsonSerializer.SerializeToElement(new PointLight(power / intensity, intensity, range), AssetJson.Options),
+                    [nameof(PointLight)] = JsonSerializer.SerializeToElement(new PointLight(ColorOf(power / intensity), intensity, range), AssetJson.Options),
                 },
             });
         }
@@ -335,10 +362,16 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
         return power.X + power.Y + power.Z;
     }
 
+    private static Color ColorOf(Vector3 rgb)
+    {
+        return new Color(rgb.X, rgb.Y, rgb.Z);
+    }
+
     /// <summary>
-    /// Every part of <paramref name="model"/>, drawn as the mesh <paramref name="shown"/> has for it.
+    /// Every part of <paramref name="model"/>, drawn as the mesh <paramref name="shown"/> has for it, with the card
+    /// <paramref name="impostor"/> has for it.
     /// </summary>
-    private static void Add(Model model, Model shown, in Renderer renderer, in Matrix4x4 world, List<(Mesh Mesh, Matrix4x4 World, Handle<Material> Material, float Radius)> drawn)
+    private static void Add(Model model, Model shown, Model? impostor, in Renderer renderer, in Matrix4x4 world, List<Drawn> drawn)
     {
         foreach (ModelPart part in model.Parts)
         {
@@ -346,8 +379,9 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
                 continue;
 
             Mesh mesh = shown.Meshes[part.MeshIndex];
+            Mesh? card = impostor is not null && part.MeshIndex < impostor.Meshes.Length ? impostor.Meshes[part.MeshIndex] : null;
             if (mesh.Indices.Length > 0)
-                drawn.Add((mesh, world, renderer.Materials[Math.Clamp(part.MaterialSlot, 0, MaterialSlots.Capacity - 1)], mesh.Bounds.Transform(world).Radius));
+                drawn.Add(new Drawn(mesh, card is { Vertices.Length: > 0 } ? card : null, world, renderer.Materials[Math.Clamp(part.MaterialSlot, 0, MaterialSlots.Capacity - 1)], mesh.Bounds.Transform(world).Radius));
         }
     }
 
@@ -392,6 +426,27 @@ internal sealed class ChunkLods(Assets assets, IFileSystem files) : ILODGenerato
             AddTriangle(corners, center, first, faces[face], faces[face + 1], faces[face + 2], indices);
             AddTriangle(corners, center, first, faces[face], faces[face + 2], faces[face + 3], indices);
         }
+    }
+
+    /// <summary>
+    /// The impostor's card where the object is: its middle moved by <paramref name="world"/>, its side grown by the
+    /// largest scale, and turned about the up axis as the object's x axis is, which is all of a turn a card can show
+    /// (it is baked from the sides, so a tipped object shows upright).
+    /// </summary>
+    private static void AddCard(Mesh card, in Matrix4x4 world, List<Vertex> vertices, List<uint> indices)
+    {
+        float scale = MathF.Max(new Vector3(world.M11, world.M12, world.M13).Length(), MathF.Max(new Vector3(world.M21, world.M22, world.M23).Length(), new Vector3(world.M31, world.M32, world.M33).Length()));
+        float yaw = MathF.Atan2(-world.M13, world.M11);
+        uint first = (uint)vertices.Count;
+        foreach (Vertex vertex in card.Vertices)
+        {
+            (Vector3 center, float half) = ImpostorCard.Square(vertex);
+            (ulong model, int mesh) = ImpostorCard.Source(vertex);
+            vertices.Add(ImpostorCard.Corner(new Vector2(vertex.Normal.X, vertex.Normal.Y), Vector3.Transform(center, world), half * scale, yaw, model, mesh));
+        }
+
+        foreach (uint index in card.Indices)
+            indices.Add(first + index);
     }
 
     private static void AddTriangle(ReadOnlySpan<Vector3> corners, Vector3 center, uint first, int a, int b, int c, List<uint> indices)

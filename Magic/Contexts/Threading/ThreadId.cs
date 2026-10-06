@@ -1,6 +1,6 @@
 using Magic.Services;
 
-namespace Magic.Contexts;
+namespace Magic.Contexts.Threading;
 
 /// <summary>
 /// Names a thread to <see cref="Threads"/>: <see cref="Worker"/>, <see cref="Main"/>, <see cref="Render"/> or one

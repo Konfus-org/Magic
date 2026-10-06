@@ -36,4 +36,14 @@ public sealed class Post : Asset
     public PostOutput Output { get; set; } = new();
 
     public Dictionary<string, Param> Params { get; set; } = [];
+
+    /// <summary>
+    /// Where the settings window shows its params, as for a <see cref="Pass.Group"/>.
+    /// </summary>
+    public string Group { get; set; } = "";
+
+    /// <summary>
+    /// How the settings window shows each param, as for a <see cref="Pass.Tuning"/>.
+    /// </summary>
+    public Dictionary<string, ParamTuning> Tuning { get; set; } = [];
 }

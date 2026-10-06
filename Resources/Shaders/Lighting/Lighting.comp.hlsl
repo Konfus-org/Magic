@@ -27,7 +27,6 @@
 
 struct PassParams
 {
-    uint debugView = 0;              // DebugView*: what to show instead of the scene
     float aoStrength = 1.0;          // how much of the occlusion darkens the ambient
     bool aoMultiBounce = true;       // let the ambient bounce in creases (Jimenez 2016)
     float shadowBlend = 0.15;        // share of a cascade's range it blends into the next over
@@ -39,16 +38,6 @@ struct PassParams
     float giInteriorStrength = 1.0;
     float giFadeVoxels = 4.0;        // voxels from a GI level's edge over which it blends into the next
 };
-
-// PassParams.debugView: what the lighting shows instead of the scene.
-static const uint DebugViewNone = 0u;
-static const uint DebugViewShadows = 1u;
-static const uint DebugViewAo = 2u;
-static const uint DebugViewBentNormal = 3u;
-static const uint DebugViewGiRadiance = 4u;
-static const uint DebugViewSkyVisibility = 5u;
-static const uint DebugViewVoxelAlbedo = 6u;
-static const uint DebugViewVoxelCoverage = 7u;
 
 // How much of an overfull tile's colour is the failure glow: enough to be unmistakable, with the lights it
 // kept still showing through.
@@ -75,28 +64,22 @@ Texture2D<float4> Ao : READ(5);
 SamplerState AoSampler : SAMPLER(5);
 Texture2D<float> ShadowAtlas : READ(6);
 SamplerComparisonState ShadowAtlasSampler : SAMPLER(6);
-Texture3D<float4> GiShR0 : READ(7);
-SamplerState GiShR0Sampler : SAMPLER(7);
-Texture3D<float4> GiShR1 : READ(8);
-SamplerState GiShR1Sampler : SAMPLER(8);
-Texture3D<float4> GiShG0 : READ(9);
-SamplerState GiShG0Sampler : SAMPLER(9);
-Texture3D<float4> GiShG1 : READ(10);
-SamplerState GiShG1Sampler : SAMPLER(10);
-Texture3D<float4> GiShB0 : READ(11);
-SamplerState GiShB0Sampler : SAMPLER(11);
-Texture3D<float4> GiShB1 : READ(12);
-SamplerState GiShB1Sampler : SAMPLER(12);
-Texture3D<float> GiSkyVis : READ(13);
-SamplerState GiSkyVisSampler : SAMPLER(13);
-Texture3D<float4> GiAlbedo : READ(14);
-SamplerState GiAlbedoSampler : SAMPLER(14);
-StructuredBuffer<GpuLight> Lights : READ(15);
-StructuredBuffer<uint> Tiles : READ(16);
-StructuredBuffer<uint> Clusters : READ(17);
-StructuredBuffer<GpuShadowView> ShadowViews : READ(18);
-StructuredBuffer<GpuShadowHeader> ShadowHeader : READ(19);
-StructuredBuffer<GpuGiState> GiState : READ(20);
+Texture3D<float4> GiShR : READ(7);
+SamplerState GiShRSampler : SAMPLER(7);
+Texture3D<float4> GiShG : READ(8);
+SamplerState GiShGSampler : SAMPLER(8);
+Texture3D<float4> GiShB : READ(9);
+SamplerState GiShBSampler : SAMPLER(9);
+Texture3D<float> GiSkyVis : READ(10);
+SamplerState GiSkyVisSampler : SAMPLER(10);
+Texture3D<float4> GiAlbedo : READ(11);
+SamplerState GiAlbedoSampler : SAMPLER(11);
+StructuredBuffer<GpuLight> Lights : READ(12);
+StructuredBuffer<uint> Tiles : READ(13);
+StructuredBuffer<uint> Clusters : READ(14);
+StructuredBuffer<GpuShadowView> ShadowViews : READ(15);
+StructuredBuffer<GpuShadowHeader> ShadowHeader : READ(16);
+StructuredBuffer<GpuGiState> GiState : READ(17);
 
 [[vk::image_format("rgba16f")]]
 RWTexture2D<float4> Hdr : WRITE(0);
@@ -104,8 +87,9 @@ RWTexture2D<float4> Hdr : WRITE(0);
 #include "Lighting/Shadows.hlsli"
 #include "Include/Gi.hlsli"
 
-// The cascades' colours in the Shadows debug view: red, green, blue, yellow; white past the last.
-static const float3 CascadeTints[ShadowMaxCascades + 1] = { float3(1.0, 0.2, 0.2), float3(0.2, 1.0, 0.2), float3(0.3, 0.4, 1.0), float3(1.0, 1.0, 0.2), float3(1.0, 1.0, 1.0) };
+// The cascades' colours in the sun shadow debug view: red, green, blue, yellow, the far view's magenta, and white
+// where nothing shadows the point.
+static const float3 CascadeTints[ShadowFarRow + 2] = { float3(1.0, 0.2, 0.2), float3(0.2, 1.0, 0.2), float3(0.3, 0.4, 1.0), float3(1.0, 1.0, 0.2), float3(1.0, 0.4, 1.0), float3(1.0, 1.0, 1.0) };
 
 // Whether the pixel is ink of an overfull cluster's text. The message runs along the top of the tiles in
 // the view's own pixels, not each tile's, so its words carry on from one tile into the next; under it each
@@ -183,7 +167,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
         float3 toSun = -SunDirection;
         uint shadowFlags = ShadowHeader[0].flags;
         ShadowFilter filter = { passParams.shadowBlend, passParams.shadowFilterRadius, passParams.shadowNormalBias, passParams.shadowDepthBias };
-        uint cascade = ShadowMaxCascades;
+        uint cascade = ShadowFarRow + 1u; // none, until the sun's shadow says
         float sunVisible = 1.0;
         [branch] if ((shadowFlags & ShadowSunFlag) != 0u)
             sunVisible = SunShadow(filter, position, surface.normal, viewDepth, saturate(dot(surface.normal, toSun)), cascade);
@@ -201,24 +185,45 @@ void main(uint3 threadId : SV_DispatchThreadID)
         [loop] for (uint index = 0u; index < count; index++)
         {
             GpuLight light = Lights[Clusters[row + 1u + index]];
-            float3 lightToSurface = position - (light.positionRange.xyz - CameraPos);
+            float3 lightToSurface = position - LightNearest(light, position);
+            float3 toHighlight = NormalizeOrZero(LightAlong(light, position, reflect(-toCamera, surface.normal)) - position);
             float shadow = 1.0;
             [branch] if ((shadowFlags & ShadowLocalFlag) != 0u && light.shadow.x != ShadowNone)
                 shadow = LocalShadow(filter, light, position, surface.normal);
-            color += Arriving(light, lightToSurface) * shadow * Reflected(surface, NormalizeOrZero(-lightToSurface), toCamera);
+            color += Arriving(light, lightToSurface) * shadow * Reflected(surface, NormalizeOrZero(-lightToSurface), toHighlight, toCamera);
         }
 
-        [branch] if (passParams.debugView == DebugViewShadows)
-            color = CascadeTints[min(cascade, ShadowMaxCascades)] * lerp(0.15, 1.0, sunVisible);
-        else if (passParams.debugView == DebugViewAo)
+        // The debug views (DeferredRenderer's DebugView, in the frame's flags): one part of the picture instead of it.
+        uint debugView = FrameDebugView();
+        [branch] if (debugView == DebugViewAlbedo)
+            color = surface.baseColor;
+        else if (debugView == DebugViewNormals)
+            color = surface.normal * 0.5 + 0.5;
+        else if (debugView == DebugViewRoughness)
+            color = surface.roughness.xxx;
+        else if (debugView == DebugViewMetallic)
+            color = surface.metallic.xxx;
+        else if (debugView == DebugViewEmissive || debugView == DebugViewLevelOfDetail)
+            color = surface.emissive;
+        else if (debugView == DebugViewDepth)
+            color = (1.0 - saturate(log2(max(viewDepth, 1.0)) / 8.0)).xxx; // a metre white, 256 m black, evenly per doubling
+        else if (debugView == DebugViewSunShadow)
+            color = CascadeTints[min(cascade, ShadowFarRow + 1u)] * lerp(0.15, 1.0, sunVisible);
+        else if (debugView == DebugViewAmbientOcclusion)
             color = visibility.xxx;
-        else if (passParams.debugView == DebugViewBentNormal)
+        else if (debugView == DebugViewBentNormals)
             color = bentNormal * 0.5 + 0.5;
-        else if (passParams.debugView == DebugViewGiRadiance)
+        else if (debugView == DebugViewLightCount)
+        {
+            // Blue for none, through green, to red for a full cluster.
+            float share = saturate((float)reaching / (float)LightsPerCluster);
+            color = reaching == 0u ? float3(0.05, 0.05, 0.3) : lerp(lerp(float3(0.1, 0.3, 1.0), float3(0.1, 1.0, 0.2), saturate(share * 2.0)), float3(1.0, 0.1, 0.1), saturate(share * 2.0 - 1.0));
+        }
+        else if (debugView == DebugViewGiLight)
             color = ambient;
-        else if (passParams.debugView == DebugViewSkyVisibility)
+        else if (debugView == DebugViewSkyVisibility)
             color = skyVisibility.xxx;
-        else if (passParams.debugView == DebugViewVoxelAlbedo || passParams.debugView == DebugViewVoxelCoverage)
+        else if (debugView == DebugViewVoxelAlbedo || debugView == DebugViewVoxelCoverage)
         {
             // The voxel the surface itself fills: half a voxel in from the pixel, in the finest level that holds it.
             float4 voxelValue = float4(0.0, 0.0, 0.0, 0.0);
@@ -235,7 +240,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
                 }
             }
 
-            color = passParams.debugView == DebugViewVoxelAlbedo ? voxelValue.rgb : voxelValue.aaa;
+            color = debugView == DebugViewVoxelAlbedo ? voxelValue.rgb : voxelValue.aaa;
         }
 
         [branch] if (reaching > LightsPerCluster)

@@ -1,0 +1,65 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 10071
+    },
+    "needs": "$transparentChunks",
+    "defines": [
+        "#define CLEAR_FRONT 1"
+    ],
+    "creates": [
+        {
+            "name": "SceneColor",
+            "kind": "texture",
+            "format": "rgba16_float",
+            "scale": 1
+        },
+        {
+            "name": "TransparentAccum",
+            "kind": "texture",
+            "format": "rgba16_float",
+            "scale": 1
+        },
+        {
+            "name": "TransparentCoverage",
+            "kind": "texture",
+            "format": "r16_float",
+            "scale": 1
+        },
+        {
+            "name": "TransparentFront",
+            "kind": "texture",
+            "format": "r32_float",
+            "scale": 1
+        },
+        {
+            "name": "TransparentFrontScratch",
+            "kind": "texture",
+            "format": "r32_float",
+            "scale": 1
+        }
+    ],
+    "reads": [
+        {
+            "name": "Hdr",
+            "filter": "nearest"
+        }
+    ],
+    "writes": [
+        {
+            "name": "SceneColor"
+        },
+        {
+            "name": "TransparentAccum"
+        },
+        {
+            "name": "TransparentCoverage"
+        },
+        {
+            "name": "TransparentFront"
+        }
+    ],
+    "dispatch": {
+        "per": "view"
+    }
+}

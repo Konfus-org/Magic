@@ -1,4 +1,4 @@
-using System.Numerics;
+using Magic.Mathematics;
 
 namespace Magic.Contexts.Components;
 
@@ -8,14 +8,14 @@ namespace Magic.Contexts.Components;
 /// </summary>
 public struct DirectionalLight : IComponent
 {
-    public DirectionalLight(Vector3 color, float intensity, bool castsShadows = true)
+    public DirectionalLight(Color color, float intensity, bool castsShadows = true)
     {
         Color = color;
         Intensity = intensity;
         CastsShadows = castsShadows;
     }
 
-    public Vector3 Color { get; set; }
+    public Color Color { get; set; }
 
     public float Intensity { get; set; }
 

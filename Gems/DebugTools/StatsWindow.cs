@@ -11,7 +11,7 @@ namespace DebugToolsGem;
 /// The engine's own numbers in one place: frames per second and frame time, the GC, and everything any system set in
 /// <see cref="Debugging.Stats"/> (what the transform, render and streaming systems are doing, the renderer's counters,
 /// the asset pools), a tab per first part of the name (Frame, Rendering, Streaming), and under it the tab's values as
-/// a document: the plain ones first, then a block per sub-category (<c>Rendering.Gi</c>, <c>Streaming.Pool.Texture</c>)
+/// a document: the plain ones first, then a block per sub-category (<c>Frame.Time</c>, <c>Memory.Assets.Texture</c>)
 /// headed by its name. Drawn as the "Stats" window while open (F3), and logged (verbose, so only with --verbose) every
 /// <see cref="LogIntervalMs"/> whether open or not, so a headless or scripted run can have them too. Reads the stats,
 /// changes nothing but its own.
@@ -101,14 +101,14 @@ internal sealed class StatsWindow : Window
         long allocated = GC.GetTotalAllocatedBytes();
         TimeSpan pause = GC.GetTotalPauseDuration();
         double seconds = _sinceGcSampleMs / 1000d;
-        Debugging.Stats.Set("Frame.GC.HeapMB", Megabytes(GC.GetTotalMemory(false)));
-        Debugging.Stats.Set("Frame.GC.AllocatedMBPerSecond", Megabytes(allocated - _sampledAllocatedBytes) / seconds);
-        Debugging.Stats.Set("Frame.GC.PausedPercent", (pause - _sampledPause).TotalMilliseconds / _sinceGcSampleMs * 100);
+        Debugging.Stats.Set("Memory.GC.HeapMB", Megabytes(GC.GetTotalMemory(false)));
+        Debugging.Stats.Set("Memory.GC.AllocatedMBPerSecond", Megabytes(allocated - _sampledAllocatedBytes) / seconds);
+        Debugging.Stats.Set("Memory.GC.PausedPercent", (pause - _sampledPause).TotalMilliseconds / _sinceGcSampleMs * 100);
         for (int generation = 0; generation < _sampledCollections.Length; generation++)
         {
             int count = GC.CollectionCount(generation);
-            Debugging.Stats.Set($"Frame.GC.Gen{generation}Collections", count);
-            Debugging.Stats.Set($"Frame.GC.Gen{generation}PerSecond", (count - _sampledCollections[generation]) / seconds);
+            Debugging.Stats.Set($"Memory.GC.Gen{generation}Collections", count);
+            Debugging.Stats.Set($"Memory.GC.Gen{generation}PerSecond", (count - _sampledCollections[generation]) / seconds);
             _sampledCollections[generation] = count;
         }
 

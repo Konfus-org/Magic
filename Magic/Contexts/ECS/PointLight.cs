@@ -1,4 +1,4 @@
-using System.Numerics;
+using Magic.Mathematics;
 
 namespace Magic.Contexts.Components;
 
@@ -8,7 +8,7 @@ namespace Magic.Contexts.Components;
 /// </summary>
 public struct PointLight : IComponent
 {
-    public PointLight(Vector3 color, float intensity, float range, bool castsShadows = false)
+    public PointLight(Color color, float intensity, float range, bool castsShadows = false)
     {
         Color = color;
         Intensity = intensity;
@@ -16,7 +16,7 @@ public struct PointLight : IComponent
         CastsShadows = castsShadows;
     }
 
-    public Vector3 Color { get; set; }
+    public Color Color { get; set; }
 
     public float Intensity { get; set; }
 

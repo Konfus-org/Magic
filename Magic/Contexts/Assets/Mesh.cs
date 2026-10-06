@@ -1,5 +1,4 @@
 using Magic.Mathematics;
-using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -28,7 +27,8 @@ public struct Vertex
 #if DEBUG
     static Vertex()
     {
-        Debug.Assert(Unsafe.SizeOf<Vertex>() == Size, $"{nameof(Vertex)} must be {Size} bytes.");
+        // Qualified: inside Magic, Debug is the Magic.Contexts.Debug namespace.
+        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<Vertex>() == Size, $"{nameof(Vertex)} must be {Size} bytes.");
     }
 #endif
 }
@@ -64,19 +64,21 @@ public sealed class Mesh
     }
 
     /// <summary>
-    /// Over the positions of the vertices, without copying them out first.
+    /// Over the positions of the vertices, without copying them out first. An impostor card's corner counts as the
+    /// cube its card turns in, half its side round its middle every way, since the card faces whichever camera.
     /// </summary>
     private static Aabb BoxAround(ReadOnlySpan<Vertex> vertices)
     {
         if (vertices.IsEmpty)
             return default;
 
-        Vector3 min = vertices[0].Position, max = min;
+        Vector3 min = new(float.MaxValue), max = new(float.MinValue);
 
         foreach (ref readonly Vertex vertex in vertices)
         {
-            min = Vector3.Min(min, vertex.Position);
-            max = Vector3.Max(max, vertex.Position);
+            (Vector3 center, float half) = ImpostorCard.IsCard(vertex) ? ImpostorCard.Square(vertex) : (vertex.Position, 0f);
+            min = Vector3.Min(min, center - new Vector3(half));
+            max = Vector3.Max(max, center + new Vector3(half));
         }
 
         return new Aabb(min, max);

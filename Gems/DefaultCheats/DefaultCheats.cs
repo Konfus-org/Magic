@@ -1,7 +1,9 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
+using Magic.Contexts.Domain;
 using Magic.Contexts.Events;
+using Magic.Contexts.Threading;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
@@ -30,9 +32,10 @@ internal sealed class DefaultCheats : IGem
     private readonly Events _events;
     private readonly IEcs _ecs;
     private readonly Assets _assets;
+    private readonly Settings _settings;
     private readonly IDisposable[] _cheatRegistrations;
 
-    public DefaultCheats(IRendering rendering, IWindowRegistry windows, IFileSystem files, World world, Project project, Threads threads, Events events, IEcs ecs, Assets assets)
+    public DefaultCheats(IRendering rendering, IWindowRegistry windows, IFileSystem files, World world, Project project, Threads threads, Events events, IEcs ecs, Assets assets, Settings settings)
     {
         _world = world;
         _events = events;
@@ -43,12 +46,15 @@ internal sealed class DefaultCheats : IGem
         _windows = windows;
         _files = files;
         _project = project;
+        _settings = settings;
         _cheatRegistrations =
         [
             Debugging.Commands.Register("screenshot", _ => Screenshot()),
             Debugging.Commands.Register("restore", Restore),
             Debugging.Commands.Register("portal", Portal),
             Debugging.Commands.Register("summon", Summon),
+            Debugging.Commands.Register("set", Set),
+            Debugging.Commands.Register("preset", UsePreset),
             Debugging.Commands.Register("exit", _ => world.End()),
         ];
     }
@@ -202,7 +208,7 @@ internal sealed class DefaultCheats : IGem
             case ".mat":
                 SpawnModel(name, _assets.Find<Model>("Models/Cube.fbx"), _assets.Find<Material>(path), position);
                 return;
-            case ".cs" or ".hlsl" or ".hlsli" or ".pass" or ".post" or ".pipeline" or ".rtex" or ".ttf" or ".png" or ".jpg" or ".jpeg" or ".magic" or ".meta":
+            case ".cs" or ".hlsl" or ".hlsli" or ".pass" or ".post" or ".pipeline" or ".preset" or ".rtex" or ".ttf" or ".png" or ".jpg" or ".jpeg" or ".magic" or ".meta":
                 Debugging.Log.Warn($"{path} cannot be summoned: it is not a thing in the world.");
                 return;
         }
@@ -215,6 +221,50 @@ internal sealed class DefaultCheats : IGem
         }
 
         SpawnModel(name, model, _assets.Find<Material>("Materials/Default.mat"), position);
+    }
+
+    /// <summary>
+    /// <c>set Owner.Property=value ...</c>, read as <c>--set</c> reads them (<c>set Gpu.Vsync=false
+    /// ShadowPlan.distance=500</c>): live, until the next preset is applied.
+    /// </summary>
+    private void Set(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Debugging.Log.Warn("Usage: set <Owner.Property=value> ..., like set Gpu.Vsync=false ShadowPlan.distance=500");
+            return;
+        }
+
+        string[] unused = _settings.Set(args);
+        foreach (string line in unused)
+            Debugging.Log.Warn($"set {line}: expected Owner.Property=value.");
+
+        if (unused.Length < args.Length)
+            Debugging.Log.Info($"Set {string.Join(' ', args.Except(unused))}.");
+    }
+
+    /// <summary>
+    /// <c>preset [path]</c>: lists the presets, or applies one, named by its name, its file name or its path.
+    /// </summary>
+    private void UsePreset(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            Debugging.Log.Info($"Preset {_settings.Preset?.Path ?? "none"}; there are {string.Join(", ", _assets.Paths(".preset"))}.");
+            return;
+        }
+
+        if (Resolve(args[0], ".preset") is not { } path)
+            return;
+
+        if (_assets.Load(_assets.Find<Preset>(path)) is not { } preset)
+        {
+            Debugging.Log.Warn($"{path} does not load as a preset.");
+            return;
+        }
+
+        _settings.Apply(preset);
+        Debugging.Log.Info($"Settings preset: {preset.Path}");
     }
 
     /// <summary>

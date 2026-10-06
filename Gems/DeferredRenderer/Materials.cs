@@ -213,6 +213,8 @@ internal static class Materials
 
             ulong surfaceId = material.Shader.IsValid ? material.Shader.Id : table.DefaultSurface;
             surface = Shaders.Surface(ctx, surfaceId);
+            if (surface is not null && variant.HasFlag(SurfaceVariant.Transparent) && surface.Stripped.Contains("SceneBehind(", StringComparison.Ordinal))
+                variant |= SurfaceVariant.Refractive;
             if (surface is null)
             {
                 Shader? rejected = Shaders.Get(ctx, new Handle<Shader>(surfaceId));

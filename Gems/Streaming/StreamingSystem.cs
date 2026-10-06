@@ -1,7 +1,10 @@
 ﻿using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
+using Magic.Contexts.Domain;
 using Magic.Contexts.Events;
+using Magic.Contexts.Settings;
+using Magic.Contexts.Threading;
 using Magic.Interfaces;
 using Magic.Mathematics;
 using Magic.Services;
@@ -18,8 +21,8 @@ namespace StreamingGem;
 /// this frame: a domain that appears there has its global chunks spawned under <c>World.&lt;Name&gt;.Globals</c>, where
 /// they stay, and one that is gone from it has everything of it destroyed. In between, every frame, for every
 /// camera of the domain, the chunk cube the camera stands in (active), the cubes within
-/// <see cref="Magic.Contexts.Settings.StreamingSettings.Radius"/> of it, and the cubes its
-/// frustum touches within <see cref="Magic.Contexts.Settings.RenderSettings.ViewDist"/> are wanted, of the cubes that have an
+/// <see cref="StreamingSettings.Radius"/> of it, and the cubes its
+/// frustum touches within <see cref="StreamingSettings.ViewDist"/> are wanted, of the cubes that have an
 /// <c>x_y_z.chunk</c> file beside the domain file: they load off the main thread, nearest first and
 /// <see cref="MaxLoads"/> at a time, where their components are read too; the main thread only spawns them, nearest first and
 /// <see cref="SpawnBudgetMs"/> worth a frame, under <c>World.&lt;Name&gt;.Chunks.Cx_y_z</c>. A camera under one
@@ -35,7 +38,7 @@ namespace StreamingGem;
 /// </para>
 /// <para>
 /// A cube far from every camera is spawned as a lesser version of its chunk when it has one (<see cref="Assets.Lods{T}"/>:
-/// a stand-in, good beyond its threshold in metres times <see cref="Magic.Contexts.Settings.RenderSettings.LodBias"/>), which is what lets
+/// a stand-in, good beyond its threshold in metres times <see cref="LodSettings.Bias"/>), which is what lets
 /// everything in view be loaded however far it is. A camera crossing the threshold swaps the two, and only once it is
 /// <see cref="LodHysteresis"/> past it, so standing on it does not swap back and forth. The one coming in is spawned
 /// <see cref="Hidden"/> and stays so until the renderer has registered every one of its entities; then it is shown
@@ -102,7 +105,8 @@ internal sealed class StreamingSystem : ISystem
 
     private readonly IEcs _ecs;
     private readonly Assets _assets;
-    private readonly Project _project;
+    private readonly StreamingSettings _settings;
+    private readonly LodSettings _lod;
     private readonly IScripting[] _scripting;
     private readonly Dictionary<Handle, List<IDisposable>> _attachments = []; // what the scripting gems handed out per entity, ended with it
     private readonly List<Handle> _ended = []; // scratch for Destroy
@@ -136,16 +140,18 @@ internal sealed class StreamingSystem : ISystem
     private int _fillChunks;
     private double _fillWorstMs;
 
-    private readonly ChunkReader _reader = new();
+    private readonly ChunkReader _reader;
     private readonly List<(string Path, Vector3 At, Task<Loaded?> Task, CancellationTokenSource Cancel)> _summons = []; // what the world was asked to spawn outside any domain, reading
     private Handle _summonedRoot;
 
-    public StreamingSystem(IEcs ecs, Assets assets, Project project, IScripting[] scripting, World world, Threads threads, IRendering? rendering)
+    public StreamingSystem(IEcs ecs, Assets assets, Types<IComponent> components, StreamingSettings settings, LodSettings lod, IScripting[] scripting, World world, Threads threads, IRendering? rendering)
     {
         _drawn = rendering is not null;
+        _reader = new ChunkReader(components);
         _ecs = ecs;
         _assets = assets;
-        _project = project;
+        _settings = settings;
+        _lod = lod;
         _scripting = scripting;
         _world = world;
         _threads = threads;
@@ -654,8 +660,8 @@ internal sealed class StreamingSystem : ISystem
         stream.Cameras.Clear();
 
         float chunkSize = stream.Domain.ChunkSize;
-        float radius = MathF.Max(0f, _project.Settings.Streaming.Radius);
-        float viewDist = MathF.Max(0f, _project.Settings.Render.ViewDist);
+        float radius = MathF.Max(0f, _settings.Radius);
+        float viewDist = MathF.Max(0f, _settings.ViewDist);
         Dictionary<(int X, int Y, int Z), Handle<Chunk>> files = stream.Files ??= Files(stream);
 
         foreach ((Handle owner, Vector3 eye, Frustum frustum) in _views)
@@ -874,7 +880,7 @@ internal sealed class StreamingSystem : ISystem
 
         int Pick(float metres)
         {
-            float bias = MathF.Max(0.01f, _project.Settings.Render.LodBias);
+            float bias = MathF.Max(0.01f, _lod.Bias);
             for (int i = 0; i < lods.Length; i++)
             {
                 if (metres > lods[i].Threshold * bias)
@@ -897,7 +903,7 @@ internal sealed class StreamingSystem : ISystem
     /// </summary>
     private async Task<Loaded?> LoadAsync(Handle<Chunk> handle, int? level, float distance, CancellationToken cancel)
     {
-        (float Threshold, Handle<Chunk> Asset)[] lods = await _assets.LodsAsync(handle, cancel: cancel).ConfigureAwait(false);
+        (float Threshold, Handle<Chunk> Asset)[] lods = [.. (await _assets.LodsAsync(handle, cancel: cancel).ConfigureAwait(false)).Levels.Select(level => (level.Threshold, new Handle<Chunk>(level.Asset)))];
         int picked = Math.Min(level ?? Level(lods, distance, -1), lods.Length);
         Handle<Chunk> shown = picked == 0 ? handle : lods[picked - 1].Asset;
         Chunk? chunk = await _assets.LoadAsync(shown, cancel: cancel).ConfigureAwait(false);
@@ -1332,8 +1338,8 @@ internal sealed class StreamingSystem : ISystem
         Debugging.Stats.Set("Streaming.Kept", kept);
         Debugging.Stats.Set("Streaming.StandIns", standIns);
         Debugging.Stats.Set("Streaming.Entities", entities);
-        Debugging.Stats.Set("Streaming.Bytes", bytes);
-        Debugging.Stats.Set("Streaming.Budget", budget);
+        Debugging.Stats.Set("Streaming.Memory.UsedMB", bytes / (1024d * 1024d));
+        Debugging.Stats.Set("Streaming.Memory.BudgetMB", budget / (1024d * 1024d));
         Debugging.Stats.Set("Streaming.Filling", filling);
         Debugging.Stats.Set("Streaming.Bootstrapping", _bootstrapping ? 1 : 0);
     }

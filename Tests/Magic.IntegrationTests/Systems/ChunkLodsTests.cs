@@ -1,5 +1,6 @@
 ﻿using Magic.Contexts;
 using Magic.Contexts.Assets;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using StreamingGem;
@@ -127,9 +128,10 @@ public sealed class ChunkLodsTests : IDisposable
     [Theory]
     [InlineData("PointLight")]
     [InlineData("SpotLight")]
+    [InlineData("AreaLight")]
     public void A_light_is_a_point_light_of_the_stand_in(string light)
     {
-        WriteChunk($$"""{ "components": { "Transform": {}, "{{light}}": { "color": { "x": 1, "y": 1, "z": 1 }, "intensity": 1, "range": 5, "outerAngle": 1 } } }""");
+        WriteChunk($$"""{ "components": { "Transform": {}, "{{light}}": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 1, "range": 5, "outerAngle": 1 } } }""");
 
         Chunk standIn = StandIn();
 
@@ -140,8 +142,8 @@ public sealed class ChunkLodsTests : IDisposable
     public void Lights_standing_together_are_merged_into_one()
     {
         WriteChunk("""
-            { "components": { "Transform": { "position": { "x": 10, "y": 0, "z": 10 } }, "PointLight": { "color": { "x": 1, "y": 0, "z": 0 }, "intensity": 1, "range": 5 } } },
-            { "components": { "Transform": { "position": { "x": 10, "y": 4, "z": 10 } }, "PointLight": { "color": { "x": 0, "y": 1, "z": 0 }, "intensity": 1, "range": 5 } } }
+            { "components": { "Transform": { "position": { "x": 10, "y": 0, "z": 10 } }, "PointLight": { "color": { "r": 1, "g": 0, "b": 0 }, "intensity": 1, "range": 5 } } },
+            { "components": { "Transform": { "position": { "x": 10, "y": 4, "z": 10 } }, "PointLight": { "color": { "r": 0, "g": 1, "b": 0 }, "intensity": 1, "range": 5 } } }
             """);
 
         Chunk standIn = StandIn();
@@ -153,8 +155,8 @@ public sealed class ChunkLodsTests : IDisposable
     public void Lights_standing_apart_are_each_a_glow_of_the_stand_in()
     {
         WriteChunk("""
-            { "components": { "Transform": { "position": { "x": 10, "y": 0, "z": 10 } }, "PointLight": { "color": { "x": 1, "y": 0, "z": 0 }, "intensity": 1, "range": 5 } } },
-            { "components": { "Transform": { "position": { "x": 40, "y": 0, "z": 10 } }, "SpotLight": { "color": { "x": 0, "y": 1, "z": 0 }, "intensity": 1, "range": 5, "outerAngle": 1 } } }
+            { "components": { "Transform": { "position": { "x": 10, "y": 0, "z": 10 } }, "PointLight": { "color": { "r": 1, "g": 0, "b": 0 }, "intensity": 1, "range": 5 } } },
+            { "components": { "Transform": { "position": { "x": 40, "y": 0, "z": 10 } }, "SpotLight": { "color": { "r": 0, "g": 1, "b": 0 }, "intensity": 1, "range": 5, "outerAngle": 1 } } }
             """);
 
         Chunk standIn = StandIn();
@@ -166,8 +168,8 @@ public sealed class ChunkLodsTests : IDisposable
     public void Lights_standing_close_together_share_one_glow()
     {
         WriteChunk("""
-            { "components": { "Transform": { "position": { "x": 10, "y": 1, "z": 10 } }, "PointLight": { "color": { "x": 1, "y": 0, "z": 0 }, "intensity": 1, "range": 5 } } },
-            { "components": { "Transform": { "position": { "x": 12, "y": 1, "z": 10 } }, "PointLight": { "color": { "x": 0, "y": 1, "z": 0 }, "intensity": 1, "range": 5 } } }
+            { "components": { "Transform": { "position": { "x": 10, "y": 1, "z": 10 } }, "PointLight": { "color": { "r": 1, "g": 0, "b": 0 }, "intensity": 1, "range": 5 } } },
+            { "components": { "Transform": { "position": { "x": 12, "y": 1, "z": 10 } }, "PointLight": { "color": { "r": 0, "g": 1, "b": 0 }, "intensity": 1, "range": 5 } } }
             """);
 
         Chunk standIn = StandIn();
@@ -179,8 +181,8 @@ public sealed class ChunkLodsTests : IDisposable
     public void A_glow_is_twice_as_big_for_four_times_the_light()
     {
         WriteChunk("""
-            { "components": { "Transform": { "position": { "x": 10, "y": 0, "z": 10 } }, "PointLight": { "color": { "x": 1, "y": 1, "z": 1 }, "intensity": 4, "range": 5 } } },
-            { "components": { "Transform": { "position": { "x": 40, "y": 0, "z": 10 } }, "PointLight": { "color": { "x": 1, "y": 1, "z": 1 }, "intensity": 16, "range": 5 } } }
+            { "components": { "Transform": { "position": { "x": 10, "y": 0, "z": 10 } }, "PointLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 4, "range": 5 } } },
+            { "components": { "Transform": { "position": { "x": 40, "y": 0, "z": 10 } }, "PointLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 16, "range": 5 } } }
             """);
 
         float[] radii = [.. With(StandIn(), "Glow").Select(glow => glow.Components["Glow"].GetProperty("radius").GetSingle())];
@@ -192,8 +194,8 @@ public sealed class ChunkLodsTests : IDisposable
     public void A_merged_light_reaches_as_far_as_the_lights_it_stands_for()
     {
         WriteChunk("""
-            { "components": { "Transform": { "position": { "x": 10, "y": 0, "z": 10 } }, "PointLight": { "color": { "x": 1, "y": 1, "z": 1 }, "intensity": 1, "range": 5 } } },
-            { "components": { "Transform": { "position": { "x": 10, "y": 4, "z": 10 } }, "PointLight": { "color": { "x": 1, "y": 1, "z": 1 }, "intensity": 1, "range": 5 } } }
+            { "components": { "Transform": { "position": { "x": 10, "y": 0, "z": 10 } }, "PointLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 1, "range": 5 } } },
+            { "components": { "Transform": { "position": { "x": 10, "y": 4, "z": 10 } }, "PointLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 1, "range": 5 } } }
             """);
 
         Chunk standIn = StandIn();
@@ -217,7 +219,7 @@ public sealed class ChunkLodsTests : IDisposable
     {
         WriteChunk("""
             { "components": { "Transform": { "position": { "x": 100, "y": 0, "z": 0 } } },
-              "children": [ { "components": { "Transform": { "position": { "x": 0, "y": 50, "z": 0 } }, "PointLight": { "color": { "x": 1, "y": 1, "z": 1 }, "intensity": 1, "range": 5 } } } ] }
+              "children": [ { "components": { "Transform": { "position": { "x": 0, "y": 50, "z": 0 } }, "PointLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 1, "range": 5 } } } ] }
             """);
 
         Chunk standIn = StandIn();
@@ -261,7 +263,7 @@ public sealed class ChunkLodsTests : IDisposable
         _assets = new Services.Assets(project, files, new Events(), container, new Threads());
         container.Add<ILODGenerator<Chunk>>(new ChunkLods(_assets, files));
 
-        return _assets.Load(_assets.Lods(Cube)[0].Asset) ?? throw new InvalidOperationException("The stand-in did not load.");
+        return _assets.Load(new Handle<Chunk>(_assets.Lods(Cube).Levels[0].Asset)) ?? throw new InvalidOperationException("The stand-in did not load.");
     }
 
     /// <summary>

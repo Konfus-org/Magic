@@ -1,4 +1,4 @@
-namespace Magic.Contexts;
+namespace Magic.Contexts.Domain;
 
 /// <summary>
 /// What opening a domain does to the ones already open in the world.

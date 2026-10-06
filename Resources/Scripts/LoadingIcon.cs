@@ -40,7 +40,7 @@ internal sealed class LoadingIcon : IBehavior
             return;
 
         _shown = true;
-        if (!_project.Icon.IsValid || !_ecs.TryGet<Renderer>(_entity, out Renderer renderer) || _assets.Load(renderer.Materials[0]) is not { } material)
+        if (!_project.Icon.IsValid || !_ecs.TryGet(_entity, out Renderer renderer) || _assets.Load(renderer.Materials[0]) is not { } material)
             return;
 
         material.Params.TryGetValue(Map, out Param param);

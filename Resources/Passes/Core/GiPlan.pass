@@ -83,7 +83,7 @@
             "levels": 1
         },
         {
-            "name": "GiShR0",
+            "name": "GiShR",
             "kind": "volume",
             "format": "rgba16_float",
             "scale": 0,
@@ -92,10 +92,10 @@
                 48,
                 48
             ],
-            "levels": 3
+            "levels": 6
         },
         {
-            "name": "GiShR1",
+            "name": "GiShG",
             "kind": "volume",
             "format": "rgba16_float",
             "scale": 0,
@@ -104,10 +104,10 @@
                 48,
                 48
             ],
-            "levels": 3
+            "levels": 6
         },
         {
-            "name": "GiShG0",
+            "name": "GiShB",
             "kind": "volume",
             "format": "rgba16_float",
             "scale": 0,
@@ -116,43 +116,7 @@
                 48,
                 48
             ],
-            "levels": 3
-        },
-        {
-            "name": "GiShG1",
-            "kind": "volume",
-            "format": "rgba16_float",
-            "scale": 0,
-            "size": [
-                48,
-                48,
-                48
-            ],
-            "levels": 3
-        },
-        {
-            "name": "GiShB0",
-            "kind": "volume",
-            "format": "rgba16_float",
-            "scale": 0,
-            "size": [
-                48,
-                48,
-                48
-            ],
-            "levels": 3
-        },
-        {
-            "name": "GiShB1",
-            "kind": "volume",
-            "format": "rgba16_float",
-            "scale": 0,
-            "size": [
-                48,
-                48,
-                48
-            ],
-            "levels": 3
+            "levels": 6
         },
         {
             "name": "GiAccum",
@@ -237,6 +201,36 @@
         },
         "framesPerRebuild": {
             "x": 2
+        }
+    },
+    "tuning": {
+        "levels": {
+            "label": "Levels",
+            "description": "Nested volumes around the camera, each this much coarser than the last. Must match what the pass creates in its file: change both there.",
+            "fixed": true
+        },
+        "resolution": {
+            "label": "Voxels a side",
+            "description": "Voxels along each side of a level. Must match what the pass creates in its file: change both there.",
+            "fixed": true
+        },
+        "voxelSize": {
+            "label": "Finest voxel (m)",
+            "description": "Size of a voxel in the finest level.",
+            "min": 0.25,
+            "max": 4
+        },
+        "levelScale": {
+            "label": "Level scale",
+            "description": "How much bigger each level's voxels are than the last's.",
+            "min": 2,
+            "max": 8
+        },
+        "framesPerRebuild": {
+            "label": "Frames per rebuild",
+            "description": "A level is rebuilt every this many frames; the frames between rebuild nothing.",
+            "min": 1,
+            "max": 8
         }
     }
 }

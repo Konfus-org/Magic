@@ -10,15 +10,20 @@ internal sealed record CachedShader(Shader Shader, string ClosureHash, ulong[] C
 /// <summary>
 /// The shader text in use, by asset id (main thread), and where compiled bytecode is kept on disk: under the project's
 /// cache, one folder per bytecode format, so a second start never runs the compiler. <see cref="IncludeDirectory"/> is
-/// the shader root <c>#include</c>s resolve against.
+/// the shader root <c>#include</c>s resolve against. <see cref="DeferredSettings.ShaderCache"/> turns the disk cache on
+/// and off live: it is asked at every compile.
 /// </summary>
 internal sealed class ShaderCache
 {
-    public ShaderCache(string includeDirectory, string? cacheDirectory, string format)
+    private readonly string _cacheDirectory;
+    private readonly DeferredSettings _settings;
+
+    public ShaderCache(string includeDirectory, string cacheDirectory, string format, DeferredSettings settings)
     {
         IncludeDirectory = includeDirectory;
-        CacheDirectory = cacheDirectory;
+        _cacheDirectory = cacheDirectory;
         Format = format;
+        _settings = settings;
     }
 
     public string IncludeDirectory { get; }
@@ -26,7 +31,7 @@ internal sealed class ShaderCache
     /// <summary>
     /// Null when the cache is off.
     /// </summary>
-    public string? CacheDirectory { get; }
+    public string? CacheDirectory => _settings.ShaderCache ? _cacheDirectory : null;
 
     /// <summary>
     /// The device's bytecode format, part of every cache key.

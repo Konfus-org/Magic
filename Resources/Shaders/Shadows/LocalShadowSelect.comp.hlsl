@@ -1,17 +1,18 @@
 // Gives this frame's shadow-casting spot and point lights their pages of the atlas, on the GPU: one group. From
 // the candidates the candidates pass listed (every light that may cast, with its score: how much of the main
 // view it could reach), the best maxLocalLights are chosen by that many rounds of a parallel arg-max,
-// and each chosen light keeps the slot it held last frame when its key (its place and reach, quantised) still
-// matches, else takes a free one: a light's pages are drawn again only when it is new or when its turn comes.
-// The faces drawn this frame are a new light's, all at once, then the oldest, within facesPerFrame, and never
-// more rows than the draw args and visible-id buffers have slices for (visibleSlots, matching the creates in
-// the seed pass's file and the draw pass's iterations): a refreshed row's slice is its place in the refreshed
-// list, cascades first.
+// and each chosen light keeps the slot it held last frame: the one whose key (its place and reach, quantised)
+// still matches, or, when it moved or turned, the one it held by its row in the lights buffer, which then has to
+// be drawn again. A light with neither takes a free slot. The faces drawn this frame are those of new and moved
+// lights, all at once, then the oldest, within facesPerFrame, and never more rows than the draw args and
+// visible-id buffers have slices for (visibleSlots, matching the creates in the seed pass's file and the draw
+// pass's iterations): a refreshed row's slice is its place in the refreshed list, cascades first.
 //
-// Writes the face rows of every slot in use (their matrices from the light as it is now), each light's shadow
-// row and face count into the lights buffer, the slots' state, the rest of the refreshed list after the
-// cascades, and the cull's indirect dispatch: one group per page per refreshed row (Cull/CullShadow.comp).
-// Twin, kept as the reference: Reference/LocalShadows.cs.
+// A face row is written only when its face is drawn, so its matrices are always the ones its page holds the depth
+// of: a moved light whose turn has not come shows its shadow where it was, never a mix of the two. A light whose
+// pages have never been drawn casts none yet. Writes those rows, each light's shadow row and face count into the
+// lights buffer, the slots' state, the rest of the refreshed list after the cascades, and the cull's indirect
+// dispatch: one group per page per refreshed row (Cull/CullShadow.comp).
 
 #include "Include/Frame.hlsli"
 #include "Include/ShadowViews.hlsli"
@@ -21,8 +22,8 @@
 struct PassParams
 {
     uint maxLocalLights = 8;
-    uint facesPerFrame = 4;
-    uint visibleSlots = 10; // slices of the draw args and visible ids: the same number as their creates' slots
+    uint facesPerFrame = 8;
+    uint visibleSlots = 24; // slices of the draw args and visible ids: the same number as their creates' slots
 };
 
 StructuredBuffer<GpuCounts> Counts : READ(0);
@@ -139,8 +140,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
     uint chosen = ChosenCount;
     bool clearAll = (header.flags & ShadowClearAllFlag) != 0u;
     uint keepLight[ShadowMaxSlots]; // per slot: the chosen light that keeps it, or none
+    bool moved[ShadowMaxSlots];     // per slot: kept by a light that moved or turned since it was drawn
     [unroll] for (uint s = 0u; s < ShadowMaxSlots; s++)
+    {
         keepLight[s] = ShadowNone;
+        moved[s] = false;
+    }
 
     // A light keeps the slot whose key is still its own.
     [loop] for (uint c = 0u; c < chosen; c++)
@@ -157,6 +162,33 @@ void main(uint3 threadId : SV_DispatchThreadID)
             [flatten] if (matches)
             {
                 keepLight[s] = Chosen[c];
+                break;
+            }
+        }
+    }
+
+    // A light that moved or turned keeps the slot it held by its row, and is drawn again.
+    [loop] for (uint c = 0u; c < chosen; c++)
+    {
+        uint lightIndex = Chosen[c];
+        bool placed = false;
+        [loop] for (uint s = 0u; s < slotCount && !placed; s++)
+            placed = keepLight[s] == lightIndex;
+        [branch] if (placed)
+            continue;
+
+        GpuLight light = Lights[lightIndex];
+        uint faces = IsPointLight(light) ? ShadowFacesPerSlot : 1u;
+        [loop] for (uint s = 0u; s < slotCount; s++)
+        {
+            GpuLocalShadowSlot slot = ShadowSlots[s];
+            [branch] if (!clearAll && slot.state.x != 0u && keepLight[s] == ShadowNone && slot.state.w == lightIndex && slot.state.y == faces)
+            {
+                slot.key = float4(ShadowQuantize(light.positionRange.xyz), light.positionRange.w);
+                slot.key2 = float4(ShadowQuantize(normalize(light.directionOuterCos.xyz)), light.directionOuterCos.w);
+                ShadowSlots[s] = slot;
+                keepLight[s] = lightIndex;
+                moved[s] = true;
                 break;
             }
         }
@@ -188,7 +220,8 @@ void main(uint3 threadId : SV_DispatchThreadID)
         }
     }
 
-    // Which slots draw this frame: the never-drawn first, then the oldest, within the face budget and the slices.
+    // Which slots draw this frame: the never-drawn and the moved first, then the oldest, within the face budget and
+    // the slices.
     uint refreshed = header.refreshedCount;
     uint budget = passParams.facesPerFrame;
     bool draws[ShadowMaxSlots];
@@ -207,7 +240,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
         {
             [flatten] if (decided[s])
                 continue;
-            uint last = ShadowSlots[s].state.z;
+            uint last = moved[s] ? ShadowNone : ShadowSlots[s].state.z;
             bool older = oldest == ShadowNone || last == ShadowNone || (oldestFrame != ShadowNone && last < oldestFrame);
             [flatten] if (older)
             {
@@ -221,7 +254,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
 
         decided[oldest] = true;
         uint faces = ShadowSlots[oldest].state.y;
-        bool isNew = ShadowSlots[oldest].state.z == ShadowNone;
+        bool isNew = ShadowSlots[oldest].state.z == ShadowNone || moved[oldest];
         bool fits = refreshed + faces <= passParams.visibleSlots;
         bool draw = fits && (isNew || budget >= faces);
         [flatten] if (draw && !isNew)
@@ -258,15 +291,19 @@ void main(uint3 threadId : SV_DispatchThreadID)
         [loop] for (uint face = 0u; face < ShadowFacesPerSlot; face++)
         {
             uint rowIndex = ShadowFaceRow(s, face);
-            [branch] if (face < faces)
+            [branch] if (face < faces && draws[s])
             {
-                uint slice = draws[s] ? listed : 0u;
-                ShadowViews[rowIndex] = FaceRow(light, face, faces, s * ShadowFacesPerSlot + face, header, draws[s], slice);
-                [flatten] if (draws[s])
-                {
-                    ShadowRefreshed[listed] = rowIndex;
-                    listed++;
-                }
+                ShadowViews[rowIndex] = FaceRow(light, face, faces, s * ShadowFacesPerSlot + face, header, true, listed);
+                ShadowRefreshed[listed] = rowIndex;
+                listed++;
+            }
+            else if (face < faces)
+            {
+                // Not drawn this frame: the row keeps the matrices its page was drawn with, and is not refreshed.
+                GpuShadowView row = ShadowViews[rowIndex];
+                row.flags.y = 0u;
+                row.flags.w = 0u;
+                ShadowViews[rowIndex] = row;
             }
             else
             {
@@ -276,11 +313,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
             }
         }
 
-        light.shadow.x = ShadowFaceRow(s, 0u);
-        light.shadow.y = faces;
+        slot.state.z = draws[s] ? FrameNumber : slot.state.z;
+        bool drawnOnce = slot.state.z != ShadowNone;
+        light.shadow.x = drawnOnce ? ShadowFaceRow(s, 0u) : ShadowNone;
+        light.shadow.y = drawnOnce ? faces : 0u;
         Lights[lightIndex] = light;
 
-        slot.state.z = draws[s] ? FrameNumber : slot.state.z;
         slot.state.w = lightIndex;
         ShadowSlots[s] = slot;
     }

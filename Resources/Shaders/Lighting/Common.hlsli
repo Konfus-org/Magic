@@ -55,13 +55,52 @@ bool LightTouchesBox(GpuLight light, float3 boxMin, float3 boxMax)
     return dot(toBox, toBox) <= range * range;
 }
 
-// A point or spot light's colour as it arrives along lightToSurface (not normalised): inverse-square, eased
-// to nothing at the light's range so the edge of its reach is never a visible line, and for a spot faded
-// from the inner cone out to the outer one; and faded out as its whole reach gets too small on screen to see.
+// Whether the light is an area light: a rectangle, not a point (Structs.hlsli's GpuLight).
+bool IsAreaLight(GpuLight light)
+{
+    return light.area.w > 0.0;
+}
+
+// The point of an area light's rectangle nearest a camera-relative point (dropped onto its plane, then kept inside its
+// edges); a point or spot light's own position, which is all there is of it.
+float3 LightNearest(GpuLight light, float3 positionRel)
+{
+    float3 center = light.positionRange.xyz - CameraPos;
+    [branch] if (!IsAreaLight(light))
+        return center;
+
+    float halfWidth = length(light.area.xyz);
+    float3 right = light.area.xyz / halfWidth;
+    float3 up = cross(light.directionOuterCos.xyz, right);
+    float3 offset = positionRel - center;
+    return center + right * clamp(dot(offset, right), -halfWidth, halfWidth) + up * clamp(dot(offset, up), -light.area.w, light.area.w);
+}
+
+// Where a ray from a camera-relative point meets an area light's rectangle, or the nearest of it to where the ray meets
+// its plane (and the point nearest the surface when the ray never comes back towards its front): what a reflection
+// sees of it, the highlight's light. A point or spot light's own position.
+float3 LightAlong(GpuLight light, float3 positionRel, float3 ray)
+{
+    float3 center = light.positionRange.xyz - CameraPos;
+    [branch] if (!IsAreaLight(light))
+        return center;
+
+    float3 facing = light.directionOuterCos.xyz;
+    float towards = dot(ray, facing);
+    float along = dot(center - positionRel, facing) / min(towards, -1e-6);
+    float3 hit = towards < 0.0 && along > 0.0 ? positionRel + ray * along : positionRel;
+    return LightNearest(light, hit);
+}
+
+// A light's colour as it arrives along lightToSurface (not normalised), from the point of it the surface takes its
+// light from (LightNearest): inverse-square, eased to nothing at the light's range so the edge of its reach is never a
+// visible line, and for a spot faded from the inner cone out to the outer one (for an area light, the cosine off its
+// facing); and faded out as its whole reach gets too small on screen to see. An area light's range counts from its
+// rectangle, not from the middle its stored reach is grown around.
 float3 Arriving(GpuLight light, float3 lightToSurface)
 {
     float distanceSquared = dot(lightToSurface, lightToSurface);
-    float range = light.positionRange.w;
+    float range = light.positionRange.w - (IsAreaLight(light) ? length(float2(length(light.area.xyz), light.area.w)) : 0.0);
     float reach = distanceSquared / max(range * range, 1e-6);
     float window = saturate(1.0 - reach * reach);
     float falloff = window * window / (distanceSquared + 1.0);

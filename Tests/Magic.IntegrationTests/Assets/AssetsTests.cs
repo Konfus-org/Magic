@@ -1,6 +1,8 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
+using Magic.Contexts.Settings;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using Magic.Utils;
@@ -21,11 +23,13 @@ public sealed class AssetsTests : IDisposable
     private readonly TempFolder _root = new();
     private readonly Events _events = new();
     private readonly Container _container = new();
+    private readonly AssetSettings _budgets = new();
     private readonly Project _project;
 
     public AssetsTests()
     {
         _project = new Project { Name = "Tests", Root = _root.Path, Resources = Path.Combine(_root.Path, "NoResources") };
+        _container.Add(_budgets);
         Directory.CreateDirectory(_project.Assets);
     }
 
@@ -194,7 +198,7 @@ public sealed class AssetsTests : IDisposable
     public void A_budget_of_zero_reads_the_file_every_time()
     {
         Write("M.mat", "{}", 80);
-        _project.Settings.Assets.Budgets[nameof(Material)] = 0;
+        _budgets.Budgets[nameof(Material)] = 0;
         using Services.Assets assets = Open();
         Material? first = assets.Load(Mat);
 
@@ -237,7 +241,7 @@ public sealed class AssetsTests : IDisposable
         for (int i = 0; i < 11; i++)
             Write($"Small{i}.mat", "{" + new string(' ', 100_000) + "}", 100 + (ulong)i); // about 0.1 MB of file each, which is what counts
 
-        _project.Settings.Assets.Budgets[nameof(Material)] = 1; // room for ten
+        _budgets.Budgets[nameof(Material)] = 1; // room for ten
         using Services.Assets assets = Open();
 
         for (int i = 0; i < 11; i++)
@@ -250,7 +254,7 @@ public sealed class AssetsTests : IDisposable
     public void An_asset_bigger_than_its_budget_is_still_kept_until_the_next_miss()
     {
         Write("Huge.mat", "{" + new string(' ', 1_200_000) + "}", 94); // about 1.2 MB of file
-        _project.Settings.Assets.Budgets[nameof(Material)] = 1;
+        _budgets.Budgets[nameof(Material)] = 1;
         using Services.Assets assets = Open();
 
         Material? huge = assets.Load(new Handle<Material>(94));
@@ -510,7 +514,7 @@ public sealed class AssetsTests : IDisposable
         for (int i = 0; i < 4; i++)
             Write($"Big{i}.mat", "{" + new string(' ', 600_000) + "}", 90 + (ulong)i); // about 0.6 MB of file each
 
-        _project.Settings.Assets.Budgets[nameof(Material)] = 2;
+        _budgets.Budgets[nameof(Material)] = 2;
 
         return Open();
     }

@@ -10,14 +10,14 @@
             "format": "depth",
             "scale": 0,
             "size": [
-                8192,
+                10240,
                 2560
             ]
         },
         {
             "name": "ShadowViews",
             "kind": "buffer",
-            "bytes": 40000,
+            "bytes": 40400,
             "zero": true
         },
         {
@@ -29,7 +29,7 @@
         {
             "name": "ShadowRefreshed",
             "kind": "buffer",
-            "bytes": 400,
+            "bytes": 404,
             "zero": true
         }
     ],
@@ -72,6 +72,12 @@
         "staggerFar": {
             "x": 1
         },
+        "farDistance": {
+            "x": 2048
+        },
+        "farRefreshFrames": {
+            "x": 120
+        },
         "localResolution": {
             "x": 256
         },
@@ -79,10 +85,86 @@
             "x": 8
         },
         "atlasWidth": {
-            "x": 8192
+            "x": 10240
         },
         "atlasHeight": {
             "x": 2560
+        }
+    },
+    "tuning": {
+        "cascades": {
+            "label": "Sun cascades",
+            "description": "Slices of the view the sun's shadow is split into: more keeps near shadows sharp further out.",
+            "min": 1,
+            "max": 4
+        },
+        "cascadeResolution": {
+            "label": "Cascade resolution",
+            "description": "Texels a side of each sun cascade.",
+            "min": 256,
+            "max": 4096
+        },
+        "distance": {
+            "label": "Sun shadow distance (m)",
+            "description": "How far from the camera the sun casts shadows.",
+            "min": 10,
+            "max": 2000
+        },
+        "splitLambda": {
+            "label": "Cascade split",
+            "description": "How the cascades divide the distance: 0 even, 1 crowded near the camera.",
+            "min": 0,
+            "max": 1
+        },
+        "blendFraction": {
+            "label": "Cascade overlap",
+            "description": "Share of a cascade's range it overlaps the next by, where they blend.",
+            "min": 0,
+            "max": 0.5
+        },
+        "casterRange": {
+            "label": "Caster reach (m)",
+            "description": "How far towards the sun a caster outside the view still shadows what is in it.",
+            "min": 0,
+            "max": 2000
+        },
+        "staggerFar": {
+            "label": "Far cascades every other frame",
+            "description": "Redraw the far cascades on alternate frames, halving their cost; the near two redraw every frame."
+        },
+        "farDistance": {
+            "label": "Far sun shadow distance (m)",
+            "description": "How far from the camera the far view, past the cascades, lets everything cast and take the sun's shadow at low resolution; at or under the shadow distance it is off.",
+            "min": 0,
+            "max": 8192
+        },
+        "farRefreshFrames": {
+            "label": "Far view redraw (frames)",
+            "description": "The far view is drawn again when the camera moves an eighth of it or the sun turns, and at least this often, for what streamed in.",
+            "min": 1,
+            "max": 1000
+        },
+        "localResolution": {
+            "label": "Local light shadow resolution",
+            "description": "Texels a side of each face of a point or spot light's shadow.",
+            "min": 64,
+            "max": 1024
+        },
+        "maxLocalLights": {
+            "label": "Shadowed local lights",
+            "description": "How many point and spot lights cast shadows at once, the most important first.",
+            "min": 0,
+            "max": 32
+        },
+        "atlasWidth": {
+            "label": "Atlas width (texels)",
+            "description": "Width of the shadow atlas. Must match what the pass creates in its file: change both there.",
+            "fixed": true
+        },
+        "atlasHeight": {
+            "label": "Atlas height (texels)",
+            "description": "Height of the shadow atlas. Must match what the pass creates in its file: change both there.",
+            "fixed": true
         }
     }
 }

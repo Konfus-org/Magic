@@ -17,9 +17,9 @@
             "components": {
                 "Sky": {
                     "color": {
-                        "x": 0.4,
-                        "y": 0.55,
-                        "z": 0.85
+                        "r": 0.4,
+                        "g": 0.55,
+                        "b": 0.85
                     }
                 }
             }
@@ -76,9 +76,9 @@
                 },
                 "DirectionalLight": {
                     "color": {
-                        "x": 1,
-                        "y": 0.96,
-                        "z": 0.9
+                        "r": 1,
+                        "g": 0.96,
+                        "b": 0.9
                     },
                     "intensity": 4,
                     "castsShadows": true

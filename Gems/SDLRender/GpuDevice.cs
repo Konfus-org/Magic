@@ -1,4 +1,3 @@
-using Magic.Contexts.Settings;
 using Magic.Interfaces;
 using Magic.Utils;
 using SDL3;
@@ -22,17 +21,18 @@ internal sealed class GpuDevice : IDisposable
     public const int FramesInFlight = 2;
 
     private readonly int _mainThread = Environment.CurrentManagedThreadId;
-    private readonly RenderSettings _settings;
+    private readonly GpuSettings _settings;
     private readonly Dictionary<uint, nint> _claimed = [];
     private readonly InFlight[] _slots = [new(), new()];
     private readonly List<(Kind Kind, nint Handle)> _released = []; // freed since the last submit
     private long _frameNumber;
     private bool _vsync;
 
-    public GpuDevice(RenderSettings settings, bool debug, IFileSystem files, string gemsDirectory)
+    public GpuDevice(GpuSettings settings, GpuBackend backend, bool debug, IFileSystem files, string gemsDirectory)
     {
         _settings = settings;
         _vsync = settings.Vsync;
+        Backend = backend;
 
         // DXIL is D3D12's, so Windows only. dxcompiler.dll loads dxil.dll by bare name and, without it, produces
         // unsigned DXIL that D3D12 rejects; the gem folder is not on the search path, so it is loaded by full path first.
@@ -54,8 +54,8 @@ internal sealed class GpuDevice : IDisposable
             SDL.SetBooleanProperty(props, SDL.Props.GPUDeviceCreateShadersSPIRVBoolean, true);
             SDL.SetBooleanProperty(props, SDL.Props.GPUDeviceCreateShadersDXILBoolean, OperatingSystem.IsWindows());
             SDL.SetBooleanProperty(props, SDL.Props.GPUDeviceCreateDebugModeBoolean, debug);
-            if (!string.IsNullOrEmpty(settings.Backend))
-                SDL.SetStringProperty(props, SDL.Props.GPUDeviceCreateNameString, settings.Backend);
+            if (backend != GpuBackend.Auto)
+                SDL.SetStringProperty(props, SDL.Props.GPUDeviceCreateNameString, backend == GpuBackend.Vulkan ? "vulkan" : "direct3d12");
             Handle = SDL.CreateGPUDeviceWithProperties(props);
         }
         finally
@@ -119,6 +119,11 @@ internal sealed class GpuDevice : IDisposable
     }
 
     public nint Handle { get; private set; }
+
+    /// <summary>
+    /// The backend asked for when it was made (<see cref="GpuBackend.Auto"/>: SDL's choice).
+    /// </summary>
+    public GpuBackend Backend { get; }
 
     public SDL.GPUShaderFormat ShaderFormat { get; }
 
@@ -294,7 +299,7 @@ internal sealed class GpuDevice : IDisposable
     /// Waits for the GPU and releases everything still deferred; the caller has released its own objects first.
     /// </summary>
     /// <summary>
-    /// <see cref="RenderSettings.Vsync"/> changed (the settings window): every claimed window's swapchain follows. Called
+    /// <see cref="GpuSettings.Vsync"/> changed (the settings window): every claimed window's swapchain follows. Called
     /// between frames, where SDL allows it.
     /// </summary>
     private void ChangeVsync()

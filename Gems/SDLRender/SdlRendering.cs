@@ -27,6 +27,40 @@ internal sealed class SdlRendering : IGem, IRendering
         AlphaBlendOp = SDL.GPUBlendOp.Add,
     };
 
+    private static readonly SDL.GPUColorTargetBlendState AddBlend = new()
+    {
+        EnableBlend = true,
+        SrcColorBlendFactor = SDL.GPUBlendFactor.One,
+        DstColorBlendFactor = SDL.GPUBlendFactor.One,
+        ColorBlendOp = SDL.GPUBlendOp.Add,
+        SrcAlphaBlendFactor = SDL.GPUBlendFactor.One,
+        DstAlphaBlendFactor = SDL.GPUBlendFactor.One,
+        AlphaBlendOp = SDL.GPUBlendOp.Add,
+    };
+
+    private static readonly SDL.GPUColorTargetBlendState CoverageBlend = new()
+    {
+        EnableBlend = true,
+        SrcColorBlendFactor = SDL.GPUBlendFactor.One,
+        DstColorBlendFactor = SDL.GPUBlendFactor.OneMinusSrcColor,
+        ColorBlendOp = SDL.GPUBlendOp.Add,
+        SrcAlphaBlendFactor = SDL.GPUBlendFactor.One,
+        DstAlphaBlendFactor = SDL.GPUBlendFactor.OneMinusSrcAlpha,
+        AlphaBlendOp = SDL.GPUBlendOp.Add,
+    };
+
+    private static readonly SDL.GPUColorTargetBlendState MaxBlend = new()
+    {
+        EnableBlend = true,
+        SrcColorBlendFactor = SDL.GPUBlendFactor.One,
+        DstColorBlendFactor = SDL.GPUBlendFactor.One,
+        ColorBlendOp = SDL.GPUBlendOp.Max,
+        SrcAlphaBlendFactor = SDL.GPUBlendFactor.One,
+        DstAlphaBlendFactor = SDL.GPUBlendFactor.One,
+        AlphaBlendOp = SDL.GPUBlendOp.Max,
+    };
+
+    private readonly GpuSettings _settings;
     private readonly Project _project;
     private readonly IFileSystem _files;
     private GpuDevice? _device;
@@ -38,9 +72,11 @@ internal sealed class SdlRendering : IGem, IRendering
     private readonly List<(GpuDevice.Kind Kind, uint Id)> _releasing = []; // released since the last submit
     private readonly Dictionary<uint, (nint Texture, uint Width, uint Height)> _swapchains = []; // this submit's images
     private readonly Dictionary<uint, GpuTexture> _presented = [];  // by window, the texture last blitted onto it
+    private GpuBackend? _failed; // a backend that would not start: not tried again until the setting changes
 
-    public SdlRendering(Project project, IFileSystem files)
+    public SdlRendering(GpuSettings settings, Project project, IFileSystem files)
     {
+        _settings = settings;
         _project = project;
         _files = files;
     }
@@ -50,17 +86,7 @@ internal sealed class SdlRendering : IGem, IRendering
         if (_device is null || _device.Handle == 0)
             return;
 
-        _device.WaitIdle();
-        foreach (nint buffer in _buffers.Live)
-            _device.Release(GpuDevice.Kind.Buffer, buffer);
-        foreach (TextureObject texture in _textures.Live)
-            _device.Release(GpuDevice.Kind.Texture, texture.Handle);
-        foreach (nint sampler in _samplers.Live)
-            _device.Release(GpuDevice.Kind.Sampler, sampler);
-        foreach (PipelineObject pipeline in _pipelines.Live)
-            _device.Release(pipeline.Compute ? GpuDevice.Kind.ComputePipeline : GpuDevice.Kind.GraphicsPipeline, pipeline.Handle);
-
-        _device.Dispose();
+        Destroy(_device);
     }
 
     public bool Debug { get; set; }
@@ -69,12 +95,14 @@ internal sealed class SdlRendering : IGem, IRendering
 
     public string ShaderFormat => Gpu.ShaderFormat.ToString();
 
+    public uint Generation { get; private set; }
+
     public GpuFormat DepthFormat => Gpu.DepthFormat.ToEngine();
 
     /// <summary>
     /// Made on first use, so it is made with whatever <see cref="Debug"/> Core set when it took this renderer.
     /// </summary>
-    private GpuDevice Gpu => _device ??= new GpuDevice(_project.Settings.Render, Debug, _files, _project.EngineGems);
+    private GpuDevice Gpu => _device ??= new GpuDevice(_settings, _settings.Backend, Debug, _files, _project.EngineGems);
 
     public GpuBuffer CreateBuffer(GpuBufferUsage usage, uint bytes)
     {
@@ -165,7 +193,7 @@ internal sealed class SdlRendering : IGem, IRendering
             bool depth = desc.Depth != GpuFormat.Invalid;
             SDL.GPUColorTargetDescription[] targets = new SDL.GPUColorTargetDescription[desc.Colors.Length];
             for (int i = 0; i < targets.Length; i++)
-                targets[i] = new SDL.GPUColorTargetDescription { Format = desc.Colors[i].ToSdl(), BlendState = desc.AlphaBlend ? AlphaBlend : default };
+                targets[i] = new SDL.GPUColorTargetDescription { Format = desc.Colors[i].ToSdl(), BlendState = BlendStateOf(i < desc.Blends.Length ? desc.Blends[i] : GpuBlend.None) };
             SDL.GPUGraphicsPipelineCreateInfo info = new()
             {
                 VertexShader = vertex,
@@ -299,6 +327,16 @@ internal sealed class SdlRendering : IGem, IRendering
     public float Submit(RenderCommands commands)
     {
         Gpu.AssertMainThread();
+        if (_failed is { } failed && failed != _settings.Backend)
+            _failed = null;
+
+        // Another backend was chosen: the device is made again, and this frame, recorded with the old one's objects, is dropped.
+        if (_device is { } device && device.Backend != _settings.Backend && _failed is null)
+        {
+            Switch(device);
+            commands.Clear();
+            return 0f;
+        }
         if (commands.Count == 0 && _transfers.Count == 0)
         {
             FreeReleased();
@@ -683,6 +721,18 @@ internal sealed class SdlRendering : IGem, IRendering
     /// <summary>
     /// A depth target loaded or cleared to 0 (reverse-Z: infinitely far), with no stencil.
     /// </summary>
+    private static SDL.GPUColorTargetBlendState BlendStateOf(GpuBlend blend)
+    {
+        return blend switch
+        {
+            GpuBlend.Alpha => AlphaBlend,
+            GpuBlend.Add => AddBlend,
+            GpuBlend.Coverage => CoverageBlend,
+            GpuBlend.Max => MaxBlend,
+            _ => default,
+        };
+    }
+
     private static SDL.GPUDepthStencilTargetInfo DepthTarget(nint texture, SDL.GPULoadOp load)
     {
         return new SDL.GPUDepthStencilTargetInfo
@@ -725,6 +775,59 @@ internal sealed class SdlRendering : IGem, IRendering
 
         _swapchains[id] = acquired;
         return acquired;
+    }
+
+    /// <summary>
+    /// Makes the device again with the backend the settings ask for, or, when that one will not start, with the one it
+    /// had. Every GPU object goes with the old device and no id is used again, so whoever releases an old one releases
+    /// nothing; <see cref="Generation"/> moves on, which tells them to make theirs again.
+    /// </summary>
+    private void Switch(GpuDevice device)
+    {
+        GpuBackend previous = device.Backend;
+        GpuBackend wanted = _settings.Backend;
+        Destroy(device);
+        _device = null;
+        _buffers.Clear();
+        _textures.Clear();
+        _samplers.Clear();
+        _pipelines.Clear();
+        _transfers.Clear();
+        _releasing.Clear();
+        _swapchains.Clear();
+        _presented.Clear();
+
+        try
+        {
+            _device = new GpuDevice(_settings, wanted, Debug, _files, _project.EngineGems);
+            Debugging.Log.Info($"GPU device made again: {previous} to {wanted} ({_device.Name}, {_device.ShaderFormat}).", onScreen: true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Debugging.Log.Error($"The {wanted} backend would not start, so {previous} is kept: {ex.Message}", onScreen: true);
+            _failed = wanted;
+            _device = new GpuDevice(_settings, previous, Debug, _files, _project.EngineGems);
+        }
+
+        Generation++;
+    }
+
+    /// <summary>
+    /// Releases every object the handle tables hold, then the device.
+    /// </summary>
+    private void Destroy(GpuDevice device)
+    {
+        device.WaitIdle();
+        foreach (nint buffer in _buffers.Live)
+            device.Release(GpuDevice.Kind.Buffer, buffer);
+        foreach (TextureObject texture in _textures.Live)
+            device.Release(GpuDevice.Kind.Texture, texture.Handle);
+        foreach (nint sampler in _samplers.Live)
+            device.Release(GpuDevice.Kind.Sampler, sampler);
+        foreach (PipelineObject pipeline in _pipelines.Live)
+            device.Release(pipeline.Compute ? GpuDevice.Kind.ComputePipeline : GpuDevice.Kind.GraphicsPipeline, pipeline.Handle);
+
+        device.Dispose();
     }
 
     /// <summary>
@@ -799,6 +902,20 @@ internal sealed class HandleTable<T> where T : struct
         _items.Add(item);
         _alive.Add(true);
         return (uint)(_items.Count - 1);
+    }
+
+    /// <summary>
+    /// Forgets every id without handing any out again: one held from before reads and frees as nothing.
+    /// </summary>
+    public void Clear()
+    {
+        for (int i = 0; i < _items.Count; i++)
+        {
+            _items[i] = default;
+            _alive[i] = false;
+        }
+
+        _free.Clear();
     }
 
     /// <summary>

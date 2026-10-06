@@ -1,7 +1,9 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
+using Magic.UnitTests.Fakes;
 using Magic.Utils;
 using Xunit;
 
@@ -37,7 +39,7 @@ public sealed class AssetLodsTests : IDisposable
         Write("M.mat", "{}", """{ "id": 80 }""");
         using Services.Assets assets = Open();
 
-        (float, Handle<Material>)[] lods = assets.Lods(Mat);
+        Lod[] lods = assets.Lods(Mat).Levels;
 
         Assert.Empty(lods);
     }
@@ -48,9 +50,9 @@ public sealed class AssetLodsTests : IDisposable
         Write("M.mat", "{}", """{ "id": 80, "lods": { "0.5": 81 } }""");
         using Services.Assets assets = Open();
 
-        (float, Handle<Material>)[] lods = assets.Lods(Mat);
+        Lod[] lods = assets.Lods(Mat).Levels;
 
-        Assert.Equal([(0.5f, new Handle<Material>(81))], lods);
+        Assert.Equal([(0.5f, 81UL)], lods.Select(lod => (lod.Threshold, lod.Asset)));
     }
 
     [Fact]
@@ -59,7 +61,7 @@ public sealed class AssetLodsTests : IDisposable
         Write("M.mat", "{}", """{ "id": 80, "lods": { "0.1": 82, "0.5": 81 } }""");
         using Services.Assets assets = Open();
 
-        (float Threshold, Handle<Material>)[] lods = assets.Lods(Mat);
+        Lod[] lods = assets.Lods(Mat).Levels;
 
         Assert.Equal([0.5f, 0.1f], lods.Select(lod => lod.Threshold));
     }
@@ -84,7 +86,7 @@ public sealed class AssetLodsTests : IDisposable
         _container.Add<ILODGenerator<Material>>(new TwoMaterials());
         using Services.Assets assets = Open();
 
-        (float Threshold, Handle<Material>)[] lods = assets.Lods(Mat);
+        Lod[] lods = assets.Lods(Mat).Levels;
 
         Assert.Equal([0.5f, 0.1f], lods.Select(lod => lod.Threshold));
     }
@@ -96,7 +98,7 @@ public sealed class AssetLodsTests : IDisposable
         _container.Add<ILODGenerator<Material>>(new TwoMaterials());
         using Services.Assets assets = Open();
 
-        Material? lod = assets.Load(assets.Lods(Mat)[0].Asset);
+        Material? lod = assets.Load(new Handle<Material>(assets.Lods(Mat).Levels[0].Asset));
 
         Assert.True(lod?.DoubleSided);
     }
@@ -108,7 +110,7 @@ public sealed class AssetLodsTests : IDisposable
         _container.Add<ILODGenerator<Material>>(new TwoMaterials());
         using Services.Assets assets = Open();
 
-        (float, Handle<Material>)[] lods = assets.Lods(assets.Lods(Mat)[0].Asset);
+        Lod[] lods = assets.Lods(new Handle<Material>(assets.Lods(Mat).Levels[0].Asset)).Levels;
 
         Assert.Empty(lods);
     }
@@ -133,14 +135,14 @@ public sealed class AssetLodsTests : IDisposable
     {
         Write("M.mat", "{}", """{ "id": 80 }""");
         _container.Add<ILODGenerator<Material>>(new TwoMaterials());
-        (float, Handle<Material>)[] made;
+        Lod[] made;
         using (Services.Assets first = Open())
-            made = first.Lods(Mat);
+            made = first.Lods(Mat).Levels;
 
         using Services.Assets second = Open();
-        (float, Handle<Material>)[] found = second.Lods(Mat);
+        Lod[] found = second.Lods(Mat).Levels;
 
-        Assert.Equal(made, found);
+        Assert.Equal(made.Select(lod => (lod.Threshold, lod.Asset)), found.Select(lod => (lod.Threshold, lod.Asset)));
     }
 
     [Fact]
@@ -258,7 +260,7 @@ public sealed class AssetLodsTests : IDisposable
         _container.Add<ILODGenerator<Material>>(new Failing());
         using Services.Assets assets = Open();
 
-        (float, Handle<Material>)[] lods = assets.Lods(Mat);
+        Lod[] lods = assets.Lods(Mat).Levels;
 
         Assert.Empty(lods);
     }
@@ -292,7 +294,7 @@ public sealed class AssetLodsTests : IDisposable
         await cancel.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => finding);
 
-        (float, Handle<Material>)[] lods = await assets.LodsAsync(Mat);
+        Lod[] lods = (await assets.LodsAsync(Mat)).Levels;
 
         Assert.Single(lods);
     }
@@ -312,7 +314,9 @@ public sealed class AssetLodsTests : IDisposable
 
     private Services.Assets Open()
     {
-        return new Services.Assets(_project, new FileSystem(), new Events(), _container, new Threads());
+        Services.Assets assets = new(_project, new FileSystem(), new Events(), _container, new Threads());
+        LoadedTypes.Into(assets); // the asset types, which a LOD manifest names
+        return assets;
     }
 
     private void Write(string file, string content, string meta)
@@ -330,7 +334,7 @@ public sealed class AssetLodsTests : IDisposable
 
         public int Version => 1;
 
-        public async Task<Result<Dictionary<float, string>>> GenerateAsync(Material asset, string folder, IProgress<float>? progress, CancellationToken cancel)
+        public async Task<Result<Lods>> GenerateAsync(Material asset, string folder, IProgress<float>? progress, CancellationToken cancel)
         {
             Calls++;
             progress?.Report(0.5f);
@@ -338,7 +342,7 @@ public sealed class AssetLodsTests : IDisposable
             await File.WriteAllTextAsync(Path.Combine(folder, "half.mat"), """{ "doubleSided": true }""", cancel);
             await File.WriteAllTextAsync(Path.Combine(folder, "tenth.mat"), """{ "doubleSided": true }""", cancel);
 
-            return Result<Dictionary<float, string>>.Success(new() { [0.1f] = "tenth.mat", [0.5f] = "half.mat" });
+            return Result<Lods>.Success(new Lods([new Lod(0.5f, Lods.IdOf(folder, "half.mat"), []), new Lod(0.1f, Lods.IdOf(folder, "tenth.mat"), [])]));
         }
     }
 
@@ -353,7 +357,7 @@ public sealed class AssetLodsTests : IDisposable
 
         public int Version => 1;
 
-        public async Task<Result<Dictionary<float, string>>> GenerateAsync(Material asset, string folder, IProgress<float>? progress, CancellationToken cancel)
+        public async Task<Result<Lods>> GenerateAsync(Material asset, string folder, IProgress<float>? progress, CancellationToken cancel)
         {
             Calls++;
             if (Assets is not null)
@@ -362,7 +366,7 @@ public sealed class AssetLodsTests : IDisposable
             Directory.CreateDirectory(folder);
             await File.WriteAllTextAsync(Path.Combine(folder, "half.mat"), "{}", cancel);
 
-            return Result<Dictionary<float, string>>.Success(new() { [0.5f] = "half.mat" });
+            return Result<Lods>.Success(new Lods([new Lod(0.5f, Lods.IdOf(folder, "half.mat"), [])]));
         }
     }
 
@@ -381,7 +385,7 @@ public sealed class AssetLodsTests : IDisposable
 
         public int Version => 1;
 
-        public async Task<Result<Dictionary<float, string>>> GenerateAsync(Material asset, string folder, IProgress<float>? progress, CancellationToken cancel)
+        public async Task<Result<Lods>> GenerateAsync(Material asset, string folder, IProgress<float>? progress, CancellationToken cancel)
         {
             if (Interlocked.Increment(ref _calls) == 1)
             {
@@ -392,7 +396,7 @@ public sealed class AssetLodsTests : IDisposable
             Directory.CreateDirectory(folder);
             await File.WriteAllTextAsync(Path.Combine(folder, "half.mat"), "{}", cancel);
 
-            return Result<Dictionary<float, string>>.Success(new() { [0.5f] = "half.mat" });
+            return Result<Lods>.Success(new Lods([new Lod(0.5f, Lods.IdOf(folder, "half.mat"), [])]));
         }
     }
 
@@ -400,9 +404,9 @@ public sealed class AssetLodsTests : IDisposable
     {
         public int Version => 1;
 
-        public Task<Result<Dictionary<float, string>>> GenerateAsync(Material asset, string folder, IProgress<float>? progress, CancellationToken cancel)
+        public Task<Result<Lods>> GenerateAsync(Material asset, string folder, IProgress<float>? progress, CancellationToken cancel)
         {
-            return Task.FromResult(Result<Dictionary<float, string>>.Failure("on purpose"));
+            return Task.FromResult(Result<Lods>.Failure("on purpose"));
         }
     }
 

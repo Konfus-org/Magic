@@ -69,9 +69,9 @@
                 },
                 "DirectionalLight": {
                     "color": {
-                        "x": 0.6,
-                        "y": 0.7,
-                        "z": 1
+                        "r": 0.6,
+                        "g": 0.7,
+                        "b": 1
                     },
                     "intensity": 0.15
                 }

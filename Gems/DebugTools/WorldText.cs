@@ -1,12 +1,12 @@
 ﻿using Magic.Contexts;
 using Magic.Attributes.Scripts;
 using Magic.Contexts.Components;
-using Magic.Contexts.Settings;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Utils;
 using System.Drawing;
 using System.Numerics;
+using Magic.Contexts.Debug;
 
 namespace DebugToolsGem;
 
@@ -22,7 +22,6 @@ namespace DebugToolsGem;
 internal sealed class WorldText : ISystem
 {
     private readonly IWindowRegistry? _windows;
-    private readonly RenderSettings _settings;
     private readonly IEcsQuery<Camera, WorldTransform> _cameras;
     private readonly QueryChunkAction<Camera, WorldTransform> _collectViews;
     private readonly List<View> _views = [];
@@ -30,10 +29,9 @@ internal sealed class WorldText : ISystem
     private Size _window;
     private uint _main;
 
-    public WorldText(IEcs ecs, IWindowRegistry? windows, RenderSettings settings)
+    public WorldText(IEcs ecs, IWindowRegistry? windows)
     {
         _windows = windows;
-        _settings = settings;
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
         _collectViews = CollectViews;
     }
@@ -70,21 +68,19 @@ internal sealed class WorldText : ISystem
 
     /// <summary>
     /// The views of the cameras that draw into the main window: each one's rectangle in the window's pixels and its
-    /// view-projection. The scene may be drawn at another resolution and stretched over the window, so the shape of
-    /// the view is taken from that resolution and its place from the window.
+    /// view-projection. The scene may be drawn at a share of the window's size and stretched over it, which keeps its
+    /// shape, so both come from the window.
     /// </summary>
     private void CollectViews(ReadOnlySpan<Handle> entities, Span<Camera> cameras, Span<WorldTransform> worlds)
     {
-        Size drawn = _settings.Resolution is { Width: > 0, Height: > 0 } resolution ? resolution : _window;
         for (int i = 0; i < cameras.Length; i++)
         {
             RenderTarget target = cameras[i].Target;
             if (target.IsTexture || (target.Window != 0 && target.Window != _main))
                 continue;
 
-            Rectangle shape = cameras[i].Viewport.ToPixels(drawn.Width, drawn.Height);
             Rectangle place = cameras[i].Viewport.ToPixels(_window.Width, _window.Height);
-            float aspect = shape.Height > 0 ? (float)shape.Width / shape.Height : 1f;
+            float aspect = place.Height > 0 ? (float)place.Width / place.Height : 1f;
             Matrix4x4 world = worlds[i].Value;
             _views.Add(new View(cameras[i].ViewProjection(world, aspect), world.Translation, place));
         }

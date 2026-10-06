@@ -56,11 +56,30 @@
             "x": 8
         },
         "facesPerFrame": {
-            "x": 4
+            "x": 8
         },
         "visibleSlots": {
-            "x": 10
+            "x": 24
         }
     },
-    "needs": "$shadowCasters"
+    "needs": "$shadowCasters",
+    "tuning": {
+        "maxLocalLights": {
+            "label": "Shadowed local lights",
+            "description": "How many point and spot lights cast shadows at once, the most important first.",
+            "min": 0,
+            "max": 32
+        },
+        "facesPerFrame": {
+            "label": "Faces redrawn per frame",
+            "description": "Local light shadow faces redrawn each frame, the oldest first; a new light draws all of its faces at once.",
+            "min": 1,
+            "max": 24
+        },
+        "visibleSlots": {
+            "label": "Draw slots",
+            "description": "Shadow views drawn in one frame. Must match what the pass creates in its file: change both there.",
+            "fixed": true
+        }
+    }
 }

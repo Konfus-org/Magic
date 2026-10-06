@@ -106,7 +106,7 @@ public sealed class OptionsTests
 
     [Theory]
     [InlineData("Vsync=false")]  // no section
-    [InlineData("Render.Vsync")] // no value
+    [InlineData("Gpu.Vsync")]   // no value
     public void A_malformed_set_is_refused(string set)
     {
         Options options = Runnable();
@@ -121,7 +121,7 @@ public sealed class OptionsTests
     public void A_section_key_and_value_set_is_accepted()
     {
         Options options = Runnable();
-        options.Set = ["Render.Vsync=false"];
+        options.Set = ["Gpu.Vsync=false"];
 
         string? error = options.Validate();
 

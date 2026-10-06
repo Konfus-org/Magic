@@ -27,5 +27,11 @@ GBufferOutput main(MeshVaryings input, bool isFrontFace : SV_IsFrontFace)
     stored.roughness = surface.roughness;
     stored.metallic = surface.metallic;
     stored.occlusion = surface.occlusion;
+
+    // The level of detail debug view: the level the instance is drawn at, as what it emits (the lighting shows it).
+    static const float3 LevelTints[5] = { float3(0.9, 0.9, 0.9), float3(0.2, 0.9, 0.2), float3(0.95, 0.9, 0.2), float3(1.0, 0.5, 0.1), float3(1.0, 0.15, 0.15) };
+    [branch] if (FrameDebugView() == DebugViewLevelOfDetail)
+        stored.emissive = LevelTints[min(input.flags >> GpuVisibleLevelShift, 4u)];
+
     return EncodeGBuffer(stored);
 }

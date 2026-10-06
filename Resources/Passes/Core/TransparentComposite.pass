@@ -1,0 +1,29 @@
+{
+    "kind": "compute",
+    "shader": {
+        "id": 10072
+    },
+    "needs": "$transparentChunks",
+    "reads": [
+        {
+            "name": "SceneColor",
+            "filter": "nearest"
+        },
+        {
+            "name": "TransparentAccum",
+            "filter": "nearest"
+        },
+        {
+            "name": "TransparentCoverage",
+            "filter": "nearest"
+        }
+    ],
+    "writes": [
+        {
+            "name": "Hdr"
+        }
+    ],
+    "dispatch": {
+        "per": "view"
+    }
+}

@@ -492,16 +492,19 @@ internal sealed class Buckets
     /// </summary>
     public void SetLods(uint group, ReadOnlySpan<(float Threshold, uint Group)> lods)
     {
-        GpuLodRow row = new() { Count = (uint)Math.Min(lods.Length, GpuLodRow.Capacity) };
-        if (row.Count > 0)
-            (row.Thresholds.X, row.Group1) = lods[0];
-        if (row.Count > 1)
-            (row.Thresholds.Y, row.Group2) = lods[1];
-        if (row.Count > 2)
-            (row.Thresholds.Z, row.Group3) = lods[2];
+        Span<float> thresholds = stackalloc float[GpuLodRow.Capacity];
+        Span<uint> groups = stackalloc uint[GpuLodRow.Capacity];
+        for (int i = 0; i < Math.Min(lods.Length, GpuLodRow.Capacity); i++)
+            (thresholds[i], groups[i]) = lods[i];
+
+        GpuLodRow row = new()
+        {
+            Thresholds = new Vector4(thresholds[0], thresholds[1], thresholds[2], thresholds[3]),
+            Groups = new UintVector4(groups[0], groups[1], groups[2], groups[3]),
+        };
 
         ref GpuLodRow current = ref _lods[group];
-        if (current.Count == row.Count && current.Thresholds == row.Thresholds && current.Group1 == row.Group1 && current.Group2 == row.Group2 && current.Group3 == row.Group3)
+        if (current.Thresholds == row.Thresholds && current.Groups == row.Groups)
             return;
 
         current = row;

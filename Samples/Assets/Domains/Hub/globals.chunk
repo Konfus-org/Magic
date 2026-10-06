@@ -30,7 +30,7 @@
                     "scale": { "x": 1, "y": 1, "z": 1 }
                 },
                 "DirectionalLight": {
-                    "color": { "x": 0.6, "y": 0.7, "z": 1 },
+                    "color": { "r": 0.6, "g": 0.7, "b": 1 },
                     "intensity": 0.25
                 }
             }

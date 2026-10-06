@@ -20,11 +20,19 @@ internal static class Pipelines
     public const string Template = "Templates/GBuffer.frag.hlsl";
 
     /// <summary>
-    /// The template a transparent class is composed around: lit as it is drawn, blended over Hdr.
+    /// The template a transparent class is composed around: lit as it is drawn, added into the weighted
+    /// transparency targets that the transparency stage composites over Hdr.
     /// </summary>
     public const string ForwardTemplate = "Templates/Forward.frag.hlsl";
     public const string VertexTemplate = "Templates/Mesh.vert.hlsl";
     private const string Contract = "Include/Surface.hlsli";
+
+    /// <summary>
+    /// A transparent class's targets (Resources/Passes/Core/TransparentPrepare.pass makes them): the weighted colour
+    /// and weight, summed; the coverage, built up; the nearest depth, kept (refractive layers).
+    /// </summary>
+    private static readonly GpuFormat[] TransparentColors = [GpuFormat.Rgba16Float, GpuFormat.R16Float, GpuFormat.R32Float];
+    private static readonly GpuBlend[] TransparentBlends = [GpuBlend.Add, GpuBlend.Coverage, GpuBlend.Max];
 
     // The fixed 48-byte vertex in slot 0 plus the instance slot and its LOD fade (GpuVisible) from an instance-rate buffer
     // in slot 1: the index is never taken from SV_InstanceID, whose relation to first_instance differs between backends.
@@ -154,13 +162,13 @@ internal static class Pipelines
         try
         {
             bool transparent = cls.Variant.HasFlag(SurfaceVariant.Transparent);
-            PipelineDesc desc = new(table.VertexShader, result.Payload, transparent ? [FrameTargets.HdrFormat] : table.ColorFormats)
+            PipelineDesc desc = new(table.VertexShader, result.Payload, transparent ? TransparentColors : table.ColorFormats)
             {
                 Buffers = VertexBuffers,
                 Attributes = VertexAttributes,
                 Depth = table.DepthFormat,
-                Cull = cls.Variant.HasFlag(SurfaceVariant.DoubleSided) ? GpuCull.None : GpuCull.Back,
-                AlphaBlend = transparent,
+                Cull = cls.Variant.HasFlag(SurfaceVariant.DoubleSided) || cls.Variant.HasFlag(SurfaceVariant.Impostor) ? GpuCull.None : GpuCull.Back,
+                Blends = transparent ? TransparentBlends : [],
                 DepthWrite = !transparent,
             };
             GpuPipeline pipeline = ctx.Gpu.CreatePipeline(desc);
@@ -206,6 +214,7 @@ internal static class Pipelines
         sb.Append("#define SURFACE_MASKED ").Append(variant.HasFlag(SurfaceVariant.Masked) ? '1' : '0').Append('\n');
         sb.Append("#define SURFACE_DOUBLE_SIDED ").Append(variant.HasFlag(SurfaceVariant.DoubleSided) ? '1' : '0').Append('\n');
         sb.Append("#define SURFACE_FORWARD ").Append(variant.HasFlag(SurfaceVariant.Transparent) ? '1' : '0').Append('\n');
+        sb.Append("#define SURFACE_IMPOSTOR ").Append(variant.HasFlag(SurfaceVariant.Impostor) ? '1' : '0').Append('\n');
         if (variant.HasFlag(SurfaceVariant.FailureForced))
             sb.Append("#define FAILURE_FORCE 1\n");
         sb.Append("#include \"Include/Surface.hlsli\"\n");

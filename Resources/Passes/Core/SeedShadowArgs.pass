@@ -10,7 +10,7 @@
             "per": "$groupCount",
             "stride": 20,
             "min": 1280,
-            "slots": 10,
+            "slots": 24,
             "usage": "indirect"
         },
         {
@@ -18,7 +18,7 @@
             "kind": "buffer",
             "per": "$visibleHighWater",
             "stride": 8,
-            "slots": 10,
+            "slots": 24,
             "usage": "vertex"
         }
     ],

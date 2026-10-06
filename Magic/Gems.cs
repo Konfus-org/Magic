@@ -1,6 +1,6 @@
-using Magic.Contexts;
 using Magic.Contexts.Events;
 using Magic.Contexts.Files;
+using Magic.Contexts.Threading;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
@@ -18,7 +18,7 @@ namespace Magic;
 /// <para>A gem is one dll holding one class that implements <see cref="IGem"/>. Its name is the assembly name; the
 /// gem's csproj stamps whether it is static and which gems it depends on into the assembly
 /// (<c>GemStatic</c>, <c>GemDependsOn</c>, see Directory.Build.props). The class is constructed once, its constructor
-/// parameters taken from the <see cref="Container"/>, and put in the container under every Core interface it
+/// parameters taken from the <see cref="IServices"/>, and added to them under every Core interface it
 /// implements. What its constructor needs is what it depends on: gems load after whatever provides that, and unload
 /// before it. A static gem is never unloaded before shutdown, and neither is anything it depends on, nor a gem that
 /// provides a service the frame loop keeps (<see cref="CoreServices"/>): a change to one is warned about and needs a
@@ -43,7 +43,7 @@ namespace Magic;
 /// settled change over to that thread and waits for it, and <see cref="Dispose"/> on the way out. The folder
 /// watchers only queue changes.
 /// </summary>
-internal sealed class Gems(Container container, IFileSystem files, Events events, Threads threads) : IDisposable
+internal sealed class Gems(IServices services, IFileSystem files, Events events, Threads threads) : IDisposable
 {
     /// <summary>
     /// The list entry that stands for every gem in the engine folder.
@@ -72,6 +72,81 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// Every loaded gem, in load order (dependencies first): the order the frame loop calls them in.
     /// </summary>
     public IGem[] Loaded { get; private set; } = [];
+
+    /// <summary>
+    /// The types of <paramref name="assembly"/>, as many as load: one that names a missing dependency is left out.
+    /// </summary>
+    internal static Type[] TypesOf(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return [.. ex.Types.OfType<Type>()];
+        }
+    }
+
+    /// <summary>
+    /// Hands each of <paramref name="types"/> to every registrar in <paramref name="services"/> that takes its kind
+    /// (<see cref="IRegisterFromGem"/>), and adds what each hands back to the services under the type. Returns what was
+    /// registered, for <see cref="Unregister"/>. A registrar that throws is logged and the rest go on.
+    /// </summary>
+    internal static List<Registration> Register(IServices services, IReadOnlyCollection<Type> types)
+    {
+        List<Registration> registered = [];
+        foreach (IRegisterFromGem registrar in services.All<IRegisterFromGem>())
+        {
+            foreach (Type type in types.Where(type => Takes(registrar.Of, type)))
+            {
+                try
+                {
+                    object? instance = registrar.Register(type);
+                    if (instance is not null)
+                        services.Add(type, instance);
+
+                    registered.Add(new Registration(registrar, type, instance));
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    Debugging.Log.Warn($"Registering {type.FullName} with {registrar.GetType().Name} failed: {ex.Message}");
+                }
+            }
+        }
+
+        return registered;
+    }
+
+    /// <summary>
+    /// Undoes <see cref="Register"/>, last first: the instances leave the services and each registrar forgets its types.
+    /// </summary>
+    internal static void Unregister(IServices services, List<Registration> registered)
+    {
+        for (int i = registered.Count - 1; i >= 0; i--)
+        {
+            (IRegisterFromGem registrar, Type type, object? instance) = registered[i];
+            if (instance is not null)
+                services.Remove(type, instance);
+
+            registrar.Unregister(type);
+        }
+
+        registered.Clear();
+    }
+
+    /// <summary>
+    /// Whether a registrar of <paramref name="of"/> takes <paramref name="type"/>: a concrete, non-generic type that
+    /// carries <paramref name="of"/> (an attribute) or is assignable to it (a class or interface).
+    /// </summary>
+    private static bool Takes(Type of, Type type)
+    {
+        if (type.IsAbstract || type.IsInterface || type.ContainsGenericParameters)
+            return false;
+
+        return typeof(Attribute).IsAssignableFrom(of) ? type.IsDefined(of, false) : of.IsAssignableFrom(type);
+    }
+
 
     public void Dispose()
     {
@@ -228,7 +303,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         {
             IEnumerable<Gem> ready = pending
                 .OrderBy(candidate => candidate.Provides.Contains(typeof(ILogger)) ? 0 : 1).ThenBy(candidate => candidate.Name)
-                .Where(candidate => candidate.Requires.All(container.Has) && candidate.DependsOn.All(dependency => Find(dependency) is not null));
+                .Where(candidate => candidate.Requires.All(services.Has) && candidate.DependsOn.All(dependency => Find(dependency) is not null));
             Gem? next = ready.FirstOrDefault(candidate => !pending.Any(other => other != candidate && other.Provides.Overlaps(candidate.Optional)))
                 ?? ready.FirstOrDefault();
             if (next is null)
@@ -252,7 +327,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         // Whatever is left needs something nobody provides, or sits in a dependency cycle.
         foreach (Gem gem in pending)
         {
-            string missing = gem.Requires.FirstOrDefault(required => !container.Has(required)) is { } type
+            string missing = gem.Requires.FirstOrDefault(required => !services.Has(required)) is { } type
                 ? $"nothing provides {type}"
                 : $"gem {gem.DependsOn.First(dependency => Find(dependency) is null)} is not loaded";
             Debugging.Log.Warn($"Skipping gem {gem.Name} ({gem.Path}): {missing}.");
@@ -282,23 +357,14 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         try
         {
             Assembly assembly = context.LoadGem();
-            Type[] types;
-            try
-            {
-                types = assembly.GetTypes();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                types = [.. ex.Types.OfType<Type>()];
-            }
-
+            Type[] types = TypesOf(assembly);
             Type[] gemTypes = [.. types.Where(candidate => typeof(IGem).IsAssignableFrom(candidate) && !candidate.IsAbstract && !candidate.IsInterface)];
             if (gemTypes.Length == 0)
             {
                 // A project's scripts stay loaded with nothing to construct; anything else is a helper library that
                 // happens to reference the host.
                 if (types.Any(candidate => typeof(IScript).IsAssignableFrom(candidate) && !candidate.IsAbstract && !candidate.IsInterface))
-                    return new Gem(context, assembly, null);
+                    return new Gem(context, assembly, types, null);
 
                 context.Unload();
                 return null;
@@ -314,7 +380,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
                 return null;
             }
 
-            return new Gem(context, assembly, gemTypes[0]);
+            return new Gem(context, assembly, types, gemTypes[0]);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -330,12 +396,15 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     /// </summary>
     private bool Construct(Gem gem, byte[]? state)
     {
+        // Its types first: the gem's constructor, and any gem after it, may ask for what they register (its settings).
+        gem.Registered.AddRange(Register(services, gem.Types));
+
         if (gem.Type is null)
             return true;
 
         try
         {
-            gem.Instance = (IGem)gem.Type.Create(container);
+            gem.Instance = (IGem)gem.Type.Create(services);
 
             // Core decides when rendering debugs, before a gem constructed after this one can reach the renderer.
 #if DEBUG
@@ -344,7 +413,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
 #endif
 
             foreach (Type contract in gem.Provides)
-                container.Add(contract, gem.Instance);
+                services.Add(contract, gem.Instance);
 
             // Loggers and debug UIs are also driven through Debugging, which fans every call out to all of them.
             if (gem.Instance is ILogger logger)
@@ -457,27 +526,34 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     }
 
     /// <summary>
-    /// Takes the gem out of the container and Debugging and disposes it; a logger is flushed before it goes.
+    /// Takes the gem out of the container and Debugging and disposes it, a logger flushed before it goes, then
+    /// unregisters its types.
     /// </summary>
     private void Teardown(Gem gem)
     {
-        if (gem.Instance is null)
-            return;
+        if (gem.Instance is not null)
+            Dispose(gem, gem.Instance);
 
-        container.Remove(gem.Instance);
+        Unregister(services, gem.Registered);
+    }
 
-        if (gem.Instance is ILogger logger)
+    private void Dispose(Gem gem, IGem instance)
+    {
+        foreach (Type contract in gem.Provides)
+            services.Remove(contract, instance);
+
+        if (instance is ILogger logger)
         {
             Debugging.Log.Flush();
             Debugging.Log.Unregister(logger);
         }
 
-        if (gem.Instance is IDebugUI ui)
+        if (instance is IDebugUI ui)
             Debugging.UI.Unregister(ui);
 
         try
         {
-            gem.Instance.Dispose();
+            instance.Dispose();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -500,7 +576,7 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
             grew = false;
             foreach (Gem other in _gems)
             {
-                if (!group.Contains(other) && group.Any(member => member.Provides.Overlaps(other.Requires) || member.Provides.Overlaps(other.Optional) || other.DependsOn.Contains(member.Name)))
+                if (!group.Contains(other) && group.Any(member => member.Provides.Overlaps(other.Requires) || member.Provides.Overlaps(other.Optional) || member.Types.Overlaps(other.Requires) || other.DependsOn.Contains(member.Name)))
                     grew |= group.Add(other);
             }
         }
@@ -552,20 +628,27 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
     }
 
     /// <summary>
+    /// One type handed to one registrar, and what it handed back for the container.
+    /// </summary>
+    internal readonly record struct Registration(IRegisterFromGem Registrar, Type Type, object? Instance);
+
+    /// <summary>
     /// A gem: what its assembly declares, read before construction, and the instance once built. A project's scripts
     /// are one without a <see cref="Type"/>: an assembly kept loaded, with no instance.
     /// </summary>
     private sealed class Gem
     {
-        public Gem(GemLoadContext context, Assembly assembly, Type? type)
+        public Gem(GemLoadContext context, Assembly assembly, Type[] types, Type? type)
         {
             Context = context;
+            Assembly = assembly;
             Type = type;
             Name = assembly.GetName().Name ?? "?";
             Version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "?";
             IsStatic = bool.TryParse(Metadata(assembly, "MagicGem.Static"), out bool isStatic) && isStatic;
             DependsOn = Metadata(assembly, "MagicGem.DependsOn")?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? [];
             Provides = [.. type?.GetInterfaces().Where(i => i.Assembly == Host && i != typeof(IGem)) ?? []];
+            Types = [.. types];
             Requires = [];
             Optional = [];
 
@@ -576,12 +659,14 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
                     Optional.Add(element); // every provider, so none is required, but each loads first
                 else if (Magic.Extensions.TypeExtensions.IsOptional(nullability, parameter))
                     Optional.Add(parameter.ParameterType);
-                else
+                else if (parameter.ParameterType.Assembly != assembly) // its own types are registered before it is constructed
                     Requires.Add(parameter.ParameterType);
             }
         }
 
         public GemLoadContext Context { get; }
+
+        public Assembly Assembly { get; }
 
         /// <summary>
         /// The gem's class; null for a project's scripts.
@@ -607,7 +692,18 @@ internal sealed class Gems(Container container, IFileSystem files, Events events
         public HashSet<Type> Provides { get; }
 
         /// <summary>
-        /// Its constructor's parameter types that must be there: host services or other gems' interfaces.
+        /// Every type of its assembly: registered before it is constructed (<see cref="IRegisterFromGem{T}"/>), so a gem
+        /// that asks for one (its settings) loads after it and unloads before it.
+        /// </summary>
+        public HashSet<Type> Types { get; }
+
+        /// <summary>
+        /// What its types were registered as, to unregister when it goes.
+        /// </summary>
+        public List<Registration> Registered { get; } = [];
+
+        /// <summary>
+        /// Its constructor's parameter types that must be there: host services, other gems' interfaces and settings.
         /// </summary>
         public HashSet<Type> Requires { get; }
 

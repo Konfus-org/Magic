@@ -33,27 +33,15 @@
             "filter": "comparison"
         },
         {
-            "name": "GiShR0",
+            "name": "GiShR",
             "filter": "linear"
         },
         {
-            "name": "GiShR1",
+            "name": "GiShG",
             "filter": "linear"
         },
         {
-            "name": "GiShG0",
-            "filter": "linear"
-        },
-        {
-            "name": "GiShG1",
-            "filter": "linear"
-        },
-        {
-            "name": "GiShB0",
-            "filter": "linear"
-        },
-        {
-            "name": "GiShB1",
+            "name": "GiShB",
             "filter": "linear"
         },
         {
@@ -92,9 +80,6 @@
         "per": "view"
     },
     "params": {
-        "debugView": {
-            "x": 0
-        },
         "aoStrength": {
             "x": 1
         },
@@ -127,6 +112,74 @@
         },
         "giFadeVoxels": {
             "x": 4
+        }
+    },
+    "tuning": {
+        "aoStrength": {
+            "group": "Lighting/Ambient occlusion",
+            "label": "Strength",
+            "description": "How much the occlusion darkens the ambient light: 0 none, 1 all.",
+            "min": 0,
+            "max": 1
+        },
+        "aoMultiBounce": {
+            "group": "Lighting/Ambient occlusion",
+            "label": "Multiple bounces",
+            "description": "Let light bounce in creases, so bright surfaces darken less than the occlusion alone says."
+        },
+        "shadowBlend": {
+            "group": "Lighting/Shadows",
+            "label": "Cascade blend",
+            "description": "Share of a cascade's range over which it fades into the next.",
+            "min": 0,
+            "max": 0.5
+        },
+        "shadowFilterRadius": {
+            "group": "Lighting/Shadows",
+            "label": "Softness (m)",
+            "description": "Radius of the shadows' soft edge in metres.",
+            "min": 0,
+            "max": 0.2
+        },
+        "shadowNormalBias": {
+            "group": "Lighting/Shadows",
+            "label": "Normal bias (texels)",
+            "description": "How far a surface is pushed out along its normal before testing its shadow: raise it if surfaces shadow themselves in stripes.",
+            "min": 0,
+            "max": 5
+        },
+        "shadowDepthBias": {
+            "group": "Lighting/Shadows",
+            "label": "Depth bias (texels)",
+            "description": "How far a surface is pushed towards the light before testing its shadow: raise it against acne, lower it if shadows float.",
+            "min": 0,
+            "max": 5
+        },
+        "giIntensity": {
+            "group": "Lighting/Global illumination",
+            "label": "Bounce strength",
+            "description": "Multiplies the light bounced off other surfaces.",
+            "min": 0,
+            "max": 4
+        },
+        "giInteriorTint": {
+            "group": "Lighting/Global illumination",
+            "label": "Interior light",
+            "description": "The colour an interior is lit with where neither the sky nor a bounce reaches."
+        },
+        "giInteriorStrength": {
+            "group": "Lighting/Global illumination",
+            "label": "Interior strength",
+            "description": "Multiplies the interior light.",
+            "min": 0,
+            "max": 4
+        },
+        "giFadeVoxels": {
+            "group": "Lighting/Global illumination",
+            "label": "Level fade (voxels)",
+            "description": "Voxels from a level's edge over which it blends into the next, coarser one.",
+            "min": 0,
+            "max": 16
         }
     }
 }

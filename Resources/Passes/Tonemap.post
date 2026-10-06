@@ -2,5 +2,6 @@
     "shader": { "id": 10020 },
     "inputs": [ "Hdr" ],
     "output": { "name": "Ldr" },
-    "params": { "exposure": { "x": 1.0 } }
+    "params": { "exposure": { "x": 1.0 } },
+    "tuning": { "exposure": { "label": "Exposure", "description": "Multiplies the scene's light before it is mapped to the screen: above 1 brighter, below 1 darker.", "min": 0, "max": 8 } }
 }

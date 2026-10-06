@@ -3,9 +3,9 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Extensions;
 using Magic.Interfaces;
+using Magic.Services;
 using Magic.Utils;
 using System.Collections.Concurrent;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -21,13 +21,13 @@ namespace StreamingGem;
 /// of chunks and what each leaves behind is what the garbage collector stops the frame for. Components that cannot
 /// be read are warned about once and skipped. Any thread.
 /// </summary>
-internal sealed class ChunkReader
+internal sealed class ChunkReader(Types<IComponent> components)
 {
     private static readonly JsonReaderOptions ReaderOptions = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
     private readonly HashSet<string> _warned = []; // locked: several workers read at once
 
-    // Component names -> types; replaced whole when gems change.
+    // Component names -> types, and their columns; replaced whole when gems change.
     private volatile ComponentTypes? _types;
 
     /// <summary>
@@ -46,7 +46,7 @@ internal sealed class ChunkReader
     /// </summary>
     public PreparedChunk Read(Chunk chunk, CancellationToken cancel = default)
     {
-        Reading reading = new(_types ??= new ComponentTypes(FindComponentTypes()), chunk.Path);
+        Reading reading = new(_types ??= new ComponentTypes(components), chunk.Path);
         Utf8JsonReader reader = new(chunk.Json, ReaderOptions);
         if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
             throw new JsonException($"{chunk.Path} is not a JSON object.");
@@ -270,7 +270,8 @@ internal sealed class ChunkReader
     /// </summary>
     private Type? Resolve(ComponentTypes types, string name, string file)
     {
-        if (!types.ByName.TryGetValue(name, out List<Type>? found))
+        IReadOnlyList<Type> found = types.Components.Named(name);
+        if (found.Count == 0)
         {
             Warn(name, $"{file}: no loaded component type is named {name}; skipped.");
             return null;
@@ -295,50 +296,6 @@ internal sealed class ChunkReader
         }
 
         Debugging.Log.Warn(message);
-    }
-
-    private static Dictionary<string, List<Type>> FindComponentTypes()
-    {
-        // Only Core and what references it can declare an IComponent; skipping the framework is most of the time saved.
-        Assembly core = typeof(IComponent).Assembly;
-        string? coreName = core.GetName().Name;
-        Dictionary<string, List<Type>> found = new(StringComparer.OrdinalIgnoreCase);
-        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (assembly.IsDynamic || (assembly != core && !assembly.GetReferencedAssemblies().Any(reference => reference.Name == coreName)))
-                continue;
-
-            Type[] types;
-            try
-            {
-                types = assembly.GetTypes();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                types = [.. ex.Types.OfType<Type>()];
-            }
-
-            foreach (Type type in types)
-            {
-                if (!type.IsValueType || type.IsGenericTypeDefinition || !typeof(IComponent).IsAssignableFrom(type))
-                    continue;
-
-                Add(found, type.Name, type);
-                if (type.FullName is { } full && full != type.Name)
-                    Add(found, full, type);
-            }
-        }
-
-        return found;
-
-        static void Add(Dictionary<string, List<Type>> found, string key, Type type)
-        {
-            if (!found.TryGetValue(key, out List<Type>? list))
-                found[key] = list = [];
-
-            if (!list.Contains(type))
-                list.Add(type);
-        }
     }
 
     /// <summary>
@@ -400,13 +357,13 @@ internal sealed class ChunkReader
     }
 
     /// <summary>
-    /// Every <see cref="IComponent"/> by name, and how to make a column for each, as one snapshot workers share.
+    /// Every <see cref="IComponent"/> by name, and how to make a column for each, as one cache workers share.
     /// </summary>
-    private sealed class ComponentTypes(Dictionary<string, List<Type>> byName)
+    private sealed class ComponentTypes(Types<IComponent> components)
     {
         private readonly ConcurrentDictionary<Type, Type> _columns = new();
 
-        public Dictionary<string, List<Type>> ByName { get; } = byName;
+        public Types<IComponent> Components { get; } = components;
 
         /// <summary>
         /// Throws ArgumentException for a struct that is not unmanaged.

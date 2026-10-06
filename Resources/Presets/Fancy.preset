@@ -1,0 +1,12 @@
+{
+    // A step up from Normal: sharper textures, detail held longer, shadows further out.
+    "Lod.Bias": 1.5,
+    "Deferred.Anisotropy": 16,
+    "Streaming.Radius": 192,
+    "ShadowPlan.distance": 450,
+    "ShadowPlan.maxLocalLights": 10,
+    "LocalShadowSelect.maxLocalLights": 10,
+    "LocalShadowSelect.facesPerFrame": 6,
+    "Gtao.slices": 4,
+    "Gtao.steps": 6
+}

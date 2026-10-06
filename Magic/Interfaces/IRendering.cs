@@ -1,4 +1,5 @@
 using Magic.Contexts.Rendering;
+using Magic.Contexts.Threading;
 using Magic.Utils;
 
 namespace Magic.Interfaces;
@@ -8,7 +9,7 @@ namespace Magic.Interfaces;
 /// (SDL GPU today; Vulkan or anything else would implement the same). It keeps no caches and knows nothing of assets,
 /// entities or windows beyond presenting to them: the host's render system and any gem that draws decide everything and
 /// hold every handle. The gem is static: loaded once, never hot reloaded, so a handle is good for the whole run.
-/// Render thread only (<see cref="Contexts.ThreadId.Render"/>: a gem's constructor, Dispose and Render hook are on
+/// Render thread only (<see cref="ThreadId.Render"/>: a gem's constructor, Dispose and Render hook are on
 /// it), except <see cref="Compile"/>.
 /// </summary>
 public interface IRendering
@@ -29,6 +30,12 @@ public interface IRendering
     /// The bytecode format <see cref="Compile"/> produces (e.g. <c>SPIRV</c>, <c>DXIL</c>): part of a shader cache key.
     /// </summary>
     string ShaderFormat { get; }
+
+    /// <summary>
+    /// Moves on whenever the device is made again (another backend was chosen): every GPU object made before is gone,
+    /// so whoever holds any makes them again, without releasing the old.
+    /// </summary>
+    uint Generation { get; }
 
     /// <summary>
     /// The depth format this device renders depth targets in.

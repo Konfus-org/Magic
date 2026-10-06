@@ -1,4 +1,6 @@
 ﻿using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
+using Magic.Extensions;
 using Magic.Interfaces;
 
 namespace Magic.Services;
@@ -10,11 +12,12 @@ namespace Magic.Services;
 internal static class CoreServices
 {
     /// <summary>
-    /// The container gem constructors ask by type, holding the services for <paramref name="project"/>; gems add
+    /// The container gem constructors ask by type, holding the services for <paramref name="project"/> and the
+    /// <paramref name="settings"/> made from the command line; gems add
     /// theirs as they load. Whoever calls disposes the <see cref="Assets"/> and then the <see cref="Threads"/> in
     /// it, and says which thread is which: none is anybody's yet.
     /// </summary>
-    public static Container Create(Project project, IFileSystem files)
+    public static Container Create(Project project, IFileSystem files, Settings settings)
     {
         Container container = new();
         container.Add<IServices>(container); // the read side, for whoever must look services up by type
@@ -37,6 +40,21 @@ internal static class CoreServices
         container.Add(assets);
         container.Add(new Scheduler());
         container.Add(new World(events, assets, threads) { Loading = project.Loading });
+        container.Add(settings);
+        Types<IComponent> components = new();
+        container.Add(components);
+        Types<IScript> scripts = new();
+        container.Add(scripts);
+
+        // The services that register what assemblies declare, which Gems finds by this contract.
+        container.Add<IRegisterFromGem>(settings);
+        container.Add<IRegisterFromGem>(assets);
+        container.Add<IRegisterFromGem>(components);
+        container.Add<IRegisterFromGem>(scripts);
+
+        // The engine's own types go to the services that register them (its settings, asset and component types), as
+        // each gem's will; the engine never unloads, so nothing keeps the registrations.
+        Gems.Register(container, Gems.TypesOf(typeof(Project).Assembly));
 
         return container;
     }

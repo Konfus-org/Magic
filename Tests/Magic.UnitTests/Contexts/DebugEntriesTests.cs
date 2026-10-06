@@ -1,4 +1,4 @@
-using Magic.Contexts;
+using Magic.Contexts.Debug;
 using System.Drawing;
 using System.Numerics;
 using Xunit;

@@ -2,6 +2,7 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
+using Magic.UnitTests.Fakes;
 using StreamingGem;
 using System.Numerics;
 using System.Text;
@@ -133,7 +134,7 @@ public sealed class ChunkReaderTests
     {
         byte[] file = [0xEF, 0xBB, 0xBF, .. Encoding.UTF8.GetBytes("""{ "entities": [ { "name": "A" } ] }""")];
 
-        PreparedChunk chunk = new ChunkReader().Read(new Chunk { Data = file });
+        PreparedChunk chunk = new ChunkReader(LoadedTypes.Of<IComponent>()).Read(new Chunk { Data = file });
 
         Assert.Single(chunk.Entities);
     }
@@ -156,7 +157,7 @@ public sealed class ChunkReaderTests
 
     private static PreparedChunk Read(string json)
     {
-        return new ChunkReader().Read(new Chunk { Data = Encoding.UTF8.GetBytes(json) });
+        return new ChunkReader(LoadedTypes.Of<IComponent>()).Read(new Chunk { Data = Encoding.UTF8.GetBytes(json) });
     }
 
     /// <summary>

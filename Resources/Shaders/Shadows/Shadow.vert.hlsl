@@ -28,7 +28,7 @@ struct VsOut
 VsOut main(VsIn input)
 {
     GpuShadowView view = ShadowViews[ShadowRefreshed[PassIteration()]];
-    GpuInstanceXform world = InstanceXforms[input.instance];
+    GpuInstanceXform world = InstanceXforms[input.instance & GpuVisibleSlotMask];
     float4 point4 = float4(input.position, 1.0);
     float3 worldPosition = float3(dot(world.r0, point4), dot(world.r1, point4), dot(world.r2, point4));
     float4 clip = mul(view.viewProj, float4(worldPosition - view.eye.xyz, 1.0));

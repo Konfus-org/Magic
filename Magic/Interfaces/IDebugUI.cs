@@ -1,4 +1,4 @@
-using Magic.Contexts;
+using Magic.Contexts.Debug;
 using System.Drawing;
 using System.Numerics;
 
@@ -79,6 +79,16 @@ public interface IDebugUI
     /// the selected tab's content. <paramref name="label"/> only tells the bars of one window apart. True when changed.
     /// </summary>
     bool Tabs(string label, ref int index, string[] options);
+
+    /// <summary>
+    /// A header that folds away what is drawn under it, open until clicked. True while open: draw what is under it only then.
+    /// </summary>
+    bool Header(string label);
+
+    /// <summary>
+    /// <paramref name="text"/> shown while the mouse rests on the item drawn last.
+    /// </summary>
+    void Tooltip(string text);
 
     /// <summary>
     /// An item of the context menu a right-click anywhere in the window (or nested view) it is called in opens, in

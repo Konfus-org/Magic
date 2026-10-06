@@ -1,0 +1,17 @@
+{
+    "shader": {
+        "id": 10001
+    },
+    "type": "transparent",
+    "params": {
+        "color": {
+            "r": 1.0,
+            "g": 0.7,
+            "b": 0.1,
+            "a": 0.35
+        },
+        "roughness": {
+            "x": 0.2
+        }
+    }
+}

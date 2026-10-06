@@ -14,13 +14,15 @@ internal enum LightKind : byte
 {
     Directional,
     Point,
-    Spot
+    Spot,
+    Area
 }
 
 /// <summary>
-/// One light of any kind with its entity's world matrix; the fields a kind does not have are zero.
+/// One light of any kind with its entity's world matrix; the fields a kind does not have are zero. Size is an area
+/// light's width and height.
 /// </summary>
-internal readonly record struct LightInstance(LightKind Kind, Vector3 Color, float Intensity, float Range, float InnerAngle, float OuterAngle, bool CastsShadows, Matrix4x4 World);
+internal readonly record struct LightInstance(LightKind Kind, Vector3 Color, float Intensity, float Range, float InnerAngle, float OuterAngle, Vector2 Size, bool CastsShadows, Matrix4x4 World);
 
 /// <summary>
 /// Everything drawing one entity takes; <see cref="Static"/> promises the world matrix never changes, and one that

@@ -1,0 +1,62 @@
+{
+    "kind": "draw",
+    "needs": "$refractiveChunks",
+    "reads": [
+        {
+            "name": "ShadowAtlas",
+            "filter": "comparison"
+        },
+        {
+            "name": "GiShR",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShG",
+            "filter": "linear"
+        },
+        {
+            "name": "GiShB",
+            "filter": "linear"
+        },
+        {
+            "name": "GiSkyVis",
+            "filter": "linear"
+        },
+        {
+            "name": "SceneColor",
+            "filter": "linear"
+        },
+        {
+            "name": "TransparentFront",
+            "filter": "nearest"
+        },
+        {
+            "name": "Lights"
+        },
+        {
+            "name": "TransparentTiles"
+        },
+        {
+            "name": "ShadowViews"
+        },
+        {
+            "name": "ShadowHeader"
+        },
+        {
+            "name": "GiState"
+        }
+    ],
+    "draw": {
+        "pipeline": "refractive",
+        "layers": "nearest",
+        "colors": [
+            "TransparentAccum",
+            "TransparentCoverage",
+            "TransparentFrontScratch"
+        ],
+        "depth": "Depth",
+        "load": "load",
+        "args": "DrawArgsLate",
+        "instances": "VisibleIds"
+    }
+}

@@ -37,6 +37,11 @@ internal sealed partial class FakeRendering : IRendering
     public bool Debug { get; set; }
     public string Device => "Fake GPU";
     public string ShaderFormat => "FAKE";
+
+    /// <summary>
+    /// Set by a test to stand for the device made again.
+    /// </summary>
+    public uint Generation { get; set; }
     public GpuFormat DepthFormat => GpuFormat.D32Float;
 
     public GpuBuffer CreateBuffer(GpuBufferUsage usage, uint bytes) => new(_next++);

@@ -1,0 +1,14 @@
+{
+    // Everything up: full detail far out, long shadows, the GI rebuilt every frame. Bring a fan.
+    "Lod.Bias": 3,
+    "Deferred.Anisotropy": 16,
+    "Streaming.Radius": 256,
+    "Assets.Budgets": { "Chunk": 2048, "Texture": 1024, "Model": 512 },
+    "ShadowPlan.distance": 800,
+    "ShadowPlan.maxLocalLights": 10,
+    "LocalShadowSelect.maxLocalLights": 10,
+    "LocalShadowSelect.facesPerFrame": 6,
+    "Gtao.slices": 6,
+    "Gtao.steps": 10,
+    "GiPlan.framesPerRebuild": 1
+}

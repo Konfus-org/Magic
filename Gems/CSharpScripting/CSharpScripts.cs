@@ -1,22 +1,21 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
+using Magic.Services;
 using Magic.Utils;
-using System.Reflection;
-using System.Runtime.Loader;
 
 namespace CSharpScriptingGem;
 
 /// <summary>
 /// Loads <see cref="Script"/> assets written in C#. It compiles nothing: the project's own build did, and the host
 /// loaded the result. Loading a script finds its class, the one <see cref="IScript"/> named like the file
-/// (<c>OrbitCamera.cs</c> declares <c>OrbitCamera</c>), among the assemblies loaded now. It keeps none of them, so
-/// a project reloads freely under it.
+/// (<c>OrbitCamera.cs</c> declares <c>OrbitCamera</c>), among the script types loaded now (<see cref="Types{T}"/>). It keeps
+/// none of them, so a project reloads freely under it.
 /// </summary>
-internal sealed class CSharpScripts : IGem, IAssetLoader<Script>
+internal sealed class CSharpScripts(Types<IScript> scripts) : IGem, IAssetLoader<Script>
 {
     public Result Load(Script asset, byte[] bytes)
     {
-        Type[] found = [.. Scripts().Where(type => type.Name == asset.Name)];
+        Type[] found = [.. scripts.Named(asset.Name).Where(type => type.IsClass && type.Name == asset.Name)];
         if (found.Length == 0)
             return Result.Failure($"no loaded assembly has an IScript class named {asset.Name}; build the project.");
 
@@ -26,35 +25,5 @@ internal sealed class CSharpScripts : IGem, IAssetLoader<Script>
         asset.Type = found[0];
 
         return Result.Success();
-    }
-
-    /// <summary>
-    /// Every script class there is. Only the host and what references it can declare one, and an assembly being unloaded is
-    /// no longer in a context that is listed, so a reloaded project's old classes are not found beside the new.
-    /// </summary>
-    private static IEnumerable<Type> Scripts()
-    {
-        string? host = typeof(IScript).Assembly.GetName().Name;
-        foreach (Assembly assembly in AssemblyLoadContext.All.SelectMany(context => context.Assemblies))
-        {
-            if (assembly.IsDynamic || (assembly != typeof(IScript).Assembly && !assembly.GetReferencedAssemblies().Any(reference => reference.Name == host)))
-                continue;
-
-            Type[] types;
-            try
-            {
-                types = assembly.GetTypes();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                types = [.. ex.Types.OfType<Type>()];
-            }
-
-            foreach (Type type in types)
-            {
-                if (type.IsClass && !type.IsAbstract && typeof(IScript).IsAssignableFrom(type))
-                    yield return type;
-            }
-        }
     }
 }

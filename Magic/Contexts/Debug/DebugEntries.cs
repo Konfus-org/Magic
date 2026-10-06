@@ -1,7 +1,7 @@
 ﻿using System.Drawing;
 using System.Numerics;
 
-namespace Magic.Contexts;
+namespace Magic.Contexts.Debug;
 
 /// <summary>
 /// One thing the debug UI shows on screen for a while: a line of the list down the left of the window, or, with a

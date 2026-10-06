@@ -34,30 +34,29 @@
     ],
     "writes": [
         {
-            "name": "GiShR0"
+            "name": "GiShR"
         },
         {
-            "name": "GiShR1"
+            "name": "GiShG"
         },
         {
-            "name": "GiShG0"
-        },
-        {
-            "name": "GiShG1"
-        },
-        {
-            "name": "GiShB0"
-        },
-        {
-            "name": "GiShB1"
+            "name": "GiShB"
         }
     ],
     "dispatch": {
-        "per": "level:GiShR0"
+        "per": "level:GiShR"
     },
     "params": {
         "propagationDamping": {
             "x": 0.9
+        }
+    },
+    "tuning": {
+        "propagationDamping": {
+            "label": "Bounce damping",
+            "description": "Share of the light kept on each step it spreads through the voxels: lower fades bounces sooner.",
+            "min": 0,
+            "max": 1
         }
     }
 }

@@ -12,4 +12,14 @@ float3 NormalizeOrZero(float3 direction)
     return direction * rsqrt(max(dot(direction, direction), 1e-20));
 }
 
+// A pixel's place in the 4 x 4 ordered-dither (Bayer) matrix, as the middle of its sixteenth of 0..1: the
+// bits of x ^ y and y interleaved, most significant last.
+float DitherValue(float2 pixel)
+{
+    uint2 cell = (uint2)pixel & 3u;
+    uint mixed = cell.x ^ cell.y;
+    uint rank = ((mixed & 1u) << 3u) | ((cell.y & 1u) << 2u) | (mixed & 2u) | ((cell.y & 2u) >> 1u);
+    return ((float)rank + 0.5) / 16.0;
+}
+
 #endif

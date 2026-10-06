@@ -4,7 +4,7 @@
 // passes when it is alive, not hidden, allowed to cast, inside the view's six planes (taken from its ViewProj,
 // Cull/Common.hlsli FrustumPlanes, so an orthographic cascade and a perspective face cull the same way), inside
 // the receivers' volume swept towards the light (a cascade's: what the camera sees of its slice and everything
-// between it and the sun; else it shadows nothing in view), and at least minTexels shadow texels across. No
+// between it and the sun; else it shadows nothing in view), and at least minTexels shadow texels in radius (half a texel: a caster a texel or more across is drawn). No
 // occlusion and no late pass: a shadow map is drawn whole each time. A survivor is appended into the row's slice
 // of the draw args with the usual LOD choice, read in the shadow view's texels (lodBias is the shadow views' own).
 
@@ -14,7 +14,7 @@
 
 struct PassParams
 {
-    float minTexels = 1.5;
+    float minTexels = 0.5;
     float lodBias = 0.5;
 };
 
@@ -68,7 +68,8 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     bool isOrthographic = (view.flags.x & ShadowViewOrthographic) != 0u;
     float along = isOrthographic ? 1.0 : max(dot(centerRel, view.rotation[2].xyz), view.range.y);
     float texels = instance.cullRadius / max(view.eye.w * along, 1e-6);
-    bool isSizeCulled = (instance.flags & InstanceNoSizeCull) == 0u && texels < passParams.minTexels;
+    bool isFar = (view.flags.x & ShadowViewFar) != 0u; // far away a field of small things casts its shadow together
+    bool isSizeCulled = !isFar && (instance.flags & InstanceNoSizeCull) == 0u && texels < passParams.minTexels;
     if (isSizeCulled)
         return;
 

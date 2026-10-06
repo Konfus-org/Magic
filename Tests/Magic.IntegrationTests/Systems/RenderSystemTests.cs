@@ -5,7 +5,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
 using Magic.Contexts.Settings;
-using Magic.Interfaces;
+using Magic.Mathematics;
 using Magic.Services;
 using Magic.Utils;
 using DeferredRendererGem;
@@ -15,6 +15,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using Xunit;
 
 namespace Magic.IntegrationTests.Systems;
@@ -36,6 +37,8 @@ public sealed class RenderSystemTests : IDisposable
     private readonly FakeRendering _fake = new();
     private readonly FakeWindows _windows = new();
     private readonly RenderCommands _commands = new();
+    private readonly Settings _settings = new();
+    private readonly DeferredSettings _deferred = new() { ShaderCache = false };
     private readonly Services.Assets _assets;
     private readonly TagSystem _tags;
     private readonly TransformSystem _transforms;
@@ -51,7 +54,6 @@ public sealed class RenderSystemTests : IDisposable
             Root = _root.Path,
             EngineGems = AppContext.BaseDirectory,
             Resources = Path.Combine(repo, "Resources"),
-            Settings = new Settings { Render = new RenderSettings { ShaderCache = false } },
         };
         Directory.CreateDirectory(Path.Combine(project.Assets, "Passes"));
         File.WriteAllText(Path.Combine(project.Assets, "Passes", "Broken.post"), """{ "shader": { "id": 999999 }, "inputs": [ "Ldr" ], "output": { "name": "Ldr" } }""");
@@ -61,7 +63,7 @@ public sealed class RenderSystemTests : IDisposable
         _assets = new Services.Assets(project, files, new Events(), new Container(), new Threads());
         _tags = new TagSystem(_ecs);
         _transforms = new TransformSystem(_ecs);
-        _rendering = new RenderSystem(_ecs, _assets, files, project, new World(new Events(), _assets, new Threads()), _windows, _fake, new Threads());
+        _rendering = new RenderSystem(_ecs, _assets, files, project, _settings, new LodSettings(), _deferred, new World(new Events(), _assets, new Threads()), _windows, _fake, new Threads());
     }
 
     public void Dispose()
@@ -126,7 +128,7 @@ public sealed class RenderSystemTests : IDisposable
     public void A_point_light_is_uploaded_with_its_position_and_range()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
-        _ecs.Set(Spawn(new Vector3(7, 8, 9)), new PointLight(Vector3.One, 2f, 5f));
+        _ecs.Set(Spawn(new Vector3(7, 8, 9)), new PointLight(new Color(1f, 1f, 1f), 2f, 5f));
 
         RenderFrame();
 
@@ -234,15 +236,54 @@ public sealed class RenderSystemTests : IDisposable
     }
 
     [Fact]
-    public void A_tuned_parameter_is_what_the_pass_lists_after()
+    public void A_pass_parameter_set_through_the_settings_is_what_the_pass_lists_after()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
-        RenderUntil(() => _rendering.Tuning.Passes.Any(pass => pass.Params.Any(parameter => parameter.Name == "debugView")));
-        TunablePass lighting = _rendering.Tuning.Passes.First(pass => pass.Params.Any(parameter => parameter.Name == "debugView"));
+        RenderUntil(() => _rendering.Tuning.Passes.Any(pass => pass.Params.Any(parameter => parameter.Name == "aoStrength")));
+        _settings.Set(["Lighting.aoStrength=3"]);
 
-        _rendering.Tuning.Set(lighting.Id, "debugView", Param.Of(3f));
+        RenderFrame();
 
-        Assert.Equal(3f, _rendering.Tuning.Passes.First(pass => pass.Id == lighting.Id).Params.First(parameter => parameter.Name == "debugView").Value.X);
+        Assert.Equal(3f, _rendering.Tuning.Passes.SelectMany(pass => pass.Params).First(parameter => parameter.Name == "aoStrength").Value.X);
+    }
+
+    [Fact]
+    public void Applying_a_preset_sets_the_pass_parameters_it_names()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        RenderUntil(() => _rendering.Tuning.Passes.Any(pass => pass.Params.Any(parameter => parameter.Name == "aoStrength")));
+        _settings.Apply(new Preset { Values = new() { ["Lighting.aoStrength"] = JsonSerializer.SerializeToElement(2) } });
+
+        RenderFrame();
+
+        Assert.Equal(2f, _rendering.Tuning.Passes.SelectMany(pass => pass.Params).First(parameter => parameter.Name == "aoStrength").Value.X);
+    }
+
+    [Fact]
+    public void A_device_made_again_builds_the_render_state_again()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        RenderUntil(() => LightingCompiles() > 0);
+        int before = LightingCompiles();
+        _fake.Generation++;
+
+        RenderUntil(() => LightingCompiles() > before);
+
+        Assert.True(LightingCompiles() > before);
+    }
+
+    [Fact]
+    public void Changing_the_anisotropy_keeps_the_render_state()
+    {
+        _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
+        RenderUntil(() => LightingCompiles() > 0);
+        int before = LightingCompiles();
+        _deferred.Anisotropy = 2f;
+
+        for (int i = 0; i < 5; i++)
+            RenderFrame();
+
+        Assert.Equal(before, LightingCompiles());
     }
 
     [Fact]
@@ -358,7 +399,7 @@ public sealed class RenderSystemTests : IDisposable
         Handle parent = Spawn(Vector3.Zero);
         Handle lamp = Spawn(new Vector3(1, 1, 1), isStatic);
         _ecs.SetParent(lamp, parent);
-        _ecs.Set(lamp, new PointLight(Vector3.One, 1f, 5f));
+        _ecs.Set(lamp, new PointLight(new Color(1f, 1f, 1f), 1f, 5f));
         RenderFrame();
         RenderFrame();
 
@@ -376,7 +417,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, Tags.Of(Tag.Hidden));
         Handle lamp = Spawn(new Vector3(1, 1, 1), isStatic: true);
         _ecs.SetParent(lamp, parent);
-        _ecs.Set(lamp, new PointLight(Vector3.One, 1f, 5f));
+        _ecs.Set(lamp, new PointLight(new Color(1f, 1f, 1f), 1f, 5f));
         RenderFrame();
         RenderFrame();
 
@@ -409,7 +450,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, Tags.Of(Tag.Hidden));
         Handle light = Spawn(Vector3.Zero);
         _ecs.SetParent(light, parent);
-        _ecs.Set(light, new PointLight(Vector3.One, 2f, 5f));
+        _ecs.Set(light, new PointLight(new Color(1f, 1f, 1f), 2f, 5f));
 
         RenderFrame();
 
@@ -423,7 +464,7 @@ public sealed class RenderSystemTests : IDisposable
         _ecs.Set(parent, Tags.Of(Tag.Hidden));
         Handle light = Spawn(Vector3.Zero);
         _ecs.SetParent(light, parent);
-        _ecs.Set(light, new PointLight(Vector3.One, 2f, 5f));
+        _ecs.Set(light, new PointLight(new Color(1f, 1f, 1f), 2f, 5f));
         RenderFrame();
 
         _ecs.Set(parent, default(Tags));
@@ -479,6 +520,11 @@ public sealed class RenderSystemTests : IDisposable
         _transforms.Run(frame);
         _rendering.Run(frame);
         _fake.Submit(_commands);
+    }
+
+    private int LightingCompiles()
+    {
+        return _fake.Compiled.Count(source => source.Contains("Shaders/Lighting/Lighting.comp.hlsl\""));
     }
 
     /// <summary>

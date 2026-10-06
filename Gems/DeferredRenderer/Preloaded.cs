@@ -1,5 +1,4 @@
-﻿using Magic.Contexts;
-using Magic.Contexts.Assets;
+﻿using Magic.Contexts.Assets;
 
 namespace DeferredRendererGem;
 
@@ -15,7 +14,7 @@ internal sealed class Preloaded
     /// <summary>
     /// The lesser versions of the models in it, by the model's id, the highest threshold first.
     /// </summary>
-    public Dictionary<ulong, (float Threshold, Handle<Model> Asset)[]> Lods { get; } = [];
+    public Dictionary<ulong, Lods> Lods { get; } = [];
 
     /// <summary>
     /// The frame it arrived in.

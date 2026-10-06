@@ -1,4 +1,4 @@
-using System.Numerics;
+using Magic.Mathematics;
 
 namespace Magic.Contexts.Components;
 
@@ -11,13 +11,13 @@ namespace Magic.Contexts.Components;
 /// </summary>
 public struct Glow : IComponent
 {
-    public Glow(Vector3 color, float radius)
+    public Glow(Color color, float radius)
     {
         Color = color;
         Radius = radius;
     }
 
-    public Vector3 Color { get; set; }
+    public Color Color { get; set; }
 
     public float Radius { get; set; }
 }

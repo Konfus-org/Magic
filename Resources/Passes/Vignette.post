@@ -2,5 +2,6 @@
     "shader": { "id": 10021 },
     "inputs": [ "Ldr" ],
     "output": { "name": "Ldr" },
-    "params": { "strength": { "x": 0.5 } }
+    "params": { "strength": { "x": 0.5 } },
+    "tuning": { "strength": { "label": "Strength", "description": "How much the corners of the screen darken: 0 none.", "min": 0, "max": 1 } }
 }

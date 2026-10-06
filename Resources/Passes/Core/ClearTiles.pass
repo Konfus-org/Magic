@@ -14,7 +14,7 @@
     "draw": {
         "depth": "ShadowAtlas",
         "load": "load",
-        "rows": "52",
+        "rows": "53",
         "depthCompare": "always"
     },
     "needs": "$shadowCasters"

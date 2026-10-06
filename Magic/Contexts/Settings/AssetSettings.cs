@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace Magic.Contexts.Settings;
 
 /// <summary>
@@ -7,6 +9,8 @@ namespace Magic.Contexts.Settings;
 /// The Chunk budget is also how much of the world stays spawned: chunks that go out of view are kept until the spawned
 /// ones together are over it. The defaults suit a machine with 16 GB shared between the CPU and the GPU.
 /// </summary>
+[Settings("Assets")]
+[Category("World/Memory budgets")]
 public sealed class AssetSettings
 {
     /// <summary>
@@ -17,5 +21,7 @@ public sealed class AssetSettings
     /// <summary>
     /// Megabytes kept for each asset type not in <see cref="Budgets"/>, each type on its own.
     /// </summary>
+    [DisplayName("Other types (MB each)")]
+    [Description("Megabytes kept loaded for each asset type the budgets do not name.")]
     public int DefaultBudget { get; set; } = 32;
 }

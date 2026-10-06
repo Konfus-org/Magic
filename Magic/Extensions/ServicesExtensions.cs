@@ -10,6 +10,18 @@ public static class ServicesExtensions
 {
     extension(IServices services)
     {
+        /// <inheritdoc cref="IServices.Add"/>
+        public void Add<T>(T instance) where T : class
+        {
+            services.Add(typeof(T), instance);
+        }
+
+        /// <inheritdoc cref="IServices.Remove"/>
+        public void Remove<T>(T instance) where T : class
+        {
+            services.Remove(typeof(T), instance);
+        }
+
         public bool Has<T>() where T : class
         {
             return services.Has(typeof(T));

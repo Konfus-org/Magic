@@ -78,9 +78,26 @@ float CascadeVisibility(ShadowFilter filter, uint cascade, float3 positionRel, f
     return FilteredShadow(uv, clip.z, radiusTexels, view.tileUv.xy, view.tileUv.zw);
 }
 
+// The sun's far view at a camera-relative point (row ShadowFarRow): full light where it is off or does not hold the
+// point, fading to that over the last tenth of its square so its edge is never a line.
+float FarVisibility(ShadowFilter filter, float3 positionRel, float3 normal, float facing)
+{
+    GpuShadowView view = ShadowViews[ShadowFarRow];
+    if ((view.flags.x & ShadowViewUsed) == 0u)
+        return 1.0;
+
+    float4 clip = mul(view.viewProj, float4(positionRel + (CameraPos - view.eye.xyz), 1.0));
+    float inside = saturate((1.0 - max(abs(clip.x), abs(clip.y))) * 10.0);
+    [branch] if (inside <= 0.0)
+        return 1.0;
+
+    return lerp(1.0, CascadeVisibility(filter, ShadowFarRow, positionRel, normal, facing), inside);
+}
+
 // The sun's visibility at a pixel: the first cascade whose range reaches the pixel's view depth, blended into the
-// next over the last BlendFraction of its range, and into full light past the last one. The selection is uniform
-// per lane and samples only inside the one branch, after the guard.
+// next over the last BlendFraction of its range, and into the far view past the last one. The selection is uniform
+// per lane and samples only inside the one branch, after the guard. cascadeOut is ShadowFarRow past the cascades
+// where the far view is, ShadowFarRow + 1 where nothing shadows the point.
 float SunShadow(ShadowFilter filter, float3 positionRel, float3 normal, float viewDepth, float facing, out uint cascadeOut)
 {
     uint count = ShadowHeader[0].cascadeCount;
@@ -97,17 +114,22 @@ float SunShadow(ShadowFilter filter, float3 positionRel, float3 normal, float vi
         visible = CascadeVisibility(filter, cascade, positionRel, normal, facing);
         [branch] if (blend > 0.0)
         {
-            float next = cascade + 1u < count ? CascadeVisibility(filter, cascade + 1u, positionRel, normal, facing) : 1.0;
+            float next = cascade + 1u < count ? CascadeVisibility(filter, cascade + 1u, positionRel, normal, facing) : FarVisibility(filter, positionRel, normal, facing);
             visible = lerp(visible, next, blend);
         }
     }
+    else
+    {
+        visible = FarVisibility(filter, positionRel, normal, facing);
+    }
 
-    cascadeOut = cascade;
+    bool farUsed = (ShadowViews[ShadowFarRow].flags.x & ShadowViewUsed) != 0u;
+    cascadeOut = cascade < count ? cascade : farUsed ? ShadowFarRow : ShadowFarRow + 1u;
     return visible;
 }
 
 // The sun's visibility at a camera-relative point that has no view depth (a voxel of the GI): the finest cascade
-// whose map holds the point, full light past the last.
+// whose map holds the point, the far view past the last.
 float SunVisibilityAt(ShadowFilter filter, float3 positionRel, float3 normal)
 {
     uint count = ShadowHeader[0].cascadeCount;
@@ -120,17 +142,19 @@ float SunVisibilityAt(ShadowFilter filter, float3 positionRel, float3 normal)
             cascade = i;
     }
 
-    float visible = 1.0;
-    [branch] if (cascade < count)
-        visible = CascadeVisibility(filter, cascade, positionRel, normal, saturate(dot(normal, -SunDirection)));
-    return visible;
+    float facing = saturate(dot(normal, -SunDirection));
+    return cascade < count ? CascadeVisibility(filter, cascade, positionRel, normal, facing) : FarVisibility(filter, positionRel, normal, facing);
 }
 
 // A spot or point light's visibility at a camera-relative position, through the light's shadow views: the one face
 // a spot has, or the face of six the pixel falls in. The light's reach was tested by the caller: this only reads the map.
+// A light's faces are drawn together, from where it was then (their eye), which a moving light whose turn has not
+// come again has since left: the pixel is placed against that eye, not the light's position now, or a face would
+// compare depths measured from two places (the side faces of a light moving sideways all read as shadowed, leaving
+// the square its downward face covers lit).
 float LocalShadow(ShadowFilter filter, GpuLight light, float3 positionRel, float3 normal)
 {
-    float3 fromLight = positionRel - (light.positionRange.xyz - CameraPos);
+    float3 fromLight = positionRel - (ShadowViews[light.shadow.x].eye.xyz - CameraPos);
     uint face = light.shadow.y > 1u ? ShadowFaceOf(fromLight) : 0u;
     GpuShadowView view = ShadowViews[light.shadow.x + face];
 

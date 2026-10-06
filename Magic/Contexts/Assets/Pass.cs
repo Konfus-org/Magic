@@ -112,14 +112,40 @@ public enum DrawPipeline : byte
     Material,
 
     /// <summary>
-    /// The transparent material pipelines, lit as they are drawn.
+    /// The transparent material pipelines, lit as they are drawn, but for the refractive ones.
     /// </summary>
     Forward,
+
+    /// <summary>
+    /// The transparent material pipelines whose surface reads the scene behind it (refraction), drawn after the others.
+    /// </summary>
+    Refractive,
 
     /// <summary>
     /// The pass's own depth-only pipeline (<see cref="Pass.Shader"/> and <see cref="Pass.Fragment"/>), for shadow maps.
     /// </summary>
     Depth
+}
+
+/// <summary>
+/// Which layers of transparent surfaces a forward or refractive draw draws: every one, or, to put refracting glass over
+/// the glass behind it, first the depth of the nearest only, then those behind it, then the nearest.
+/// </summary>
+public enum TransparentLayers : byte
+{
+    All,
+
+    /// <summary>
+    /// Only the depth of the nearest surface, into the third colour target (max-blended).
+    /// </summary>
+    Depth,
+
+    /// <summary>
+    /// The surfaces behind the nearest one, whose depth the pass reads.
+    /// </summary>
+    Behind,
+
+    Nearest
 }
 
 /// <summary>
@@ -255,6 +281,11 @@ public sealed class PassDraw
 {
     public DrawPipeline Pipeline { get; set; }
 
+    /// <summary>
+    /// Which transparent layers a forward or refractive draw draws (Templates/Forward.frag.hlsl).
+    /// </summary>
+    public TransparentLayers Layers { get; set; }
+
     public string[] Colors { get; set; } = [];
 
     public string Depth { get; set; } = "";
@@ -265,7 +296,21 @@ public sealed class PassDraw
 
     public string Instances { get; set; } = "";
 
+    /// <summary>
+    /// For a depth draw: draws the impostors' cards (the last LOD of a model) and nothing else, its vertex stage handed
+    /// the whole vertex and its fragment stage the material texture pools, from which it reads their atlases. A depth
+    /// draw without it draws everything but them.
+    /// </summary>
+    public bool Impostors { get; set; }
+
     public float DepthBiasSlope { get; set; }
+
+    /// <summary>
+    /// The most the slope bias may move a depth, in depth units, with the slope's sign (reverse-Z: negative); 0 for no
+    /// limit. A wall seen edge-on from the light has a near-infinite slope, and without a limit its depth is pushed
+    /// past the floor it stands on, which then sees light through the seam at the wall's foot.
+    /// </summary>
+    public float DepthBiasClamp { get; set; }
 
     /// <summary>
     /// For quads: how many rows, a <c>$count</c> or a number.
@@ -326,4 +371,48 @@ public sealed class Pass : Asset
     public PassDraw Draw { get; set; } = new();
 
     public Dictionary<string, Param> Params { get; set; } = [];
+
+    /// <summary>
+    /// Where the settings window shows its params: <c>"Tab/Header"</c>, like <c>"Lighting/Shadows"</c>. Empty is the
+    /// renderer's place for its stage; a param's own <see cref="ParamTuning.Group"/> wins.
+    /// </summary>
+    public string Group { get; set; } = "";
+
+    /// <summary>
+    /// How the settings window shows each param, by name: a label, a description and a range. A param not listed is
+    /// shown by its name.
+    /// </summary>
+    public Dictionary<string, ParamTuning> Tuning { get; set; } = [];
+}
+
+/// <summary>
+/// How the settings window shows one param of a pass or post; nothing here reaches the shader. <see cref="Min"/> equal
+/// to <see cref="Max"/> (the default) is no range.
+/// </summary>
+public sealed class ParamTuning
+{
+    /// <summary>
+    /// <c>"Tab/Header"</c>; empty is the pass's.
+    /// </summary>
+    public string Group { get; set; } = "";
+
+    /// <summary>
+    /// Plain words for the param; empty is its name split into words.
+    /// </summary>
+    public string Label { get; set; } = "";
+
+    /// <summary>
+    /// What it does, shown while the mouse rests on it.
+    /// </summary>
+    public string Description { get; set; } = "";
+
+    public float Min { get; set; }
+
+    public float Max { get; set; }
+
+    /// <summary>
+    /// Shown, not edited: the param repeats what the file itself sets (the size of something it creates), so changing
+    /// it alone would only make the shader disagree with its resources. Change both in the file.
+    /// </summary>
+    public bool Fixed { get; set; }
 }

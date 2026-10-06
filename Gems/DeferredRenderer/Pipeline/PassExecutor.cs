@@ -2,6 +2,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Rendering;
 using System.Drawing;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace DeferredRendererGem;
 
@@ -209,7 +210,8 @@ internal static class PassExecutor
             return 0;
 
         int draws = 0;
-        bool transparent = draw.Pipeline == DrawPipeline.Forward;
+        bool transparent = draw.Pipeline != DrawPipeline.Material;
+        bool refractive = draw.Pipeline == DrawPipeline.Refractive;
         Span<GpuBuffer> vertexBuffers = stackalloc GpuBuffer[2];
         Span<GpuBuffer> fragmentBuffers = stackalloc GpuBuffer[MaxBindings];
         Span<GpuBinding> textures = stackalloc GpuBinding[TextureTable.Classes + MaxBindings];
@@ -236,6 +238,7 @@ internal static class PassExecutor
 
             PassConstants constants = PassConstants.Of(view.Constants);
             constants.SetParams(pass.Params);
+            constants.SetLayers(draw.Layers);
             commands.SetViewport(view.Rect);
             commands.SetScissor(view.Rect);
             commands.Push(GpuStage.Vertex, constants);
@@ -249,7 +252,7 @@ internal static class PassExecutor
 
             foreach ((PipelineClass cls, List<int> chunks) in ctx.Buckets.ByClass)
             {
-                if (chunks.Count == 0 || cls.Variant.HasFlag(SurfaceVariant.Transparent) != transparent)
+                if (chunks.Count == 0 || cls.Variant.HasFlag(SurfaceVariant.Transparent) != transparent || cls.Variant.HasFlag(SurfaceVariant.Refractive) != refractive)
                     continue;
 
                 GpuPipeline pipeline = Pipelines.Get(ctx, cls); // none only while the class's first compile is still running
@@ -257,14 +260,7 @@ internal static class PassExecutor
                     continue;
 
                 commands.BindPipeline(pipeline);
-                foreach (int chunk in chunks)
-                {
-                    if (ctx.Buckets.IsEmpty(chunk))
-                        continue; // every group released: its 64 commands would draw nothing
-
-                    commands.DrawIndexedIndirect(args, (uint)chunk * Buckets.ChunkBytes, Buckets.GroupsPerChunk);
-                    draws++;
-                }
+                draws += DrawChunks(ctx, commands, args, 0, CollectionsMarshal.AsSpan(chunks));
             }
         }
 
@@ -299,23 +295,75 @@ internal static class PassExecutor
         commands.BindStorageBuffers(GpuStage.Vertex, 0, buffers[..(1 + extra)]);
         commands.BindVertexBuffers(0, [ctx.Meshes.VertexBuffer, instances]);
         commands.BindPipeline(pass.Pipeline);
-        for (uint iteration = 0; iteration < iterations && ctx.Buckets.ChunkCount > 0; iteration++)
+        if (draw.Impostors)
+        {
+            Span<GpuBinding> pools = stackalloc GpuBinding[TextureTable.Classes];
+            Textures.Bindings(ctx, pools);
+            commands.BindTextures(GpuStage.Fragment, 0, pools);
+        }
+
+        // The chunks of the classes this draw is for: the impostors' cards, or everything else.
+        Span<int> chunks = ctx.Buckets.ChunkCount <= 1024 ? stackalloc int[ctx.Buckets.ChunkCount] : new int[ctx.Buckets.ChunkCount];
+        int chunkCount = 0;
+        foreach ((PipelineClass cls, List<int> owned) in ctx.Buckets.ByClass)
+        {
+            if (cls.Variant.HasFlag(SurfaceVariant.Impostor) != draw.Impostors)
+                continue;
+
+            owned.CopyTo(chunks[chunkCount..]);
+            chunkCount += owned.Count;
+        }
+
+        chunks[..chunkCount].Sort(); // ascending, so DrawChunks finds the runs
+
+        for (uint iteration = 0; iteration < iterations && chunkCount > 0; iteration++)
         {
             PassConstants constants = PassConstants.Of(frame);
             constants.SetParams(pass.Params);
             constants.SetIteration(iteration, iterations);
             commands.Push(GpuStage.Vertex, constants);
-            for (int chunk = 0; chunk < ctx.Buckets.ChunkCount; chunk++)
-            {
-                if (ctx.Buckets.IsEmpty(chunk))
-                    continue;
-
-                commands.DrawIndexedIndirect(args, (iteration * argsSlice) + ((uint)chunk * Buckets.ChunkBytes), Buckets.GroupsPerChunk);
-                draws++;
-            }
+            draws += DrawChunks(ctx, commands, args, iteration * argsSlice, chunks[..chunkCount]);
         }
 
         commands.EndRenderPass();
+        return draws;
+    }
+
+    /// <summary>
+    /// The draw args of <paramref name="chunks"/> (ascending), from <paramref name="offset"/> in <paramref name="args"/>:
+    /// one indirect call per run of consecutive chunks that hold a group, so a class whose chunks were made one after
+    /// another is a single call however many it has. Each call costs the CPU far more than its 64 commands cost the GPU
+    /// (a released group's command draws nothing). Returns how many calls it made.
+    /// </summary>
+    private static int DrawChunks(RenderContext ctx, RenderCommands commands, GpuBuffer args, uint offset, ReadOnlySpan<int> chunks)
+    {
+        int draws = 0;
+        int first = -1;
+        int count = 0;
+        foreach (int chunk in chunks)
+        {
+            bool empty = ctx.Buckets.IsEmpty(chunk);
+            if (count > 0 && (empty || chunk != first + count))
+            {
+                commands.DrawIndexedIndirect(args, offset + ((uint)first * Buckets.ChunkBytes), (uint)(count * Buckets.GroupsPerChunk));
+                draws++;
+                count = 0;
+            }
+
+            if (empty)
+                continue;
+
+            if (count == 0)
+                first = chunk;
+            count++;
+        }
+
+        if (count > 0)
+        {
+            commands.DrawIndexedIndirect(args, offset + ((uint)first * Buckets.ChunkBytes), (uint)(count * Buckets.GroupsPerChunk));
+            draws++;
+        }
+
         return draws;
     }
 

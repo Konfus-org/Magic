@@ -193,6 +193,37 @@ public readonly record struct VertexBufferLayout(uint Slot, uint Pitch, bool Per
 public readonly record struct VertexAttribute(uint Location, uint Slot, GpuVertexFormat Format, uint Offset);
 
 /// <summary>
+/// How a colour target blends what a fragment writes (src) into what is there (dst).
+/// </summary>
+public enum GpuBlend : byte
+{
+    /// <summary>
+    /// src replaces dst.
+    /// </summary>
+    None,
+
+    /// <summary>
+    /// Straight alpha over what is there: src * src.a + dst * (1 - src.a), for UI.
+    /// </summary>
+    Alpha,
+
+    /// <summary>
+    /// src + dst, every channel: sums such as weighted transparency.
+    /// </summary>
+    Add,
+
+    /// <summary>
+    /// src + dst * (1 - src), every channel: coverage that builds up as 1 - the product of what lets light through.
+    /// </summary>
+    Coverage,
+
+    /// <summary>
+    /// The larger of src and dst, every channel: the nearest depth (reverse-Z) of what was drawn.
+    /// </summary>
+    Max
+}
+
+/// <summary>
 /// A graphics pipeline, as data: both shaders, the vertex layout, the colour targets (one per <c>SV_Target</c> the
 /// fragment shader writes, in order; none for a depth-only pipeline) and an optional depth target. The defaults are the
 /// engine's conventions (clockwise front faces, reverse-Z), so a backend reads them rather than knowing them.
@@ -213,9 +244,10 @@ public sealed record PipelineDesc(CompiledShader Vertex, CompiledShader Fragment
     public GpuCompare DepthCompare { get; init; } = GpuCompare.GreaterOrEqual;
 
     /// <summary>
-    /// Straight alpha over what is there, for UI.
+    /// How each colour target blends what the fragment writes into what is there, in the order of <see cref="Colors"/>;
+    /// a target past the end does not blend.
     /// </summary>
-    public bool AlphaBlend { get; init; }
+    public GpuBlend[] Blends { get; init; } = [];
 
     public bool DepthWrite { get; init; } = true;
 

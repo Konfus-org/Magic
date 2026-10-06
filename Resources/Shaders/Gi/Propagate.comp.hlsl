@@ -25,19 +25,14 @@ StructuredBuffer<GpuShadowView> ShadowViews : READ(5);
 StructuredBuffer<GpuShadowHeader> ShadowHeader : READ(6);
 StructuredBuffer<GpuGiState> GiState : READ(7);
 
-// Both light sets: the level's old light is loaded from the set its parity left, the new written into the other.
+// The light volumes, both sets stacked (Gi/State.hlsli): the level's old light is loaded from the set its parity
+// left, the new written into the other. RW for both, since SDL forbids sampling a texture bound for write.
 [[vk::image_format("rgba16f")]]
-RWTexture3D<float4> ShR0 : WRITE(0);
+RWTexture3D<float4> ShR : WRITE(0);
 [[vk::image_format("rgba16f")]]
-RWTexture3D<float4> ShR1 : WRITE(1);
+RWTexture3D<float4> ShG : WRITE(1);
 [[vk::image_format("rgba16f")]]
-RWTexture3D<float4> ShG0 : WRITE(2);
-[[vk::image_format("rgba16f")]]
-RWTexture3D<float4> ShG1 : WRITE(3);
-[[vk::image_format("rgba16f")]]
-RWTexture3D<float4> ShB0 : WRITE(4);
-[[vk::image_format("rgba16f")]]
-RWTexture3D<float4> ShB1 : WRITE(5);
+RWTexture3D<float4> ShB : WRITE(2);
 
 struct PassParams
 {
@@ -61,26 +56,12 @@ float4 VoxelAt(Texture3D<float4> volume, SamplerState volumeSampler, uint level,
     return volume.SampleLevel(volumeSampler, GiStackedUv(level, (float3)voxel + 0.5), 0.0);
 }
 
-// The level's light as it was, from the set its old parity left it in.
-float4 OldSh(RWTexture3D<float4> set0, RWTexture3D<float4> set1, uint oldParity, int3 texel)
+void WriteSh(uint level, uint parity, uint3 voxel, float4 r, float4 g, float4 b)
 {
-    return oldParity == 0u ? set0[texel] : set1[texel];
-}
-
-void WriteSh(uint parity, int3 texel, float4 r, float4 g, float4 b)
-{
-    [branch] if (parity == 0u)
-    {
-        ShR0[texel] = r;
-        ShG0[texel] = g;
-        ShB0[texel] = b;
-    }
-    else
-    {
-        ShR1[texel] = r;
-        ShG1[texel] = g;
-        ShB1[texel] = b;
-    }
+    int3 texel = GiShTexel(level, parity, voxel);
+    ShR[texel] = r;
+    ShG[texel] = g;
+    ShB[texel] = b;
 }
 
 // The direct light on a point of a surface facing normal (camera relative, as the shadows want it).
@@ -100,7 +81,7 @@ float3 DirectLight(ShadowFilter filter, float3 positionRel, float3 normal, uint3
     [loop] for (uint i = 0u; i < count; i++)
     {
         GpuLight local = Lights[LightGrid[row + 1u + i]];
-        float3 lightToSurface = positionRel - (local.positionRange.xyz - CameraPos);
+        float3 lightToSurface = positionRel - LightNearest(local, positionRel);
         float facing = saturate(dot(normal, NormalizeOrZero(-lightToSurface)));
         [branch] if (facing <= 0.0)
             continue;
@@ -117,7 +98,7 @@ float3 DirectLight(ShadowFilter filter, float3 positionRel, float3 normal, uint3
 // What an occupied voxel holds: no light of its own, and none passes through it (an empty voxel only takes on what
 // its empty neighbours held), but a surface's filtered read reaches into the voxel it fills, so it keeps the
 // average of what its empty neighbours held last time rather than black.
-void WriteOccupied(uint level, int3 voxel, int3 texel, float3 shift, uint parity, bool oldValid)
+void WriteOccupied(uint level, int3 voxel, float3 shift, uint parity, bool oldValid)
 {
     float4 r = float4(0.0, 0.0, 0.0, 0.0), g = r, b = r;
     float count = 0.0;
@@ -134,16 +115,16 @@ void WriteOccupied(uint level, int3 voxel, int3 texel, float3 shift, uint parity
             if (VoxelAt(Albedo, AlbedoSampler, level, other).a >= GiOccupied)
                 continue;
 
-            int3 oldTexel = GiStackedTexel(level, (uint3)old);
-            r += OldSh(ShR0, ShR1, oldParity, oldTexel);
-            g += OldSh(ShG0, ShG1, oldParity, oldTexel);
-            b += OldSh(ShB0, ShB1, oldParity, oldTexel);
+            int3 oldTexel = GiShTexel(level, oldParity, (uint3)old);
+            r += ShR[oldTexel];
+            g += ShG[oldTexel];
+            b += ShB[oldTexel];
             count += 1.0;
         }
     }
 
     float share = count > 0.0 ? 1.0 / count : 0.0;
-    WriteSh(parity, texel, r * share, g * share, b * share);
+    WriteSh(level, parity, (uint3)voxel, r * share, g * share, b * share);
 }
 
 [numthreads(4, 4, 4)]
@@ -155,7 +136,6 @@ void main(uint3 threadId : SV_DispatchThreadID)
     uint level = GiUpdateLevel();
     int3 voxel = (int3)threadId;
     int res = (int)GiResolution();
-    int3 texel = GiStackedTexel(level, threadId);
     uint parity = GiParity(level);
     uint oldParity = parity ^ 1u;
     float4 here = VoxelAt(Albedo, AlbedoSampler, level, voxel);
@@ -163,7 +143,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
     bool oldValid = GiLevelWasValid(level); // the other set holds this level once it was built
     [branch] if (here.a >= GiOccupied)
     {
-        WriteOccupied(level, voxel, texel, shift, parity, oldValid);
+        WriteOccupied(level, voxel, shift, parity, oldValid);
         return;
     }
 
@@ -201,13 +181,13 @@ void main(uint3 threadId : SV_DispatchThreadID)
             if (any(old < 0) || any(old >= res))
                 continue;
 
-            int3 oldTexel = GiStackedTexel(level, (uint3)old);
+            int3 oldTexel = GiShTexel(level, oldParity, (uint3)old);
             float4 lobe = ShLobe(toHere) * (damping * NeighbourShare);
-            shR += lobe * ShIrradiance(OldSh(ShR0, ShR1, oldParity, oldTexel), toHere);
-            shG += lobe * ShIrradiance(OldSh(ShG0, ShG1, oldParity, oldTexel), toHere);
-            shB += lobe * ShIrradiance(OldSh(ShB0, ShB1, oldParity, oldTexel), toHere);
+            shR += lobe * ShIrradiance(ShR[oldTexel], toHere);
+            shG += lobe * ShIrradiance(ShG[oldTexel], toHere);
+            shB += lobe * ShIrradiance(ShB[oldTexel], toHere);
         }
     }
 
-    WriteSh(parity, texel, shR, shG, shB);
+    WriteSh(level, parity, threadId, shR, shG, shB);
 }

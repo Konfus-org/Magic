@@ -19,6 +19,7 @@
     <!-- One fake renderer and one fake window for both suites. -->
     <Compile Include="..\Magic.UnitTests\Fakes\FakeRendering.cs" Link="Fakes\FakeRendering.cs" />
     <Compile Include="..\Magic.UnitTests\Fakes\FakeWindows.cs" Link="Fakes\FakeWindows.cs" />
+    <Compile Include="..\Magic.UnitTests\Fakes\LoadedTypes.cs" Link="Fakes\LoadedTypes.cs" />
   </ItemGroup>
 
   <ItemGroup>

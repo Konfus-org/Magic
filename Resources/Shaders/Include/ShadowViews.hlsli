@@ -10,16 +10,19 @@
 
 #include "Include/Structs.hlsli"
 
-// Rows 0 .. ShadowMaxCascades - 1 are the main view's cascades; slot s of the local lights holds the six rows
-// after them, one per face (a spot light uses the first).
+// Rows 0 .. ShadowMaxCascades - 1 are the main view's cascades, row ShadowFarRow the sun's far view (one tile past
+// the cascades' in the top row, kept between redraws: Shadows/ShadowPlan.comp), and slot s of the local lights holds
+// the six rows after it, one per face (a spot light uses the first).
 static const uint ShadowMaxCascades = 4u;
+static const uint ShadowFarRow = ShadowMaxCascades;
 static const uint ShadowFacesPerSlot = 6u;
 static const uint ShadowMaxSlots = 16u;
-static const uint ShadowMaxRows = ShadowMaxCascades + ShadowMaxSlots * ShadowFacesPerSlot;
+static const uint ShadowMaxRows = ShadowFarRow + 1u + ShadowMaxSlots * ShadowFacesPerSlot;
 
 // GpuShadowView.flags.x
 static const uint ShadowViewUsed = 1u;
 static const uint ShadowViewOrthographic = 2u;
+static const uint ShadowViewFar = 4u; // the sun's far view: its casters are not culled for their size
 
 // GpuShadowHeader.flags
 static const uint ShadowSunFlag = 1u;      // the sun casts: the cascades are there to read
@@ -40,7 +43,7 @@ static const float ShadowSpotMarginDegrees = 4.0;
 
 uint ShadowFaceRow(uint slot, uint face)
 {
-    return ShadowMaxCascades + slot * ShadowFacesPerSlot + face;
+    return ShadowFarRow + 1u + slot * ShadowFacesPerSlot + face;
 }
 
 // Where a cascade's tile sits in the atlas, in texels: x origin, y origin, width, height.

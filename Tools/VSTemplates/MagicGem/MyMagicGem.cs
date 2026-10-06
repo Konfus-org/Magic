@@ -5,10 +5,14 @@ namespace MyMagicGem;
 
 /// <summary>
 /// The gem: the one class in this dll that implements IGem. Constructor parameters are its dependencies: host
-/// services (Project, Assets, Events, IFileSystem, Scheduler, World) or interfaces other gems provide, such as IEcs from the ECS gem.
+/// services (Project, Assets, Events, IFileSystem, Scheduler, World, Settings) or interfaces other gems provide, such as IEcs from the ECS gem.
 /// The host loads gems in dependency order, so they are always there. To offer a service to the host and other gems,
 /// implement its Core interface on this class (IAssetLoader&lt;T&gt;, IDebugUI, ...). Name, static and dependencies
 /// on other gems by name are set in the csproj (GemStatic, GemDependsOn).
+/// For settings of its own, declare a class with [Settings("MyMagicGem")] (Magic.Contexts.Settings) whose public
+/// properties have defaults, and take it as a constructor parameter: a preset sets "MyMagicGem.Key": value,
+/// --set MyMagicGem.Key=value overrides it, and the settings window (F4) edits it live, where its
+/// [Category("Tab/Header")] says, with [DisplayName], [Description] and [Range] on the properties.
 /// </summary>
 internal sealed class MyMagicGem : IGem
 {

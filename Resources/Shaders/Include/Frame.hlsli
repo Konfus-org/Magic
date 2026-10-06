@@ -61,6 +61,26 @@ static const uint FrameFlagHasSky = 1u;          // a Sky entity set Ambient: it
 static const uint FrameFlagSunCastsShadows = 2u;
 static const uint FrameFlagIsMainView = 4u;      // the view frame-wide passes (shadows, GI) are planned from
 
+// What is shown in place of the lit scene, from bits 8..15 of Flags (twin: DeferredRenderer's DebugView).
+static const uint DebugViewNormal = 0u;
+static const uint DebugViewAlbedo = 1u;
+static const uint DebugViewNormals = 2u;
+static const uint DebugViewRoughness = 3u;
+static const uint DebugViewMetallic = 4u;
+static const uint DebugViewEmissive = 5u;
+static const uint DebugViewDepth = 6u;
+static const uint DebugViewSunShadow = 7u;
+static const uint DebugViewAmbientOcclusion = 8u;
+static const uint DebugViewBentNormals = 9u;
+static const uint DebugViewLightCount = 10u;
+static const uint DebugViewGiLight = 11u;
+static const uint DebugViewSkyVisibility = 12u;
+static const uint DebugViewVoxelAlbedo = 13u;
+static const uint DebugViewVoxelCoverage = 14u;
+static const uint DebugViewLevelOfDetail = 15u;
+
+uint FrameDebugView() { return (Flags >> 8u) & 0xFFu; }
+
 // Which run of a pass that runs several times this is, how many there are, and the view's index.
 uint PassIteration() { return PassRaw[7].x; }
 uint PassIterationCount() { return PassRaw[7].y; }

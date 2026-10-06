@@ -90,11 +90,11 @@ internal static class Preloads
     /// <summary>
     /// The model's lesser versions, as <see cref="Get{T}"/> answers an asset.
     /// </summary>
-    public static (float Threshold, Handle<Model> Asset)[] Lods(RenderContext ctx, Handle<Model> handle)
+    public static Lods Lods(RenderContext ctx, Handle<Model> handle)
     {
         foreach (Preloaded preloaded in ctx.Using)
         {
-            if (preloaded.Lods.TryGetValue(handle.Id, out (float Threshold, Handle<Model> Asset)[]? lods))
+            if (preloaded.Lods.TryGetValue(handle.Id, out Lods? lods))
                 return lods;
         }
 
@@ -147,7 +147,8 @@ internal static class Preloads
     }
 
     /// <summary>
-    /// The model with its lesser versions, which are made first when they are not cached.
+    /// The model with its lesser versions, which are made first when they are not cached, and their impostors' atlases;
+    /// and for the impostor cards of other models in any of them (a stand-in's small objects), those models' LODs and atlases.
     /// </summary>
     public static async Task<Preloaded> ModelAsync(Assets assets, Handle<Model> handle, CancellationToken cancel)
     {
@@ -157,10 +158,14 @@ internal static class Preloads
         if (model is null)
             return preloaded;
 
-        (float Threshold, Handle<Model> Asset)[] lods = await assets.LodsAsync(handle, cancel: cancel).ConfigureAwait(false);
-        preloaded.Lods[handle.Id] = lods;
-        foreach ((_, Handle<Model> lesser) in lods)
-            preloaded.Assets[lesser.Id] = await assets.LoadAsync(lesser, cancel: cancel).ConfigureAwait(false);
+        Lods lods = await LodsAsync(assets, handle.Id, preloaded, cancel).ConfigureAwait(false);
+        HashSet<ulong> shown = [.. new[] { model }.Concat(lods.Levels.Select(level => preloaded.Assets[level.Asset] as Model))
+            .SelectMany(each => each?.Meshes ?? [])
+            .Where(mesh => mesh.Vertices.Length > 0 && ImpostorCard.IsCard(mesh.Vertices[0]))
+            .SelectMany(mesh => mesh.Vertices.Select(vertex => ImpostorCard.Source(vertex).Model))];
+        shown.Remove(handle.Id);
+        foreach (ulong other in shown)
+            await LodsAsync(assets, other, preloaded, cancel).ConfigureAwait(false);
 
         return preloaded;
     }
@@ -261,6 +266,23 @@ internal static class Preloads
 
         ctx.Preloaded[id] = loaded;
         return true;
+    }
+
+    /// <summary>
+    /// The model's lesser versions into <paramref name="into"/>, with each one's model and atlases.
+    /// </summary>
+    private static async Task<Lods> LodsAsync(Assets assets, ulong id, Preloaded into, CancellationToken cancel)
+    {
+        Lods lods = await assets.LodsAsync(new Handle<Model>(id), cancel: cancel).ConfigureAwait(false);
+        into.Lods[id] = lods;
+        foreach (Lod level in lods.Levels)
+        {
+            into.Assets[level.Asset] = await assets.LoadAsync(new Handle<Model>(level.Asset), cancel: cancel).ConfigureAwait(false);
+            foreach (ulong atlas in level.Atlases)
+                into.Assets[atlas] = await assets.LoadAsync(new Handle<Texture>(atlas), cancel: cancel).ConfigureAwait(false);
+        }
+
+        return lods;
     }
 
     private static async Task TextureAsync(Assets assets, ulong id, Preloaded into, CancellationToken cancel)

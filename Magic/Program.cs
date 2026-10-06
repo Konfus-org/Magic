@@ -3,6 +3,7 @@ using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
+using Magic.Contexts.Threading;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
@@ -78,17 +79,19 @@ internal static class Program
                 return Fail(loaded.Message);
 
             // The host's services, which gem constructors ask for by type; gems add theirs as they load.
-            Container container = CoreServices.Create(loaded.Payload, files);
-            IServices services = container;
-            using Threads threads = services.Get<Threads>();
-            threads.Claim(ThreadId.Render); // this thread, the one the process started on, is the render thread: work for it waits for RunUntil below
+            IServices services = CoreServices.Create(loaded.Payload, files, new Settings(options.Set));
+
             using Assets assets = services.Get<Assets>();
             Events events = services.Get<Events>();
-            Project project = services.Get<Project>();
 
+            using Threads threads = services.Get<Threads>();
+            threads.Claim(ThreadId.Render); // this thread, the one the process started on, is the render thread: work for it waits for RunUntil below
+
+            Project project = services.Get<Project>();
+            ApplyPreset(options, project, assets, services.Get<Settings>());
             Debugging.Log.Info($"Project {project.Name}: root {project.Root}; assets {project.Assets}; cache {project.Cache}; resources {project.Resources}; engine gems {project.EngineGems}; gems [{string.Join(", ", project.Gems)}].");
 
-            using Gems gems = new(container, files, events, threads);
+            using Gems gems = new(services, files, events, threads);
             gems.Load(project.EngineGems, project.Gems, project.Root);
 
             // What a gem provides may not be there: the window factory, the renderer.
@@ -132,6 +135,29 @@ internal static class Program
         {
             Fail($"Exception occurred, crashing...\nException:\n{ex}");
             return 1;
+        }
+    }
+
+    /// <summary>
+    /// Applies the settings preset: --preset, else the project's, else the engine's Normal. A path that is not a preset
+    /// is an error, and the next choice is taken.
+    /// </summary>
+    private static void ApplyPreset(Options options, Project project, Assets assets, Settings settings)
+    {
+        Handle<Preset> preset = options.Preset is { } path ? assets.Find<Preset>(path) : project.Preset;
+        if (options.Preset is not null && !preset.IsValid)
+            Debugging.Log.Error($"--preset {options.Preset}: no such asset under Resources or Assets.");
+        if (!preset.IsValid)
+            preset = assets.Find<Preset>(Preset.DefaultPath);
+
+        if (assets.Load(preset) is { } loaded)
+        {
+            settings.Apply(loaded);
+            Debugging.Log.Info($"Settings preset: {loaded.Path}");
+        }
+        else
+        {
+            Debugging.Log.Error($"The settings preset {preset} could not be loaded: every setting is at its default.");
         }
     }
 
@@ -238,27 +264,8 @@ internal static class Program
         if (options.Root is not null)
             root = files.FullPath(options.Root);
 
-        // --set Render.Vsync=false writes settings.render.vsync; a value that isn't JSON is a string, which is what an enum wants.
-        foreach (string setting in options.Set)
-        {
-            string[] pair = setting.Split('=', 2);
-            if (pair.Length < 2 || string.IsNullOrWhiteSpace(pair[0]))
-                continue;
-
-            string[] path = ["settings", .. pair[0].Split('.', StringSplitOptions.TrimEntries)];
-            JsonObject node = json;
-            foreach (string key in path[..^1])
-                node = node[key] as JsonObject ?? (JsonObject)(node[key] = new JsonObject(nodeOptions));
-
-            try
-            {
-                node[path[^1]] = JsonNode.Parse(pair[1], nodeOptions);
-            }
-            catch (JsonException)
-            {
-                node[path[^1]] = pair[1];
-            }
-        }
+        if (json.Remove("settings"))
+            Debugging.Log.Warn("The project file has \"settings\", which are no longer read there: settings live in a preset (\"preset\": { \"id\": N }).");
 
         Project project;
         try
@@ -267,7 +274,7 @@ internal static class Program
         }
         catch (JsonException ex)
         {
-            return Result<Project>.Failure($"Project settings are not valid: {ex.Message}");
+            return Result<Project>.Failure($"Project file is not valid: {ex.Message}");
         }
 
         return Result<Project>.Success(project with
@@ -429,11 +436,11 @@ internal static class Program
         {
             long submitting = Stopwatch.GetTimestamp();
             if (rendering is not null)
-                Debugging.Stats.Set("Rendering.WaitMs", rendering.Submit(commands));
+                Debugging.Stats.Set("Frame.Time.RenderWaitMs", rendering.Submit(commands));
             else
                 commands.Clear();
 
-            Debugging.Stats.Set("Rendering.SubmitMs", Stopwatch.GetElapsedTime(submitting).TotalMilliseconds);
+            Debugging.Stats.Set("Frame.Time.RenderSubmitMs", Stopwatch.GetElapsedTime(submitting).TotalMilliseconds);
         });
 
         long finished = Stopwatch.GetTimestamp();

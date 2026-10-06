@@ -3,6 +3,7 @@ using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Rendering;
+using Magic.Contexts.Settings;
 using Magic.Extensions;
 using Magic.Services;
 using StreamingGem;
@@ -11,6 +12,7 @@ using Magic.Utils;
 using System.Diagnostics;
 using System.Numerics;
 using Xunit;
+using Magic.Contexts.Domain;
 
 namespace Magic.IntegrationTests.Utils;
 
@@ -49,7 +51,7 @@ public sealed class DebuggingScreenshotTests : IDisposable
         Container container = new();
         _assets = new Services.Assets(project, _files, _events, container, new Threads());
         _world = new World(_events, _assets, new Threads());
-        _streaming = new StreamingSystem(_ecs, _assets, project, [], _world, new Threads(), _rendering);
+        _streaming = new StreamingSystem(_ecs, _assets, LoadedTypes.Of<IComponent>(), new StreamingSettings(), new LodSettings(), [], _world, new Threads(), _rendering);
         _shot = Path.Combine(_root.Path, "shot.png");
 
         _world.Open(Test);

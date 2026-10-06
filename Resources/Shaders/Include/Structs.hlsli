@@ -57,26 +57,28 @@ struct GpuCell
 };
 
 // 32 B: the lesser versions (LODs) of one bucket group's mesh, one row per group. An instance of the group is
-// drawn in group1 once its height on screen, as a fraction of the view's, is under thresholds.x, in group2
-// under thresholds.y, in group3 under thresholds.z; count is how many of the three there are.
+// drawn in groups[i] once its height on screen, as a fraction of the view's, is under thresholds[i], the last
+// such i; the thresholds fall from x to w, and a level whose threshold is 0 is not there (a mesh's impostor is
+// the last level it has).
 struct GpuLodRow
 {
     float4 thresholds;
-    uint group1;
-    uint group2;
-    uint group3;
-    uint count;
+    uint4 groups;
 };
 
 // 8 B: one entry of a view's visible list, read by the vertex stage through the instance-rate buffer: the
 // instance's slot, and how much of it is drawn while it blends between two versions of its mesh. lodFade 1 is
 // all of it; f in (0, 1) keeps the pixels whose dither value is under f; -f keeps the others, so the two
-// versions of one instance, drawn with f and -f, cover every pixel exactly once.
+// versions of one instance, drawn with f and -f, cover every pixel exactly once. The slot's top bits are the level
+// of detail it is drawn at (0 the full mesh), for the debug view: mask with GpuVisibleSlotMask before indexing.
 struct GpuVisible
 {
     uint slot;
     float lodFade;
 };
+
+static const uint GpuVisibleLevelShift = 28u;
+static const uint GpuVisibleSlotMask = (1u << GpuVisibleLevelShift) - 1u;
 
 // 20 B: SDL's GPUIndexedIndirectDrawCommand, one per bucket group. The field order is the graphics API's
 // (the GPU reads it as the draw), not ours: never reorder it, here or in C# DrawArgs.
@@ -89,8 +91,11 @@ struct GpuDrawArgs
     uint firstInstance;
 };
 
-// 64 B: one point or spot light, in absolute world space. A point light is a spot whose cone never ends: its
-// cosines are below any a direction can have, so nothing branches on the kind. shadow.x is the row of its first
+// 80 B: one point, spot or area light, in absolute world space. A point light is a spot whose cone never ends: its
+// cosines are below any a direction can have, so nothing branches on the kind. An area light is a spot whose cone is
+// its front half, falling off with the cosine (inner 1, outer 0), seen from the part of its rectangle a surface looks
+// at (Lighting/Common.hlsli); its range is grown by half the rectangle's diagonal, so a reach measured from its
+// middle holds it all. shadow.x is the row of its first
 // shadow view (GpuShadowView), ShadowNone when it holds no pages this frame; shadow.y how many faces it has (1 a
 // spot, 6 a point); shadow.z bit 0 whether it may cast at all. The CPU uploads x and y as none; the GPU's local
 // shadow selection fills them in.
@@ -99,6 +104,7 @@ struct GpuLight
     float4 positionRange;     // xyz position, w range in metres: nothing farther is lit
     float4 colorInnerCos;     // rgb linear colour times intensity, w cos(half the inner cone angle)
     float4 directionOuterCos; // xyz the direction the light travels, w cos(half the outer cone angle)
+    float4 area;              // an area light's xyz +X edge direction times half its width, w half its height; else 0
     uint4 shadow;             // x first shadow view row or none, y face count, z LightCastsShadows, w unused
 };
 

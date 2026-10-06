@@ -1,3 +1,4 @@
+using Magic.Contexts;
 using Magic.Contexts.Rendering;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
@@ -8,10 +9,10 @@ using System.Numerics;
 namespace DeferredRendererGem;
 
 /// <summary>
-/// A loaded model: the mesh slots it owns, those of its lesser versions among them, its parts on its own, and its
-/// <see cref="Model.Origin"/> as it was when it was placed.
+/// A loaded model: the mesh slots it owns, those of its lesser versions among them, its parts on its own, its
+/// <see cref="Model.Origin"/> as it was when it was placed, and the atlases its impostor holds.
 /// </summary>
-internal readonly record struct ModelEntry(uint[] Slots, (uint MeshSlot, int MaterialSlot)[] Parts, Vector3 Origin);
+internal readonly record struct ModelEntry(uint[] Slots, (uint MeshSlot, int MaterialSlot)[] Parts, Vector3 Origin, Handle<Texture>[] Atlases);
 
 /// <summary>
 /// Every model in use, id to <see cref="ModelEntry"/>, reference counted, and every mesh of them on the GPU: vertices and
@@ -98,8 +99,9 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
 
     /// <summary>
     /// A slot for the mesh, its geometry queued for upload; slot 0, the failure cube, when the buffers are full (logged).
+    /// <paramref name="isImpostor"/> marks an impostor's card, drawn with the impostor variant of its class.
     /// </summary>
-    public uint Place(Mesh mesh)
+    public uint Place(Mesh mesh, bool isImpostor = false)
     {
         if (mesh.Bounds.Radius == 0f && mesh.Vertices.Length > 0)
             mesh.ComputeBounds(); // a loader that did not
@@ -115,7 +117,15 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
         }
 
         Pending.Add((vertices.Offset, indices.Offset, mesh.Vertices, mesh.Indices));
-        return _placements.Add(new Placement(vertices, indices, (uint)mesh.Indices.Length, mesh.Bounds, mesh.Box));
+        return _placements.Add(new Placement(vertices, indices, (uint)mesh.Indices.Length, mesh.Bounds, mesh.Box) { IsImpostor = isImpostor });
+    }
+
+    /// <summary>
+    /// Whether the slot holds an impostor's card.
+    /// </summary>
+    public bool IsImpostor(uint slot)
+    {
+        return _placements[slot]?.IsImpostor == true;
     }
 
     /// <summary>
@@ -169,5 +179,7 @@ internal sealed class MeshTable : RefCountTable<ulong, ModelEntry>
     private sealed record Placement(RangeAllocator.Allocation Vertices, RangeAllocator.Allocation Indices, uint IndexCount, BoundingSphere Bounds, Aabb Box)
     {
         public (float Threshold, uint MeshSlot)[] Lods { get; set; } = [];
+
+        public bool IsImpostor { get; init; }
     }
 }

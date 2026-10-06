@@ -8,6 +8,7 @@
 #include "Include/GBuffer.hlsli"
 #include "Include/MeshVaryings.hlsli"
 #include "Include/Surface.hlsli"
+#include "Include/Impostor.hlsli"
 
 // Keeps every pool and every interpolant alive whatever the surface reads; returns zero. DXC drops
 // resources and inputs nothing uses; SDL lays a stage's storage buffers out after its samplers, so a
@@ -22,20 +23,11 @@ float3 KeepBindingsAlive(MeshVaryings input)
     [branch] if (input.flags == 0xFFFFFFFFu)
     {
         nothing = SampleTextureGrad(input.flags, input.uv, float2(0.0, 0.0), float2(0.0, 0.0)).rgb
-            + input.tangent.xyz + input.worldPosition + input.normal + float3(input.uv, asfloat(input.material));
+            + input.tangent.xyz + input.worldPosition + input.normal + float3(input.uv, asfloat(input.material))
+            + asfloat(input.impostor.xyz) + asfloat(input.impostor.w);
     }
 
     return nothing;
-}
-
-// A pixel's place in the 4 x 4 ordered-dither (Bayer) matrix, as the middle of its sixteenth of 0..1: the
-// bits of x ^ y and y interleaved, most significant last.
-float DitherValue(float2 pixel)
-{
-    uint2 cell = (uint2)pixel & 3u;
-    uint mixed = cell.x ^ cell.y;
-    uint rank = ((mixed & 1u) << 3u) | ((cell.y & 1u) << 2u) | (mixed & 2u) | ((cell.y & 2u) >> 1u);
-    return ((float)rank + 0.5) / 16.0;
 }
 
 // Negative for a pixel this version of a blending instance leaves to the other one (GpuVisible.lodFade).
@@ -77,6 +69,24 @@ SurfaceInputs SurfaceInputsOf(MeshVaryings input, bool isFrontFace)
     surfaceInputs.isFrontFace = isFrontFace != isMirrored;
 #if SURFACE_DOUBLE_SIDED
     surfaceInputs.normal = surfaceInputs.isFrontFace ? surfaceInputs.normal : -surfaceInputs.normal;
+#endif
+
+#if SURFACE_IMPOSTOR
+    // An impostor's card: the surface is what the frame shows here, the frame picked with a dither offset from the LOD
+    // fade's so the two do not line up. Its uv and normal (the model's, through the model's axes, which the varyings
+    // carry) stand in for the mesh's. A card is a few pixels tall, so the material's textures are read near their
+    // smallest mip (the uv steps as if the card covered the texture twice a pixel): their average colour, which is all
+    // there is to see, where full detail through baked 8-bit uvs would be noise.
+    uint frame = ImpostorFrame(input.impostor.z, asfloat(input.impostor.w), DitherValue(input.position.xy + float2(2.0, 1.0)));
+    ImpostorTexel texel = ImpostorSample(input.impostor.xy, frame, input.uv);
+    clip(texel.coverage - 0.5);
+    float3 axisZ = cross(input.normal, input.tangent.xyz);
+    surfaceInputs.normal = NormalizeOrZero(texel.normal.x * input.normal + texel.normal.y * input.tangent.xyz + texel.normal.z * axisZ);
+    surfaceInputs.tangent = float4(0.0, 0.0, 0.0, 1.0);
+    surfaceInputs.uv = texel.uv;
+    surfaceInputs.uvDdx = float2(0.5, 0.0);
+    surfaceInputs.uvDdy = float2(0.0, 0.5);
+    surfaceInputs.isFrontFace = true;
 #endif
 
     return surfaceInputs;

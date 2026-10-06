@@ -12,7 +12,7 @@ namespace DeferredRendererGem;
 /// Everything <see cref="IRendering.Debug"/> turns on, in one place, through the same <see cref="IRendering"/> the frame uses: start-up
 /// checks of the conventions every shader is written against (a clockwise triangle is the one that survives back-face
 /// culling; a System.Numerics matrix uploaded untransposed and applied with <c>mul(M, v)</c> agrees with
-/// <c>Vector4.Transform</c>, on this backend), and, with <see cref="Magic.Contexts.Settings.RenderSettings.CullingCheck"/>, a periodic check of the GPU cull against a CPU cull of the same rows. A
+/// <c>Vector4.Transform</c>, on this backend), and, with <see cref="DeferredSettings.CullingCheck"/>, a periodic check of the GPU cull against a CPU cull of the same rows. A
 /// failure is logged as an error, so a run with <c>--fail-on-error</c> fails.
 /// </summary>
 internal static class RenderChecks
@@ -154,7 +154,7 @@ internal static class RenderChecks
 
         float Value(string name, float fallback) => plan.Values.TryGetValue(name, out Magic.Contexts.Assets.Param value) ? value.X : fallback;
         int count = (int)planned.CascadeCount;
-        int resolution = (int)Value("cascadeResolution", 2048f);
+        int resolution = (int)planned.Layout.Z; // the cascade resolution as fitted into the atlas
         float distance = MathF.Max(Value("distance", 300f), frame.Near + 1f);
         float lambda = Value("splitLambda", 0.7f);
         float blend = Value("blendFraction", 0.15f);

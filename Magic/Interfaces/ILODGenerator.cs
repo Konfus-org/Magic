@@ -19,14 +19,13 @@ public interface ILODGenerator<T> where T : Asset
 
     /// <summary>
     /// Writes the lesser versions of <paramref name="asset"/> as asset files directly in <paramref name="folder"/>,
-    /// which is this asset's alone, and answers each one's threshold and file name. What a threshold measures belongs
-    /// to the type: for a model the height on screen, as a fraction of the view's, under which it is drawn; for a
-    /// chunk the metres from a camera beyond which it is spawned. An asset not worth a lesser version is an empty
-    /// answer. Files the lesser versions name in turn (a chunk's model) go in the same folder, with a sidecar when
-    /// the generator needs to know the id. Called on a worker. It tells <paramref name="progress"/>, when there is
+    /// which is this asset's alone, and answers them (<see cref="Lod"/>: each one's threshold, its file's id and the
+    /// textures baked for it). A file in the folder has no sidecar: its id is <see cref="Lods.IdOf"/> of its name,
+    /// which is also how a file names another (a chunk its stand-in models). An asset not worth a lesser version is
+    /// <see cref="Lods.None"/>. Called on a worker. It tells <paramref name="progress"/>, when there is
     /// one, how much of the work is done, 0 to 1. It stops, by throwing
     /// <see cref="OperationCanceledException"/>, when <paramref name="cancel"/> is cancelled; what it had written by
     /// then is made again the next time.
     /// </summary>
-    Task<Result<Dictionary<float, string>>> GenerateAsync(T asset, string folder, IProgress<float>? progress, CancellationToken cancel);
+    Task<Result<Lods>> GenerateAsync(T asset, string folder, IProgress<float>? progress, CancellationToken cancel);
 }

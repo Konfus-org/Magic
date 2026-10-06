@@ -2,6 +2,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Rendering;
 using Magic.Utils;
 using System.Text;
+using System.Text.Json;
 
 namespace DeferredRendererGem;
 
@@ -20,6 +21,15 @@ internal static class PassLoader
     // slot 1 (Shadows/Shadow.vert.hlsl). The vertex stage binds the transforms before the pass's own buffers.
     private static readonly VertexBufferLayout[] DepthVertexBuffers = [new(0, Vertex.Size), new(1, GpuVisible.Size, PerInstance: true)];
     private static readonly VertexAttribute[] DepthVertexAttributes = [new(0, 0, GpuVertexFormat.Float3, 0), new(1, 1, GpuVertexFormat.Uint, 0)];
+
+    // An impostor's card says what it is in its normal and tangent (Include/Impostor.hlsli), so its depth draw takes those too.
+    private static readonly VertexAttribute[] ImpostorVertexAttributes =
+    [
+        new(0, 0, GpuVertexFormat.Float3, 0),
+        new(1, 0, GpuVertexFormat.Float3, 12),
+        new(2, 0, GpuVertexFormat.Float4, 24),
+        new(3, 1, GpuVertexFormat.Uint, 0),
+    ];
     private const int DepthFixedVertexBuffers = 1;
 
     /// <summary>
@@ -43,6 +53,8 @@ internal static class PassLoader
             Path = post.Path,
             Shader = post.Shader,
             Params = post.Params,
+            Group = post.Group,
+            Tuning = post.Tuning,
             Reads = [.. post.Inputs.Select(input => new PassRead { Name = input })],
             Writes = [new PassWrite { Name = post.Output.Name }],
             Dispatch = new PassDispatch { Per = "output:" + post.Output.Name },
@@ -84,7 +96,7 @@ internal static class PassLoader
         state.IsPost = isPost;
         state.Pass = pass;
         state.PingPong = Array.Exists(pass.Writes, write => Array.Exists(pass.Reads, read => string.Equals(read.Name, write.Name, StringComparison.OrdinalIgnoreCase)));
-        state.Values = new Dictionary<string, Param>(pass.Params);
+        state.Values = ValuesOf(pass, ctx.Settings.Values);
         state.Error = null;
         state.NeedsPipeline = false;
         ctx.Pipeline.Changed = true;
@@ -223,7 +235,45 @@ internal static class PassLoader
     }
 
     /// <summary>
-    /// The pass's parameters packed again from its values: after the settings window changed one.
+    /// A pass's values: its file's params with the settings' <c>"PassName.param"</c> values (the preset's, then
+    /// <c>--set</c>) laid over them.
+    /// </summary>
+    public static Dictionary<string, Param> ValuesOf(Pass pass, IReadOnlyDictionary<string, JsonElement> settings)
+    {
+        Dictionary<string, Param> values = new(pass.Params);
+        string prefix = Path.GetFileNameWithoutExtension(pass.Path) + ".";
+        foreach ((string key, JsonElement value) in settings)
+        {
+            if (!key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (Param.Of(value) is { } param)
+                values[key[prefix.Length..]] = param;
+            else
+                Debugging.Log.Warn($"Setting {key} = {value} is not a pass parameter value (a number, true or false, or [x, y, z, w]).");
+        }
+
+        return values;
+    }
+
+    /// <summary>
+    /// Every pass's values made again from its file and the settings, and packed: the settings' values changed (a preset
+    /// applied, a value set from the settings window or the console).
+    /// </summary>
+    public static void Reapply(RenderContext ctx)
+    {
+        foreach (List<PassState> stage in ctx.Pipeline.Stages)
+        {
+            foreach (PassState state in stage)
+            {
+                state.Values = ValuesOf(state.Pass, ctx.Settings.Values);
+                Repack(ctx, state.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The pass's parameters packed again from its values.
     /// </summary>
     public static void Repack(RenderContext ctx, ulong id)
     {
@@ -348,12 +398,13 @@ internal static class PassLoader
                 return ctx.Gpu.CreatePipeline(new PipelineDesc(compiled, depthFragment)
                 {
                     Buffers = DepthVertexBuffers,
-                    Attributes = DepthVertexAttributes,
+                    Attributes = pass.Draw.Impostors ? ImpostorVertexAttributes : DepthVertexAttributes,
                     Depth = ctx.Gpu.DepthFormat,
                     Cull = GpuCull.None,
                     DepthCompare = pass.Draw.DepthCompare,
                     DepthWrite = pass.Draw.DepthWrite,
                     DepthBiasSlope = pass.Draw.DepthBiasSlope,
+                    DepthBiasClamp = pass.Draw.DepthBiasClamp,
                     DepthClip = false,
                 });
             case PassKind.Quads when state.CompiledFragment is { } quadFragment:

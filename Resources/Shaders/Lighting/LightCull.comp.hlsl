@@ -14,6 +14,14 @@
 
 #define GROUP_SIZE 8 // tiles a side per group
 
+// With TRANSPARENT_TILES 1 (Resources/Passes/Core/TransparentLightCull.pass) a tile reaches from the near plane to the
+// farthest depth drawn in it, or TransparentReach where nothing was: the lights of anything in front of the opaque
+// scene, which is where transparent surfaces are drawn (Templates/Forward.frag.hlsl).
+#ifndef TRANSPARENT_TILES
+#define TRANSPARENT_TILES 0
+#endif
+static const float TransparentReach = 10000.0;
+
 Texture2D<float> Depth : READ(0);
 SamplerState DepthSampler : SAMPLER(0);
 StructuredBuffer<GpuLight> Lights : READ(1);
@@ -55,10 +63,20 @@ void main(uint3 threadId : SV_DispatchThreadID)
     uint count = 0u;
     float nearDepth = 0.0;
     float farDepth = 0.0;
-    [branch] if (nearest > 0.0)
+    bool drawn = nearest > 0.0;
+#if TRANSPARENT_TILES
+    [branch] if (LightCount > 0u)
+#else
+    [branch] if (drawn)
+#endif
     {
+#if TRANSPARENT_TILES
+        nearDepth = Near;
+        farDepth = drawn ? ViewDepth(farthest) : min(Far, TransparentReach);
+#else
         nearDepth = ViewDepth(nearest);
         farDepth = ViewDepth(farthest);
+#endif
 
         float3 boxMin;
         float3 boxMax;

@@ -58,10 +58,13 @@ internal sealed class Options
     [Option("loading", HelpText = "Show this domain while another opens instead of the project's loading domain: a path under Resources or Assets, like Domains/Loading/Loading.domain.")]
     public string? Loading { get; set; }
 
+    [Option("preset", HelpText = "Use this settings preset instead of the project's: a path under Resources or Assets, like Presets/Toaster.preset.")]
+    public string? Preset { get; set; }
+
     [Option("pipeline", HelpText = "Render with this pipeline instead of the project's: a path under Resources or Assets, like Pipelines/Default.pipeline.")]
     public string? Pipeline { get; set; }
 
-    [Option("set", HelpText = "Override project settings: --set Render.Resolution.Width=1280 Render.Resolution.Height=720 Render.Vsync=false (Section.Key=value, space separated).")]
+    [Option("set", HelpText = "Override settings over the preset: --set Gpu.Vsync=false Lod.Bias=2 ShadowPlan.distance=500 (Owner.Property=value, space separated; Owner is a settings name or a pass's file name).")]
     public IEnumerable<string> Set { get; set; } = [];
 
     /// <summary>

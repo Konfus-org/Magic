@@ -46,5 +46,38 @@
         "steps": {
             "x": 4
         }
+    },
+    "group": "Lighting/Ambient occlusion",
+    "tuning": {
+        "radius": {
+            "label": "Radius (m)",
+            "description": "Metres around a surface searched for what shades it.",
+            "min": 0.1,
+            "max": 5
+        },
+        "maxRadiusPixels": {
+            "label": "Largest radius (pixels)",
+            "description": "The most pixels the radius may cover on screen, so near surfaces stay cheap.",
+            "min": 8,
+            "max": 256
+        },
+        "thickness": {
+            "label": "Thickness",
+            "description": "How thick surfaces are assumed to be, as a share of the radius: lower lets light past thin things.",
+            "min": 0,
+            "max": 1
+        },
+        "slices": {
+            "label": "Directions",
+            "description": "Directions searched around each pixel: more is smoother and slower.",
+            "min": 1,
+            "max": 8
+        },
+        "steps": {
+            "label": "Steps",
+            "description": "Samples along each direction: more is more accurate and slower.",
+            "min": 1,
+            "max": 16
+        }
     }
 }

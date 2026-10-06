@@ -1,32 +1,21 @@
 {
     "kind": "draw",
+    "needs": "$transparentChunks",
     "reads": [
         {
             "name": "ShadowAtlas",
             "filter": "comparison"
         },
         {
-            "name": "GiShR0",
+            "name": "GiShR",
             "filter": "linear"
         },
         {
-            "name": "GiShR1",
+            "name": "GiShG",
             "filter": "linear"
         },
         {
-            "name": "GiShG0",
-            "filter": "linear"
-        },
-        {
-            "name": "GiShG1",
-            "filter": "linear"
-        },
-        {
-            "name": "GiShB0",
-            "filter": "linear"
-        },
-        {
-            "name": "GiShB1",
+            "name": "GiShB",
             "filter": "linear"
         },
         {
@@ -34,13 +23,18 @@
             "filter": "linear"
         },
         {
+            "name": "SceneColor",
+            "filter": "linear"
+        },
+        {
+            "name": "TransparentFront",
+            "filter": "nearest"
+        },
+        {
             "name": "Lights"
         },
         {
-            "name": "LightTiles"
-        },
-        {
-            "name": "LightClusters"
+            "name": "TransparentTiles"
         },
         {
             "name": "ShadowViews"
@@ -54,8 +48,11 @@
     ],
     "draw": {
         "pipeline": "forward",
+        "layers": "all",
         "colors": [
-            "Hdr"
+            "TransparentAccum",
+            "TransparentCoverage",
+            "TransparentFrontScratch"
         ],
         "depth": "Depth",
         "load": "load",

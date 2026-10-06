@@ -1,4 +1,4 @@
-using Magic.Contexts;
+using Magic.Contexts.Threading;
 
 namespace Magic.Services;
 

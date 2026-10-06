@@ -2,6 +2,7 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
+using Magic.Contexts.Domain;
 using Magic.Contexts.Events;
 using Magic.Extensions;
 using Magic.Interfaces;

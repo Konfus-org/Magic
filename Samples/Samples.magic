@@ -1,5 +1,4 @@
 {
     "name": "Samples",
-    "entryPoint": { "id": 3301 },
-    "console": true
+    "entryPoint": { "id": 3301 }
 }

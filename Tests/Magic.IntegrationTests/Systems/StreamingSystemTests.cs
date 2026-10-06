@@ -4,6 +4,8 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Events;
 using Magic.Contexts.Rendering;
+using Magic.Contexts.Settings;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using StreamingGem;
@@ -14,6 +16,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Text.Json;
 using Xunit;
+using Magic.Contexts.Domain;
 
 namespace Magic.IntegrationTests.Systems;
 
@@ -40,6 +43,8 @@ public sealed class StreamingSystemTests : IDisposable
 
     private readonly TempFolder _root = new();
     private readonly Project _project;
+    private readonly StreamingSettings _settings = new();
+    private readonly AssetSettings _budgets = new();
     private readonly Events _events = new();
     private readonly World _world;
     private readonly FlecsEcs _ecs = new();
@@ -77,11 +82,12 @@ public sealed class StreamingSystemTests : IDisposable
         Write("Watched/globals.chunk", """{ "entities": [ { "name": "Eye", "components": { "Transform": { "position": { "x": 5, "y": 5, "z": 5 } }, "Camera": {} } } ] }""", 3071);
 
         Container container = new();
+        container.Add(_budgets);
         container.Add<ILODGenerator<Chunk>>(new StandIns());
         _assets = new Services.Assets(_project, new FileSystem(), _events, container, new Threads());
         _transforms = new TransformSystem(_ecs);
         _world = new World(_events, _assets, new Threads());
-        _streaming = new StreamingSystem(_ecs, _assets, _project, [_scripting], _world, new Threads(), new FakeRendering());
+        _streaming = new StreamingSystem(_ecs, _assets, LoadedTypes.Of<IComponent>(), _settings, new LodSettings(), [_scripting], _world, new Threads(), new FakeRendering());
     }
 
     public void Dispose()
@@ -305,8 +311,8 @@ public sealed class StreamingSystemTests : IDisposable
     [Fact]
     public void A_chunk_beyond_the_view_distance_is_not_streamed_in()
     {
-        _project.Settings.Render.ViewDist = 200f;
-        _project.Settings.Assets.Budgets[nameof(Chunk)] = 0; // nothing but what the camera wants is loaded
+        _settings.ViewDist = 200f;
+        _budgets.Budgets[nameof(Chunk)] = 0; // nothing but what the camera wants is loaded
         Open(Test);
         SpawnCamera();
 
@@ -346,7 +352,7 @@ public sealed class StreamingSystemTests : IDisposable
     [Fact]
     public void A_chunk_no_longer_seen_is_unloaded_when_over_the_chunk_budget()
     {
-        _project.Settings.Assets.Budgets[nameof(Chunk)] = 0;
+        _budgets.Budgets[nameof(Chunk)] = 0;
         Open(Test);
         Handle camera = SpawnCamera();
         StepUntil(() => Spawned("Test", 0, 0, 2));
@@ -360,8 +366,8 @@ public sealed class StreamingSystemTests : IDisposable
     [Fact]
     public void A_chunk_within_the_radius_of_the_camera_stays_wherever_it_looks()
     {
-        _project.Settings.Streaming.Radius = 64f;
-        _project.Settings.Assets.Budgets[nameof(Chunk)] = 0;
+        _settings.Radius = 64f;
+        _budgets.Budgets[nameof(Chunk)] = 0;
         Open(Test);
         Handle camera = SpawnCamera();
         StepUntil(() => Spawned("Test", 0, 0, 1) && Spawned("Test", 0, 0, 2));
@@ -512,7 +518,7 @@ public sealed class StreamingSystemTests : IDisposable
     [Fact]
     public void A_domain_is_loaded_once_the_chunks_the_camera_wants_are_spawned()
     {
-        _project.Settings.Streaming.Radius = 0f;
+        _settings.Radius = 0f;
         SpawnCamera();
 
         Open(Test);
@@ -523,7 +529,7 @@ public sealed class StreamingSystemTests : IDisposable
     [Fact]
     public void A_chunk_no_camera_wants_is_loaded_while_the_chunk_budget_has_room()
     {
-        _project.Settings.Streaming.Radius = 0f;
+        _settings.Radius = 0f;
         Open(Test);
         SpawnCamera();
 
@@ -535,8 +541,8 @@ public sealed class StreamingSystemTests : IDisposable
     [Fact]
     public void A_chunk_no_camera_wants_is_not_loaded_without_a_chunk_budget()
     {
-        _project.Settings.Streaming.Radius = 0f;
-        _project.Settings.Assets.Budgets[nameof(Chunk)] = 0;
+        _settings.Radius = 0f;
+        _budgets.Budgets[nameof(Chunk)] = 0;
         Open(Test);
         SpawnCamera();
 
@@ -608,7 +614,7 @@ public sealed class StreamingSystemTests : IDisposable
     [Fact]
     public void A_domain_behind_the_loading_domain_is_loaded_with_the_chunks_no_camera_wants()
     {
-        _project.Settings.Streaming.Radius = 0f;
+        _settings.Radius = 0f;
         OpenBehindLoading(Test);
         SpawnCamera();
         StepUntil(() => Debugging.Stats.Get("Streaming.Loaded") == 6);
@@ -723,7 +729,7 @@ public sealed class StreamingSystemTests : IDisposable
     private void UseScripting(params IScripting[] scripting)
     {
         _streaming.Dispose();
-        _streaming = new StreamingSystem(_ecs, _assets, _project, scripting, _world, new Threads(), new FakeRendering());
+        _streaming = new StreamingSystem(_ecs, _assets, LoadedTypes.Of<IComponent>(), _settings, new LodSettings(), scripting, _world, new Threads(), new FakeRendering());
     }
 
     /// <summary>
@@ -884,12 +890,12 @@ public sealed class StreamingSystemTests : IDisposable
     {
         public int Version => 1;
 
-        public async Task<Result<Dictionary<float, string>>> GenerateAsync(Chunk asset, string folder, IProgress<float>? progress, CancellationToken cancel)
+        public async Task<Result<Lods>> GenerateAsync(Chunk asset, string folder, IProgress<float>? progress, CancellationToken cancel)
         {
             Directory.CreateDirectory(folder);
             await File.WriteAllTextAsync(Path.Combine(folder, "standin.chunk"), """{ "entities": [ { "name": "StandIn", "components": { "Transform": {} } } ] }""", cancel);
 
-            return Result<Dictionary<float, string>>.Success(new() { [512f] = "standin.chunk" });
+            return Result<Lods>.Success(new Lods([new Lod(512f, Lods.IdOf(folder, "standin.chunk"), [])]));
         }
     }
 

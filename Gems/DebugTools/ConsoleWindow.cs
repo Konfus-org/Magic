@@ -28,10 +28,9 @@ internal sealed class ConsoleWindow : Window, ILogger
     private string _text = "";
     private bool _logChanged;
 
-    public ConsoleWindow(IInput? input, IClipboard? clipboard, bool openAtStart) : base("Console", Key.Grave, input, clipboard)
+    public ConsoleWindow(IInput? input, IClipboard? clipboard) : base("Console", Key.Grave, input, clipboard)
     {
         Debugging.Log.Register(this);
-        Open = openAtStart;
 
         // Not one of the engine's threads (Threads.Create): this one sits in ReadLine until the terminal closes, and
         // Threads joins its own at dispose, which would wait for that. A long-running task gets a thread of its own
@@ -144,32 +143,43 @@ internal sealed class ConsoleWindow : Window, ILogger
     }
 
     /// <summary>
-    /// Whitespace separates arguments; double quotes keep spaces inside one.
+    /// Whitespace separates arguments; double quotes, braces and brackets keep spaces inside one. Quotes around a whole
+    /// argument are dropped, those inside one are kept, so <c>set Assets.Budgets={"Chunk": 512, "Texture": 256}</c>
+    /// is one argument and keeps its JSON.
     /// </summary>
     private static string[] Split(string line)
     {
         List<string> words = [];
         StringBuilder word = new();
-        bool quoted = false, any = false;
+        bool quoted = false, wrapped = false, any = false;
+        int depth = 0;
 
         foreach (char character in line)
         {
             if (character == '"')
             {
+                if (!any)
+                    wrapped = true;
+                else if (!wrapped || !quoted)
+                    word.Append(character);
+
                 quoted = !quoted;
                 any = true;
                 continue;
             }
 
-            if (char.IsWhiteSpace(character) && !quoted)
+            if (char.IsWhiteSpace(character) && !quoted && depth == 0)
             {
                 if (any)
                     words.Add(word.ToString());
 
                 word.Clear();
-                any = false;
+                any = wrapped = false;
                 continue;
             }
+
+            if (!quoted)
+                depth = Math.Max(0, depth + character switch { '{' or '[' => 1, '}' or ']' => -1, _ => 0 });
 
             word.Append(character);
             any = true;

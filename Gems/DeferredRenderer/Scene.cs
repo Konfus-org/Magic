@@ -26,10 +26,11 @@ internal static class Scene
     private const int MaxResolution = 16384;
 
     /// <summary>
-    /// An instance whose cull radius projects to under this many pixels is culled, like one outside the frustum.
-    /// Higher culls more of the small and distant instances: fewer triangles and draws, but things pop in later.
+    /// An instance whose cull radius projects to under this many pixels is culled, like one outside the frustum: a half
+    /// pixel radius, so only what is less than a pixel across goes. Anything a pixel or more across is drawn (a cheap
+    /// lesser version of it far away), so distant things never thin out or pop in.
     /// </summary>
-    private const float MinObjectPixels = 1f;
+    private const float MinObjectPixels = 0.5f;
 
     /// <summary>
     /// Fills <paramref name="plan"/> with this frame: the pipeline synced to what the world names (<paramref name="pipeline"/>
@@ -150,8 +151,8 @@ internal static class Scene
         Rectangle rect = view.Camera.Viewport.ToPixels((int)targets.Width, (int)targets.Height);
         (int hiZWidth, int hiZHeight, int hiZLevels, _) = HiZ.Size(rect.Width, rect.Height);
         FrameConstants constants = FrameConstants.Build(
-            view, rect, (hiZWidth, hiZHeight, hiZLevels), time, MinObjectPixels, MathF.Max(0.01f, ctx.Settings.LodBias), lighting,
-            (uint)frameNumber, (uint)index << FrameConstants.ViewIndexShift);
+            view, rect, (hiZWidth, hiZHeight, hiZLevels), time, MinObjectPixels, MathF.Max(0.01f, ctx.Lod.Bias), lighting,
+            (uint)frameNumber, ((uint)index << FrameConstants.ViewIndexShift) | ((uint)ctx.Deferred.DebugView << FrameConstants.DebugViewShift));
         return new ViewPlan(index, rect, ctx.Resources.View(index), constants);
     }
 
@@ -269,10 +270,9 @@ internal static class Scene
         if (size.Width <= 0 || size.Height <= 0)
             return null; // minimised
 
-        // Rendered at the settings' resolution, whatever the window's size; Present stretches the result over it.
-        Size resolution = ctx.Settings.Resolution;
-        if (resolution.Width > 0 && resolution.Height > 0)
-            size = new Size(Math.Min(resolution.Width, MaxResolution), Math.Min(resolution.Height, MaxResolution));
+        // Rendered at the render scale's share of the window, in its shape; Present stretches the result over it.
+        float scale = ctx.Deferred.Scale;
+        size = new Size(Math.Clamp((int)MathF.Round(size.Width * scale), 1, MaxResolution), Math.Clamp((int)MathF.Round(size.Height * scale), 1, MaxResolution));
 
         return Ensure(ctx, target, size.Width, size.Height);
     }

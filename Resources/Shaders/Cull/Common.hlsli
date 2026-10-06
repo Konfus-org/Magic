@@ -196,21 +196,23 @@ bool IsOccluded(StructuredBuffer<float> hiZ, float3 center, float radius)
     return isHidden;
 }
 
-// An instance into a bucket's draw: one more instance, its slot and fade at the next place of the bucket's
-// run of the visible list. argsOffset is where the view's slice of the draw args starts (0 for a camera).
+// An instance into a bucket's draw: one more instance, its slot (with the level of detail in its top bits) and fade
+// at the next place of the bucket's run of the visible list. argsOffset is where the view's slice of the draw args
+// starts (0 for a camera).
 void AppendToBucket(
     RWStructuredBuffer<GpuDrawArgs> drawArgs,
     RWStructuredBuffer<GpuVisible> visibleIds,
     uint argsOffset,
     uint bucket,
     uint slot,
+    uint level,
     float lodFade)
 {
     uint index;
     InterlockedAdd(drawArgs[argsOffset + bucket].instanceCount, 1u, index);
 
     GpuVisible visible;
-    visible.slot = slot;
+    visible.slot = slot | (level << GpuVisibleLevelShift);
     visible.lodFade = lodFade;
     visibleIds[drawArgs[argsOffset + bucket].firstInstance + index] = visible;
 }
@@ -233,28 +235,22 @@ void AppendVisibleHeight(
 {
     GpuLodRow row = lods[bucket];
 
-    // The thresholds fall from x to z, so each one passed makes the bucket picked so far the finer one.
+    // The thresholds fall from x to w, so each one passed makes the bucket picked so far the finer one.
     uint finer = bucket;
     uint picked = bucket;
+    uint finerLevel = 0u;
+    uint pickedLevel = 0u;
     float threshold = 0.0;
-    [branch] if (row.count > 0u && height < row.thresholds.x)
+    [unroll] for (uint level = 0u; level < 4u; level++)
     {
-        picked = row.group1;
-        threshold = row.thresholds.x;
-    }
-
-    [branch] if (row.count > 1u && height < row.thresholds.y)
-    {
-        finer = picked;
-        picked = row.group2;
-        threshold = row.thresholds.y;
-    }
-
-    [branch] if (row.count > 2u && height < row.thresholds.z)
-    {
-        finer = picked;
-        picked = row.group3;
-        threshold = row.thresholds.z;
+        [branch] if (row.thresholds[level] > 0.0 && height < row.thresholds[level])
+        {
+            finer = picked;
+            finerLevel = pickedLevel;
+            picked = row.groups[level];
+            pickedLevel = level + 1u;
+            threshold = row.thresholds[level];
+        }
     }
 
     // How much of the finer version is left: all of it at the threshold, none LOD_BLEND of the threshold under.
@@ -262,12 +258,12 @@ void AppendVisibleHeight(
     float finerShare = picked != finer ? saturate((height - threshold + blendHeight) / blendHeight) : 0.0;
     [branch] if (finerShare > 0.0)
     {
-        AppendToBucket(drawArgs, visibleIds, argsOffset, finer, slot, finerShare);
-        AppendToBucket(drawArgs, visibleIds, argsOffset, picked, slot, -finerShare);
+        AppendToBucket(drawArgs, visibleIds, argsOffset, finer, slot, finerLevel, finerShare);
+        AppendToBucket(drawArgs, visibleIds, argsOffset, picked, slot, pickedLevel, -finerShare);
     }
     else
     {
-        AppendToBucket(drawArgs, visibleIds, argsOffset, picked, slot, 1.0);
+        AppendToBucket(drawArgs, visibleIds, argsOffset, picked, slot, pickedLevel, 1.0);
     }
 }
 

@@ -6,11 +6,22 @@
 // are culled against the receivers' volume: the slice's faces that face away from the sun and a plane through
 // every silhouette edge along it, up to twelve planes, relative to the cascade's eye.
 //
+// The far view (row ShadowFarRow, the tile after the cascades') covers everything within farDistance of the camera
+// at low resolution, so what is past the cascades still casts and takes a shadow. Its centre is snapped to an eighth
+// of its width, so it holds still while the camera moves, and it is drawn again only when that centre moves, the sun
+// turns, its distance changes or farRefreshFrames have passed (what streamed in since): most frames it costs nothing.
+// Its casters are not culled for being smaller than a texel (ShadowViewFar), since far away a field of small things
+// casts its shadow together. 0 for farDistance (or no more than distance) turns it off.
+//
 // The far cascades are drawn again on alternate frames when staggerFar is set: a cascade that keeps last
 // frame's tile keeps last frame's row too. A change to the layout (the hash in the header's generation) draws
 // every tile again. The header carries what the lighting needs of the atlas (whose size the parameters repeat,
 // since a depth texture cannot be asked); the refreshed list the rows the cull and the draw work on, cascades
 // first (the local light selection pass adds its faces after them).
+//
+// The layout is fitted into the atlas (FitLayout): a cascade resolution whose row of tiles is wider or taller than the
+// atlas is lowered until it fits, and the local lights are as many as have room for their faces under that row. The
+// header carries what was fitted, and every pass after this one reads it from there, not from these parameters.
 
 #include "Include/Frame.hlsli"
 #include "Include/ShadowViews.hlsli"
@@ -24,9 +35,11 @@ struct PassParams
     float blendFraction = 0.15;
     float casterRange = 500.0;
     bool staggerFar = true;
+    float farDistance = 2048.0;
+    uint farRefreshFrames = 120;
     uint localResolution = 256;
     uint maxLocalLights = 8;
-    uint atlasWidth = 8192;  // the atlas the pass creates, in texels: the same numbers as its create
+    uint atlasWidth = 10240; // the atlas the pass creates, in texels: the same numbers as its create
     uint atlasHeight = 2560;
 };
 
@@ -34,7 +47,7 @@ RWStructuredBuffer<GpuShadowView> ShadowViews : WRITE(0);
 RWStructuredBuffer<GpuShadowHeader> ShadowHeader : WRITE(1);
 RWStructuredBuffer<uint> ShadowRefreshed : WRITE(2);
 
-groupshared uint RefreshedRows[ShadowMaxCascades];
+groupshared uint RefreshedRows[ShadowFarRow + 1u];
 
 // The far edge of each cascade (twin: Cascades.Split).
 float SplitFar(uint index, uint count, float near, float reach, float lambda)
@@ -43,6 +56,17 @@ float SplitFar(uint index, uint count, float near, float reach, float lambda)
     float even = near + (reach - near) * share;
     float logarithmic = near > 0.0 ? near * pow(reach / near, share) : even;
     return index + 1u == count ? reach : lerp(even, logarithmic, lambda);
+}
+
+// The layout the atlas has room for: the cascade resolution, the local page resolution and the shadowed local lights,
+// each no more than asked for.
+uint3 FitLayout(uint cascadeResolution, uint localResolution, uint maxLocalLights, uint atlasWidth, uint atlasHeight)
+{
+    uint cascade = max(1u, min(cascadeResolution, min(atlasWidth / (ShadowFarRow + 1u), atlasHeight)));
+    uint below = atlasHeight - cascade;
+    uint page = max(1u, min(localResolution, min(atlasWidth, below)));
+    uint pages = (atlasWidth / page) * (below / page);
+    return uint3(cascade, page, min(min(maxLocalLights, ShadowMaxSlots), pages / ShadowFacesPerSlot));
 }
 
 // A plane through onPlane with the given normal, turned to face inside.
@@ -128,10 +152,12 @@ void main(uint3 threadId : SV_DispatchThreadID)
     uint atlasWidth = passParams.atlasWidth;
     uint atlasHeight = passParams.atlasHeight;
     float2 atlasSize = float2(atlasWidth, atlasHeight);
+    uint3 fitted = FitLayout(passParams.cascadeResolution, passParams.localResolution, passParams.maxLocalLights, atlasWidth, atlasHeight);
+    uint cascadeResolution = fitted.x;
 
     // The layout this frame; a change to it starts the atlas over.
-    uint generation = (cascadeCount * 73856093u) ^ (passParams.cascadeResolution * 19349663u) ^ (passParams.localResolution * 83492791u)
-        ^ (passParams.maxLocalLights * 2654435761u) ^ (atlasWidth * 7u) ^ (atlasHeight * 13u) ^ 0x9E3779B9u;
+    uint generation = (cascadeCount * 73856093u) ^ (cascadeResolution * 19349663u) ^ (fitted.y * 83492791u)
+        ^ (fitted.z * 2654435761u) ^ (atlasWidth * 7u) ^ (atlasHeight * 13u) ^ 0x9E3779B9u;
     bool clearAll = ShadowHeader[0].generation != generation;
     bool sunCasts = FrameHas(FrameFlagSunCastsShadows) && any(SunColor > 0.0);
 
@@ -158,7 +184,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
             float along = min(farSplit, 0.5 * (1.0 + a2) * (nearSplit + farSplit));
             float radius = sqrt((farSplit - along) * (farSplit - along) + a2 * farSplit * farSplit);
             radius = ceil(radius * 16.0) / 16.0;
-            float texel = 2.0 * radius / (float)passParams.cascadeResolution;
+            float texel = 2.0 * radius / (float)cascadeResolution;
 
             float4x4 lightRotation = LightRotation(SunDirection);
             float3 center = CameraPos + forward * along;
@@ -173,7 +199,7 @@ void main(uint3 threadId : SV_DispatchThreadID)
             float4 planes[12];
             uint planeCount = ReceiverPlanes(corners, SunDirection, snapped - CameraPos, planes);
 
-            float4 tileTexels = CascadeTileTexels(tid, passParams.cascadeResolution);
+            float4 tileTexels = CascadeTileTexels(tid, cascadeResolution);
             row.viewProj = mul(OrthographicReverseZ(2.0 * radius, 2.0 * radius, nearPlane, farPlane), lightRotation);
             row.rotation = lightRotation;
             row.eye = float4(snapped, texel);
@@ -194,6 +220,48 @@ void main(uint3 threadId : SV_DispatchThreadID)
             row.flags.x = 0u;
         ShadowViews[tid] = row;
         RefreshedRows[tid] = refresh ? 1u : 0u;
+    }
+
+    [branch] if (tid == ShadowFarRow)
+    {
+        GpuShadowView row = ShadowViews[ShadowFarRow];
+        bool wasUsed = (row.flags.x & ShadowViewUsed) != 0u;
+        bool enabled = sunCasts && passParams.farDistance > passParams.distance;
+
+        float radius = passParams.farDistance;
+        float texel = 2.0 * radius / (float)cascadeResolution;
+        float4x4 lightRotation = LightRotation(SunDirection);
+        float step = max(radius / 8.0, texel);
+        float3 inLight = mul(lightRotation, float4(CameraPos, 1.0)).xyz;
+        inLight = floor(inLight / step) * step;
+        float3 snapped = mul(transpose(lightRotation), float4(inLight, 1.0)).xyz;
+
+        bool moved = any(abs(row.eye.xyz - snapped) > 1e-3) || row.range.x != radius || dot(row.rotation[2].xyz, normalize(SunDirection)) < 0.99999;
+        bool refresh = enabled && (clearAll || !wasUsed || moved || FrameNumber % max(passParams.farRefreshFrames, 1u) == 0u);
+        [branch] if (refresh)
+        {
+            float nearPlane = -(radius + passParams.casterRange);
+            float4 tileTexels = CascadeTileTexels(ShadowFarRow, cascadeResolution);
+            row.viewProj = mul(OrthographicReverseZ(2.0 * radius, 2.0 * radius, nearPlane, radius), lightRotation);
+            row.rotation = lightRotation;
+            row.eye = float4(snapped, texel);
+            row.tileUv = TexelsToUv(tileTexels, atlasSize);
+            row.tileTexels = tileTexels;
+            row.range = float4(radius, nearPlane, radius, 0.0);
+            row.flags = uint4(ShadowViewUsed | ShadowViewOrthographic | ShadowViewFar, 1u, 0u, ShadowFarRow);
+            [unroll] for (uint i = 0u; i < 12u; i++)
+                row.planes[i] = float4(0.0, 0.0, 0.0, 0.0);
+        }
+        else
+        {
+            row.flags.y = 0u;
+            row.flags.w = ShadowFarRow;
+        }
+
+        [flatten] if (!enabled)
+            row.flags.x = 0u;
+        ShadowViews[ShadowFarRow] = row;
+        RefreshedRows[ShadowFarRow] = refresh ? 1u : 0u;
     }
 
     GroupMemoryBarrierWithGroupSync();
@@ -218,13 +286,19 @@ void main(uint3 threadId : SV_DispatchThreadID)
         }
     }
 
+    [flatten] if (RefreshedRows[ShadowFarRow] != 0u)
+    {
+        ShadowRefreshed[refreshed] = ShadowFarRow;
+        refreshed++;
+    }
+
     GpuShadowHeader header;
     header.cascadeCount = sunCasts ? cascadeCount : 0u;
     header.flags = (sunCasts ? ShadowSunFlag : 0u) | (clearAll ? ShadowClearAllFlag : 0u);
     header.refreshedCount = refreshed;
     header.generation = generation;
-    header.atlasTexel = float4(1.0 / atlasSize, (float)passParams.cascadeResolution / atlasSize);
-    header.layout = uint4(atlasWidth, atlasHeight, passParams.cascadeResolution, passParams.localResolution);
-    header.slots = uint4(min(passParams.maxLocalLights, ShadowMaxSlots), ShadowMaxCascades + min(passParams.maxLocalLights, ShadowMaxSlots) * ShadowFacesPerSlot, 0u, 0u);
+    header.atlasTexel = float4(1.0 / atlasSize, (float)cascadeResolution / atlasSize);
+    header.layout = uint4(atlasWidth, atlasHeight, cascadeResolution, fitted.y);
+    header.slots = uint4(fitted.z, ShadowFarRow + 1u + fitted.z * ShadowFacesPerSlot, 0u, 0u);
     ShadowHeader[0] = header;
 }

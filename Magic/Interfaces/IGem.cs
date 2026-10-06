@@ -1,4 +1,5 @@
 using Magic.Contexts;
+using Magic.Contexts.Threading;
 
 namespace Magic.Interfaces;
 
@@ -38,7 +39,7 @@ public interface IGem : IDisposable
     }
 
     /// <summary>
-    /// On the render thread (<see cref="Contexts.ThreadId.Render"/>), which owns the GPU and the windows, while the
+    /// On the render thread (<see cref="ThreadId.Render"/>), which owns the GPU and the windows, while the
     /// main thread waits: the ECS can be read and written as in any hook, and <see cref="IRendering"/> and window
     /// calls are on their own thread. Once every gem's hook has returned, the frame's commands are submitted there
     /// while the main thread goes on with the next frame.
