@@ -191,19 +191,25 @@ internal static class Scene
     }
 
     /// <summary>
-    /// The occupancy bricks due this frame, as many as the passes that run once per brick allow (the most any of them
-    /// iterates), taken off the queue and uploaded with their dispatches; how many there are.
+    /// The occupancy bricks due this frame, as many as every pass that runs once per brick takes (the fewest any of them
+    /// iterates), taken off the queue and uploaded with their dispatches; how many there are. None while one of those
+    /// passes does not run yet (still compiling, say): a job taken then would be cleared and never built, and its mesh
+    /// would have no voxels for good.
     /// </summary>
     private static int UploadBrickJobs(RenderContext ctx)
     {
-        int budget = 0;
+        int budget = int.MaxValue;
         foreach (PassState pass in ctx.Pipeline.Stages[(int)PipelineStage.Gi])
         {
-            if (pass.Ready && pass.Pass.Each.Over == EachOver.Bricks)
-                budget = Math.Max(budget, (int)pass.Pass.Each.Max);
+            if (pass.Pass.Each.Over != EachOver.Bricks)
+                continue;
+            if (!pass.Ready || ctx.Pipeline.Unfit.Contains(pass.Id))
+                return 0;
+
+            budget = Math.Min(budget, (int)pass.Pass.Each.Max);
         }
 
-        if (budget == 0 || ctx.Bricks.Pending.Count == 0)
+        if (budget == int.MaxValue || ctx.Bricks.Pending.Count == 0)
             return 0;
 
         Span<GpuBrickJob> jobs = stackalloc GpuBrickJob[PassValidator.MaxIterations];
