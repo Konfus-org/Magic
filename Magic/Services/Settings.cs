@@ -10,7 +10,7 @@ namespace Magic.Services;
 /// <summary>
 /// The settings, a service: a flat pile of <c>"Owner.Property"</c> values (<see cref="Values"/>) written into one object
 /// per <see cref="SettingsAttribute"/> class of every loaded assembly (<see cref="All"/>), which gems ask for by type.
-/// The values are three layers, each over the one before: the applied <see cref="Assets.Preset"/>, the start-up
+/// The values are three layers, each over the one before: the applied <see cref="Contexts.Assets.Preset"/>, the start-up
 /// <c>--set</c> lines, which stay over every preset, and what was <see cref="Set"/> while running (the settings window,
 /// the console), which lasts until the next preset. The flow is one way: whatever changes a value changes it here,
 /// the values are written into the objects, gems read the objects every frame. Pass parameters are values too

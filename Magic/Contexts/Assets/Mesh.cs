@@ -1,6 +1,5 @@
 using Magic.Mathematics;
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Magic.Contexts.Assets;
@@ -27,8 +26,8 @@ public struct Vertex
 #if DEBUG
     static Vertex()
     {
-        // Qualified: inside Magic, Debug is the Magic.Contexts.Debug namespace.
-        System.Diagnostics.Debug.Assert(Unsafe.SizeOf<Vertex>() == Size, $"{nameof(Vertex)} must be {Size} bytes.");
+        // Qualified: inside Magic, Debug is the Magic.Contexts.Debug namespace; Unsafe so a Release build needs no using.
+        System.Diagnostics.Debug.Assert(System.Runtime.CompilerServices.Unsafe.SizeOf<Vertex>() == Size, $"{nameof(Vertex)} must be {Size} bytes.");
     }
 #endif
 }
