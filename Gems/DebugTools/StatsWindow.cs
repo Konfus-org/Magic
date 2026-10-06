@@ -52,8 +52,14 @@ internal sealed class StatsWindow : Window
         Debugging.Stats.Set("Frame.WorstMs", _lastFrameMs);
         SampleGc(dtMs);
 
-        _stats.Clear();
-        Debugging.Stats.Take(_stats);
+        // The stats are gathered only for what reads them: the open window, and the log every LogIntervalMs.
+        _sinceLogMs += dtMs;
+        bool logDue = _sinceLogMs >= LogIntervalMs;
+        if (Open || logDue)
+        {
+            _stats.Clear();
+            Debugging.Stats.Take(_stats);
+        }
 
         if (Open)
         {
@@ -70,8 +76,7 @@ internal sealed class StatsWindow : Window
             Debugging.UI.End();
         }
 
-        _sinceLogMs += dtMs;
-        if (_sinceLogMs >= LogIntervalMs)
+        if (logDue)
         {
             _sinceLogMs = 0;
             _line.Clear();
@@ -79,10 +84,9 @@ internal sealed class StatsWindow : Window
                 _line.Append(_line.Length == 0 ? "" : ", ").Append(name).Append(' ').Append(Format(value));
 
             Debugging.Log.Verbose($"Stats: {_line}.");
+            if (fps < 30)
+                Debugging.Log.Verbose("FPS is below 30! Consider profiling and optimizing.");
         }
-
-        if (fps < 30)
-            Debugging.Log.Verbose("FPS is below 30! Consider profiling and optimizing.");
 
         _lastFrameMs = _windowWorstMs;
         _windowWorstMs = 0;

@@ -30,9 +30,9 @@ internal sealed class PipelineState(CompiledShader fullscreenVertex, GpuPipeline
     public RefCountTable<ulong, PassState> Passes { get; } = new();
 
     /// <summary>
-    /// The ids the pipeline and the post list named when they were last synced: one reference each.
+    /// What the pipeline and the post list named when the listing last changed, with the stage of each: one reference each.
     /// </summary>
-    public List<ulong> Held { get; } = [];
+    public List<(ulong Id, PipelineStage Stage)> Listed { get; } = [];
 
     /// <summary>
     /// What this frame's sync wants listed, with the stage of each; kept between frames so nothing is allocated.

@@ -95,7 +95,10 @@ internal sealed partial class ParamLayout
     /// </summary>
     public static Result<ParamLayout> Parse(string hlsl, string structName, bool allowTextures)
     {
-        Match match = StructPattern(structName).Match(hlsl);
+        Match match = StructPattern().Match(hlsl);
+        while (match.Success && match.Groups["name"].Value != structName)
+            match = match.NextMatch();
+
         if (!match.Success)
             return Result<ParamLayout>.Failure($"no 'struct {structName} {{ ... }}' declaration.");
 
@@ -325,10 +328,8 @@ internal sealed partial class ParamLayout
         return CommentPattern().Replace(text, comment => Blank(comment.Value));
     }
 
-    private static Regex StructPattern(string structName)
-    {
-        return new Regex($@"\bstruct\s+{Regex.Escape(structName)}\s*\{{(?<body>[^}}]*)\}}", RegexOptions.Singleline);
-    }
+    [GeneratedRegex(@"\bstruct\s+(?<name>\w+)\s*\{(?<body>[^}]*)\}", RegexOptions.Singleline)]
+    private static partial Regex StructPattern();
 
     [GeneratedRegex(@"^(?<type>\w+)\s+(?<name>\w+)\s*(?::\s*(?<semantic>\w+))?\s*(?:=\s*(?<default>.+))?$", RegexOptions.Singleline)]
     private static partial Regex MemberPattern();

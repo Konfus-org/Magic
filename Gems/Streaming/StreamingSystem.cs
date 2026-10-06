@@ -114,6 +114,7 @@ internal sealed class StreamingSystem : ISystem
     private readonly World _world;
     private readonly Threads _threads;
     private readonly IEcsQuery<Camera, WorldTransform> _cameras;
+    private readonly QueryChunkAction<Camera, WorldTransform> _addViews;
 
     // One per open domain, in the order they were opened; their roots hang under the one World entity.
     private readonly List<Stream> _streams = [];
@@ -156,6 +157,7 @@ internal sealed class StreamingSystem : ISystem
         _world = world;
         _threads = threads;
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
+        _addViews = AddViews;
         _nearestFirst = (left, right) => DistanceSquared(left.Stream, left.Chunk).CompareTo(DistanceSquared(right.Stream, right.Chunk));
     }
 
@@ -626,11 +628,13 @@ internal sealed class StreamingSystem : ISystem
     private void FindCameras()
     {
         _views.Clear();
-        _cameras.Run((ReadOnlySpan<Handle> entities, Span<Camera> cameras, Span<WorldTransform> worlds) =>
-        {
-            for (int i = 0; i < cameras.Length; i++)
-                _views.Add((DomainRootOf(entities[i]), worlds[i].Value.Translation, cameras[i].Frustum(worlds[i].Value, StreamingAspect)));
-        });
+        _cameras.Run(_addViews);
+    }
+
+    private void AddViews(ReadOnlySpan<Handle> entities, Span<Camera> cameras, Span<WorldTransform> worlds)
+    {
+        for (int i = 0; i < cameras.Length; i++)
+            _views.Add((DomainRootOf(entities[i]), worlds[i].Value.Translation, cameras[i].Frustum(worlds[i].Value, StreamingAspect)));
     }
 
     /// <summary>

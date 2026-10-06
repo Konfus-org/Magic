@@ -277,7 +277,7 @@ internal sealed class FileSystem : IFileSystem
         try
         {
             CreateParentDirectory(path);
-            File.WriteAllText(path, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            File.WriteAllText(path, text, Utf8);
 
             return Result.Success();
         }
@@ -316,7 +316,7 @@ internal sealed class FileSystem : IFileSystem
         try
         {
             CreateParentDirectory(path);
-            await File.WriteAllTextAsync(path, text, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancel).ConfigureAwait(false);
+            await File.WriteAllTextAsync(path, text, Utf8, cancel).ConfigureAwait(false);
 
             return Result.Success();
         }

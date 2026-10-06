@@ -389,6 +389,8 @@ internal sealed class Buckets
 
     private readonly RefCountTable<(PipelineClass Class, uint Mesh), Group> _groups = new();
     private readonly List<Stack<int>> _freeInChunk = [];
+    private readonly List<int> _impostorChunks = [];
+    private readonly List<int> _otherChunks = [];
     private readonly RangeAllocator _visibleSpace;
     private readonly uint _visibleCapacity;
     private DrawArgs[] _template = new DrawArgs[GroupsPerChunk];
@@ -438,6 +440,12 @@ internal sealed class Buckets
     /// The chunks of every class, for the draw loop: one indirect call per chunk.
     /// </summary>
     public Dictionary<PipelineClass, List<int>> ByClass { get; } = [];
+
+    /// <summary>
+    /// The chunks of every impostor class, or of every other class, ascending: what a depth draw of the impostors' cards,
+    /// or of everything else, walks. Chunks are only ever added, each one past the last.
+    /// </summary>
+    public ReadOnlySpan<int> ChunksOf(bool impostors) => CollectionsMarshal.AsSpan(impostors ? _impostorChunks : _otherChunks);
 
     /// <summary>
     /// True when every group of the chunk is free: its indirect call would draw nothing.
@@ -553,6 +561,7 @@ internal sealed class Buckets
             free.Push(i);
         _freeInChunk.Add(free);
         chunks.Add(created);
+        (cls.Variant.HasFlag(SurfaceVariant.Impostor) ? _impostorChunks : _otherChunks).Add(created);
 
         if (_template.Length < _freeInChunk.Count * GroupsPerChunk)
         {

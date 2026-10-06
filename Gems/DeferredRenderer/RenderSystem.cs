@@ -438,22 +438,29 @@ internal sealed class RenderSystem : ISystem
             return;
 
         foreach (ulong id in changed)
-        {
-            Preloads.Forget(ctx, id);
-            if (ctx.Shaders.Entries.ContainsKey(id))
-                ctx.Reloads.Start(id, cancel => Preloads.ShadersAsync(ctx.Assets, [.. Shaders.Affected(ctx, id)], cancel));
-            else if (ctx.Pipeline.Passes.Contains(id))
-                ctx.Reloads.Start(id, cancel => Preloads.PassAsync(ctx.Assets, id, cancel));
-            else if (ctx.Pipeline.Current.IsValid && id == ctx.Pipeline.Current.Id)
-                ctx.Reloads.Start(id, cancel => Preloads.PipelineAsync(ctx.Assets, id, cancel));
-            else if (ctx.Materials.Contains(id))
-                ctx.Reloads.Start(id, cancel => Preloads.MaterialAsync(ctx.Assets, new Handle<Material>(id), cancel));
-            else if (ctx.Textures.Contains(id))
-                ctx.Reloads.Start(id, cancel => Preloads.TextureAsync(ctx.Assets, id, cancel));
+            Reload(ctx, id);
+    }
 
-            if (ctx.Meshes.Contains(id))
-                Debugging.Log.Warn($"Model {id} changed on disk; remove and re-add its entities to see the new geometry (live model reload arrives with streaming).");
-        }
+    /// <summary>
+    /// Starts loading one changed asset again, as whatever the renderer holds it as. Apart from
+    /// <see cref="ApplyAssetChanges"/> so the lambdas' closure is made only for a change, not every frame.
+    /// </summary>
+    private static void Reload(RenderContext ctx, ulong id)
+    {
+        Preloads.Forget(ctx, id);
+        if (ctx.Shaders.Entries.ContainsKey(id))
+            ctx.Reloads.Start(id, cancel => Preloads.ShadersAsync(ctx.Assets, [.. Shaders.Affected(ctx, id)], cancel));
+        else if (ctx.Pipeline.Passes.Contains(id))
+            ctx.Reloads.Start(id, cancel => Preloads.PassAsync(ctx.Assets, id, cancel));
+        else if (ctx.Pipeline.Current.IsValid && id == ctx.Pipeline.Current.Id)
+            ctx.Reloads.Start(id, cancel => Preloads.PipelineAsync(ctx.Assets, id, cancel));
+        else if (ctx.Materials.Contains(id))
+            ctx.Reloads.Start(id, cancel => Preloads.MaterialAsync(ctx.Assets, new Handle<Material>(id), cancel));
+        else if (ctx.Textures.Contains(id))
+            ctx.Reloads.Start(id, cancel => Preloads.TextureAsync(ctx.Assets, id, cancel));
+
+        if (ctx.Meshes.Contains(id))
+            Debugging.Log.Warn($"Model {id} changed on disk; remove and re-add its entities to see the new geometry (live model reload arrives with streaming).");
     }
 
     /// <summary>

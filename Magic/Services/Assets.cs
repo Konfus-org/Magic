@@ -83,6 +83,7 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
     private readonly AsyncLocal<ConcurrentDictionary<(Type Type, ulong Id), bool>?> _generatorReads = new(); // what the generator running in this flow asked for
     private readonly string _lodCache;
     private long _loadCount; // counts Loads, for least recently used
+    private AssetSettings? _budgets; // taken from the services on the main thread, read on any
 
     internal Assets(Project project, IFileSystem files, Events events, IServices services, Threads threads)
     {
@@ -91,6 +92,7 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
         _services = services;
         _threads = threads;
         _gemsChanged = events.Watch(EventType.GemsChanged, _ => OnGemsChanged());
+        _budgets = services.TryGet(out AssetSettings? budgets) ? budgets : null;
 
         // Generated LODs are assets of this root; nothing but this class writes there, so it is neither listed nor watched.
         _lodCache = files.FullPath(files.Combine(project.Cache, "Lods"));
@@ -316,11 +318,12 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
         {
             foreach ((Type type, Pool pool) in _pools)
             {
-                Debugging.Stats.Set($"Memory.Assets.{type.Name}.Loaded", pool.Entries.Count);
-                Debugging.Stats.Set($"Memory.Assets.{type.Name}.UsedMB", pool.Bytes / (double)Megabyte);
-                Debugging.Stats.Set($"Memory.Assets.{type.Name}.BudgetMB", BudgetOf(type) / (double)Megabyte);
-                Debugging.Stats.Set($"Memory.Assets.{type.Name}.Hits", pool.Hits);
-                Debugging.Stats.Set($"Memory.Assets.{type.Name}.Misses", pool.Misses);
+                string[] names = pool.StatNames;
+                Debugging.Stats.Set(names[0], pool.Entries.Count);
+                Debugging.Stats.Set(names[1], pool.Bytes / (double)Megabyte);
+                Debugging.Stats.Set(names[2], BudgetOf(type) / (double)Megabyte);
+                Debugging.Stats.Set(names[3], pool.Hits);
+                Debugging.Stats.Set(names[4], pool.Misses);
             }
         }
     }
@@ -734,7 +737,7 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
             }
 
             if (!_pools.TryGetValue(typeof(T), out pool))
-                _pools[typeof(T)] = pool = new Pool();
+                _pools[typeof(T)] = pool = new Pool(typeof(T).Name);
 
             bool hit = true;
             if (!pool.Entries.TryGetValue(handle.Id, out entry))
@@ -814,11 +817,10 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
     private List<(Type Type, ulong Id)> Named(object holder, ConcurrentDictionary<(Type, ulong), bool> seen)
     {
         List<(Type Type, ulong Id)> named = [];
-        foreach (object handle in holder.ValuesOf<Handle<Asset>>())
+        foreach (object value in holder.ValuesOf<Handle<Asset>>())
         {
-            Type type = handle.GetType().GetGenericArguments()[0];
-            if (handle.GetType().GetProperty(nameof(Handle<>.Id))?.GetValue(handle) is ulong id && id != 0)
-                named.Add((type, id));
+            if (value is ITypedHandle { Id: not 0 } handle)
+                named.Add((handle.Of, handle.Id));
         }
 
         named.RemoveAll(dependency => !seen.TryAdd(dependency, true) || (dependency.Type == typeof(Texture) && RenderTexture.IsAt(PathOf(dependency.Id))));
@@ -1050,10 +1052,12 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
     /// <summary>
     /// The budgets as the settings have them now; the defaults where nothing registered any (a tool, a test).
     /// </summary>
-    private AssetSettings Budgets => _services.TryGet(out AssetSettings? settings) ? settings : DefaultBudgets;
+    private AssetSettings Budgets => _budgets ?? DefaultBudgets;
 
     object? IRegisterFromGem.Register(Type type)
     {
+        // Settings registers its types before this does, so the budgets are there by the first asset type.
+        _budgets ??= _services.TryGet(out AssetSettings? budgets) ? budgets : null;
         _types[type.FullName ?? type.Name] = type;
         return null;
     }
@@ -1357,9 +1361,14 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
     /// <summary>
     /// One asset type's loaded assets by id, with what they take and how often a Load found one. Used under the lock.
     /// </summary>
-    private sealed class Pool
+    private sealed class Pool(string type)
     {
         public Dictionary<ulong, Entry> Entries { get; } = [];
+
+        /// <summary>
+        /// What it is published as each frame: <c>Memory.Assets.&lt;Type&gt;.</c> Loaded, UsedMB, BudgetMB, Hits and Misses.
+        /// </summary>
+        public string[] StatNames { get; } = [.. ((string[])["Loaded", "UsedMB", "BudgetMB", "Hits", "Misses"]).Select(stat => $"Memory.Assets.{type}.{stat}")];
 
         /// <summary>
         /// What the counted entries hold; an entry still being read counts nothing yet.

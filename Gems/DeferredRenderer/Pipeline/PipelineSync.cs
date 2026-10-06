@@ -2,6 +2,7 @@ using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Utils;
+using System.Runtime.InteropServices;
 
 namespace DeferredRendererGem;
 
@@ -29,24 +30,11 @@ internal static class PipelineSync
 
         List<(ulong Id, PipelineStage Stage)> wanted = state.Wanted;
         Wanted(state, posts, wanted);
-        if (wanted.Count != state.Held.Count || !wanted.Select(entry => entry.Id).SequenceEqual(state.Held))
-            state.Changed = true;
-        Acquire(ctx, state, wanted);
-        ReleaseUnlisted(ctx, state);
-        state.Held.Clear();
-        foreach ((ulong id, _) in wanted)
-            state.Held.Add(id);
+        if (!CollectionsMarshal.AsSpan(wanted).SequenceEqual(CollectionsMarshal.AsSpan(state.Listed)))
+            Relist(ctx, state, wanted);
 
-        foreach (ulong id in state.Held)
+        foreach ((ulong id, _) in state.Listed)
             PassLoader.Finish(ctx, id);
-
-        foreach (List<PassState> stage in state.Stages)
-            stage.Clear();
-        foreach ((ulong id, PipelineStage stage) in wanted)
-        {
-            if (state.Passes.TryGet(id, out PassState pass) && pass.Stage == stage && !state.Stages[(int)stage].Contains(pass))
-                state.Stages[(int)stage].Add(pass);
-        }
 
         // The listing is held together once every pass has been read, and again whenever it changes: what a pass still
         // loading will make is unknown until then, and a pass waiting for it just waits.
@@ -66,9 +54,30 @@ internal static class PipelineSync
         }
     }
 
+    /// <summary>
+    /// The listing changed: a reference is taken on every pass now listed before the last listing's are dropped (so a
+    /// pass listed in both is kept), and the stage lists are built again.
+    /// </summary>
+    private static void Relist(RenderContext ctx, PipelineState state, List<(ulong Id, PipelineStage Stage)> wanted)
+    {
+        state.Changed = true;
+        Acquire(ctx, state, wanted);
+        ReleaseUnlisted(ctx, state);
+        state.Listed.Clear();
+        state.Listed.AddRange(wanted);
+
+        foreach (List<PassState> stage in state.Stages)
+            stage.Clear();
+        foreach ((ulong id, PipelineStage stage) in wanted)
+        {
+            if (state.Passes.TryGet(id, out PassState pass) && pass.Stage == stage && !state.Stages[(int)stage].Contains(pass))
+                state.Stages[(int)stage].Add(pass);
+        }
+    }
+
     private static bool AllRead(PipelineState state)
     {
-        foreach (ulong id in state.Held)
+        foreach ((ulong id, _) in state.Listed)
         {
             if (state.Passes.TryGet(id, out PassState pass) && pass.Path.Length == 0 && pass.Error is null)
                 return false;
@@ -95,7 +104,7 @@ internal static class PipelineSync
         wanted.Clear();
         if (state.Asset is { } asset)
         {
-            foreach (PipelineStage stage in Enum.GetValues<PipelineStage>())
+            for (PipelineStage stage = PipelineStage.Shadows; stage < PipelineStage.Post; stage++)
             {
                 foreach (Handle<Pass> handle in asset.StageOf(stage))
                 {
@@ -136,7 +145,7 @@ internal static class PipelineSync
     /// </summary>
     private static void ReleaseUnlisted(RenderContext ctx, PipelineState state)
     {
-        foreach (ulong id in state.Held)
+        foreach ((ulong id, _) in state.Listed)
         {
             if (!state.Passes.Release(id, out PassState? gone))
                 continue;

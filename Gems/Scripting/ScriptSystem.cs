@@ -55,6 +55,7 @@ internal sealed class ScriptSystem : ISystem
     private readonly World _world;
     private readonly IServices _services;
     private readonly IEcsQuery<Camera, WorldTransform> _cameras;
+    private readonly QueryChunkAction<Camera, WorldTransform> _addCameraPositions;
     private readonly List<Vector3> _cameraPositions = []; // as of this frame's Update
     private readonly Dictionary<Handle, List<Attached>> _attached = [];
     private readonly HashSet<Handle> _pending = []; // entities with scripts still to be made
@@ -74,6 +75,7 @@ internal sealed class ScriptSystem : ISystem
         _scheduler = scheduler;
         _services = services;
         _cameras = ecs.Query<Camera, WorldTransform>().Build();
+        _addCameraPositions = AddCameraPositions;
         _observer = ecs.Observe<Scripts>(ComponentEvent.Removed, _removed.Add);
         _hooks = new Disposables<Hook>(new FixedUpdateHook(this), new LateUpdateHook(this), new RenderHook(this));
         _scheduled = new Disposables<IDisposable>([.. _hooks.Select(hook => scheduler.Add(ecs, hook))]);
@@ -155,11 +157,7 @@ internal sealed class ScriptSystem : ISystem
         }
 
         _cameraPositions.Clear();
-        _cameras.Run((ReadOnlySpan<Handle> _, Span<Camera> _, Span<WorldTransform> worlds) =>
-        {
-            foreach (WorldTransform world in worlds)
-                _cameraPositions.Add(world.Value.Translation);
-        });
+        _cameras.Run(_addCameraPositions);
 
         Call(UpdateType.Update, frame);
     }
@@ -183,6 +181,12 @@ internal sealed class ScriptSystem : ISystem
             interval *= 2;
 
         return interval;
+    }
+
+    private void AddCameraPositions(ReadOnlySpan<Handle> entities, Span<Camera> cameras, Span<WorldTransform> worlds)
+    {
+        foreach (WorldTransform world in worlds)
+            _cameraPositions.Add(world.Value.Translation);
     }
 
     /// <summary>

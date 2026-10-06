@@ -303,26 +303,14 @@ internal static class PassExecutor
         }
 
         // The chunks of the classes this draw is for: the impostors' cards, or everything else.
-        Span<int> chunks = ctx.Buckets.ChunkCount <= 1024 ? stackalloc int[ctx.Buckets.ChunkCount] : new int[ctx.Buckets.ChunkCount];
-        int chunkCount = 0;
-        foreach ((PipelineClass cls, List<int> owned) in ctx.Buckets.ByClass)
-        {
-            if (cls.Variant.HasFlag(SurfaceVariant.Impostor) != draw.Impostors)
-                continue;
-
-            owned.CopyTo(chunks[chunkCount..]);
-            chunkCount += owned.Count;
-        }
-
-        chunks[..chunkCount].Sort(); // ascending, so DrawChunks finds the runs
-
-        for (uint iteration = 0; iteration < iterations && chunkCount > 0; iteration++)
+        ReadOnlySpan<int> chunks = ctx.Buckets.ChunksOf(draw.Impostors);
+        for (uint iteration = 0; iteration < iterations && chunks.Length > 0; iteration++)
         {
             PassConstants constants = PassConstants.Of(frame);
             constants.SetParams(pass.Params);
             constants.SetIteration(iteration, iterations);
             commands.Push(GpuStage.Vertex, constants);
-            draws += DrawChunks(ctx, commands, args, iteration * argsSlice, chunks[..chunkCount]);
+            draws += DrawChunks(ctx, commands, args, iteration * argsSlice, chunks);
         }
 
         commands.EndRenderPass();

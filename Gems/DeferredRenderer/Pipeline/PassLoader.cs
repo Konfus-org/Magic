@@ -344,8 +344,7 @@ internal static class PassLoader
                 return;
         }
 
-        int fixedBuffers = pass.Kind == PassKind.Draw ? DepthFixedVertexBuffers : 0;
-        Result check = PassValidator.Check(pass, compiled, state.CompiledFragment, fixedBuffers, name => ResourceRegistry.Describe(ctx, pipeline, name)?.Kind);
+        Result check = CheckBindings(ctx, state, compiled);
         if (check.Failed)
         {
             Disable(ctx, id, check.Message);
@@ -366,6 +365,17 @@ internal static class PassLoader
         {
             Disable(ctx, id, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// The compiled bindings held against the file (<see cref="PassValidator.Check"/>); apart, so its lambda's closure
+    /// is made only when a pass is checked, not each frame <see cref="Finish"/> is asked.
+    /// </summary>
+    private static Result CheckBindings(RenderContext ctx, PassState state, CompiledShader compiled)
+    {
+        PipelineState pipeline = ctx.Pipeline;
+        int fixedBuffers = state.Pass.Kind == PassKind.Draw ? DepthFixedVertexBuffers : 0;
+        return PassValidator.Check(state.Pass, compiled, state.CompiledFragment, fixedBuffers, name => ResourceRegistry.Describe(ctx, pipeline, name)?.Kind);
     }
 
     /// <summary>

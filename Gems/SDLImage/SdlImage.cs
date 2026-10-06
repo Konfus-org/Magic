@@ -56,17 +56,23 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
 
             int levelCount = asset.Mipmaps ? 1 + (int)Math.Floor(Math.Log2(Math.Max(level0.Width, level0.Height))) : 1;
 
-            List<TextureLevel> levels = [];
-            List<byte[]> pixels = [];
+            // Each level halves the one before, down to 1: sized up front, so the chain is copied once into one array.
+            TextureLevel[] levels = new TextureLevel[levelCount];
+            int size = 0;
+            for (int i = 0; i < levelCount; i++)
+            {
+                int width = Math.Max(1, level0.Width >> i), height = Math.Max(1, level0.Height >> i);
+                levels[i] = new TextureLevel(width, height, size, width * height * 4);
+                size += levels[i].Size;
+            }
+
+            byte[] pixels = GC.AllocateUninitializedArray<byte>(size);
             nint current = surface;
             for (int i = 0; i < levelCount; i++)
             {
                 if (i > 0)
                 {
-                    SDL.Surface previous = Marshal.PtrToStructure<SDL.Surface>(current);
-                    int nextWidth = Math.Max(1, previous.Width / 2);
-                    int nextHeight = Math.Max(1, previous.Height / 2);
-                    nint next = SDL.ScaleSurface(current, nextWidth, nextHeight, SDL.ScaleMode.Linear);
+                    nint next = SDL.ScaleSurface(current, levels[i].Width, levels[i].Height, SDL.ScaleMode.Linear);
                     if (current != surface)
                         SDL.DestroySurface(current);
 
@@ -76,16 +82,14 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
                     current = next;
                 }
 
-                byte[] data = Copy(current, out int width, out int height);
-                levels.Add(new TextureLevel(width, height, levels.Sum(level => level.Size), data.Length));
-                pixels.Add(data);
+                Copy(current, pixels, levels[i]);
             }
 
             if (current != surface)
                 SDL.DestroySurface(current);
 
-            asset.Levels = [.. levels];
-            asset.Pixels = [.. pixels.SelectMany(level => level)];
+            asset.Levels = levels;
+            asset.Pixels = pixels;
         }
         finally
         {
@@ -98,29 +102,23 @@ internal sealed class SdlImage : IGem, IAssetLoader<Texture>
     }
 
     /// <summary>
-    /// The surface's pixels as tightly packed RGBA rows (SDL pads rows to its pitch).
+    /// The surface's pixels into <paramref name="level"/>'s place in <paramref name="pixels"/>, as tightly packed RGBA
+    /// rows (SDL pads rows to its pitch).
     /// </summary>
-    private static byte[] Copy(nint surface, out int width, out int height)
+    private static void Copy(nint surface, byte[] pixels, TextureLevel level)
     {
-        SDL.Surface info = Marshal.PtrToStructure<SDL.Surface>(surface);
-        width = info.Width;
-        height = info.Height;
-        int rowBytes = width * 4;
-        byte[] data = GC.AllocateUninitializedArray<byte>(rowBytes * height);
-
+        int rowBytes = level.Width * 4;
         bool locked = SDL.LockSurface(surface);
         try
         {
-            info = Marshal.PtrToStructure<SDL.Surface>(surface);
-            for (int y = 0; y < height; y++)
-                Marshal.Copy(info.Pixels + (y * info.Pitch), data, y * rowBytes, rowBytes);
+            SDL.Surface info = Marshal.PtrToStructure<SDL.Surface>(surface);
+            for (int y = 0; y < level.Height; y++)
+                Marshal.Copy(info.Pixels + (y * info.Pitch), pixels, level.Offset + (y * rowBytes), rowBytes);
         }
         finally
         {
             if (locked)
                 SDL.UnlockSurface(surface);
         }
-
-        return data;
     }
 }
