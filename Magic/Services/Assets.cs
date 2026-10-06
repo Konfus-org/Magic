@@ -135,7 +135,7 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
 
         foreach (string path in listing.Payload)
         {
-            if (_files.FileExists(path) && !IsSidecar(path))
+            if (_files.FileExists(path))
                 Index(path, publish: false);
         }
     }
@@ -383,7 +383,7 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
             {
                 Result<string[]> listing = _files.ReadDirectoryRecursive(path);
                 if (listing.Ok)
-                    present.UnionWith(listing.Payload.Where(file => _files.FileExists(file) && !IsSidecar(file)));
+                    present.UnionWith(listing.Payload.Where(_files.FileExists));
             }
             else if (_files.FileExists(path))
                 present.Add(path);
@@ -525,7 +525,7 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
             foreach (string file in listing.Payload)
             {
                 string full = _files.FullPath(file);
-                if (_files.FileExists(full) && !IsSidecar(full) && !string.Equals(full, _files.FullPath(manifestPath), StringComparison.OrdinalIgnoreCase))
+                if (_files.FileExists(full) && !string.Equals(full, _files.FullPath(manifestPath), StringComparison.OrdinalIgnoreCase))
                     Index(full, publish: false);
             }
         }
@@ -1172,6 +1172,9 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
     /// </summary>
     private void Index(string path, bool publish)
     {
+        if (!IsAsset(path))
+            return;
+
         // A generated file has no sidecar: its name gives its id (Lods.IdOf).
         ulong id = _files.IsUnder(_lodCache, path) ? GeneratedId(path) : ReadId(path + ".meta") ?? Mint(path + ".meta");
         if (id == 0)
@@ -1333,6 +1336,14 @@ public sealed class Assets : IDisposable, IRegisterFromGem<Asset>
     private static bool IsSidecar(string path)
     {
         return path.EndsWith(".meta", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Every file under a root is an asset but its sidecar and its documentation (a folder's README).
+    /// </summary>
+    private static bool IsAsset(string path)
+    {
+        return !IsSidecar(path) && !path.EndsWith(".md", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

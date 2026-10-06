@@ -4,6 +4,5 @@
     "wrap": "repeat",
     "filter": "linear",
     "channels": "rgb",
-    "mipmaps": true,
-    "compression": false
+    "mipmaps": true
 }

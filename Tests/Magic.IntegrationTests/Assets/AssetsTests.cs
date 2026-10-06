@@ -151,6 +151,16 @@ public sealed class AssetsTests : IDisposable
     }
 
     [Fact]
+    public void A_readme_is_not_an_asset()
+    {
+        _root.Write("Assets/Materials/README.md", "# Materials");
+
+        using Services.Assets assets = Open();
+
+        Assert.False(File.Exists(Path.Combine(_project.Assets, "Materials", "README.md.meta")));
+    }
+
+    [Fact]
     public void Find_turns_a_path_into_a_handle()
     {
         Write("Materials/M.mat", "{}", 80);

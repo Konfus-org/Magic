@@ -4,6 +4,5 @@
     "wrap": "clamp_to_edge",
     "filter": "linear",
     "channels": "rgba",
-    "mipmaps": true,
-    "compression": false
+    "mipmaps": true
 }

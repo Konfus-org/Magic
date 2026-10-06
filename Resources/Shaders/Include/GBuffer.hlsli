@@ -1,4 +1,4 @@
-// The gbuffer: what the scene is drawn into before it is lit, mirrored by Magic/Contexts/Rendering/GBuffer.cs.
+// The gbuffer: what the scene is drawn into before it is lit, mirrored by Gems/DeferredRenderer/GBuffer.cs.
 // Every surface in view is stored as the material it is, one target per property, and nothing in it is lit:
 //
 //   Emissive  r11g11b10f  what the surface emits, linear; the clear colour where nothing was drawn

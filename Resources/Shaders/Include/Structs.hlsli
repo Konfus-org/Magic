@@ -1,4 +1,4 @@
-// The GPU tables, mirroring Magic/Contexts/Rendering/GpuStructs.cs field for field. Every member is 16 bytes
+// The GPU tables, mirroring Gems/DeferredRenderer/GpuStructs.cs field for field. Every member is 16 bytes
 // (or a run of scalars adding up to 16) so the layout is the same under D3D packing and DXC's vector-relaxed
 // std430. Never change a struct here without its C# twin (or the other way round): both sides read the same
 // bytes blind, so a mismatch compiles and draws garbage.

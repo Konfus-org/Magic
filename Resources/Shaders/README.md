@@ -27,6 +27,27 @@ transparency and post stages → overlays. The pipeline asset (`Resources/Pipeli
 project's `"pipeline"` or `--pipeline`) lists the passes of each stage; the posts come from the world's
 `PostProcessing`.
 
+## The asset
+
+Every `.hlsl` and `.hlsli` is a `Shader` asset (text, with a `.meta` holding its id). The suffix is its stage:
+`.vert`, `.frag`, `.comp`, `.surf` (a surface, composed into the mesh templates by the renderer) and `.hlsli` (a
+header, never compiled alone). Who names a shader: a [pass or post](../Passes/README.md) by id, a
+[material](../Materials/README.md) by id (a surface), and the renderer by path for its own (the default and failure
+surfaces, the templates, the probes).
+
+- **Includes** are written root-relative (`#include "Include/Frame.hlsli"`) and resolve against the engine's
+  `Resources/Shaders`, wherever the including shader lives. A project's shader can include every engine header; a
+  header of the project's own must sit under `Resources/Shaders` too, or be pasted into the shader.
+- **Compiled at run time**, on a worker, and kept in `Cache/Shaders/<format>/` next to `Magic.exe`: the key is the
+  shader's text, its stage, the bytecode format and a hash of every header it includes, so a second run compiles
+  nothing and an edited header recompiles exactly what includes it. `Deferred.ShaderCache=false` turns the disk
+  cache off.
+- **Hot reload**: editing a shader or a header recompiles every pass, post and material pipeline that uses it, live.
+  A shader that does not compile disables its pass (or draws its materials as the failure surface) with the
+  compiler's message in the log, and comes back when it compiles.
+- **Adding one**: write the file beside the asset that names it (a pass's shader next to the pass, a sample's
+  surface in its domain's `Shaders/`), let the `.meta` be minted or give it an id, and name that id.
+
 ## How a frame is rendered
 
 **GPU-driven.** The CPU keeps tables (instances, meshes, materials, lights) on the GPU, uploads what changed,
@@ -48,7 +69,7 @@ reaches, not the objects in the scene.
 | `Depth` | `D32Float` (or `D24Unorm`) | Reverse-Z depth; 0 where nothing was drawn. |
 
 - The packing lives in `Include/GBuffer.hlsli` (`EncodeGBuffer`, `DecodeGBuffer`) and nowhere else; its C#
-  twin is `Magic/Contexts/Rendering/GBuffer.cs`. Four colour targets is all a render pass has.
+  twin is `Gems/DeferredRenderer/GBuffer.cs`. Four colour targets is all a render pass has.
 - There is no position target. A pixel's position comes from its depth and the frame block (`ViewDepth`,
   `ViewPosition`, `ViewToWorld`): no inverse matrix, perspective and orthographic alike. Shading works
   relative to the camera, so it holds up far from the origin.
@@ -125,7 +146,7 @@ These are the ones that break silently when ignored. Most were learned the hard 
   view's 256 bytes, then the pass's 128 (`PassRaw`: its parameters, and in the last row the executor's
   `PassIteration()`); a header that still needs more appends to it with `FRAME_APPEND`. The CPU pushes
   `PassConstants` (384 bytes) to every stage, whatever the shader reads of it.
-- **A GPU struct changes together with its C# twin** in `Magic/Contexts/Rendering/GpuStructs.cs`. Both sides
+- **A GPU struct changes together with its C# twin** in `Gems/DeferredRenderer/GpuStructs.cs`. Both sides
   read the same bytes blind. Storage-buffer structs are built from 16-byte members; the constant block is
   built from 16-byte rows (a `float3` with a scalar, two `float2`, four scalars).
 - **Varyings shared by composed or generated shaders live in one header** (`MeshVaryings`, `PassVaryings`).
