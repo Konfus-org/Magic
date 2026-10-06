@@ -218,10 +218,8 @@ internal static class Scene
         if (count == 0)
             return 0;
 
-        ctx.BrickJobs.Ensure(ctx.Gpu, (uint)(count * GpuBrickJob.Size));
-        ctx.BrickArgs.Ensure(ctx.Gpu, (uint)(count * 16));
-        ctx.Gpu.Upload<GpuBrickJob>(ctx.BrickJobs.Handle, 0, jobs[..count]);
-        ctx.Gpu.Upload<UintVector4>(ctx.BrickArgs.Handle, 0, dispatches[..count]);
+        ctx.BrickJobs.Upload<GpuBrickJob>(ctx.Gpu, jobs[..count]);
+        ctx.BrickArgs.Upload<UintVector4>(ctx.Gpu, dispatches[..count]);
         Debugging.Stats.Set("Rendering.Gi.Bricks", ctx.Bricks.Count);
         Debugging.Stats.Set("Rendering.Gi.BricksPending", ctx.Bricks.Pending.Count);
         Debugging.Stats.Set("Rendering.Gi.BricksDropped", ctx.Bricks.Dropped);

@@ -181,10 +181,10 @@ internal sealed class RenderSystem : ISystem
         _collectViews = CollectViews;
         _collectPosts = CollectPosts;
         _collectSky = CollectSky;
-        _collectDirectional = CollectDirectional;
-        _collectPoints = CollectPoints;
-        _collectSpots = CollectSpots;
-        _collectAreas = CollectAreas;
+        _collectDirectional = (entities, lights, worlds) => CollectLights(entities, lights, worlds, LightInstance.Of);
+        _collectPoints = (entities, lights, worlds) => CollectLights(entities, lights, worlds, LightInstance.Of);
+        _collectSpots = (entities, lights, worlds) => CollectLights(entities, lights, worlds, LightInstance.Of);
+        _collectAreas = (entities, lights, worlds) => CollectLights(entities, lights, worlds, LightInstance.Of);
         _collectGlows = CollectGlows;
     }
 
@@ -217,12 +217,7 @@ internal sealed class RenderSystem : ISystem
     /// <summary>
     /// The render state of the current renderer; null without one.
     /// </summary>
-    private RenderContext? Context { get; set; }
-
-    /// <summary>
-    /// The pipeline's passes and their parameters, over whatever context there is.
-    /// </summary>
-    public IPipelineTuning Tuning => field ??= new PipelineTuning(() => Context);
+    public RenderContext? Context { get; private set; }
 
     /// <summary>
     /// Syncs the entities into the render state and records the scene into <paramref name="frame"/>'s commands, drawing into
@@ -783,48 +778,16 @@ internal sealed class RenderSystem : ISystem
         return entities.Length > 0 && IsHiddenUnderLastParent(entities[0]);
     }
 
-    private void CollectDirectional(ReadOnlySpan<Handle> entities, Span<DirectionalLight> lights, Span<WorldTransform> worlds)
+    /// <summary>
+    /// The lights of one kind a query hands over, as <see cref="LightInstance"/>s, unless they are hidden.
+    /// </summary>
+    private void CollectLights<T>(ReadOnlySpan<Handle> entities, Span<T> lights, Span<WorldTransform> worlds, LightOf<T> of)
     {
         if (IsHiddenTogether(entities))
             return;
 
         for (int i = 0; i < lights.Length; i++)
-        {
-            _collectedLights.Add(new LightInstance(LightKind.Directional, lights[i].Color.Rgb, lights[i].Intensity, 0f, 0f, 0f, Vector2.Zero, lights[i].CastsShadows, worlds[i].Value));
-        }
-    }
-
-    private void CollectPoints(ReadOnlySpan<Handle> entities, Span<PointLight> lights, Span<WorldTransform> worlds)
-    {
-        if (IsHiddenTogether(entities))
-            return;
-
-        for (int i = 0; i < lights.Length; i++)
-        {
-            _collectedLights.Add(new LightInstance(LightKind.Point, lights[i].Color.Rgb, lights[i].Intensity, lights[i].Range, 0f, 0f, Vector2.Zero, lights[i].CastsShadows, worlds[i].Value));
-        }
-    }
-
-    private void CollectSpots(ReadOnlySpan<Handle> entities, Span<SpotLight> lights, Span<WorldTransform> worlds)
-    {
-        if (IsHiddenTogether(entities))
-            return;
-
-        for (int i = 0; i < lights.Length; i++)
-        {
-            _collectedLights.Add(new LightInstance(LightKind.Spot, lights[i].Color.Rgb, lights[i].Intensity, lights[i].Range, lights[i].InnerAngle, lights[i].OuterAngle, Vector2.Zero, lights[i].CastsShadows, worlds[i].Value));
-        }
-    }
-
-    private void CollectAreas(ReadOnlySpan<Handle> entities, Span<AreaLight> lights, Span<WorldTransform> worlds)
-    {
-        if (IsHiddenTogether(entities))
-            return;
-
-        for (int i = 0; i < lights.Length; i++)
-        {
-            _collectedLights.Add(new LightInstance(LightKind.Area, lights[i].Color.Rgb, lights[i].Intensity, lights[i].Range, 0f, 0f, new Vector2(lights[i].Width, lights[i].Height), lights[i].CastsShadows, worlds[i].Value));
-        }
+            _collectedLights.Add(of(lights[i], worlds[i].Value));
     }
 
     private void CollectGlows(ReadOnlySpan<Handle> entities, Span<Glow> glows, Span<WorldTransform> worlds)

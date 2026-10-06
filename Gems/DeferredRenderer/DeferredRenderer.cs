@@ -20,7 +20,7 @@ internal sealed class DeferredRenderer : IGem, IPipelineTuning
         _scheduled = scheduler.Add(ecs, _system);
     }
 
-    public IReadOnlyList<TunablePass> Passes => _system.Tuning.Passes;
+    public IReadOnlyList<TunablePass> Passes => PipelineTuning.PassesOf(_system.Context);
 
     public void Dispose()
     {

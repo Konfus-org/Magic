@@ -56,16 +56,7 @@ internal static class ImpostorBaker
     /// </summary>
     private static (Vector3 Center, float Half) Square(Model model)
     {
-        Vector3 min = new(float.MaxValue), max = new(float.MinValue);
-        foreach (Mesh mesh in model.Meshes)
-        {
-            foreach (Vertex vertex in mesh.Vertices)
-            {
-                min = Vector3.Min(min, vertex.Position);
-                max = Vector3.Max(max, vertex.Position);
-            }
-        }
-
+        (Vector3 min, Vector3 max) = MeshLods.PositionBox(model);
         Vector3 center = (min + max) * 0.5f;
         float reach = 0f;
         foreach (Mesh mesh in model.Meshes)

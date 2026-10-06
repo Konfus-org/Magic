@@ -40,13 +40,6 @@ internal sealed class PipelineState(CompiledShader fullscreenVertex, GpuPipeline
     public List<(ulong Id, PipelineStage Stage)> Wanted { get; } = [];
 
     /// <summary>
-    /// The fit check's working set: every name that stands for something so far, and what does not fit.
-    /// </summary>
-    public Dictionary<string, ResourceInfo> Made { get; } = new(StringComparer.OrdinalIgnoreCase);
-
-    public List<(PassState Pass, string Problem)> UnfitFound { get; } = [];
-
-    /// <summary>
     /// Set when the listing changed (a pass listed, unlisted, loaded, compiled or disabled): the fit check runs again.
     /// </summary>
     public bool Changed { get; set; } = true;

@@ -93,10 +93,24 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
         return TryGet(handle.Id, out uint packed) ? packed : None;
     }
 
-    public void FreeLayer(uint packed)
+    /// <summary>
+    /// A material's reference to a layer: the class in the top 16 bits, the layer in the bottom.
+    /// </summary>
+    public static uint Pack(int classIndex, uint layer) => ((uint)classIndex << 16) | layer;
+
+    public static int ClassOf(uint packed) => (int)(packed >> 16);
+
+    public static uint LayerOf(uint packed) => packed & 0xFFFF;
+
+    /// <summary>
+    /// The texture is gone or loads again: its layer goes back to its class, and it is no render texture any more.
+    /// </summary>
+    public void Forget(ulong id, uint packed)
     {
         if (packed != Failed)
-            Pools[packed >> 16].Free.Push(packed & 0xFFFF);
+            Pools[ClassOf(packed)].Free.Push(LayerOf(packed));
+
+        Rendered.Remove(id);
     }
 
     /// <summary>
@@ -135,7 +149,7 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
     /// <summary>
     /// The pool size a source of this size lands in, capped at <see cref="MaxSize"/>.
     /// </summary>
-    public int SizeFor(int width, int height)
+    public static int SizeFor(int width, int height)
     {
         int largest = Math.Max(width, height);
         foreach (int size in PoolSizes)
@@ -215,7 +229,7 @@ internal sealed class TextureTable : RefCountTable<ulong, uint>
 /// </summary>
 internal readonly record struct RenderedTexture(uint Packed, int Width, int Height)
 {
-    public int Class => (int)(Packed >> 16);
+    public int Class => TextureTable.ClassOf(Packed);
 
-    public uint Layer => Packed & 0xFFFF;
+    public uint Layer => TextureTable.LayerOf(Packed);
 }

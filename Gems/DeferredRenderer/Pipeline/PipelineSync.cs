@@ -46,8 +46,7 @@ internal static class PipelineSync
             return;
 
         state.Changed = false;
-        PassValidator.Fit(ctx, state, state.Made, state.UnfitFound);
-        foreach ((PassState pass, string problem) in state.UnfitFound)
+        foreach ((PassState pass, string problem) in PassValidator.Fit(ctx, state))
         {
             state.Unfit.Add(pass.Id);
             state.Problem($"Pass {pass.Path} does not fit the pipeline and is skipped: it {problem}");

@@ -118,14 +118,13 @@ internal static class PassValidator
     /// <summary>
     /// Holds the listing together, stage by stage in order: a pass fits when every name it uses stands for something
     /// by then (the engine's, or made by a pass before it) within the scope it runs in, when it creates nothing an
-    /// earlier pass already made, and when it writes only what may be written. Fills <paramref name="unfit"/> with each
-    /// pass that does not fit and what is wrong with it; the ones that fit go on to run. <paramref name="made"/> is the
-    /// working set, the caller's to keep.
+    /// earlier pass already made, and when it writes only what may be written. Returns each pass that does not fit and
+    /// what is wrong with it; the ones that fit go on to run.
     /// </summary>
-    public static void Fit(RenderContext ctx, PipelineState pipeline, Dictionary<string, ResourceInfo> made, List<(PassState Pass, string Problem)> unfit)
+    public static List<(PassState Pass, string Problem)> Fit(RenderContext ctx, PipelineState pipeline)
     {
-        unfit.Clear();
-        made.Clear();
+        List<(PassState Pass, string Problem)> unfit = [];
+        Dictionary<string, ResourceInfo> made = new(StringComparer.OrdinalIgnoreCase);
         foreach (string name in ResourceRegistry.EngineNames)
         {
             if (ResourceRegistry.Describe(ctx, pipeline, name) is { } engine)
@@ -157,6 +156,8 @@ internal static class PassValidator
                 }
             }
         }
+
+        return unfit;
     }
 
     private static string? FitOne(RenderContext ctx, PipelineState pipeline, PassState state, Dictionary<string, ResourceInfo> made)

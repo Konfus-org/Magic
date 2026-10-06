@@ -1,8 +1,6 @@
 using Magic.Contexts;
 using Magic.Contexts.Assets;
 using Magic.Utils;
-
-using Magic.Extensions;
 using System.Numerics;
 
 namespace DeferredRendererGem;
@@ -127,11 +125,9 @@ internal static class Materials
 
         table.Dirty = false;
         uint bytes = (uint)table.States.Count * GpuMaterial.Size;
-        table.Records.Ensure(ctx.Gpu, bytes);
-        ctx.Gpu.Upload(table.Records.Handle, 0, table.RecordBytes.AsSpan(0, (int)bytes));
+        table.Records.Upload<byte>(ctx.Gpu, table.RecordBytes.AsSpan(0, (int)bytes));
         table.GiRow((uint)Math.Max(0, table.States.Count - 1));
-        table.GiRecords.Ensure(ctx.Gpu, (uint)table.States.Count * GpuGiMaterial.Size);
-        ctx.Gpu.Upload<GpuGiMaterial>(table.GiRecords.Handle, 0, table.GiRows.AsSpan(0, table.States.Count));
+        table.GiRecords.Upload<GpuGiMaterial>(ctx.Gpu, table.GiRows.AsSpan(0, table.States.Count));
     }
 
     /// <summary>

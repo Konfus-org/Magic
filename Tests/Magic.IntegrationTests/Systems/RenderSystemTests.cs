@@ -230,33 +230,33 @@ public sealed class RenderSystemTests : IDisposable
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
 
-        RenderUntil(() => _rendering.Tuning.Passes.Count > 0);
+        RenderUntil(() => PipelineTuning.PassesOf(_rendering.Context).Count > 0);
 
-        Assert.Equal("Shadows", _rendering.Tuning.Passes[0].Stage);
+        Assert.Equal("Shadows", PipelineTuning.PassesOf(_rendering.Context)[0].Stage);
     }
 
     [Fact]
     public void A_pass_parameter_set_through_the_settings_is_what_the_pass_lists_after()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
-        RenderUntil(() => _rendering.Tuning.Passes.Any(pass => pass.Params.Any(parameter => parameter.Name == "aoStrength")));
+        RenderUntil(() => PipelineTuning.PassesOf(_rendering.Context).Any(pass => pass.Params.Any(parameter => parameter.Name == "aoStrength")));
         _settings.Set(["Lighting.aoStrength=3"]);
 
         RenderFrame();
 
-        Assert.Equal(3f, _rendering.Tuning.Passes.SelectMany(pass => pass.Params).First(parameter => parameter.Name == "aoStrength").Value.X);
+        Assert.Equal(3f, PipelineTuning.PassesOf(_rendering.Context).SelectMany(pass => pass.Params).First(parameter => parameter.Name == "aoStrength").Value.X);
     }
 
     [Fact]
     public void Applying_a_preset_sets_the_pass_parameters_it_names()
     {
         _ecs.Set(Spawn(new Vector3(0, 1, -3)), Camera.Perspective(60f, 0.1f));
-        RenderUntil(() => _rendering.Tuning.Passes.Any(pass => pass.Params.Any(parameter => parameter.Name == "aoStrength")));
+        RenderUntil(() => PipelineTuning.PassesOf(_rendering.Context).Any(pass => pass.Params.Any(parameter => parameter.Name == "aoStrength")));
         _settings.Apply(new Preset { Values = new() { ["Lighting.aoStrength"] = JsonSerializer.SerializeToElement(2) } });
 
         RenderFrame();
 
-        Assert.Equal(2f, _rendering.Tuning.Passes.SelectMany(pass => pass.Params).First(parameter => parameter.Name == "aoStrength").Value.X);
+        Assert.Equal(2f, PipelineTuning.PassesOf(_rendering.Context).SelectMany(pass => pass.Params).First(parameter => parameter.Name == "aoStrength").Value.X);
     }
 
     [Fact]

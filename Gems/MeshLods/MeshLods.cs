@@ -85,15 +85,27 @@ internal sealed class MeshLods(IFileSystem files) : IGem, ILODGenerator<Model>
     /// </summary>
     private static float Size(Model model)
     {
-        Vector3 min = new(float.MaxValue), max = new(float.MinValue);
-        foreach (Vertex vertex in model.Meshes.SelectMany(mesh => mesh.Vertices))
-        {
-            min = Vector3.Min(min, vertex.Position);
-            max = Vector3.Max(max, vertex.Position);
-        }
-
+        (Vector3 min, Vector3 max) = PositionBox(model);
         Vector3 size = max - min;
         return MathF.Max(1e-4f, MathF.Max(size.X, MathF.Max(size.Y, size.Z)));
+    }
+
+    /// <summary>
+    /// The box around every vertex position of every mesh of the model.
+    /// </summary>
+    internal static (Vector3 Min, Vector3 Max) PositionBox(Model model)
+    {
+        Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+        foreach (Mesh mesh in model.Meshes)
+        {
+            foreach (Vertex vertex in mesh.Vertices)
+            {
+                min = Vector3.Min(min, vertex.Position);
+                max = Vector3.Max(max, vertex.Position);
+            }
+        }
+
+        return (min, max);
     }
 
     /// <summary>

@@ -1,4 +1,3 @@
-using Magic.Extensions;
 using System.Buffers;
 
 namespace DeferredRendererGem;
@@ -25,10 +24,7 @@ internal static class Lights
         }
 
         if (count > 0)
-        {
-            ctx.Lights.Ensure(ctx.Gpu, (uint)(count * GpuLight.Size));
-            ctx.Gpu.Upload<GpuLight>(ctx.Lights.Handle, 0, rows.AsSpan(0, count));
-        }
+            ctx.Lights.Upload<GpuLight>(ctx.Gpu, rows.AsSpan(0, count));
 
         ArrayPool<GpuLight>.Shared.Return(rows);
     }
@@ -43,7 +39,6 @@ internal static class Lights
         if (glows.IsEmpty)
             return;
 
-        ctx.Glows.Ensure(ctx.Gpu, (uint)(glows.Length * GpuGlow.Size));
-        ctx.Gpu.Upload(ctx.Glows.Handle, 0, glows);
+        ctx.Glows.Upload(ctx.Gpu, glows);
     }
 }

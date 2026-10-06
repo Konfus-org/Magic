@@ -17,6 +17,12 @@ internal sealed class Preloaded
     public Dictionary<ulong, Lods> Lods { get; } = [];
 
     /// <summary>
+    /// The textures in it fitted to their pool's size with the whole mip chain (<see cref="Textures.Fit"/>), by id: done
+    /// here, on a worker, so the render thread only copies them up.
+    /// </summary>
+    public Dictionary<ulong, (byte[] Pixels, int[] Offsets)> Fitted { get; } = [];
+
+    /// <summary>
     /// The frame it arrived in.
     /// </summary>
     public long Frame { get; set; }

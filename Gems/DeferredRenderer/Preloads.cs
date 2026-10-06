@@ -88,6 +88,20 @@ internal static class Preloads
     }
 
     /// <summary>
+    /// The texture fitted to its pool, as it was fitted ahead of the render thread; fitted here when it was not.
+    /// </summary>
+    public static (byte[] Pixels, int[] Offsets) Fitted(RenderContext ctx, Texture texture)
+    {
+        foreach (Preloaded preloaded in ctx.Using)
+        {
+            if (preloaded.Fitted.TryGetValue(texture.Id, out (byte[] Pixels, int[] Offsets) fitted))
+                return fitted;
+        }
+
+        return Textures.Fit(texture);
+    }
+
+    /// <summary>
     /// The model's lesser versions, as <see cref="Get{T}"/> answers an asset.
     /// </summary>
     public static Lods Lods(RenderContext ctx, Handle<Model> handle)
@@ -290,9 +304,16 @@ internal static class Preloads
         if (id == 0 || into.Assets.ContainsKey(id))
             return;
 
-        into.Assets[id] = RenderTexture.IsAt(assets.PathOf(id))
-            ? await assets.LoadAsync(new Handle<RenderTexture>(id), cancel: cancel).ConfigureAwait(false)
-            : await assets.LoadAsync(new Handle<Texture>(id), cancel: cancel).ConfigureAwait(false);
+        if (RenderTexture.IsAt(assets.PathOf(id)))
+        {
+            into.Assets[id] = await assets.LoadAsync(new Handle<RenderTexture>(id), cancel: cancel).ConfigureAwait(false);
+            return;
+        }
+
+        Texture? texture = await assets.LoadAsync(new Handle<Texture>(id), cancel: cancel).ConfigureAwait(false);
+        into.Assets[id] = texture;
+        if (texture is not null && Textures.Fits(texture))
+            into.Fitted[id] = Textures.Fit(texture);
     }
 
     /// <summary>

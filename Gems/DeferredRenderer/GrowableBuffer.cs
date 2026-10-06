@@ -1,6 +1,8 @@
 ﻿using Magic.Contexts.Rendering;
+using Magic.Extensions;
 using Magic.Interfaces;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 
 namespace DeferredRendererGem;
 
@@ -36,5 +38,14 @@ internal sealed class GrowableBuffer
         Size = BitOperations.RoundUpToPowerOf2(bytes);
         Handle = gpu.CreateBuffer(Usage, Size);
         return true;
+    }
+
+    /// <summary>
+    /// <paramref name="rows"/> from the start of the buffer, grown first when they do not fit.
+    /// </summary>
+    public void Upload<T>(IRendering gpu, ReadOnlySpan<T> rows) where T : unmanaged
+    {
+        Ensure(gpu, (uint)(rows.Length * Unsafe.SizeOf<T>()));
+        gpu.Upload(Handle, 0, rows);
     }
 }

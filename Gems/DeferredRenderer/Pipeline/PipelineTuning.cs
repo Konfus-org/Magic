@@ -4,27 +4,26 @@ using Magic.Interfaces;
 namespace DeferredRendererGem;
 
 /// <summary>
-/// The passes of the current pipeline with their parameters, for the settings window (<see cref="IPipelineTuning"/>):
-/// reads the pass table of the render context there is. Without a context (no renderer) it lists nothing.
+/// The passes of the current pipeline with their parameters, for the settings window (<see cref="IPipelineTuning"/>).
 /// </summary>
-internal sealed class PipelineTuning(Func<RenderContext?> context) : IPipelineTuning
+internal static class PipelineTuning
 {
-    public IReadOnlyList<TunablePass> Passes
+    /// <summary>
+    /// Every pass of the context's pipeline as listed, described; none without a context (no renderer).
+    /// </summary>
+    public static IReadOnlyList<TunablePass> PassesOf(RenderContext? ctx)
     {
-        get
-        {
-            List<TunablePass> passes = [];
-            if (context() is not { } ctx)
-                return passes;
-
-            foreach (List<PassState> stage in ctx.Pipeline.Stages)
-            {
-                foreach (PassState pass in stage)
-                    passes.Add(Describe(ctx, pass));
-            }
-
+        List<TunablePass> passes = [];
+        if (ctx is null)
             return passes;
+
+        foreach (List<PassState> stage in ctx.Pipeline.Stages)
+        {
+            foreach (PassState pass in stage)
+                passes.Add(Describe(ctx, pass));
         }
+
+        return passes;
     }
 
     /// <summary>

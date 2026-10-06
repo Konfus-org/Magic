@@ -35,8 +35,7 @@ internal static class Textures
         if (!ctx.Textures.Release(handle.Id, out uint packed))
             return;
 
-        ctx.Textures.FreeLayer(packed);
-        ctx.Textures.Rendered.Remove(handle.Id);
+        ctx.Textures.Forget(handle.Id, packed);
     }
 
     /// <summary>
@@ -47,8 +46,7 @@ internal static class Textures
         if (!ctx.Textures.TryGet(id, out uint packed))
             return;
 
-        ctx.Textures.FreeLayer(packed);
-        ctx.Textures.Rendered.Remove(id);
+        ctx.Textures.Forget(id, packed);
         ctx.Textures.Set(id, Load(ctx, id));
     }
 
@@ -122,6 +120,54 @@ internal static class Textures
     }
 
     /// <summary>
+    /// Whether the pools can take the texture: RGBA8, with its pixels.
+    /// </summary>
+    public static bool Fits(Texture texture)
+    {
+        return texture.Format is TextureFormat.Rgba8Unorm or TextureFormat.Rgba8Srgb && texture.Levels.Length > 0;
+    }
+
+    /// <summary>
+    /// Every mip level of the texture at its pool's size, level 0 first, tightly packed RGBA8 in one array;
+    /// <c>Offsets[i]</c> is where level i starts and the last offset is where the chain ends. A source that is already
+    /// square at the size with its whole chain is used as it is. Pure, so any thread: the preload does it on a worker.
+    /// </summary>
+    public static (byte[] Pixels, int[] Offsets) Fit(Texture texture)
+    {
+        int size = TextureTable.SizeFor(texture.Width, texture.Height);
+        int levels = 1 + (int)Math.Log2(size);
+        int[] offsets = new int[levels + 1];
+
+        if (HasChain(texture, size, levels))
+        {
+            for (int i = 0; i < levels; i++)
+                offsets[i] = texture.Levels[i].Offset;
+            offsets[levels] = texture.Levels[levels - 1].Offset + texture.Levels[levels - 1].Size;
+            return (texture.Pixels, offsets);
+        }
+
+        offsets = MipOffsets(size);
+        byte[] pixels = new byte[offsets[levels]];
+
+        TextureLevel level0 = texture.Levels[0];
+        ReadOnlySpan<byte> source = texture.Pixels.AsSpan(level0.Offset, level0.Size);
+        Span<byte> top = pixels.AsSpan(0, offsets[1]);
+        if (level0.Width == size && level0.Height == size)
+            source.CopyTo(top);
+        else
+            Resize(source, level0.Width, level0.Height, top, size, size);
+
+        for (int i = 1, width = size; i < levels; i++, width /= 2)
+        {
+            Span<byte> above = pixels.AsSpan(offsets[i - 1], offsets[i] - offsets[i - 1]);
+            Span<byte> level = pixels.AsSpan(offsets[i], offsets[i + 1] - offsets[i]);
+            Downsample(above, width, width, level);
+        }
+
+        return (pixels, offsets);
+    }
+
+    /// <summary>
     /// Loads, fits and queues the texture; its packed reference, or <see cref="TextureTable.Failed"/> (logged) when it cannot be used.
     /// </summary>
     private static uint Load(RenderContext ctx, ulong id)
@@ -133,25 +179,21 @@ internal static class Textures
         if (texture is null)
             return TextureTable.Failed; // the asset manager logged why
 
-        if (texture.Format is not (TextureFormat.Rgba8Unorm or TextureFormat.Rgba8Srgb) || texture.Levels.Length == 0)
+        if (!Fits(texture))
         {
             Debugging.Log.Warn($"{texture.Path} is {texture.Format}; the pools take RGBA8 only, so it draws as failed.");
             return TextureTable.Failed;
         }
 
         TextureTable table = ctx.Textures;
-        int size = table.SizeFor(texture.Width, texture.Height);
+        int size = TextureTable.SizeFor(texture.Width, texture.Height);
         int classIndex = (texture.Format == TextureFormat.Rgba8Srgb ? 0 : 4) + Array.IndexOf(TextureTable.PoolSizes, size);
-        TextureTable.PoolClass pool = table.Pools[classIndex];
-        if (!table.TryAllocateLayer(ctx.Gpu, pool, out uint layer))
-        {
-            Debugging.Log.Warn($"Texture pool class {classIndex} is full ({TextureTable.MaxLayers} layers); {texture.Path} draws as failed.");
+        if (!TryAllocate(ctx, classIndex, texture.Path, out uint packed))
             return TextureTable.Failed;
-        }
 
-        (byte[] pixels, int[] offsets) = FitToPool(texture, pool.Size);
-        table.Pending.Add((classIndex, layer, pixels, offsets));
-        return ((uint)classIndex << 16) | layer;
+        (byte[] pixels, int[] offsets) = Preloads.Fitted(ctx, texture);
+        table.Pending.Add((classIndex, TextureTable.LayerOf(packed), pixels, offsets));
+        return packed;
     }
 
     /// <summary>
@@ -171,68 +213,45 @@ internal static class Textures
         }
 
         TextureTable table = ctx.Textures;
-        int classIndex = Array.IndexOf(TextureTable.PoolSizes, table.SizeFor(texture.Width, texture.Height));
-        TextureTable.PoolClass pool = table.Pools[classIndex];
-        if (!table.TryAllocateLayer(ctx.Gpu, pool, out uint layer))
-        {
-            Debugging.Log.Warn($"Texture pool class {classIndex} is full ({TextureTable.MaxLayers} layers); {texture.Path} draws as failed.");
+        int classIndex = Array.IndexOf(TextureTable.PoolSizes, TextureTable.SizeFor(texture.Width, texture.Height));
+        if (!TryAllocate(ctx, classIndex, texture.Path, out uint packed))
             return TextureTable.Failed;
-        }
 
-        int levels = (int)pool.Levels;
-        int[] offsets = new int[levels + 1];
-        for (int i = 0, width = pool.Size; i < levels; i++, width = Math.Max(1, width / 2))
-            offsets[i + 1] = offsets[i] + (width * width * 4);
-
-        uint packed = ((uint)classIndex << 16) | layer;
-        table.Pending.Add((classIndex, layer, new byte[offsets[levels]], offsets));
+        int[] offsets = MipOffsets(table.Pools[classIndex].Size);
+        table.Pending.Add((classIndex, TextureTable.LayerOf(packed), new byte[offsets[^1]], offsets));
         table.Rendered[id] = new RenderedTexture(packed, texture.Width, texture.Height);
         return packed;
     }
 
     /// <summary>
-    /// Every mip level of the texture at <paramref name="size"/>, level 0 first, tightly packed RGBA8 in one array;
-    /// <c>Offsets[i]</c> is where level i starts and the last offset is where the chain ends. A source that is already
-    /// square at the size with its whole chain is used as it is.
+    /// A layer of the class, packed; false, logged, when the class is full and the texture draws as failed.
     /// </summary>
-    private static (byte[] Pixels, int[] Offsets) FitToPool(Texture texture, int size)
+    private static bool TryAllocate(RenderContext ctx, int classIndex, string path, out uint packed)
+    {
+        TextureTable table = ctx.Textures;
+        if (table.TryAllocateLayer(ctx.Gpu, table.Pools[classIndex], out uint layer))
+        {
+            packed = TextureTable.Pack(classIndex, layer);
+            return true;
+        }
+
+        Debugging.Log.Warn($"Texture pool class {classIndex} is full ({TextureTable.MaxLayers} layers); {path} draws as failed.");
+        packed = TextureTable.Failed;
+        return false;
+    }
+
+    /// <summary>
+    /// Where each level of a square RGBA8 chain from <paramref name="size"/> down to 1 starts, tightly packed; the last
+    /// entry is where the chain ends.
+    /// </summary>
+    private static int[] MipOffsets(int size)
     {
         int levels = 1 + (int)Math.Log2(size);
         int[] offsets = new int[levels + 1];
+        for (int i = 0, width = size; i < levels; i++, width = Math.Max(1, width / 2))
+            offsets[i + 1] = offsets[i] + (width * width * 4);
 
-        if (HasChain(texture, size, levels))
-        {
-            for (int i = 0; i < levels; i++)
-                offsets[i] = texture.Levels[i].Offset;
-            offsets[levels] = texture.Levels[levels - 1].Offset + texture.Levels[levels - 1].Size;
-            return (texture.Pixels, offsets);
-        }
-
-        int total = 0;
-        for (int i = 0, width = size; i < levels; i++, width /= 2)
-        {
-            offsets[i] = total;
-            total += width * width * 4;
-        }
-        offsets[levels] = total;
-        byte[] pixels = new byte[total];
-
-        TextureLevel level0 = texture.Levels[0];
-        ReadOnlySpan<byte> source = texture.Pixels.AsSpan(level0.Offset, level0.Size);
-        Span<byte> top = pixels.AsSpan(0, offsets[1]);
-        if (level0.Width == size && level0.Height == size)
-            source.CopyTo(top);
-        else
-            Resize(source, level0.Width, level0.Height, top, size, size);
-
-        for (int i = 1, width = size; i < levels; i++, width /= 2)
-        {
-            Span<byte> above = pixels.AsSpan(offsets[i - 1], offsets[i] - offsets[i - 1]);
-            Span<byte> level = pixels.AsSpan(offsets[i], offsets[i + 1] - offsets[i]);
-            Downsample(above, width, width, level);
-        }
-
-        return (pixels, offsets);
+        return offsets;
     }
 
     /// <summary>

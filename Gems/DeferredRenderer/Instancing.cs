@@ -134,27 +134,22 @@ internal static class Instancing
         InstanceTable instances = ctx.Instances;
         if (instances.CellsDirty)
         {
-            instances.CellBuffer.Ensure(gpu, (uint)instances.CellCount * GpuCell.Size);
-            gpu.Upload(instances.CellBuffer.Handle, 0, instances.Cells);
+            instances.CellBuffer.Upload(gpu, instances.Cells);
             instances.CellsDirty = false;
         }
 
         if (instances.PagesDirty)
         {
-            instances.PageBuffer.Ensure(gpu, (uint)instances.PageCount * GpuPage.Size);
-            gpu.Upload(instances.PageBuffer.Handle, 0, instances.Pages);
+            instances.PageBuffer.Upload(gpu, instances.Pages);
             instances.PagesDirty = false;
         }
 
         Buckets buckets = ctx.Buckets;
         if (buckets.Dirty)
         {
-            buckets.Template.Ensure(gpu, (uint)buckets.TemplateRows.Length * DrawArgs.Size);
-            gpu.Upload(buckets.Template.Handle, 0, buckets.TemplateRows);
-            buckets.Lods.Ensure(gpu, (uint)buckets.LodRows.Length * GpuLodRow.Size);
-            gpu.Upload(buckets.Lods.Handle, 0, buckets.LodRows);
-            buckets.GiGroups.Ensure(gpu, (uint)buckets.GiRows.Length * GpuGiGroup.Size);
-            gpu.Upload(buckets.GiGroups.Handle, 0, buckets.GiRows);
+            buckets.Template.Upload(gpu, buckets.TemplateRows);
+            buckets.Lods.Upload(gpu, buckets.LodRows);
+            buckets.GiGroups.Upload(gpu, buckets.GiRows);
             buckets.Dirty = false;
         }
     }
