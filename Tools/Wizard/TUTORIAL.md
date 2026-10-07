@@ -3,22 +3,23 @@
 A step-by-step build of the Magic editor, **Wizard**, and the MCP server that lets it (and an LLM) drive the engine.
 Work through it top to bottom. Every part ends with a checkpoint you can run before moving on.
 
-All paths are relative to the repo root (the folder holding `Magic.slnx`) unless a step says otherwise. Commands are
-PowerShell.
+All paths are relative to the repo root (the folder holding `Magic-Wizard.slnx`) unless a step says otherwise.
+Commands are PowerShell.
 
 ## What you are building
 
 ```
  Wizard desktop app                              Magic.exe
  ┌────────────────────────────────────┐          ┌───────────────────────────────┐
- │ Electron shell  (Wizard\Shell)     │          │ Core  (knows nothing of any   │
- │   window, menu, native dialogs     │          │        editor)                │
- │        │ spawns, shows its URL     │          │                               │
- │        ▼                           │  spawns  │ Gems\Mcp  (static gem)        │
- │ Wizard server  (Wizard\Wizard)     │─────────▶│   HttpListener   pool threads │
- │   Blazor Server, all logic in C#   │          │   queue ──▶ Update()   main   │
- │   Engine service ── MCP client ────┼── HTTP ─▶│   tools over IEcs, World,     │
- └────────────────────────────────────┘ localhost│   Assets, Debugging           │
+ │ Electron shell                     │          │ Core  (knows nothing of any   │
+ │   (Wizard\Shell)                   │          │        editor)                │
+ │   window, menu, native dialogs     │          │                               │
+ │        │ spawns, shows its URL     │          │ Magic\Gems\Mcp  (static gem)  │
+ │        ▼                           │  spawns  │   HttpListener   pool threads │
+ │ Wizard server  (Wizard\Wizard)     │─────────▶│   Threads ──▶ main thread     │
+ │   Blazor Server, all logic in C#   │          │   tools over IEcs, World,     │
+ │   Engine service ── MCP client ────┼── HTTP ─▶│   Assets, Settings, Log       │
+ └────────────────────────────────────┘ localhost│                               │
  Claude Code ── .mcp.json ──────────────────────▶│                               │
                                                  └───────────────────────────────┘
 ```
@@ -49,21 +50,30 @@ browse the entity hierarchy, edit components live in an inspector, and do all of
 
 ### What was verified, and what was not
 
-Everything below was built and run on this machine (Windows 11, .NET SDK 10.0.401, Node 24.19, Electron 44.5) in a
-private copy of the repo before this tutorial was written:
+The whole tutorial was first built and run on this machine (Windows 11, .NET SDK 10.0.401, Node 24.19, Electron 44.5)
+against an earlier layout of the engine: the gem's 20 tools from a C# MCP client, Wizard in a browser (Play, Stop,
+console, hierarchy, inspector edits, add entity, add component), the Electron shell from source, attached to a
+running server (`WIZARD_URL`) and packaged, and closing the window stopping the Wizard server and the engine.
 
-- The gem: all 20 tools called from a C# MCP client against the running Cube sample.
-- Wizard in a browser: Play, Stop, console, hierarchy, inspector edits, add entity, add component.
-- The Electron shell: from source, attached to a running server (`WIZARD_URL`), and packaged.
-- Closing the window stops the Wizard server and the engine.
-- The integration tests in Part 7 (10 pass) and the existing integration suite (178 pass).
+The engine has been restructured since: first into Core and contract gems, with services instead of statics, for
+which the gem in Part 2 was rewritten, then with every contract folded into Core. The rewritten gem was built, with
+no errors or warnings of its own, in a copy of the repo, and its tools were called by hand (Part 3) against a
+`--headless` run of the Samples project: `engine_info`, `log_read`,
+`command_list`, `command_run`, `entity_children`, `entity_get`, `component_set`, `component_types`,
+`settings_get`, `settings_set`, `asset_list`, `domain_open`, `screenshot` (which answers an error when headless)
+and `quit`, plus a refused request from a browser `Origin`.
 
 Not verified, so treat as "should work":
 
+- **The gem since the contracts folded into Core.** Their types kept their namespaces, so only its project
+  references changed (Core alone), but it was not rebuilt.
+- **Parts 4 to 9 after the restructure.** Wizard references no engine code, so only its engine paths changed, but
+  it was not rebuilt.
 - **Claude Code connecting through `.mcp.json`.** The server answers a standard MCP `initialize` and `tools/list`
   from both a raw HTTP client and the official SDK client, but I could not add a server to a Claude Code session
   from inside one.
-- **macOS and Linux.** Nothing in Wizard is Windows-specific, but the engine itself is Windows-only today.
+- **macOS and Linux.** Nothing in Wizard is Windows-specific; the engine runs on Windows and Linux, but `HttpListener`
+  and the shell were only tried on Windows.
 - **`dotnet watch` hot reload** was not exercised; it is the stock Blazor Server workflow.
 
 ## Part 0: Prerequisites
@@ -75,72 +85,37 @@ dotnet --version   # 10.0.401 or later 10.x
 node --version     # v24 or later; npm comes with it
 ```
 
-No workloads to install. Before you start, make sure the engine builds and the Cube sample runs:
+No workloads to install. Before you start, make sure the engine builds and the Samples project runs (it opens the
+Hub):
 
 ```powershell
-dotnet build Magic.slnx
+dotnet build Magic-Wizard.slnx
 Build\net10.0\Debug\bin\Magic.exe --project Samples
 ```
 
-## Part 1: Three small Core changes
+## Part 1: What the gem needs from the engine
 
-The gem needs three things Core keeps internal today. All three are general-purpose: anything that drives the engine
-from outside the console window needs them, editor or not.
+The gem needs three things from the engine. Two are already there; the third is a one-line build change. All three
+are general-purpose: anything that drives the engine from outside the console window needs them, editor or not.
 
-### 1.1 Let gems list and run console commands
+### 1.1 Console commands are already open to gems
 
-`Magic\Utils\Debugging.cs`, in the nested `Commands` class. Gems can already `Register` a command; make the other two
-members public so a gem can run one.
+Nothing to change: the `DebugUI` service (`Magic\Core\Services\Debug\DebugUI.cs`) lists the console commands
+(`Commands`) and runs one (`Run`) in public. The Mcp gem takes `DebugUI` in its constructor below.
 
-```csharp
-// before
-        /// <summary>
-        /// Every registered name, sorted.
-        /// </summary>
-        internal static IEnumerable<string> Names => _commands.Keys.Order();
+### 1.2 Components are already read and written the way chunk files do
 
-        /// <summary>
-        /// Runs the command called <paramref name="name"/>; false when there is none. A command that throws is logged.
-        /// </summary>
-        internal static bool Run(string name, string[] args)
-
-// after
-        /// <summary>
-        /// Every registered name, sorted.
-        /// </summary>
-        public static IEnumerable<string> Names => _commands.Keys.Order();
-
-        /// <summary>
-        /// Runs the command called <paramref name="name"/>; false when there is none. A command that throws is logged.
-        /// </summary>
-        public static bool Run(string name, string[] args)
-```
-
-Your code standard puts public members before internal ones within a group. `Register` is already public and first,
-so nothing needs to move.
-
-### 1.2 Let gems read and write components the way chunk files do
-
-`Magic\Contexts\Assets\AssetJson.cs`:
-
-```csharp
-// before
-internal static class AssetJson
-
-// after
-public static class AssetJson
-```
-
-The gem serialises components with these options, so what `entity_get` returns is exactly what a `.chunk` file
+Nothing to change: `AssetJson` (`Magic\Core\Services\AssetJson.cs`, namespace `Magic.Services`) is public.
+The gem serialises components with its options, so what `entity_get` returns is exactly what a `.chunk` file
 holds, and what `component_set` accepts is exactly what a `.chunk` file may contain.
 
-### 1.3 Pin ZLogging's logging packages
+### 1.3 Pin ZLoggerLogging's logging packages
 
 All engine gems build flat into `Build\net10.0\Debug\bin\Gems\`. ZLogger brings
 `Microsoft.Extensions.Logging.Abstractions.dll` version 8; the MCP SDK brings version 10 of the same file. Whichever
 gem builds last would win, and the loser risks a `MissingMethodException`. Make both resolve the same version.
 
-`Gems\ZLogging\ZLogging.csproj`:
+`Magic\Gems\Debug\ZLoggerLogging\ZLoggerLogging.csproj`:
 
 ```xml
   <ItemGroup>
@@ -154,22 +129,24 @@ gem builds last would win, and the loser risks a `MissingMethodException`. Make 
 ### Checkpoint
 
 ```powershell
-dotnet build Magic\Magic.csproj
+dotnet build Magic\Core\Core.csproj
 ```
 
-It builds with 0 warnings and 0 errors. (You can confirm the pin after Part 2: every `Microsoft.Extensions.*.dll` in
-`Build\net10.0\Debug\bin\Gems\` shows file version 10.0.x.)
+It builds with no errors (building Core builds every default gem too). You can confirm the pin after Part 2: every
+`Microsoft.Extensions.*.dll` in `Build\net10.0\Debug\bin\Gems\` shows file version 10.0.x.
 
 ## Part 2: The Mcp gem
 
 ### 2.1 The project
 
-Create the folder `Gems\Mcp` and in it `Mcp.csproj`. It has the same shape as `Gems\ZLogging\ZLogging.csproj`.
+Create the folder `Magic\Gems\Mcp` and in it `Mcp.csproj`. It has the shape every gem's csproj has
+(`Tools\VSTemplates\MagicGem\MyMagicGem.csproj`): it references Core only, without copying it. Everything it uses
+(`IEcs`, `World`, `Assets`, `DebugUI`, `IRendering`, `IWindowRegistry`) is Core's, in `Magic.dll`.
 
 ```xml
 <Project>
 
-  <!-- Must come before the SDK props import: Directory.Build.props (imported by the SDK)
+  <!-- Must come before the SDK props import: the Directory.Build.props of the engine repo, or of a Magic project,
        switches this project to gem output settings when IsMagicGem is true. -->
   <PropertyGroup>
     <IsMagicGem>true</IsMagicGem>
@@ -187,15 +164,16 @@ Create the folder `Gems\Mcp` and in it `Mcp.csproj`. It has the same shape as `G
     <PackageReference Include="ModelContextProtocol.Core" Version="2.2.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="$(MagicRoot)Magic\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+  <!-- Inside the engine repo the gem compiles against Core as a project reference. Inside a Magic project
+       (MagicProjectRoot is set by the project's Directory.Build.props) that file references the engine's built
+       Magic.dll instead, so nothing is added here. Either way Magic.dll is never copied next to the gem: the
+       gem's load context shares the host's already-loaded copy, and a second copy would be a different
+       assembly identity whose IGem the host would not recognise. -->
+  <ItemGroup Condition="'$(MagicProjectRoot)' == ''">
+    <ProjectReference Include="$(MagicRoot)Magic\Core\Core.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
-  <ItemGroup>
-    <InternalsVisibleTo Include="Magic.IntegrationTests" />
-  </ItemGroup>
-
-  <!-- The gem, as the host sees it before constructing it (see Directory.Build.props). -->
+  <!-- The gem, as the engine sees it before constructing it. GemStatic true: loaded once, never hot reloaded. -->
   <PropertyGroup>
     <GemStatic>true</GemStatic>
     <Description>Serves the engine to MCP clients (editors, LLMs) over localhost HTTP.</Description>
@@ -209,36 +187,46 @@ Create the folder `Gems\Mcp` and in it `Mcp.csproj`. It has the same shape as `G
 ```
 
 Why `GemStatic` is true: the gem owns a listening socket and requests in flight. Reloading it mid-call would drop
-them, and it depends on static gems (`IEcs`, `IRendering`) anyway.
+them, and the gems it talks to through Core's interfaces (the ECS, the renderer, the platform) are static anyway.
+
+The gem is one file: its `IGem` class at the root of the folder, as every part is laid out. It makes nothing
+public, so it has no `Contexts` or `Services` folder.
 
 ### 2.2 Register it with the build
 
-`Magic\Magic.csproj`, at the end of the `DefaultGem` list:
+`Magic\Core\Core.csproj`, at the end of the `DefaultGem` list:
 
 ```xml
-    <DefaultGem Include="$(MagicRoot)Gems\DefaultCheats\DefaultCheats.csproj" />
-    <DefaultGem Include="$(MagicRoot)Gems\Mcp\Mcp.csproj" />
+    <DefaultGem Include="$(MagicRoot)Magic\Gems\World\LoadingScreen\LoadingScreen.csproj" />
+    <DefaultGem Include="$(MagicRoot)Magic\Gems\Mcp\Mcp.csproj" />
 ```
 
-`Magic.slnx`, in the `/Gems/` folder, between ImGuiOverlay and SDL:
+`Magic-Wizard.slnx`, whose folders mirror the disk: a folder of its own, between ModelLodGenerator and
+DeferredRenderer.
 
 ```xml
-    <Project Path="Gems/ImGuiOverlay/ImGuiOverlay.csproj" />
-    <Project Path="Gems/Mcp/Mcp.csproj" />
-    <Project Path="Gems/SDL/SDL.csproj" Id="dc93ae9f-b3ed-4220-b9eb-a7bf52ec8d68" />
+  <Folder Name="/Magic/Gems/LODs/ModelLodGenerator/">
+    <Project Path="Magic/Gems/LODs/ModelLodGenerator/ModelLodGenerator.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Mcp/">
+    <Project Path="Magic/Gems/Mcp/Mcp.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Rendering/DeferredRenderer/">
 ```
+
+(`dotnet sln Magic-Wizard.slnx add Magic\Gems\Mcp\Mcp.csproj --solution-folder Magic\Gems\Mcp` does the same.)
 
 ### 2.3 The gem
 
-Create `Gems\Mcp\Mcp.cs`. Read the notes after the listing before you type it in; they explain the parts that are
-not obvious.
+Create `Magic\Gems\Mcp\Mcp.cs`. Read the notes after the listing before you type it in; they explain the parts that
+are not obvious.
 
 ```csharp
 using Magic.Contexts;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Components;
-using Magic.Contexts.Events;
-using Magic.Contexts.Settings;
+using Magic.Contexts.Domain;
+using Magic.Contexts.Rendering;
+using Magic.Contexts.Threading;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
@@ -246,14 +234,14 @@ using Magic.Utils;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
-using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Globalization;
 using System.Net;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using IComponent = Magic.Contexts.Components.IComponent;
-using Result = Magic.Utils.Result;
 
 namespace McpGem;
 
@@ -261,53 +249,50 @@ namespace McpGem;
 /// Serves the engine to MCP clients (an editor, an LLM) over localhost HTTP, so they can drive it without the engine
 /// knowing who they are. Off unless the <c>MAGIC_MCP_PORT</c> environment variable names a port: a game never opens
 /// one by accident. Requests arrive on pool threads; the engine is main-thread only, so every tool that touches it
-/// is queued and run in <see cref="Update"/>. Stateless: one request, one answer, nothing pushed, so clients poll
-/// (<c>log_read</c>).
+/// is handed to the main thread (<see cref="Threads"/>) and answers once that has run it. Stateless: one request, one
+/// answer, nothing pushed, so clients poll (<c>log_read</c>). It hears of every component type as gems load and
+/// unload (a registrar of <see cref="IComponent"/>), and of every log line (an <see cref="ILogger"/>).
 /// </summary>
-internal sealed class Mcp : IGem, ILogger
+internal sealed class Mcp : IGem, ILogger, ITypeRegistrar<IComponent>
 {
     private const int LogCapacity = 2000;
 
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
-    /// <summary>
-    /// Components and settings as chunk files write them, minus what cannot be set (Transform.Matrix).
-    /// </summary>
-    private static readonly JsonSerializerOptions _assetJson = new(AssetJson.Options) { IgnoreReadOnlyProperties = true, WriteIndented = false };
-
-    private static readonly MethodInfo _has = typeof(IEcs).GetMethod(nameof(IEcs.Has))!;
-    private static readonly MethodInfo _tryGet = typeof(IEcs).GetMethod(nameof(IEcs.TryGet))!;
-    private static readonly MethodInfo _set = typeof(IEcs).GetMethod(nameof(IEcs.Set))!;
-    private static readonly MethodInfo _remove = typeof(IEcs).GetMethod(nameof(IEcs.Remove))!;
+    private static readonly MethodInfo _has = EcsMethod(nameof(IEcs.Has));
+    private static readonly MethodInfo _tryGet = EcsMethod(nameof(IEcs.TryGet));
+    private static readonly MethodInfo _set = EcsMethod(nameof(IEcs.Set));
+    private static readonly MethodInfo _remove = EcsMethod(nameof(IEcs.Remove));
 
     private readonly IEcs _ecs;
     private readonly World _world;
     private readonly Assets _assets;
     private readonly Project _project;
-    private readonly IFileSystem _files;
-    private readonly IRendering _rendering;
-    private readonly IWindowRegistry _windows;
+    private readonly Settings _settings;
+    private readonly Threads _threads;
+    private readonly DebugUI _debug;
+    private readonly IRendering? _rendering;
+    private readonly IWindowRegistry? _windows;
     private readonly HttpListener _listener = new();
     private readonly CancellationTokenSource _stopping = new();
-    private readonly ConcurrentQueue<Action> _mainThreadWork = new();
-    private readonly Lock _logLock = new();
+    private readonly Lock _lock = new(); // the log and the component types: both are written from other threads
     private readonly Queue<LogLine> _log = new();
+    private readonly Dictionary<string, Type> _componentTypes = new(StringComparer.OrdinalIgnoreCase);
     private readonly McpServerOptions _options;
-    private readonly IDisposable _gemsChanged;
-    private Dictionary<string, Type>? _componentTypes;
     private long _lastLogId;
     private long _frame;
 
-    public Mcp(IEcs ecs, World world, Assets assets, Project project, Events events, IFileSystem files, IRendering rendering, IWindowRegistry windows)
+    public Mcp(IEcs ecs, World world, Assets assets, Project project, Settings settings, Threads threads, DebugUI debug, IRendering? rendering, IWindowRegistry? windows)
     {
         _ecs = ecs;
         _world = world;
         _assets = assets;
         _project = project;
-        _files = files;
+        _settings = settings;
+        _threads = threads;
+        _debug = debug;
         _rendering = rendering;
         _windows = windows;
-        _gemsChanged = events.Watch(EventType.GemsChanged, _ => _componentTypes = null); // a reloaded gem brings new component types
         _options = new McpServerOptions
         {
             ServerInfo = new Implementation { Name = "Magic", Version = "1.0.0" },
@@ -320,17 +305,17 @@ internal sealed class Mcp : IGem, ILogger
                     ([Description("Id of the last line already seen; 0 for everything kept.")] long after = 0,
                      [Description("Most lines to return.")] int max = 200) => LogRead(after, max)),
                 Tool("command_list", "The names of every console command.",
-                    () => OnMainThreadAsync(() => Serialize(Debugging.Commands.Names))),
+                    () => OnMainThreadAsync(() => Serialize(_debug.Commands))),
                 Tool("command_run", "Runs a console command. Its output goes to the log: read it with log_read.",
                     ([Description("The command's name, from command_list.")] string name,
                      [Description("Arguments, already split.")] string[]? args = null) => OnMainThreadAsync(() => CommandRun(name, args ?? []))),
                 Tool("screenshot", "The main window as it was last shown, as a PNG.",
-                    () => OnMainThreadAsync(Screenshot)),
-                Tool("domain_open", "Opens a domain by asset path, such as Domains/Cube/Cube.domain.",
-                    ([Description("Path relative to the Assets folder, forward slashes.")] string path,
+                    () => _threads.InvokeAsync(ThreadId.Render, _ => Screenshot(), _stopping.Token)),
+                Tool("domain_open", "Opens a domain by asset path, such as Cave/Cave.domain.",
+                    ([Description("Path relative to the project's Assets folder or a gem's Resources folder, forward slashes.")] string path,
                      [Description("True to open on top of what is open; false to replace it.")] bool additive = false) => OnMainThreadAsync(() => DomainOpen(path, additive))),
                 Tool("domain_close", "Closes an open domain by asset path.",
-                    ([Description("Path relative to the Assets folder, forward slashes.")] string path) => OnMainThreadAsync(() => DomainClose(path))),
+                    ([Description("Path relative to the project's Assets folder or a gem's Resources folder, forward slashes.")] string path) => OnMainThreadAsync(() => DomainClose(path))),
                 Tool("entity_children", "The entities directly under a parent: id, name, enabled and how many children each has.",
                     ([Description("The parent's id; leave out for the world root.")] string parent = "") => OnMainThreadAsync(() => EntityChildren(parent))),
                 Tool("entity_get", "One entity: name, parent, enabled and every component it has, as JSON in the chunk file format.",
@@ -347,7 +332,7 @@ internal sealed class Mcp : IGem, ILogger
                     ([Description("The entity's id.")] string id,
                      [Description("False to disable.")] bool enabled = true) => OnMainThreadAsync(() => EntityEnable(id, enabled))),
                 Tool("component_types", "The names of every component type an entity can have.",
-                    () => OnMainThreadAsync(() => Serialize(ComponentTypes().Keys.Order()))),
+                    () => Serialize(ComponentTypes().Select(pair => pair.Key))),
                 Tool("component_set", "Adds or overwrites a component on an entity. The value is the whole component, as entity_get shows it; fields left out take their defaults.",
                     ([Description("The entity's id.")] string id,
                      [Description("The component's name, from component_types.")] string component,
@@ -355,43 +340,50 @@ internal sealed class Mcp : IGem, ILogger
                 Tool("component_remove", "Removes a component from an entity.",
                     ([Description("The entity's id.")] string id,
                      [Description("The component's name.")] string component) => OnMainThreadAsync(() => ComponentRemove(id, component))),
-                Tool("settings_get", "The project's settings, by section.",
-                    () => OnMainThreadAsync(() => JsonSerializer.Serialize(_project.Settings, _assetJson))),
-                Tool("settings_set", "Changes one setting; it takes effect on the next frame and is not saved to the project file.",
-                    ([Description("The section, such as Render.")] string section,
+                Tool("settings_get", "Every settings class's values, by name (Gpu, Lod, World, ...).",
+                    () => OnMainThreadAsync(SettingsGet)),
+                Tool("settings_set", "Changes one setting, as the console's set command does: live until the next preset, never saved. A name that matches nothing is warned about in the log.",
+                    ([Description("The settings name, such as Gpu.")] string section,
                      [Description("The setting in it, such as Vsync.")] string key,
                      [Description("The new value as JSON.")] JsonElement value) => OnMainThreadAsync(() => SettingsSet(section, key, value))),
                 Tool("asset_list", "The asset paths directly in a folder with an extension.",
-                    ([Description("Folder relative to Assets or the engine's Resources, forward slashes.")] string folder,
+                    ([Description("Folder relative to the project's Assets folder or a gem's Resources folder, forward slashes.")] string folder,
                      [Description("Extension with its dot, such as .chunk.")] string extension) => AssetList(folder, extension)),
                 Tool("quit", "Quits the engine once the current frame is done.",
-                    () => OnMainThreadAsync(() => { _world.End(); return "quitting"; })),
+                    () => OnMainThreadAsync(() =>
+                    {
+                        _world.End();
+                        return "quitting";
+                    })),
             ],
         };
 
-        if (!int.TryParse(Environment.GetEnvironmentVariable("MAGIC_MCP_PORT"), out int port))
+        if (!int.TryParse(Environment.GetEnvironmentVariable("MAGIC_MCP_PORT"), NumberStyles.None, CultureInfo.InvariantCulture, out int port))
             return;
 
         // Both names: HTTP.sys matches the Host header against the prefix, and clients use either.
         _listener.Prefixes.Add($"http://localhost:{port}/");
         _listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         _listener.Start();
-        _ = Task.Run(ListenAsync);
-        Debugging.Log.Info($"MCP server listening on http://localhost:{port}/mcp");
+        ListenAsync().FireAndForget();
+        Log.Info($"MCP server listening on http://localhost:{port}/mcp");
     }
 
     public void Dispose()
     {
-        _gemsChanged.Dispose();
         _stopping.Cancel();
         _listener.Close();
+        _stopping.Dispose();
     }
 
     public void Update(in Frame frame)
     {
         _frame = frame.Number;
-        while (_mainThreadWork.TryDequeue(out Action? work))
-            work();
+    }
+
+    private static MethodInfo EcsMethod(string name)
+    {
+        return typeof(IEcs).GetMethod(name) ?? throw new MissingMethodException(nameof(IEcs), name);
     }
 
     private static McpServerTool Tool(string name, string description, Delegate run)
@@ -404,14 +396,6 @@ internal sealed class Mcp : IGem, ILogger
         return JsonSerializer.Serialize(value, _json);
     }
 
-    private static string CommandRun(string name, string[] args)
-    {
-        if (!Debugging.Commands.Run(name, args))
-            throw new McpException($"There is no console command called '{name}'.");
-
-        return "ran";
-    }
-
     private async Task ListenAsync()
     {
         while (!_stopping.IsCancellationRequested)
@@ -419,14 +403,14 @@ internal sealed class Mcp : IGem, ILogger
             HttpListenerContext context;
             try
             {
-                context = await _listener.GetContextAsync();
+                context = await _listener.GetContextAsync().ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is HttpListenerException or ObjectDisposedException)
             {
                 return; // the listener was closed
             }
 
-            _ = Task.Run(() => ServeAsync(context));
+            Task.Run(() => ServeAsync(context)).FireAndForget();
         }
     }
 
@@ -459,22 +443,24 @@ internal sealed class Mcp : IGem, ILogger
                 return;
             }
 
-            JsonRpcMessage? message = await JsonSerializer.DeserializeAsync<JsonRpcMessage>(request.InputStream, McpJsonUtilities.DefaultOptions, _stopping.Token);
+            JsonRpcMessage? message = await JsonSerializer.DeserializeAsync<JsonRpcMessage>(request.InputStream, McpJsonUtilities.DefaultOptions, _stopping.Token).ConfigureAwait(false);
             if (message is null)
             {
                 response.StatusCode = 400;
                 return;
             }
 
-            await using StreamableHttpServerTransport transport = new() { Stateless = true };
-            await using McpServer server = McpServer.Create(transport, _options);
+            StreamableHttpServerTransport transport = new() { Stateless = true };
+            await using ConfiguredAsyncDisposable disposingTransport = transport.ConfigureAwait(false);
+            McpServer server = McpServer.Create(transport, _options);
+            await using ConfiguredAsyncDisposable disposingServer = server.ConfigureAwait(false);
             using CancellationTokenSource answered = CancellationTokenSource.CreateLinkedTokenSource(_stopping.Token);
-            _ = server.RunAsync(answered.Token);
+            server.RunAsync(answered.Token).FireAndForget();
 
             // The answer is buffered so the status can still change: a notification has no answer, and that is a 202.
             using MemoryStream body = new();
-            bool wrote = await transport.HandlePostRequestAsync(message, body, answered.Token);
-            answered.Cancel();
+            bool wrote = await transport.HandlePostRequestAsync(message, body, answered.Token).ConfigureAwait(false);
+            await answered.CancelAsync().ConfigureAwait(false);
             if (!wrote)
             {
                 response.StatusCode = 202;
@@ -485,9 +471,9 @@ internal sealed class Mcp : IGem, ILogger
             response.Headers["Cache-Control"] = "no-cache, no-store";
             response.ContentLength64 = body.Length;
             body.Position = 0;
-            await body.CopyToAsync(response.OutputStream);
+            await body.CopyToAsync(response.OutputStream).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is JsonException or OperationCanceledException or HttpListenerException or IOException)
+        catch (Exception ex) when (ex is JsonException or OperationCanceledException or ObjectDisposedException or HttpListenerException or IOException)
         {
             if (ex is JsonException)
                 response.StatusCode = 400;
@@ -506,28 +492,22 @@ internal sealed class Mcp : IGem, ILogger
     }
 
     /// <summary>
-    /// Runs <paramref name="work"/> in the next <see cref="Update"/> and hands back what it returned, or threw.
+    /// Runs <paramref name="work"/> on the main thread at the start of the next frame and hands back what it returned,
+    /// or threw.
     /// </summary>
     private Task<T> OnMainThreadAsync<T>(Func<T> work)
     {
-        TaskCompletionSource<T> done = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _mainThreadWork.Enqueue(() =>
+        return _threads.InvokeAsync(ThreadId.Main, _ =>
         {
             try
             {
-                done.SetResult(work());
+                return work();
             }
-            catch (TargetInvocationException ex) when (ex.InnerException is not null)
+            catch (TargetInvocationException ex) when (ex.InnerException is { } inner)
             {
-                done.SetException(new McpException(ex.InnerException.Message)); // a component call made through reflection: say what it said
+                throw new McpException(inner.Message); // a component call made through reflection: say what it said
             }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                done.SetException(ex);
-            }
-        });
-
-        return done.Task.WaitAsync(_stopping.Token);
+        }, _stopping.Token);
     }
 
     private string EngineInfo()
@@ -538,31 +518,38 @@ internal sealed class Mcp : IGem, ILogger
             root = _project.Root,
             frame = _frame,
             entities = _ecs.EntityCount,
-            domains = _world.Active.Select(domain => _assets.PathOf(domain.Id)),
+            domains = _world.Domains.Select(open => _assets.PathOf(open.Handle.Id)),
         });
     }
 
     private string LogRead(long after, int max)
     {
-        lock (_logLock)
+        lock (_lock)
             return Serialize(_log.Where(line => line.Id > after).Take(max <= 0 ? LogCapacity : max));
     }
 
+    private string CommandRun(string name, string[] args)
+    {
+        if (!_debug.Run(name, args))
+            throw new McpException($"There is no console command called '{name}'.");
+
+        return "ran";
+    }
+
+    /// <summary>
+    /// Render thread, which owns the GPU and the windows. Waits for the GPU.
+    /// </summary>
     private ContentBlock Screenshot()
     {
-        if (_windows.Main is not { } window)
-            throw new McpException("There is no main window to capture.");
+        if (_rendering is not { } rendering || _windows?.Main is not { } window)
+            throw new McpException("There is no renderer or no main window to capture.");
 
-        string path = _files.Combine(Project.Screenshots, "mcp.png");
-        Result taken = _rendering.Screenshot(window, _files, path);
+        Result<CapturedFrame> taken = rendering.Read(GpuTexture.Window(window.Handle));
         if (taken.Failed)
             throw new McpException($"Screenshot failed: {taken.Message}");
 
-        Result<byte[]> png = _files.ReadBinary(path);
-        if (png.Failed)
-            throw new McpException($"Screenshot could not be read back: {png.Message}");
-
-        return ImageContentBlock.FromBytes(png.Payload, "image/png");
+        CapturedFrame frame = taken.Payload;
+        return ImageContentBlock.FromBytes(frame.Pixels.AsSpan().Png(frame.Width, frame.Height), "image/png");
     }
 
     private string DomainOpen(string path, bool additive)
@@ -571,7 +558,9 @@ internal sealed class Mcp : IGem, ILogger
         if (!domain.IsValid)
             throw new McpException($"There is no domain at '{path}'.");
 
-        _world.Open(domain, additive ? OpenMode.Additive : OpenMode.Replace);
+        if (_world.Open(domain, additive ? OpenMode.Additive : OpenMode.Replace) is { Failed: true } opened)
+            throw new McpException(opened.Message);
+
         return "opened";
     }
 
@@ -587,16 +576,16 @@ internal sealed class Mcp : IGem, ILogger
 
     private string EntityChildren(string parent)
     {
-        Handle handle = parent.Length == 0 ? _ecs.Lookup("World") : Entity(parent);
+        Handle handle = parent.Length == 0 ? _ecs.Lookup(World.RootName) : Entity(parent);
         if (!handle.IsValid)
             return "[]"; // nothing is open yet
 
-        return Serialize(_ecs.GetChildren(handle).Select(child => new
+        return Serialize(ChildrenOf(handle).Select(child => new
         {
-            id = child.Id.ToString(),
+            id = child.Id.ToString(CultureInfo.InvariantCulture),
             name = _ecs.GetName(child),
             enabled = _ecs.IsEnabled(child),
-            children = _ecs.GetChildren(child).Length,
+            children = ChildrenOf(child).Count,
         }));
     }
 
@@ -604,9 +593,9 @@ internal sealed class Mcp : IGem, ILogger
     {
         Handle entity = Entity(id);
         JsonObject components = [];
-        foreach ((string name, Type type) in ComponentTypes().OrderBy(pair => pair.Key))
+        foreach ((string name, Type type) in ComponentTypes())
         {
-            if (!(bool)_has.MakeGenericMethod(type).Invoke(_ecs, [entity])!)
+            if (_has.MakeGenericMethod(type).Invoke(_ecs, [entity]) is not true)
                 continue;
 
             // A tag has no value to read; an empty object says it is there.
@@ -615,14 +604,14 @@ internal sealed class Mcp : IGem, ILogger
             if (!isTag)
                 _tryGet.MakeGenericMethod(type).Invoke(_ecs, arguments);
 
-            components[name] = isTag ? new JsonObject() : JsonSerializer.SerializeToNode(arguments[1], type, _assetJson);
+            components[name] = isTag ? new JsonObject() : JsonSerializer.SerializeToNode(arguments[1], type, AssetJson.Compact);
         }
 
         return new JsonObject
         {
             ["id"] = id,
             ["name"] = _ecs.GetName(entity),
-            ["parent"] = _ecs.GetParent(entity).Id.ToString(),
+            ["parent"] = _ecs.GetParent(entity).Id.ToString(CultureInfo.InvariantCulture),
             ["enabled"] = _ecs.IsEnabled(entity),
             ["components"] = components,
         }.ToJsonString();
@@ -631,7 +620,7 @@ internal sealed class Mcp : IGem, ILogger
     private string EntityCreate(string name, string parent)
     {
         Handle created = _ecs.Create(name.Length == 0 ? null : name, parent.Length == 0 ? Handle.None : Entity(parent));
-        return created.Id.ToString();
+        return created.Id.ToString(CultureInfo.InvariantCulture);
     }
 
     private string EntityDestroy(string id)
@@ -659,7 +648,7 @@ internal sealed class Mcp : IGem, ILogger
         object parsed;
         try
         {
-            parsed = value.Deserialize(type, _assetJson) ?? throw new JsonException("null");
+            parsed = value.Deserialize(type, AssetJson.Compact) ?? throw new JsonException("null");
         }
         catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
@@ -676,22 +665,19 @@ internal sealed class Mcp : IGem, ILogger
         return "removed";
     }
 
+    private string SettingsGet()
+    {
+        JsonObject sections = [];
+        foreach (object settings in _settings.All)
+            sections[Settings.NameOf(settings)] = JsonSerializer.SerializeToNode(settings, settings.GetType(), AssetJson.Compact);
+
+        return sections.ToJsonString();
+    }
+
     private string SettingsSet(string section, string key, JsonElement value)
     {
-        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.IgnoreCase;
-        object? target = typeof(Settings).GetProperty(section, Flags)?.GetValue(_project.Settings);
-        PropertyInfo? setting = target?.GetType().GetProperty(key, Flags);
-        if (target is null || setting is null || !setting.CanWrite)
-            throw new McpException($"There is no setting {section}.{key}.");
-
-        try
-        {
-            setting.SetValue(target, value.Deserialize(setting.PropertyType, _assetJson));
-        }
-        catch (Exception ex) when (ex is JsonException or NotSupportedException)
-        {
-            throw new McpException($"That is not a {setting.PropertyType.Name}: {ex.Message}");
-        }
+        if (_settings.Set([$"{section}.{key}={value.GetRawText()}"]).Length > 0)
+            throw new McpException($"'{section}.{key}' is not a setting's name.");
 
         return "set";
     }
@@ -706,60 +692,42 @@ internal sealed class Mcp : IGem, ILogger
     /// </summary>
     private Handle Entity(string id)
     {
-        if (!ulong.TryParse(id, out ulong value) || !_ecs.IsAlive(new Handle(value)))
+        if (!ulong.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out ulong value) || !_ecs.IsAlive(new Handle(value)))
             throw new McpException($"There is no entity with id '{id}'.");
 
         return new Handle(value);
     }
 
+    private List<Handle> ChildrenOf(Handle parent)
+    {
+        List<Handle> children = [];
+        _ecs.GetChildren(parent, children);
+        return children;
+    }
+
     private Type ComponentType(string name)
     {
-        if (!ComponentTypes().TryGetValue(name, out Type? type))
-            throw new McpException($"There is no component type called '{name}'. component_types lists them.");
+        lock (_lock)
+        {
+            if (_componentTypes.TryGetValue(name, out Type? type))
+                return type;
+        }
 
-        return type;
+        throw new McpException($"There is no component type called '{name}'. component_types lists them.");
     }
 
     /// <summary>
-    /// Every <see cref="IComponent"/> struct in the process by type name (by full name where two share one), found the
-    /// way streaming finds them: only Core and what references it can declare one.
+    /// Every component type by name, in name order, as it is now.
     /// </summary>
-    private Dictionary<string, Type> ComponentTypes()
+    private KeyValuePair<string, Type>[] ComponentTypes()
     {
-        if (_componentTypes is not null)
-            return _componentTypes;
-
-        Assembly core = typeof(IComponent).Assembly;
-        string? coreName = core.GetName().Name;
-        Dictionary<string, Type> found = new(StringComparer.OrdinalIgnoreCase);
-        foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
-        {
-            if (assembly.IsDynamic || (assembly != core && !assembly.GetReferencedAssemblies().Any(reference => reference.Name == coreName)))
-                continue;
-
-            Type[] types;
-            try
-            {
-                types = assembly.GetTypes();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                types = [.. ex.Types.OfType<Type>()];
-            }
-
-            foreach (Type type in types)
-            {
-                if (type.IsValueType && !type.IsGenericTypeDefinition && typeof(IComponent).IsAssignableFrom(type))
-                    found[found.ContainsKey(type.Name) ? type.FullName! : type.Name] = type;
-            }
-        }
-
-        return _componentTypes = found;
+        lock (_lock)
+            return [.. _componentTypes.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)];
     }
 
     void ILogger.Log(LogLevel level, string message, string file, int line)
     {
-        lock (_logLock)
+        lock (_lock)
         {
             _log.Enqueue(new LogLine(++_lastLogId, level.ToString(), message));
             if (_log.Count > LogCapacity)
@@ -767,8 +735,24 @@ internal sealed class Mcp : IGem, ILogger
         }
     }
 
-    void ILogger.Flush()
+    /// <summary>
+    /// A component type, by its name, or its full name when another type already has the name.
+    /// </summary>
+    object? ITypeRegistrar.Register(Type type)
     {
+        lock (_lock)
+            _componentTypes[_componentTypes.ContainsKey(type.Name) ? type.FullName ?? type.Name : type.Name] = type;
+
+        return null;
+    }
+
+    void ITypeRegistrar.Unregister(Type type)
+    {
+        lock (_lock)
+        {
+            foreach (string name in _componentTypes.Where(pair => pair.Value == type).Select(pair => pair.Key).ToArray())
+                _componentTypes.Remove(name);
+        }
     }
 
     private readonly record struct LogLine(long Id, string Level, string Message);
@@ -777,8 +761,13 @@ internal sealed class Mcp : IGem, ILogger
 
 #### Notes on the gem
 
-**The two `using` aliases.** `System.ComponentModel` (for `[Description]`) also has an `IComponent`, and the MCP SDK
-also has a `Result`. Without the aliases both are ambiguous and the build fails with CS0104.
+**The `using` alias.** `System.ComponentModel` (for `[Description]`) also has an `IComponent`. Without the alias
+it is ambiguous and the build fails with CS0104.
+
+**The engine's build rules apply.** The repo's `.editorconfig` and `Directory.Build.props` make these errors, which
+is why the listing looks the way it does: every `await` says `.ConfigureAwait(false)` (an `await using` too, through
+`ConfiguredAsyncDisposable`), a task nobody awaits is let go with `FireAndForget()` rather than `_ =`, the
+null-forgiving `!` is banned, numbers are parsed culture-invariantly, and disposable fields are disposed.
 
 **How a request flows.**
 
@@ -788,8 +777,9 @@ also has a `Result`. Without the aliases both are ambiguous and the build fails 
    driving your engine.
 3. It creates a transport and a server for that one request (`Stateless = true`), and lets the SDK handle the
    message. The SDK parses the JSON-RPC, finds the tool, and calls your delegate.
-4. The delegate calls `OnMainThreadAsync`, which queues the real work and returns a task.
-5. The engine's next `Update` drains the queue on the main thread and completes the task.
+4. The delegate calls `OnMainThreadAsync`, which hands the real work to the main thread with
+   `Threads.InvokeAsync(ThreadId.Main, …)` and returns its task.
+5. The main thread runs it at the start of the next frame and completes the task.
 6. The SDK writes the answer into the buffer and `ServeAsync` sends it.
 
 **Why the answer is buffered.** A JSON-RPC notification (such as `notifications/initialized`) has no answer, and
@@ -802,32 +792,46 @@ an argument optional. Return a `string` for text, or a `ContentBlock` for anythi
 image).
 
 **Errors.** Throw `McpException` for anything the caller should read: the SDK turns it into a tool error carrying
-your message. Any other exception type is reported as a generic failure with no detail.
+your message (after "An error occurred invoking '<tool>': "). Any other exception type is reported as a generic
+failure with no detail.
 
-**Tools that skip the main thread.** `log_read` and `asset_list` do not call `OnMainThreadAsync`: the log buffer has its
-own lock and `Assets.FindAll`/`PathOf` are thread-safe. Everything else touches the ECS or the world and must queue.
+**Tools that skip the main thread.** `log_read` and `component_types` read what the gem keeps under its own lock,
+and `asset_list` calls `Assets.FindAll`/`PathOf`, which are thread-safe. `screenshot` runs on the render thread,
+which owns the GPU and the windows: `IRendering.Read` gives back what the main window last showed, and the
+`Png` extension (Core's `PngExtensions`) encodes it in memory, so nothing is written to disk. Without a renderer or
+a main window (`--headless`) it answers an error. Everything else touches the ECS, the world or the settings and
+must be on the main thread.
 
-**The log.** Implementing `ILogger` is all it takes: `Gems.Construct` registers any gem that is an `ILogger` with
-`Debugging.Log`. One limit: lines logged before this gem is constructed are not in its buffer (they went to the
-loggers that existed then). The gem loads late because it depends on the ECS and the renderer.
+**The log.** Implementing `ILogger` is all it takes: the gem loader (`Magic\Core\Internal\Gems.cs`) registers any
+gem that is an `ILogger` with `Log`, and loads loggers as early as their dependencies allow. Lines logged before the
+gem is constructed (the host's start-up, the gems loaded before it) went only to the loggers that existed then.
+
+**Component types.** The gem is an `ITypeRegistrar<IComponent>`: the loader hands it every component struct of every
+assembly already loaded and of each gem that loads later, and takes them back when a gem unloads, which is how
+ChunkStreaming learns the names a chunk file uses. A name two types share is kept under the second one's full
+name.
 
 **Components by reflection.** `IEcs.Has<T>`, `TryGet<T>`, `Set<T>` and `Remove<T>` need a compile-time type. The
 gem has a `Type` at runtime, so it closes each generic method with `MakeGenericMethod` and invokes it. `TryGet`'s
 `out` value comes back in the arguments array. A failure inside such a call arrives wrapped in
-`TargetInvocationException`, which `OnMainThreadAsync` unwraps so the caller sees the real message. `StreamingSystem`
-does the same trick privately for `Set`; if a third caller ever appears, that is the moment to give `IEcs` untyped
-members instead.
+`TargetInvocationException`, which `OnMainThreadAsync` unwraps so the caller sees the real message. ChunkStreaming
+solves the same problem privately, with a generic column class closed over each type (`ComponentColumn<T>` in
+`ChunkReader.cs`); if another caller ever appears, that is the moment to give `IEcs` untyped members instead.
 
-**`_assetJson`.** A copy of `AssetJson.Options` with two changes: no indentation, and read-only properties skipped.
-Without the second, `Transform` would also emit its computed `Matrix`, which cannot be set back.
+**Settings.** `settings_get` writes every `[Settings]` class the `Settings` service holds (`Settings.All`) under
+its name; `settings_set` hands one `Name.Property=value` line to `Settings.Set`, the same path the console's `set`
+command takes, so the value lasts until the next preset and is never saved.
+
+**`AssetJson.Compact`.** Components and settings go out as chunk files write them, on one line: the engine's one
+JSON dialect, which already leaves out what a type only computes (`Transform`'s `Matrix`, which could not be set back).
 
 ### Checkpoint
 
 ```powershell
-dotnet build Magic\Magic.csproj
+dotnet build Magic\Core\Core.csproj
 ```
 
-0 warnings, 0 errors, and `Build\net10.0\Debug\bin\Gems\Mcp.dll` exists. Run a sample as usual:
+No errors, and `Build\net10.0\Debug\bin\Gems\Mcp.dll` exists. Run the Samples project as usual:
 
 ```powershell
 Build\net10.0\Debug\bin\Magic.exe --project Samples
@@ -868,26 +872,26 @@ Each prints an `event: message` line and a `data:` line holding the JSON-RPC ans
 
 ```
 event: message
-data: {"result":{"content":[{"type":"text","text":"["exit","screenshot"]"}]},"id":1,"jsonrpc":"2.0"}
+data: {"result":{"content":[{"type":"text","text":"["exit","get","portal","preset","restore","screenshot","set","summon"]"}]},"id":1,"jsonrpc":"2.0"}
 ```
 
 The tool's own answer is the `text` value: a JSON string inside JSON, so its quotes arrive escaped as `"`.
-That one is `["exit","screenshot"]`, from `command_list`.
+That one is `["exit","get","portal","preset","restore","screenshot","set","summon"]`, from `command_list`.
 
-Now change the world. Take the id that `entity_children` returned (the `Cube` domain root), and walk down:
+Now change the world. `entity_children` with no parent answers what is under the world root: the `Hub` domain (and
+`Loading`, the loading screen's domain). Take the id of `Hub` and walk down:
 
 ```powershell
-Mcp entity_children '{"parent":"<id of Cube>"}'        # Globals, Chunks
-Mcp entity_children '{"parent":"<id of Chunks>"}'      # C0_0_0
-Mcp entity_children '{"parent":"<id of C0_0_0>"}'      # Cube, CubeBehind
-Mcp entity_get '{"id":"<id of the Cube entity>"}'
-Mcp component_set '{"id":"<id of the Cube entity>","component":"Transform","value":{"position":{"x":0,"y":2.5,"z":0}}}'
+Mcp entity_children '{"parent":"<id of Hub>"}'        # Globals, Chunks
+Mcp entity_children '{"parent":"<id of Globals>"}'    # PostProcessing, Orbit, Camera, Moon, Floor, Question
+Mcp entity_get '{"id":"<id of Moon>"}'
+Mcp component_set '{"id":"<id of Moon>","component":"DirectionalLight","value":{"color":{"r":1,"g":0.2,"b":0.2},"intensity":1}}'
 ```
 
-The cube jumps up in the engine window. Then:
+The Hub turns red in the engine window. Then:
 
 ```powershell
-Mcp command_run '{"name":"nope"}'   # isError, "There is no console command called 'nope'."
+Mcp command_run '{"name":"nope"}'   # isError: "An error occurred invoking 'command_run': There is no console command called 'nope'."
 Mcp quit
 ```
 
@@ -913,22 +917,22 @@ Create `.mcp.json` in the repo root:
 ```
 
 Start the engine with `MAGIC_MCP_PORT=47800` as above, then start Claude Code in the repo. It asks once whether to
-trust the project's MCP server. After that, ask it things like "what entities are in the open domain?" or "move the
-cube up one metre and take a screenshot". The server is only reachable while an engine is running on that port.
+trust the project's MCP server. After that, ask it things like "what entities are in the open domain?" or "turn the
+moon light red and take a screenshot". The server is only reachable while an engine is running on that port.
 
 47800 is just the convention for "the engine I started by hand". Wizard picks a free port per run instead, so the
 two never collide.
 
 ## Part 4: The Wizard server
 
-Wizard is its own solution in `Wizard\`. Nothing in it is built by `Magic.slnx`, and nothing in it references
-Magic.
+Wizard is its own solution in `Wizard\` at the repo root, beside `Magic\`. Nothing in it is built by
+`Magic-Wizard.slnx`, and nothing in it references Magic.
 
 ### 4.1 Cut Wizard off from the engine's build settings
 
 The repo root's `Directory.Build.props` applies to every project beneath it: it would force the engine's output
-paths and configurations onto Wizard. MSBuild stops at the first `Directory.Build.props` it finds walking up, so
-giving Wizard its own (which does not import the root's) cuts it off.
+paths, configurations, analyzers and banned APIs onto Wizard. MSBuild stops at the first `Directory.Build.props` it
+finds walking up, so giving Wizard its own (which does not import the root's) cuts it off.
 
 Create `Wizard\Directory.Build.props`:
 
@@ -953,6 +957,15 @@ Create `Wizard\Directory.Build.props`:
 With `ArtifactsPath`, the build lands in `Build\Wizard\bin\Wizard\debug\` and intermediates in `Build\Wizard\obj\`.
 No `bin` or `obj` folders appear in the source tree.
 
+The repo root's `.editorconfig` reaches Wizard the same way, and it makes the engine's rules errors; one of them
+(CA2007, `ConfigureAwait(false)` on every `await`) is wrong for Blazor components, which must continue on their own
+context. Create `Wizard\.editorconfig` to stop the walk there too:
+
+```ini
+# Wizard is its own world: the engine's code rules (the repo root's .editorconfig) do not apply here.
+root = true
+```
+
 ### 4.2 Scaffold the project and solution
 
 ```powershell
@@ -971,8 +984,8 @@ What the flags mean:
 - `--no-https`: it only ever listens on localhost.
 
 You now have `Wizard\Wizard.slnx` and the project in `Wizard\Wizard\`. Open
-`Wizard\Wizard\Properties\launchSettings.json` and set `applicationUrl` to `http://localhost:5211` (the template
-picks a random port; a fixed one makes the later steps copy-pasteable).
+`Wizard\Wizard\Properties\launchSettings.json` and set `applicationUrl` to `http://localhost:5211` (the
+template picks a random port; a fixed one makes the later steps copy-pasteable).
 
 ### 4.3 The project file
 
@@ -1093,7 +1106,7 @@ public sealed class Engine(IConfiguration configuration) : IAsyncDisposable
 
         string executable = Executable();
         if (!File.Exists(executable))
-            throw new EngineException($"Magic was not found at {executable}. Build Magic.slnx first, or set Engine in appsettings.json.");
+            throw new EngineException($"Magic was not found at {executable}. Build Magic-Wizard.slnx first, or set Engine in appsettings.json.");
 
         int port = FreePort();
         ProcessStartInfo start = new(executable)
@@ -1211,7 +1224,7 @@ public sealed class Engine(IConfiguration configuration) : IAsyncDisposable
 
     /// <summary>
     /// Where Magic is: the Engine setting if there is one, otherwise the Debug build of the repo this Wizard was built
-    /// in, found by walking up to the folder that holds Magic.slnx.
+    /// in, found by walking up to the folder that holds Magic-Wizard.slnx.
     /// </summary>
     private string Executable()
     {
@@ -1221,7 +1234,7 @@ public sealed class Engine(IConfiguration configuration) : IAsyncDisposable
         string name = OperatingSystem.IsWindows() ? "Magic.exe" : "Magic";
         for (DirectoryInfo? folder = new(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
         {
-            if (File.Exists(Path.Combine(folder.FullName, "Magic.slnx")))
+            if (File.Exists(Path.Combine(folder.FullName, "Magic-Wizard.slnx")))
                 return Path.Combine(folder.FullName, "Build", "net10.0", "Debug", "bin", name);
         }
 
@@ -1242,8 +1255,8 @@ Things worth knowing:
 - **`EngineException` is the only exception a component has to catch.** `CallAsync` converts transport failures (the
   engine died mid-call) and tool errors (the engine said no) into it.
 - **Finding the engine.** While Wizard is built inside this repo, walking up from its own output folder reaches
-  `Magic.slnx`, so it uses the Debug engine build with no configuration. To point elsewhere (an Optimize build, an
-  installed engine), add `"Engine": "C:\\path\\to\\Magic.exe"` to `Wizard\Wizard\appsettings.json`.
+  `Magic-Wizard.slnx`, so it uses the Debug engine build with no configuration. To point elsewhere (an Optimize
+  build, an installed engine), add `"Engine": "C:\\path\\to\\Magic.exe"` to `Wizard\Wizard\appsettings.json`.
 - **Wizard uses `File` and `Process` directly.** The "disk access through `IFileSystem`" rule is the engine's;
   Wizard is a separate application and has no such service.
 
@@ -1915,7 +1928,8 @@ It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 
 1. Paste the full path of a project into the box, for example that of `Samples` in your checkout
    (a folder or its `.magic` file both work), and press **Play**.
-2. The engine window opens. The status on the right shows `Cube · frame N · 338 entities`, counting up.
+2. The engine window opens on the Hub. The status on the right shows `Samples · frame N · N entities` (a few
+   hundred), counting up.
 3. The console fills with the engine's log.
 4. Type `screenshot` in the command box and press Enter: a `Screenshot: …png` line appears.
 5. Type `nope`: a red line says there is no such command.
@@ -1924,7 +1938,7 @@ It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 "Browse…" does nothing in a browser tab; it needs the shell from Part 5.
 
 If Play reports that Magic exited before its MCP server answered, the engine build does not include the gem:
-run `dotnet build Magic\Magic.csproj` from the repo root.
+run `dotnet build Magic\Core\Core.csproj` from the repo root.
 
 ### Iterating with hot reload
 
@@ -2676,8 +2690,8 @@ and raises `Changed` → the inspector sends the whole component with `component
 screen shows what the engine actually holds, not what you typed. If the engine refuses (bad value), the message
 appears in red and the reload puts the old value back.
 
-The `_editing` flag matters: the Cube sample's camera orbits, so its `Transform` changes every frame. Without the
-flag, the half-second refresh would overwrite a field while you are typing in it.
+The `_editing` flag matters: the Hub's camera orbits, so its `Transform` changes every frame. Without the flag, the
+half-second refresh would overwrite a field while you are typing in it.
 
 ### 6.5 Put them on the page
 
@@ -2707,261 +2721,31 @@ The page owns the selection and hands it to both panels. That is the whole of Wi
 
 ### Checkpoint
 
-Run Wizard (browser or shell), Play the Cube sample, then:
+Run Wizard (browser or shell), Play the Samples project, then:
 
-1. The hierarchy shows `Cube`. Open it: `Globals` (PostProcessing, Camera, Sun) and `Chunks` → `C0_0_0` → `Cube`,
-   `CubeBehind`.
-2. Select the inner `Cube`. The inspector shows `Renderer` and `Transform`.
-3. Change `position.y` to `2.25` and press Tab. The cube moves in the engine window, and the field still reads
-   `2.25` after the next refresh. The material id is unchanged.
+1. The hierarchy shows `Loading` (the loading screen's domain) and `Hub`. Open `Hub`: `Globals` (PostProcessing,
+   Orbit, Camera, Moon, Floor, Question) and `Chunks`, which is empty: the Hub is all globals.
+2. Select `Moon`. The inspector shows `DirectionalLight` and `Transform`.
+3. Change `intensity` to `1` and press Tab. The Hub brightens in the engine window, and the field still reads `1`
+   after the next refresh.
 4. Select `Camera`: its `Transform` values tick as the camera orbits. Click into a field: they hold still while it
    has focus.
-5. With `Cube` selected press **+**. The new entity is selected (it appears under `Cube` once you open that node).
-   Choose `Transform` under "Add component…" and press **Add**: a Transform with default values appears.
+5. With `Globals` selected press **+**. The new entity is selected (it appears under `Globals` once you open that
+   node). Choose `Transform` under "Add component…" and press **Add**: a Transform with default values appears.
 6. Press **−**: the entity is gone and the inspector empties.
-7. Untick `enabled` on `CubeBehind`: it greys out in the tree on the next refresh.
+7. Untick `enabled` on `Question`: it greys out in the tree on the next refresh.
 
 Edits are live only. Stop and Play again and the world is back to what the chunk files say; saving is future work.
 
 ## Part 7: Tests
 
-One integration test class for the gem, in the style `Tests\README.md` asks for: it drives the gem through the
-interface the engine's clients use (an MCP client over HTTP) and checks what happened in the real ECS.
+None in this pass, and that is the rule rather than a gap. The engine has unit tests only (`TESTING.md`): each
+project's own, in a `Tests` folder beside it (`Magic\Gems\Mcp\Tests\Mcp.Tests.csproj` here), driving its public API
+in memory, with no I/O and nothing made public for a test's sake. The Mcp gem makes nothing public: its class is
+internal, and all it does is answer HTTP on a socket and call into other gems, which is I/O and more than one unit.
+What a test could check is what Part 3 checks by hand.
 
-### 7.1 Reference the gem
-
-`Tests\Magic.IntegrationTests\Magic.IntegrationTests.csproj`, at the end of the project references:
-
-```xml
-    <ProjectReference Include="..\..\Gems\CSharpScripting\CSharpScripts.csproj" />
-    <ProjectReference Include="..\..\Gems\Mcp\Mcp.csproj" />
-```
-
-(The gem's csproj already grants `InternalsVisibleTo` to this project; that was in Part 2.1.)
-
-### 7.2 The tests
-
-Create `Tests\Magic.IntegrationTests\McpTests.cs`, next to `CSharpScriptingTests.cs`. Do not put it in a `Gems`
-subfolder: the namespace `Magic.IntegrationTests.Gems` would hide the `Gems` class from `GemsTests.cs`.
-
-```csharp
-using FlecsGem;
-using Magic.Contexts;
-using Magic.Contexts.Components;
-using Magic.Interfaces;
-using Magic.Services;
-using Magic.UnitTests.Fakes;
-using McpGem;
-using ModelContextProtocol.Client;
-using ModelContextProtocol.Protocol;
-using System.Diagnostics;
-using System.Net;
-using System.Net.Sockets;
-using System.Numerics;
-using System.Text;
-using System.Text.Json.Nodes;
-using Xunit;
-
-namespace Magic.IntegrationTests;
-
-/// <summary>
-/// The Mcp gem on the real Flecs gem, driven the way an editor drives it: by an MCP client over localhost HTTP. The
-/// test thread plays the engine's main thread, running the gem's Update until a call is answered.
-/// </summary>
-public sealed class McpTests : IDisposable
-{
-    private readonly TempFolder _root = new();
-    private readonly Events _events = new();
-    private readonly FlecsEcs _ecs = new();
-    private readonly Services.Assets _assets;
-    private readonly Mcp _mcp;
-    private readonly McpClient _client;
-    private readonly int _port;
-
-    public McpTests()
-    {
-        Project project = new() { Name = "Tests", Root = _root.Path, EngineGems = AppContext.BaseDirectory, Resources = Path.Combine(_root.Path, "NoResources") };
-        FileSystem files = new();
-        FakeWindows windows = new();
-        _assets = new Services.Assets(project, files, _events, new Container());
-
-        using (TcpListener free = new(IPAddress.Loopback, 0))
-        {
-            free.Start();
-            _port = ((IPEndPoint)free.LocalEndpoint).Port;
-        }
-
-        // The gem reads its port once, in its constructor: set for exactly that long.
-        Environment.SetEnvironmentVariable("MAGIC_MCP_PORT", _port.ToString());
-        _mcp = new Mcp(_ecs, new World(_events), _assets, project, _events, files, new FakeRendering(), windows);
-        Environment.SetEnvironmentVariable("MAGIC_MCP_PORT", null);
-
-        _client = McpClient.CreateAsync(new HttpClientTransport(new HttpClientTransportOptions
-        {
-            Endpoint = new Uri($"http://127.0.0.1:{_port}/mcp"),
-            TransportMode = HttpTransportMode.StreamableHttp,
-        })).GetAwaiter().GetResult();
-    }
-
-    public void Dispose()
-    {
-        _client.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _mcp.Dispose();
-        _assets.Dispose();
-        _ecs.Dispose();
-        _root.Dispose();
-    }
-
-    [Fact]
-    public void Entity_create_makes_the_entity_under_its_parent()
-    {
-        Handle parent = _ecs.Create("Parent");
-
-        Call("entity_create", new() { ["name"] = "Made", ["parent"] = parent.Id.ToString() });
-
-        Assert.True(_ecs.Lookup("Parent.Made").IsValid);
-    }
-
-    [Fact]
-    public void Entity_destroy_removes_the_entity()
-    {
-        Handle doomed = _ecs.Create("Doomed");
-
-        Call("entity_destroy", new() { ["id"] = doomed.Id.ToString() });
-
-        Assert.False(_ecs.IsAlive(doomed));
-    }
-
-    [Fact]
-    public void Entity_children_lists_what_is_under_the_parent()
-    {
-        Handle parent = _ecs.Create("Parent");
-        _ecs.Create("Child", parent);
-
-        CallToolResult result = Call("entity_children", new() { ["parent"] = parent.Id.ToString() });
-
-        Assert.Equal("Child", JsonNode.Parse(Text(result))![0]!["name"]!.GetValue<string>());
-    }
-
-    [Fact]
-    public void Entity_get_shows_a_component_the_entity_has()
-    {
-        Handle entity = _ecs.Create("Thing");
-        _ecs.Set(entity, new Transform { Position = new Vector3(1, 2, 3) });
-
-        CallToolResult result = Call("entity_get", new() { ["id"] = entity.Id.ToString() });
-
-        Assert.Equal(2f, JsonNode.Parse(Text(result))!["components"]!["Transform"]!["position"]!["y"]!.GetValue<float>());
-    }
-
-    [Fact]
-    public void Component_set_writes_the_component()
-    {
-        Handle entity = _ecs.Create("Thing");
-
-        Call("component_set", new() { ["id"] = entity.Id.ToString(), ["component"] = "Transform", ["value"] = JsonNode.Parse("""{ "position": { "x": 1, "y": 2, "z": 3 } }""") });
-
-        Assert.Equal(new Vector3(1, 2, 3), _ecs.Get<Transform>(entity).Position);
-    }
-
-    [Fact]
-    public void Component_remove_takes_the_component_away()
-    {
-        Handle entity = _ecs.Create("Thing");
-        _ecs.Set(entity, new Transform());
-
-        Call("component_remove", new() { ["id"] = entity.Id.ToString(), ["component"] = "Transform" });
-
-        Assert.False(_ecs.Has<Transform>(entity));
-    }
-
-    [Fact]
-    public void A_component_type_nobody_declares_is_refused()
-    {
-        Handle entity = _ecs.Create("Thing");
-
-        CallToolResult result = Call("component_set", new() { ["id"] = entity.Id.ToString(), ["component"] = "Nope", ["value"] = new JsonObject() });
-
-        Assert.True(result.IsError);
-    }
-
-    [Fact]
-    public void An_entity_that_is_not_alive_is_refused()
-    {
-        CallToolResult result = Call("entity_get", new() { ["id"] = "123456789" });
-
-        Assert.True(result.IsError);
-    }
-
-    [Fact]
-    public void Log_read_answers_only_the_lines_after_the_given_id()
-    {
-        ILogger logger = _mcp;
-        logger.Log(LogLevel.Information, "first", "", 0);
-        logger.Log(LogLevel.Information, "second", "", 0);
-
-        CallToolResult result = Call("log_read", new() { ["after"] = 1 });
-
-        Assert.Equal("second", Assert.Single(JsonNode.Parse(Text(result))!.AsArray())!["message"]!.GetValue<string>());
-    }
-
-    [Fact]
-    public async Task A_request_from_a_web_page_is_refused()
-    {
-        using HttpClient browser = new();
-        using HttpRequestMessage request = new(HttpMethod.Post, $"http://127.0.0.1:{_port}/mcp")
-        {
-            Content = new StringContent("""{ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }""", Encoding.UTF8, "application/json"),
-        };
-        request.Headers.Add("Origin", "https://example.com");
-
-        using HttpResponseMessage response = await browser.SendAsync(request);
-
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-    }
-
-    /// <summary>
-    /// Sends the call, then is the main thread: updates the gem until the answer is back.
-    /// </summary>
-    private CallToolResult Call(string tool, Dictionary<string, object?> arguments)
-    {
-        Task<CallToolResult> call = _client.CallToolAsync(tool, arguments).AsTask();
-        Stopwatch clock = Stopwatch.StartNew();
-        while (!call.IsCompleted && clock.Elapsed < TimeSpan.FromSeconds(5))
-        {
-            _mcp.Update(default);
-            Thread.Sleep(1);
-        }
-
-        return call.GetAwaiter().GetResult();
-    }
-
-    private static string Text(CallToolResult result)
-    {
-        return string.Concat(result.Content.OfType<TextContentBlock>().Select(block => block.Text));
-    }
-}
-```
-
-One thing to decide for yourself: the constructor sets a process-wide environment variable for the instant the gem
-is constructed. `Tests\README.md` says "no shared state"; nothing else reads that variable, but it is still
-process-wide. If that bothers you, the clean fix is a second `Mcp` constructor parameter for the port, which
-changes how the gem is configured, so I left the choice to you.
-
-Wizard itself has no tests in this pass. Its logic is thin wiring over `Engine.CallAsync`; the part worth testing is
-the engine's side of the contract, which these cover.
-
-### Checkpoint
-
-```powershell
-dotnet test Tests\Magic.IntegrationTests --filter "FullyQualifiedName~McpTests"
-```
-
-`Passed!  - Failed: 0, Passed: 10`. Then run the whole integration suite to confirm nothing else moved:
-
-```powershell
-dotnet test Tests\Magic.IntegrationTests
-```
+Wizard has no tests either. Its logic is thin wiring over `Engine.CallAsync`.
 
 ## Part 8: Packaging
 
@@ -3016,9 +2800,9 @@ Things to know before you distribute it:
 - **The published server needs the .NET 10 ASP.NET runtime on the machine.** To remove that requirement, publish
   self-contained: add `-r win-x64 --self-contained` to the `dotnet publish` line (and the matching runtime
   identifier on other platforms).
-- **It still has to find an engine.** Inside this repo the walk-up to `Magic.slnx` works even from the packaged
-  location. Anywhere else, set `"Engine"` in the `appsettings.json` beside the published `Wizard.exe`. How Wizard
-  and Magic are distributed together is an open question for later.
+- **It still has to find an engine.** Inside this repo the walk-up to `Magic-Wizard.slnx` works even from the
+  packaged location. Anywhere else, set `"Engine"` in the `appsettings.json` beside the published `Wizard.exe`. How
+  Wizard and Magic are distributed together is an open question for later.
 - **One platform per build.** Electron Forge packages for the platform it runs on. A macOS or Linux build is made
   on that platform, with the server published for that platform.
 
@@ -3037,12 +2821,11 @@ Everything else Wizard produces is already under `Build/`. Commit `Wizard\Shell\
 
 ### 9.2 README.md
 
-In the root `README.md`, add Wizard to the folder structure:
+In the root `README.md`, add Wizard to the folder structure, and point the introduction's link at the new README
+instead of this tutorial:
 
 ```
-Tools/              dotnet new templates for projects and gems; see Tools/VSTemplates/README.md
-Wizard/             The editor: its own solution (Wizard.slnx); see Wizard/README.md
-Build/              All build output, per framework and configuration (not checked in)
+Wizard/        The editor: its own solution (Wizard.slnx); see Wizard/README.md
 ```
 
 And create `Wizard\README.md`:
@@ -3056,8 +2839,9 @@ engine assembly.
 
 ```
 Wizard/
-  Wizard.slnx             The solution (not part of Magic.slnx)
+  Wizard.slnx             The solution (not part of Magic-Wizard.slnx)
   Directory.Build.props   Wizard's own build settings; output goes to Build/Wizard/
+  .editorconfig           Stops the engine's code rules at this folder
   Wizard/                 The editor: a Blazor Server app, all logic in C#
     Services/Engine.cs    Starts the engine and calls its MCP tools
     Components/Editor/    Toolbar, hierarchy, inspector, console
@@ -3066,7 +2850,7 @@ Wizard/
 
 ## Building and running
 
-You need the .NET 10 SDK and Node. Build the engine first (`dotnet build Magic.slnx` in the repo root).
+You need the .NET 10 SDK and Node. Build the engine first (`dotnet build Magic-Wizard.slnx` in the repo root).
 
 ```powershell
 dotnet build Wizard.slnx
@@ -3085,7 +2869,7 @@ To see the same hot-reloading page in the real window, set `WIZARD_URL` to that 
 
 ## Adding a feature
 
-1. If the engine cannot do it yet, add a tool to `Gems/Mcp/Mcp.cs`.
+1. If the engine cannot do it yet, add a tool to `Magic/Gems/Mcp/Mcp.cs`.
 2. Call it with `Engine.CallAsync("tool_name", arguments)` from a component.
 3. If it needs something only a desktop app can do (a native dialog, a menu item), add a handler in
    `Shell/main.js`, expose it in `Shell/preload.js`, and give it a stand-in in `Components/App.razor`.
@@ -3097,13 +2881,14 @@ Once that README exists, this tutorial has done its job and can be deleted.
 
 | Symptom | Cause and fix |
 |---|---|
-| `error CS0104: 'Result' is an ambiguous reference` or the same for `IComponent` in `Mcp.cs` | The two `using X = …;` alias lines at the top of the file are missing. |
-| Engine log shows `Skipping gem Mcp … nothing provides …` | A service the gem's constructor asks for is missing, for example running with a `gems` list in the `.magic` file that leaves out the renderer. The gem needs `IEcs`, `IRendering` and `IWindowRegistry`. |
+| `error CS0104: 'IComponent' is an ambiguous reference` in `Mcp.cs` | The `using IComponent = …;` alias line at the top of the file is missing. |
+| Engine log shows `Skipping gem Mcp … nothing provides …` | A service the gem's constructor asks for is missing, for example running with a `gems` list in the `.magic` file that leaves out the ECS (`"-FlecsEcs"`). The gem needs `IEcs` (the FlecsEcs gem) and Core's services, `World`, `Assets` and `DebugUI` among them; the renderer and the windows are optional (without them `screenshot` answers an error). |
 | `MissingMethodException` mentioning `Microsoft.Extensions.Logging` at engine start | Step 1.3 was skipped: two versions of the logging dll are fighting over one file. Add the pin and rebuild. |
 | `HttpListenerException: Access is denied` at engine start | The prefix is not a localhost one. The gem only registers `localhost` and `127.0.0.1`, which need no admin rights; check for a typo. |
 | `HttpListenerException` about the prefix being in use | Another engine is already listening on that port (usually a leftover from a manual run with 47800). Close it. |
-| Wizard: "Magic was not found at …" | The engine is not built (`dotnet build Magic.slnx`), or Wizard is running outside the repo and needs `"Engine"` in `appsettings.json`. |
+| Wizard: "Magic was not found at …" | The engine is not built (`dotnet build Magic-Wizard.slnx`), or Wizard is running outside the repo and needs `"Engine"` in `appsettings.json`. |
 | Wizard: "Magic exited with code 1 before its MCP server answered" | The project path is wrong or the project failed to load. Run the same `Magic.exe --project …` in a terminal to see why. |
+| Wizard build fails with `CA2007` (`ConfigureAwait`) or other `CA` errors | The engine's `.editorconfig` reaches Wizard: `Wizard\.editorconfig` with `root = true` (step 4.1) is missing. |
 | Wizard page loads unstyled when run from the Debug build | The server is running in Production without being published. Use `dotnet run`, or let the shell start it (it sets Development). |
 | `error CS8978: 'method group' cannot be made nullable` in a `.razor` file | A generic call in an attribute is missing its outer parentheses: write `@(x.GetValue<bool>())`. |
 | Shell: "Wizard could not start … ENOENT" | The server has not been built. Run `dotnet build Wizard.slnx` in `Wizard\`. |

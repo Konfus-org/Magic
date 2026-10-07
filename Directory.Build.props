@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
 
   <!-- Shared settings for every project in this repo. -->
 
@@ -42,10 +42,18 @@
     <MagicPlatform Condition="$(MagicRuntime.StartsWith('linux'))">Linux</MagicPlatform>
     <MagicPlatform Condition="$(MagicRuntime.StartsWith('osx'))">MacOS</MagicPlatform>
 
+    <!-- One SDL for every gem that uses it: the SDL3-CS bindings and the native SDL package they call. -->
+    <Sdl3CsVersion>3.4.16</Sdl3CsVersion>
+    <Sdl3NativeVersion>3.4.14.1</Sdl3NativeVersion>
+
     <!-- A build for another platform ("-r linux-x64" on Windows) gets a folder of its own, so it never
          overwrites the machine's own build: Build\net10.0\Debug-linux-x64\. -->
     <MagicBuildDir>$(MSBuildThisFileDirectory)Build\$(TargetFramework)\$(Configuration)\</MagicBuildDir>
     <MagicBuildDir Condition="'$(MagicRuntime)' != '$(MagicHostRuntime)'">$(MSBuildThisFileDirectory)Build\$(TargetFramework)\$(Configuration)-$(MagicRuntime)\</MagicBuildDir>
+
+    <!-- Whether assets are copied next to the exe: in Release, and for another platform, where a path on this
+         machine means nothing. Debug and Optimize read them where they are, so an edit shows without a build. -->
+    <ShipResources Condition="'$(Configuration)' == 'Release' Or '$(MagicRuntime)' != '$(MagicHostRuntime)'">true</ShipResources>
 
     <!-- The runtime is in the path already when it matters; the SDK must not add a folder for it. -->
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
@@ -80,7 +88,7 @@
   </PropertyGroup>
 
   <!-- A gem is any project that sets <IsMagicGem>true</IsMagicGem> *before* importing Sdk.props
-       (see Gems\SDL\SDL.csproj). A property set in the body of a csproj that uses the Sdk="..."
+       (see Magic\Gems\SdlPlatform\SdlPlatform.csproj). A property set in the body of a csproj that uses the Sdk="..."
        attribute is not visible here: this file is imported by the SDK before that body is read.
        Not tied to the Gems\ folder, so a project created from the template elsewhere still builds as a gem. -->
   <PropertyGroup Condition="'$(IsMagicGem)' == 'true'">
@@ -100,8 +108,12 @@
     <!-- Gems aren't published to NuGet. -->
     <IsPackable>false</IsPackable>
 
+    <!-- A gem references every gem it builds on itself, and none comes along through another: the gems it names are
+         what the loader loads first, and no gem's copy lands in a project's build to be loaded twice. -->
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+
     <!-- All gems land flat in bin\Gems\ next to the host exe: that is the
-         folder the host's gem loader (Magic\Gems.cs) scans for plugin DLLs at runtime. -->
+         folder the host's gem loader (Magic\Core\Internal\Gems.cs) scans for plugin DLLs at runtime. -->
     <OutputPath>$(MagicBuildDir)bin\Gems\</OutputPath>
 
     <!-- Intermediate files get one folder per gem. Sharing a single obj\
@@ -112,13 +124,54 @@
   </PropertyGroup>
 
   <!-- What the host needs to know about a gem before it constructs it, stamped into the assembly. Set in the gem's
-       csproj: GemStatic (true: loaded once, never reloaded) and GemDependsOn (gem names, ';' separated, that must be
-       loaded first though no service connects them). The gem's name is its assembly name; Version, Description and
+       csproj: GemStatic (true: loaded once, never reloaded; absent is false); what it needs loaded first are its project
+       references.
+       The gem's name is its assembly name; Version, Description and
        Authors are the SDK's own properties. Items are evaluated after every property, so the csproj body's values count. -->
   <ItemGroup Condition="'$(IsMagicGem)' == 'true'">
-    <AssemblyMetadata Include="MagicGem.Static" Value="$(GemStatic)" />
-    <AssemblyMetadata Include="MagicGem.DependsOn" Value="$(GemDependsOn)" />
+    <AssemblyMetadata Include="MagicGem.Static" Value="$([MSBuild]::ValueOrDefault('$(GemStatic)', 'false'))" />
   </ItemGroup>
+
+  <!-- A gem's own assets, and the engine's: a Resources folder beside the csproj, its place stamped into the assembly.
+       The loader adds a gem's while the gem is loaded, Program the engine's for the whole run (GemResources). In Debug
+       and Optimize that is each part's folder itself, so an edit shows without a build; shipped, every part's are one
+       bundle, bin\Resources\, which Core.csproj makes (BundleResources) and Core stamps: no gem stamps its own. -->
+  <PropertyGroup Condition="('$(IsMagicGem)' == 'true' Or '$(MSBuildProjectName)' == 'Core') And Exists('$(MSBuildProjectDirectory)\Resources') And '$(ShipResources)' != 'true'">
+    <GemResources>$(MSBuildProjectDirectory)\Resources</GemResources>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Core' And '$(ShipResources)' == 'true'">
+    <GemResources>Resources</GemResources>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(GemResources)' != ''">
+    <AssemblyMetadata Include="MagicGem.Resources" Value="$(GemResources)" />
+  </ItemGroup>
+
+  <!-- Unit tests: a project named <Thing>.Tests in a Tests folder beside what it tests (Magic\Core\Tests, a folder per
+       area in it). It tests the public API only, in memory: no files, no native libraries, nothing made visible to it.
+       What it tests never builds it: every other project leaves its Tests folder out. -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeIdentifier>$(MagicRuntime)</RuntimeIdentifier>
+    <!-- Tests make their own threads: the banned APIs are for the engine. -->
+    <MagicBansApis>false</MagicBansApis>
+    <OutputPath>$(MagicBuildDir)bin\Tests\</OutputPath>
+    <!-- One obj\ per test project; sharing one breaks MSBuild's incremental build. -->
+    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\Tests\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- A normal reference: Magic.dll is copied next to the tests, unlike next to a gem. -->
+    <ProjectReference Include="$(MagicRoot)Magic\Core\Core.csproj" />
+  </ItemGroup>
+  <PropertyGroup Condition="!$(MSBuildProjectName.EndsWith('.Tests'))">
+    <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**</DefaultItemExcludes>
+  </PropertyGroup>
 
   <!-- Strict builds for everything of ours (engine, gems, samples, tests): the rules .editorconfig marks as errors
        fail the build, and so does every nullable warning; any other warning stays a warning. The banned APIs

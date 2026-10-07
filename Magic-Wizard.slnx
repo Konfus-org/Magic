@@ -4,33 +4,74 @@
     <BuildType Name="Optimize" />
     <BuildType Name="Release" />
   </Configurations>
-  <Folder Name="/Gems/">
-    <Project Path="Gems/AssimpModels/AssimpModels.csproj" />
-    <Project Path="Gems/CSharpScripting/CSharpScripts.csproj" />
-    <Project Path="Gems/DebugTools/DebugTools.csproj" />
-    <Project Path="Gems/DefaultCheats/DefaultCheats.csproj" Id="45ab667a-667c-4ea8-bc5b-72d5108546f3" />
-    <Project Path="Gems/DefaultTagging/DefaultTagging.csproj" />
-    <Project Path="Gems/DeferredRenderer/DeferredRenderer.csproj" />
-    <Project Path="Gems/FlecsEcs/FlecsEcs.csproj" />
-    <Project Path="Gems/ImGuiOverlay/ImGuiOverlay.csproj" />
-    <Project Path="Gems/MeshLods/MeshLods.csproj" />
-    <Project Path="Gems/SDL/SDL.csproj" Id="dc93ae9f-b3ed-4220-b9eb-a7bf52ec8d68" />
-    <Project Path="Gems/SDLImage/SDLImage.csproj" />
-    <Project Path="Gems/SDLInput/SDLInput.csproj" />
-    <Project Path="Gems/SDLRender/SDLRender.csproj" />
-    <Project Path="Gems/SDLFonts/SDLFonts.csproj" />
-    <Project Path="Gems/SDLWindowing/SDLWindowing.csproj" />
-    <Project Path="Gems/Scripting/Scripting.csproj" />
-    <Project Path="Gems/Streaming/WorldStreaming.csproj" />
-    <Project Path="Gems/WorldTransforms/WorldTransforms.csproj" />
-    <Project Path="Gems/ZLogging/ZLogging.csproj" Id="a585cf9f-0774-4b62-b353-838c1bf1c5a2" />
+  <Folder Name="/Magic/Core/">
+    <Project Path="Magic/Core/Core.csproj" />
+    <Project Path="Magic/Core/Tests/Core.Tests.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Assets/AssimpModelLoader/">
+    <Project Path="Magic/Gems/Assets/AssimpModelLoader/AssimpModelLoader.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Assets/SdlFontLoader/">
+    <Project Path="Magic/Gems/Assets/SdlFontLoader/SdlFontLoader.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Assets/SdlImageLoader/">
+    <Project Path="Magic/Gems/Assets/SdlImageLoader/SdlImageLoader.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/CSharpScripting/">
+    <Project Path="Magic/Gems/CSharpScripting/CSharpScripting.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/World/EntityHierarchy/">
+    <Project Path="Magic/Gems/World/EntityHierarchy/EntityHierarchy.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/World/Scripting/">
+    <Project Path="Magic/Gems/World/Scripting/Scripting.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Debug/ConsoleCheats/">
+    <Project Path="Magic/Gems/Debug/ConsoleCheats/ConsoleCheats.csproj" Id="45ab667a-667c-4ea8-bc5b-72d5108546f3" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Debug/DebugTools/">
+    <Project Path="Magic/Gems/Debug/DebugTools/DebugTools.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Debug/ImGuiDebugUI/">
+    <Project Path="Magic/Gems/Debug/ImGuiDebugUI/ImGuiDebugUI.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Debug/Screenshots/">
+    <Project Path="Magic/Gems/Debug/Screenshots/Screenshots.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Debug/ZLoggerLogging/">
+    <Project Path="Magic/Gems/Debug/ZLoggerLogging/ZLoggerLogging.csproj" Id="a585cf9f-0774-4b62-b353-838c1bf1c5a2" />
+  </Folder>
+  <Folder Name="/Magic/Gems/LODs/ChunkLodGenerator/">
+    <Project Path="Magic/Gems/LODs/ChunkLodGenerator/ChunkLodGenerator.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/LODs/ModelLodGenerator/">
+    <Project Path="Magic/Gems/LODs/ModelLodGenerator/ModelLodGenerator.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Rendering/DeferredRenderer/">
+    <Project Path="Magic/Gems/Rendering/DeferredRenderer/DeferredRenderer.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Rendering/SdlGpuRenderer/">
+    <Project Path="Magic/Gems/Rendering/SdlGpuRenderer/SdlGpuRenderer.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/Rendering/SdlShaderCompiler/">
+    <Project Path="Magic/Gems/Rendering/SdlShaderCompiler/SdlShaderCompiler.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/SdlPlatform/">
+    <Project Path="Magic/Gems/SdlPlatform/SdlPlatform.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/SettingsPresets/">
+    <Project Path="Magic/Gems/SettingsPresets/SettingsPresets.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/World/ChunkStreaming/">
+    <Project Path="Magic/Gems/World/ChunkStreaming/ChunkStreaming.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/World/FlecsEcs/">
+    <Project Path="Magic/Gems/World/FlecsEcs/FlecsEcs.csproj" />
+  </Folder>
+  <Folder Name="/Magic/Gems/World/LoadingScreen/">
+    <Project Path="Magic/Gems/World/LoadingScreen/LoadingScreen.csproj" />
   </Folder>
   <Folder Name="/Samples/">
     <Project Path="Samples/Samples.csproj" />
   </Folder>
-  <Folder Name="/Tests/">
-    <Project Path="Tests/Magic.IntegrationTests/Magic.IntegrationTests.csproj" />
-    <Project Path="Tests/Magic.UnitTests/Magic.UnitTests.csproj" />
-  </Folder>
-  <Project Path="Magic/Magic.csproj" />
 </Solution>

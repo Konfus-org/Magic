@@ -1,0 +1,97 @@
+﻿using Magic.Contexts.Debug;
+using System.Drawing;
+using System.Numerics;
+
+namespace Magic.Interfaces;
+
+/// <summary>
+/// Immediate-mode widgets, provided by a UI gem, for the debug tools to draw with. Main thread only: every call
+/// between two of the UI gem's Present hooks makes up what it draws in the next one. Answers come from input that arrived before the last draw.
+/// A widget's label is drawn on its left and the widget stretches to the width of what it is in.
+/// </summary>
+public interface IDebugWidgets
+{
+    /// <summary>
+    /// Opens a movable window titled <paramref name="title"/>; everything until <see cref="End"/> goes in it. Called while
+    /// another is open, it is a view nested in that one instead, as wide as its parent and as tall as the room the parent
+    /// has left after what follows the view. <paramref name="scrollable"/>: a window is sized by the user and scrolls
+    /// (otherwise it fits its content); a nested view scrolls and, while scrolled to the bottom, follows what is added there.
+    /// </summary>
+    void Begin(string title, bool scrollable = false);
+
+    /// <summary>
+    /// <see cref="Begin(string, bool)"/> for a window with a close button in its header, which sets
+    /// <paramref name="visible"/> to false when clicked: stop drawing the window from the next frame. This frame's
+    /// <see cref="End"/> is still owed. A nested view has no header, so no button.
+    /// </summary>
+    void Begin(string title, ref bool visible, bool scrollable = false);
+
+    void End();
+
+    void Text(string text, Color color);
+
+    /// <summary>
+    /// Text centred on a pixel of the main window, outside any window and drawn over everything: what text in the
+    /// world (<see cref="IDebugUI.Text(Vector3, string, Color?)"/>) becomes once it is projected.
+    /// </summary>
+    void Text(Vector2 pixel, string text, Color color);
+
+    /// <summary>
+    /// Lines down the left of the main window, top to bottom, drawn over everything: no window, no background, no
+    /// scrollbar. When there are more than fit, the first ones are left out.
+    /// </summary>
+    void Lines(ReadOnlySpan<DebugLine> lines);
+
+    /// <summary>
+    /// True when the button was clicked.
+    /// </summary>
+    bool Button(string label);
+
+    /// <summary>
+    /// A one-line text field editing <paramref name="text"/>; true when Enter was pressed in it. Takes the keyboard when its panel appears.
+    /// </summary>
+    bool Input(string label, ref string text);
+
+    /// <summary>
+    /// Multi-line text editing <paramref name="text"/>, as tall as its lines; <paramref name="readOnly"/> text can still be selected and copied. True when changed.
+    /// </summary>
+    bool Document(string label, ref string text, bool readOnly = false);
+
+    /// <summary>
+    /// True when changed.
+    /// </summary>
+    bool Checkbox(string label, ref bool value);
+
+    /// <summary>
+    /// A number dragged left and right (or typed after a double-click), kept within <paramref name="min"/>..<paramref name="max"/>;
+    /// equal bounds (the default) mean none. True when changed.
+    /// </summary>
+    bool Slider(string label, ref float value, float min = 0f, float max = 0f);
+
+    /// <summary>
+    /// One of <paramref name="options"/>, by index. True when changed.
+    /// </summary>
+    bool Choice(string label, ref int index, string[] options);
+
+    /// <summary>
+    /// A row of tabs across the window, one of <paramref name="options"/> selected by index; what is drawn after it is
+    /// the selected tab's content. <paramref name="label"/> only tells the bars of one window apart. True when changed.
+    /// </summary>
+    bool Tabs(string label, ref int index, string[] options);
+
+    /// <summary>
+    /// A header that folds away what is drawn under it, open until clicked. True while open: draw what is under it only then.
+    /// </summary>
+    bool Header(string label);
+
+    /// <summary>
+    /// <paramref name="text"/> shown while the mouse rests on the item drawn last.
+    /// </summary>
+    void Tooltip(string text);
+
+    /// <summary>
+    /// An item of the context menu a right-click anywhere in the window (or nested view) it is called in opens, in
+    /// the order called. True the frame it is clicked.
+    /// </summary>
+    bool MenuItem(string label);
+}

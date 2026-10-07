@@ -1,6 +1,6 @@
-<Project>
+﻿<Project>
 
-  <!-- The engine's samples as one project: Samples.magic opens the Hub, and every folder under Assets\Domains\ is a
+  <!-- The engine's samples as one project: Samples.magic opens the Hub, and every domain under Assets\ is a
        sample to portal into (see README.md). The scripts under Assets\ compile into a dll in this project's own
        Build\ tree (see Directory.Build.props), where the host finds it. Build it with "dotnet build Samples";
        rebuild while it runs to hot reload the scripts. -->
@@ -22,7 +22,7 @@
 
   <ItemGroup>
     <!-- Compile against the host, never copy it: the scripts share the host's loaded Magic.dll. -->
-    <ProjectReference Include="$(MagicRoot)Magic\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="$(MagicRoot)Magic\Core\Core.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <!-- What the host says of the dll when it loads it. -->

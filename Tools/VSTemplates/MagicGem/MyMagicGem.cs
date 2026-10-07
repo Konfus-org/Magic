@@ -4,11 +4,13 @@ using Magic.Interfaces;
 namespace MyMagicGem;
 
 /// <summary>
-/// The gem: the one class in this dll that implements IGem. Constructor parameters are its dependencies: host
-/// services (Project, Assets, Events, IFileSystem, Scheduler, World, Settings) or interfaces other gems provide, such as IEcs from the ECS gem.
+/// The gem: the one class in this dll that implements IGem, at the root of its folder (beside it: Contexts for its
+/// public data, Services for its public interfaces and classes, Internal for the rest, Resources for its assets,
+/// Tests for its unit tests). Constructor parameters are its dependencies: host services (Project, Events,
+/// IFileSystem, Threads, Settings, ITelemetry) or what other gems provide, such as IEcs, Assets, World or IDebugUI.
 /// The host loads gems in dependency order, so they are always there. To offer a service to the host and other gems,
-/// implement its Core interface on this class (IAssetLoader&lt;T&gt;, IDebugUI, ...). Name, static and dependencies
-/// on other gems by name are set in the csproj (GemStatic, GemDependsOn).
+/// implement its interface on this class (IAssetLoader&lt;T&gt;, ILogger, ...). Name, static and the gems it builds
+/// on are set in the csproj (GemStatic, project references to contract gems).
 /// For settings of its own, declare a class with [Settings("MyMagicGem")] (Magic.Contexts.Settings) whose public
 /// properties have defaults, and take it as a constructor parameter: a preset sets "MyMagicGem.Key": value,
 /// --set MyMagicGem.Key=value overrides it, and the settings window (F4) edits it live, where its

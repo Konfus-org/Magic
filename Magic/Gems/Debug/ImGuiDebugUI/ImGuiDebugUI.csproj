@@ -1,0 +1,41 @@
+﻿<Project>
+
+  <!-- Must come before the SDK props import: the Directory.Build.props of the engine repo, or of a Magic project,
+       switches this project to gem output settings when IsMagicGem is true. -->
+  <PropertyGroup>
+    <IsMagicGem>true</IsMagicGem>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Not "ImGui": that namespace segment would shadow Hexa.NET.ImGui.ImGui, and the dll must not clash with the native cimgui.dll. -->
+    <RootNamespace>ImGuiDebugUIGem</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Hexa.NET.ImGui" Version="2.2.9" />
+  </ItemGroup>
+
+  <!-- Inside the engine repo the gem compiles against Core as a project reference. Inside a Magic project
+       (MagicProjectRoot is set by the project's Directory.Build.props) that file references the engine's built
+       Magic.dll instead, so nothing is added here. Either way Magic.dll is never copied next to the gem: the
+       gem's load context shares the host's already-loaded copy, and a second copy would be a different
+       assembly identity whose IGem the host would not recognise. -->
+  <ItemGroup Condition="'$(MagicProjectRoot)' == ''">
+    <ProjectReference Include="$(MagicRoot)Magic\Core\Core.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <!-- The gem, as the engine sees it before constructing it. GemStatic true: loaded once, never hot reloaded. -->
+  <PropertyGroup>
+    <GemStatic>true</GemStatic>
+    <Description>Debug UI widgets drawn with Dear ImGui.</Description>
+    <Authors>Konfus</Authors>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
+
+</Project>

@@ -1,0 +1,32 @@
+{
+    "doubleSided": true,
+    "shader": {
+        "id": 10001
+    },
+    "params": {
+        "color": {
+            "r": 1,
+            "g": 1,
+            "b": 1,
+            "a": 1
+        },
+        "roughness": {
+            "x": 1.0
+        },
+        "colorMap": {
+            "texture": {
+                "id": 7309
+            }
+        },
+        "normalMap": {
+            "texture": {
+                "id": 7310
+            }
+        },
+        "ormMap": {
+            "texture": {
+                "id": 7311
+            }
+        }
+    }
+}

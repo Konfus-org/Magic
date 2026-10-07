@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
 
   <!-- Must come before the SDK props import: the Directory.Build.props of the engine repo, or of a Magic project,
        switches this project to gem output settings when IsMagicGem is true. -->
@@ -18,14 +18,12 @@
        gem's load context shares the host's already-loaded copy, and a second copy would be a different
        assembly identity whose IGem the host would not recognise. -->
   <ItemGroup Condition="'$(MagicProjectRoot)' == ''">
-    <ProjectReference Include="$(MagicRoot)Magic\Magic.csproj" Private="false" ExcludeAssets="runtime" />
+    <ProjectReference Include="$(MagicRoot)Magic\Core\Core.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>
 
-  <!-- The gem, as the engine sees it before constructing it. GemStatic true: loaded once, never hot reloaded.
-       GemDependsOn: names of gems (their assembly names, ';' separated) to load first though no service connects them. -->
+  <!-- The gem, as the engine sees it before constructing it. GemStatic false: a rebuilt dll is reloaded in place. -->
   <PropertyGroup>
     <GemStatic>false</GemStatic>
-    <GemDependsOn></GemDependsOn>
     <Description>GEM_DESCRIPTION</Description>
     <Authors>GEM_AUTHOR</Authors>
     <Version>1.0.0</Version>

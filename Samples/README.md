@@ -1,7 +1,8 @@
-# Samples
+﻿# Samples
 
 One project: `Samples.magic` opens the Hub (a floor, a question mark and a camera to fly), and
-every folder under `Assets/Domains/` is a sample to portal into. The scripts under `Assets/` compile into one dll
+every domain under `Assets/` is a sample to portal into: one folder each, or a folder per variant under a
+group (`City/Day`, `City/Night`), with `Shared/` for what several use. The scripts under `Assets/` compile into one dll
 (`Samples.csproj`, built into `Samples/Build/`), where the host finds it. Build everything and run it from the
 repository root:
 
@@ -18,17 +19,17 @@ Caches land in `Cache\` next to `Magic.exe`. Screenshots (`--screenshots 1 --scr
 ## The console
 
 The grave key opens it. The terminal the host was started from is a console too: a line typed there runs the same way, so a
-`--headless` run is driven from it. `help` lists the commands; these come with the engine's `DefaultCheats` gem:
+`--headless` run is driven from it. `help` lists the commands; these come with the engine's `ConsoleCheats` gem:
 
 | Command | Does |
 |---|---|
 | `portal` | Lists the domains there are: the sample list. |
-| `portal Lights` | Opens that domain in place of the world. A name, `Lights.domain`, or a path; `additive` opens it on top of the world instead. |
-| `portal Lights 0,5,-11` | The same, and once it is loaded puts the cameras that draw the main window at that position. `portal 0,5,-11` alone moves them now. |
-| `summon Monkey.fbx` | Puts the asset in the world 3 m in front of the camera: a model wearing the default material, a material (`summon Red.mat`) on a cube, a chunk (its entities under a root at the position), or a domain (opened on top). `summon Cube.fbx 0,1,0` says where. A bare name is enough when only one asset has it; `Monkey` is both a model and a domain, so it asks for the extension. |
+| `portal CityAtNight` | Opens that domain in place of the world. A name, `CityAtNight.domain`, or a path; `additive` opens it on top of the world instead. |
+| `portal Cave 0,2,-4` | The same, and once it is loaded puts the cameras that draw the main window at that position. `portal 0,5,-11` alone moves them now. |
+| `summon Prop_Wagon.glb` | Puts the asset in the world 3 m in front of the camera: a model wearing the default material, a material (`summon Red.mat`) on the default model (a cube), a chunk (its entities under a root at the position), or a domain (opened on top). `summon Sphere.fbx 0,1,0` says where. A bare name is enough when only one asset has it; a name several share asks for the extension. |
 | `screenshot`, `restore shot.png`, `exit` | A screenshot of the main window, the world as it was when one was taken, and quit. |
-| `preset` | Says which preset is in use and lists them: the engine's `Presets/Toaster`, `Normal` (the default), `Fancy` and `MeltMyGPU`. |
-| `preset Toaster` | Uses that one (a name, `Toaster.preset`, or a path); `--preset` picks it at start-up, and a project names its own with `"preset": { "id": N }`. |
+| `preset` | Says which preset is in use and lists them: the engine's `Presets/Toaster`, `Default`, `Fancy` and `MeltMyGPU`. |
+| `preset Toaster` | Uses that one (a name, `Toaster.preset`, or a path); `--preset` picks it at start-up, and a project's own `Presets/Default.preset` replaces the engine's. |
 | `set Gpu.Backend=vulkan ShadowPlan.distance=500` | `Owner.Property=value` as `--set` takes them, a settings class's or a pass's, as many as given, live until the next preset (what `--set` gave at start-up stays over every preset). The backend switches without a restart. |
 
 What is summoned sits under `World.Summoned` and goes when a portal replaces the world.
@@ -39,8 +40,9 @@ nothing is saved.
 
 ## Adding a sample
 
-A sample is a folder under `Assets/Domains/`: its domain, its chunks, and whatever materials, shaders, textures and
-scripts it alone uses, each with its `.meta` id. Scripts go in `namespace Samples.<Name>`, since one dll holds them
+A sample is a folder under `Assets/` (or under a group of variants, like `City/`): its domain and its chunks at the top, and whatever materials, shaders,
+textures and scripts it alone uses in a subfolder per type (`Materials/`, `Shaders/`, `Textures/`, `Scripts/`), each
+with its `.meta` id. What more than one sample uses lives in `Assets/Shared/<Type>/`. Scripts go in `namespace Samples.<Name>`, since one dll holds them
 all and a chunk names a script by its class name, which must be unique. The `magicsample` template makes one
 (`Tools/VSTemplates/README.md`):
 
@@ -53,38 +55,42 @@ dotnet build Samples
 
 ## Gems
 
-The `.magic` file says which engine gems load, by their assembly name (the same name `GemDependsOn` uses).
+The `.magic` file says which engine gems load, by their assembly name.
 `"default"` stands for every gem in the engine's `bin\Gems\` folder; a file without a `gems` key gets
-`["default"]`, and `[]` loads none of them. A name with a leading `-` leaves that gem out of `"default"`:
-`["default", "-DebugTools"]`.
+`["default"]`, and `[]` loads none of them. A name with a leading `-` leaves that gem out of `"default"`, and
+whatever references it with it:
 
 ```json
-{ "name": "Cube", "entryPoint": { "id": 3001 }, "gems": ["ZLogging", "FlecsEcs", "SDL", "SDLWindowing", "SDLRender"] }
+{ "name": "Cave", "entryPoint": { "id": 3601 }, "gems": ["default", "-DebugTools"] }
 ```
 
+A list without `"default"` loads only what it names and the gems those reference, so it must name every gem it
+wants: the logger, the ECS, the platform, the renderers, `Scripting` and `CSharpScripting` for scripts, and so on.
+Almost no gem references another: the one case is `EntityHierarchy`, which `DeferredRenderer` and `ChunkStreaming`
+bring with them.
+
 A project's own gems are never listed: any gem dll found under the project folder (here
-`Build/net10.0/<Config>/bin/Samples.dll`) loads and hot reloads like an engine gem. `obj`, `Cache` and dot
+`Build/net10.0/<Config>/bin/Samples.dll`) loads like an engine gem, and hot reloads. `obj`, `Cache` and dot
 folders are skipped, so a build's intermediate copy of the dll does not count twice. A project gem named like an
 engine gem is the one loaded: that is how a project replaces, say, `DeferredRenderer` with its own.
 
 ## Scripts
 
-A sample's scripts are assets: a `.cs` file under its folder (`Assets/Domains/<Name>/Scripts/`) with a `.meta`
+A sample's scripts are assets: a `.cs` file under its folder (`Assets/<Name>/Scripts/`) with a `.meta`
 beside it, whose class a chunk attaches to an entity by the file's id. The dll has no gem in it, only those classes.
 
-RenderTexture's `Spin.cs` is an `IBehavior` on the monkey: its `Update` turns that entity around the world's up
-axis. `0_0_0.chunk` lists it under the monkey's `"scripts"` with the speed picked for the scene.
-
-The two scripts every sample uses are shared, in `Assets/Scripts/Shared/` (see Moving around):
-`CameraController.cs` is an `IBehavior` on the camera, and `OrbitSystem.cs` is an `ISystem`: one instance,
-attached to an entity of its own, that queries the cameras.
+The scripts more than one sample uses are shared, in `Assets/Shared/Scripts/`: `CameraController.cs` is an `IBehavior`
+on the camera and `OrbitSystem.cs` an `ISystem` (see Moving around); `Wander.cs` walks DaytimeCity's townsfolk
+round their blocks (see The towns); `Turn.cs` is an `IBehavior` whose `Update` turns its entity around the world's
+up axis (CityAtNight's searchlights, TV's monkey, each chunk listing it under the entity's `"scripts"` with the speed
+picked for it), and `Ring.cs` takes CityAtNight's lamplighters round their yards.
 
 Edit a script and rebuild the Samples project while it runs: the host sees the new dll and reloads the scripts
 without a restart.
 
 ## Moving around
 
-`Assets/Scripts/Shared/` holds the two scripts every sample's `globals.chunk` names by id, with the speeds picked
+`Assets/Shared/Scripts/` holds the two scripts every sample's `globals.chunk` names by id, with the speeds picked
 for the scene:
 
 ```json
@@ -99,15 +105,15 @@ are optional. Nothing moves while the button is up, so the console and debug win
 `OrbitSystem` (3051) swings every camera around the origin, so a run with nobody at the controls (`--lifetime`,
 a screenshot, an agent testing streaming) still sees the scene from all sides. The first press of the right
 mouse button stops it for good; editing the chunk brings it back. A sample without the `Orbit` entity
-(RenderTexture) stays still.
+(SplitScreen, TV, GracefulFailures) stays still.
 
 ## A domain on disk
 
 ```
-Domains/Cube/
-    Cube.domain       { "chunkSize": 64 }          global data: seed, chunk size, time
+Cave/
+    Cave.domain       { "chunkSize": 64 }          global data: the chunk size
     globals.chunk     always loaded (camera, sun)  any .chunk whose name is not a coordinate
-    0_0_0.chunk       the cube at x=0, y=0, z=0    streamed by the cameras
+    0_0_0.chunk       the cave at x=0, y=0, z=0    streamed by the cameras
 ```
 
 A chunk `x_y_z.chunk` covers `[x * chunkSize, (x + 1) * chunkSize)` on each axis. Opening a domain spawns its
@@ -121,23 +127,25 @@ out of view go, the farthest first, and a nearer cube takes the place of the far
 A domain opened in place of the others (the entry point, or `World.Open` from a script) fills behind the loading
 domain: it is not drawn and its scripts wait until what the cameras want and the fill are there and the renderer has
 all of it, so it appears whole. `[Impatient]` on a script class makes it run as soon as its entity spawns
-all the same. The loading domain is the engine's (`Resources/Domains/Loading`: the project's icon over a bar) unless
+all the same. The loading domain is the engine's (the LoadingScreen gem's `Domains/Loading`: the project's icon over a bar) unless
 the `.magic` file names another, which is a domain like any other:
 
 ```json
-{ "name": "Cube", "entryPoint": { "id": 3001 }, "loading": { "id": 3090 } }
+{ "name": "Cave", "entryPoint": { "id": 3601 }, "loading": { "id": 3090 } }
 ```
 
 The engine's `LoadingBar` script (id 720) scales its entity along X by how far the world is, read from
-`World.Active`; on a model whose `.meta` puts its `"origin"` on its left edge (`Models/Bar.fbx`, id 520) that is a bar
+`World.Domains`; on a model whose `.meta` puts its `"origin"` on its left edge (`Models/Bar.fbx`, id 520) that is a bar
 filling from left to right. `--loading <path>` picks a loading domain for one run.
 
 Far things get cheaper on their own (LODs). A model small on screen is drawn as a lesser version of itself, picked
-per instance on the GPU and blended into, never switched to (a dither over `Culling.LodBlend` of the threshold);
-a cube beyond 512 m is spawned as a stand-in of its chunk, a few entities drawing what
-never moves there (small things as boxes, the smallest not at all) and up to four point lights standing for all its point and spot lights with a glowing dot where each was, with no scripts, and swapped for the real
-chunk as a camera comes near. Both are made the first time they are needed, by whichever gem provides an
-`ILODGenerator<T>` (`MeshLods` for models, the engine itself for chunks), and kept in `Cache\Lods\` next to
+per instance on the GPU and blended into, never switched to (a dither over a quarter of the threshold, `LOD_BLEND` in the cull passes);
+a cube beyond 512 m is spawned as a stand-in of its chunk: a few entities drawing what never moves there (small
+things as their impostor cards, boxes when they have none, bigger ones as their lowest mesh LOD while the stand-in's
+budget allows) and up to four point lights standing for all its point and spot lights, with a glowing dot where
+they were; no scripts. It is swapped for the real chunk as a camera comes near. Both are made the first time they
+are needed, by whichever gem provides an `ILODGenerator<T>` (`ModelLodGenerator` for models, `ChunkLodGenerator`
+for chunks), and kept in `Cache\Lods\` next to
 `Magic.exe` until the source file changes. `--set Lod.Bias=2` keeps detail twice as long, `0.5` gives it up
 twice as soon. To author them instead, name them in the asset's `.meta`: `"lods": { "0.25": 1234 }` is the id of
 the model to draw under a quarter of the view's height (for a chunk, the id of the chunk to spawn beyond that many
@@ -156,21 +164,33 @@ the file and in `Tags`; the engine keeps a marker component under each so its qu
                                   "DirectionalLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 3 } } } ] }
 ```
 
+## The towns
+
+DaytimeCity and CityAtNight (`City/Day` and `City/Night`) are chunks on disk like any authored world: a 20 by 20
+grid of `x_y_z.chunk` files beside each domain, one block of the village kit's terraced houses round a yard per chunk, market squares,
+watchtowers and the town wall along the edge, which stream, unload and get stand-ins as any chunk does. They were
+written once by a generator that is no longer in the samples, so nothing is built at start-up; edit a chunk as you
+would any other. The day town's carts stand along the curbs, and its townsfolk are capsules that walk the street
+round their block to a random spot, pause and walk on (`Scripts/Wander.cs`: the chunk gives the rectangle, the speed
+and a `seed`, from which `Randomness` makes each walker's own sequence).
+
+## Assets from elsewhere
+
+`Assets/Shared/Models/Village` is part of Quaternius' Medieval Village MegaKit, `Assets/Shared/Models/Interior` his Ultimate
+House Interior Pack and two of Kenney's furniture models (the TV and its cabinet), all CC0; `Assets/CREDITS.md`
+says where each came from. The kit's glTF files were packed into single `.glb` files, its textures halved to 1024
+and its roughness maps turned into the ORM maps `Pbr` reads (`Assets/Shared/Textures/Village`, `Assets/Shared/Materials/Village`).
+
 ## The samples
 
 | Sample | Shows | Look for |
 |---|---|---|
-| Cube | The first material end to end: a checkerboard cube, reverse-Z depth, back-face culling | `Stats: … instances 2, visible 2+0` in a Debug build; a 2x2 checkerboard cube on dark blue |
-| Monkey | Model import conventions | Suzanne faces the camera, her left ear on the viewer's right |
-| Lods | Levels of detail: three rows of monkeys from the camera out to 1.2 km | near monkeys are the full model, small ones the smooth lesser version, chunks beyond 512 m one stand-in entity each (`loaded as LOD 1` with `--verbose`); `--set Lod.Bias=0.25` makes the switch obvious, `=100` shows full detail everywhere; a second run logs no `Generated` |
-| Lights | Deferred lighting: six `PointLight`s circling a ring of shapes (`Scripts/Circle.cs`), each drawn as a small unlit ball of its colour, and two `SpotLight`s overhead turning (`Scripts/Turn.cs`), a 2.5 m by 1 m `AreaLight` panel hanging low behind the panes (`Panel`, drawn with `Materials/Panel.mat`), under a dim blue moon, and transparency: red, green, blue and amber panes and three tinted bubbles overlapping (`Materials/Tint*.mat`), and refracting glass (`Materials/Glass*.mat`, `Surfaces/Glass.surf.hlsl`): a pane, a crossing teal pane, a sphere and an amber block | pools of colour crossing the floor and the shapes, mixing where they overlap; the spots' cones sweep round; a soft rectangle of warm light under the panel, and the torus and the cube shadowed from its middle; every light reaches only its `range`; the tinted layers mix their colours wherever they overlap, in any order; the glass bends what is behind it (the sphere shows it upside down) with coloured fringes at the edges |
-| LightStress | Lights at scale, every path of the lighting: 400 chunks (1.28 km a side) with 16 lights each, about 6 400 in all; the camera orbits until the right mouse button takes it over, and flying it straight through the field is where a streaming hitch would show. Per chunk twelve still `PointLight`s, two `SpotLight`s and two point lights a script moves (`Scripts/Circle.cs`); chunks beyond 512 m are stand-ins, whose lights are the chunk's merged into at most four, each of the chunk's own lights still showing as a glowing dot; in front of the camera 192 lights share one spot, more than a cluster's 63, and one very bright light sits on a `Hidden` entity | `--verbose` logs `… lights` (thousands, far more than the near chunks hold) and the frame time; pools of colour and dots of light reach the horizon, with no pink there; the crowded spot flashes pink in squares that read `TOO MANY LIGHTS` with each tile's count under it: the tiles too many lights reach, shown as the failure it is; no white glare from the hidden light |
-| RenderTexture | A camera drawing into a texture: `SecurityCamera`'s `"target": { "texture": { "id": 5010 } }` names `Textures/Monitor.rtex` (`{ "width": 512, "height": 512 }`), and `Monitor.mat` samples the same id on a standing plane. `Scripts/Spin.cs` adds a `Spin` component the chunk uses | the plane shows the spinning monkey side-on, live; edit the size in `Monitor.rtex` while it runs |
-| SplitScreen | Two cameras in one window: `"viewport": "top_half"` and `"bottom_half"`, each culled and drawn on its own | two views orbiting until you fly the top one; Debug-build Stats count both |
-| Grid | GPU-driven scale: 410 000 static entities in 400 chunks (1.28 km a side), 1024 small shapes and one 16 m tower in each, streamed by distance. Far chunks are stand-ins, and anything under a pixel is not drawn, so towards the horizon the small shapes go and the towers stay | `Streaming:` lines; `FPS:` above 60 in a Debug build (vsync off by default); every chunk in view loads, whatever the distance; `--set Streaming.ViewDist=200` limits it and `--set Assets.Budgets={"Chunk":8}` shows chunks out of view unloading |
-| Wall | Two-phase HiZ occlusion culling: a wall in front of a 16k grid | in a Debug build, the last `Stats:` visible count is a fraction of the instances |
-| Cave | Shadows, GI and ambient occlusion together: a room of warm walls with one opening under a sun, a `Sky` entity (the sky's colour), a warm `PointLight` that casts shadows (its bulb's renderer says `"flags": "no_shadow"`) and a cool one that does not, a glowing pool of lava, and props for the contact shadows | the sun's cone through the door, in four colours with the `Deferred.DebugView` setting on Sun shadow (F4, Debug tab, Renderer); the back of the room lit blue by the sky near the door and warm by the walls' bounce deeper in (Gi light), going dark with the GI passes taken out of `Resources/Pipelines/Default.pipeline`; sky visibility (Sky visibility) white outside, grey inside; dark creases under the props and between the two crates (Ambient occlusion) |
-| Fallbacks | The render failure looks, one cube each: a surface that does not compile (magenta), a material whose shader is not an asset (magenta checker), a model that is not an asset (red checker on the unit cube), a texture that is not an asset (red checker). All glow and breathe, and each carries its reason as red `!!! ... !!!` text (always in a Debug build; in a Release build while F3 is on). Logs errors by design, so `--fail-on-error` returns 2 | fix `Domains/Fallbacks/Shaders/BadCompile.surf.hlsl` or point `BadTexture.mat` at texture 36 while it runs and the cube heals |
+| DaytimeCity | Scale, streaming and culling in a walled medieval town of about 400 000 entities, 400 chunks on disk (see The towns): houses built from the village kit's walls, windows, doors, roofs and gables, yards, market squares, watchtowers, carts along the curbs and capsule townsfolk walking their blocks (`Scripts/Wander.cs`), under a sun and a `Sky`. Far chunks are stand-ins and far houses their lesser versions; near houses hide the streets behind them (two-phase HiZ occlusion) | `Streaming:` lines and `FPS:` in a Debug build; roofs and paving to the horizon with no gaps or pop-in; capsules strolling the streets; `--set Lod.Bias=0.25` makes the LOD switch obvious; a second run logs no `Generated`; `--set Assets.Budgets={"Chunk":8}` shows chunks out of view unloading |
+| CityAtNight | Lighting at scale, and every lighting path, in the same town at night: lanterns on posts along every street (`PointLight`s with unlit bulbs), lit windows, shop doors with a warm `AreaLight` over them, a searchlight turning on each watchtower (`SpotLight`s, `Shared/Scripts/Turn.cs`), lamplighters' lanterns going round the yards and squares (`Shared/Scripts/Ring.cs`), about 4 000 lights in all, under a dim moon. The middle square has the glass fountain: a refracting sphere, a teal pane and an amber block (`Materials/Glass*.mat`) inside a ring of red, green, blue and amber panes (`Materials/Tint*.mat`). Two chunks south, the festival square hangs 192 lights over one spot, more than a cluster's 63, and one very bright light sits on a `hidden` entity | pools of warm light along the streets to the horizon, the far ones as glowing dots; the searchlights' cones sweeping; the tinted panes mixing their colours in any order and the glass bending what is behind it; the festival spot flashing pink in squares that read `TOO MANY LIGHTS` with each tile's count; no white glare from the hidden light |
+| Cave | GI: a cave of rock with its mouth open to the sun and a blue `Sky`, a pool of lava in the back left corner (emissive `Materials/Lava.mat`), an old wagon and crates for contact shadows | the sun's patches through the mouth; the back of the cave lit by the sky and by the rock's bounce, going dark with the GI passes taken out of DeferredRenderer's `Pipelines/Default.pipeline`; the walls and floor round the lava glowing orange; dark creases under the wagon and between the crates (`Deferred.DebugView`, F4, Debug tab, shows each term on its own) |
+| SplitScreen | Two cameras in one window (`"viewport": "top_half"` and `"bottom_half"`), each culled and drawn on its own, both on a living room: a couch facing a TV whose screen shows static (`Shaders/Static.surf.hlsl`, a sample surface shader: snow re-rolled 30 times a second, scanlines and a rolling band, its average light given to the GI) | both views show the couch and the TV's snow flickering; fly the top view, the bottom one stays; Debug-build Stats count both |
+| TV | A camera drawing into a texture: in the same living room, the TV's screen (`Materials/Screen.mat`) samples `Textures/Screen.rtex` (640 by 360), which `StudioCamera`'s `"target": { "texture": { "id": 5010 } }` draws into. It films a show 200 m away (`3_0_0.chunk`): a monkey and a ring turning (`Shared/Scripts/Turn.cs`) on a stage under circling coloured lights | the TV plays the show live; edit the size in `Screen.rtex` while it runs |
+| GracefulFailures | Every failure the engine shows instead of crashing, in a line, each with a caption under it saying what failed and why (`Scripts/Caption.cs`, world text, always in a Debug build, in Release while F3 is on): a surface that does not compile, a material whose shader is not an asset, a shader that is not a surface, a material that is not an asset, a texture that is not an asset, a render texture of width 0, a model that is not an asset, too many lights on one spot, a post whose shader is not an asset, an unknown component, a script that is not an asset and a script that throws | magenta and red checkers that glow and breathe with their `!!! ... !!!` reasons; `TOO MANY LIGHTS` over the crowded sphere; a magenta `BADPOST` band across the top; the last three only in the log. Logs errors by design, so `--fail-on-error` returns 2; fix `Shaders/BadCompile.surf.hlsl` while it runs and the cube heals |
 
-Hot reload works on every file: edit `Domains/Cube/0_0_0.chunk` while Cube is open and the cube moves; edit its
-`globals.chunk` and the camera or sun change; edit `Cube.domain` and the domain reopens.
+Hot reload works on every file: edit `Cave/0_0_0.chunk` while Cave is open and the rocks move; edit its
+`globals.chunk` and the camera or sun change; edit `Cave.domain` and the domain reopens.

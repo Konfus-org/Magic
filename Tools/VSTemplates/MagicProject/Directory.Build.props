@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
 
   <!-- Build settings for every gem in this project, laid out like the engine's own build. This file is what
        lets a gem csproj (the project's Scripts, or one made with the magicgem template under Gems\) build
@@ -47,8 +47,8 @@
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
   </PropertyGroup>
 
-  <!-- Gems compile against the engine's built Magic.dll of the same configuration and never copy it: the
-       gem's load context shares the host's already-loaded copy. -->
+  <!-- Gems compile against the engine's built Magic.dll of the same configuration, which holds everything a gem
+       builds on, and never copy it: the gem's load context shares the host's already-loaded copy. -->
   <ItemGroup Condition="'$(IsMagicGem)' == 'true'">
     <Reference Include="Magic">
       <HintPath>$(MagicRoot)Build\$(TargetFramework)\$(Configuration)\bin\Magic.dll</HintPath>
@@ -58,15 +58,22 @@
 
   <ItemGroup>
     <PackageReference Include="Nullable.Extended.Analyzer" Version="1.15.6581" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- What the host needs to know about a gem before it constructs it, stamped into the assembly. Set in the gem's
-       csproj: GemStatic (true: loaded once, never reloaded) and GemDependsOn (gem names, ';' separated, that must be
-       loaded first though no service connects them). The gem's name is its assembly name; Version, Description and
+       csproj: GemStatic (true: loaded once, never reloaded; absent is false); what it needs loaded first are its project
+       references.
+       The gem's name is its assembly name; Version, Description and
        Authors are the SDK's own properties. Items are evaluated after every property, so the csproj body's values count. -->
   <ItemGroup Condition="'$(IsMagicGem)' == 'true'">
-    <AssemblyMetadata Include="MagicGem.Static" Value="$(GemStatic)" />
-    <AssemblyMetadata Include="MagicGem.DependsOn" Value="$(GemDependsOn)" />
+    <AssemblyMetadata Include="MagicGem.Static" Value="$([MSBuild]::ValueOrDefault('$(GemStatic)', 'false'))" />
+  </ItemGroup>
+
+  <!-- A gem's own assets: a Resources folder beside its csproj, added to the assets while the gem is loaded, as the
+       engine's gems' are. -->
+  <ItemGroup Condition="'$(IsMagicGem)' == 'true' And Exists('$(MSBuildProjectDirectory)\Resources')">
+    <AssemblyMetadata Include="MagicGem.Resources" Value="$(MSBuildProjectDirectory)\Resources" />
   </ItemGroup>
 
   <Target Name="CheckMagicRoot" BeforeTargets="ResolveAssemblyReferences" Condition="'$(IsMagicGem)' == 'true'">

@@ -5,7 +5,7 @@
   "identity": "Magic.Sample.CSharp",
   "name": "Magic Sample",
   "shortName": "magicsample",
-  "description": "Adds a sample to the engine's Samples project: a domain folder under Assets/Domains with a camera, a light, a floor, a turning cube and the script that turns it. Run the Samples project and type 'portal <name>' in the console. The template leans on what the Samples project has: the shared CameraController (3050) and OrbitSystem (3051) scripts and the Tonemap pass (10030).",
+  "description": "Adds a sample to the engine's Samples project: a sample folder under Assets with a camera, a light, a floor, a turning cube and the script that turns it. Run the Samples project and type 'portal <name>' in the console. The template leans on what the Samples project has: the shared CameraController (3050) and OrbitSystem (3051) scripts and the Tonemap pass (10030).",
   "tags": {
     "language": "C#",
     "type": "item"
@@ -38,6 +38,6 @@
     }
   },
   "primaryOutputs": [
-    { "path": "Domains/MyMagicSample/MyMagicSample.domain" }
+    { "path": "MyMagicSample/MyMagicSample.domain" }
   ]
 }

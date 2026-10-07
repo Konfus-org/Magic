@@ -7,4 +7,6 @@ M:System.Threading.Thread.#ctor(System.Threading.ThreadStart);Threads are made b
 M:System.Threading.Thread.#ctor(System.Threading.ThreadStart,System.Int32);Threads are made by the Threads service (Threads.Create).
 M:System.Threading.Thread.#ctor(System.Threading.ParameterizedThreadStart);Threads are made by the Threads service (Threads.Create).
 M:System.Threading.Thread.#ctor(System.Threading.ParameterizedThreadStart,System.Int32);Threads are made by the Threads service (Threads.Create).
-T:System.Console;Output goes through Debugging.Log, which the logger gems write.
+T:System.Console;Output goes through Log (Magic.Utils), which the logger gems write.
+M:System.Random.#ctor;Random numbers come from the Randomness service (Randomness.For), so one seed repeats a run.
+P:System.Random.Shared;Random numbers come from the Randomness service (Randomness.For), so one seed repeats a run.

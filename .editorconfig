@@ -309,6 +309,6 @@ dotnet_diagnostic.NX0002.severity = error
 dotnet_diagnostic.NX0003.severity = error
 
 # Tests: xUnit runs them on its own context, so no ConfigureAwait; test methods carry no Async suffix.
-[Tests/**.cs]
+[**/Tests/**.cs]
 dotnet_diagnostic.CA2007.severity = none
 dotnet_diagnostic.VSTHRD200.severity = none
