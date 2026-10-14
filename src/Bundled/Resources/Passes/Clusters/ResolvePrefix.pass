@@ -1,0 +1,8 @@
+{
+    "stage": "g_buffer",
+    "kind": "compute",
+    "shader": { "id": 60028 },
+    "reads": [ { "name": "TileCounts" }, { "name": "TileList" } ],
+    "writes": [ { "name": "ResolveArgs" } ],
+    "dispatch": { "groups": [ 1 ] }
+}

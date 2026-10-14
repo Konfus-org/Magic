@@ -1,0 +1,11 @@
+{
+    // A step up from Default: finer clusters, sharper sun shadows close up, textures filtered with every tap, and global
+    // illumination's probes traced with more rays more often.
+    "settings": {
+        "ClusterRendering.clusterError": 0.75,
+        "ClusterRendering.shadowFinest": 6,
+        "ClusterRendering.anisotropy": 16,
+        "ClusterRendering.giRays": 96,
+        "ClusterRendering.giUpdateEvery": 2
+    }
+}

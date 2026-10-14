@@ -1,47 +1,70 @@
-# Agents
+# AI Agent Guidelines
 
-How an AI agent works in this repository. What the engine is, how to build it and how its code is written are in
-the documents below; read the ones your task touches before changing anything.
+This document outlines the strict rules, workflows, and verification steps for AI agents operating in this repository. You must read and follow this guide, along with any relevant document listed below, before modifying any files.
 
-## Read first
+## Required Reading
 
-| Document | For |
+| Document | Purpose & Scope |
 | --- | --- |
-| [README.md](README.md) | What Magic and Wizard are, building, running, how the engine fits together, folder layout |
-| [CODESTANDARDS.md](CODESTANDARDS.md) | Every rule for C#, performance, cross-platform code; the build enforces many of them |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | How contributions are reviewed |
-| [Magic/Core/Resources/README.md](Magic/Core/Resources/README.md) | Assets: ids, `.meta`, formats, lifetime, hot reload, the default assets; each part's Resources folder has a README per kind |
-| [Shaders README](Magic/Gems/Rendering/DeferredRenderer/Resources/Shaders/README.md) | How the renderer and its shaders work, and the rules that keep shaders correct |
-| [Samples/README.md](Samples/README.md) | The samples, the console (`portal`, `summon`, `set`), domains and chunks |
-| [Tools/VSTemplates/README.md](Tools/VSTemplates/README.md) | Writing a gem or a project from the templates |
-| [Tools/Wizard/TUTORIAL.md](Tools/Wizard/TUTORIAL.md) | The Wizard editor |
-| [TESTING.md](TESTING.md) | Test conventions, for when tests are asked for |
+| [Start Here](README.md) | High-level overview of Magic and Wizard, build/run commands, engine architecture, and directory layout. |
+| [Code Standards](CODESTANDARDS.md) | C# coding standards, performance rules, and cross-platform guidelines enforced by the build system. |
+| [Contributing](CONTRIBUTING.md) | Code review processes and acceptance criteria. |
+| [Tests](tests/README.md) | Test suites, conventions, and requirements for requested test coverage. |
 
-## How to work
+## Development Workflow & Constraints
 
-- **Keep the change as small as it can be, and simple.** No speculative abstractions; follow the code around it.
-- **Think out loud** while you work. At the end, justify the change and explain it in depth, with a preview of the
-  `git diff`.
-- **Tests are not required.** Do not write tests unless they are asked for; do run the existing ones when you change
-  what they cover.
-- **Sweeping changes get a plan first**: before/after code and a diagram of the data flow, approved before any edit.
-- **Third-party libraries come from NuGet**; nothing is vendored.
-- **Before Implementing** Please think step by step about whether there exists a less over-engineered and yet simpler, more elegant, and more robust solution to the problem that accords with KISS and DRY principles. Present it to me with your degree of confidence from 1 to 10 and its rationale, but do not modify code yet. 
+### 1. Pre-Implementation Review
+- **KISS & DRY Planning:** Before modifying any code, analyze the task step-by-step. Identify the simplest, least over-engineered, and most robust solution possible.
+- **Prefer Removing Code:** Prefer a solution that removes or simplifies code over one that adds it.
+- **Proposal Requirement:** Present your proposed approach to the user before writing code. You must include:
+  1. Your rationale for the design.
+  2. Your confidence rating on a scale from 1 to 10.
+  3. The alternative solutions you considered, and why the chosen one is the simplest, most maintainable, and most straightforward.
+- **Do not modify code** until the user explicitly approves this proposal.
 
-## Git
+### 2. Architecture & Design Rules
+- **Scope Limitation:** Keep every change as minimal and simple as possible. Match the surrounding code style and patterns. Do not introduce speculative abstractions.
+- **State Management:** Prefer stateless implementations wherever possible.
+- **Private State:** Private state is a private field declared at the top of the type, never a private `{ get; set; }` property. Properties are for what other code reads; behaviour on reading or writing private state is a method. See [Code Standards](CODESTANDARDS.md#state).
+- **Abstractions:** Minimize inheritance, abstractions, and interfaces. Avoid unnecessary architectural overhead.
+- **Data Flow:** Prioritize data-oriented programming with straightforward, explicit data flows.
+- **Dependencies:** All third-party libraries must come from NuGet. Do not vendor or manually embed external code.
 
-- Work on the branch the main checkout has active (`dev`). Do not create branches or worktrees.
-- Commit in small increments with short, precise messages. **Never push.**
-- Never add a co-author line, and nothing in a commit may say or hint that an AI wrote it.
-- Other agents may be editing the same checkout at the same time. Before committing, check `git status` and stage
-  only your own changes (whole files, or hunks); leave anyone else's work uncommitted.
+### 3. Documentation & Output
+- **Synchronized Docs:** Update relevant comments, docstrings, and markdown files (`.md`) immediately alongside code changes. Keep documentation completely accurate.
+- **Explain, Never Inventory:** Docs say how a thing works and what must hold for it to work, never what is in which folder, file or namespace. No lists or tables of the files, assets, ids, types or packages there are, and no folder trees beyond where each kind of thing goes: the Materials README explains how materials work, not which materials there are. The folder already shows what is in it, and a list is one more thing to keep in step that quietly goes out of date. A specific file is named only as the example that teaches a rule, or where the behaviour being explained depends on that path.
+- **Gems by Role, Never by Name:** Gems can be swapped at any time, so comments, summaries, docs and user-facing messages describe another gem only by what it does ("a platform gem", "the GPU provider", "a shader compiler"), never by its name or the library it wraps. A gem names itself only inside its own folder. Configuration that must list gems (project files, `Magic.slnx`, `.editorconfig` sections) is exempt.
+- **Chain of Thought:** Think out loud throughout the task execution. 
+- **Justification & Diff:** At the completion of your task, provide an in-depth justification of your changes accompanied by a complete `git diff` preview.
 
-## Checking your work
+### 4. Testing & Scope Changes
+- **Test Requirements:** Do not write new tests unless explicitly requested by the user. Always run existing tests if your changes modify code covered by them.
+- **Sweeping Changes:** For large or multi-file architectural changes, you must submit a pre-implementation plan containing "before/after" code snippets and a data-flow diagram. This must be approved before editing.
 
-- Build `Magic-Wizard.slnx`; warnings that matter are errors, so a clean build is the first check.
-- Run the host on a sample with `--fail-on-error` (exit code 2 when anything logged an error) and, for anything
-  visual, `--screenshots 1 --screenshot-delay <frame>`. `Magic --help` lists the options.
-- The samples' cameras orbit with time, so two runs never make the same screenshot: compare scenes whose cameras
-  stand still. GracefulFailures logs errors on purpose.
-- Engine caches (`Cache/Shaders`, `Cache/Lods`) sit next to `Magic.exe` and are shared by every project run from
-  that build: a run of another project can evict LODs and make the next run regenerate them.
+## Git & Workspace Management
+
+- **Branch Locking:** Work exclusively on the currently active branch of the main checkout. Do not create new branches, stashes, or worktrees.
+- **No Self-Committing:** Do not execute commits unless explicitly instructed by the user.
+- **AI Anonymity:** Never add a co-author line. Ensure no code, comments, or commit messages hint that an AI generated the work.
+- **Multi-Agent Workspace Isolation:** Other agents may be editing this checkout simultaneously. Before staging or committing (when requested), check `git status`. Stage only your own file modifications or specific hunks; do not alter or commit other uncommitted work.
+
+## Validation & Verification Steps
+
+Execute these verification checks in order before concluding your work:
+
+1. **Clean Build Compilation:** 
+   Build `Magic.slnx`. Treat all relevant compiler warnings as errors. A perfectly clean build is mandatory.
+2. **Runtime Execution Verification:** 
+   Run the host application on the samples, headless and with a window, using the strict error-handling flag:
+   ```bash
+   Magic --project samples --frames 120 --fail-on-error
+   Magic --project samples --frames 120 --fail-on-error --headless
+   ```
+   *(Note: This returns exit code `2` if any error was logged during the run.)*
+3. **Visual Check (If Applicable):** 
+   For any visual or rendering change, run the samples with a window, take a screenshot and look at it. The frames
+   before the scene is drawn go by quickly, so wait well past them; the log names the file, under `Screenshots/`
+   beside Magic:
+   ```bash
+   printf 'wait 1500\nwait 400\nscreenshot\n' | Magic --project samples --frames 2000 --fail-on-error
+   ```

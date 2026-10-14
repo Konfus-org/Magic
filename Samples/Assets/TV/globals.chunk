@@ -1,9 +1,0 @@
-{
-    "entities": [
-        {"name": "PostProcessing", "components": {"PostProcessing": {"posts": [{"id": 10030}]}}},
-        {"name": "Sky", "components": {"Sky": {"color": {"r": 0.22, "g": 0.27, "b": 0.42}}}},
-        {"name": "Sun", "components": {"Transform": {"rotation": {"x": 0.12814, "y": 0.56651, "z": -0.08973, "w": 0.80907}}, "DirectionalLight": {"color": {"r": 1, "g": 0.7, "b": 0.45}, "intensity": 1.6, "castsShadows": true}}},
-        {"name": "Camera", "scripts": [{"id": 3050, "speed": 3}], "components": {"Transform": {"position": {"x": 0, "y": 1.7, "z": -3.6}, "rotation": {"x": 0.06976, "y": 0.0, "z": 0.0, "w": 0.99756}}, "Camera": {}}},
-        {"name": "StudioCamera", "components": {"Transform": {"position": {"x": 224, "y": 1.6, "z": 26.5}, "rotation": {"x": 0.05234, "y": 0.0, "z": 0.0, "w": 0.99863}}, "Camera": {"fieldOfView": 45, "target": {"texture": {"id": 5010}}}}}
-    ]
-}

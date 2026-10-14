@@ -1,0 +1,12 @@
+{
+    "stage": "light_culling",
+    "kind": "compute",
+    "shader": { "id": 60030 },
+    "reads": [ { "name": "SceneLights" } ],
+    "creates": [
+        { "name": "LightCounts", "kind": "buffer", "type": "uint", "stride": 4, "rows": 1026, "seed": "Zeros" },
+        { "name": "VisibleLights", "kind": "buffer", "type": "uint2", "stride": 8, "per": "sceneLights" }
+    ],
+    "writes": [ { "name": "LightCounts" }, { "name": "VisibleLights" } ],
+    "dispatch": { "per": "sceneLights" }
+}

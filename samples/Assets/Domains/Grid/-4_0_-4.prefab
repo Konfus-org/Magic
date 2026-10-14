@@ -1,0 +1,14 @@
+{
+    "entities": [
+        { "prefab": { "id": 3341 }, "components": { "Transform": { "position": { "x": 34.169, "y": 0, "z": 36.297 }, "rotation": { "x": 0, "y": 0.233, "z": 0, "w": -0.973 }, "scale": { "x": 3.206, "y": 3.206, "z": 3.206 } } } },
+        { "prefab": { "id": 3341 }, "components": { "Transform": { "position": { "x": 56.691, "y": 0, "z": 25.859 }, "rotation": { "x": 0, "y": 0.783, "z": 0, "w": 0.622 }, "scale": { "x": 2.365, "y": 2.365, "z": 2.365 } } } },
+        { "prefab": { "id": 3343 }, "components": { "Transform": { "position": { "x": 25.64, "y": 0, "z": 35.029 }, "rotation": { "x": 0, "y": 0.664, "z": 0, "w": 0.748 }, "scale": { "x": 1.214, "y": 1.214, "z": 1.214 } } } },
+        { "prefab": { "id": 3341 }, "components": { "Transform": { "position": { "x": 56.452, "y": 0, "z": 21.071 }, "rotation": { "x": 0, "y": 0.371, "z": 0, "w": 0.929 }, "scale": { "x": 2.995, "y": 2.995, "z": 2.995 } } } },
+        { "prefab": { "id": 3340 }, "components": { "Transform": { "position": { "x": 6.706, "y": 0, "z": 13.429 }, "rotation": { "x": 0, "y": 0.054, "z": 0, "w": -0.999 }, "scale": { "x": 3.283, "y": 3.283, "z": 3.283 } } } },
+        { "prefab": { "id": 3343 }, "components": { "Transform": { "position": { "x": 32.76, "y": 0, "z": 20.866 }, "rotation": { "x": 0, "y": 0.751, "z": 0, "w": 0.66 }, "scale": { "x": 1.095, "y": 1.095, "z": 1.095 } } } },
+        { "prefab": { "id": 3343 }, "components": { "Transform": { "position": { "x": 6.418, "y": 0, "z": 57.998 }, "rotation": { "x": 0, "y": 0.342, "z": 0, "w": -0.94 }, "scale": { "x": 1.104, "y": 1.104, "z": 1.104 } } } },
+        { "prefab": { "id": 3340 }, "components": { "Transform": { "position": { "x": 23.666, "y": 0, "z": 52.866 }, "rotation": { "x": 0, "y": 0.317, "z": 0, "w": 0.949 }, "scale": { "x": 3.253, "y": 3.253, "z": 3.253 } } } },
+        { "prefab": { "id": 3359 }, "components": { "Transform": { "position": { "x": 6.963, "y": 0, "z": 9.606 } } } },
+        { "prefab": { "id": 3359 }, "components": { "Transform": { "position": { "x": 26.673, "y": 0, "z": 52.399 } } } }
+    ]
+}

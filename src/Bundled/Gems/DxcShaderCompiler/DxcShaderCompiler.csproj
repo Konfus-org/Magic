@@ -1,0 +1,18 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- DXC and SDL_shadercross are C APIs: sources, results and DXC's COM interfaces are pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SDL_shadercross is built on SDL: it frees what it returns with SDL_free and reads options as SDL properties. -->
+    <PackageReference Include="ppy.SDL3-CS" />
+    <!-- DXC, SPIRV-Cross and SDL_shadercross, built for each OS; the gem's load context picks the machine's. -->
+    <PackageReference Include="SDL3-CS.Linux.Shadercross" />
+    <PackageReference Include="SDL3-CS.MacOS.Shadercross" />
+    <PackageReference Include="SDL3-CS.Windows.Shadercross" />
+    <!-- XxHash3: what names a compiled shader in the cache, and the version of its source. -->
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+</Project>

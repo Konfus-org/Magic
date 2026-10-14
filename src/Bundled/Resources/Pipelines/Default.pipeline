@@ -1,0 +1,4 @@
+{
+    // No passes: a world whose post-processing names it has no effects.
+    "entries": []
+}

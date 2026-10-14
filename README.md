@@ -1,117 +1,94 @@
 ﻿# Magic
 
-A modern, plugin-driven game engine in C# where nothing is glued in, in the spirit of Our Machinery and Bevy.
+A modern, cross platform, plugin-driven game engine in C# where nothing is glued in, in the spirit of Our Machinery and Bevy.
 `Magic` is the engine: a host that loads a project and its gems (plugin dlls) and runs the frame loop, a
-standalone program that works with or without the editor. The ECS, windows and input, rendering and logging all
-live in gems (`Magic/Gems`), the engine's plugins. `Wizard` is the editor: a separate application, completely
-decoupled from Magic, that drives it from outside (`Tools/Wizard/TUTORIAL.md`), with plugins of its own.
+standalone program that works with or without the editor. The ECS, windows and input, and rendering all live in
+gems (`src/Bundled/Gems`), the engine's plugins.
 
 Everything is cross-platform (Windows, Linux, macOS planned), modern .NET, and written for performance; the rules
 are in the [code standards](CODESTANDARDS.md).
 
 ## Building and running
 
-Needs the .NET 10 SDK. Configurations: `Debug`, `Optimize` (optimised, full symbols), `Release`.
+Needs the .NET 10 SDK. Configurations: `Debug` (integer overflow checked), `Optimize` (optimised, full symbols),
+`Release` (optimised, no symbols). Only a release presents on the display's refresh by default; the others draw
+uncapped, so the frame rate they show is the true one.
 
 ```powershell
-dotnet build Magic-Wizard.slnx
-dotnet test Magic-Wizard.slnx
-Build/net10.0/Debug/bin/Magic --project Samples
+dotnet build Magic.slnx
+dotnet test Magic.slnx
+Build/net10.0/Debug/bin/Magic --project samples
 ```
 
-The solution builds every gem; `dotnet build Magic/Core/Core.csproj` alone builds the engine and its default gems.
+Build the solution: building `src/Core` alone does not build the gems, which reference Core rather than the other
+way round. Run from an IDE or with `dotnet run --project src/Core`, Magic opens the Samples project. Only a `Release`
+build copies the engine's and the gems' assets beside Magic; the others read them where they are in the repository, so
+building stays fast and an edit to one reaches a running engine at once.
 
-The Samples project opens a hub with the console up: `portal` lists the samples, `portal DaytimeCity` opens one, `summon
-Prop_Wagon.glb` puts a model in front of the camera ([Samples/README.md](Samples/README.md)). The terminal the host was started from is a
-console too, so `--headless` runs are driven by typing there.
+`Magic --help` lists the options. `--project` takes a `.magic` file or the folder holding one, `--frames <n>` stops
+after n frames, and type `quit` in the terminal or close the window to stop sooner. `--headless` is for runs without
+a window: gems open none, and Ctrl+C stops the run cleanly, ending its gems, where otherwise it ends the process at
+once. `--set Gem.setting=value`, as many times as needed, overrides a gem's setting from the presets, and
+`--preset Name` applies a preset, an asset of such settings for a kind of machine (`Toaster`, `Fancy`), over the
+project's own, its `Presets/Default.preset`, and under `--set`. `--verbose` also logs `Debugging.Verbose` lines, detail
+that is usually noise. Exit codes: 0 clean, 1 bad arguments or a project that cannot be opened, 2 an error was logged
+under `--fail-on-error`. A
+crash ends the process with the OS's crash code and leaves a `.crash` file in `Logs/` beside Magic. What is slow to
+make, such as a compiled shader or a model's levels of detail, is kept in `Cache/` beside Magic, and made again when
+what it was made from changes; deleting the folder is always safe.
 
-`Magic --help` lists the options. Exit codes: 0 clean, 1 bad arguments or a crash, 2 an error was logged under
-`--fail-on-error`.
-
-Windows and Linux (Vulkan) are supported; macOS is not yet. `Tools/build-all.ps1 -Runtime linux-x64` builds the
-host, the gems and the samples for another platform into its own folder (`Build/net10.0/Debug-linux-x64/`); the
-solution itself refuses a runtime. The host project's "Magic (WSL)" launch profile runs that build in WSL, with the
-Samples project; run the script before it. It needs the ".NET Debugging with WSL" component of Visual Studio.
+The build is strict: every compiler, analyzer, MSBuild and NuGet warning is an error. `.editorconfig` holds the
+rules, `BannedSymbols.txt` the APIs the build refuses, each with what to use instead, and `Directory.Build.props`
+checks that every namespace matches its folder.
 
 ## How it works
 
-Core (`Magic/Core`, built as `Magic.exe` and `Magic.dll`) is the runner and the engine's vocabulary: it loads the
-project and its gems, hands every gem the same frame, holds the services every gem may ask for, and holds every type
-more than one gem names (components, assets, events, settings, the interfaces gems implement). Everything else is a
-gem (`Magic/Gems`): a dll with one class implementing `IGem`, which references Core only, so swapping one (a
-renderer, the platform, the ECS) is one line in the project's `gems` list. The one exception is a gem that reads
-another gem's public markers: DeferredRenderer and ChunkStreaming reference EntityHierarchy for its `Static`,
-`Hidden` and `Settled`.
+Core is a thin coordinator. `Engine.Run` does four things, in order, on the process's first thread, which the OS ties
+windows and their events to and so becomes the render thread:
 
-- **Host** (`Magic/Core/Program.cs`): reads the project's `.magic` file, builds Core's services (`Settings`,
-  `Randomness`, `DebugUI`, `Assets` and `World` among them) before any gem, loads the gems, then opens the entry point
-  (`World.OpenEntryPoint`), which may be a gem's asset. Each frame it applies the asset changes that settled
-  (`Assets.ProcessChanges`) and hands one immutable `Frame` to every gem's `Update`, `FixedUpdate` (60 Hz),
-  `LateUpdate` and `Render`, then `Present` on the render thread. The frame loop runs on a main thread; `Render`,
-  `Present` and the GPU submit run on the render thread, which owns the windows.
-- **Gems** (`Magic/Core/Internal/Gems.cs`): a gem's constructor parameters are its dependencies (a `T?` is optional,
-  a `T[]` is every provider) and the interfaces it implements are what it provides. The gems it references load
-  first, even when the project's `gems` list does not name them, unload after it, and reload it when they reload; a
-  rebuilt dll of a gem that is not static (a project's) is reloaded in place. A gem's own assets are the `Resources` folder beside its csproj, added to the
-  assets while it is loaded; Core's are there for the whole run. A project leaves a gem out with `"-Name"` in its
-  `gems` list, or replaces it by shipping a gem of the same name.
-- **Threads** (`Magic/Core/Services/Threads.cs`): `Post`/`Invoke`/`InvokeAsync(work, thread)`. No thread id means a
-  worker of the .NET thread pool; `Main` and `Render` are the engine's two dedicated threads, and `MainThread` is the
-  shorthand for the first. Work given to `InvokeAsync` is handed its `CancellationToken`, and never starts once that
-  is cancelled.
-- **Events** (`Magic/Core/Services/Events.cs`): any struct is an event, published from any thread and read in the next
-  frame as `frame.Events.Of<T>()`, or handed to a `Watch<T>`.
-- **Settings** (`Magic/Core/Services/Settings.cs`): Core's and every gem's `[Settings]` classes, set from the command
-  line (`--set Name.Key=value`), a preset, or the settings window, live.
-- **Assets** (`Magic/Core/Services/Assets`, [Magic/Core/Resources/README.md](Magic/Core/Resources/README.md)):
-  addressed by id, not path; the id and type live in a `.meta` file beside each asset. Gems add formats with
-  `IAssetLoader<T>`. `LoadAsync` reads and imports off the calling thread, stops for a `CancellationToken` and tells
-  an `IProgress<float>` how far its dependencies are; `Load` waits for the same thing.
-- **World** (`Magic/Core/Services/World`): a stack of open domains. A domain is a folder of `x_y_z.chunk` files
-  streamed in around the cameras (`Magic/Gems/World/ChunkStreaming`). `World.Open` (or `OpenAsync`) loads the
-  domain's own file and answers a `Result`; each open domain (`World.Domains`) has a `State`, `Loading` until its
-  globals and the chunks its cameras want are spawned, and a `Progress` that goes on to the `IProgress<float>` given to
-  `Open`; `World.State` is `Loading` while a domain opened in place of the world is not there yet, which is when the
-  loading screen (`Magic/Gems/World/LoadingScreen`) shows its domain over it.
-- **ECS** (`Magic/Core/Services/Ecs`, `Magic/Gems/World/FlecsEcs`): components are structs implementing `IComponent`;
-  systems are `ISystem`s given to `IEcs.Add`, in a phase (`Update`, `FixedUpdate`, `LateUpdate`, `Render`, then
-  `Overlay` for what draws on top of the scene). EntityHierarchy (`Magic/Gems/World/EntityHierarchy`) computes every
-  entity's `WorldTransform` and keeps the `Static`, `Hidden` and `Settled` markers.
-- **Scripts** (`Magic/Core/Contexts/Scripting`, `Magic/Gems/World/Scripting`): a chunk lists scripts on its entities;
-  the Scripting gem runs them, whatever language they are written in, from what their `Script` asset says (made how,
-  impatient, always updated). C# is one language (`Magic/Gems/CSharpScripting`): a `.cs` asset's class, an `ISystem`
-  or an `IBehavior` compiled by the project's csproj, marked `[Impatient]` or `[AlwaysUpdate]` as needed.
-- **Rendering** (`Magic/Gems/Rendering/DeferredRenderer` over `Magic/Gems/Rendering/SdlGpuRenderer`): GPU-driven on
-  SDL_GPU, with the pipeline, its passes and the posts defined as data in its `Resources`.
-- **Debugging**: `Log` writes to every logger gem; `ITelemetry` takes the numbers the debug display (F3) shows; a gem
-  shows the developer text in the world and notes through `IDebugUI`, and adds console commands through
-  `IConsoleCommands`.
+1. **Opens the project.** Its `.magic` file (JSON) names the project, its entry point and its gems. A key the file
+   format does not know is an error, so a misspelt key fails loudly instead of being ignored.
+2. **Makes the gems**, once it has loaded the project's own code, if it has any: its scripts and their components,
+   which the csproj beside its `.magic` file compiles from its `Assets/` ([Core's README](src/Core/README.md#the-project-file)).
+   Gem `Name` is `Gems/Name/Name.dll` beside Magic, loaded into its own `AssemblyLoadContext`
+   with its own dependencies, and holds exactly one class that implements `IGem`. That class's constructor
+   parameters are what it needs: Core's services, the assets among them, interfaces other gems implement, and its own
+   settings object, filled from its defaults, then the project's own preset, the preset applied over it, then `--set`,
+   and changed while running through Core's `Settings` ([Core's README](src/Core/README.md#gem-settings)). Every other
+   interface it implements is what it provides, but `ILogSink`, which makes it somewhere the log goes. Gems are made in
+   dependency order, and in the project's order where dependencies do not decide.
+3. **Runs frames, on two threads.** A frame runs four phases, and each phase calls that hook on every gem that has one,
+   so data flows one way from the start of a frame to its end. A main thread started beside the render thread runs the
+   game's, in the order the gems were made: `Update`, `FixedUpdate` (once per fixed step) and `LateUpdate`. The
+   render thread then runs `Render`, in reverse order, while the main thread goes on to the next frame, so drawing and
+   presenting never hold the game up. `LateUpdate` is the one point where both hold still, and copies what `Render`
+   will read. Work on other threads is tasks, and hands what it made to the main or render thread through `Threads`
+   ([Core's README](src/Core/README.md#threads)).
+4. **Ends the gems**, in reverse order, on the render thread, once a gem stops the run (`Lifetime.Stop`), Ctrl+C is
+   pressed in a `--headless` run or the `--frames` limit is reached.
+
+Gems never reference each other. They talk only through interfaces in Core, so a gem can be swapped for any other
+that implements the same ones. Failures are explicit and never stop the engine: a gem that cannot be found,
+loaded or made, or that throws in a hook, is logged as an error, and the run goes on without it. Only state that
+cannot be stops it: a failed assert crashes at once, leaving a crash file. The log, `Debugging`, lives in Core, so
+that it works before any gem exists; any thread can write to it, and a background task prints to the terminal and to
+wherever gems send it. What the engine measures, such as how long a frame takes, is published as .NET metrics that
+gems listen to ([Core's README](src/Core/README.md#the-log)).
 
 ## Folder structure
 
 ```
-Magic/
-  Core/        Magic.exe and Magic.dll: Program, the gem loader, the services every gem may ask for and every type
-               gems share, by area (Assets, Debug, Ecs, Maths, Platform, Randomness, Rendering, Scripting, World);
-               its Resources hold what every part may use: the primitive models, the default domain,
-               materials, textures, icon and presets, and the generic shaders
-  Gems/        The engine's gems
-    Assets/      AssimpModelLoader, SdlImageLoader, SdlFontLoader
-    Debug/       DebugTools, ImGuiDebugUI, Screenshots, ConsoleCheats, ZLoggerLogging
-    LODs/        ModelLodGenerator, ChunkLodGenerator
-    Rendering/   DeferredRenderer, SdlGpuRenderer, SdlShaderCompiler
-    World/       FlecsEcs, EntityHierarchy, Scripting, ChunkStreaming, LoadingScreen
-    SdlPlatform/ CSharpScripting/ SettingsPresets/
-Samples/       The samples, one project (Samples/README.md)
-Tools/         dotnet new templates for projects, gems and samples (Tools/VSTemplates/README.md)
-Build/         All build output (not checked in)
+(root)                     the solution, and the build settings and code rules every project shares
+src/Core/                  Magic: the host, the frame loop, and the interfaces and data gems share
+src/Bundled/Gems/<Name>/   the gems that ship with Magic, one project each
+src/Bundled/Resources/     the engine's own assets, its bundled gems' among them, as one project
+samples/                   sample projects, each a .magic file, its Assets/ (data, settings and scripts), and a csproj
+tests/                     tests, one project per project tested
+Build/                     build output, not in git
 ```
 
-Every part, Core and each gem, is laid out the same way: its csproj (named for its folder) and its `IGem` class at
-the root (Core's `Program`), then `Contexts` (public data: components, assets, events, settings), `Services` (public
-interfaces and the classes that do the work), `Internal` (everything not public), `Resources` (its assets) and
-`Tests` (its unit tests, [TESTING.md](TESTING.md)). Core splits `Contexts`, `Services` and `Tests` by area. The
-solution's folders mirror these.
+Each project has a README with its details. Core files its code by kind, one folder and namespace each, and a gem is
+flat ([code standards](CODESTANDARDS.md#folders)). New engine work goes in a gem; Core gets only what gems share.
 
 ## Contributing
 

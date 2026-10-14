@@ -1,0 +1,11 @@
+{
+    "stage": "light_culling",
+    "kind": "compute",
+    "shader": { "id": 60033 },
+    "reads": [ { "name": "LightCounts" }, { "name": "Lights" } ],
+    "creates": [
+        { "name": "LightBins", "kind": "buffer", "type": "uint2", "stride": 8, "per": "zBins", "seed": "ZBinsEmpty" }
+    ],
+    "writes": [ { "name": "LightBins" } ],
+    "dispatch": { "per": "lights" }
+}

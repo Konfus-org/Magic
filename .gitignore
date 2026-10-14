@@ -18,8 +18,6 @@ screenshots/
 Screenshots/
 cache/
 Cache/
-# ...but the gems of those names are source
-!Magic/Gems/Debug/Screenshots/
 
 # Crash reports (Log writes them into Logs/; this catches strays)
 *.crash

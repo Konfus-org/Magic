@@ -1,0 +1,11 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- SDL is a C API: its windows, gamepads and events are pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ppy.SDL3-CS" />
+  </ItemGroup>
+</Project>

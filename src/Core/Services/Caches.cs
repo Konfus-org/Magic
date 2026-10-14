@@ -1,0 +1,165 @@
+using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.IO;
+using Magic.Contexts.Utils;
+using Magic.Interfaces;
+
+namespace Magic.Services;
+
+/// <summary>
+/// What is slow to make, kept so that a later run reads it rather than making it again: a model's levels of detail, a
+/// compiled shader. Each entry is a type of thing under a key, the id of what it was made from: an asset's, so any asset
+/// can have one of each type, or a hash naming what is not an asset, such as a shader's source and stage. An entry was
+/// made from one version of its source (a hash of the asset's file, of the settings it was made with, of whatever else
+/// would make it come out otherwise); read with another, it is dirty, so it is deleted and the caller makes it again.
+/// Any thread.
+/// <para>
+/// Entries are files beside Magic, in <c>Cache/</c>, as the log's are in <c>Logs/</c>: <c>Cache/&lt;Type&gt;/&lt;key&gt;</c>,
+/// the version it was made from and its type's <see cref="ICache{T}.Version"/>, then the bytes the type's
+/// <see cref="ICache{T}"/> wrote, which a gem provides and which is asked for through <see cref="IServiceProvider"/> on
+/// every read and write. Nothing is kept in memory: whoever reads an entry keeps what it needs of it.
+/// </para>
+/// </summary>
+public sealed class Caches
+{
+    /// <summary>
+    /// The bytes in front of what a type's cache wrote: the version it was made from, and the type's cache's version.
+    /// </summary>
+    private const int HeaderSize = sizeof(ulong) + sizeof(int);
+
+    private readonly IFileSystem _files;
+    private readonly IServiceProvider _services;
+    private readonly string _folder;
+
+    internal Caches(IFileSystem files, IServiceProvider services)
+    {
+        _files = files;
+        _services = services;
+        _folder = files.Combine(AppContext.BaseDirectory, "Cache");
+    }
+
+    /// <summary>
+    /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>; why
+    /// not when nothing is, or when what is was made from another version, or by another <see cref="ICache{T}.Version"/>,
+    /// and so is deleted.
+    /// </summary>
+    public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, CancellationToken cancel)
+    {
+        if (CacheOf<T>() is not { } cache)
+        {
+            return Result.Failure<T>($"no gem the project lists caches {typeof(T).Name}s.");
+        }
+
+        string file = FileOf<T>(key);
+        if (!_files.FileExists(file))
+        {
+            return Result.Failure<T>($"nothing is cached at {file}.");
+        }
+
+        Result<byte[]> bytes = await _files.ReadAsync(file, cancel).ConfigureAwait(false);
+        if (!bytes.Ok)
+        {
+            return Result.Failure<T>($"{file} could not be read: {bytes.Error}");
+        }
+
+        Result<T> read = Read(cache, bytes.Value, version);
+        if (read.Ok)
+        {
+            return read;
+        }
+
+        Result deleted = _files.Delete(file);
+        if (!deleted.Ok)
+        {
+            Debugging.Warn($"{file} is dirty, but could not be deleted: {deleted.Error}");
+        }
+
+        return Result.Failure<T>($"{file} is dirty, so it is deleted: {read.Error}");
+    }
+
+    /// <summary>
+    /// Keeps <paramref name="value"/> as what is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from
+    /// <paramref name="version"/>, in place of what was. It is written beside the entry, then moved over it, so a reader,
+    /// or the next run after a crash, never finds half an entry. One that cannot be kept is a warning: it is made again
+    /// next time.
+    /// </summary>
+    public async Task WriteAsync<T>(ulong key, ulong version, T value, CancellationToken cancel)
+    {
+        if (CacheOf<T>() is not { } cache)
+        {
+            Debugging.Warn($"No gem the project lists caches {typeof(T).Name}s, so one is not kept.");
+            return;
+        }
+
+        string file = FileOf<T>(key);
+        Result written = await _files.WriteAsync(file, Bytes(cache, version, value), cancel).ConfigureAwait(false);
+        if (!written.Ok)
+        {
+            Debugging.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="ICache{T}"/> a gem provides; null when none does, or the gem that does was not made, which Core
+    /// has said why.
+    /// </summary>
+    private ICache<T>? CacheOf<T>()
+    {
+        try
+        {
+            return _services.GetService(typeof(ICache<T>)) as ICache<T>;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is.
+    /// </summary>
+    private string FileOf<T>(ulong key)
+    {
+        return _files.Combine(_folder, typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// <paramref name="value"/> as an entry: the versions, then what <paramref name="cache"/> writes of it.
+    /// </summary>
+    private static ReadOnlyMemory<byte> Bytes<T>(ICache<T> cache, ulong version, T value)
+    {
+        using MemoryStream stream = new();
+        Span<byte> header = stackalloc byte[HeaderSize];
+        BinaryPrimitives.WriteUInt64LittleEndian(header, version);
+        BinaryPrimitives.WriteInt32LittleEndian(header[sizeof(ulong)..], cache.Version);
+        stream.Write(header);
+        cache.Write(value, stream);
+        return stream.GetBuffer().AsMemory(0, (int)stream.Length);
+    }
+
+    /// <summary>
+    /// What the entry <paramref name="bytes"/> holds, read by <paramref name="cache"/>, when it was made from
+    /// <paramref name="version"/> by the cache's version; why not otherwise.
+    /// </summary>
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Bytes a type's cache cannot read, whatever it throws, are dirty: they are deleted and made again.")]
+    private static Result<T> Read<T>(ICache<T> cache, byte[] bytes, ulong version)
+    {
+        if (bytes.Length < HeaderSize
+            || BinaryPrimitives.ReadUInt64LittleEndian(bytes) != version
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(sizeof(ulong))) != cache.Version)
+        {
+            return Result.Failure<T>("it was made from something else.");
+        }
+
+        try
+        {
+            using MemoryStream stream = new(bytes, HeaderSize, bytes.Length - HeaderSize, writable: false);
+            return cache.Read(stream);
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<T>($"its bytes are not a {typeof(T).Name}: {ex.Message}");
+        }
+    }
+}

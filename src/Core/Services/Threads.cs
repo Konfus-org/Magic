@@ -1,0 +1,337 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Threading.Channels;
+using Magic.Contexts.Threading;
+
+namespace Magic.Services;
+
+/// <summary>
+/// Where work runs when it has to run somewhere in particular: on one of the engine's two threads
+/// (<see cref="EngineThread"/>), each of which runs what it is handed in the order it was handed, or on a thread of its
+/// own for work that lasts as long as the run. Ordinary async and background work is plain tasks on .NET's thread pool,
+/// not this. Safe from any thread.
+/// <para>
+/// The main thread runs what it was handed at the start of every frame, before Update; the render thread between frames.
+/// Nothing here waits for another thread: <see cref="Post"/> returns at once and
+/// <see cref="InvokeAsync(EngineThread, Action, CancellationToken)"/> hands back a task, so the two engine threads never
+/// wait on each other but where the frame loop says. Work handed to the main thread before it starts runs on its first
+/// frame.
+/// </para>
+/// <para>
+/// When the frame loop ends, each thread runs what it was left. The gems are then disposed on the render thread, which
+/// takes no more work, while the main thread still runs what it is handed: a gem that owns something of the main
+/// thread's hands its ending there. Once they are disposed, the main thread runs what it was left and ends, and
+/// anything handed to either after that is dropped.
+/// </para>
+/// </summary>
+public sealed class Threads : IDisposable
+{
+    private readonly Lifetime _lifetime;
+    private readonly WorkQueue _main = new("main");
+    private readonly WorkQueue _render = new("render");
+    private volatile bool _framesEnded;
+
+    /// <summary>
+    /// Makes the calling thread, the process's first, the render thread.
+    /// </summary>
+    internal Threads(Lifetime lifetime)
+    {
+        _lifetime = lifetime;
+        _render.Owner = Environment.CurrentManagedThreadId;
+        Thread.CurrentThread.Name ??= "Render";
+    }
+
+    public void Dispose()
+    {
+        _main.Dispose();
+        _render.Dispose();
+    }
+
+    /// <summary>
+    /// Returns which engine thread the calling thread is, or <see cref="EngineThread.Unknown"/> if it is neither.
+    /// </summary>
+    public EngineThread Active()
+    {
+        int mainId = Queue(EngineThread.Main).Owner;
+        if (mainId == Environment.CurrentManagedThreadId)
+        {
+            return EngineThread.Main;
+        }
+
+        int renderId = Queue(EngineThread.Render).Owner;
+        if (renderId == Environment.CurrentManagedThreadId)
+        {
+            return EngineThread.Render;
+        }
+
+        return EngineThread.Unknown;
+    }
+
+    /// <summary>
+    /// Whether the calling thread may do <paramref name="thread"/>'s work now: it is that thread, or that thread is not
+    /// running (start-up and shutdown, which run alone on the render thread).
+    /// </summary>
+    public bool IsCurrent(EngineThread thread)
+    {
+        int owner = Queue(thread).Owner;
+        return owner == 0 || owner == Environment.CurrentManagedThreadId;
+    }
+
+    /// <summary>
+    /// Hands <paramref name="work"/> to <paramref name="thread"/> and returns at once. What it throws is logged as an
+    /// error.
+    /// </summary>
+    public void Post(EngineThread thread, Action work)
+    {
+        if (!Queue(thread).Enqueue(work))
+        {
+            Debugging.Warn($"Work was handed to the {thread} thread after the run ended; it is dropped.");
+        }
+    }
+
+    /// <summary>
+    /// Hands <paramref name="work"/> to <paramref name="thread"/>; the task ends once it has run, with what it threw, and
+    /// whoever awaits it goes on on a worker. Work that has not started when <paramref name="cancel"/> is cancelled, or
+    /// that the thread will never run because the run has ended, never runs, and the task ends cancelled.
+    /// </summary>
+    public Task InvokeAsync(EngineThread thread, Action work, CancellationToken cancel = default)
+    {
+        return InvokeAsync<object?>(thread, () =>
+        {
+            work();
+            return null;
+        }, cancel);
+    }
+
+    /// <inheritdoc cref="InvokeAsync(EngineThread, Action, CancellationToken)"/>
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "What the work throws ends the task, for whoever awaits it.")]
+    public Task<T> InvokeAsync<T>(EngineThread thread, Func<T> work, CancellationToken cancel = default)
+    {
+        if (cancel.IsCancellationRequested)
+        {
+            return Task.FromCanceled<T>(cancel);
+        }
+
+        TaskCompletionSource<T> done = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool queued = Queue(thread).Enqueue(() =>
+        {
+            if (cancel.IsCancellationRequested)
+            {
+                done.SetCanceled(cancel);
+                return;
+            }
+
+            try
+            {
+                done.SetResult(work());
+            }
+            catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+            {
+                done.SetCanceled(cancel);
+            }
+            catch (Exception ex)
+            {
+                done.SetException(ex);
+            }
+        });
+
+        if (!queued)
+        {
+            done.SetCanceled(CancellationToken.None);
+        }
+
+        return done.Task;
+    }
+
+    /// <summary>
+    /// Runs <paramref name="work"/> on a thread of its own named <paramref name="name"/>: for work that lasts as long as
+    /// the run and would hold a pool thread the whole time, such as reading the terminal. It is given
+    /// <see cref="Lifetime.Stopping"/>, and the task ends with it: with what it threw, or cancelled when it stops for the
+    /// token. The thread is a background one, so work that cannot look at the token (a blocking read) does not keep the
+    /// process alive.
+    /// </summary>
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "What the work throws ends the task, for whoever awaits it.")]
+    public Task RunAsync(string name, Action<CancellationToken> work)
+    {
+        TaskCompletionSource ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken stopping = _lifetime.Stopping;
+        Thread thread = new(() =>
+        {
+            try
+            {
+                work(stopping);
+                ended.SetResult();
+            }
+            catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+            {
+                ended.SetCanceled(stopping);
+            }
+            catch (Exception ex)
+            {
+                ended.SetException(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = name,
+        };
+        thread.Start();
+        return ended.Task;
+    }
+
+    /// <summary>
+    /// Runs what the main thread was handed so far. On the main thread, at the start of each frame.
+    /// </summary>
+    internal void RunMainWork()
+    {
+        _main.RunPending();
+    }
+
+    /// <summary>
+    /// Runs <paramref name="frames"/> on a new thread, the main thread, and the render thread's work on the calling
+    /// thread, the render thread, until <paramref name="frames"/> returns. Then <paramref name="end"/> runs here, once
+    /// the render thread has run what it was left and takes no more, while the main thread still runs what it is handed;
+    /// then the main thread runs what is left and ends.
+    /// </summary>
+    internal void Run(Action frames, Action end)
+    {
+        Thread main = new(() => RunMain(frames)) { Name = "Main" };
+        main.Start();
+        while (!_framesEnded)
+        {
+            _render.Wait();
+            _render.RunPending();
+        }
+
+        _render.End();
+        _render.RunUntilEnded();
+        end();
+        _main.End();
+        main.Join();
+    }
+
+    private void RunMain(Action frames)
+    {
+        _main.Owner = Environment.CurrentManagedThreadId;
+        try
+        {
+            frames();
+            _main.RunPending();
+        }
+        finally
+        {
+            _framesEnded = true;
+            _render.Wake();
+        }
+
+        // Until the gems are disposed: what they hand the main thread as they end runs here.
+        _main.RunUntilEnded();
+        _main.Owner = 0;
+    }
+
+    private WorkQueue Queue(EngineThread thread)
+    {
+        return thread switch
+        {
+            EngineThread.Main => _main,
+            EngineThread.Render => _render,
+            EngineThread.Unknown => throw new ArgumentOutOfRangeException(nameof(thread), thread, "There is no such engine thread."),
+            _ => throw new ArgumentOutOfRangeException(nameof(thread), thread, "There is no such engine thread."),
+        };
+    }
+
+    /// <summary>
+    /// One engine thread's work, in the order it came, and the thread running it.
+    /// </summary>
+    private sealed class WorkQueue(string name) : IDisposable
+    {
+        // Completed when the thread ends: a write after that fails, so nothing is left behind unrun.
+        private readonly Channel<Action> _work = Channel.CreateUnbounded<Action>(new UnboundedChannelOptions { SingleReader = true });
+        private readonly ManualResetEventSlim _arrived = new();
+
+        public void Dispose()
+        {
+            _arrived.Dispose();
+        }
+
+        /// <summary>
+        /// The managed id of the thread that runs this work; 0 while none does.
+        /// </summary>
+        public int Owner
+        {
+            get => Volatile.Read(ref field);
+            set => Volatile.Write(ref field, value);
+        }
+
+        /// <summary>
+        /// Adds <paramref name="work"/>; false once the thread has ended.
+        /// </summary>
+        public bool Enqueue(Action work)
+        {
+            if (!_work.Writer.TryWrite(work))
+            {
+                return false;
+            }
+
+            _arrived.Set();
+            return true;
+        }
+
+        /// <summary>
+        /// Blocks until work arrives or <see cref="Wake"/> is called.
+        /// </summary>
+        public void Wait()
+        {
+            _arrived.Wait();
+
+            // Before running what came: work added from here on sets it again.
+            _arrived.Reset();
+        }
+
+        public void Wake()
+        {
+            _arrived.Set();
+        }
+
+        public void RunPending()
+        {
+            while (_work.Reader.TryRead(out Action? work))
+            {
+                Run(work);
+            }
+        }
+
+        /// <summary>
+        /// Takes no more work, and wakes the thread running it to run what is left.
+        /// </summary>
+        public void End()
+        {
+            _work.Writer.TryComplete();
+            _arrived.Set();
+        }
+
+        /// <summary>
+        /// Runs work as it comes until <see cref="End"/> and the last of it has run. On the thread that runs this work.
+        /// </summary>
+        public void RunUntilEnded()
+        {
+            while (!_work.Reader.Completion.IsCompleted)
+            {
+                Wait();
+                RunPending();
+            }
+        }
+
+        [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever posted work throws, it is logged and the thread goes on.")]
+        private void Run(Action work)
+        {
+            try
+            {
+                work();
+            }
+            catch (Exception ex)
+            {
+                Debugging.Error($"Work handed to the {name} thread threw: {ex}");
+            }
+        }
+    }
+}

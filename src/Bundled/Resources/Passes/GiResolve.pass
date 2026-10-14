@@ -1,0 +1,11 @@
+{
+    "stage": "probes",
+    "kind": "compute",
+    "shader": { "id": 11324 },
+    "reads": [
+        { "name": "GiSplat" },
+        { "name": "GiLevels" }
+    ],
+    "writes": [ { "name": "GiField" } ],
+    "dispatch": { "per": "1048576" }
+}

@@ -1,0 +1,14 @@
+{
+    "entities": [
+        { "prefab": { "id": 3357 }, "components": { "Transform": { "position": { "x": 32, "y": 0, "z": 32 } } } },
+        { "prefab": { "id": 3350 }, "components": { "Transform": { "position": { "x": 13.654, "y": 0, "z": 45.565 }, "rotation": { "x": 0, "y": 0.437, "z": 0, "w": -0.9 }, "scale": { "x": 25.853, "y": 1, "z": 24.366 } } } },
+        { "prefab": { "id": 3350 }, "components": { "Transform": { "position": { "x": 19.622, "y": 0, "z": 29.311 }, "rotation": { "x": 0, "y": 0.921, "z": 0, "w": 0.391 }, "scale": { "x": 26.877, "y": 1, "z": 22.279 } } } },
+        { "prefab": { "id": 3343 }, "components": { "Transform": { "position": { "x": 42.658, "y": 0, "z": 21.372 }, "rotation": { "x": 0, "y": 0.926, "z": 0, "w": 0.378 }, "scale": { "x": 1.103, "y": 1.103, "z": 1.103 } } } },
+        { "prefab": { "id": 3343 }, "components": { "Transform": { "position": { "x": 37.123, "y": 0, "z": 15.538 }, "rotation": { "x": 0, "y": 0.737, "z": 0, "w": -0.676 }, "scale": { "x": 0.828, "y": 0.828, "z": 0.828 } } } },
+        { "prefab": { "id": 3343 }, "components": { "Transform": { "position": { "x": 47.885, "y": 0, "z": 54.378 }, "rotation": { "x": 0, "y": 0.356, "z": 0, "w": -0.934 }, "scale": { "x": 0.943, "y": 0.943, "z": 0.943 } } } },
+        { "prefab": { "id": 3343 }, "components": { "Transform": { "position": { "x": 1.8, "y": 0, "z": 1.458 }, "rotation": { "x": 0, "y": 0.328, "z": 0, "w": 0.945 }, "scale": { "x": 0.993, "y": 0.993, "z": 0.993 } } } },
+        { "prefab": { "id": 3343 }, "components": { "Transform": { "position": { "x": 33.4, "y": 0, "z": 37.775 }, "rotation": { "x": 0, "y": 0.706, "z": 0, "w": -0.708 }, "scale": { "x": 1.02, "y": 1.02, "z": 1.02 } } } },
+        { "prefab": { "id": 3359 }, "components": { "Transform": { "position": { "x": 11.343, "y": 0, "z": 28.787 } } } },
+        { "prefab": { "id": 3345 }, "components": { "Transform": { "position": { "x": 13.402, "y": 0, "z": 12.192 }, "rotation": { "x": 0, "y": 0.817, "z": 0, "w": -0.576 }, "scale": { "x": 0.951, "y": 0.951, "z": 0.951 } } } }
+    ]
+}

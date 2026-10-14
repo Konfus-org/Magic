@@ -1,0 +1,12 @@
+{
+    "stage": "occlusion",
+    "kind": "compute",
+    "shader": { "id": 11284 },
+    "reads": [
+        { "name": "Depth", "filter": "nearest" },
+        { "name": "Normal", "filter": "nearest" }
+    ],
+    "creates": [ { "name": "AmbientOcclusionNoisy", "format": "rgba8_unorm", "scale": 0.5 } ],
+    "writes": [ { "name": "AmbientOcclusionNoisy" } ],
+    "dispatch": { "per": "output:AmbientOcclusionNoisy" }
+}

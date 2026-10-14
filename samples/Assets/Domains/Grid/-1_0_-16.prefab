@@ -1,0 +1,15 @@
+{
+    "entities": [
+        { "prefab": { "id": 3354 }, "components": { "Transform": { "position": { "x": 32, "y": 0, "z": 32 } } } },
+        { "prefab": { "id": 3347 }, "components": { "Transform": { "position": { "x": 60.644, "y": 0, "z": 50.844 }, "rotation": { "x": 0, "y": 0.939, "z": 0, "w": 0.344 }, "scale": { "x": 31.495, "y": 31.495, "z": 31.495 } } } },
+        { "prefab": { "id": 3347 }, "components": { "Transform": { "position": { "x": 37.046, "y": 0, "z": 57.64 }, "rotation": { "x": 0, "y": 0.893, "z": 0, "w": 0.451 }, "scale": { "x": 28.176, "y": 28.176, "z": 28.176 } } } },
+        { "prefab": { "id": 3345 }, "components": { "Transform": { "position": { "x": 34.895, "y": 0, "z": 46.109 }, "rotation": { "x": 0, "y": 0.996, "z": 0, "w": 0.095 }, "scale": { "x": 1.34, "y": 1.34, "z": 1.34 } } } },
+        { "prefab": { "id": 3345 }, "components": { "Transform": { "position": { "x": 20.466, "y": 0, "z": 58.639 }, "rotation": { "x": 0, "y": 0.574, "z": 0, "w": 0.819 }, "scale": { "x": 1.332, "y": 1.332, "z": 1.332 } } } },
+        { "prefab": { "id": 3345 }, "components": { "Transform": { "position": { "x": 4.082, "y": 0, "z": 2.994 }, "rotation": { "x": 0, "y": 0.533, "z": 0, "w": 0.846 }, "scale": { "x": 1.08, "y": 1.08, "z": 1.08 } } } },
+        { "prefab": { "id": 3345 }, "components": { "Transform": { "position": { "x": 57.392, "y": 0, "z": 48.966 }, "rotation": { "x": 0, "y": 1, "z": 0, "w": -0 }, "scale": { "x": 1.033, "y": 1.033, "z": 1.033 } } } },
+        { "prefab": { "id": 3345 }, "components": { "Transform": { "position": { "x": 40.919, "y": 0, "z": 53.584 }, "rotation": { "x": 0, "y": 0.323, "z": 0, "w": 0.946 }, "scale": { "x": 0.804, "y": 0.804, "z": 0.804 } } } },
+        { "prefab": { "id": 3345 }, "components": { "Transform": { "position": { "x": 38.221, "y": 0, "z": 29.298 }, "rotation": { "x": 0, "y": 0.543, "z": 0, "w": -0.84 }, "scale": { "x": 1.302, "y": 1.302, "z": 1.302 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 7.885, "y": 0, "z": 1.981 }, "rotation": { "x": 0, "y": 0.258, "z": 0, "w": -0.966 }, "scale": { "x": 0.516, "y": 0.516, "z": 0.516 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 12.41, "y": 0, "z": 48.591 }, "rotation": { "x": 0, "y": 0.947, "z": 0, "w": 0.321 }, "scale": { "x": 1.167, "y": 1.167, "z": 1.167 } } } }
+    ]
+}

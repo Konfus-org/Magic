@@ -1,9 +1,0 @@
-{
-    "entities": [
-        {"name": "PostProcessing", "components": {"PostProcessing": {"posts": [{"id": 10030}]}}},
-        {"name": "Sky", "components": {"Sky": {"color": {"r": 0.42, "g": 0.58, "b": 0.9}}}},
-        {"name": "Sun", "components": {"Transform": {"rotation": {"x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023}}, "DirectionalLight": {"color": {"r": 1, "g": 0.96, "b": 0.88}, "intensity": 3.5, "castsShadows": true}}},
-        {"name": "Orbit", "scripts": [{"id": 3051, "degreesPerSecond": 3}]},
-        {"name": "Camera", "scripts": [{"id": 3050, "speed": 40}], "components": {"Transform": {"position": {"x": 0, "y": 55, "z": -520}, "rotation": {"x": 0.07846, "y": 0, "z": 0, "w": 0.99692}}, "Camera": {}}}
-    ]
-}

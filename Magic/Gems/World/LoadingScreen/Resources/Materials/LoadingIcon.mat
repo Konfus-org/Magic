@@ -1,8 +1,0 @@
-{
-    "shader": { "id": 10002 },
-    "type": "masked",
-    "params": {
-        "color": { "r": 1, "g": 1, "b": 1, "a": 1 },
-        "colorMap": { "texture": { "id": 7436761896624509111 } }
-    }
-}

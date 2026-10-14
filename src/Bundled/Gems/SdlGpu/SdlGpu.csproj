@@ -1,0 +1,13 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- SDL is a C API: its device, command buffers and passes are pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The bindings only: SDL itself is the copy the platform gem loaded, which owns the window this gem draws into
+         and which every gem shares (GemLoadContext). -->
+    <PackageReference Include="ppy.SDL3-CS" ExcludeAssets="native" />
+  </ItemGroup>
+</Project>

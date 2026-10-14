@@ -1,0 +1,7 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- Magic's own scripts: assets in the bundled resources, compiled with the rest of this gem's code. -->
+    <Compile Include="../../Resources/**/*.cs" />
+  </ItemGroup>
+</Project>

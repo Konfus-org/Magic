@@ -1,8 +1,0 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-  <!-- Unit tests of Magic's public API (see Directory.Build.props). -->
-  <PropertyGroup>
-    <RootNamespace>MagicTests</RootNamespace>
-  </PropertyGroup>
-
-</Project>

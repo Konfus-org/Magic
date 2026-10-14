@@ -1,0 +1,8 @@
+{
+    "stage": "light_culling",
+    "kind": "compute",
+    "shader": { "id": 60034 },
+    "reads": [ { "name": "LightCounts" }, { "name": "Lights" } ],
+    "writes": [ { "name": "LightTiles" } ],
+    "dispatch": { "per": "lights" }
+}

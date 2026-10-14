@@ -1,0 +1,65 @@
+// The sky's light from everywhere as nine spherical-harmonic coefficients, for Core's ShIrradiance
+// (Lighting/Ibl.hlsli): the captured sky projected on the real SH basis, each texel weighted by the solid angle it
+// covers (Sloan 2008, "Stupid Spherical Harmonics Tricks"). One group reads a small mip of every face and sums.
+
+#include "Include/Cube.hlsli"
+#include "Include/Math.hlsli"
+
+// Texels a side of the mip read, and threads in the group.
+#define FACE_SIZE 16u
+#define THREADS 64u
+
+groupshared float3 Sums[THREADS][9];
+
+[numthreads(THREADS, 1, 1)]
+void main(uint thread : SV_GroupIndex)
+{
+    float width;
+    float height;
+    float levels;
+    SkyCube.GetDimensions(0u, width, height, levels);
+    float level = clamp(log2(width / (float)FACE_SIZE), 0.0, levels - 1.0);
+
+    float3 sums[9];
+    [unroll] for (uint i = 0u; i < 9u; i++)
+    {
+        sums[i] = float3(0.0, 0.0, 0.0);
+    }
+
+    for (uint texel = thread; texel < 6u * FACE_SIZE * FACE_SIZE; texel += THREADS)
+    {
+        uint face = texel / (FACE_SIZE * FACE_SIZE);
+        uint inFace = texel % (FACE_SIZE * FACE_SIZE);
+        float2 uv = (float2(inFace % FACE_SIZE, inFace / FACE_SIZE) + 0.5) / (float)FACE_SIZE;
+        float2 st = uv * 2.0 - 1.0;
+        float solidAngle = 4.0 / (Pow2((float)FACE_SIZE) * pow(1.0 + dot(st, st), 1.5));
+        float3 direction = CubeDirection(face, uv);
+        float3 radiance = SkyCube.SampleLevel(SkyCubeSampler, direction, level).rgb * solidAngle;
+        sums[0] += radiance * 0.282095;
+        sums[1] += radiance * (0.488603 * direction.y);
+        sums[2] += radiance * (0.488603 * direction.z);
+        sums[3] += radiance * (0.488603 * direction.x);
+        sums[4] += radiance * (1.092548 * direction.x * direction.y);
+        sums[5] += radiance * (1.092548 * direction.y * direction.z);
+        sums[6] += radiance * (0.315392 * (3.0 * direction.z * direction.z - 1.0));
+        sums[7] += radiance * (1.092548 * direction.x * direction.z);
+        sums[8] += radiance * (0.546274 * (direction.x * direction.x - direction.y * direction.y));
+    }
+
+    [unroll] for (uint j = 0u; j < 9u; j++)
+    {
+        Sums[thread][j] = sums[j];
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    [branch] if (thread < 9u)
+    {
+        float3 total = float3(0.0, 0.0, 0.0);
+        for (uint other = 0u; other < THREADS; other++)
+        {
+            total += Sums[other][thread];
+        }
+
+        STORE(SkySh, float4, thread, float4(total, 0.0));
+    }
+}

@@ -1,0 +1,8 @@
+{
+    "stage": "occlusion",
+    "kind": "compute",
+    "shader": { "id": 60043 },
+    "reads": [ { "name": "SunClipmap" }, { "name": "SceneLights" }, { "name": "ChangedLights" }, { "name": "Moved" }, { "name": "ShadowArgs" }, { "name": "ShadowViews" } ],
+    "writes": [ { "name": "ShadowTables" } ],
+    "dispatch": { "per": "lightEntries" }
+}

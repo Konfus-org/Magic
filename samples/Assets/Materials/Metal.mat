@@ -1,0 +1,8 @@
+{
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.95, "g": 0.8, "b": 0.55, "a": 1 },
+        "roughness": { "x": 0.3 },
+        "metallic": { "x": 1 }
+    }
+}

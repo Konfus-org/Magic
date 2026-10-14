@@ -1,0 +1,23 @@
+{
+    "stage": "depth",
+    "kind": "compute",
+    "shader": { "id": 60021 },
+    "reads": [
+        { "name": "Instances" },
+        { "name": "Models" },
+        { "name": "Levels" },
+        { "name": "Cards" },
+        { "name": "MaterialBins" },
+        { "name": "HiZ" }
+    ],
+    "writes": [
+        { "name": "CullCounts" },
+        { "name": "BinCounts" },
+        { "name": "Budget" },
+        { "name": "HiddenInstances" },
+        { "name": "Jobs" },
+        { "name": "VisibleClusters" }
+    ],
+    "dispatch": { "args": "CullArgs", "first": 2 },
+    "params": { "phase": { "x": 2 } }
+}

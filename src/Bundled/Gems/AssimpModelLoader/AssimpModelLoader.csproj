@@ -1,0 +1,12 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- A file is handed to Assimp where it lies in memory, as a pointer. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Assimp, built for each OS; the gem hands the machine's to the wrapper, which loads it itself. -->
+    <PackageReference Include="AssimpNetter" />
+  </ItemGroup>
+</Project>

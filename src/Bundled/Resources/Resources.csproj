@@ -1,0 +1,3 @@
+<!-- The assets that ship with Magic: the engine's own and its bundled gems'. Nothing here builds: Core ships the
+     folder, and the scripting gem compiles the scripts. -->
+<Project Sdk="Microsoft.Build.NoTargets" />

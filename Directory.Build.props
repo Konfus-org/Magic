@@ -1,199 +1,90 @@
-﻿<Project>
-
-  <!-- Shared settings for every project in this repo. -->
-
+<Project>
+  <!-- Every project. The build is strict: every compiler, analyzer, MSBuild and NuGet warning is an error, and the
+       analyzer rules are in .editorconfig. -->
   <PropertyGroup>
-    <!-- Single source of truth for the target framework. Declared here (not
-         in each csproj) so the output paths below can use it: this file is
-         imported before a project's own PropertyGroup is evaluated. -->
-    <TargetFramework>net10.0</TargetFramework>
-
-    <!-- The SDK only defaults Configuration later, in its .targets. Default
-         it here so it's usable in the paths below under a plain
-         "dotnet build" (VS and "dotnet build -c X" pass it in explicitly). -->
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
-
-    <!-- The three build configurations. The SDK defines the upper-cased configuration name
-         for every build (Microsoft.NET.Sdk.CSharp.targets), so code gets exactly one of
-         DEBUG, OPTIMIZE or RELEASE:
-           Debug    - no optimisation, DEBUG.
-           Optimize - optimised code with full symbols, OPTIMIZE: profile real performance
-                      while still being able to step through it.
-           Release  - optimised code, RELEASE. -->
     <Configurations>Debug;Optimize;Release</Configurations>
-
-    <!-- Repo root, for project references that must not depend on where a project lives. -->
-    <MagicRoot>$(MSBuildThisFileDirectory)</MagicRoot>
-
-    <!-- The machine doing the build, as a portable runtime (linux-x64): an SDK from a Linux distribution calls
-         itself by the distribution (ubuntu.26.04-x64), which no native package is published for. -->
-    <MagicHostOS Condition="$([MSBuild]::IsOSPlatform('Windows'))">win</MagicHostOS>
-    <MagicHostOS Condition="$([MSBuild]::IsOSPlatform('Linux'))">linux</MagicHostOS>
-    <MagicHostOS Condition="$([MSBuild]::IsOSPlatform('OSX'))">osx</MagicHostOS>
-    <MagicHostRuntime>$(MagicHostOS)-$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant())</MagicHostRuntime>
-
-    <!-- The platform being built for: the machine's own unless "-r <rid>" says otherwise. No csproj names a
-         runtime; the projects that carry native libraries (gems, tests) build for this one. -->
-    <MagicRuntime>$(RuntimeIdentifier)</MagicRuntime>
-    <MagicRuntime Condition="'$(MagicRuntime)' == ''">$(MagicHostRuntime)</MagicRuntime>
-
-    <!-- The same, as native packages that ship one per OS spell it: "SDL3-CS.$(MagicPlatform)". -->
-    <MagicPlatform Condition="$(MagicRuntime.StartsWith('win'))">Windows</MagicPlatform>
-    <MagicPlatform Condition="$(MagicRuntime.StartsWith('linux'))">Linux</MagicPlatform>
-    <MagicPlatform Condition="$(MagicRuntime.StartsWith('osx'))">MacOS</MagicPlatform>
-
-    <!-- One SDL for every gem that uses it: the SDL3-CS bindings and the native SDL package they call. -->
-    <Sdl3CsVersion>3.4.16</Sdl3CsVersion>
-    <Sdl3NativeVersion>3.4.14.1</Sdl3NativeVersion>
-
-    <!-- A build for another platform ("-r linux-x64" on Windows) gets a folder of its own, so it never
-         overwrites the machine's own build: Build\net10.0\Debug-linux-x64\. -->
-    <MagicBuildDir>$(MSBuildThisFileDirectory)Build\$(TargetFramework)\$(Configuration)\</MagicBuildDir>
-    <MagicBuildDir Condition="'$(MagicRuntime)' != '$(MagicHostRuntime)'">$(MSBuildThisFileDirectory)Build\$(TargetFramework)\$(Configuration)-$(MagicRuntime)\</MagicBuildDir>
-
-    <!-- Whether assets are copied next to the exe: in Release, and for another platform, where a path on this
-         machine means nothing. Debug and Optimize read them where they are, so an edit shows without a build. -->
-    <ShipResources Condition="'$(Configuration)' == 'Release' Or '$(MagicRuntime)' != '$(MagicHostRuntime)'">true</ShipResources>
-
-    <!-- The runtime is in the path already when it matters; the SDK must not add a folder for it. -->
-    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
-
-    <!-- Stop the SDK from appending net10.0\ after the path; it's already in it. -->
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-
-    <OutputPath>$(MagicBuildDir)bin\</OutputPath>
-    <!-- BaseIntermediateOutputPath is where NuGet restore writes
-         project.assets.json; IntermediateOutputPath is where the compiler
-         writes. Pointing both at the same folder keeps everything in one obj\. -->
-    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
-
-    <!-- Reference assemblies only speed up incremental builds across
-         projects; skipping them keeps a ref\ folder out of obj\. -->
-    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
-
-    <!-- The SDK only excludes bin\ and obj\ from the *.cs glob by way of
-         the two paths above, which now live under Build\. Exclude the
-         conventional folders by name too, so a stale obj\ left next to a
-         csproj can never get compiled as source. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**</DefaultItemExcludes>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <Features>strict</Features>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>All</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Also what lets the build report unused usings (IDE0005). -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- A package with a known vulnerability, direct or transitive, fails the restore. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
   </PropertyGroup>
 
-  <!-- The SDK only knows Debug and Release: it sets Optimize and DebugSymbols from those
-       names, so Optimize has to set them itself. -->
+  <!-- Output: Build/obj/<Project>/, and Build/net10.0/<Configuration>/bin/ for Magic (gems go under its Gems/). -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)Build/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
+    <MagicBin>$(MSBuildThisFileDirectory)Build/$(TargetFramework)/$(Configuration)/bin/</MagicBin>
+    <OutputPath>$(MagicBin)</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <!-- Assets: a part's own are its Resources/ folder (MagicResources). A release copies them beside its assembly, their
+       READMEs and any project file left behind; any other build copies nothing and records the folder in the assembly
+       (Magic.Resources), so assets are read where they are written, and an edit reaches a running engine without a
+       build. -->
+  <PropertyGroup>
+    <MagicResources>$(MSBuildProjectDirectory)/Resources</MagicResources>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Content Include="$(MagicResources)/**" Exclude="$(MagicResources)/**/*.md;$(MagicResources)/**/*.csproj" LinkBase="Resources" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' != 'Release'">
+    <AssemblyMetadata Include="Magic.Resources" Value="$([System.IO.Path]::GetFullPath('$(MagicResources)'))" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <!-- Integer overflow throws while developing instead of wrapping silently; wrap on purpose with unchecked. -->
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)' == 'Optimize'">
     <Optimize>true</Optimize>
-    <DebugSymbols>true</DebugSymbols>
-    <DebugType>portable</DebugType>
   </PropertyGroup>
 
-  <!-- A gem is any project that sets <IsMagicGem>true</IsMagicGem> *before* importing Sdk.props
-       (see Magic\Gems\SdlPlatform\SdlPlatform.csproj). A property set in the body of a csproj that uses the Sdk="..."
-       attribute is not visible here: this file is imported by the SDK before that body is read.
-       Not tied to the Gems\ folder, so a project created from the template elsewhere still builds as a gem. -->
-  <PropertyGroup Condition="'$(IsMagicGem)' == 'true'">
-    <!-- Gems are plugins: build as class libraries only, never an EXE/apphost. -->
-    <OutputType>Library</OutputType>
-
-    <!-- Marks this as a dynamically-loaded plugin, so the SDK writes a
-         .deps.json and copies its dependencies locally. A gem loaded
-         via reflection outside the host's own dependency graph needs
-         those sitting right next to it. -->
-    <EnableDynamicLoading>true</EnableDynamicLoading>
-
-    <!-- A runtime makes the SDK copy a package's native libraries for that platform, and only those, flat next
-         to the gem, where its load context finds them. -->
-    <RuntimeIdentifier>$(MagicRuntime)</RuntimeIdentifier>
-
-    <!-- Gems aren't published to NuGet. -->
-    <IsPackable>false</IsPackable>
-
-    <!-- A gem references every gem it builds on itself, and none comes along through another: the gems it names are
-         what the loader loads first, and no gem's copy lands in a project's build to be loaded twice. -->
-    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
-
-    <!-- All gems land flat in bin\Gems\ next to the host exe: that is the
-         folder the host's gem loader (Magic\Core\Internal\Gems.cs) scans for plugin DLLs at runtime. -->
-    <OutputPath>$(MagicBuildDir)bin\Gems\</OutputPath>
-
-    <!-- Intermediate files get one folder per gem. Sharing a single obj\
-         between projects breaks MSBuild's incremental build (they overwrite
-         each other's per-project caches). -->
-    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\Gems\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <!-- Source paths compiled in, such as the file each log line names, start at the repository rather than the
+         folders of the machine that built it. Other configurations keep full paths, so debuggers find the sources. -->
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
   </PropertyGroup>
 
-  <!-- What the host needs to know about a gem before it constructs it, stamped into the assembly. Set in the gem's
-       csproj: GemStatic (true: loaded once, never reloaded; absent is false); what it needs loaded first are its project
-       references.
-       The gem's name is its assembly name; Version, Description and
-       Authors are the SDK's own properties. Items are evaluated after every property, so the csproj body's values count. -->
-  <ItemGroup Condition="'$(IsMagicGem)' == 'true'">
-    <AssemblyMetadata Include="MagicGem.Static" Value="$([MSBuild]::ValueOrDefault('$(GemStatic)', 'false'))" />
-  </ItemGroup>
-
-  <!-- A gem's own assets, and the engine's: a Resources folder beside the csproj, its place stamped into the assembly.
-       The loader adds a gem's while the gem is loaded, Program the engine's for the whole run (GemResources). In Debug
-       and Optimize that is each part's folder itself, so an edit shows without a build; shipped, every part's are one
-       bundle, bin\Resources\, which Core.csproj makes (BundleResources) and Core stamps: no gem stamps its own. -->
-  <PropertyGroup Condition="('$(IsMagicGem)' == 'true' Or '$(MSBuildProjectName)' == 'Core') And Exists('$(MSBuildProjectDirectory)\Resources') And '$(ShipResources)' != 'true'">
-    <GemResources>$(MSBuildProjectDirectory)\Resources</GemResources>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Core' And '$(ShipResources)' == 'true'">
-    <GemResources>Resources</GemResources>
-  </PropertyGroup>
-  <ItemGroup Condition="'$(GemResources)' != ''">
-    <AssemblyMetadata Include="MagicGem.Resources" Value="$(GemResources)" />
-  </ItemGroup>
-
-  <!-- Unit tests: a project named <Thing>.Tests in a Tests folder beside what it tests (Magic\Core\Tests, a folder per
-       area in it). It tests the public API only, in memory: no files, no native libraries, nothing made visible to it.
-       What it tests never builds it: every other project leaves its Tests folder out. -->
-  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
-    <IsTestProject>true</IsTestProject>
-    <IsPackable>false</IsPackable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <RuntimeIdentifier>$(MagicRuntime)</RuntimeIdentifier>
-    <!-- Tests make their own threads: the banned APIs are for the engine. -->
-    <MagicBansApis>false</MagicBansApis>
-    <OutputPath>$(MagicBuildDir)bin\Tests\</OutputPath>
-    <!-- One obj\ per test project; sharing one breaks MSBuild's incremental build. -->
-    <BaseIntermediateOutputPath>$(MagicBuildDir)obj\Tests\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
-    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
-  </PropertyGroup>
-  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
-    <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <!-- A normal reference: Magic.dll is copied next to the tests, unlike next to a gem. -->
-    <ProjectReference Include="$(MagicRoot)Magic\Core\Core.csproj" />
-  </ItemGroup>
-  <PropertyGroup Condition="!$(MSBuildProjectName.EndsWith('.Tests'))">
-    <DefaultItemExcludes>$(DefaultItemExcludes);Tests\**</DefaultItemExcludes>
-  </PropertyGroup>
-
-  <!-- Strict builds for everything of ours (engine, gems, samples, tests): the rules .editorconfig marks as errors
-       fail the build, and so does every nullable warning; any other warning stays a warning. The banned APIs
-       (BannedSymbols.txt) are the conventions a compiler cannot know: disk access through IFileSystem, threads
-       through Threads, output through the log. Nullable.Extended.Analyzer bans the null-forgiving '!' (NX0001-NX0003):
-       what is always there is not declared nullable, and what may be missing is handled. -->
-  <PropertyGroup>
-    <WarningsAsErrors>$(WarningsAsErrors);nullable</WarningsAsErrors>
-    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-
-    <!-- The compiler only reports unused usings (IDE0005) when it reads the doc comments; the file itself is
-         nobody's, so it stays in obj\. Not every public member or
-         parameter has a comment (CS1591, CS1573), and a cref may name a method without picking an overload (CS0419). -->
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <CopyDocumentationFileToOutputDirectory>false</CopyDocumentationFileToOutputDirectory>
-    <NoWarn>$(NoWarn);CS1591;CS1573;CS0419</NoWarn>
-  </PropertyGroup>
+  <!-- Global usings, listed rather than implied. No System.Linq (no LINQ in the frame loop) and no System.IO (disk
+       access goes through IFileSystem): a file that needs either says so. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" PrivateAssets="all" />
-    <PackageReference Include="Nullable.Extended.Analyzer" Version="1.15.6581" PrivateAssets="all" />
-    <AdditionalFiles Include="$(MagicRoot)BannedSymbols.txt" Condition="'$(MagicBansApis)' != 'false'" />
+    <Using Include="System" />
+    <Using Include="System.Collections.Generic" />
+    <Using Include="System.Threading" />
+    <Using Include="System.Threading.Tasks" />
   </ItemGroup>
 
+  <ItemGroup>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" Visible="false" />
+  </ItemGroup>
+
+  <!-- A namespace matches its folder: the project's RootNamespace, then each folder below the project (CODESTANDARDS
+       Folders). Checked here rather than by IDE0130, which goes quiet when the checkout's path holds a # or ;: the
+       analyzers read the project's folder from a file in which either starts a comment. Code compiled from outside
+       the project, such as the bundled scripts, is not checked. -->
+  <Target Name="CheckNamespaces" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_OwnCode Include="@(Compile)" Condition="$([System.String]::Copy('%(FullPath)').StartsWith('$(ProjectDir)'))"
+                Folder="$([MSBuild]::MakeRelative('$(ProjectDir)', '%(RootDir)%(Directory)'))" />
+      <_OwnCode Namespace="$([System.String]::Copy('$(RootNamespace).%(Folder)').Replace('\', '.').Replace('/', '.').TrimEnd('.'))" />
+    </ItemGroup>
+    <Error Condition="'%(_OwnCode.FullPath)' != '' and !$([System.IO.File]::ReadAllText('%(_OwnCode.FullPath)').Contains('namespace %(_OwnCode.Namespace);'))"
+           ContinueOnError="ErrorAndContinue" File="%(_OwnCode.FullPath)"
+           Text="Its namespace must be %(_OwnCode.Namespace), its folder's." />
+  </Target>
 </Project>

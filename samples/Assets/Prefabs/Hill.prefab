@@ -1,0 +1,5 @@
+{
+    "entities": [
+        { "name": "Hill", "components": { "Transform": { "position": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1, "y": 0.2, "z": 1 } }, "Renderer": { "model": { "id": 517 }, "materials": { "slot0": { "id": 3326 } } } } }
+    ]
+}

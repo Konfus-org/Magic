@@ -1,0 +1,6 @@
+{
+    "entities": [
+        { "name": "Walls", "components": { "Transform": { "position": { "x": 0, "y": 2, "z": 0 }, "scale": { "x": 6, "y": 4, "z": 8 } }, "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 3339 } } } } },
+        { "name": "Roof", "components": { "Transform": { "position": { "x": 0, "y": 4, "z": 0 }, "rotation": { "x": 0, "y": 0, "z": 0.383, "w": 0.924 }, "scale": { "x": 4.25, "y": 4.25, "z": 7.8 } }, "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 3324 } } } } }
+    ]
+}

@@ -1,0 +1,9 @@
+{
+    "stage": "occlusion",
+    "kind": "compute",
+    "shader": { "id": 11282 },
+    "reads": [ { "name": "Depth", "filter": "nearest" } ],
+    "creates": [ { "name": "ContactShadows", "format": "r8_unorm" } ],
+    "writes": [ { "name": "ContactShadows" } ],
+    "dispatch": { "per": "view" }
+}

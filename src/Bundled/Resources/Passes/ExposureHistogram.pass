@@ -1,0 +1,14 @@
+{
+    "stage": "post",
+    "kind": "compute",
+    "shader": { "id": 11260 },
+    "reads": [
+        { "name": "Hdr", "filter": "nearest" },
+        { "name": "Exposure" }
+    ],
+    "creates": [
+        { "name": "ExposureHistogram", "kind": "buffer", "type": "uint", "stride": 4, "rows": 64, "seed": "Zeros" }
+    ],
+    "writes": [ { "name": "ExposureHistogram" } ],
+    "dispatch": { "per": "view" }
+}

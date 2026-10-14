@@ -1,0 +1,16 @@
+{
+    "stage": "occlusion",
+    "kind": "compute",
+    "shader": { "id": 60044 },
+    "reads": [ { "name": "Instances" }, { "name": "SceneLights" }, { "name": "SunClipmap" } ],
+    "writes": [
+        { "name": "ShadowTables" },
+        { "name": "ShadowCandidates" },
+        { "name": "ShadowViews" },
+        { "name": "ShadowGroups" },
+        { "name": "ShadowLightGroups" },
+        { "name": "ShadowArgs" },
+        { "name": "ShadowCounts" }
+    ],
+    "dispatch": { "groups": [ 1 ] }
+}

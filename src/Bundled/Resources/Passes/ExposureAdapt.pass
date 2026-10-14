@@ -1,0 +1,8 @@
+{
+    "stage": "post",
+    "kind": "compute",
+    "shader": { "id": 11261 },
+    "reads": [ { "name": "ExposureHistogram" } ],
+    "writes": [ { "name": "Exposure" } ],
+    "dispatch": { "groups": [ 1, 1, 1 ] }
+}

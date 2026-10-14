@@ -1,5 +1,0 @@
-{
-    "shader": { "id": 999995 },
-    "inputs": [ "Ldr" ],
-    "output": { "name": "Ldr" }
-}

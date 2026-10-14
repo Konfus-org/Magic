@@ -1,9 +1,0 @@
-{
-    "base": {
-        "id": 10122
-    },
-    "draw": {
-        "load": "load",
-        "args": "DrawArgsLate"
-    }
-}

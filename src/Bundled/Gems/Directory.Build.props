@@ -1,0 +1,16 @@
+<Project>
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!-- Every project under this folder is a gem: a plugin Magic loads from bin/Gems/<Name>/<Name>.dll. -->
+  <PropertyGroup>
+    <RootNamespace>Magic.$(MSBuildProjectName)</RootNamespace>
+    <OutputPath>$(MagicBin)Gems/$(MSBuildProjectName)/</OutputPath>
+    <!-- Copies the gem's own NuGet dependencies, native ones included, next to it. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compiled against, never copied: at run time a gem uses the Magic that loaded it. -->
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../../Core/Core.csproj" Private="false" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>

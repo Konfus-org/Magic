@@ -1,0 +1,12 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- SDL_image is a C API: its streams and surfaces are pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SDL_image, and SDL beneath it, for each OS; the gem's load context picks the machine's. -->
+    <PackageReference Include="ppy.SDL3_image-CS" />
+  </ItemGroup>
+</Project>

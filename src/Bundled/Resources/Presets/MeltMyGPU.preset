@@ -1,0 +1,14 @@
+{
+    // Everything up: drawn at one and a half times the window and scaled down, the finest clusters, the sharpest sun
+    // shadows close up, twice the pages of shadow drawn a frame, and global illumination traced with more rays, its
+    // finest probes every frame. Bring a fan.
+    "settings": {
+        "ClusterRendering.renderScale": 1.5,
+        "ClusterRendering.clusterError": 0.5,
+        "ClusterRendering.shadowFinest": 4,
+        "ClusterRendering.shadowUpdates": 1024,
+        "ClusterRendering.anisotropy": 16,
+        "ClusterRendering.giRays": 128,
+        "ClusterRendering.giUpdateEvery": 1
+    }
+}

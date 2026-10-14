@@ -1,0 +1,15 @@
+{
+    "entities": [
+        {
+            "name": "Camera",
+            "tags": [ "player" ],
+            "components": {
+                "Transform": {},
+                "Camera": {}
+            },
+            "scripts": [
+                { "id": 3315, "speed": 30 }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,69 @@
+# ImGuiDebugUI
+
+The debug UI, drawn with Dear ImGui ([Hexa.NET.ImGui](https://github.com/HexaEngine/Hexa.NET.ImGui)): provides
+`IDebugUI` ([Core's README](../../../Core/README.md#the-debug-ui)). It draws what gems and scripts report, lines down the
+left of the window and text in the world, and the windows gems draw with its widgets, over everything the gems made
+after it have drawn. It takes the GPU, the shader compiler, the assets and the window, and the input and the world when
+there are: without input nothing can be clicked or typed, and without a world, which needs a gem that provides the ECS,
+there are no cameras to put text in the world by.
+
+## Settings
+
+In the project's `Presets/Default.preset`, by another preset, or `--set ImGuiDebugUI.<key>=<value>`:
+
+| Key | Default | |
+| --- | --- | --- |
+| `font` | none | The font everything is written in, `{ "id": N }`; none for the default font. |
+| `fontSize` | `20` | The height of a line of text in window pixels, which every widget is sized around. |
+| `reportSeconds` | `5` | How long a line on screen, or a warning or error in the world, stays when its report does not say. |
+| `textDistance` | `50` | Metres from a camera beyond which text in the world is not shown in its view. |
+
+`font` and `fontSize` are read as the gem starts; the others whenever they are used, so they change while it runs.
+
+## Frames
+
+ImGui's frame is the main thread's, and drawing it the render thread's:
+
+1. **Update** hands ImGui the frame's input and starts its frame. A gem that takes `IDebugUI` is made after this one, so
+   its Update runs after, and the widgets it calls there go into this frame. A widget called outside it throws.
+2. **LateUpdate** ends any window left open, with an error the first time, draws what is reported, ends ImGui's frame
+   and copies what it drew: vertices, indices, the draws into them, and what changed in its textures.
+3. **Render**, a frame behind, takes in the texture changes, uploads the vertices and indices, and records one render
+   pass of draws onto the window's image, as it is, after the gems made after this one have drawn theirs: a gem that
+   takes `IDebugUI`, and any the project lists after this one. So a project lists it before its renderer, as the
+   samples do, to have the UI on top of the scene. The pipeline is made for the window's format once the shaders,
+   `Shaders/Overlay/`, are compiled; until then, and for good when they do not compile, which is an error, nothing is
+   drawn.
+
+ImGui lays out in window pixels, so `fontSize` says how big the UI is. Its colours, the engine's look among them, are
+already encoded for the window's image and are written as they are; a `Color` a gem gives is linear, and is encoded to
+sRGB first. Copy and paste go through the window's clipboard.
+
+## Reports
+
+- A report is kept, from any thread, until it has shown: text at a place in the world for the frame it is reported in,
+  a line or a warning or error for its seconds after it was last reported. The same text at the same place again keeps
+  it up rather than adding another, and a line reported again shows how often.
+- `Info`, `Warn` and `Error` are logged too: an `Info` every time, a warning or error when it first shows, not again
+  while it stays up. Warnings are orange and errors red, between `!!!`s.
+- What is reported shows, and `Enabled` is true, while the window has an image: always in a Debug build, and in any
+  other only while a window drawn with the widgets is open. Reports made meanwhile are kept as ever, and logged.
+- Lines go down the left of the window, those reported every frame first, then the rest oldest first, as many of the
+  last as fit, each with a dark shadow. Text in the
+  world is centred on its place on a dark plate, in every view of a camera that draws into the window, has it in
+  front, and is within `textDistance` of it: projected as the renderer frames that camera's part of the window. Both
+  are drawn under the windows, so a window stays readable over them.
+- A report's tooltip shows while the mouse rests on its text and on no window.
+
+## Fonts
+
+The font is the `Font` asset the settings name, loaded on a worker and made ImGui's between two frames; until then, or
+when it does not load, which is a warning, ImGui writes in its own. ImGui asks for each character as it first draws it
+at a size and gets the asset's, scaled from the size the asset was drawn at, so a font whose `.meta` size is near
+`fontSize` is the sharpest.
+
+## Natives
+
+Hexa.NET.ImGui carries cimgui for each platform it supports. Its bindings load it themselves rather than through the
+gem's load context, so the gem finds the machine's copy among its dependencies and points the bindings' loader at its
+folder.

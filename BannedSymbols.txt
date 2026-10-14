@@ -1,12 +1,27 @@
-T:System.IO.File;Disk access goes through IFileSystem, so it can be faked in a test.
-T:System.IO.Directory;Disk access goes through IFileSystem, so it can be faked in a test.
-T:System.IO.FileInfo;Disk access goes through IFileSystem, so it can be faked in a test.
-T:System.IO.DirectoryInfo;Disk access goes through IFileSystem, so it can be faked in a test.
-T:System.IO.FileStream;Disk access goes through IFileSystem, so it can be faked in a test.
-M:System.Threading.Thread.#ctor(System.Threading.ThreadStart);Threads are made by the Threads service (Threads.Create).
-M:System.Threading.Thread.#ctor(System.Threading.ThreadStart,System.Int32);Threads are made by the Threads service (Threads.Create).
-M:System.Threading.Thread.#ctor(System.Threading.ParameterizedThreadStart);Threads are made by the Threads service (Threads.Create).
-M:System.Threading.Thread.#ctor(System.Threading.ParameterizedThreadStart,System.Int32);Threads are made by the Threads service (Threads.Create).
-T:System.Console;Output goes through Log (Magic.Utils), which the logger gems write.
-M:System.Random.#ctor;Random numbers come from the Randomness service (Randomness.For), so one seed repeats a run.
-P:System.Random.Shared;Random numbers come from the Randomness service (Randomness.For), so one seed repeats a run.
+T:System.IO.File;Disk access goes through IFileSystem
+T:System.IO.Directory;Disk access goes through IFileSystem
+T:System.IO.FileInfo;Disk access goes through IFileSystem
+T:System.IO.DirectoryInfo;Disk access goes through IFileSystem
+T:System.IO.FileStream;Disk access goes through IFileSystem
+M:System.IO.Path.Combine(System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Combine(System.String,System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Combine(System.String,System.String,System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Combine(System.String[]);Build paths with IFileSystem.Combine
+M:System.IO.Path.Combine(System.ReadOnlySpan{System.String});Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.String,System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.String,System.String,System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.String[]);Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.ReadOnlySpan{System.String});Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char});Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char});Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char});Build paths with IFileSystem.Combine
+M:System.IO.Path.GetDirectoryName(System.String);Take paths apart with IFileSystem.Parent
+M:System.IO.Path.GetDirectoryName(System.ReadOnlySpan{System.Char});Take paths apart with IFileSystem.Parent
+F:System.IO.Path.DirectorySeparatorChar;Never write a separator: build paths with IFileSystem.Combine
+F:System.IO.Path.AltDirectorySeparatorChar;Never write a separator: build paths with IFileSystem.Combine
+P:System.Environment.NewLine;Text is written with '\n' on every OS
+T:System.Console;Write through Debugging (Info, Warn, Error), so every line is ordered and counted
+T:System.Diagnostics.Debug;Log and assert through Debugging, which is on in every build
+T:System.Diagnostics.Trace;Write through Debugging (Info, Warn, Error), so every line is ordered and counted
+T:System.Collections.Concurrent.BlockingCollection`1;Hand work between threads with System.Threading.Channels

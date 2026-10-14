@@ -1,0 +1,7 @@
+{
+    // The samples' own settings, under whichever preset is applied.
+    "settings": {
+        // The cluster renderer's frame: Pipelines/Clusters.pipeline.
+        "ClusterRendering.pipeline": { "id": 60200 }
+    }
+}

@@ -1,7 +1,0 @@
-{
-    "id": 3,
-    "version": 1,
-    "wrap": "clamp_to_edge",
-    "filter": "linear",
-    "mipmaps": false
-}

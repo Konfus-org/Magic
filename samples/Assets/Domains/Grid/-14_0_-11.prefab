@@ -1,0 +1,14 @@
+{
+    "entities": [
+        { "prefab": { "id": 3356 }, "components": { "Transform": { "position": { "x": 32, "y": 0, "z": 32 } } } },
+        { "prefab": { "id": 3352 }, "components": { "Transform": { "position": { "x": 20.875, "y": 0, "z": 47.14 }, "rotation": { "x": 0, "y": 0.996, "z": 0, "w": 0.087 }, "scale": { "x": 17.062, "y": 17.062, "z": 17.062 } } } },
+        { "prefab": { "id": 3352 }, "components": { "Transform": { "position": { "x": 11.171, "y": 0, "z": 12.313 }, "rotation": { "x": 0, "y": 0.7, "z": 0, "w": -0.714 }, "scale": { "x": 29.402, "y": 29.402, "z": 29.402 } } } },
+        { "prefab": { "id": 3352 }, "components": { "Transform": { "position": { "x": 17.572, "y": 0, "z": 4.467 }, "rotation": { "x": 0, "y": 0.999, "z": 0, "w": 0.05 }, "scale": { "x": 18.226, "y": 18.226, "z": 18.226 } } } },
+        { "prefab": { "id": 3353 }, "components": { "Transform": { "position": { "x": 25.204, "y": 0, "z": 14.776 }, "rotation": { "x": 0, "y": 0.173, "z": 0, "w": 0.985 }, "scale": { "x": 27.62, "y": 39.509, "z": 27.62 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 54.719, "y": 0, "z": 33.872 }, "rotation": { "x": 0, "y": 0.506, "z": 0, "w": -0.863 }, "scale": { "x": 1.815, "y": 1.815, "z": 1.815 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 59.134, "y": 0, "z": 14.506 }, "rotation": { "x": 0, "y": 0.095, "z": 0, "w": -0.995 }, "scale": { "x": 2.308, "y": 2.308, "z": 2.308 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 56.53, "y": 0, "z": 8.227 }, "rotation": { "x": 0, "y": 0.474, "z": 0, "w": -0.88 }, "scale": { "x": 1.065, "y": 1.065, "z": 1.065 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 43.723, "y": 0, "z": 1.012 }, "rotation": { "x": 0, "y": 0.748, "z": 0, "w": 0.664 }, "scale": { "x": 1.967, "y": 1.967, "z": 1.967 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 7.079, "y": 0, "z": 55.076 }, "rotation": { "x": 0, "y": 0.548, "z": 0, "w": 0.837 }, "scale": { "x": 2.728, "y": 2.728, "z": 2.728 } } } }
+    ]
+}

@@ -1,0 +1,5 @@
+{
+    // Clear glass: what is behind it bent through it, a little tinted.
+    "shader": { "id": 10073 },
+    "type": "transparent"
+}

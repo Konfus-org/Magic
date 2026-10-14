@@ -1,0 +1,17 @@
+{
+    "stage": "probes",
+    "kind": "draw",
+    "each": "6",
+    "creates": [
+        {
+            "name": "SkyCube",
+            "format": "rgba16_float",
+            "scale": 0,
+            "width": 64,
+            "height": 64,
+            "levels": 7,
+            "cube": true
+        }
+    ],
+    "draw": { "drawn": "sky", "colors": [ "SkyCube" ], "load": "dont_care", "mipmaps": true }
+}

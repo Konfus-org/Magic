@@ -1,0 +1,12 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- Dear ImGui is a C API: its context, draw lists, fonts and textures are pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Dear ImGui (cimgui) for each OS, which the gem points the bindings' own loader at. -->
+    <PackageReference Include="Hexa.NET.ImGui" />
+  </ItemGroup>
+</Project>

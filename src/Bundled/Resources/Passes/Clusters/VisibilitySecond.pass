@@ -1,0 +1,5 @@
+{
+    "stage": "depth",
+    "kind": "draw",
+    "draw": { "drawn": "visibility", "colors": [ "Visibility" ], "depth": "Depth", "load": "load", "args": "BinArgs", "first": 256, "instances": "VisiblePieces" }
+}

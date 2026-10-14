@@ -1,0 +1,4 @@
+T:System.OperatingSystem;No OS checks in Core: platform code lives in a gem
+T:System.Runtime.InteropServices.DllImportAttribute;No native calls in Core: they live in a gem
+T:System.Runtime.InteropServices.LibraryImportAttribute;No native calls in Core: they live in a gem
+T:System.Runtime.InteropServices.NativeLibrary;No native libraries in Core: they live in a gem

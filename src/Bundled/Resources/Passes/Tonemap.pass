@@ -1,0 +1,8 @@
+{
+    "stage": "post",
+    "kind": "fullscreen",
+    "shader": { "id": 11262 },
+    "reads": [ { "name": "Hdr", "filter": "linear" }, { "name": "Taa", "filter": "linear", "optional": true } ],
+    "creates": [ { "name": "Ldr", "format": "rgba16_float", "size": "output" } ],
+    "writes": [ { "name": "Ldr" } ]
+}

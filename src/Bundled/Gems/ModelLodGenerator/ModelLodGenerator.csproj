@@ -1,0 +1,7 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- XxHash3: the handles of a model's card atlases, the same on every run. -->
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+</Project>

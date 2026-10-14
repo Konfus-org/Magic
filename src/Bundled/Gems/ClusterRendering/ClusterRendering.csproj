@@ -1,0 +1,9 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- XxHash3: what a field of a model a gem made is kept by, as such a model has no file to be versioned by. -->
+    <PackageReference Include="System.IO.Hashing" />
+    <!-- BC7: what the textures materials sample are compressed into, a quarter of their size in memory and in reads. -->
+    <PackageReference Include="BCnEncoder.Net" />
+  </ItemGroup>
+</Project>

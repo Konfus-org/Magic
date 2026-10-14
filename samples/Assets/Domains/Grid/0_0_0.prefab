@@ -1,0 +1,6 @@
+{
+    "entities": [
+        { "name": "Cube", "components": { "Transform": { "position": { "x": 32, "y": 0.5, "z": 32 } }, "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 12045873320119837722 } } }, "Spin": { "degreesPerSecond": 45 } }, "scripts": [ { "id": 3312, "height": 1 } ] },
+        { "prefab": { "id": 3359 }, "components": { "Transform": { "position": { "x": 18.758, "y": 0, "z": 4.593 } } } }
+    ]
+}

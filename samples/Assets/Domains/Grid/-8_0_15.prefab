@@ -1,0 +1,14 @@
+{
+    "entities": [
+        { "prefab": { "id": 3358 }, "components": { "Transform": { "position": { "x": 32, "y": 0, "z": 32 } } } },
+        { "prefab": { "id": 3348 }, "components": { "Transform": { "position": { "x": 0.197, "y": 0, "z": 28.379 }, "rotation": { "x": 0, "y": 0.919, "z": 0, "w": 0.395 }, "scale": { "x": 152.69, "y": 163.853, "z": 152.69 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 34.701, "y": 0, "z": 2.768 }, "rotation": { "x": 0, "y": 0.077, "z": 0, "w": -0.997 }, "scale": { "x": 2.863, "y": 2.863, "z": 2.863 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 41.401, "y": 0, "z": 20.092 }, "rotation": { "x": 0, "y": 0.747, "z": 0, "w": 0.665 }, "scale": { "x": 1.576, "y": 1.576, "z": 1.576 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 10.062, "y": 0, "z": 18.12 }, "rotation": { "x": 0, "y": 0.872, "z": 0, "w": -0.49 }, "scale": { "x": 3.152, "y": 3.152, "z": 3.152 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 51.02, "y": 0, "z": 3.482 }, "rotation": { "x": 0, "y": 0.309, "z": 0, "w": -0.951 }, "scale": { "x": 1.591, "y": 1.591, "z": 1.591 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 19.704, "y": 0, "z": 9.742 }, "rotation": { "x": 0, "y": 0.834, "z": 0, "w": 0.551 }, "scale": { "x": 3.684, "y": 3.684, "z": 3.684 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 62.104, "y": 0, "z": 61.635 }, "rotation": { "x": 0, "y": 0.995, "z": 0, "w": 0.097 }, "scale": { "x": 3.157, "y": 3.157, "z": 3.157 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 21.622, "y": 0, "z": 39.272 }, "rotation": { "x": 0, "y": 0.781, "z": 0, "w": 0.624 }, "scale": { "x": 3.96, "y": 3.96, "z": 3.96 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 9.016, "y": 0, "z": 41.027 }, "rotation": { "x": 0, "y": 0.511, "z": 0, "w": 0.86 }, "scale": { "x": 1.948, "y": 1.948, "z": 1.948 } } } }
+    ]
+}

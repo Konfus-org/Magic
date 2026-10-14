@@ -1,0 +1,22 @@
+{
+    "entities": [
+        { "prefab": { "id": 3358 }, "components": { "Transform": { "position": { "x": 32, "y": 0, "z": 32 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 55.736, "y": 0, "z": 44.131 }, "rotation": { "x": 0, "y": 0.494, "z": 0, "w": 0.869 }, "scale": { "x": 3.736, "y": 3.736, "z": 3.736 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 62.523, "y": 0, "z": 55.157 }, "rotation": { "x": 0, "y": 0.929, "z": 0, "w": -0.369 }, "scale": { "x": 2.33, "y": 2.33, "z": 2.33 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 59.769, "y": 0, "z": 20.179 }, "rotation": { "x": 0, "y": 0.143, "z": 0, "w": -0.99 }, "scale": { "x": 3.992, "y": 3.992, "z": 3.992 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 34.956, "y": 0, "z": 60.144 }, "rotation": { "x": 0, "y": 0.718, "z": 0, "w": 0.696 }, "scale": { "x": 2.819, "y": 2.819, "z": 2.819 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 14.001, "y": 0, "z": 48.143 }, "rotation": { "x": 0, "y": 0.606, "z": 0, "w": 0.796 }, "scale": { "x": 3.597, "y": 3.597, "z": 3.597 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 6.532, "y": 0, "z": 51.019 }, "rotation": { "x": 0, "y": 0.284, "z": 0, "w": -0.959 }, "scale": { "x": 1.46, "y": 1.46, "z": 1.46 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 40.144, "y": 0, "z": 46.42 }, "rotation": { "x": 0, "y": 0.178, "z": 0, "w": 0.984 }, "scale": { "x": 1.421, "y": 1.421, "z": 1.421 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 52.817, "y": 0, "z": 14.98 }, "rotation": { "x": 0, "y": 0.92, "z": 0, "w": 0.392 }, "scale": { "x": 3.394, "y": 3.394, "z": 3.394 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 8.462, "y": 0, "z": 44.103 }, "rotation": { "x": 0, "y": 0.547, "z": 0, "w": 0.837 }, "scale": { "x": 0.973, "y": 0.973, "z": 0.973 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 52.167, "y": 0, "z": 3.919 }, "rotation": { "x": 0, "y": 0.889, "z": 0, "w": 0.458 }, "scale": { "x": 1.392, "y": 1.392, "z": 1.392 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 42.677, "y": 0, "z": 16.983 }, "rotation": { "x": 0, "y": 0.925, "z": 0, "w": 0.38 }, "scale": { "x": 0.909, "y": 0.909, "z": 0.909 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 18.281, "y": 0, "z": 59.747 }, "rotation": { "x": 0, "y": 0.916, "z": 0, "w": -0.402 }, "scale": { "x": 0.988, "y": 0.988, "z": 0.988 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 26.996, "y": 0, "z": 34.531 }, "rotation": { "x": 0, "y": 0.401, "z": 0, "w": -0.916 }, "scale": { "x": 1.208, "y": 1.208, "z": 1.208 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 39.044, "y": 0, "z": 35.674 }, "rotation": { "x": 0, "y": 0.237, "z": 0, "w": 0.972 }, "scale": { "x": 1.251, "y": 1.251, "z": 1.251 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 1.694, "y": 0, "z": 18.407 }, "rotation": { "x": 0, "y": 0.728, "z": 0, "w": 0.685 }, "scale": { "x": 1.272, "y": 1.272, "z": 1.272 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 30.764, "y": 0, "z": 38.673 }, "rotation": { "x": 0, "y": 0.766, "z": 0, "w": -0.643 }, "scale": { "x": 1.356, "y": 1.356, "z": 1.356 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 10.688, "y": 0, "z": 45.616 }, "rotation": { "x": 0, "y": 0.974, "z": 0, "w": 0.226 }, "scale": { "x": 0.881, "y": 0.881, "z": 0.881 } } } }
+    ]
+}

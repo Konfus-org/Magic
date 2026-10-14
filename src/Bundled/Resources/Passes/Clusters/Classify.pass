@@ -1,0 +1,20 @@
+{
+    "stage": "g_buffer",
+    "kind": "compute",
+    "shader": { "id": 60027 },
+    "reads": [
+        { "name": "Visibility", "filter": "nearest" },
+        { "name": "VisiblePieces" },
+        { "name": "Instances" },
+        { "name": "Cards" },
+        { "name": "Clusters" },
+        { "name": "MaterialBins" }
+    ],
+    "creates": [
+        { "name": "TileCounts", "kind": "buffer", "type": "uint", "stride": 4, "rows": 256, "seed": "Zeros" },
+        { "name": "TileList", "kind": "buffer", "type": "uint", "stride": 4, "per": "tileEntries" },
+        { "name": "ResolveArgs", "kind": "buffer", "type": "uint", "stride": 20, "rows": 256 }
+    ],
+    "writes": [ { "name": "TileCounts" }, { "name": "TileList" } ],
+    "dispatch": { "per": "view", "tile": 8 }
+}

@@ -1,0 +1,7 @@
+{
+    "entities": [
+        { "prefab": { "id": 3354 }, "components": { "Transform": { "position": { "x": 32, "y": 0, "z": 32 } } } },
+        { "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 3.648, "y": 0, "z": 60.528 }, "rotation": { "x": 0, "y": 0.796, "z": 0, "w": -0.605 }, "scale": { "x": 1.017, "y": 1.017, "z": 1.017 } } } },
+        { "prefab": { "id": 3346 }, "components": { "Transform": { "position": { "x": 9.912, "y": 0, "z": 6.637 }, "rotation": { "x": 0, "y": 0.928, "z": 0, "w": 0.374 }, "scale": { "x": 0.776, "y": 0.776, "z": 0.776 } } } }
+    ]
+}

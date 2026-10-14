@@ -1,0 +1,6 @@
+{
+    "stage": "sky",
+    "kind": "draw",
+    "reads": [ { "name": "Exposure" } ],
+    "draw": { "drawn": "sky", "colors": [ "Hdr" ], "depth": "Depth", "load": "load" }
+}

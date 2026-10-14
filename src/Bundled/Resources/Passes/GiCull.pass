@@ -1,0 +1,13 @@
+{
+    "stage": "probes",
+    "kind": "compute",
+    "shader": { "id": 11321 },
+    "reads": [
+        { "name": "Instances" },
+        { "name": "Models" },
+        { "name": "MeshFields" },
+        { "name": "GiLevels" }
+    ],
+    "writes": [ { "name": "GiJobs" } ],
+    "dispatch": { "per": "instances" }
+}

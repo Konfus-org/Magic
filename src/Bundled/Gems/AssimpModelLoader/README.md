@@ -1,0 +1,26 @@
+# AssimpModelLoader
+
+Models to meshes, through Assimp ([AssimpNetter](https://github.com/Saalvage/AssimpNetter)): provides
+`IAssetLoader<Model>`. What a model's `.meta` holds is in [Models](../../Resources/Models/README.md).
+
+## Behaviour
+
+- Assimp triangulates the file, joins identical vertices, and makes tangents where the file has none and has texture
+  coordinates; meshes of points or lines are left out. Texture coordinates start at the top left.
+- Normals are the file's, never made: a mesh without them fails the load, so export with normals (Blender does by
+  default), and a model is shaded as it was in the tool it was made in.
+- Every node's transform is baked into its meshes' vertices, then turned into the engine's frame: metres, +Y up and the
+  front at +Z. glTF and OBJ come from Assimp in that frame, right-handed. An FBX comes as the file is, untouched: its
+  unit and which of its axes are right, up and front are in the file, and are read and turned into the same frame, so
+  a model exported from Blender is its size there, at any export scale and with any export axes. An X mirror then
+  takes the right-handed frame to the engine's: a model's front, Blender's -Y, faces +Z, and Blender's +X is -X.
+- A transform that mirrors turns a triangle's winding over, so its corners are swapped back: triangles are clockwise
+  seen from outside. Then the `.meta`'s `origin` is moved to (0, 0, 0).
+- A mesh's material slot is its material's place in the file's list, and one past 7 is 7.
+- Each file is imported by an importer of its own, so files load on workers, several at once. `Dispose` waits for the
+  imports running, then frees Assimp; a file asked for after that fails.
+
+## Natives
+
+AssimpNetter carries Assimp for every platform it supports, and loads it itself, by a path: the gem finds the
+machine's from its own dependencies, as its load context finds every other native library.

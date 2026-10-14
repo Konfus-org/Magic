@@ -1,0 +1,18 @@
+{
+    "stage": "transparency",
+    "kind": "draw",
+    "reads": [
+        { "name": "SceneColor", "filter": "linear" },
+        { "name": "ShadowPool", "filter": "comparison" },
+        { "name": "SkyCube", "filter": "linear" },
+        { "name": "Dfg", "filter": "linear" },
+        { "name": "Lights" },
+        { "name": "LightBins" },
+        { "name": "LightTiles" },
+        { "name": "SkySh" },
+        { "name": "Exposure" },
+        { "name": "ShadowTables" },
+        { "name": "SunClipmap" }
+    ],
+    "draw": { "drawn": "transparent", "colors": [ "Hdr" ], "depth": "Depth", "load": "load" }
+}

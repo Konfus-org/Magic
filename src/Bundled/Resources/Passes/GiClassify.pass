@@ -1,0 +1,14 @@
+{
+    "stage": "probes",
+    "kind": "compute",
+    "shader": { "id": 11325 },
+    "reads": [
+        { "name": "GiLevels" },
+        { "name": "GiField", "filter": "linear" }
+    ],
+    "writes": [
+        { "name": "GiIrradiance" },
+        { "name": "GiProbeState" }
+    ],
+    "dispatch": { "per": "16384" }
+}

@@ -1,8 +1,0 @@
-{
-    "entities": [
-        {"name": "PostProcessing", "components": {"PostProcessing": {"posts": [{"id": 10030}, {"id": 10058}]}}},
-        {"name": "Sky", "components": {"Sky": {"color": {"r": 0.4, "g": 0.5, "b": 0.7}}}},
-        {"name": "Camera", "scripts": [{"id": 3050, "speed": 5}], "components": {"Transform": {"position": {"x": 0, "y": 3, "z": -25}, "rotation": {"x": 0.0349, "y": 0, "z": 0, "w": 0.99939}}, "Camera": {}}},
-        {"name": "Sun", "components": {"Transform": {"rotation": {"x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023}}, "DirectionalLight": {"color": {"r": 1, "g": 1, "b": 1}, "intensity": 3}}}
-    ]
-}

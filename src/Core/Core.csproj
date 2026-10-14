@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Magic: the host executable, and the library every gem compiles against. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Magic</AssemblyName>
+    <RootNamespace>Magic</RootNamespace>
+    <!-- For the delegate* the frame loop calls gem hooks through. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Launched from an IDE or dotnet run, Magic starts in the repository and opens the samples. -->
+    <RunWorkingDirectory>$(MSBuildThisFileDirectory)../../</RunWorkingDirectory>
+    <RunArguments>--project samples</RunArguments>
+    <!-- The engine's own assets, its bundled gems' among them, every project's to use, which are not in this folder. -->
+    <MagicResources>$(MSBuildThisFileDirectory)../Bundled/Resources</MagicResources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Magic's own: they never reach a gem. -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" PrivateAssets="all" />
+    <PackageReference Include="System.CommandLine" PrivateAssets="all" />
+    <!-- XxHash3: an asset's version, a hash of its file and its sidecar. -->
+    <PackageReference Include="System.IO.Hashing" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="BannedSymbols.txt" />
+  </ItemGroup>
+</Project>

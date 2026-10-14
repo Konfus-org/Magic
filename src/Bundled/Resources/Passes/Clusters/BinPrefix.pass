@@ -1,0 +1,15 @@
+{
+    "stage": "cull",
+    "kind": "compute",
+    "shader": { "id": 60024 },
+    "reads": [ { "name": "VisibleClusters" }, { "name": "VisiblePieces" } ],
+    "writes": [
+        { "name": "BinArgs" },
+        { "name": "BinCounts" },
+        { "name": "BinCursors" },
+        { "name": "CullArgs" },
+        { "name": "CullCounts" }
+    ],
+    "dispatch": { "groups": [ 1 ] },
+    "params": { "phase": { "x": 1 } }
+}

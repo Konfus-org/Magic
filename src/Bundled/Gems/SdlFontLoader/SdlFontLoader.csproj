@@ -1,0 +1,12 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- SDL_ttf is a C API: its fonts, streams and surfaces are pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- SDL_ttf, and SDL beneath it, for each OS; the gem's load context picks the machine's. -->
+    <PackageReference Include="ppy.SDL3_ttf-CS" />
+  </ItemGroup>
+</Project>

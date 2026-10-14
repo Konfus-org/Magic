@@ -1,4 +1,23 @@
 {
     "name": "Samples",
-    "entryPoint": { "id": 3301 }
+    "entryPoint": { "id": 3301 },
+    "player": { "id": 3316 },
+    "gems": [
+        "SdlPlatform",
+        "SdlGpu",
+        "DxcShaderCompiler",
+        "ConsoleCommands",
+        "ArchEcs",
+        "Scripting",
+        "SdlTextureLoader",
+        "SdlFontLoader",
+        "AssimpModelLoader",
+        "ModelLodGenerator",
+        "PrefabLoader",
+        "PipelineLoader",
+        "ImGuiDebugUI",
+        "DebugTools",
+        "ClusterRendering",
+        "LogMetrics"
+    ]
 }

@@ -1,0 +1,8 @@
+{
+    "stage": "probes",
+    "kind": "compute",
+    "shader": { "id": 11230 },
+    "creates": [ { "name": "Dfg", "format": "rgba16_float", "scale": 0, "width": 32, "height": 32 } ],
+    "writes": [ { "name": "Dfg" } ],
+    "dispatch": { "per": "output:Dfg" }
+}
