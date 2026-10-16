@@ -95,10 +95,12 @@ public interface IDebugUI
     bool Button(string label);
 
     /// <summary>
-    /// A one-line text field editing <paramref name="text"/>; true when Enter was pressed in it. It takes the keyboard when
-    /// its window appears, and keeps it after Enter.
+    /// A one-line text field editing <paramref name="text"/>; true when Enter was pressed in it. With
+    /// <paramref name="focus"/> it takes the keyboard when its window appears, as the one field a window is for does;
+    /// any field keeps the keyboard after Enter. <paramref name="hint"/> shows greyed in the field while it is empty,
+    /// for a field whose label is hidden to say what it takes.
     /// </summary>
-    bool Input(string label, ref string text);
+    bool Input(string label, ref string text, string? hint = null, bool focus = false);
 
     /// <summary>
     /// Text of many lines editing <paramref name="text"/>, as tall as its lines; <paramref name="readOnly"/> text can still
@@ -133,6 +135,24 @@ public interface IDebugUI
     /// then.
     /// </summary>
     bool Header(string label);
+
+    /// <summary>
+    /// Opens a table headed by <paramref name="columns"/>, whose rows are drawn with <see cref="Row"/> until
+    /// <see cref="EndTable"/>: each column as wide as its widest cell, and resized by dragging its edge.
+    /// <paramref name="label"/> only tells the tables of one window apart.
+    /// </summary>
+    void Table(string label, ReadOnlySpan<string> columns);
+
+    /// <summary>
+    /// A row of the table open, a cell per column in order, the rest empty when there are fewer. The row is what was
+    /// drawn last, so a <see cref="Tooltip"/> after it shows while the mouse rests anywhere on it.
+    /// </summary>
+    void Row(ReadOnlySpan<string> cells);
+
+    /// <summary>
+    /// Closes what the last Table opened.
+    /// </summary>
+    void EndTable();
 
     /// <summary>
     /// <paramref name="text"/> shown while the mouse rests on what was drawn last.

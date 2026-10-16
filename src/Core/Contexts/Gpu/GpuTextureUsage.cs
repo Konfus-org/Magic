@@ -11,7 +11,7 @@ public enum GpuTextureUsage : byte
     /// <summary>
     /// Sampled, through a sampler, by any stage.
     /// </summary>
-    Sampler = 1 << 0,
+    Sampled = 1 << 0,
 
     ColorTarget = 1 << 1,
     DepthTarget = 1 << 2,

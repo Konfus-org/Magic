@@ -21,5 +21,5 @@ uint main(PieceVaryings input, bool isFrontFace : SV_IsFrontFace, out float dept
 #endif
     clip(keep);
     depth = surfaceDepth;
-    return input.id + (KeepBindingsAlive(input.flags, input.uv).x != 0.0 ? 1u : 0u);
+    return input.id;
 }

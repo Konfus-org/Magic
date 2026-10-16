@@ -129,7 +129,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
             Pixels = pixels,
             Levels = levels,
             Filter = meta.Filter,
-            Address = meta.Wrap,
+            Wrap = meta.Wrap,
         });
     }
 

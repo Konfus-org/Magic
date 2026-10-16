@@ -14,7 +14,7 @@ public enum EngineThread
     Unknown,
 
     /// <summary>
-    /// The game: gems' Update, FixedUpdate and LateUpdate hooks, the ECS and its systems. The engine starts it once
+    /// The game: gems' Update, FixedUpdate, LateUpdate and Sync hooks, the ECS and its systems. The engine starts it once
     /// the gems are made, and it ends with the frame loop.
     /// </summary>
     Main,

@@ -27,12 +27,12 @@ each slot:
 "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 710 } } }
 ```
 
-## Levels of detail
+## Clusters and cards
 
-A model's `Clusters` are its triangles in small clusters at every level of detail, which whatever draws it cuts
-through cluster by cluster, so detail follows distance across the model; past them, from a distance that grows with
-the model's size, its `Cards`, Core's `Card`, a flat picture of each mesh that turns to face the camera. They are made
-as the model loads, by the model level-of-detail gem when the project lists one, kept in the cache, and made again
+A model's `Clusters` are its triangles in small clusters at every level, finest to coarsest, which whatever draws it
+cuts through cluster by cluster, so detail follows distance across the model; past them, from a distance that grows
+with the model's size, its `Cards`, Core's `Card`, a flat picture of each mesh that turns to face the camera. They are
+made as the model loads, by the gem that makes clusters when the project lists one, kept in the cache, and made again
 when the model's file or `.meta` changes; a model that lies flat has no cards.
 
 ## Adding a model

@@ -1,0 +1,8 @@
+{
+    "description": "What each pixel reflects, black where too rough, over a faint scene; teal where the world draws none.",
+    "stage": "ui",
+    "kind": "fullscreen",
+    "shader": { "id": 11945 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

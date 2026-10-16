@@ -25,8 +25,7 @@ void main(uint3 id : SV_DispatchThreadID)
     }
 
     uint bin = ZBinOf(max(WorldToView(centre).z, Near));
-    uint at;
-    LightCounts.InterlockedAdd(CountVisible * 4u, 1u, at);
+    uint at = WaveAllocate(LightCounts, CountVisible * 4u, 1u);
     if (at < CountOf(VisibleLights, 8u))
     {
         LightCounts.InterlockedAdd(bin * 4u, 1u);

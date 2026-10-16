@@ -10,7 +10,7 @@
 
 void Cull(uint slot, GpuSceneInstance instance, GpuModel model, float3 centre, float radius, uint shadowGroup, GpuShadowGroup target)
 {
-    // Pixels of error a metre of the model's is, as near and as far as it reaches.
+    // Pixels of error a metre of the model's is, as near and as far as its clusters' error spheres reach.
     float perMetre;
     float nearest = 1.0;
     float farthest = 1.0;
@@ -32,8 +32,9 @@ void Cull(uint slot, GpuSceneInstance instance, GpuModel model, float3 centre, f
         }
 
         perMetre = instance.maxScale * (float)FaceTexels(min(FinestMip(target.faceMips), LightMips - 1u)) * 0.5;
-        nearest = max(distance - radius, LightNear);
-        farthest = max(distance + radius, LightNear);
+        float reach = model.clusterReach * instance.maxScale;
+        nearest = max(distance - reach, LightNear);
+        farthest = max(distance + reach, LightNear);
     }
 
     // The levels whose clusters the group can want somewhere on the model, a run, as the view's cull finds them.
@@ -57,8 +58,7 @@ void Cull(uint slot, GpuSceneInstance instance, GpuModel model, float3 centre, f
     }
 
     uint jobs = (last - first + JobClusters - 1u) / JobClusters;
-    uint at;
-    ShadowCounts.InterlockedAdd(ShadowCountJobs, jobs, at);
+    uint at = WaveAllocate(ShadowCounts, ShadowCountJobs, jobs);
     uint capacity = CountOf(ShadowJobs, 16u);
     [loop] for (uint job = 0u; job < jobs && at + job < capacity; job++)
     {

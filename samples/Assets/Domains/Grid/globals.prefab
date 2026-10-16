@@ -15,7 +15,7 @@
         {
             "name": "PostProcessing",
             "components": {
-                "PostProcessing": { "effects": { "id": 11001 } }
+                "PostProcessing": { "effects": { "id": 3362 } }
             }
         },
         {
@@ -52,7 +52,7 @@
             "name": "Spawn",
             "tags": [ "spawn" ],
             "components": {
-                "Transform": { "position": { "x": 16, "y": 12, "z": -48 } }
+                "Transform": { "position": { "x": 0, "y": 3, "z": -60 }, "rotation": { "x": -0.0349, "y": 0, "z": 0, "w": 0.99939 } }
             }
         }
     ]

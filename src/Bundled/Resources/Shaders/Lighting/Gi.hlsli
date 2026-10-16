@@ -6,10 +6,12 @@
 // the light arriving from every direction (DDGI: Majercik et al. 2019, "Dynamic Diffuse Global Illumination with
 // Ray-Traced Irradiance Fields") on an octahedron: irradiance over pi in a tile of GiIrradianceSide texels, and the
 // mean distance to what is in each direction and its square in one of GiDistanceSide, both with a one-texel border
-// copied from inside so filtering never reads past a tile.
+// copied from inside so filtering never reads past a tile. Each probe's cell, its spacing a side with the probe in its
+// middle, lists the point and spot lights that reach it (Probes/GiLights), which light what the field holds there.
 //
 // What a function reads it declares by name, so a shader includes this and binds only what it uses: GiLevels always,
-// GiField to sample the field, GiIrradiance and GiDistance to sample the probes.
+// GiField to sample the field, GiIrradiance and GiDistance to sample the probes, GiLights and SceneLights to light what
+// a ray hits by the world's lights.
 
 #ifndef MAGIC_GI_HLSLI
 #define MAGIC_GI_HLSLI
@@ -32,10 +34,59 @@ static const uint GiDistanceSide = 16u;
 // What a probe's irradiance is stored times, so a sunlit room's bounces, tens of thousands of nits, fit a half float.
 static const float GiStoreScale = 1.0 / 32.0;
 
+// The most lights a probe's cell lists, and what follows the last of fewer.
+static const uint GiCellLights = 16u;
+static const uint GiNoLight = 0xFFFFFFFFu;
+
+// How far the sun is, for GiVisibility: further than any field goes.
+static const float GiFarAway = 1e30;
+
 // What GiProbeState's w holds of a probe, besides the probe its slot holds in xyz: whether it lights anything this frame
-// (Probes/GiClassify), and whether its tiles hold what it was traced with rather than nothing yet (Probes/GiBlend).
+// (Probes/GiClassify); whether what it holds (GiHistory) is what it was traced with (Probes/GiBlend), which it keeps
+// while its slot holds it, used or not; and whether what it holds is the next coarser level's light where it is, given
+// it until it is traced (Probes/GiClassify).
 static const int GiProbeUsed = 2;
 static const int GiProbeHeld = 1;
+static const int GiProbeSeeded = 4;
+
+// Texels a side inside a probe's distance and irradiance tiles, which its border texels copy.
+static const uint GiDistanceInside = GiDistanceSide - 2u;
+static const uint GiIrradianceInside = GiIrradianceSide - 2u;
+
+// The longest a probe's ray counts as for what it sees, in probe spacings: far enough that what is further does not
+// decide what is in sight.
+static const float GiMaxSpacings = 4.0;
+
+// Voxels from the camera the levels are placed about, along the axis it is farthest along, within which a level's
+// probes light a place on their own, past which it is the next level's, the two blended between. The camera is always
+// 24 voxels or more from a level's faces (the renderer's GiVolume.Snap), and a place reads the probes up to a spacing
+// and a bias around it, so it never reads past the level.
+static const float GiBlendStart = 12.0;
+static const float GiBlendEnd = 20.0;
+
+// A probe's history in GiHistory, a word apiece: each inside irradiance texel as four halves in two words, then each
+// inside distance texel's mean and mean square as two halves in one.
+static const uint GiHistoryWords = GiIrradianceInside * GiIrradianceInside * 2u + GiDistanceInside * GiDistanceInside;
+
+uint GiIrradianceHistory(uint probeIndex, uint inside)
+{
+    return probeIndex * GiHistoryWords + inside * 2u;
+}
+
+uint GiDistanceHistory(uint probeIndex, uint inside)
+{
+    return probeIndex * GiHistoryWords + GiIrradianceInside * GiIrradianceInside * 2u + inside;
+}
+
+uint2 GiPackHalf(float4 value)
+{
+    return uint2(f32tof16(value.x) | (f32tof16(value.y) << 16u), f32tof16(value.z) | (f32tof16(value.w) << 16u));
+}
+
+float4 GiUnpackHalf(uint2 packed)
+{
+    return float4(f16tof32(packed.x), f16tof32(packed.x >> 16u), f16tof32(packed.y), f16tof32(packed.y >> 16u));
+}
 
 GpuGi GiHeader()
 {
@@ -77,6 +128,12 @@ uint GiIndex(uint3 stored)
     return stored.x + GiResolution * (stored.y + GiResolution * stored.z);
 }
 
+// Where the index-th voxel of the levels' volume is stored: a pass over every voxel, a thread each, finds its own by it.
+uint3 GiStoredAt(uint index)
+{
+    return uint3(index % GiResolution, (index / GiResolution) % GiResolution, index / (GiResolution * GiResolution));
+}
+
 // The voxel stored at a place of a level's volume, from the world's origin.
 int3 GiVoxelAt(GpuGiLevel level, uint3 stored)
 {
@@ -114,6 +171,12 @@ float3 GiProbePosition(GpuGiLevel level, int3 probe)
 int3 GiProbeOrigin(GpuGiLevel level)
 {
     return level.origin / (int)GiStride;
+}
+
+// The probe of a level whose cell a place is in, the cell its spacing a side with the probe in its middle.
+int3 GiCellOf(GpuGiLevel level, float3 position)
+{
+    return (int3)floor(position / ((float)GiStride * level.voxel));
 }
 
 // A probe's index, by where it is stored, and its tile in the atlases.
@@ -282,7 +345,9 @@ struct GiHit
 };
 
 // A ray through the field, stepping as far as the nearest surface each time (sphere tracing, Hart 1996), in the finest
-// level from first on that holds where it is; no hit once it leaves the coarsest or goes maxDistance.
+// level from first on that holds where it is; no hit once it leaves the coarsest or goes maxDistance. A ray that runs
+// out of steps first is creeping along a surface it never quite reaches, and is taken to have hit it where it stopped:
+// taken to see the sky past it, it would let the sky into rooms.
 GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float maxDistance)
 {
     GiHit hit;
@@ -294,7 +359,7 @@ GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float ma
     uint index = first;
     GpuGiLevel level = GiLevel(index);
     float t = 0.0;
-    [loop] for (uint step = 0u; step < 128u && t < maxDistance; step++)
+    [loop] for (uint step = 0u; step < 128u; step++)
     {
         float3 position = origin + direction * t;
         [loop] while (index < levels && !GiContains(level, position, 1.0))
@@ -303,40 +368,43 @@ GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float ma
             level = GiLevel(min(index, levels - 1u));
         }
 
-        if (index >= levels)
+        if (index >= levels || t >= maxDistance)
         {
-            break;
+            hit.distance = maxDistance;
+            return hit;
         }
 
         float distance = GiFieldAt(level, index, position);
+        hit.distance = t;
+        hit.level = index;
+        hit.position = position;
         if (distance < 0.2 * level.voxel)
         {
             hit.isHit = true;
             hit.isInside = step == 0u && distance < 0.0;
-            hit.distance = t;
-            hit.level = index;
-            hit.position = position;
             return hit;
         }
 
         t += max(distance, 0.2 * level.voxel);
     }
 
+    hit.isHit = true;
     return hit;
 }
 
-// How much of the sun reaches a place through the field, softened by how near the ray passes what it misses
-// (Quilez 2010's soft shadows from a distance field).
-float GiSunVisibility(float3 origin, float3 toSun, uint first, uint levels)
+// How much of a light far metres off along toward reaches a place through the field, the sun GiFarAway: softened by how
+// near the ray passes what it misses, as seen from whichever end is nearer (Quilez 2010's soft shadows from a distance
+// field), and stopping a voxel short of the light, so what holds a lamp, its shade or bulb, does not hide it.
+float GiVisibility(float3 origin, float3 toward, float far, uint first, uint levels)
 {
     uint index = first;
     GpuGiLevel level = GiLevel(index);
     float maxDistance = GiLevel(levels - 1u).voxel * (float)GiResolution * 0.5;
     float visible = 1.0;
     float t = level.voxel;
-    [loop] for (uint step = 0u; step < 64u && t < maxDistance; step++)
+    [loop] for (uint step = 0u; step < 64u && t < min(maxDistance, far - level.voxel); step++)
     {
-        float3 position = origin + toSun * t;
+        float3 position = origin + toward * t;
         [loop] while (index < levels && !GiContains(level, position, 1.0))
         {
             index++;
@@ -354,7 +422,7 @@ float GiSunVisibility(float3 origin, float3 toSun, uint first, uint levels)
             return 0.0;
         }
 
-        visible = min(visible, 8.0 * distance / t);
+        visible = min(visible, 8.0 * distance / min(t, far - t));
         t += max(distance, 0.25 * level.voxel);
     }
 
@@ -367,16 +435,12 @@ float GiSunVisibility(float3 origin, float3 toSun, uint first, uint levels)
 // normal again where there is no eye), and how much of it they vouch for: the eight probes around it, each counted by
 // how near it is, how much it faces the surface, and whether the surface is in sight of it by what it saw that way
 // (Chebyshev's bound on its distances), so light does not come through walls; a probe inside something counts for
-// nothing. Where none of them has the surface in sight, the near and facing ones count as they are rather than none:
-// light from everywhere never falls back to the open sky inside a level.
-float GiSampleLevel(GpuGiLevel level, uint index, float3 position, float3 normal, float3 view, out float3 irradiance)
+// nothing. The near and facing ones also count as they are, a thousandth as much, so where none of them has the surface
+// in sight they light it rather than none, and the one gives way to the other smoothly: light from everywhere never
+// falls back to the open sky inside a level, nor jumps as a probe comes into sight. The atlases' sizes are the
+// caller's, asked once for every level it reads.
+float GiSampleLevel(GpuGiLevel level, uint index, float3 position, float3 normal, float3 view, float2 irradianceSize, float2 distanceSize, out float3 irradiance)
 {
-    float width;
-    float height;
-    GiIrradiance.GetDimensions(width, height);
-    float distanceWidth;
-    float distanceHeight;
-    GiDistance.GetDimensions(distanceWidth, distanceHeight);
     float spacing = (float)GiStride * level.voxel;
     float3 biased = position + (normal * 0.2 + view * 0.8) * (0.3 * spacing);
     float3 grid = biased / spacing - 0.5;
@@ -399,7 +463,7 @@ float GiSampleLevel(GpuGiLevel level, uint index, float3 position, float3 normal
         uint2 tile = GiTile(probe, index);
         float3 fromProbe = biased - probePosition;
         float distance = length(fromProbe);
-        float2 moments = GiDistance.SampleLevel(GiDistanceSampler, GiOctUv(tile, fromProbe / max(distance, 1e-4), GiDistanceSide, float2(distanceWidth, distanceHeight)), 0.0).xy;
+        float2 moments = GiDistance.SampleLevel(GiDistanceSampler, GiOctUv(tile, fromProbe / max(distance, 1e-4), GiDistanceSide, distanceSize), 0.0).xy;
         if (distance > moments.x)
         {
             float variance = abs(moments.x * moments.x - moments.y);
@@ -411,7 +475,7 @@ float GiSampleLevel(GpuGiLevel level, uint index, float3 position, float3 normal
         // Crush the weights that are left small, so a probe that barely sees the surface does not show.
         weight = max(weight, 1e-6);
         weight = weight < 0.2 ? weight * weight * weight / 0.04 : weight;
-        float4 stored = GiIrradiance.SampleLevel(GiIrradianceSampler, GiOctUv(tile, normal, GiIrradianceSide, float2(width, height)), 0.0);
+        float4 stored = GiIrradiance.SampleLevel(GiIrradianceSampler, GiOctUv(tile, normal, GiIrradianceSide, irradianceSize), 0.0);
         weight *= stored.a;
         near *= stored.a;
         sum += stored.rgb * (weight / GiStoreScale);
@@ -420,36 +484,98 @@ float GiSampleLevel(GpuGiLevel level, uint index, float3 position, float3 normal
         nearTotal += near;
     }
 
-    irradiance = total > 1e-4 ? sum / total : nearTotal > 0.0 ? nearSum / nearTotal : float3(0.0, 0.0, 0.0);
+    irradiance = (sum + nearSum * 1e-3) / max(total + nearTotal * 1e-3, 1e-12);
     return nearTotal;
 }
 
 // The irradiance over pi the probes give a surface, from the finest level that holds the place, blended into the next
-// over its outermost probes, and how much of it the levels hold: 1 well inside them, fading to 0 past the coarsest.
+// between GiBlendStart and GiBlendEnd of its voxels from the camera, and how much of it the levels hold: 1 well inside
+// them, fading to 0 past the coarsest. A level whose probes vouch for little there hands it to the next by as much.
 float3 GiIrradianceAt(float3 position, float3 normal, float3 view, out float held)
 {
     GpuGi header = GiHeader();
+    float2 irradianceSize;
+    GiIrradiance.GetDimensions(irradianceSize.x, irradianceSize.y);
+    float2 distanceSize;
+    GiDistance.GetDimensions(distanceSize.x, distanceSize.y);
     float3 result = float3(0.0, 0.0, 0.0);
     float remaining = 1.0;
     [loop] for (uint index = 0u; index < header.levels && remaining > 0.0; index++)
     {
         GpuGiLevel level = GiLevel(index);
-        if (!GiContains(level, position, (float)GiStride))
+        float3 fromCamera = abs(position - header.camera) / max(level.voxel, 1e-6);
+        float along = max(fromCamera.x, max(fromCamera.y, fromCamera.z));
+        if (along >= GiBlendEnd || !GiContains(level, position, (float)GiStride))
         {
             continue;
         }
 
-        float3 voxels = position / level.voxel - float3(level.origin);
-        float edge = min(min(voxels.x, min(voxels.y, voxels.z)), min((float)GiResolution - voxels.x, min((float)GiResolution - voxels.y, (float)GiResolution - voxels.z)));
         float3 irradiance;
-        float weight = GiSampleLevel(level, index, position, normal, view, irradiance);
-        float share = remaining * saturate(edge / (float)GiStride - 1.0) * (weight > 1e-5 ? 1.0 : 0.0);
+        float vouched = GiSampleLevel(level, index, position, normal, view, irradianceSize, distanceSize, irradiance);
+        float share = remaining * saturate((GiBlendEnd - along) / (GiBlendEnd - GiBlendStart)) * saturate(vouched * 10.0);
         result += irradiance * share;
         remaining -= share;
     }
 
     held = 1.0 - remaining;
     return held > 0.0 ? result / held : result;
+}
+#endif
+
+#if defined(HAS_GiField) && defined(HAS_GiSurface) && defined(HAS_GiEmission) && defined(HAS_GiIrradiance) && defined(HAS_GiDistance) && defined(HAS_GiLights) && defined(HAS_SceneLights)
+#include "Lighting/Ibl.hlsli"
+#include "Lighting/Lights.hlsli"
+
+// The light the field's surface sends back the way a ray hit it: what it gives off, the sun and the point and spot
+// lights its cell lists as far as the field lets them through, and everything else as the probes held it last, the
+// sky's (its nine coefficients) where they hold nothing. What a probe's ray takes, which is how light bounces again and
+// again, and what a reflection the view cannot see shows.
+float3 GiHitRadiance(GiHit hit, uint levels, float3 sh[9])
+{
+    GpuGiLevel hitLevel = GiLevel(hit.level);
+    float3 normal = GiNormalAt(hitLevel, hit.level, hit.position);
+    float3 uvw = (float3(GiStored(GiVoxelOf(hitLevel, hit.position), hit.level)) + 0.5) / float3(GiResolution, GiResolution, GiResolution * GiMaxLevels);
+    float4 surface = GiSurface.SampleLevel(GiSurfaceSampler, uvw, 0.0);
+    float3 albedo = surface.a > 0.0 ? surface.rgb : float3(0.5, 0.5, 0.5);
+    float3 radiance = GiEmission.SampleLevel(GiEmissionSampler, uvw, 0.0).rgb;
+    float3 origin = hit.position + normal * hitLevel.voxel;
+    [branch] if (any(SunIlluminance > 0.0))
+    {
+        float facing = saturate(dot(normal, -SunDirection));
+        [branch] if (facing > 0.0)
+        {
+            float visible = GiVisibility(origin, -SunDirection, GiFarAway, hit.level, levels);
+            radiance += albedo * SunIlluminance * (facing * visible * InvPi);
+        }
+    }
+
+    // The lights listed for the cell the hit is in, as the view's lighting has them reach and face it.
+    uint listed = GiProbeIndex(GiCellOf(hitLevel, hit.position), hit.level) * GiCellLights;
+    [loop] for (uint i = 0u; i < GiCellLights; i++)
+    {
+        uint slot = LOAD(GiLights, uint, listed + i);
+        [branch] if (slot == GiNoLight)
+        {
+            break;
+        }
+
+        GpuSceneLight light = LOAD(SceneLights, GpuSceneLight, slot);
+        float3 position = light.high + light.low;
+        float3 toLight = position - hit.position;
+        float3 l = toLight * rsqrt(max(dot(toLight, toLight), 1e-8));
+        float reaching = DistanceAttenuation(toLight, 1.0 / Pow2(light.range)) * SpotAttenuation(l, light.forward, float2(light.spotScale, light.spotOffset)) * saturate(dot(normal, l));
+        [branch] if (reaching > 0.0)
+        {
+            float3 fromOrigin = position - origin;
+            float far = length(fromOrigin);
+            float visible = GiVisibility(origin, fromOrigin / max(far, 1e-4), far, hit.level, levels);
+            radiance += albedo * light.intensity * (reaching * visible * InvPi);
+        }
+    }
+
+    float held;
+    float3 bounced = GiIrradianceAt(hit.position, normal, normal, held);
+    return radiance + albedo * lerp(ShIrradiance(normal, sh), bounced, held);
 }
 #endif
 

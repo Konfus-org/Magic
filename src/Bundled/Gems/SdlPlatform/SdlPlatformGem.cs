@@ -59,6 +59,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// <summary>
     /// What was typed this frame, put together on the main thread from the pump's pieces.
     /// </summary>
+    private readonly SdlPlatformSettings _settings;
     private readonly StringBuilder _typed = new();
 
     private string _title;
@@ -72,10 +73,19 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     private float _pixelDensity = 1;
 
+    /// <summary>
+    /// The size the settings last asked the window to be, so a drag that changes it is left alone.
+    /// </summary>
+    private int _askedWidth;
+    private int _askedHeight;
+
     public unsafe SdlPlatformGem(SdlPlatformSettings settings, Args run, Lifetime lifetime, Threads threads, Project project, Assets assets)
     {
         _lifetime = lifetime;
         _threads = threads;
+        _settings = settings;
+        _askedWidth = settings.Width;
+        _askedHeight = settings.Height;
         _assets = assets;
         _title = project.Name;
         _icon = assets.Default<Icon>();
@@ -263,10 +273,26 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
+    /// Resizes the window when the settings ask for a size they did not before, on the window thread.
+    /// </summary>
+    private unsafe void Resize()
+    {
+        if (_window == null || (_settings.Width == _askedWidth && _settings.Height == _askedHeight))
+        {
+            return;
+        }
+
+        (_askedWidth, _askedHeight) = (_settings.Width, _settings.Height);
+        (int width, int height) = (_askedWidth, _askedHeight);
+        _threads.Post(EngineThread.Render, () => SDL3.SDL_SetWindowSize(_window, width, height));
+    }
+
+    /// <summary>
     /// Applies what the render thread's pump saw since the last frame. Main thread.
     /// </summary>
     public void Update(in Frame frame)
     {
+        Resize();
         for (int i = 0; i < _devices.Count; i++)
         {
             StartFrame(_devices[i].Kind, _controls[i]);
@@ -344,8 +370,9 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     uint mouse = (uint)sdlEvent.motion.which;
                     Set(DeviceKind.Mouse, mouse, Control.MouseX, sdlEvent.motion.x * _pixelDensity);
                     Set(DeviceKind.Mouse, mouse, Control.MouseY, sdlEvent.motion.y * _pixelDensity);
-                    Add(mouse, Control.MouseMotionX, sdlEvent.motion.xrel * _pixelDensity);
-                    Add(mouse, Control.MouseMotionY, sdlEvent.motion.yrel * _pixelDensity);
+                    float motion = _pixelDensity * Math.Clamp(_settings.MouseSensitivity, 0.1f, 10);
+                    Add(mouse, Control.MouseMotionX, sdlEvent.motion.xrel * motion);
+                    Add(mouse, Control.MouseMotionY, sdlEvent.motion.yrel * motion * (_settings.InvertMouseY ? -1 : 1));
                     break;
                 }
 
@@ -416,11 +443,15 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// An SDL axis, -32768 to 32767, as -1 to 1. Triggers only reach the positive half.
+    /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the settings' dead zone, and past it growing from 0 to 1 at
+    /// full deflection, so the zone's edge is no step. Triggers only reach the positive half.
     /// </summary>
-    private static float Stick(short value)
+    private float Stick(short value)
     {
-        return Math.Max(value / 32767f, -1f);
+        float raw = Math.Max(value / 32767f, -1f);
+        float deadZone = Math.Clamp(_settings.StickDeadZone, 0, 0.5f);
+        float past = MathF.Abs(raw) - deadZone;
+        return past <= 0 ? 0 : MathF.CopySign(past / (1 - deadZone), raw);
     }
 
     /// <summary>
@@ -580,11 +611,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
     private unsafe void ReadAxes(uint id, SDL_Gamepad* gamepad)
     {
-        // SDL's stick y grows downward; Magic's is up positive.
+        // SDL's stick y grows downward; Magic's is up positive, unless the settings invert it.
+        float up = _settings.InvertStickY ? 1 : -1;
         Set(DeviceKind.Gamepad, id, Control.GamepadLeftX, Stick(SDL3.SDL_GetGamepadAxis(gamepad, SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTX)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadLeftY, -Stick(SDL3.SDL_GetGamepadAxis(gamepad, SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTY)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadLeftY, up * Stick(SDL3.SDL_GetGamepadAxis(gamepad, SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFTY)));
         Set(DeviceKind.Gamepad, id, Control.GamepadRightX, Stick(SDL3.SDL_GetGamepadAxis(gamepad, SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTX)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadRightY, -Stick(SDL3.SDL_GetGamepadAxis(gamepad, SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTY)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadRightY, up * Stick(SDL3.SDL_GetGamepadAxis(gamepad, SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHTY)));
         Set(DeviceKind.Gamepad, id, Control.GamepadLeftTrigger, Stick(SDL3.SDL_GetGamepadAxis(gamepad, SDL_GamepadAxis.SDL_GAMEPAD_AXIS_LEFT_TRIGGER)));
         Set(DeviceKind.Gamepad, id, Control.GamepadRightTrigger, Stick(SDL3.SDL_GetGamepadAxis(gamepad, SDL_GamepadAxis.SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)));
     }

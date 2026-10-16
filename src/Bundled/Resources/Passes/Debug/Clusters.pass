@@ -1,0 +1,8 @@
+{
+    "description": "Each cluster its own colour, darker the coarser, cards grey, black lines between and where nothing was drawn.",
+    "stage": "ui",
+    "kind": "fullscreen",
+    "shader": { "id": 11263 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

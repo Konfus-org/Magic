@@ -1,8 +1,7 @@
 // Keeps the sun's entries in step with its clipmap, a thread an entry: an entry whose level's window moved off the page
 // it held lets that page go; a page is drawn again, all of it when the sun turned or what depth is measured from moved,
 // else where a sphere that moved reaches its column (the sun is far, so a caster's shadow falls straight along it),
-// border and all, and where last frame drew it short of casters; a page wanted this frame is noted as read; and no page
-// has a view until the allocator gives it one.
+// border and all; a page wanted this frame is noted as read; and no page has a view until the allocator gives it one.
 
 #include "Include/VirtualShadows.hlsli"
 
@@ -54,7 +53,7 @@ void main(uint3 id : SV_DispatchThreadID)
         }
         else
         {
-            uint rect = sun.allDirty != 0u ? WholeRect : UnionRect(TouchedRect(sun, row, page - row.origin, sun.moved), ShortRect(entry.view));
+            uint rect = sun.allDirty != 0u ? WholeRect : TouchedRect(sun, row, page - row.origin, sun.moved);
             if (rect != 0u)
             {
                 entry.page |= PageDirty;

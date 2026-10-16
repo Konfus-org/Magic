@@ -44,14 +44,10 @@ VsOut main(VsIn input)
     float scale = size / pool;
     float2 offset = float2((2.0 * corner.x + size) / pool - 1.0, 1.0 - (2.0 * corner.y + size) / pool);
 
-    // The scene's tables every draw of pieces binds, read where no view is, so they stay bound and the pass's own
-    // buffers after them keep their places.
-    uint kept = view.page == 0u ? Models.Load(0u) ^ Cards.Load(0u) : 0u;
-
     VsOut output;
     output.clip = index >= triangles
         ? float4(asfloat(0x7FC00000u).xxx, 1.0)
-        : float4(page.xy * scale + page.w * offset, page.z + asfloat(kept), page.w);
+        : float4(page.xy * scale + page.w * offset, page.z, page.w);
     float2 low;
     float2 high;
     RectClip(view.rect, low, high);

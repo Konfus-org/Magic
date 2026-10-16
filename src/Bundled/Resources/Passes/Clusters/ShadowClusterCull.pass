@@ -1,17 +1,7 @@
 {
-    "stage": "occlusion",
+    "stage": "shadows",
     "kind": "compute",
     "shader": { "id": 60046 },
-    "reads": [
-        { "name": "Instances" },
-        { "name": "Clusters" },
-        { "name": "MaterialBins" },
-        { "name": "ShadowGroups" },
-        { "name": "ShadowJobs" },
-        { "name": "ShadowViews" },
-        { "name": "SunClipmap" },
-        { "name": "ShadowTables" }
-    ],
     "writes": [ { "name": "ShadowPieces" }, { "name": "ShadowCounts" } ],
     "dispatch": { "args": "ShadowArgs", "first": 5 }
 }

@@ -11,7 +11,7 @@ void main(uint3 thread : SV_DispatchThreadID)
         GiJobs.Store(0u, 0u);
     }
 
-    uint3 stored = uint3(thread.x % GiResolution, (thread.x / GiResolution) % GiResolution, thread.x / (GiResolution * GiResolution));
+    uint3 stored = GiStoredAt(thread.x);
     uint index = stored.z / GiResolution;
     if (index >= GiHeader().levels)
     {

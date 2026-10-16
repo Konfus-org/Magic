@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 
 namespace Magic.ClusterRendering;
 
@@ -12,8 +13,8 @@ namespace Magic.ClusterRendering;
 /// A shader's param struct, a surface's <c>MaterialParams</c> or a pass's <c>PassParams</c>, as the renderer reads it
 /// from the HLSL, the compiler reporting counts and no names: its members, where each sits in the packed record, the
 /// HLSL that unpacks the record, and how values are packed into it. The CPU is the one place the layout exists: scalars
-/// 4-byte aligned, 2-vectors 8, 3- and 4-vectors 16, in declaration order, the total rounded up to 16 bytes and at most
-/// <see cref="RecordBytes"/> for a material, <see cref="PassBytes"/> for a pass.
+/// 4-byte aligned, 2-vectors 8, 3- and 4-vectors 16 and curves 16, four rows each, in declaration order, the total
+/// rounded up to 16 bytes and at most <see cref="RecordBytes"/> for a material, <see cref="PassBytes"/> for a pass.
 /// </summary>
 internal sealed partial class ParamLayout
 {
@@ -26,6 +27,12 @@ internal sealed partial class ParamLayout
     /// The most a pass's params pack to: seven rows of the constant block, the last being the renderer's.
     /// </summary>
     public const int PassBytes = 112;
+
+    /// <summary>
+    /// The places along a curve param its value is packed at, evenly from its first key to its last, after where those
+    /// are: the 16 floats of Shaders/Include/Curve.hlsli's <c>Curve</c>.
+    /// </summary>
+    private const int CurveSamples = 14;
 
     private static readonly Dictionary<string, ParamType> _types = new(StringComparer.Ordinal)
     {
@@ -44,6 +51,7 @@ internal sealed partial class ParamLayout
         ["bool"] = ParamType.Bool,
         ["Color"] = ParamType.Color,
         ["TextureRef"] = ParamType.TextureRef,
+        ["Curve"] = ParamType.Curve,
     };
 
     private ParamLayout(string structName, IReadOnlyList<ParamField> fields, int size, int bodyStart, int bodyEnd)
@@ -76,7 +84,7 @@ internal sealed partial class ParamLayout
     /// pass with no params needs none. Why not, for a member of a type a param cannot be, or more than
     /// <paramref name="maxBytes"/> of them.
     /// </summary>
-    public static Result<ParamLayout?> Parse(string hlsl, string structName, bool allowTextures, int maxBytes)
+    public static Result<ParamLayout?> Parse(string hlsl, string structName, bool allowTextures, bool allowCurves, int maxBytes)
     {
         Match match = StructPattern().Match(hlsl);
         while (match.Success && !string.Equals(match.Groups["name"].Value, structName, StringComparison.Ordinal))
@@ -110,12 +118,17 @@ internal sealed partial class ParamLayout
             string typeName = member.Groups["type"].Value;
             if (!_types.TryGetValue(typeName, out ParamType type))
             {
-                return Result.Failure<ParamLayout?>($"{structName}.{name} is a {typeName}; a param is float, int, uint or bool, a 2 to 4 vector of one, a Color or a TextureRef.");
+                return Result.Failure<ParamLayout?>($"{structName}.{name} is a {typeName}; a param is float, int, uint or bool, a 2 to 4 vector of one, a Color, a TextureRef or a Curve.");
             }
 
             if (type == ParamType.TextureRef && !allowTextures)
             {
                 return Result.Failure<ParamLayout?>($"{structName}.{name} is a TextureRef, which a pass's params cannot be.");
+            }
+
+            if (type == ParamType.Curve && !allowCurves)
+            {
+                return Result.Failure<ParamLayout?>($"{structName}.{name} is a Curve, which a material's params cannot be.");
             }
 
             if (fields.Exists(field => string.Equals(field.Name, name, StringComparison.Ordinal)))
@@ -179,6 +192,16 @@ internal sealed partial class ParamLayout
         text.Append(StructName).Append(' ').Append(signature).Append(" { ").Append(prologue).Append(' ').Append(StructName).Append(" loaded; ");
         foreach (ParamField field in Fields)
         {
+            if (field.Type == ParamType.Curve)
+            {
+                for (int row = 0; row < field.Size / 16; row++)
+                {
+                    text.Append(CultureInfo.InvariantCulture, $"loaded.{field.Name}.rows[{row}] = asfloat({rows}[{(field.Offset / 16) + row}]); ");
+                }
+
+                continue;
+            }
+
             string raw = $"{rows}[{field.Offset / 16}].{"xyzw".Substring(field.Offset % 16 / 4, field.Components)}";
             string value = field.Type == ParamType.Bool ? $"{raw} != 0u" : field.IsFloat ? $"asfloat({raw})" : field.IsInt ? $"asint({raw})" : raw;
             text.Append("loaded.").Append(field.Name).Append(" = ").Append(value).Append("; ");
@@ -223,12 +246,14 @@ internal sealed partial class ParamLayout
     /// <summary>
     /// What a material of <paramref name="values"/> gives global illumination: the colour of its <c>: GiColor</c> member,
     /// white without one, and half of it when a <c>: GiColorMap</c> member names a texture, whose own colour is taken as
-    /// mid grey; and the light of its <c>: GiEmissive</c> member, none without one.
+    /// mid grey, less as much of it as its <c>: GiMetallic</c> member says it is metal, as a metal scatters no light the
+    /// way a matte surface does, only mirrors it; and the light of its <c>: GiEmissive</c> member, none without one.
     /// </summary>
     public (Vector3 Color, Vector3 Emission) GiOf(IReadOnlyDictionary<string, MaterialParam> values)
     {
         Vector3 color = Vector3.One;
         Vector3 emission = Vector3.Zero;
+        float metallic = 0;
         bool isMapped = false;
         foreach (ParamField field in Fields)
         {
@@ -245,19 +270,23 @@ internal sealed partial class ParamLayout
                 case "GiColorMap":
                     isMapped = value.Texture != Handle<Texture>.None;
                     break;
+                case "GiMetallic":
+                    metallic = Math.Clamp(value.X, 0, 1);
+                    break;
                 default:
                     break;
             }
         }
 
-        return (isMapped ? color * 0.5f : color, emission);
+        return ((isMapped ? color * 0.5f : color) * (1 - metallic), emission);
     }
 
     /// <summary>
     /// Packs each member into <paramref name="record"/> from the first of <paramref name="layers"/> that has it by name,
-    /// else its default, else zero; a texture as <paramref name="texture"/> resolves it.
+    /// else its default, else zero; a texture as <paramref name="texture"/> resolves it, and a curve as
+    /// <paramref name="curve"/> does, all zeros for none.
     /// </summary>
-    public void Write(ReadOnlySpan<IReadOnlyDictionary<string, MaterialParam>?> layers, Func<MaterialParam, uint> texture, Span<byte> record)
+    public void Write(ReadOnlySpan<IReadOnlyDictionary<string, MaterialParam>?> layers, Func<MaterialParam, uint> texture, Func<MaterialParam, Curve?> curve, Span<byte> record)
     {
         record.Clear();
         foreach (ParamField field in Fields)
@@ -281,10 +310,35 @@ internal sealed partial class ParamLayout
             {
                 BinaryPrimitives.WriteUInt32LittleEndian(destination, value.X != 0 ? 1u : 0u);
             }
+            else if (field.Type == ParamType.Curve)
+            {
+                WriteCurve(curve(value), destination);
+            }
             else
             {
                 WriteComponents(field, value, destination);
             }
+        }
+    }
+
+    /// <summary>
+    /// A curve as Shaders/Include/Curve.hlsli reads it: where its first and last keys are, then its value at
+    /// <see cref="CurveSamples"/> places evenly from the one to the other.
+    /// </summary>
+    private static void WriteCurve(Curve? curve, Span<byte> destination)
+    {
+        if (curve is not { Keys.Count: > 0 })
+        {
+            return;
+        }
+
+        float start = curve.Keys[0].At;
+        float end = curve.Keys[^1].At;
+        BinaryPrimitives.WriteSingleLittleEndian(destination, start);
+        BinaryPrimitives.WriteSingleLittleEndian(destination[4..], end);
+        for (int i = 0; i < CurveSamples; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(destination[(8 + (i * 4))..], curve.At(start + ((end - start) * i / (CurveSamples - 1))));
         }
     }
 
@@ -317,7 +371,7 @@ internal sealed partial class ParamLayout
     /// </summary>
     private static MaterialParam DefaultOf(ParamField field, string? text)
     {
-        if (text is null || field.Type == ParamType.TextureRef)
+        if (text is null || field.Type is ParamType.TextureRef or ParamType.Curve)
         {
             return new MaterialParam();
         }
@@ -406,11 +460,17 @@ internal enum ParamType : byte
     /// A texture the renderer resolved into its pools, or <c>TextureNone</c>.
     /// </summary>
     TextureRef,
+
+    /// <summary>
+    /// A curve, as sixteen floats: where its first and last keys are, then its value at places evenly between.
+    /// </summary>
+    Curve,
 }
 
 /// <summary>
 /// One member of a param struct: where it sits in the packed record, its declared default, and its role for global
-/// illumination, <c>GiColor</c>, <c>GiColorMap</c> or <c>GiEmissive</c>, or none; both are stripped from the HLSL.
+/// illumination, <c>GiColor</c>, <c>GiColorMap</c>, <c>GiMetallic</c> or <c>GiEmissive</c>, or none; both are stripped
+/// from the HLSL.
 /// </summary>
 internal sealed record ParamField(string Name, ParamType Type, int Offset, MaterialParam Default)
 {
@@ -422,6 +482,7 @@ internal sealed record ParamField(string Name, ParamType Type, int Offset, Mater
         ParamType.Float2 or ParamType.Int2 or ParamType.Uint2 => 2,
         ParamType.Float3 or ParamType.Int3 or ParamType.Uint3 => 3,
         ParamType.Float4 or ParamType.Int4 or ParamType.Uint4 or ParamType.Color => 4,
+        ParamType.Curve => 16,
         _ => 1,
     };
 

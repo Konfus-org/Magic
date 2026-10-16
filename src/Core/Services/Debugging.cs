@@ -16,7 +16,8 @@ namespace Magic.Services;
 /// each line was logged from, and the log adds the thread and frame (<see cref="LogLine"/>).
 /// <para>
 /// <see cref="Verbose(string, string, string, int)"/> lines are logged only under --verbose. Lines go to the
-/// terminal, then to every gem that is an <see cref="ILogSink"/>. <see cref="Critical"/>
+/// terminal, then to every gem that is an <see cref="ILogSink"/>; the lines before there was any sink, up to
+/// <see cref="StartupLines"/>, are kept for the first one added, so a console has the whole run. <see cref="Critical"/>
 /// and a failed <see cref="Assert(bool, string, string, string, string, int)"/> end the process at once, leaving what
 /// the terminal had not printed yet in a .crash file in Logs/ beside Magic.
 /// </para>
@@ -29,11 +30,21 @@ public static class Debugging
     /// </summary>
     private const int CatchUpSeconds = 5;
 
+    /// <summary>
+    /// How many lines are kept for the first sink while there is none; past it the oldest go.
+    /// </summary>
+    private const int StartupLines = 10_000;
+
     // Not single reader: Critical takes what the printing task has not.
     private static readonly Channel<Entry> _entries = Channel.CreateUnbounded<Entry>();
 
-    // Only the printing task touches it, in order with the lines.
+    // Only the printing task touches them, in order with the lines.
     private static readonly List<ILogSink> _sinks = [];
+
+    /// <summary>
+    /// The lines printed before any sink was added, for the first one; null from then on.
+    /// </summary>
+    private static Queue<LogLine>? _startup = new();
     private static readonly Task _printing = PrintAsync();
     private static int _errorCount;
     private static int _crashing;
@@ -124,11 +135,27 @@ public static class Debugging
     }
 
     /// <summary>
-    /// Sends every line logged from now on to <paramref name="sink"/> too, until it is removed.
+    /// Sends every line logged from now on to <paramref name="sink"/> too, until it is removed. The first sink added
+    /// gets the lines logged before it first.
     /// </summary>
     internal static void Add(ILogSink sink)
     {
-        _entries.Writer.TryWrite(new Entry(default, () => _sinks.Add(sink)));
+        _entries.Writer.TryWrite(new Entry(default, AddSink));
+
+        void AddSink()
+        {
+            _sinks.Add(sink);
+            if (_startup is not { } startup)
+            {
+                return;
+            }
+
+            _startup = null;
+            foreach (LogLine line in startup)
+            {
+                WriteSinks(line);
+            }
+        }
     }
 
     /// <summary>
@@ -198,6 +225,15 @@ public static class Debugging
 
                 TextWriter terminal = entry.Line.Level >= LogLevel.Error ? Console.Error : Console.Out;
                 await terminal.WriteLineAsync(entry.Line.ToString()).ConfigureAwait(false);
+                if (_startup is { } startup)
+                {
+                    startup.Enqueue(entry.Line);
+                    if (startup.Count > StartupLines)
+                    {
+                        startup.Dequeue();
+                    }
+                }
+
                 WriteSinks(entry.Line);
             }
 

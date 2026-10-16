@@ -27,7 +27,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
     /// scripts, once every entity is made, so a script starts on the whole prefab. A part without a transform is where
     /// its parent is.
     /// </summary>
-    public Entity[] Spawn(World world, in Transform at)
+    public Entity[] Spawn(World world, Transform at)
     {
         List<(Entity Entity, PrefabPart Part)> made = [];
         Make(world, Parts, at, made);
@@ -35,7 +35,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
         for (int i = 0; i < entities.Length; i++)
         {
             entities[i] = made[i].Entity;
-            foreach (IScript script in made[i].Part.Scripts)
+            foreach (PrefabScript script in made[i].Part.Scripts)
             {
                 world.Attach(entities[i], script);
             }
@@ -53,7 +53,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
         return PlaceIn(Parts, new Transform(), tag);
     }
 
-    private static void Make(World world, IReadOnlyList<PrefabPart> parts, in Transform parent, List<(Entity Entity, PrefabPart Part)> made)
+    private static void Make(World world, IReadOnlyList<PrefabPart> parts, Transform parent, List<(Entity Entity, PrefabPart Part)> made)
     {
         foreach (PrefabPart part in parts)
         {
@@ -69,7 +69,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
         }
     }
 
-    private static Transform? PlaceIn(IReadOnlyList<PrefabPart> parts, in Transform parent, Tag tag)
+    private static Transform? PlaceIn(IReadOnlyList<PrefabPart> parts, Transform parent, Tag tag)
     {
         foreach (PrefabPart part in parts)
         {
@@ -93,6 +93,13 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
 }
 
 /// <summary>
+/// A script as a <see cref="PrefabPart"/> holds it: which, and the values the prefab gives it, each a public property's
+/// name and its value read as the property's type. A script is made for an entity, so a part cannot hold one made
+/// (<see cref="IScript"/>); it holds what each entity spawned from it has its own copy made from.
+/// </summary>
+public sealed record PrefabScript(Script Script, IReadOnlyDictionary<string, object?> Values);
+
+/// <summary>
 /// One part of a <see cref="Prefab"/>, spawned as one entity: its components, its scripts and the parts under it, whose
 /// transforms are relative to its own. Each entity spawned from it is given a copy of its components and of its scripts,
 /// and nothing changes a part once it is made, as a prefab is shared by everything that spawns it.
@@ -110,10 +117,10 @@ public sealed class PrefabPart
     public IReadOnlyList<IComponent> Components { get; init; } = [];
 
     /// <summary>
-    /// Its scripts, made with their values set; each entity spawned from it runs a copy of each
+    /// Its scripts, each with the values it is given; each entity spawned from it runs its own copy of each
     /// (<see cref="World.Attach"/>).
     /// </summary>
-    public IReadOnlyList<IScript> Scripts { get; init; } = [];
+    public IReadOnlyList<PrefabScript> Scripts { get; init; } = [];
 
     public IReadOnlyList<PrefabPart> Children { get; init; } = [];
 
@@ -121,7 +128,7 @@ public sealed class PrefabPart
     /// Where it is under <paramref name="parent"/>, its parent's place: its transform placed there, or the parent's
     /// place when it has none.
     /// </summary>
-    public Transform PlaceUnder(in Transform parent)
+    public Transform PlaceUnder(Transform parent)
     {
         foreach (IComponent component in Components)
         {

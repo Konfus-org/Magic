@@ -1,6 +1,6 @@
 // The vertex stage of every draw of pieces: no vertex buffer, only an instance-rate buffer of pieces (an instance's
-// slot, which cluster and piece or card, and the piece's slot among the view's), from which each index of the draw is
-// worked out: its triangle, index / 3, and corner, index % 3, of the piece's 32, the corner's vertex read from the
+// slot, which cluster and piece or card, and the piece's slot among the view's), and the scene's tables, which the
+// renderer declares ahead of this, from which each index of the draw is worked out: its triangle, index / 3, and corner, index % 3, of the piece's 32, the corner's vertex read from the
 // geometry's words and moved by its instance, relative to the camera. A triangle past the cluster's last is put where no
 // triangle is drawn. A mirrored instance's triangles wind the other way, so its second and third corners swap and the
 // pipelines cull back faces alike. A card's six indices are its quad's, turned to face the camera (CardCorner). With
@@ -9,19 +9,6 @@
 #ifndef PIECES_PLACE_ONLY
 #define PIECES_PLACE_ONLY 0
 #endif
-
-#include "Include/Bindings.hlsli"
-
-#define HAS_Instances 1
-#define HAS_Models 1
-#define HAS_Clusters 1
-#define HAS_Cards 1
-#define HAS_Geometry 1
-ByteAddressBuffer Instances : READ(0);
-ByteAddressBuffer Models : READ(1);
-ByteAddressBuffer Clusters : READ(2);
-ByteAddressBuffer Cards : READ(3);
-ByteAddressBuffer Geometry : READ(4);
 
 #include "Include/PieceVaryings.hlsli"
 #include "Include/Pieces.hlsli"
@@ -77,15 +64,13 @@ PieceVaryings main(VsIn input)
 
     float4 clip = isPast ? float4(asfloat(0x7FC00000u).xxx, 1.0) : mul(ViewProj, float4(position, 1.0));
     uint id = ((input.slot << 5) | face) + 1u;
-    GpuModel model = LOAD(Models, GpuModel, instance.model);
 #if PIECES_PLACE_ONLY
-    // The models stay bound as every draw of pieces binds them, though only a piece that dissolves reads them: a flag no
-    // model has keeps the compiler from dropping them, and every binding after them moving.
     PiecePlace output;
-    output.id = id + (model.padding.x == 0xFFFFFFFFu ? 1u : 0u);
+    output.id = id;
     output.clip = clip;
     return output;
 #else
+    GpuModel model = LOAD(Models, GpuModel, instance.model);
     float takeover = CardTakeover(model, instance, length(ScenePosition(instance, model.bounds.xyz)));
     PieceVaryings output;
     output.position = position;

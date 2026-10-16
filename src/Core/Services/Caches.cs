@@ -8,12 +8,12 @@ using Magic.Interfaces;
 namespace Magic.Services;
 
 /// <summary>
-/// What is slow to make, kept so that a later run reads it rather than making it again: a model's levels of detail, a
+/// What is slow to make, kept so that a later run reads it rather than making it again: a model's clusters, a
 /// compiled shader. Each entry is a type of thing under a key, the id of what it was made from: an asset's, so any asset
 /// can have one of each type, or a hash naming what is not an asset, such as a shader's source and stage. An entry was
 /// made from one version of its source (a hash of the asset's file, of the settings it was made with, of whatever else
-/// would make it come out otherwise); read with another, it is dirty, so it is deleted and the caller makes it again.
-/// Any thread.
+/// would make it come out otherwise); read with another, it is dirty: the read fails, and the caller makes it again and
+/// writes it over it. Any thread.
 /// <para>
 /// Entries are files beside Magic, in <c>Cache/</c>, as the log's are in <c>Logs/</c>: <c>Cache/&lt;Type&gt;/&lt;key&gt;</c>,
 /// the version it was made from and its type's <see cref="ICache{T}.Version"/>, then the bytes the type's
@@ -41,8 +41,7 @@ public sealed class Caches
 
     /// <summary>
     /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>; why
-    /// not when nothing is, or when what is was made from another version, or by another <see cref="ICache{T}.Version"/>,
-    /// and so is deleted.
+    /// not when nothing is, or when what is was made from another version, or by another <see cref="ICache{T}.Version"/>.
     /// </summary>
     public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, CancellationToken cancel)
     {
@@ -63,19 +62,10 @@ public sealed class Caches
             return Result.Failure<T>($"{file} could not be read: {bytes.Error}");
         }
 
+        // A dirty entry is left for the write that follows to replace: deleting it here would collide with another
+        // reader of the same entry, and it is never read as valid anyway.
         Result<T> read = Read(cache, bytes.Value, version);
-        if (read.Ok)
-        {
-            return read;
-        }
-
-        Result deleted = _files.Delete(file);
-        if (!deleted.Ok)
-        {
-            Debugging.Warn($"{file} is dirty, but could not be deleted: {deleted.Error}");
-        }
-
-        return Result.Failure<T>($"{file} is dirty, so it is deleted: {read.Error}");
+        return read.Ok ? read : Result.Failure<T>($"{file} is dirty: {read.Error}");
     }
 
     /// <summary>

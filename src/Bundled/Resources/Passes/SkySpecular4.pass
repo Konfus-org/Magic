@@ -1,0 +1,8 @@
+{
+    "stage": "probes",
+    "kind": "fullscreen",
+    "shader": { "id": 11232 },
+    "each": "6",
+    "writes": [ { "name": "SkySpecular", "level": 4 } ],
+    "params": { "level": { "x": 4 } }
+}

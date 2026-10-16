@@ -11,12 +11,11 @@ namespace Magic.DebugTools;
 internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? input, IWindow? window)
 {
     private readonly string _title = $"{name} ({(key == Control.KeyGrave ? "`" : key.ToString()["Key".Length..])} to toggle)";
-    private bool _isOpen;
 
     /// <summary>
-    /// Written by the close button while the window is begun.
+    /// Toggled by the key, and cleared by the close button while the window is begun.
     /// </summary>
-    private bool _isShown;
+    private bool _isOpen;
 
     /// <summary>
     /// Whether Copy was clicked in this frame's <see cref="Begin"/>, so the window puts what it shows on the clipboard.
@@ -40,8 +39,7 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
             return false;
         }
 
-        _isShown = true;
-        ui.Begin(_title, ref _isShown, scrollable);
+        ui.Begin(_title, ref _isOpen, scrollable);
         IsCopyClicked = ui.MenuItem("Copy");
         return true;
     }
@@ -52,7 +50,6 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
     public void End()
     {
         ui.End();
-        _isOpen = _isShown;
     }
 
     /// <summary>

@@ -2,14 +2,6 @@
     "stage": "cull",
     "kind": "compute",
     "shader": { "id": 60022 },
-    "reads": [
-        { "name": "Instances" },
-        { "name": "Models" },
-        { "name": "Clusters" },
-        { "name": "MaterialBins" },
-        { "name": "Jobs" },
-        { "name": "HiZ" }
-    ],
     "writes": [
         { "name": "CullCounts" },
         { "name": "BinCounts" },

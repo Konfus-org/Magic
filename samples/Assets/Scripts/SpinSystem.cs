@@ -9,7 +9,7 @@ namespace Magic.Samples.Assets.Scripts;
 /// Turns every entity with a <see cref="Spin"/> by its rate each frame, on the ECS's threads: a script, a system that a
 /// prefab attaches to an entity of its own, <c>{ "id": 3313 }</c>, so it runs while that entity's domain is open.
 /// </summary>
-internal sealed class SpinSystem : IParallelSystem<Transform, Spin>, IScript
+internal sealed class SpinSystem : IParallelSystemScript<Transform, Spin>
 {
     public void Run(in Frame frame, EcsChunk<Transform, Spin> chunk)
     {

@@ -23,7 +23,7 @@ Both are read as a pipeline loads, so a change while running shows only once the
 ```
 
 What a pipeline runs is the project's or world's to say; `off` and `params` are how a machine changes every pipeline
-without touching either.
+without touching either. Changed while running, every pipeline is made again, and runs the new way once it is.
 
 ## A pipeline's passes
 

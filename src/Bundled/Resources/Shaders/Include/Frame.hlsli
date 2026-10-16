@@ -35,7 +35,7 @@ cbuffer Frame : UNIFORM(0)
     uint FrameIndex;
     uint TileCountX;
     uint TileWords;
-    uint TargetIsWindow;
+    uint TargetEncoding;     // 0 linear as it is, 1 sRGB, 2 PQ (HDR10), 3 scRGB: see Output.frag.hlsl
 
     float ZBinScale;
     float ZBinBias;
@@ -53,13 +53,14 @@ cbuffer Frame : UNIFORM(0)
 
     float3 CameraMotion;     // the camera's position less the last frame's: a still point's relative position plus
                              // this is where it was relative to the last frame's camera
-    float LodScale;          // pixels a metre covers one metre in front of the camera, along the view's height
+    float PixelScale;        // pixels a metre covers one metre in front of the camera, along the view's height
 
     float3 PriorityPosition; // the player's camera relative to this one, which detail is kept nearest to
-    float TextureLodScale;   // what uv gradients are scaled by: below 1 to sharpen textures a temporal upscale resolves
+    float TextureMipScale;   // what uv gradients are scaled by: below 1 to sharpen textures a temporal upscale resolves
 
     float2 Jitter;           // this frame's sub-pixel offset of ViewProj, in clip space
-    float2 OutputSize;       // the view's size in pixels as it is shown, which upscaling fills
+    float2 OutputSize;       // the view's size in pixels as it is shown, which upscaling fills; the drawn size when the
+                             // output filter is nearest, so only the output pass scales
 
     uint4 PassRaw[8];
 };
@@ -82,6 +83,14 @@ float3 ViewPosition(float2 pixel, float viewDepth)
 {
     float2 ndc = float2(pixel.x * ViewTexel.x * 2.0 - 1.0, 1.0 - pixel.y * ViewTexel.y * 2.0) - Jitter;
     return float3(ndc / ProjScale * viewDepth, viewDepth);
+}
+
+// Where a view-space position in front of the camera falls on the view, in pixels from its top left, as the view is
+// drawn a sub-pixel off (Jitter), which ViewPosition took out.
+float2 ViewPixel(float3 seen)
+{
+    float2 ndc = seen.xy * ProjScale / seen.z + Jitter;
+    return float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * ViewSize;
 }
 
 // View is a rotation, so its transpose undoes it.

@@ -47,13 +47,17 @@ float SphericalCapIntersection(float cosA, float cosB, float cosAxes)
 
 // The share of a highlight's lobe, a cone around the reflection as wide as roughness makes it, that falls inside the
 // cone the ambient occlusion found open around the bent normal: a crease hides the reflections it would hide from a
-// mirror.
+// mirror. Measured against how much of the lobe the open hemisphere would hold, as the lobe's own part below the
+// horizon is already in the reflection's albedo (the DFG table): only what the occlusion hides beyond that is hidden,
+// so an open surface at a grazing view, where reflections are brightest, keeps all of them.
 float SpecularOcclusionCone(float3 bentNormal, float visibility, float3 reflected, float roughness)
 {
     float cosVisible = sqrt(saturate(1.0 - visibility));
     float cosLobe = exp2(-3.32193 * roughness * roughness);
-    float common = SphericalCapIntersection(cosVisible, cosLobe, dot(bentNormal, reflected));
-    return saturate(common / max(TwoPi - TwoPi * cosLobe, 1e-4));
+    float alongBent = dot(bentNormal, reflected);
+    float common = SphericalCapIntersection(cosVisible, cosLobe, alongBent);
+    float open = SphericalCapIntersection(0.0, cosLobe, alongBent);
+    return saturate(common / max(open, 1e-4));
 }
 
 #endif

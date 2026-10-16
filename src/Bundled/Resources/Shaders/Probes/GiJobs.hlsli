@@ -7,9 +7,12 @@
 
 #include "Lighting/Gi.hlsli"
 
-// Groups that share the jobs out, each taking every this many; and texels a side of a model's field.
+// Groups that share the jobs out, each taking every this many; texels a side of a model's field; and texels of its
+// largest step past a surface its distance is exact to, past which it says only that it is at least that far, as the
+// renderer's MeshFields makes it.
 static const uint GiJobGroups = 4096u;
 static const uint MeshFieldResolution = 32u;
+static const float MeshFieldBand = 2.5;
 
 struct GiJob
 {
@@ -22,6 +25,7 @@ struct GiJob
     float3 inverse2;
     float3 translation;
     float scale;
+    float thickness;
     int3 low;
     int3 high;
 };
@@ -71,8 +75,12 @@ GiJob GiJobOf(uint index)
     job.inverse2 = cofactor2 / determinant;
     job.translation = GiTranslation(instance);
 
-    // A distance in the model's space is at least this one in the world's, however it is squashed.
-    job.scale = min(length(float3(row0.x, row1.x, row2.x)), min(length(float3(row0.y, row1.y, row2.y)), length(float3(row0.z, row1.z, row2.z))));
+    // A distance in the model's space is at least this one in the world's, however it is squashed; and how thick the
+    // field's box is in the world where it is thinnest.
+    float3 stretch = float3(length(float3(row0.x, row1.x, row2.x)), length(float3(row0.y, row1.y, row2.y)), length(float3(row0.z, row1.z, row2.z)));
+    job.scale = min(stretch.x, min(stretch.y, stretch.z));
+    float3 box = job.field.size * stretch;
+    job.thickness = min(box.x, min(box.y, box.z));
 
     float3 centre;
     float3 extent;
@@ -117,11 +125,17 @@ float GiMeshDistance(GiJob job, float3 position)
 
 // The distance a voxel takes from a job's model: three quarters of a voxel less than the true one, so a surface thinner
 // than a voxel, a floor or a wall, still has voxels either side of it below zero, and no ray steps through it; every
-// shape is that much fatter for it, which light from everywhere does not show. Within the field's reach either way.
+// shape is that much fatter for it, which light from everywhere does not show. Never more than half as far as the
+// model's own field is exact past its surface, though, where its box is thicker than that fattening: a ball a few voxels
+// big would otherwise fill its whole box, as its field says no more than that far anywhere; a floor's or a wall's box,
+// thinner, is filled by the fattening anyway. Within the field's reach either way.
 float GiJobDistance(GiJob job, int3 voxel)
 {
     float reach = GiReach * job.info.voxel;
-    return clamp(GiMeshDistance(job, (float3(voxel) + 0.5) * job.info.voxel) - 0.75 * job.info.voxel, -reach, reach);
+    float exact = MeshFieldBand * max(job.field.size.x, max(job.field.size.y, job.field.size.z)) / (float)(MeshFieldResolution - 1u) * job.scale;
+    float fatter = 0.75 * job.info.voxel;
+    fatter = job.thickness <= 2.0 * fatter ? fatter : min(fatter, 0.5 * exact);
+    return clamp(GiMeshDistance(job, (float3(voxel) + 0.5) * job.info.voxel) - fatter, -reach, reach);
 }
 #endif
 

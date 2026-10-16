@@ -4,6 +4,7 @@
 // so it lights the world as the sky would. Without one (SKY_FALLBACK) it is the renderer's own: a clear sky as bright
 // as the sun makes it, with the sun's disc in view but not in the capture, which the sun's own light stands for.
 
+#include "Include/Color.hlsli"
 #include "Include/Cube.hlsli"
 #include "Include/Fullscreen.hlsli"
 #include "Include/Math.hlsli"
@@ -22,7 +23,7 @@ static const float NightSky = 0.002;
 float3 FallbackSky(float3 direction)
 {
     float3 towardSun = -SunDirection;
-    float sunLux = dot(SunIlluminance, float3(0.2126, 0.7152, 0.0722));
+    float sunLux = Luminance(SunIlluminance);
     float day = saturate(towardSun.y * 4.0 + 0.2);
     float up = direction.y;
     float3 sky = up >= 0.0 ? lerp(Horizon, Zenith, sqrt(saturate(up))) : lerp(Horizon * 0.6, Ground, saturate(-up * 4.0));
@@ -69,7 +70,6 @@ float4 main(PassVaryings input) : SV_Target0
     nits = EvaluateSurface(inputs, LoadMaterialParams(SkyMaterial)).emissive;
 #endif
 
-    nits += KeepBindingsAlive(SkyMaterial | 0x7FFFFFFFu, input.uv);
 #if SKY_CUBE
     return float4(nits, 1.0);
 #else

@@ -34,19 +34,19 @@ internal sealed class SceneLights(IGpu gpu) : IDisposable
     /// <summary>
     /// Takes in the lights that changed since the last frame, then uploads them.
     /// </summary>
-    public void Update(Snapshot snapshot)
+    public void Update(WorldCopy copy)
     {
         _changed.Clear();
-        Slots<LightCopy> lights = snapshot.Lights;
+        Delta<LightCopy> lights = copy.Lights;
         foreach (int slot in lights.Removed)
         {
             Rows.Set(slot, default);
             _changed.Add(slot);
         }
 
-        foreach (int slot in lights.Changed)
+        foreach (ref readonly Delta<LightCopy>.Change change in lights.Changed)
         {
-            LightCopy light = lights[slot];
+            (int slot, LightCopy light) = change;
             Vector3 high = light.Position.ToVector3();
             Rows.Set(slot, new GpuSceneLight
             {

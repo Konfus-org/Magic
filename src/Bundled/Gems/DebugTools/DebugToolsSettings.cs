@@ -1,10 +1,14 @@
+using System.ComponentModel;
+using Magic.Interfaces;
+
 namespace Magic.DebugTools;
 
 /// <summary>
 /// What the debug windows show. Set in the project's <c>Presets/Default.preset</c>, by another preset, or with
-/// <c>--set DebugTools.meters=["Magic"]</c>.
+/// <c>--set DebugTools.frameRate=false</c>.
 /// </summary>
-internal sealed class DebugToolsSettings
+[Category("Debug")]
+internal sealed class DebugToolsSettings : ISettings
 {
 #if DEBUG
     private const bool IsDebug = true;
@@ -19,9 +23,14 @@ internal sealed class DebugToolsSettings
     public bool FrameRate { get; set; } = IsDebug;
 
     /// <summary>
-    /// The meters the telemetry window shows, a tab each in this order, each with the meters under it: "Magic" is Core's
-    /// and every gem's "Magic.Gem", and "System.Runtime" .NET's own: garbage collection, memory, the JIT and the thread
-    /// pool.
+    /// The telemetry window's tabs, in this order: each a title, and the meters under it, by their name or a prefix of
+    /// it. "Magic.Core" is Core's meter and "Magic.Gems" every gem's, "Magic.Gems.&lt;Gem&gt;"; "System.Runtime" is
+    /// .NET's own: garbage collection, memory, the JIT and the thread pool.
     /// </summary>
-    public IReadOnlyList<string> Meters { get; set; } = ["Magic", "System.Runtime"];
+    public IReadOnlyDictionary<string, string> Tabs { get; set; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Magic.Core"] = "Magic.Core",
+        ["Magic.Gems"] = "Magic.Gems",
+        [".NET"] = "System.Runtime",
+    };
 }

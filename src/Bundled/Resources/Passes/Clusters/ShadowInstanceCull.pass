@@ -1,14 +1,7 @@
 {
-    "stage": "occlusion",
+    "stage": "shadows",
     "kind": "compute",
     "shader": { "id": 60045 },
-    "reads": [
-        { "name": "Instances" },
-        { "name": "Models" },
-        { "name": "Levels" },
-        { "name": "ShadowGroups" },
-        { "name": "ShadowViews" }
-    ],
     "writes": [ { "name": "ShadowJobs" }, { "name": "ShadowCounts" } ],
     "dispatch": { "args": "ShadowArgs", "first": 4 }
 }

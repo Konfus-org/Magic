@@ -1,7 +1,7 @@
 // Gives each light's page wanted this frame the pool page it had last frame, a thread an entry of this frame's table:
 // found by its key in last frame's table, still owned by it, it is taken over, and drawn again, all of it when its
-// light changed, else where something that moved within its reach covers it, since, and where last frame drew it short
-// of casters. What was not wanted again is left in the pool, the first taken for what is wanted now.
+// light changed, else where something that moved within its reach covers it, since. What was not wanted again is left
+// in the pool, the first taken for what is wanted now.
 
 #include "Include/VirtualShadows.hlsli"
 
@@ -65,8 +65,7 @@ void main(uint3 id : SV_DispatchThreadID)
     }
 
     bool hasChanged = slot / 32u < sun.changedLightWords && (ChangedLights.Load((slot / 32u) * 4u) & (1u << (slot % 32u))) != 0u;
-    uint shortRect = ShortRect(ShadowTables.Load((sun.lightTableLast + last) * 16u + 12u));
-    uint rect = hasChanged ? WholeRect : UnionRect(TouchedRect(MainRelative(sun, SceneLightPosition(light)), light.range, entry.tag, sun.moved), shortRect);
+    uint rect = hasChanged ? WholeRect : TouchedRect(MainRelative(sun, SceneLightPosition(light)), light.range, entry.tag, sun.moved);
     ShadowTables.Store((sun.lightTable + id.x) * 16u, (page & ~PageDirty) | (rect != 0u || (page & PageDirty) != 0u ? PageDirty : 0u));
     ShadowTables.Store2(record * 16u, uint2(id.x | LightOwner, sun.frame));
     if (rect != 0u)

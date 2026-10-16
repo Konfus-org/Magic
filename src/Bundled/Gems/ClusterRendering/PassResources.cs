@@ -6,16 +6,18 @@ using Magic.Interfaces;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// What a name a pass reads or writes stands for: a texture or a buffer, the renderer's or one a pass makes, for the
-/// frame or for each view, and how a shader declares it. The renderer's own are <see cref="Engine"/>; a pass's come
-/// from its <see cref="PassCreate"/>.
+/// What a name a pass's shader reads or writes stands for: a texture or a buffer, the renderer's or one a pass makes,
+/// for the frame, for each view or for each target (<see cref="IsTarget"/>), how a shader declares it, and how a texture
+/// is sampled wherever one samples it. The renderer's own are <see cref="Engine"/>; a pass's come from its
+/// <see cref="PassCreate"/>.
 /// </summary>
 [SuppressMessage("Style", "IDE0072:Add missing cases", Justification = "A format or shape maps to the HLSL it is declared as; the rest share a default.")]
-internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, GpuFormat Format, GpuTextureKind Shape, string BufferType)
+internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, GpuFormat Format, GpuTextureKind Shape, string BufferType, PassFilter Filter = PassFilter.Default, bool IsTarget = false)
 {
     /// <summary>
-    /// What the renderer has, by name: the scene's tables, the templates culling and binning start from, and the shadows'
-    /// pool and tables, once a frame; each view's visibility buffer, G-buffer, scene colour, velocity and exposure.
+    /// What the renderer has, by name: the scene's tables, the materials and their texture pools, the templates culling and
+    /// binning start from, and the shadows' pool and tables, once a frame; each view's visibility buffer, G-buffer, scene
+    /// colour, velocity and exposure.
     /// </summary>
     public static IReadOnlyDictionary<string, ResourceInfo> Engine { get; } = new Dictionary<string, ResourceInfo>(StringComparer.Ordinal)
     {
@@ -26,6 +28,14 @@ internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, Gp
         ["Cards"] = FrameBuffer("Cards", "GpuCard"),
         ["Geometry"] = FrameBuffer("Geometry", "uint"),
         ["Materials"] = FrameBuffer("Materials", "GpuMaterial"),
+        [TexturePools.Names[0]] = PoolTexture(0, GpuFormat.Bc7Srgb),
+        [TexturePools.Names[1]] = PoolTexture(1, GpuFormat.Bc7Srgb),
+        [TexturePools.Names[2]] = PoolTexture(2, GpuFormat.Bc7Srgb),
+        [TexturePools.Names[3]] = PoolTexture(3, GpuFormat.Bc7Srgb),
+        [TexturePools.Names[4]] = PoolTexture(4, GpuFormat.Bc7Unorm),
+        [TexturePools.Names[5]] = PoolTexture(5, GpuFormat.Bc7Unorm),
+        [TexturePools.Names[6]] = PoolTexture(6, GpuFormat.Bc7Unorm),
+        [TexturePools.Names[7]] = PoolTexture(7, GpuFormat.Bc7Unorm),
         ["MaterialBins"] = FrameBuffer("MaterialBins", "uint"),
         ["SceneLights"] = FrameBuffer("SceneLights", "GpuSceneLight"),
         ["Moved"] = FrameBuffer("Moved", "float4"),
@@ -43,11 +53,20 @@ internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, Gp
         ["MeshFields"] = FrameBuffer("MeshFields", "GpuMeshField"),
         ["MaterialGi"] = FrameBuffer("MaterialGi", "GpuMaterialGi"),
         ["GiLevels"] = FrameBuffer("GiLevels", "GpuGiLevel"),
-        ["ShadowPool"] = new("ShadowPool", false, true, GpuFormat.D32Float, GpuTextureKind.Texture2D, string.Empty),
+        ["ShadowPool"] = new("ShadowPool", false, true, GpuFormat.D32Float, GpuTextureKind.Texture2D, string.Empty, PassFilter.Comparison),
         ["ShadowTables"] = FrameBuffer("ShadowTables", "ShadowEntry"),
         ["SunClipmap"] = FrameBuffer("SunClipmap", "GpuSunClipmap"),
         ["ChangedLights"] = FrameBuffer("ChangedLights", "uint"),
+        ["Failures"] = FrameBuffer("Failures", "uint"),
+        [TargetName] = new(TargetName, false, false, GpuFormat.Rgba16Float, GpuTextureKind.Texture2D, string.Empty, IsTarget: true),
     };
+
+    /// <summary>
+    /// What a target's passes draw into (<see cref="PassStage.Overlay"/>): the window's image or a render texture,
+    /// every view in it composed, whose format and encoding are the target's own and known only as it is drawn into,
+    /// so only a script pass, which makes its pipelines for the target it is given, draws into it.
+    /// </summary>
+    public const string TargetName = "Target";
 
     public bool IsDepth => Format == GpuFormat.D32Float;
 
@@ -110,39 +129,34 @@ internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, Gp
     /// <summary>
     /// What a pass makes, as it declares it: for the frame when it is made in a stage that runs once a frame.
     /// </summary>
-    public static ResourceInfo Of(PassCreate create, bool isFrame) => new(
+    public static ResourceInfo Of(PassCreate create, bool isFrame, bool isTarget = false) => new(
         create.Name,
         create.Kind == PassResource.Buffer,
         isFrame,
         create.Format,
         create.Cube ? GpuTextureKind.Cube : create.Depth > 0 ? GpuTextureKind.Texture3D : create.Layers > 1 ? GpuTextureKind.Texture2DArray : GpuTextureKind.Texture2D,
-        create.Type);
-
-    /// <summary>
-    /// An expression that reads it once, at <c>uv</c>, as a float, through its sampler: what keeps a read the shader may
-    /// not use, or reads only texel by texel, bound with its sampler where the renderer binds them
-    /// (<see cref="ListedPass.Header"/>). A storage texture, which has no sampler, is read at its first texel.
-    /// </summary>
-    public string KeepAlive(PassFilter filter)
-    {
-        string coords = Shape == GpuTextureKind.Texture2D ? "uv" : Shape == GpuTextureKind.Cube ? "float3(uv, 1.0)" : "float3(uv, 0.0)";
-        return IsBuffer ? $"asfloat({Name}.Load(0u))"
-            : IsStorageRead ? $"asfloat({Name}.Load({(Shape == GpuTextureKind.Texture2D ? "int3(0, 0, 0)" : "int4(0, 0, 0, 0)")}).x)"
-            : filter == PassFilter.Comparison ? $"{Name}.SampleCmpLevelZero({Name}Sampler, {coords}, 0.0)"
-            : $"{Name}.SampleLevel({Name}Sampler, {coords}, 0.0).x";
-    }
+        create.Type,
+        create.Filter,
+        isTarget);
 
     private static ResourceInfo FrameBuffer(string name, string type) => new(name, true, true, GpuFormat.Invalid, GpuTextureKind.Texture2D, type);
+
+    /// <summary>
+    /// A texture pool the materials' textures live in (<see cref="TexturePools"/>): an array of layers, sampled as the
+    /// pools' own sampler says, which the frame binds with it.
+    /// </summary>
+    private static ResourceInfo PoolTexture(int pool, GpuFormat format) => new(TexturePools.Names[pool], false, true, format, GpuTextureKind.Texture2DArray, string.Empty);
 
     private static ResourceInfo ViewTexture(string name, GpuFormat format) => new(name, false, false, format, GpuTextureKind.Texture2D, string.Empty);
 }
 
 /// <summary>
-/// A name as it stands this frame: its texture or buffer, and its size.
+/// A name as it stands this frame: its texture or buffer, its size, and for a texture that is read through one sampler
+/// wherever it is read, the materials' textures, that sampler.
 /// </summary>
-internal readonly record struct BoundResource(GpuTexture Texture, GpuBuffer Buffer, uint Width, uint Height, uint Bytes)
+internal readonly record struct BoundResource(GpuTexture Texture, GpuBuffer Buffer, uint Width, uint Height, uint Bytes, GpuSampler Sampler = default)
 {
-    public static BoundResource Of(GpuTexture texture, uint width, uint height) => new(texture, GpuBuffer.None, width, height, 0);
+    public static BoundResource Of(GpuTexture texture, uint width, uint height, GpuSampler sampler = default) => new(texture, GpuBuffer.None, width, height, 0, sampler);
 
     public static BoundResource Of(GpuBuffer buffer, uint bytes) => new(GpuTexture.None, buffer, 0, 0, bytes);
 }
@@ -174,6 +188,11 @@ internal sealed class ResourceSet(IGpu gpu) : IDisposable
 {
     private readonly Dictionary<string, BoundResource> _bound = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (BoundResource Resource, ResourceKey Key)> _made = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// What is kept from frame to frame, each with its history's name, so a frame's swap walks these and makes no name.
+    /// </summary>
+    private readonly List<(string Name, string History)> _histories = [];
 
     /// <summary>
     /// The listing last trimmed for, so a frame with the same one does nothing.
@@ -215,7 +234,9 @@ internal sealed class ResourceSet(IGpu gpu) : IDisposable
         Keep(name, key);
         if (key.HasHistory)
         {
-            Keep(ResourceInfo.HistoryOf(name), key with { HasHistory = false });
+            string history = ResourceInfo.HistoryOf(name);
+            Keep(history, key with { HasHistory = false });
+            _histories.Add((name, history));
         }
 
         return true;
@@ -227,18 +248,14 @@ internal sealed class ResourceSet(IGpu gpu) : IDisposable
     /// </summary>
     public void Swap()
     {
-        foreach (string name in new List<string>(_made.Keys))
+        foreach ((string name, string history) in _histories)
         {
-            if (!_made[name].Key.HasHistory || !_made.TryGetValue(ResourceInfo.HistoryOf(name), out (BoundResource Resource, ResourceKey Key) history))
-            {
-                continue;
-            }
-
             (BoundResource Resource, ResourceKey Key) current = _made[name];
-            _made[name] = (history.Resource, current.Key);
-            _made[ResourceInfo.HistoryOf(name)] = (current.Resource, history.Key);
-            _bound[name] = history.Resource;
-            _bound[ResourceInfo.HistoryOf(name)] = current.Resource;
+            (BoundResource Resource, ResourceKey Key) last = _made[history];
+            _made[name] = (last.Resource, current.Key);
+            _made[history] = (current.Resource, last.Key);
+            _bound[name] = last.Resource;
+            _bound[history] = current.Resource;
         }
     }
 
@@ -273,7 +290,7 @@ internal sealed class ResourceSet(IGpu gpu) : IDisposable
     {
         BoundResource resource = key.IsBuffer
             ? BoundResource.Of(gpu.CreateBuffer(key.BufferUsage, key.Bytes), key.Bytes)
-            : BoundResource.Of(gpu.CreateTexture(new GpuTextureDesc(key.Format, key.TextureUsage, key.Width, key.Height, key.Levels, key.Layers, key.Shape)), key.Width, key.Height);
+            : BoundResource.Of(gpu.CreateTexture(new GpuTextureDescription(key.Format, key.TextureUsage, key.Width, key.Height, key.Levels, key.Layers, key.Shape)), key.Width, key.Height);
         _made[name] = (resource, key);
         _bound[name] = resource;
     }
@@ -293,6 +310,7 @@ internal sealed class ResourceSet(IGpu gpu) : IDisposable
         gpu.Release(made.Resource.Buffer);
         if (made.Key.HasHistory)
         {
+            _histories.RemoveAll(kept => string.Equals(kept.Name, name, StringComparison.Ordinal));
             Release(ResourceInfo.HistoryOf(name));
         }
     }

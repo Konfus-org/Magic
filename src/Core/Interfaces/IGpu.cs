@@ -1,10 +1,9 @@
-using Magic.Contexts.Assets;
+using System.Drawing;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Services;
-using Size = System.Drawing.Size;
 
 namespace Magic.Interfaces;
 
@@ -20,8 +19,8 @@ namespace Magic.Interfaces;
 /// </para>
 /// <para>
 /// A render target is a texture: one the drawer made (a render texture, which can then be sampled, as an editor's
-/// viewport is), or a window's (<see cref="Target"/>). Whatever draws asks it for its <see cref="Format"/> and
-/// <see cref="Size"/> and treats the two alike.
+/// viewport is), or a window's (<see cref="WindowTarget"/>). Whatever draws asks it for its <see cref="FormatOf"/>
+/// and <see cref="SizeOf"/> and treats the two alike.
 /// </para>
 /// <para>
 /// The provider is made before every gem that takes it, so its Render runs after theirs: take it, and record in
@@ -36,7 +35,7 @@ public interface IGpu
     /// <summary>
     /// The GPU and the API driving it, for logs: <c>NVIDIA GeForce RTX 4070 (vulkan)</c>.
     /// </summary>
-    string Device { get; }
+    string Name { get; }
 
     GpuShaderFormat ShaderFormat { get; }
 
@@ -46,17 +45,28 @@ public interface IGpu
     GpuCommands Commands { get; }
 
     /// <summary>
-    /// The stage of the frame shown in place of the finished image, to look at what that stage made; null shows the
-    /// frame as it is. Whatever draws the frame reads it and decides what of the stage to show; the provider only keeps
-    /// it. Unlike the rest of the GPU, any thread may read or set it, as a debug window on the main thread does.
+    /// The debug view shown in place of the finished image, by name: a way of looking at one thing the frame made, its
+    /// depth, its normals, which lights reach each pixel; empty shows the frame as it is. Whatever draws the frame reads
+    /// it and decides what the name shows, a pass of its own; the provider only keeps it. Unlike the rest of the GPU, any
+    /// thread may read or set it, as a debug window on the main thread does.
     /// </summary>
-    PassStage? DebugView { get; set; }
+    string DebugView { get; set; }
 
     GpuBuffer CreateBuffer(GpuBufferUsage usage, uint bytes);
 
-    GpuTexture CreateTexture(in GpuTextureDesc desc);
+    GpuTexture CreateTexture(in GpuTextureDescription description);
 
-    GpuSampler CreateSampler(in GpuSamplerDesc desc);
+    GpuSampler CreateSampler(in GpuSamplerDescription description);
+
+    /// <summary>
+    /// A graphics pipeline, or why the GPU would not make one of these shaders.
+    /// </summary>
+    Result<GpuPipeline> CreatePipeline(GpuPipelineDescription description);
+
+    /// <summary>
+    /// A compute pipeline, or why the GPU would not make one of this shader.
+    /// </summary>
+    Result<GpuPipeline> CreatePipeline(GpuShader compute);
 
     /// <summary>
     /// A window as a render target: a texture that is, each frame, the image the window shows next, acquired the first
@@ -66,29 +76,19 @@ public interface IGpu
     /// not sRGB, so the last pass of a frame encodes its colour itself. While the window has no image (minimised, or
     /// none at all in a headless run) it is 0 x 0, and the passes into it are skipped.
     /// </summary>
-    GpuTexture Target(IWindow window);
+    GpuTexture WindowTarget(IWindow window);
 
     /// <summary>
     /// What a texture was made with, or a window's image format: what the pipelines that draw into it are made for.
     /// <see cref="GpuFormat.Invalid"/> for a window with no image and for what is no texture.
     /// </summary>
-    GpuFormat Format(GpuTexture texture);
+    GpuFormat FormatOf(GpuTexture texture);
 
     /// <summary>
     /// Level 0's width and height in pixels, a window's as it is now: what whatever draws into a target sizes its own
     /// textures by.
     /// </summary>
-    Size Size(GpuTexture texture);
-
-    /// <summary>
-    /// A graphics pipeline, or why the GPU would not make one of these shaders.
-    /// </summary>
-    Result<GpuPipeline> CreatePipeline(GpuPipelineDesc desc);
-
-    /// <summary>
-    /// A compute pipeline, or why the GPU would not make one of this shader.
-    /// </summary>
-    Result<GpuPipeline> CreatePipeline(GpuShader compute);
+    Size SizeOf(GpuTexture texture);
 
     /// <summary>
     /// Copies <paramref name="data"/> now; it reaches the buffer at the start of the next submit, before that frame's

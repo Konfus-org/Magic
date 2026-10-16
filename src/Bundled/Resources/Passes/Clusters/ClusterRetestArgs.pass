@@ -1,5 +1,5 @@
 {
-    "stage": "depth",
+    "stage": "visibility",
     "kind": "compute",
     "shader": { "id": 60023 },
     "writes": [ { "name": "CullCounts" }, { "name": "CullArgs" } ],

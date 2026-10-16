@@ -63,8 +63,8 @@ Surface EvaluateSurface(SurfaceInputs input, MaterialParams material)
 }
 ```
 
-Defaults and `Gi*` roles (which members are the surface's colour and light, for global illumination) are read by the
-renderer and stripped before compilation. `SampleTexture(input, texture)` samples at the mesh uv; for any other uv
+Defaults and `Gi*` roles (which members are the surface's colour, how metal it is and its light, for global
+illumination) are read by the renderer and stripped before compilation. `SampleTexture(input, texture)` samples at the mesh uv; for any other uv
 pass its own derivatives to `SampleTextureGrad`, which the renderer defines. `SampleNormal(input, map, scale)` reads a
 normal map into world space, rebuilding z, so two-channel (BC5) maps serve as well as three-channel ones, through the
 vertex frame as MikkTSpace bakers expect.

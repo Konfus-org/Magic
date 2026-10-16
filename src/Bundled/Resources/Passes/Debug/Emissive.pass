@@ -1,0 +1,8 @@
+{
+    "description": "What the surfaces emit, alone, over a faint scene: the scene colour before the lighting adds to it.",
+    "stage": "g_buffer",
+    "kind": "fullscreen",
+    "shader": { "id": 11935 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

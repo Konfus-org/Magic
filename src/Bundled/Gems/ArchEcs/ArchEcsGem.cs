@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -31,6 +32,10 @@ namespace Magic.ArchEcs;
 /// </summary>
 internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 {
+    private static readonly Meter _meter = new("Magic.Gems.ArchEcs");
+    private static readonly Gauge<int> _entities = _meter.CreateGauge<int>("magic.gems.arch_ecs.entities", "{entity}", "Entities alive.");
+    private static readonly Gauge<int> _archetypes = _meter.CreateGauge<int>("magic.gems.arch_ecs.archetypes", "{archetype}", "Archetypes, one per set of component types entities have.");
+
     private readonly ArchWorld _world;
     private readonly Threads _threads;
 
@@ -108,7 +113,12 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         }
     }
 
-    public void Update(in Frame frame) => Run(Phase.Update, frame);
+    public void Update(in Frame frame)
+    {
+        _entities.Record(_world.Size);
+        _archetypes.Record(_world.Archetypes.Count);
+        Run(Phase.Update, frame);
+    }
 
     public void FixedUpdate(in Frame frame) => Run(Phase.FixedUpdate, frame);
 
@@ -198,6 +208,45 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         ThrowIfQuerying();
         _world.Add(alive, component);
+    }
+
+    public void Set(Entity entity, ReadOnlySpan<IComponent> components)
+    {
+        ThrowIfNotMain();
+        ArchEntity alive = Alive(entity);
+        ComponentType[] types = new ComponentType[components.Length];
+        object[] values = new object[components.Length];
+        int added = 0;
+        for (int i = 0; i < components.Length; i++)
+        {
+            values[i] = components[i];
+            ComponentType type = ComponentTypeOf(components[i].GetType());
+            if (!_world.Has(alive, type))
+            {
+                types[added++] = type;
+            }
+        }
+
+        if (added > 0)
+        {
+            ThrowIfQuerying();
+            _world.AddRange(alive, types.AsSpan(0, added));
+        }
+
+        _world.SetRange(alive, values);
+    }
+
+    public IComponent[] Components(Entity entity)
+    {
+        ThrowIfNotMain();
+        object?[] held = _world.GetAllComponents(Alive(entity));
+        IComponent[] components = new IComponent[held.Length];
+        for (int i = 0; i < held.Length; i++)
+        {
+            components[i] = held[i] as IComponent ?? throw new InvalidOperationException($"{entity} holds a {held[i]?.GetType().Name ?? "null"}, which is no component.");
+        }
+
+        return components;
     }
 
     public ref T Get<T>(Entity entity)
@@ -345,7 +394,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         ThrowIfNotMain();
         if (phase > Phase.LateUpdate)
         {
-            throw new ArgumentException($"System {system.GetType().Name} runs in {phase}, the render thread's, while the main thread changes the world: a system runs in Update, FixedUpdate or LateUpdate.", nameof(system));
+            throw new ArgumentException($"System {system.GetType().Name} runs in {phase}; a system runs in Update, FixedUpdate or LateUpdate, the phases in which the main thread moves the world on.", nameof(system));
         }
 
         int index = (int)phase;

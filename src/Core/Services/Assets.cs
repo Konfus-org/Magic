@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.IO.Hashing;
 using System.Text;
@@ -37,12 +39,14 @@ public sealed class Assets
 {
     private const string Sidecar = ".meta";
     private const string DefaultName = "Default";
+    private const string FailuresFolder = "Failures";
 
     /// <summary>
     /// How long the files must have been left alone before their changes are taken in: an editor saving a file, or a
     /// build copying a folder, writes several times in a row.
     /// </summary>
     private static readonly TimeSpan _settle = TimeSpan.FromMilliseconds(300);
+    private static readonly Histogram<double> _loadDuration = Metrics.Meter.CreateHistogram("magic.core.asset.load.duration", "s", "How long an asset took to read, make and post-process, tagged with its type.", tags: null, advice: Metrics.WorkBuckets);
 
     private readonly IFileSystem _files;
     private readonly Events _events;
@@ -54,7 +58,16 @@ public sealed class Assets
     /// </summary>
     private readonly string[] _roots;
 
-    private readonly ConcurrentDictionary<Type, bool> _missingDefaults = new();
+    /// <summary>
+    /// The engine's own <c>Resources/</c>, the first of <see cref="Project.Resources"/>: where the default and failure assets
+    /// are, and only there.
+    /// </summary>
+    private readonly string _engine;
+
+    /// <summary>
+    /// The default and failure assets found missing, by path, each said once.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, bool> _missingNamed = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The asset being made on the flow that runs now, which whatever it loads is recorded against; 0 for none.
@@ -75,6 +88,12 @@ public sealed class Assets
     /// What each asset loaded as it was made last, or has loaded so far as it is made now: what it is made from.
     /// </summary>
     private readonly Dictionary<ulong, List<AssetRef>> _madeFrom = [];
+
+    /// <summary>
+    /// Where the roots' changes are reported, by the path of each file, for <see cref="WatchAsync"/> to take in once
+    /// they settle.
+    /// </summary>
+    private readonly ChannelWriter<string> _changes;
 
     /// <summary>
     /// What is under the roots, made again whenever they change. Never changed once made, so it is read without a lock.
@@ -99,9 +118,11 @@ public sealed class Assets
         }
 
         _roots = [.. roots];
-        _index = Build(files, _roots);
+        _engine = project.Resources.Count > 0 ? project.Resources[0] : string.Empty;
+        _index = Build(files, _roots, _engine);
 
         Channel<string> changes = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+        _changes = changes.Writer;
         SubscriptionList watches = new();
         foreach (string root in _roots)
         {
@@ -124,33 +145,26 @@ public sealed class Assets
     /// <summary>
     /// <typeparamref name="T"/>'s default: the asset named Default, with one of the type's extensions, in the folder
     /// named for the type, <c>Materials/Default.mat</c>, or <c>Domains/Default/Default.domain</c> for an asset that is
-    /// a folder. Every asset type has one, and a project replaces one by having its own at the same path. None, and an
-    /// error logged once, when it is missing.
+    /// a folder, in the engine's own <c>Resources/</c> alone: a project's or a gem's file at that path is an asset like any
+    /// other, found by its path, never the default. Every asset type has one. None, and an error logged once, when it is
+    /// missing.
     /// </summary>
     public Handle<T> Default<T>()
         where T : IAsset<T>
     {
-        string folder = typeof(T).Name + "s";
-        foreach (string extension in T.Extensions)
-        {
-            Handle<T> found = Find<T>($"{folder}/{DefaultName}{extension}");
-            if (found == Handle<T>.None)
-            {
-                found = Find<T>($"{folder}/{DefaultName}/{DefaultName}{extension}");
-            }
+        return Get<T>(typeof(T).Name + "s", DefaultName, "default");
+    }
 
-            if (found != Handle<T>.None)
-            {
-                return found;
-            }
-        }
-
-        if (_missingDefaults.TryAdd(typeof(T), true))
-        {
-            Debugging.Error($"There is no default {typeof(T).Name}: no asset is {folder}/{DefaultName} or {folder}/{DefaultName}/{DefaultName} with a {typeof(T).Name}'s extension ({string.Join(", ", T.Extensions)}) under {string.Join(", ", _roots)}.");
-        }
-
-        return Handle<T>.None;
+    /// <summary>
+    /// What is drawn in a broken <typeparamref name="T"/>'s place when <paramref name="type"/> broke: the asset named for
+    /// the type of failure in the type's <c>Failures</c> folder, <c>Materials/Failures/Texture.mat</c>, in the engine's own
+    /// <c>Resources/</c> alone, as a default is (<see cref="Default{T}"/>). Only the types a renderer draws a failure as
+    /// have one. None, and an error logged once, when it is missing.
+    /// </summary>
+    public Handle<T> Failure<T>(FailureType type)
+        where T : IAsset<T>
+    {
+        return Get<T>($"{typeof(T).Name}s/{FailuresFolder}", type.ToString(), $"{type} failure");
     }
 
     /// <summary>
@@ -306,6 +320,30 @@ public sealed class Assets
     }
 
     /// <summary>
+    /// The engine's own asset named <paramref name="name"/> in <paramref name="folder"/> with one of the type's extensions,
+    /// tried in order, or in its own folder of that name for an asset that is a folder; <paramref name="what"/> says which
+    /// kind of named asset it is when it is missing, which is said once.
+    /// </summary>
+    private Handle<T> Get<T>(string folder, string name, string what)
+        where T : IAsset<T>
+    {
+        foreach (string extension in T.Extensions)
+        {
+            if (_index.Engine.TryGetValue($"{folder}/{name}{extension}", out Indexed? found) || _index.Engine.TryGetValue($"{folder}/{name}/{name}{extension}", out found))
+            {
+                return new Handle<T>(found.Id);
+            }
+        }
+
+        if (_missingNamed.TryAdd($"{folder}/{name}", true))
+        {
+            Debugging.Error($"There is no {what} {typeof(T).Name}: no asset is {folder}/{name} or {folder}/{name}/{name} with a {typeof(T).Name}'s extension ({string.Join(", ", T.Extensions)}) under {_engine}.");
+        }
+
+        return Handle<T>.None;
+    }
+
+    /// <summary>
     /// Takes in what the watches see, a batch at a time, once they have seen nothing for <see cref="_settle"/>, until the
     /// run ends, when it stops <paramref name="watches"/>.
     /// </summary>
@@ -353,7 +391,7 @@ public sealed class Assets
     private async Task ApplyAsync(HashSet<string> touched)
     {
         Index before = _index;
-        Index now = Build(_files, _roots);
+        Index now = Build(_files, _roots, _engine);
         _index = now;
 
         bool filesChanged = false;
@@ -406,6 +444,46 @@ public sealed class Assets
         {
             _events.Publish(new AssetsChanged());
         }
+    }
+
+    /// <summary>
+    /// Takes every <typeparamref name="T"/>'s file in as written, once the roots' changes settle: each asked for so far
+    /// is made again, then what was made from it, and so on out, each told as <see cref="AssetReloaded{T}"/>. For code
+    /// loaded again, which a script is the class of and a prefab names components from.
+    /// </summary>
+    internal void Touch<T>()
+        where T : IAsset<T>
+    {
+        foreach (Indexed file in _index.ById.Values)
+        {
+            if (IsOf<T>(file.Path))
+            {
+                _changes.TryWrite(file.Path);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Makes every <typeparamref name="T"/> asked for so far again, as when their files change: for a gem that makes
+    /// them, a post-processor, whose settings changed how. Each that had loaded is told as
+    /// <see cref="AssetReloaded{T}"/> once made; done once every one is.
+    /// </summary>
+    public Task RemakeAsync<T>()
+        where T : IAsset<T>
+    {
+        List<Task> remaking = [];
+        lock (_lock)
+        {
+            foreach (Slot slot in _slots.Values)
+            {
+                if (slot is Slot<T>)
+                {
+                    remaking.Add(slot.RemakeAsync());
+                }
+            }
+        }
+
+        return Task.WhenAll(remaking);
     }
 
     /// <summary>
@@ -510,8 +588,20 @@ public sealed class Assets
     /// (<see cref="ReadFileAsync{T}"/>), then given its handle. Then the type's post-processor, when a gem provides one,
     /// works on it, and what it returns is given the handle too.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "A loader that throws on a file fails that file, as content that does not load; the engine goes on.")]
+    /// <summary>
+    /// <see cref="ReadAndProcessAsync{T}"/>, timed by the asset type.
+    /// </summary>
     private async Task<Result<T>> ReadAsync<T>(ulong id)
+        where T : IAsset<T>
+    {
+        long start = Stopwatch.GetTimestamp();
+        Result<T> read = await ReadAndProcessAsync<T>(id).ConfigureAwait(false);
+        _loadDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new KeyValuePair<string, object?>("magic.core.asset.type", typeof(T).Name));
+        return read;
+    }
+
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "A loader that throws on a file fails that file, as content that does not load; the engine goes on.")]
+    private async Task<Result<T>> ReadAndProcessAsync<T>(ulong id)
         where T : IAsset<T>
     {
         if (!_index.ById.TryGetValue(id, out Indexed? indexed))
@@ -723,15 +813,17 @@ public sealed class Assets
     }
 
     /// <summary>
-    /// Every file with a sidecar under <paramref name="roots"/>, by its id, its path and its folder. A sidecar without its
-    /// file is warned about; a broken one, or one with an id another file has already, is an error and gives no asset,
-    /// unless it is at that file's path under a later root, which the first then overrides.
+    /// Every file with a sidecar under <paramref name="roots"/>, by its id, its path and its folder, and those under
+    /// <paramref name="engine"/> by their path besides. A sidecar without its file is warned about; a broken one, or one
+    /// with an id another file has already, is an error and gives no asset, unless it is at that file's path under a later
+    /// root, which the first then overrides.
     /// </summary>
-    private static Index Build(IFileSystem files, string[] roots)
+    private static Index Build(IFileSystem files, string[] roots, string engine)
     {
         Index index = new();
         foreach (string root in roots)
         {
+            bool isEngine = string.Equals(root, engine, StringComparison.OrdinalIgnoreCase);
             foreach (string sidecar in FileSystem.FindUnder(root, Sidecar))
             {
                 string path = sidecar[..^Sidecar.Length];
@@ -755,12 +847,21 @@ public sealed class Assets
                     {
                         Debugging.Error($"{path} has the id {read.Value.Id}, which {other.Path} has already; it is not an asset until one of them has another.");
                     }
+                    else if (isEngine)
+                    {
+                        index.Engine.TryAdd(path, other);
+                    }
 
                     continue;
                 }
 
                 Indexed indexed = new(read.Value.Id, path, file, read.Value.Settings);
                 index.ById.Add(indexed.Id, indexed);
+                if (isEngine)
+                {
+                    index.Engine.TryAdd(path, indexed);
+                }
+
                 if (index.ByPath.TryAdd(path, indexed))
                 {
                     int slash = path.LastIndexOf('/');
@@ -831,7 +932,8 @@ public sealed class Assets
     }
 
     /// <summary>
-    /// What is under the roots: every asset by its id, by its path, and the paths in each folder.
+    /// What is under the roots: every asset by its id, by its path, the paths in each folder, and the engine's own assets
+    /// by their path, whatever another root has at it.
     /// </summary>
     private sealed class Index
     {
@@ -840,6 +942,8 @@ public sealed class Assets
         public Dictionary<string, Indexed> ByPath { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<string, List<string>> ByFolder { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Dictionary<string, Indexed> Engine { get; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -861,7 +965,7 @@ public sealed class Assets
         public abstract Type Type { get; }
 
         /// <summary>
-        /// Makes it again (<see cref="Assets.RemakeAsync{T}"/>). Under <see cref="_lock"/>.
+        /// Makes it again (<see cref="Assets.RemakeAsync{T}(Slot{T}, ulong)"/>). Under <see cref="_lock"/>.
         /// </summary>
         public abstract Task RemakeAsync();
     }
@@ -893,6 +997,9 @@ public sealed class Assets
         /// </summary>
         public int Started { get; set; }
 
-        public override Task RemakeAsync() => _assets.RemakeAsync(this, _id);
+        public override Task RemakeAsync()
+        {
+            return _assets.RemakeAsync(this, _id);
+        }
     }
 }

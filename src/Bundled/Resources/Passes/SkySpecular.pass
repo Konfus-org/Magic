@@ -1,0 +1,21 @@
+{
+    // The sky as a rough surface reflects it (Shaders/Probes/SkyPrefilter.frag.hlsl): a mip of SkySpecular for each of
+    // six roughnesses, 0 to 1, a pass each, this one the mirror's, which makes it; SkySpecular1 to SkySpecular5 the rest.
+    "stage": "probes",
+    "kind": "fullscreen",
+    "shader": { "id": 11232 },
+    "each": "6",
+    "creates": [
+        {
+            "name": "SkySpecular",
+            "format": "rgba16_float",
+            "scale": 0,
+            "width": 128,
+            "height": 128,
+            "levels": 6,
+            "cube": true
+        }
+    ],
+    "writes": [ { "name": "SkySpecular", "level": 0 } ],
+    "params": { "level": { "x": 0 } }
+}

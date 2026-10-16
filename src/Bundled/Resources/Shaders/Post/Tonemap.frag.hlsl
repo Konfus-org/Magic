@@ -59,7 +59,5 @@ float4 main(PassVaryings input) : SV_Target0
     float3 color = Hdr.SampleLevel(HdrSampler, input.uv, 0.0).rgb;
 #endif
 
-    // Never, as uv is at most 1, but it keeps both reads bound whichever is read.
-    float kept = input.uv.x > 2.0 ? KeepReadsAlive(input.uv) : 0.0;
-    return float4(AgX(color * exp2(params.exposureBias)) + kept, 1.0);
+    return float4(AgX(color * exp2(params.exposureBias)), 1.0);
 }

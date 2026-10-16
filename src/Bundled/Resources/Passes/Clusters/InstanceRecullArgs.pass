@@ -1,8 +1,0 @@
-{
-    "stage": "depth",
-    "kind": "compute",
-    "shader": { "id": 60023 },
-    "writes": [ { "name": "CullCounts" }, { "name": "CullArgs" } ],
-    "dispatch": { "groups": [ 1 ] },
-    "params": { "row": { "x": 2 }, "counter": { "x": 4 }, "per": { "x": 64 } }
-}

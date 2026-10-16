@@ -15,6 +15,7 @@ internal sealed unsafe class FontSource : IDisposable
 {
     private readonly GCHandle _font;
     private readonly ImFontLoader* _loader;
+    private readonly ImFontPtr _added;
 
     /// <summary>
     /// Adds <paramref name="font"/> to the current context's atlas, as its default font, at <paramref name="size"/>: the
@@ -39,7 +40,8 @@ internal sealed unsafe class FontSource : IDisposable
         config.SizePixels = size;
 
         ImGuiIOPtr io = ImGui.GetIO();
-        io.FontDefault = io.Fonts.AddFont(config);
+        _added = io.Fonts.AddFont(config);
+        io.FontDefault = _added;
         config.Destroy();
     }
 
@@ -47,6 +49,15 @@ internal sealed unsafe class FontSource : IDisposable
     {
         ImGui.MemFree(_loader);
         _font.Free();
+    }
+
+    /// <summary>
+    /// Takes the font out of ImGui's atlas, for another to take its place; before <see cref="Dispose"/>, while the
+    /// context is still there.
+    /// </summary>
+    public void Remove()
+    {
+        ImGui.GetIO().Fonts.RemoveFont(_added);
     }
 
     private static Font? FontOf(ImFontConfig* source)

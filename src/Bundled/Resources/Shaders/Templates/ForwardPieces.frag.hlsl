@@ -31,6 +31,6 @@ float4 main(PieceVaryings input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
     shaded.pixel = input.clip.xy;
     shaded.viewDepth = input.clip.w;
     float3 lit = Shade(shaded) * LOAD(Exposure, float4, 0u).x;
-    float3 color = lit * surface.alpha + surface.emissive + KeepBindingsAlive(input.flags, input.uv);
+    float3 color = lit * surface.alpha + surface.emissive;
     return float4(color, saturate(surface.alpha));
 }

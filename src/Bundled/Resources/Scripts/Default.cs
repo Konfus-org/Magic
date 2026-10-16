@@ -1,6 +1,6 @@
 using Magic.Interfaces;
 
-namespace Magic.Scripting;
+namespace Magic.Scripts;
 
 /// <summary>
 /// The default script, as every asset type has one: a behaviour that does nothing.

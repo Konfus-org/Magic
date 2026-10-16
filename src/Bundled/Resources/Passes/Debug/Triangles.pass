@@ -1,0 +1,8 @@
+{
+    "description": "Each triangle drawn in its own colour; black where nothing was drawn.",
+    "stage": "ui",
+    "kind": "fullscreen",
+    "shader": { "id": 11937 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

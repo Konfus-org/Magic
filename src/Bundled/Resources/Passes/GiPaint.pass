@@ -2,16 +2,6 @@
     "stage": "probes",
     "kind": "compute",
     "shader": { "id": 11323 },
-    "reads": [
-        { "name": "GiJobs" },
-        { "name": "Instances" },
-        { "name": "Models" },
-        { "name": "MeshFields" },
-        { "name": "MeshFieldAtlas", "filter": "linear" },
-        { "name": "GiLevels" },
-        { "name": "MaterialGi" },
-        { "name": "GiSplat" }
-    ],
     "writes": [
         { "name": "GiSurface" },
         { "name": "GiEmission" }

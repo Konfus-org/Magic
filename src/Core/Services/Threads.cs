@@ -1,6 +1,9 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using Magic.Contexts.Threading;
+using Magic.Internal;
 
 namespace Magic.Services;
 
@@ -47,26 +50,6 @@ public sealed class Threads : IDisposable
     }
 
     /// <summary>
-    /// Returns which engine thread the calling thread is, or <see cref="EngineThread.Unknown"/> if it is neither.
-    /// </summary>
-    public EngineThread Active()
-    {
-        int mainId = Queue(EngineThread.Main).Owner;
-        if (mainId == Environment.CurrentManagedThreadId)
-        {
-            return EngineThread.Main;
-        }
-
-        int renderId = Queue(EngineThread.Render).Owner;
-        if (renderId == Environment.CurrentManagedThreadId)
-        {
-            return EngineThread.Render;
-        }
-
-        return EngineThread.Unknown;
-    }
-
-    /// <summary>
     /// Whether the calling thread may do <paramref name="thread"/>'s work now: it is that thread, or that thread is not
     /// running (start-up and shutdown, which run alone on the render thread).
     /// </summary>
@@ -85,6 +68,18 @@ public sealed class Threads : IDisposable
         if (!Queue(thread).Enqueue(work))
         {
             Debugging.Warn($"Work was handed to the {thread} thread after the run ended; it is dropped.");
+        }
+    }
+
+    /// <summary>
+    /// Hands the render thread a frame's Render, as <see cref="Post"/> hands it work, in its turn after the work handed
+    /// before it; not timed as work, since the frame loop times each of its hooks.
+    /// </summary>
+    internal void HandFrame(Action render)
+    {
+        if (!_render.Enqueue(render, isTimed: false))
+        {
+            Debugging.Warn("A frame was handed to the render thread after the run ended; it is dropped.");
         }
     }
 
@@ -240,12 +235,16 @@ public sealed class Threads : IDisposable
     }
 
     /// <summary>
-    /// One engine thread's work, in the order it came, and the thread running it.
+    /// One engine thread's work, in the order it came, and the thread running it. Each piece of work is timed while
+    /// something listens, as a gem's hooks are: what is handed to a thread between frames stalls the frame as surely as
+    /// a hook does.
     /// </summary>
     private sealed class WorkQueue(string name) : IDisposable
     {
+        private static readonly Histogram<double> _workDuration = Metrics.Meter.CreateHistogram("magic.core.thread.work.duration", "s", "How long one piece of work handed to an engine thread took, tagged with the thread.", tags: null, advice: Metrics.FrameBuckets);
+
         // Completed when the thread ends: a write after that fails, so nothing is left behind unrun.
-        private readonly Channel<Action> _work = Channel.CreateUnbounded<Action>(new UnboundedChannelOptions { SingleReader = true });
+        private readonly Channel<Pending> _work = Channel.CreateUnbounded<Pending>(new UnboundedChannelOptions { SingleReader = true });
         private readonly ManualResetEventSlim _arrived = new();
 
         public void Dispose()
@@ -263,11 +262,12 @@ public sealed class Threads : IDisposable
         }
 
         /// <summary>
-        /// Adds <paramref name="work"/>; false once the thread has ended.
+        /// Adds <paramref name="work"/>, timed unless <paramref name="isTimed"/> says not; false once the thread has
+        /// ended.
         /// </summary>
-        public bool Enqueue(Action work)
+        public bool Enqueue(Action work, bool isTimed = true)
         {
-            if (!_work.Writer.TryWrite(work))
+            if (!_work.Writer.TryWrite(new Pending(work, isTimed)))
             {
                 return false;
             }
@@ -294,9 +294,9 @@ public sealed class Threads : IDisposable
 
         public void RunPending()
         {
-            while (_work.Reader.TryRead(out Action? work))
+            while (_work.Reader.TryRead(out Pending pending))
             {
-                Run(work);
+                Run(pending);
             }
         }
 
@@ -322,16 +322,29 @@ public sealed class Threads : IDisposable
         }
 
         [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever posted work throws, it is logged and the thread goes on.")]
-        private void Run(Action work)
+        private void Run(in Pending pending)
         {
+            bool timed = pending.IsTimed && _workDuration.Enabled;
+            long start = timed ? Stopwatch.GetTimestamp() : 0;
             try
             {
-                work();
+                pending.Work();
             }
             catch (Exception ex)
             {
                 Debugging.Error($"Work handed to the {name} thread threw: {ex}");
             }
+
+            // Outside the try: a listener that throws is its own failure, not the work's.
+            if (timed)
+            {
+                _workDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new KeyValuePair<string, object?>("magic.core.thread.name", name));
+            }
         }
+
+        /// <summary>
+        /// Work in the queue, and whether it is timed as work: a frame's Render is not, as its hooks are timed each.
+        /// </summary>
+        private readonly record struct Pending(Action Work, bool IsTimed);
     }
 }

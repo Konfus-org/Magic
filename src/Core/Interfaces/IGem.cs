@@ -20,10 +20,11 @@ namespace Magic.Interfaces;
 /// gems that take it drew.
 /// </para>
 /// <para>
-/// The constructor and Dispose run on the render thread, alone. Update, FixedUpdate and LateUpdate run on the main
-/// thread; Render on the render thread, one frame behind, while the main thread runs the next frame's Update and
-/// FixedUpdate. So Render reads only what the gem copied in LateUpdate, never what Update and FixedUpdate change.
-/// Implement the hooks the gem needs; the rest are never called.
+/// The constructor and Dispose run on the render thread, alone. Update, FixedUpdate, LateUpdate and Sync run on the main
+/// thread; Render on the render thread, one frame behind, while the main thread runs the next frame's Update,
+/// FixedUpdate and LateUpdate. Sync is the one point where both hold still. So a gem prepares in LateUpdate what Render
+/// will read, into a buffer Render is not reading, swaps the two in Sync, and Render reads only that: never what Update,
+/// FixedUpdate and LateUpdate change. Implement the hooks the gem needs; the rest are never called.
 /// </para>
 /// </summary>
 public interface IGem
@@ -44,15 +45,26 @@ public interface IGem
     }
 
     /// <summary>
-    /// <see cref="Phase.LateUpdate"/>: copy what Render will read. The render thread is idle until every gem's
-    /// LateUpdate is done, so this can write what Render reads without a lock.
+    /// <see cref="Phase.LateUpdate"/>: prepare what Render will read, into what Render is not reading, as the render
+    /// thread may still be drawing the frame before.
     /// </summary>
     void LateUpdate(in Frame frame)
     {
     }
 
     /// <summary>
-    /// <see cref="Phase.Render"/>: draw what LateUpdate copied, after the gems that take this one have drawn.
+    /// <see cref="Phase.Sync"/>: swap what LateUpdate prepared in for Render to read. The render thread is idle until
+    /// every gem's Sync is done, so this can touch what Render reads without a lock; it is the one such point, and
+    /// every gem waits on it, so it does nothing more than the swap.
+    /// </summary>
+    void Sync(in Frame frame)
+    {
+    }
+
+    /// <summary>
+    /// <see cref="Phase.Render"/>: draw what Sync swapped in, after the gems that take this one have drawn. A gem
+    /// that draws takes <see cref="IGpu"/> in its constructor and records into <see cref="IGpu.Commands"/> here, so
+    /// the provider, made before it, submits after it.
     /// </summary>
     void Render(in Frame frame)
     {

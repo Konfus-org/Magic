@@ -1,0 +1,6 @@
+{
+    "stage": "shadows",
+    "kind": "draw",
+    "shader": { "id": 60048 },
+    "draw": { "drawn": "depth", "depth": "ShadowPool", "contents": "keep", "args": "ShadowArgs", "first": 0, "instances": "ShadowPieces", "depthCompare": "always" }
+}

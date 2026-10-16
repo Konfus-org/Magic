@@ -13,5 +13,5 @@ public interface ISpawnable
     /// Makes its entities in <paramref name="world"/>, placed at <paramref name="at"/>, and hands them back. Main
     /// thread.
     /// </summary>
-    Entity[] Spawn(World world, in Transform at);
+    Entity[] Spawn(World world, Transform at);
 }

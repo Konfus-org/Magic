@@ -1,0 +1,8 @@
+{
+    "description": "The shadow page pool, a page a cell: sun pages by level, lights' white, free black, dim while waiting.",
+    "stage": "ui",
+    "kind": "fullscreen",
+    "shader": { "id": 11942 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

@@ -39,8 +39,7 @@ void main(uint3 thread : SV_DispatchThreadID)
             continue;
         }
 
-        uint slot;
-        GiJobs.InterlockedAdd(0u, 1u, slot);
+        uint slot = WaveAllocate(GiJobs, 0u, 1u);
         if (1u + slot < capacity)
         {
             STORE(GiJobs, uint2, 1u + slot, uint2(thread.x, index));

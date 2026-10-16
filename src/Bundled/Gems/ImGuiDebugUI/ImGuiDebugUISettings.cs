@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Magic.Contexts.Assets;
+using Magic.Interfaces;
 
 namespace Magic.ImGuiDebugUI;
 
@@ -7,18 +8,19 @@ namespace Magic.ImGuiDebugUI;
 /// How the debug UI is written and how long what is reported stays. Set in the project's
 /// <c>Presets/Default.preset</c>, by another preset, or with <c>--set ImGuiDebugUI.fontSize=24</c>.
 /// </summary>
-internal sealed class ImGuiDebugUISettings
+[Category("Debug")]
+internal sealed class ImGuiDebugUISettings : ISettings
 {
     /// <summary>
-    /// The font everything is written in; none for the default font.
+    /// The font everything is written in; none for the default font. Changed while running, the UI is written in the
+    /// new one once it loads.
     /// </summary>
-    [Browsable(false)]
     public Handle<Font> Font { get; set; }
 
     /// <summary>
-    /// The height of a line of text in window pixels, which every widget is sized around.
+    /// The height of a line of text in window pixels, which every widget is sized around. Changed while running, the
+    /// UI is drawn at the new size, its glyphs stretched from the font's own.
     /// </summary>
-    [Browsable(false)]
     public float FontSize { get; set; } = 20;
 
     /// <summary>

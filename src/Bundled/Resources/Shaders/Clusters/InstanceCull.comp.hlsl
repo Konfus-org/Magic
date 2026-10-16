@@ -32,8 +32,7 @@ void AddCards(uint slot, GpuSceneInstance instance, GpuModel model, float takeov
         }
 
         uint bin = BinOf(bins, Dissolves(dissolve), true);
-        uint at;
-        CullCounts.InterlockedAdd(CountClusters * 4u, 1u, at);
+        uint at = WaveAllocate(CullCounts, CountClusters * 4u, 1u);
         if (at < CountOf(VisibleClusters, 16u))
         {
             VisibleClusters.Store4(at * 16u, uint4(slot, (model.firstCard + i) | CardBit, bin, 1u));
@@ -89,9 +88,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
     {
         if (params.phase == 1u)
         {
-            uint at;
-            CullCounts.InterlockedAdd(CountHiddenInstances * 4u, 1u, at);
-            HiddenInstances.Store(at * 4u, slot);
+            HiddenInstances.Store(WaveAllocate(CullCounts, CountHiddenInstances * 4u, 1u) * 4u, slot);
         }
 
         return;
@@ -110,12 +107,14 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         return;
     }
 
-    // The levels whose clusters the view can want somewhere on the model: one fine enough as far off as it reaches,
-    // and with a parent too coarse as near as it reaches. Error grows level by level, so they are a run.
+    // The levels whose clusters the view can want somewhere on the model: one fine enough as far off as its clusters'
+    // error spheres reach, and with a parent too coarse as near as they reach, which is past its bounds. Error grows
+    // level by level, so they are a run.
     float allowed = ClusterError * asfloat(Budget.Load((Buckets + bucket) * 4u));
-    float perMetre = instance.maxScale * LodScale;
-    float nearest = max(distance - radius, Near);
-    float farthest = max(distance + radius, Near);
+    float perMetre = instance.maxScale * PixelScale;
+    float reach = model.clusterReach * instance.maxScale;
+    float nearest = max(distance - reach, Near);
+    float farthest = max(distance + reach, Near);
     uint first = 0xFFFFFFFFu;
     uint last = 0u;
     [loop] for (uint level = 0u; level < model.levelCount; level++)
@@ -136,8 +135,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
     }
 
     uint jobs = (last - first + JobClusters - 1u) / JobClusters;
-    uint at;
-    CullCounts.InterlockedAdd(CountJobs * 4u, jobs, at);
+    uint at = WaveAllocate(CullCounts, CountJobs * 4u, jobs);
     uint capacity = CountOf(Jobs, 16u);
     [loop] for (uint job = 0u; job < jobs && at + job < capacity; job++)
     {

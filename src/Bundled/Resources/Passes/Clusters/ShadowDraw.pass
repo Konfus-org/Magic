@@ -1,7 +1,6 @@
 {
-    "stage": "occlusion",
+    "stage": "shadows",
     "kind": "draw",
     "shader": { "id": 60049 },
-    "reads": [ { "name": "ShadowViews" }, { "name": "SunClipmap" } ],
-    "draw": { "drawn": "depth", "depth": "ShadowPool", "load": "load", "args": "ShadowArgs", "first": 1, "instances": "ShadowPieces", "depthBias": -1, "depthBiasSlope": -1.5, "depthBiasClamp": -0.01 }
+    "draw": { "drawn": "depth", "depth": "ShadowPool", "contents": "keep", "args": "ShadowArgs", "first": 1, "instances": "ShadowPieces", "depthBias": -1, "depthBiasSlope": -1.5, "depthBiasClamp": -0.01 }
 }

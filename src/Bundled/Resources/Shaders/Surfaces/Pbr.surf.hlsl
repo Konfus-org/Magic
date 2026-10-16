@@ -8,7 +8,7 @@ struct MaterialParams
 {
     Color color : GiColor = Color(0.8, 0.8, 0.8, 1.0);
     float roughness = 0.6;
-    float metallic = 0.0;
+    float metallic : GiMetallic = 0.0;
     float specular = 0.5;   // a dielectric's reflectance: 0.5 is 4 %, what most non-metals reflect
     float normalScale = 1.0;
     float alphaCutoff = 0.5;

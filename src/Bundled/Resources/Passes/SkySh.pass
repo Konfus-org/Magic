@@ -2,7 +2,6 @@
     "stage": "probes",
     "kind": "compute",
     "shader": { "id": 11231 },
-    "reads": [ { "name": "SkyCube", "filter": "linear" } ],
     "creates": [ { "name": "SkySh", "kind": "buffer", "type": "float4", "stride": 16, "rows": 9 } ],
     "writes": [ { "name": "SkySh" } ],
     "dispatch": { "groups": [ 1, 1, 1 ] }

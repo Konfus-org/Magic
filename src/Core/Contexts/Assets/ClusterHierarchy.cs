@@ -3,14 +3,14 @@ using System.Numerics;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// A model's triangles in clusters of up to <see cref="MaxTriangles"/>, at every level of detail at once, after Karis,
+/// A model's triangles in clusters of up to <see cref="MaxTriangles"/>, at every level at once, after Karis,
 /// "Nanite: A Deep Dive" (2021). The finest clusters are the model's own triangles; then neighbouring clusters are
 /// grouped, each group simplified to about half with its border kept where it is, and split into clusters again, level
 /// after level, until a few are left. A renderer draws a cut through them: each cluster whose error is small enough from
 /// where it is seen and whose parent's is not. So the parts of one model nearer the camera are finer than those farther
 /// away, and as two clusters that meet were made either side of the same kept border, the cut has no cracks.
 /// <para>
-/// A cluster's <see cref="Cluster.Error"/> and <see cref="Cluster.LodBounds"/> are its group's, the same for every
+/// A cluster's <see cref="Cluster.Error"/> and <see cref="Cluster.ErrorBounds"/> are its group's, the same for every
 /// cluster made from that group, and its parent's are those of the group it was simplified into, never smaller, so
 /// every cluster decides alone and the clusters drawn still meet.
 /// </para>
@@ -50,7 +50,7 @@ public sealed class ClusterHierarchy
     public required float PositionStep { get; init; }
 
     /// <summary>
-    /// The model at a level of detail <paramref name="error"/> metres or less from it everywhere: the clusters whose own
+    /// The model as clusters <paramref name="error"/> metres or less from it everywhere: the clusters whose own
     /// error is that or less and whose parent's is more, merged into a mesh for each material slot they are drawn with.
     /// For what must be the model as it looks from a distance, without a view to project the error with, such as a
     /// distance field. Seen from <c>d</c> metres through a 60° view <c>h</c> pixels high, an error of
@@ -126,7 +126,7 @@ public readonly record struct Cluster
     /// The sphere its error is measured from, centre and radius: its group's, around every cluster the group was made
     /// from, so it is never nearer the camera than what it stands for.
     /// </summary>
-    public required Vector4 LodBounds { get; init; }
+    public required Vector4 ErrorBounds { get; init; }
 
     /// <summary>
     /// Metres it may be from the model's own triangles: 0 for those, and never less than what it was simplified from.
@@ -134,9 +134,9 @@ public readonly record struct Cluster
     public required float Error { get; init; }
 
     /// <summary>
-    /// <see cref="LodBounds"/> of the clusters it was simplified into; its own when it is of the coarsest.
+    /// <see cref="ErrorBounds"/> of the clusters it was simplified into; its own when it is of the coarsest.
     /// </summary>
-    public required Vector4 ParentLodBounds { get; init; }
+    public required Vector4 ParentErrorBounds { get; init; }
 
     /// <summary>
     /// <see cref="Error"/> of the clusters it was simplified into: infinity when it is of the coarsest, so it is drawn

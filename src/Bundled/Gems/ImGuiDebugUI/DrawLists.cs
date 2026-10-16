@@ -33,6 +33,12 @@ internal sealed unsafe class DrawLists
     public List<TextureChange> Textures { get; } = [];
 
     /// <summary>
+    /// Every texture ImGui has, by its number, as it last was: what a renderer that starts drawing now takes in first,
+    /// the changes before it having been taken in and cleared by whatever drew before.
+    /// </summary>
+    public Dictionary<uint, TextureChange> Known { get; } = [];
+
+    /// <summary>
     /// Copies the frame ImGui just ended, for a window of <paramref name="width"/> by <paramref name="height"/> pixels,
     /// and answers ImGui's asks about its textures.
     /// </summary>
@@ -125,21 +131,34 @@ internal sealed unsafe class DrawLists
             if (texture.Status == ImTextureStatus.WantCreate)
             {
                 uint id = _nextTexture++;
-                Textures.Add(new TextureChange(id, texture.Width, texture.Height, Rgba(texture)));
+                Change(new TextureChange(id, texture.Width, texture.Height, Rgba(texture)));
                 texture.SetTexID(new ImTextureID(id));
                 texture.SetStatus(ImTextureStatus.Ok);
             }
             else if (texture.Status == ImTextureStatus.WantUpdates)
             {
-                Textures.Add(new TextureChange((uint)texture.TexID.Handle, texture.Width, texture.Height, Rgba(texture)));
+                Change(new TextureChange((uint)texture.TexID.Handle, texture.Width, texture.Height, Rgba(texture)));
                 texture.SetStatus(ImTextureStatus.Ok);
             }
             else if (texture.Status == ImTextureStatus.WantDestroy && texture.UnusedFrames > 0)
             {
-                Textures.Add(new TextureChange((uint)texture.TexID.Handle, 0, 0, null));
+                Change(new TextureChange((uint)texture.TexID.Handle, 0, 0, null));
                 texture.SetTexID(ImTextureID.Null);
                 texture.SetStatus(ImTextureStatus.Destroyed);
             }
+        }
+    }
+
+    private void Change(TextureChange change)
+    {
+        Textures.Add(change);
+        if (change.Pixels is null)
+        {
+            Known.Remove(change.Id);
+        }
+        else
+        {
+            Known[change.Id] = change;
         }
     }
 }

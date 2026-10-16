@@ -50,6 +50,12 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     public const int MaxLevels = 24;
 
     /// <summary>
+    /// Entries of the table point and spot lights' pages are found in: at least twice the pages the views read of them a
+    /// frame, which the largest pool there is leaves room for.
+    /// </summary>
+    public const int LightTableEntries = 65536;
+
+    /// <summary>
     /// Bytes of a table's entry, and of a page's record.
     /// </summary>
     private const int Row = 16;
@@ -133,11 +139,10 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
         ChangedLights.Grow((lightSlots + 31) / 32);
         int poolSize = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(settings.ShadowPool, 1024, 16384));
         int levels = Math.Clamp(settings.ShadowLevels, 1, MaxLevels);
-        int lightEntries = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(settings.LightShadowEntries, 1024, 1 << 21));
-        bool isMade = poolSize != PoolSize || levels != _levelCount || lightEntries != LightEntries;
+        bool isMade = poolSize != PoolSize || levels != _levelCount;
         if (isMade)
         {
-            Make(poolSize, levels, lightEntries);
+            Make(poolSize, levels, LightTableEntries);
         }
 
         _isSwapped = !_isSwapped;
@@ -251,7 +256,7 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
         PoolSize = poolSize;
         _levelCount = levels;
         LightEntries = lightEntries;
-        Pool = gpu.CreateTexture(new GpuTextureDesc(GpuFormat.D32Float, GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler, (uint)poolSize, (uint)poolSize));
+        Pool = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.D32Float, GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampled, (uint)poolSize, (uint)poolSize));
         GpuBufferUsage written = GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite | GpuBufferUsage.GraphicsRead;
         int bytes = TableRows * Row;
         Tables = gpu.CreateBuffer(written, (uint)bytes);

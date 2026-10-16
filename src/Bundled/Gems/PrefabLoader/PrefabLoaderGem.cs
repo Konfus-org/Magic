@@ -13,11 +13,11 @@ namespace Magic.PrefabLoader;
 /// <summary>
 /// Reads <c>.prefab</c> files into <see cref="Prefab"/>s (<see cref="IAssetLoader{T}"/>), what the
 /// engine spawns: each entity a <see cref="PrefabPart"/>, with its components read as their types
-/// (<see cref="Components.Get"/>), its tags as a <see cref="Tags"/>, its scripts made (<see cref="IScripts.Make"/>) with
-/// their values set, and the entities under it, a prefab it places among them. What it loads as it reads one is what
-/// that one is made from, so it is read again when one of them changes.
+/// (<see cref="Code.Component"/>), its tags as a <see cref="Tags"/>, its scripts (<see cref="PrefabScript"/>) with
+/// their values read as their properties' types, and the entities under it, a prefab it places among them. What it
+/// loads as it reads one is what that one is made from, so it is read again when one of them changes.
 /// </summary>
-internal sealed class PrefabLoaderGem(Assets assets, IScripts? scripts = null) : IGem, IAssetLoader<Prefab>
+internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab>
 {
     /// <summary>
     /// The key of a script entry that names the script, as a handle's does.
@@ -25,7 +25,6 @@ internal sealed class PrefabLoaderGem(Assets assets, IScripts? scripts = null) :
     private const string ScriptId = "id";
 
     private readonly Assets _assets = assets;
-    private readonly IScripts? _scripts = scripts;
 
     /// <summary>
     /// The names files have given that are no component, each said once. Read on workers.
@@ -69,8 +68,8 @@ internal sealed class PrefabLoaderGem(Assets assets, IScripts? scripts = null) :
     /// <summary>
     /// The part <paramref name="entity"/> is: its components, its tags among them, its scripts, and the parts under it,
     /// those of the prefab it places first; why not, when a component is not one, a script is not named by its id, or the
-    /// prefab it places does not load. A script that does not load, cannot be made or is given a value it has no
-    /// property for is an error, and the part goes without it.
+    /// prefab it places does not load. A script that does not load or is given a value it has no property for is an
+    /// error, and the part goes without it.
     /// </summary>
     private async Task<Result<PrefabPart>> PartOfAsync(PrefabFileEntity entity, string path, CancellationToken cancel)
     {
@@ -101,7 +100,7 @@ internal sealed class PrefabLoaderGem(Assets assets, IScripts? scripts = null) :
             components.Add(tags);
         }
 
-        List<IScript> made = [];
+        List<PrefabScript> scripts = [];
         foreach (IReadOnlyDictionary<string, JsonElement> entry in entity.Scripts)
         {
             if (ScriptOf(entry) is not { } script)
@@ -109,14 +108,14 @@ internal sealed class PrefabLoaderGem(Assets assets, IScripts? scripts = null) :
                 return Result.Failure<PrefabPart>($"{name} has a script that is not named by its id, {{ \"{ScriptId}\": N }}, a whole number above 0.");
             }
 
-            Result<IScript> one = await MakeAsync(script, entry, cancel).ConfigureAwait(false);
+            Result<PrefabScript> one = await ScriptAsync(script, entry, cancel).ConfigureAwait(false);
             if (!one.Ok)
             {
                 Debugging.Error($"{path}'s {name} goes without script {_assets.Path(script) ?? script.Id.ToString(CultureInfo.InvariantCulture)}: {one.Error}");
                 continue;
             }
 
-            made.Add(one.Value);
+            scripts.Add(one.Value);
         }
 
         List<PrefabPart> children = [];
@@ -138,33 +137,23 @@ internal sealed class PrefabLoaderGem(Assets assets, IScripts? scripts = null) :
         }
 
         children.AddRange(under.Value);
-        return Result.Success(new PrefabPart { Name = entity.Name, Components = components, Scripts = made, Children = children });
+        return Result.Success(new PrefabPart { Name = entity.Name, Components = components, Scripts = scripts, Children = children });
     }
 
     /// <summary>
-    /// The script <paramref name="script"/> made, each key of its entry but the id set on its public property of that
-    /// name, read as the property's type; why not, when it does not load, cannot be made, or is given a key it has no
-    /// property for or a value that is not one.
+    /// The script <paramref name="script"/> as a part holds it: loaded, with each key of its entry but the id as the
+    /// value of its public property of that name, read as the property's type; why not, when it does not load, or is
+    /// given a key it has no property for or a value that is not one.
     /// </summary>
-    private async Task<Result<IScript>> MakeAsync(Handle<Script> script, IReadOnlyDictionary<string, JsonElement> entry, CancellationToken cancel)
+    private async Task<Result<PrefabScript>> ScriptAsync(Handle<Script> script, IReadOnlyDictionary<string, JsonElement> entry, CancellationToken cancel)
     {
-        if (_scripts is null)
-        {
-            return Result.Failure<IScript>("no gem the project lists makes scripts.");
-        }
-
         Result<Script> loaded = await _assets.LoadAsync(script, cancel).ConfigureAwait(false);
         if (!loaded.Ok)
         {
-            return Result.Failure<IScript>(loaded.Error);
+            return Result.Failure<PrefabScript>(loaded.Error);
         }
 
-        Result<IScript> made = _scripts.Make(loaded.Value);
-        if (!made.Ok)
-        {
-            return made;
-        }
-
+        Dictionary<string, object?> values = new(StringComparer.Ordinal);
         foreach ((string key, JsonElement json) in entry)
         {
             if (string.Equals(key, ScriptId, StringComparison.Ordinal))
@@ -174,20 +163,20 @@ internal sealed class PrefabLoaderGem(Assets assets, IScripts? scripts = null) :
 
             if (PropertyOf(loaded.Value.Class, key) is not { } property)
             {
-                return Result.Failure<IScript>($"it is given {key}, which it has no public property with a setter for.");
+                return Result.Failure<PrefabScript>($"it is given {key}, which it has no public property with a setter for.");
             }
 
             try
             {
-                property.SetValue(made.Value, json.Deserialize(property.PropertyType, Json.Options));
+                values[property.Name] = json.Deserialize(property.PropertyType, Json.Options);
             }
             catch (JsonException ex)
             {
-                return Result.Failure<IScript>($"its {key} is not one: {ex.Message}");
+                return Result.Failure<PrefabScript>($"its {key} is not one: {ex.Message}");
             }
         }
 
-        return made;
+        return Result.Success(new PrefabScript(loaded.Value, values));
     }
 
     /// <summary>
@@ -195,7 +184,7 @@ internal sealed class PrefabLoaderGem(Assets assets, IScripts? scripts = null) :
     /// </summary>
     private Type? TypeOf(string name)
     {
-        if (Components.Get(name) is { } type)
+        if (Code.Component(name) is { } type)
         {
             return type;
         }

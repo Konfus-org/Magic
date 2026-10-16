@@ -1,11 +1,11 @@
-// Text a shader draws itself, for what only the GPU knows went wrong: a 5 x 7 bitmap font (digits, capitals,
-// space) and 3 x 5 digits, as bits in constants. No texture and no font asset, so any fragment or compute
-// shader can include it; the cost is a few bit tests per pixel, so keep it inside the branch that needs it.
+// Text a shader draws itself, for what only the GPU knows went wrong: a 5 x 7 bitmap font (digits, capitals, an
+// exclamation mark, space) and 3 x 5 digits, as bits in constants. No texture and no font asset, so any fragment or
+// compute shader can include it; the cost is a few bit tests per pixel, so keep it inside the branch that needs it.
 //
 // A glyph is 35 bits, row after row from the top, each row from the left: bit (row * 5 + column), the first
 // 32 in x and the rest in y. It is drawn in a cell one texel wider and taller, so glyphs next to each other
 // and lines under each other stay apart. A caller that writes a message keeps it as an array of glyph
-// indices: GlyphDigit0 + n, GlyphLetterA + n, GlyphSpace.
+// indices: GlyphDigit0 + n, GlyphLetterA + n, GlyphExclamation, GlyphSpace.
 
 #ifndef MAGIC_DEBUG_TEXT_HLSLI
 #define MAGIC_DEBUG_TEXT_HLSLI
@@ -14,12 +14,13 @@ static const uint2 GlyphSize = uint2(5u, 7u);
 static const uint2 GlyphCell = uint2(6u, 8u);
 static const uint GlyphDigit0 = 0u;
 static const uint GlyphLetterA = 10u;
-static const uint GlyphSpace = 36u;
+static const uint GlyphExclamation = 36u;
+static const uint GlyphSpace = 37u;
 
 static const uint2 SmallDigitSize = uint2(3u, 5u);
 static const uint SmallDigitAdvance = 4u; // a digit and the gap after it
 
-static const uint2 Glyphs[37] =
+static const uint2 Glyphs[38] =
 {
     uint2(0xA33AE62Eu, 0x3u), // 0
     uint2(0x884210C4u, 0x3u), // 1
@@ -57,6 +58,7 @@ static const uint2 Glyphs[37] =
     uint2(0x62A22A31u, 0x4u), // X
     uint2(0x08422A31u, 0x1u), // Y
     uint2(0xC222221Fu, 0x7u), // Z
+    uint2(0x00421084u, 0x1u), // !
     uint2(0x00000000u, 0x0u), // space
 };
 

@@ -25,7 +25,7 @@ internal sealed partial record SurfaceSource(string Name, string Text, ParamLayo
 
         string name = assets.Path(surface) ?? $"surface {surface.Id}";
         string text = loaded.Value.Text;
-        Result<ParamLayout?> layout = ParamLayout.Parse(text, "MaterialParams", allowTextures: true, ParamLayout.RecordBytes);
+        Result<ParamLayout?> layout = ParamLayout.Parse(text, "MaterialParams", allowTextures: true, allowCurves: false, ParamLayout.RecordBytes);
         if (!layout.Ok)
         {
             return Result.Failure<SurfaceSource>($"{name}: {layout.Error}");

@@ -1,10 +1,14 @@
+using System.ComponentModel;
+using Magic.Interfaces;
+
 namespace Magic.Scripting;
 
 /// <summary>
 /// How often a far behaviour is updated: set in the project's <c>Presets/Default.preset</c>, by another preset, or with
 /// <c>--set Scripting.maxInterval=1</c>, which updates every behaviour every frame.
 /// </summary>
-internal sealed class ScriptingSettings
+[Category("Scripting")]
+internal sealed class ScriptingSettings : ISettings
 {
     /// <summary>
     /// Metres from the nearest of the player's cameras within which a behaviour is updated every frame; up to n times as far, every nth

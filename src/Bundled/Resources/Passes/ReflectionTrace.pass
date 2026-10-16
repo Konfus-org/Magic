@@ -1,0 +1,11 @@
+{
+    "stage": "reflections",
+    "kind": "compute",
+    "shader": { "id": 11286 },
+    "creates": [
+        { "name": "ReflectionScene", "format": "rgba16_float", "history": true },
+        { "name": "ReflectionTraced", "filter": "nearest", "format": "rgba16_float" }
+    ],
+    "writes": [ { "name": "ReflectionTraced" } ],
+    "dispatch": { "per": "view" }
+}

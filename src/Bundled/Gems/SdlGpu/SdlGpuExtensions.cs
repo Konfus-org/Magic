@@ -107,14 +107,14 @@ internal static class SdlGpuExtensions
         };
     }
 
-    extension(GpuAddress address)
+    extension(GpuWrap wrap)
     {
-        public SDL_GPUSamplerAddressMode ToSdl() => address switch
+        public SDL_GPUSamplerAddressMode ToSdl() => wrap switch
         {
-            GpuAddress.Clamp => SDL_GPUSamplerAddressMode.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-            GpuAddress.Repeat => SDL_GPUSamplerAddressMode.SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-            GpuAddress.Mirror => SDL_GPUSamplerAddressMode.SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT,
-            _ => throw new ArgumentOutOfRangeException(nameof(address), address, "There is no such address mode."),
+            GpuWrap.Clamp => SDL_GPUSamplerAddressMode.SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+            GpuWrap.Repeat => SDL_GPUSamplerAddressMode.SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
+            GpuWrap.Mirror => SDL_GPUSamplerAddressMode.SDL_GPU_SAMPLERADDRESSMODE_MIRRORED_REPEAT,
+            _ => throw new ArgumentOutOfRangeException(nameof(wrap), wrap, "There is no such wrap."),
         };
     }
 
@@ -159,14 +159,14 @@ internal static class SdlGpuExtensions
         };
     }
 
-    extension(GpuLoad load)
+    extension(GpuContents contents)
     {
-        public SDL_GPULoadOp ToSdl() => load switch
+        public SDL_GPULoadOp ToSdl() => contents switch
         {
-            GpuLoad.Load => SDL_GPULoadOp.SDL_GPU_LOADOP_LOAD,
-            GpuLoad.Clear => SDL_GPULoadOp.SDL_GPU_LOADOP_CLEAR,
-            GpuLoad.DontCare => SDL_GPULoadOp.SDL_GPU_LOADOP_DONT_CARE,
-            _ => throw new ArgumentOutOfRangeException(nameof(load), load, "There is no such load."),
+            GpuContents.Keep => SDL_GPULoadOp.SDL_GPU_LOADOP_LOAD,
+            GpuContents.Clear => SDL_GPULoadOp.SDL_GPU_LOADOP_CLEAR,
+            GpuContents.Discard => SDL_GPULoadOp.SDL_GPU_LOADOP_DONT_CARE,
+            _ => throw new ArgumentOutOfRangeException(nameof(contents), contents, "There is no such contents."),
         };
     }
 

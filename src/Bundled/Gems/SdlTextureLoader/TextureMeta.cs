@@ -23,7 +23,7 @@ internal sealed class TextureMeta
     /// </summary>
     public int Size { get; set; }
 
-    public GpuAddress Wrap { get; set; } = GpuAddress.Repeat;
+    public GpuWrap Wrap { get; set; } = GpuWrap.Repeat;
 
     public GpuFilter Filter { get; set; } = GpuFilter.Linear;
 }

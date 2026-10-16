@@ -1,0 +1,8 @@
+{
+    "description": "The G-buffer's roughness over the scene: black a mirror, white matte.",
+    "stage": "ui",
+    "kind": "fullscreen",
+    "shader": { "id": 11933 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

@@ -1,3 +1,4 @@
+﻿using System.Diagnostics.Metrics;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -23,17 +24,40 @@ namespace Magic.ClusterRendering;
 /// <see cref="Materials"/>), and records a fixed list of passes; which clusters are drawn, how finely, which lights
 /// reach which pixels, all of it the GPU works out each frame.
 /// <para>
-/// The world is copied in LateUpdate (<see cref="Snapshot"/>), and drawn in Render from that copy, one frame behind.
-/// While <see cref="IGpu.DebugView"/> names a stage, the frame runs up to it and shows what it made; while the debug UI
-/// shows, each instance drawn as the failure says why where it is.
+/// The world is copied in LateUpdate (<see cref="Snapshot"/>), handed over in Sync, and drawn in Render from that copy, one
+/// frame behind.
+/// While <see cref="IGpu.DebugView"/> names a debug view, its pass (<c>Passes/Debug/Name.pass</c>) runs after the world's
+/// effects and what it draws is shown in place of the finished image, or the failure's magenta saying nothing draws while
+/// it is not ready; while the debug UI shows, each instance drawn as the failure says why where it is. Once every view
+/// is shown, the overlay stage runs once for each target, the window whether or not a view draws into it, with the
+/// overlay pipeline's passes, the debug UI's among them.
 /// </para>
 /// </summary>
 internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<CompressedTexture>, IDisposable
 {
+    /// <summary>
+    /// The gem's meter, which its parts record on (Core's README, Telemetry).
+    /// </summary>
+    internal static Meter Meter { get; } = new("Magic.Gems.ClusterRendering");
+
+    private static readonly Counter<int> _movedInstances = Meter.CreateCounter<int>("magic.gems.cluster_rendering.scene.moved", "{instance}", "Instances that moved, whose shadows and light are drawn again.");
+    private static readonly Counter<long> _giRays = Meter.CreateCounter<long>("magic.gems.cluster_rendering.gi.rays", "{ray}", "Rays the global illumination probes traced.");
+
     private readonly IGpu _gpu;
     private readonly IDebugUI? _debug;
     private readonly Threads _threads;
     private readonly ClusterRenderingSettings _settings;
+    private readonly Assets _assets;
+
+    /// <summary>
+    /// The overlay pipeline run when the settings name none: whichever gem or project has it.
+    /// </summary>
+    private const string OverlayPath = "Pipelines/Overlay.pipeline";
+
+    /// <summary>
+    /// The pipeline a frame runs when the settings name none.
+    /// </summary>
+    private readonly Handle<Pipeline> _defaultPipeline;
     private readonly Snapshot _snapshot;
     private readonly TexturePools _textures;
     private readonly ClusterPool _models;
@@ -45,7 +69,14 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     private readonly PassRecorder _recorder;
     private readonly Views _views;
     private readonly Output _output;
+    private readonly Failures _failures;
     private readonly ResourceSet _frame;
+
+    /// <summary>
+    /// A target's names while its overlay stage records, the target itself among them; one set, each target in turn.
+    /// </summary>
+    private readonly ResourceSet _target;
+    private readonly Dictionary<GpuTexture, ViewTarget> _targets = [];
     private readonly MeshFields _fields;
     private readonly GiVolume _gi;
     private readonly GpuArray<uint> _zBinsEmpty;
@@ -56,23 +87,29 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     private readonly List<SurfaceKey> _raster = [];
     private readonly HashSet<GpuTexture> _cleared = [];
 
-    public ClusterRenderingGem(IGpu gpu, IShaderCompiler compiler, Assets assets, Caches caches, World world, Events events, Threads threads, Lifetime lifetime, ClusterRenderingSettings settings, IWindow? window = null, IDebugUI? debug = null)
+    /// <summary>
+    /// The debug view named that has no pass, said once.
+    /// </summary>
+    private string _missingView = string.Empty;
+
+    public ClusterRenderingGem(IGpu gpu, IShaderCompiler compiler, Assets assets, Caches caches, World world, Events events, Threads threads, Lifetime lifetime, ClusterRenderingSettings settings, IWindow? window = null, IDebugUI? debug = null, IScripts? scripts = null)
     {
         _gpu = gpu;
         _debug = debug;
         _threads = threads;
         _settings = settings;
+        _assets = assets;
         CancellationToken stopping = lifetime.Stopping;
         _snapshot = new Snapshot(world);
         _textures = new TexturePools(gpu, assets, caches, threads, settings.Anisotropy, stopping);
-        _fields = new MeshFields(gpu, assets, caches, settings.GiMeshFields);
+        _fields = new MeshFields(gpu, assets, caches, MeshFields.Capacity);
         _models = new ClusterPool(gpu, assets, threads, _textures, _fields, settings, stopping);
-        _materials = new Materials(gpu, assets, _textures, threads, stopping);
+        _defaultPipeline = assets.Default<Pipeline>();
+        _graph = new PassGraph(gpu, compiler, assets, scripts, PipelineOf(), threads, stopping);
+        _materials = new Materials(gpu, assets, _textures, _graph, threads, stopping);
         _scene = new Scene(gpu, assets, _models, _materials);
         _lights = new SceneLights(gpu);
         _shadows = new Shadows(gpu);
-        Handle<Pipeline> pipeline = settings.Pipeline == Handle<Pipeline>.None ? assets.Default<Pipeline>() : settings.Pipeline;
-        _graph = new PassGraph(gpu, compiler, assets, pipeline, threads, stopping);
         _pieceIndices = gpu.CreateBuffer(GpuBufferUsage.Index, PassRecorder.PieceIndexCount * sizeof(ushort));
         ushort[] indices = new ushort[PassRecorder.PieceIndexCount];
         for (int i = 0; i < indices.Length; i++)
@@ -81,10 +118,12 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
         }
 
         gpu.Upload(_pieceIndices, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
-        _recorder = new PassRecorder(gpu, _graph, _scene, _models, _materials, _textures, _pieceIndices);
+        _recorder = new PassRecorder(gpu, _graph, _pieceIndices);
         _views = new Views(gpu, window, assets, threads, settings, stopping);
         _output = new Output(gpu, compiler, assets, threads, stopping);
+        _failures = new Failures(gpu);
         _frame = new ResourceSet(gpu);
+        _target = new ResourceSet(gpu);
         _gi = new GiVolume(gpu);
         _zBinsEmpty = new GpuArray<uint>(gpu, GpuBufferUsage.ComputeRead, Views.ZBinCount * 2);
         _zeros = new GpuArray<uint>(gpu, GpuBufferUsage.ComputeRead, 16384);
@@ -103,6 +142,8 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
             _graph.Invalidate();
         })));
         _watching.Add(events.Watch<AssetReloaded<Pipeline>>(_ => OnRender(_graph.Invalidate)));
+        _watching.Add(events.Watch<AssetReloaded<Curve>>(_ => OnRender(_graph.Invalidate)));
+        _watching.Add(events.Watch<AssetReloaded<Script>>(_ => OnRender(_graph.Invalidate)));
     }
 
     public void Dispose()
@@ -114,7 +155,9 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
 
         _snapshot.Dispose();
         _frame.Dispose();
+        _target.Dispose();
         _gi.Dispose();
+        _failures.Dispose();
         _output.Dispose();
         _views.Dispose();
         _recorder.Dispose();
@@ -197,6 +240,14 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     }
 
     /// <summary>
+    /// Hands the copy to Render, now that the render thread is done with the one before.
+    /// </summary>
+    public void Sync(in Frame frame)
+    {
+        _snapshot.Swap();
+    }
+
+    /// <summary>
     /// Takes in what changed, places the sun's shadow about the main camera, then for every camera with somewhere to draw
     /// records the frame's stages once (probes), each view's stages, and the view shown in its target: up to the stage
     /// the debug view names, and what that stage made shown in place of the finished image. A window nothing is drawn
@@ -204,28 +255,33 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     /// </summary>
     public void Render(in Frame frame)
     {
-        CameraCopy? main = MainCamera();
-        Vector3D? player = _snapshot.Player ?? main?.Transform.Position;
-        _scene.Update(_snapshot, (float)frame.Seconds, player ?? default);
-        _lights.Update(_snapshot);
+        _textures.UseAnisotropy(_settings.Anisotropy);
+        WorldCopy copy = _snapshot.Front;
+        CameraCopy? main = MainCamera(copy);
+        Vector3D? player = copy.Player ?? main?.Transform.Position;
+        _scene.Update(copy, (float)frame.Seconds, player ?? default);
+        _movedInstances.Add(_scene.Moved.Count);
+        _lights.Update(copy);
         if (main is { } camera)
         {
-            _shadows.Plan(camera.Transform.Position, _snapshot.Sun?.Direction ?? -Vector3.UnitY, _lights.Changed, _lights.Capacity, _scene.Moved.Count, frame.Index, _settings);
+            _shadows.Plan(camera.Transform.Position, copy.Sun?.Direction ?? -Vector3.UnitY, _lights.Changed, _lights.Capacity, _scene.Moved.Count, frame.Index, _settings);
         }
 
         ReportFailures();
         _models.Flush();
         _materials.Flush();
-        DrawnMaterial? sky = _snapshot.Sky is { } material && material != Handle<Material>.None ? _materials.Get(material) : null;
+        DrawnMaterial? sky = copy.Sky is { } material && material != Handle<Material>.None ? _materials.Get(material) : null;
         SurfaceKey skySurface = sky is { } drawnSky ? drawnSky.Surface : default;
         _raster.Clear();
         _raster.Add(new SurfaceKey(Handle<Shader>.None, false, false));
         _raster.Add(new SurfaceKey(Handle<Shader>.None, false, true));
         _raster.AddRange(_materials.RasterBins);
-        _graph.Update(_snapshot.Effects, new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
+        _graph.Append(DebugViewPass(_gpu.DebugView));
+        _graph.Update(PipelineOf(), copy.Effects, OverlayOf(), new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
         if (_graph.Current?.Runs("GiField") == true && main is { } eye)
         {
-            _gi.Plan(eye.Transform.Position, _scene.Moved, _settings);
+            _gi.Plan(eye.Transform.Position, _scene.Moved, frame.DeltaSeconds, _settings);
+            _giRays.Add(_gi.Rays);
         }
         else
         {
@@ -245,9 +301,7 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
             HizLevels: 0,
             Lights: BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(_settings.LightCapacity, 32, 1 << 20)),
             ZBins: Views.ZBinCount,
-            LightTiles: 0,
             LightTileWords: 0,
-            Moved: (uint)_scene.Moved.Count,
             GiRays: _gi.Rays,
             GiProbeThreads: _gi.ProbeThreads,
             SceneLights: (uint)_lights.Capacity,
@@ -256,21 +310,30 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
             ShadowViews: (uint)Math.Max(_settings.ShadowUpdates, 1),
             ShadowGroups: (uint)(Math.Max(_settings.ShadowUpdates, 1) + _settings.ShadowLevels),
             ShadowCandidates: (uint)(_shadows.WholePages + _shadows.SmallPages));
-        List<View> views = _views.Prepare(new ViewFrame(_snapshot, frame, _scene, _models, _materials, sky?.Row ?? 0, counts, player, Jitters()));
+        List<View> views = _views.Prepare(new ViewFrame(copy, frame, _scene, _models, _materials, sky?.Row ?? 0, counts, player, Jitters()));
         _cleared.Clear();
-        if (_graph.Current is not { } listing || views.Count == 0)
+        if (_graph.Current is not { } listing)
         {
             ClearWindow();
             _textures.EndFrame();
             return;
         }
 
+        if (views.Count == 0)
+        {
+            ClearWindow();
+            RecordOverlays(listing, views, null, frame);
+            _textures.EndFrame();
+            return;
+        }
+
         View shown = views.Find(view => view.TargetIsWindow) ?? views[0];
         SetFrame(main?.Transform.Position ?? shown.Position);
-        PassStage? debugView = _gpu.DebugView;
-        PassStage last = debugView ?? PassStage.Ui;
-        RecordScope frameScope = new(_frame, null, shown.Constants, shown.Counts, _materials.RasterBins, _materials.ResolveBins, [], GpuBuffer.None, skySurface, []);
-        for (PassStage stage = PassStage.Shadows; stage < PassStage.Cull && stage <= last; stage++)
+        _failures.Say(listing.Failures);
+        _failures.Begin(_zeros.Buffer);
+        string debugView = _gpu.DebugView;
+        RecordScope frameScope = new(_frame, null, shown.Constants, shown.Counts, _materials.RasterBins, _materials.ResolveBins, [], GpuBuffer.None, skySurface, _gpu.Commands, frame);
+        for (PassStage stage = PassStage.Probes; stage < PassStage.Cull; stage++)
         {
             _recorder.Record(listing, stage, frameScope);
         }
@@ -278,22 +341,87 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
         foreach (View view in views)
         {
             view.Resources.Keep(listing);
-            RecordScope scope = new(_frame, view.Resources, view.Constants, view.Counts, _materials.RasterBins, _materials.ResolveBins, view.TransparentRuns, view.TransparentPieces, skySurface, []);
-            for (PassStage stage = PassStage.Cull; stage <= last; stage++)
+            RecordScope scope = new(_frame, view.Resources, view.Constants, view.Counts, _materials.RasterBins, _materials.ResolveBins, view.TransparentRuns, view.TransparentPieces, skySurface, _gpu.Commands, frame);
+            for (PassStage stage = PassStage.Cull; stage <= PassStage.Ui; stage++)
             {
                 _recorder.Record(listing, stage, scope);
             }
 
-            BoundResource image = debugView is { } debugged
-                ? DebugImage(listing, view, debugged)
-                : view.Resources.TryGet("Ldr", out BoundResource ldr) ? ldr : view.Resources.TryGet("Hdr", out BoundResource hdr) ? hdr : default;
-            _output.Draw(view.Target, view.Constants, image, _cleared.Add(view.Target.Texture));
+            BoundResource? image = debugView.Length > 0 ? DebugImage(view) : Finished(view);
+            bool clears = _cleared.Add(view.Target.Texture);
+            if (image is { } made)
+            {
+                _output.Draw(view.Target, view.Constants, made, _settings.OutputFilter, clears, _failures);
+            }
+            else
+            {
+                _output.DrawNothing(view.Target, view.Constants, clears);
+            }
+
             view.Resources.Swap();
         }
 
         _frame.Keep(listing);
         ClearWindow();
+        RecordOverlays(listing, views, shown, frame);
         _textures.EndFrame();
+    }
+
+    /// <summary>
+    /// Records the overlay stage once for each target drawn into this frame, the window among them whether or not a
+    /// view draws into it: each is <c>Target</c>, with its own size, format and encoding in the constants, over the
+    /// view shown in it, or over black. The constants are <paramref name="shown"/>'s, the view in the window, else the
+    /// frame's alone.
+    /// </summary>
+    private void RecordOverlays(Listing listing, List<View> views, View? shown, in Frame frame)
+    {
+        _target.Keep(listing);
+        _targets.Clear();
+        GpuTexture window = _views.Window();
+        System.Drawing.Size size = window == GpuTexture.None ? System.Drawing.Size.Empty : _gpu.SizeOf(window);
+        if (!size.IsEmpty)
+        {
+            _targets[window] = new ViewTarget(window, new System.Drawing.Rectangle(System.Drawing.Point.Empty, size), _gpu.FormatOf(window), true);
+        }
+
+        foreach (View view in views)
+        {
+            if (!view.TargetIsWindow)
+            {
+                _targets.TryAdd(view.Target.Texture, view.Target);
+            }
+        }
+
+        foreach (ViewTarget target in _targets.Values)
+        {
+            _target.Set(ResourceInfo.TargetName, BoundResource.Of(target.Texture, (uint)target.Area.Width, (uint)target.Area.Height));
+            FrameConstants constants = shown?.Constants ?? default;
+            constants.ViewSize = new Vector2(target.Area.Width, target.Area.Height);
+            constants.ViewTexel = new Vector2(1f / target.Area.Width, 1f / target.Area.Height);
+            constants.OutputSize = constants.ViewSize;
+            constants.TargetEncoding = (uint)target.Encoding;
+            constants.Time = (float)frame.Seconds;
+            constants.FrameIndex = (uint)(frame.Index % uint.MaxValue);
+            RecordScope scope = new(_frame, _target, constants, shown?.Counts ?? default, _materials.RasterBins, _materials.ResolveBins, [], GpuBuffer.None, default, _gpu.Commands, frame, target.Format, target.Encoding);
+            _recorder.Record(listing, PassStage.Overlay, scope);
+        }
+    }
+
+    /// <summary>
+    /// The overlay pipeline the settings name, else the one at <see cref="OverlayPath"/>, else none; changed while
+    /// running, the next listing built runs it.
+    /// </summary>
+    private Handle<Pipeline> OverlayOf()
+    {
+        return _settings.Overlay == Handle<Pipeline>.None ? _assets.Find<Pipeline>(OverlayPath) : _settings.Overlay;
+    }
+
+    /// <summary>
+    /// The pipeline the settings name, or the default one; changed while running, the next listing built runs it.
+    /// </summary>
+    private Handle<Pipeline> PipelineOf()
+    {
+        return _settings.Pipeline == Handle<Pipeline>.None ? _defaultPipeline : _settings.Pipeline;
     }
 
     /// <summary>
@@ -309,9 +437,9 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     }
 
     /// <summary>
-    /// The frame's names this frame: the scene's tables, as they may have grown, where it moved relative to the main
-    /// camera, which the shadows are placed about, the templates binning and counting start from, and the shadows' pool
-    /// and tables.
+    /// The frame's names this frame: the scene's tables, as they may have grown, the materials' texture pools, where it
+    /// moved relative to the main camera, which the shadows are placed about, the templates binning and counting start
+    /// from, and the shadows' pool and tables.
     /// </summary>
     private void SetFrame(Vector3D main)
     {
@@ -332,9 +460,15 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
         _frame.Set("Geometry", BoundResource.Of(_models.Geometry, 4));
         _frame.Set("Materials", BoundResource.Of(_materials.Records.Buffer, _materials.Records.Bytes));
         _frame.Set("MaterialBins", BoundResource.Of(_materials.Bins.Buffer, _materials.Bins.Bytes));
+        for (int pool = 0; pool < TexturePools.Count; pool++)
+        {
+            _frame.Set(TexturePools.Names[pool], BoundResource.Of(_textures.TextureOf(pool), 0, 0, _textures.Sampler));
+        }
+
         _frame.Set("Moved", BoundResource.Of(_moved.Buffer, _moved.Bytes));
         _frame.Set("ZBinsEmpty", BoundResource.Of(_zBinsEmpty.Buffer, _zBinsEmpty.Bytes));
         _frame.Set("Zeros", BoundResource.Of(_zeros.Buffer, _zeros.Bytes));
+        _frame.Set("Failures", BoundResource.Of(_failures.Raised, Failures.RaisedBytes));
         _frame.Set("MeshFieldAtlas", BoundResource.Of(_fields.Atlas, MeshFields.Resolution, MeshFields.Resolution));
         _frame.Set("MeshFields", BoundResource.Of(_fields.Table.Buffer, _fields.Table.Bytes));
         _frame.Set("MaterialGi", BoundResource.Of(_materials.Gi.Buffer, _materials.Gi.Bytes));
@@ -367,69 +501,50 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     }
 
     /// <summary>
-    /// What <paramref name="view"/> shows in place of its finished image while the frame is viewed at
-    /// <paramref name="stage"/>: the first 2D texture that the stage's last pass to make one draws into or writes, so
-    /// the G-buffer stage shows its first target and the lighting the scene colour; the scene colour when the stage
-    /// makes none, as one that only fills buffers.
+    /// The pass of the debug view <paramref name="name"/> names, <c>Passes/Debug/Name.pass</c>; none for no view, or for
+    /// a name no pass has, which is said once.
     /// </summary>
-    private BoundResource DebugImage(Listing listing, View view, PassStage stage)
+    private Handle<Pass> DebugViewPass(string name)
     {
-        List<ListedPass> passes = listing.Stages[(int)stage];
-        for (int i = passes.Count - 1; i >= 0; i--)
+        if (name.Length == 0)
         {
-            Pass pass = passes[i].Pass;
-            if (pass.Kind == PassKind.Draw)
-            {
-                foreach (string color in pass.Draw.Colors)
-                {
-                    if (TextureOf(listing, view, color) is { } drawn)
-                    {
-                        return drawn;
-                    }
-                }
-
-                if (TextureOf(listing, view, pass.Draw.Depth) is { } depth)
-                {
-                    return depth;
-                }
-
-                continue;
-            }
-
-            foreach (PassBinding write in passes[i].TextureWrites)
-            {
-                if (TextureOf(listing, view, write.Info.Name) is { } written)
-                {
-                    return written;
-                }
-            }
+            return Handle<Pass>.None;
         }
 
-        return view.Resources.TryGet("Hdr", out BoundResource hdr) ? hdr : default;
+        Handle<Pass> pass = _assets.Find<Pass>($"Passes/Debug/{name}.pass");
+        if (pass == Handle<Pass>.None && !string.Equals(name, _missingView, StringComparison.Ordinal))
+        {
+            _missingView = name;
+            Debugging.Warn($"There is no debug view {name}: no pass is Passes/Debug/{name}.pass, so the frame is shown as it is.");
+        }
+
+        return pass;
     }
 
     /// <summary>
-    /// The texture <paramref name="name"/> names for <paramref name="view"/> or the frame, when it is a 2D texture that
-    /// is there; none for a buffer, an array, a cube, a volume or a texture that cannot be sampled, which a view's image
-    /// cannot be.
+    /// The view's finished image: what the post stage made, else the lit scene as it is; none until either is made.
     /// </summary>
-    private BoundResource? TextureOf(Listing listing, View view, string name)
+    private static BoundResource Finished(View view)
     {
-        ResourceInfo? info = listing.Created.TryGetValue(name, out CreatedResource? created) ? created.Info : ResourceInfo.Engine.GetValueOrDefault(name);
-        if (info is not { IsBuffer: false, IsStorageRead: false, Shape: GpuTextureKind.Texture2D })
-        {
-            return null;
-        }
+        return view.Resources.TryGet("Ldr", out BoundResource ldr) ? ldr : view.Resources.TryGet("Hdr", out BoundResource hdr) ? hdr : default;
+    }
 
-        return (info.IsFrame ? _frame : view.Resources).TryGet(name, out BoundResource bound) && bound.Texture != GpuTexture.None ? bound : null;
+    /// <summary>
+    /// What <paramref name="view"/> shows while a debug view is named: the texture its pass drew this frame, null while
+    /// the pass is not ready or does not run, so what is shown says that nothing draws, never an image from an earlier
+    /// frame.
+    /// </summary>
+    private static BoundResource? DebugImage(View view)
+    {
+        return view.Resources.TryGet("DebugView", out BoundResource drawn) && drawn.Texture != GpuTexture.None ? drawn : null;
     }
 
     /// <summary>
     /// The camera drawing into the window, else the first; none without a camera.
     /// </summary>
-    private CameraCopy? MainCamera()
+    private static CameraCopy? MainCamera(WorldCopy copy)
     {
-        foreach (CameraCopy camera in _snapshot.Cameras)
+        foreach (CameraCopy camera in copy.Cameras)
         {
             if (camera.Camera.Target.IsWindow)
             {
@@ -437,7 +552,7 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
             }
         }
 
-        return _snapshot.Cameras.Count > 0 ? _snapshot.Cameras[0] : null;
+        return copy.Cameras.Count > 0 ? copy.Cameras[0] : null;
     }
 
     private void OnRender(Action work)

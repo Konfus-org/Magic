@@ -38,7 +38,7 @@ public sealed class Texture : IAsset<Texture>
     /// <summary>
     /// What is read past its edge, as its <c>.meta</c> asks.
     /// </summary>
-    public required GpuAddress Address { get; init; }
+    public required GpuWrap Wrap { get; init; }
 }
 
 /// <summary>

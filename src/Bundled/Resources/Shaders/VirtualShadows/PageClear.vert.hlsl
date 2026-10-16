@@ -24,9 +24,5 @@ float4 main(VsIn input) : SV_Position
     float pool = (float)(sun.poolAcross * PageTexels);
     float4 rect = float4(view.rect & 0xFFu, (view.rect >> 8) & 0xFFu, (view.rect >> 16) & 0xFFu, view.rect >> 24) * (size / (float)PageTexels);
     float2 texel = (float2)PageCorner(view.page, sun) + lerp(rect.xy, rect.zw, QuadCorners[input.vertex % 6u]);
-
-    // The scene's tables every draw of pieces binds, read where no view is, so they stay bound and the pass's own
-    // buffers after them keep their places.
-    uint kept = view.page == 0u ? Instances.Load(0u) ^ Models.Load(0u) ^ Clusters.Load(0u) ^ Cards.Load(0u) ^ Geometry.Load(0u) : 0u;
-    return float4(texel.x / pool * 2.0 - 1.0, 1.0 - texel.y / pool * 2.0, asfloat(kept), 1.0);
+    return float4(texel.x / pool * 2.0 - 1.0, 1.0 - texel.y / pool * 2.0, 0.0, 1.0);
 }

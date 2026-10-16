@@ -10,8 +10,7 @@
 
 void Emit(uint slot, uint index, uint pieces, uint view)
 {
-    uint at;
-    ShadowCounts.InterlockedAdd(ShadowCountPieces, pieces, at);
+    uint at = WaveAllocate(ShadowCounts, ShadowCountPieces, pieces);
     uint capacity = CountOf(ShadowPieces, 12u);
     [loop] for (uint piece = 0u; piece < pieces && at + piece < capacity; piece++)
     {
@@ -137,8 +136,8 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 
     // A light's texels grow with distance from it: a face's finest mip drawn sets how many pixels an error is.
     float perMetre = instance.maxScale * (float)FaceTexels(min(FinestMip(target.faceMips), LightMips - 1u)) * 0.5;
-    float own = max(length(ScenePosition(instance, cluster.lodBounds.xyz) - target.light) - cluster.lodBounds.w * instance.maxScale, LightNear);
-    float parent = max(length(ScenePosition(instance, cluster.parentLodBounds.xyz) - target.light) - cluster.parentLodBounds.w * instance.maxScale, LightNear);
+    float own = max(length(ScenePosition(instance, cluster.errorBounds.xyz) - target.light) - cluster.errorBounds.w * instance.maxScale, LightNear);
+    float parent = max(length(ScenePosition(instance, cluster.parentErrorBounds.xyz) - target.light) - cluster.parentErrorBounds.w * instance.maxScale, LightNear);
     if (cluster.error * perMetre / own > ClusterError || cluster.parentError * perMetre / parent <= ClusterError)
     {
         return;

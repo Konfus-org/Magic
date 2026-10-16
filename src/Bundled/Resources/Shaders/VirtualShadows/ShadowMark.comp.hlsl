@@ -1,16 +1,13 @@
 // Marks the pages of shadow the view's pixels read, a thread a pixel: the sun's level as fine as the pixel, the first
-// whose window holds it, and the next three coarser, which its soft shadow is searched and filtered through; and, for
-// each point or spot light that casts a shadow and reaches the pixel (its z-bin and tile, as the lighting finds them),
-// its face's page at the mip as fine as the pixel, and at the coarsest, which it is read through while its own waits,
-// put into this frame's table. A page marked is wanted this frame; the allocator gives it a page of the pool when it
-// has none. Most of a page's pixels find it marked already, and leave it be.
+// whose window holds it, and the next SunSoftLevels coarser, which its soft shadow is searched and filtered through;
+// and, for each point or spot light that casts a shadow and reaches the pixel (its z-bin and tile, as the lighting
+// finds them), its face's page at the mip as fine as the pixel, and at the coarsest, which it is read through while its
+// own waits, put into this frame's table. A page marked is wanted this frame; the allocator gives it a page of the pool
+// when it has none. Most of a page's pixels find it marked already, and leave it be.
 
 #include "Include/LightCulling.hlsli"
 #include "Include/VirtualShadows.hlsli"
 #include "Lighting/Lights.hlsli"
-
-// The coarser sun levels marked past the pixel's own, which its penumbra may be filtered through.
-static const uint SunSoftLevels = 3u;
 
 // Notes an entry wanted this frame, unless it is already.
 void Want(uint row, uint frame)
@@ -23,7 +20,8 @@ void Want(uint row, uint frame)
 
 void MarkSun(GpuSunClipmap sun, float3 position, float viewDepth)
 {
-    uint level = SunLevelFor(sun, viewDepth);
+    // From the finest level the pixel's dither can pick, so both of two levels it blends between are there.
+    uint level = SunLevelFor(sun, viewDepth, 0.0);
     uint marked = 0u;
     [loop] for (; level < sun.levels && marked <= SunSoftLevels; level++)
     {
@@ -50,7 +48,7 @@ void MarkLightPage(GpuSunClipmap sun, uint slot, uint face, float2 onFace, uint 
 
 void MarkLight(GpuSunClipmap sun, uint slot, float3 toLight, float viewDepth)
 {
-    uint mip = LightMipFor(viewDepth / LodScale, length(toLight));
+    uint mip = LightMipFor(viewDepth / PixelScale, length(toLight));
     uint face = FaceOf(-toLight);
     float ahead;
     float2 onFace = FacePlaceOf(face, -toLight, ahead);
@@ -70,9 +68,6 @@ void main(uint3 id : SV_DispatchThreadID)
     }
 
     float depth = Depth.Load(int3(id.xy, 0));
-
-    // Never, as no pixel is that far, but it keeps every read bound with its sampler, though read texel by texel.
-    depth += id.x > 0x7FFFFFFFu ? KeepReadsAlive(float2(0.0, 0.0)) : 0.0;
     if (depth <= 0.0)
     {
         return;
@@ -88,21 +83,15 @@ void main(uint3 id : SV_DispatchThreadID)
     }
 
     // The lights reaching the pixel, as the lighting walks them (Lighting/Shade.hlsli's LocalLights).
-    uint bin = ZBinOf(viewDepth);
-    uint first = LightBins.Load(bin * 8u);
-    uint last = LightBins.Load(bin * 8u + 4u);
-    uint2 tile = id.xy / LightTileSize;
-    uint tileWords = (tile.y * TileCountX + tile.x) * TileWords;
-    uint firstWord = WaveActiveMin(first <= last ? first >> 5u : 0xFFFFFFFFu);
-    uint lastWord = WaveActiveMax(first <= last ? last >> 5u : 0u);
-    [loop] for (uint word = firstWord; word <= lastWord && word < TileWords; word++)
+    LightWalk walk = LightWalkOf(pixel, viewDepth);
+    [loop] for (uint word = walk.firstWord; word <= walk.lastWord && word < TileWords; word++)
     {
-        uint mask = WaveActiveBitOr(LightTiles.Load((tileWords + word) * 4u) & RangeMask(word, first, last));
+        uint mask = LightWalkMask(walk, word);
         [loop] while (mask != 0u)
         {
             uint bit = firstbitlow(mask);
             mask &= mask - 1u;
-            GpuLight light = LOAD(Lights, GpuLight, word * 32u + bit);
+            GpuLight light = LOAD(Lights, GpuLight, WaveReadLaneFirst(word * 32u + bit));
             float3 toLight = light.position - position;
             float distanceSq = dot(toLight, toLight);
             float spot = SpotAttenuation(toLight * rsqrt(max(distanceSq, 1e-8)), light.forward, float2(light.spotScale, light.spotOffset));

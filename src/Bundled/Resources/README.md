@@ -41,8 +41,16 @@ a name looks it up by its path relative to a root, with forward slashes:
 
 **Default assets.** Every asset type has a default: the file named `Default`, with one of the type's extensions, in the
 folder named for the type, `<Type>s/Default.<ext>` (or `<Type>s/Default/Default.<ext>` for an asset that is a folder,
-like a domain), found by `Assets.Default<T>()`. Code names no path for it, and a project replaces one by having its
-own at the same path, since the project's file comes first.
+like a domain), found by `Assets.Default<T>()`. Code names no path for it. It is always the engine's: a project's or a
+gem's file at the same path is an asset like any other, found by its path, never the default, so what the engine
+falls back to is what it ships.
+
+**Failure assets.** What is drawn in a broken asset's place, for the types a renderer draws a failure as: the file
+named for what broke, a `FailureType`, in the type's `Failures` folder, `<Type>s/Failures/<FailureType>.<ext>`, found
+by `Assets.Failure<T>(FailureType)`, the engine's alone as a default is. They all breathe on a slow pulse, so
+they are never mistaken for something meant: magenta is a shader's failure (`Shader`: a surface that does not compile,
+or a material that does not load), red an asset that does not load (`Texture`, a red and black checker; `Mesh`, a red
+cube in place of a model).
 
 **Paths named in code.** A few assets beside the defaults are found by path, such as the loading domain when a project
 names none: each must exist under some root, and is read from whichever root has it. A shader's `#include` names a
@@ -73,7 +81,7 @@ what to do with. A loader or post-processor that throws fails that file. One ask
 a change, waits for what it is made into. A caller's cancellation token only stops its own wait.
 
 **Post-processing.** Once its loader has made it, a gem's `ILoadPostProcessor<T>` for the type, if the project lists
-one, works on the asset before anyone gets it, on every load and reload: a model gets its levels of detail, a pipeline
+one, works on the asset before anyone gets it, on every load and reload: a model gets its clusters, a pipeline
 its passes. What is slow to make that way is kept in [the cache](../../Core/README.md#the-cache), checked against the
 asset's version, a hash of its file and sidecar, so it is made again only when either changes. What a post-processor
 loads as it works is what the asset is made from (`Assets.Dependencies`), and an asset made from itself, a pipeline
@@ -102,6 +110,7 @@ old. A change to a `.meta` counts as a change to its asset. What it tells, on `E
 | A loaded asset's file or sidecar was written | `AssetReloaded<T>`, with the asset as it is now, even when nothing holds it any more, so whoever kept only what it made from it hears of it. One that no longer loads is an error, and what loaded before stays. |
 | An asset something was made from was made again, or is gone | That is made again after it, then what was made from that, and so on out, each an `AssetReloaded<T>`: editing a pass makes again every pipeline it is in. |
 | Files came, went, moved or were written | `AssetsChanged`, once what changed has loaded again. A moved file keeps its id. |
+| The project's code, or Magic's scripts, were built | Core loads the code again ([Core's README](../../Core/README.md#the-project-file)), then every script and every prefab is made again as if its file were written, and what is made from them after them, each an `AssetReloaded<T>`. |
 
 Every sidecar is read again each time, so a broken one, or a duplicate id, is logged again after each change until it
 is fixed.
@@ -117,7 +126,7 @@ beside Magic.
 **To the engine** (something every project should have, or a bundled gem needs): put the file here, in the folder
 named for its type (`Shaders/`, `Materials/`, …), write its `.meta` with an id of its own, and read that folder's
 README for what it must agree with. This folder holds Core's assets and every bundled gem's, so a gem that ships with
-Magic has no `Resources/` of its own. Any other gem keeps its files in its own `Resources/`, a root of its own, and a
+Magic has no `Resources/` of its own; a script here is compiled by this folder's project, as a game's are by its own. Any other gem keeps its files in its own `Resources/`, a root of its own, and a
 path two roots have is the first's, so a gem's file may not share a path with the engine's or another gem's.
 
 **To a project**: put the file anywhere under the project's `Assets/`, with its `.meta` beside it. The `.magic` file

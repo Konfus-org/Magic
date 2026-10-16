@@ -1,11 +1,18 @@
 {
-    // The cluster renderer's frame: the sky's light, then each view culled and drawn into its visibility buffer in
-    // two phases, shaded once a pixel into the G-buffer, its lights binned, its shadows' pages drawn, lit, the sky,
-    // transparent surfaces, and the view upscaled to the size it is shown at.
+    // The cluster renderer's frame: the sky's light, from everywhere and as rough surfaces reflect it, then each view
+    // culled and drawn into its visibility buffer in two phases, shaded once a pixel into the G-buffer, its lights
+    // binned, its shadows' pages drawn, lit, the sky, transparent surfaces, and the view upscaled to the size it is
+    // shown at.
     "entries": [
         { "pass": { "id": 11110 } },
         { "pass": { "id": 11111 } },
         { "pass": { "id": 11112 } },
+        { "pass": { "id": 11113 } },
+        { "pass": { "id": 11114 } },
+        { "pass": { "id": 11115 } },
+        { "pass": { "id": 11116 } },
+        { "pass": { "id": 11117 } },
+        { "pass": { "id": 11118 } },
         { "pass": { "id": 60100 } },
         { "pass": { "id": 60101 } },
         { "pass": { "id": 60102 } },

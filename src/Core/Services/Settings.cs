@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
@@ -9,32 +10,38 @@ using Magic.Contexts.CmdLine;
 using Magic.Contexts.Settings;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
+using Magic.Interfaces;
+using Magic.Internal;
 
 namespace Magic.Services;
 
 /// <summary>
 /// The gems' settings, and changing them while running: what a game's options use, as a settings window does. A gem
-/// with settings declares a class for them, and the object its constructor gets is made here, in layers, each winning
-/// over the one before: the class's initialisers, the default <see cref="Contexts.Assets.Preset"/>
-/// (<c>Presets/Default.preset</c>, the project's own settings), the preset applied over it, <c>--set</c>, then what is
-/// <see cref="Set{T}"/> while running, until another preset is applied. A setting is named by its key,
-/// <c>Gem.path</c>: the gem, as the project lists it, then where the setting sits in its settings, with dots between
-/// levels.
+/// with settings declares a class for them (<see cref="ISettings"/>), and the object its constructor gets is made here,
+/// in layers, each winning over the one before: the class's initialisers, the default
+/// <see cref="Contexts.Assets.Preset"/> (<c>Presets/Default.preset</c>, the project's own settings), the preset applied
+/// over it, <c>--set</c>, then what is <see cref="Set{T}"/> while running, until another preset is applied. A setting
+/// is named by its key, <c>Gem.path</c>: the gem, as the project lists it, then where the setting sits in its settings,
+/// with dots between levels. <see cref="All"/> lists every setting as it is now, for a UI.
 /// <para>
 /// A change is checked at once, and copied into the objects the gems hold at the frame's sync point, after the main
 /// thread has waited for the render thread and before LateUpdate, so a gem reads its settings on either engine thread
 /// and never sees one change halfway. A setting a gem reads only as it starts is marked
-/// <see cref="System.ComponentModel.BrowsableAttribute"/> false, and changes nothing until the next run. The default
-/// and the applied preset are applied again when their files change. Any thread.
+/// <see cref="RequireRestartAttribute"/>: changed, the run ends and starts again at once with every setting as it is
+/// (<see cref="RestartArgs"/>). The default and the applied preset are applied again when their files change. Any
+/// thread.
 /// </para>
 /// </summary>
 public sealed class Settings : IDisposable
 {
     private const string PresetFolder = "Presets";
+    private const string DefaultPreset = "Default";
 
     private readonly Assets _assets;
+    private readonly SettingsDocs _docs;
     private readonly Handle<Preset> _default;
-    private readonly IReadOnlyList<Setting> _commandLine;
+    private readonly JsonObject _commandLine;
+    private readonly Lifetime _lifetime;
     private readonly Subscription _reloads;
 
     /// <summary>
@@ -42,24 +49,36 @@ public sealed class Settings : IDisposable
     /// </summary>
     private readonly Lock _lock = new();
 
-    private readonly List<GemSettings> _gems = [];
+    /// <summary>
+    /// Each gem's settings object by the gem's name, as the project lists it, in the order the gems were made.
+    /// </summary>
+    private readonly OrderedDictionary<string, ISettings> _gems = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Every setting but its value, which is read as <see cref="All"/> is, with the property it is and the object its
+    /// gem holds.
+    /// </summary>
+    private readonly List<(Setting Setting, PropertyInfo Property, ISettings Held)> _all = [];
 
     /// <summary>
     /// The objects made for changes since the last sync point, by the object their gem holds, which each is copied
     /// into.
     /// </summary>
-    private readonly Dictionary<object, object> _changes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ISettings, ISettings> _changes = new(ReferenceEqualityComparer.Instance);
 
     private Layers _layers;
 
     /// <summary>
-    /// Reads the default preset and the one <c>--preset</c> names, before any gem is made, as each is made from them. A
-    /// name no preset has is an error, and only the default is applied.
+    /// Reads the default preset, the project's <c>Presets/Default.preset</c> else the engine's, and the one <c>--preset</c>
+    /// names, before any gem is made, as each is made from them. A name no preset has is an error, and only the default is
+    /// applied.
     /// </summary>
-    internal Settings(Assets assets, Events events, Project project, Args args)
+    internal Settings(Assets assets, IFileSystem files, Events events, Project project, Args args, Lifetime lifetime)
     {
         _assets = assets;
-        _default = assets.Default<Preset>();
+        _lifetime = lifetime;
+        _docs = new SettingsDocs(files);
+        _default = assets.Find<Preset>($"{PresetFolder}/{DefaultPreset}{Contexts.Assets.Preset.Extensions[0]}");
         _commandLine = CommandLine(project, args.Settings);
 
         Handle<Preset> applied = args.Preset.Length == 0 ? _default : assets.Find<Preset>($"{PresetFolder}/{args.Preset}{Contexts.Assets.Preset.Extensions[0]}");
@@ -69,7 +88,7 @@ public sealed class Settings : IDisposable
             applied = _default;
         }
 
-        IReadOnlyList<Setting> defaults = ReadNow(_default);
+        JsonObject defaults = ReadNow(_default);
         _layers = new Layers(defaults, applied == _default ? defaults : ReadNow(applied), []);
         Preset = applied;
         Debugging.Info($"Preset {NameOf(applied)}");
@@ -92,21 +111,25 @@ public sealed class Settings : IDisposable
     public Handle<Preset> Preset { get; private set; }
 
     /// <summary>
-    /// Each gem with settings, with the object it holds, in the order the gems were made: what a settings window lists.
+    /// Every setting as it is now, what was just set included, gem by gem in the order the gems were made and in a
+    /// fixed order within each: what a settings UI lists, each changed with <see cref="Set{T}"/> by its key. Complete
+    /// once every gem is made.
     /// </summary>
-    public IReadOnlyList<GemSettings> Gems => _gems;
-
-    /// <summary>
-    /// Reads <c>Gem.path=value</c>, as <c>--set</c> and a console take it: the value is JSON when it parses as JSON
-    /// (<c>1920</c>, <c>true</c>, <c>"1"</c>), and a string when it does not.
-    /// </summary>
-    public static Result<Setting> Parse(string text)
+    public IReadOnlyList<Setting> All
     {
-        int equals = text.IndexOf('=', StringComparison.Ordinal);
-        string key = equals < 0 ? string.Empty : text[..equals];
-        return IsKey(key)
-            ? Result.Success(new Setting(key, ValueOf(text[(equals + 1)..])))
-            : Result.Failure<Setting>($"A setting is Gem.setting=value; '{text}' is not one.");
+        get
+        {
+            lock (_lock)
+            {
+                List<Setting> all = new(_all.Count);
+                foreach ((Setting setting, PropertyInfo property, ISettings held) in _all)
+                {
+                    all.Add(setting with { Value = property.GetValue(_changes.GetValueOrDefault(held) ?? held) });
+                }
+
+                return all;
+            }
+        }
     }
 
     /// <summary>
@@ -124,12 +147,12 @@ public sealed class Settings : IDisposable
         JsonNode? node;
         lock (_lock)
         {
-            if (Find(GemOf(key)) is not { } gem)
+            if (!_gems.TryGetValue(GemOf(key), out ISettings? held))
             {
                 return Result.Failure<T>(NoGem(key));
             }
 
-            object current = _changes.GetValueOrDefault(gem.Values) ?? gem.Values;
+            ISettings current = _changes.GetValueOrDefault(held) ?? held;
             node = JsonSerializer.SerializeToNode(current, current.GetType(), Json.Options);
         }
 
@@ -156,8 +179,9 @@ public sealed class Settings : IDisposable
 
     /// <summary>
     /// Changes the setting at <paramref name="key"/> to <paramref name="value"/> until another preset is applied,
-    /// <c>Set("SdlPlatform.vsync", false)</c>; its gem sees it at the next sync point. Why not, when no gem with
-    /// settings has it or the value does not fit it; then nothing changes.
+    /// <c>Set("SdlPlatform.vsync", false)</c>; its gem sees it at the next sync point. The value is anything the
+    /// setting reads as JSON, a <see cref="JsonNode"/> included. Why not, when no gem with settings has it or the value
+    /// does not fit it; then nothing changes.
     /// </summary>
     public Result Set<T>(string key, T value)
     {
@@ -166,26 +190,27 @@ public sealed class Settings : IDisposable
             return Result.Failure(NotKey(key));
         }
 
-        Setting setting = new(key, JsonSerializer.SerializeToNode(value, Json.Options));
         lock (_lock)
         {
-            if (Find(GemOf(key)) is not { } gem)
+            int index = _gems.IndexOf(GemOf(key));
+            if (index < 0)
             {
                 return Result.Failure(NoGem(key));
             }
 
-            List<Setting> live = [.. _layers.Live];
-            live.RemoveAll(set => IsSameKey(set.Key, key));
-            live.Add(setting);
+            // Under the gem's name as listed, so the key replaces the same setting however its gem was spelt.
+            (string gem, ISettings held) = _gems.GetAt(index);
+            JsonObject live = (JsonObject)_layers.Live.DeepClone();
+            live[$"{gem}.{PathOf(key)}"] = JsonSerializer.SerializeToNode(value, Json.Options);
             Layers layers = _layers with { Live = live };
-            Result<object> changed = Read(gem.Gem, gem.Values.GetType(), layers);
+            Result<ISettings> changed = Read(gem, held.GetType(), layers);
             if (!changed.Ok)
             {
-                return Result.Failure($"{key} does not fit {gem.Gem}'s settings: {changed.Error}");
+                return Result.Failure($"{key} does not fit {gem}'s settings: {changed.Error}");
             }
 
             _layers = layers;
-            _changes[gem.Values] = changed.Value;
+            _changes[held] = changed.Value;
         }
 
         return Result.Success();
@@ -198,7 +223,7 @@ public sealed class Settings : IDisposable
     /// </summary>
     public async Task<Result> ApplyAsync(Handle<Preset> preset, CancellationToken cancel = default)
     {
-        Result<IReadOnlyList<Setting>> read = await ReadAsync(preset, cancel).ConfigureAwait(false);
+        Result<JsonObject> read = await ReadAsync(preset, cancel).ConfigureAwait(false);
         if (!read.Ok)
         {
             return Result.Failure(read.Error);
@@ -220,11 +245,24 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
-    /// The settings object of type <paramref name="type"/> for <paramref name="gem"/>, kept as the gem's; nothing for a
-    /// gem that takes none, which is an error when it is given some. Why not, when they do not fit it. As the gem is
-    /// made.
+    /// Reads <c>Gem.path=value</c>, as <c>--set</c> takes it: the value is JSON when it parses as JSON (<c>1920</c>,
+    /// <c>true</c>, <c>"1"</c>), and a string when it does not.
     /// </summary>
-    internal Result<object?> Make(string gem, Type? type)
+    internal static Result<(string Key, JsonNode? Value)> Parse(string line)
+    {
+        int equals = line.IndexOf('=', StringComparison.Ordinal);
+        string key = equals < 0 ? string.Empty : line[..equals];
+        return IsKey(key)
+            ? Result.Success((key, ValueOf(line[(equals + 1)..])))
+            : Result.Failure<(string, JsonNode?)>($"A setting is Gem.setting=value; '{line}' is not one.");
+    }
+
+    /// <summary>
+    /// The settings object of type <paramref name="type"/> for <paramref name="gem"/>, kept as the gem's, and each of
+    /// its settings added to <see cref="All"/>; nothing for a gem that takes none, which is an error when it is given
+    /// some. Why not, when they do not fit it. As the gem is made.
+    /// </summary>
+    internal Result<ISettings?> Make(string gem, Type? type)
     {
         lock (_lock)
         {
@@ -235,39 +273,78 @@ public sealed class Settings : IDisposable
                     Debugging.Error($"Gem {gem} takes no settings, but is given some; they are ignored.");
                 }
 
-                return Result.Success<object?>(null);
+                return Result.Success<ISettings?>(null);
             }
 
-            Result<object> values = Read(gem, type, _layers);
+            Result<ISettings> values = Read(gem, type, _layers);
             if (!values.Ok)
             {
-                return Result.Failure<object?>($"its settings are not valid: {values.Error}");
+                return Result.Failure<ISettings?>($"its settings are not valid: {values.Error}");
             }
 
-            _gems.Add(new GemSettings(gem, values.Value));
-            return Result.Success<object?>(values.Value);
+            _gems.Add(gem, values.Value);
+            foreach (PropertyInfo property in SettingsOf(type))
+            {
+                // Its own attributes first, then its class's, so one on the class marks every setting in it.
+                Setting setting = new(NameOf(property), _docs.SummaryOf(property), gem, property.PropertyType, null, [.. property.GetCustomAttributes(), .. type.GetCustomAttributes()]);
+                _all.Add((setting, property, values.Value));
+            }
+
+            return Result.Success<ISettings?>(values.Value);
         }
     }
 
     /// <summary>
-    /// Copies every change since the last time into the objects the gems hold. Main thread, at the frame's sync point.
+    /// Copies every change since the last time into the objects the gems hold, and when one changes a setting marked
+    /// <see cref="RequireRestartAttribute"/> to a value it did not hold, ends the run to start it again. Main thread, at
+    /// the frame's sync point.
     /// </summary>
     internal void ApplyChanges()
     {
+        string? restart = null;
         lock (_lock)
         {
-            foreach ((object held, object changed) in _changes)
+            foreach ((Setting setting, PropertyInfo property, ISettings held) in _all)
             {
-                foreach (PropertyInfo property in held.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                if (!_changes.TryGetValue(held, out ISettings? changed))
                 {
-                    if (property.CanRead && property.CanWrite)
-                    {
-                        property.SetValue(held, property.GetValue(changed));
-                    }
+                    continue;
                 }
+
+                object? value = property.GetValue(changed);
+                if (restart is null && setting.Attributes.OfType<RequireRestartAttribute>().Any() && !Equals(property.GetValue(held), value))
+                {
+                    restart = $"{setting.Key} changed";
+                }
+
+                property.SetValue(held, value);
             }
 
             _changes.Clear();
+        }
+
+        if (restart is { } reason)
+        {
+            _lifetime.Restart(reason);
+        }
+    }
+
+    /// <summary>
+    /// The command line that runs the engine again with every setting as it is now: <paramref name="args"/> with the
+    /// preset applied, and what was set while running as <c>--set</c> lines after its own, so each still wins.
+    /// </summary>
+    internal Args RestartArgs(Args args)
+    {
+        lock (_lock)
+        {
+            List<string> lines = [.. args.Settings];
+            foreach ((string key, JsonNode? value) in _layers.Live)
+            {
+                lines.Add($"{key}={value?.ToJsonString() ?? "null"}");
+            }
+
+            string preset = Preset == _default ? string.Empty : Path.GetFileNameWithoutExtension(NameOf(Preset));
+            return new Args { ProjectPath = args.ProjectPath, FrameLimit = args.FrameLimit, Headless = args.Headless, Settings = lines, Preset = preset };
         }
     }
 
@@ -290,15 +367,6 @@ public sealed class Settings : IDisposable
         return key[(key.IndexOf('.', StringComparison.Ordinal) + 1)..];
     }
 
-    /// <summary>
-    /// Whether two keys name the same setting: gem names are matched ignoring case, as the project's list is, and paths
-    /// exactly, as the JSON dialect matches keys.
-    /// </summary>
-    private static bool IsSameKey(string key, string other)
-    {
-        return string.Equals(GemOf(key), GemOf(other), StringComparison.OrdinalIgnoreCase) && string.Equals(PathOf(key), PathOf(other), StringComparison.Ordinal);
-    }
-
     private static string NotKey(string key)
     {
         return $"A setting is named Gem.setting; '{key}' is not one.";
@@ -307,6 +375,22 @@ public sealed class Settings : IDisposable
     private static string NoGem(string key)
     {
         return $"{GemOf(key)} is no gem with settings, so it has no {PathOf(key)}.";
+    }
+
+    /// <summary>
+    /// The settings a class of settings holds: its public properties that can be both read and set.
+    /// </summary>
+    private static IEnumerable<PropertyInfo> SettingsOf(Type type)
+    {
+        return type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(property => property.CanRead && property.CanWrite);
+    }
+
+    /// <summary>
+    /// A setting's name in its key and a preset: its property's name in Core's JSON dialect.
+    /// </summary>
+    private static string NameOf(PropertyInfo property)
+    {
+        return Json.Options.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
     }
 
     /// <summary>
@@ -325,21 +409,29 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
-    /// The command line's settings, but those for a gem the project does not list, which are an error, as a misspelt
-    /// name would be, and ignored.
+    /// The command line's settings, each line read as <see cref="Parse"/> does, but those for a gem the project does
+    /// not list, which are an error, as a misspelt name would be, and ignored.
     /// </summary>
-    private static List<Setting> CommandLine(Project project, IReadOnlyList<Setting> given)
+    private static JsonObject CommandLine(Project project, IReadOnlyList<string> lines)
     {
-        List<Setting> settings = [];
-        foreach (Setting setting in given)
+        JsonObject settings = [];
+        foreach (string line in lines)
         {
-            if (!project.Gems.Contains(GemOf(setting.Key), StringComparer.OrdinalIgnoreCase))
+            Result<(string Key, JsonNode? Value)> parsed = Parse(line);
+            if (!parsed.Ok)
             {
-                Debugging.Error($"--set {setting.Key} names {GemOf(setting.Key)}, which {project.Name} does not list as a gem; it is ignored.");
+                Debugging.Error($"--set {line}: {parsed.Error}");
                 continue;
             }
 
-            settings.Add(setting);
+            (string key, JsonNode? value) = parsed.Value;
+            if (!project.Gems.Contains(GemOf(key), StringComparer.OrdinalIgnoreCase))
+            {
+                Debugging.Error($"--set {key} names {GemOf(key)}, which {project.Name} does not list as a gem; it is ignored.");
+                continue;
+            }
+
+            settings[key] = value;
         }
 
         return settings;
@@ -349,16 +441,16 @@ public sealed class Settings : IDisposable
     /// Writes the settings of <paramref name="layer"/> that are for <paramref name="gem"/> into its
     /// <paramref name="section"/>, each at its path.
     /// </summary>
-    private static void WriteInto(JsonObject section, string gem, IReadOnlyList<Setting> layer)
+    private static void WriteInto(JsonObject section, string gem, JsonObject layer)
     {
-        foreach (Setting setting in layer)
+        foreach ((string key, JsonNode? value) in layer)
         {
-            if (!string.Equals(GemOf(setting.Key), gem, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(GemOf(key), gem, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            string[] path = PathOf(setting.Key).Split('.');
+            string[] path = PathOf(key).Split('.');
             JsonObject parent = section;
             for (int i = 0; i < path.Length - 1; i++)
             {
@@ -371,9 +463,25 @@ public sealed class Settings : IDisposable
                 parent = child;
             }
 
-            // A node has one parent, and the preset's is the asset's, which nobody changes.
-            parent[path[^1]] = setting.Value?.DeepClone();
+            // A node has one parent, and a preset's is the asset's, which nobody changes.
+            parent[path[^1]] = value?.DeepClone();
         }
+    }
+
+    /// <summary>
+    /// <paramref name="preset"/>'s settings, the asset's own object, or why one of its keys is not <c>Gem.path</c>.
+    /// </summary>
+    private static Result<JsonObject> SettingsOf(Preset preset, string name)
+    {
+        foreach ((string key, _) in preset.Settings)
+        {
+            if (!IsKey(key))
+            {
+                return Result.Failure<JsonObject>($"Preset {name} is not valid: {NotKey(key)}");
+            }
+        }
+
+        return Result.Success(preset.Settings);
     }
 
     /// <summary>
@@ -383,7 +491,7 @@ public sealed class Settings : IDisposable
     private void Reloaded(AssetReloaded<Preset> reloaded)
     {
         Handle<Preset> preset = reloaded.Asset.Handle;
-        Result<IReadOnlyList<Setting>> read = SettingsOf(reloaded.Asset);
+        Result<JsonObject> read = SettingsOf(reloaded.Asset, NameOf(preset));
         lock (_lock)
         {
             if (preset != _default && preset != Preset)
@@ -417,20 +525,20 @@ public sealed class Settings : IDisposable
     /// </summary>
     private Result Remake(Layers layers)
     {
-        List<(object Held, object Changed)> changes = [];
-        foreach (GemSettings gem in _gems)
+        List<(ISettings Held, ISettings Changed)> changes = [];
+        foreach ((string gem, ISettings held) in _gems)
         {
-            Result<object> changed = Read(gem.Gem, gem.Values.GetType(), layers);
+            Result<ISettings> changed = Read(gem, held.GetType(), layers);
             if (!changed.Ok)
             {
-                return Result.Failure($"does not fit {gem.Gem}'s settings: {changed.Error}");
+                return Result.Failure($"does not fit {gem}'s settings: {changed.Error}");
             }
 
-            changes.Add((gem.Values, changed.Value));
+            changes.Add((held, changed.Value));
         }
 
         _layers = layers;
-        foreach ((object held, object changed) in changes)
+        foreach ((ISettings held, ISettings changed) in changes)
         {
             _changes[held] = changed;
         }
@@ -442,7 +550,7 @@ public sealed class Settings : IDisposable
     /// <paramref name="gem"/>'s settings made from every layer, as a new object of <paramref name="type"/>; or why they
     /// do not fit it.
     /// </summary>
-    private Result<object> Read(string gem, Type type, Layers layers)
+    private Result<ISettings> Read(string gem, Type type, Layers layers)
     {
         object? values;
         try
@@ -451,14 +559,14 @@ public sealed class Settings : IDisposable
         }
         catch (JsonException ex)
         {
-            return Result.Failure<object>(ex.Message);
+            return Result.Failure<ISettings>(ex.Message);
         }
         catch (NotSupportedException ex)
         {
-            return Result.Failure<object>(ex.Message);
+            return Result.Failure<ISettings>(ex.Message);
         }
 
-        return values is null ? Result.Failure<object>("they are null.") : Result.Success(values);
+        return values is ISettings settings ? Result.Success(settings) : Result.Failure<ISettings>("they are null.");
     }
 
     /// <summary>
@@ -473,19 +581,6 @@ public sealed class Settings : IDisposable
         WriteInto(section, gem, _commandLine);
         WriteInto(section, gem, layers.Live);
         return section;
-    }
-
-    private GemSettings? Find(string gem)
-    {
-        foreach (GemSettings settings in _gems)
-        {
-            if (string.Equals(settings.Gem, gem, StringComparison.OrdinalIgnoreCase))
-            {
-                return settings;
-            }
-        }
-
-        return null;
     }
 
     private List<Handle<Preset>> FindPresets()
@@ -508,7 +603,7 @@ public sealed class Settings : IDisposable
     /// none when it cannot be read, which is logged.
     /// </summary>
     [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "The gems are made from the presets, so the run waits for them once, before any gem is made; they are read on a worker and need neither engine thread, so the wait cannot deadlock.")]
-    private IReadOnlyList<Setting> ReadNow(Handle<Preset> preset)
+    private JsonObject ReadNow(Handle<Preset> preset)
     {
         // A missing default has been logged already.
         if (preset == Handle<Preset>.None)
@@ -516,7 +611,7 @@ public sealed class Settings : IDisposable
             return [];
         }
 
-        Result<IReadOnlyList<Setting>> read = ReadAsync(preset, CancellationToken.None).GetAwaiter().GetResult();
+        Result<JsonObject> read = ReadAsync(preset, CancellationToken.None).GetAwaiter().GetResult();
         if (!read.Ok)
         {
             Debugging.Error(read.Error);
@@ -526,29 +621,10 @@ public sealed class Settings : IDisposable
         return read.Value;
     }
 
-    private async Task<Result<IReadOnlyList<Setting>>> ReadAsync(Handle<Preset> preset, CancellationToken cancel)
+    private async Task<Result<JsonObject>> ReadAsync(Handle<Preset> preset, CancellationToken cancel)
     {
         Result<Preset> loaded = await _assets.LoadAsync(preset, cancel).ConfigureAwait(false);
-        return loaded.Ok ? SettingsOf(loaded.Value) : Result.Failure<IReadOnlyList<Setting>>($"Preset {NameOf(preset)} could not be read: {loaded.Error}");
-    }
-
-    /// <summary>
-    /// <paramref name="preset"/>'s settings, or why one of its keys is not <c>Gem.path</c>.
-    /// </summary>
-    private Result<IReadOnlyList<Setting>> SettingsOf(Preset preset)
-    {
-        List<Setting> settings = [];
-        foreach ((string key, JsonNode? value) in preset.Settings)
-        {
-            if (!IsKey(key))
-            {
-                return Result.Failure<IReadOnlyList<Setting>>($"Preset {NameOf(preset.Handle)} is not valid: {NotKey(key)}");
-            }
-
-            settings.Add(new Setting(key, value));
-        }
-
-        return Result.Success<IReadOnlyList<Setting>>(settings);
+        return loaded.Ok ? SettingsOf(loaded.Value, NameOf(preset)) : Result.Failure<JsonObject>($"Preset {NameOf(preset)} could not be read: {loaded.Error}");
     }
 
     private string NameOf(Handle<Preset> preset)
@@ -558,7 +634,7 @@ public sealed class Settings : IDisposable
 
     /// <summary>
     /// What the gems' settings are made from, but the command line's, which never changes: the default preset's
-    /// settings, those of the preset applied over it, and what was set while running since.
+    /// settings, those of the preset applied over it, and what was set while running since, each by key.
     /// </summary>
-    private readonly record struct Layers(IReadOnlyList<Setting> Default, IReadOnlyList<Setting> Preset, IReadOnlyList<Setting> Live);
+    private readonly record struct Layers(JsonObject Default, JsonObject Preset, JsonObject Live);
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using System.Text;
 using Magic.Contexts.Frames;
@@ -23,11 +24,16 @@ namespace Magic.LogMetrics;
 internal sealed class LogMetricsGem : IGem, IDisposable
 {
     private readonly LogMetricsSettings _settings;
-    private readonly MeterListener _listener = new();
+    private MeterListener? _listener;
     private readonly Lock _lock = new();
     private readonly List<Measured> _measured = [];
     private readonly SlowestFrame _slowest = new();
-    private readonly bool _isListening;
+    private bool _isListening;
+
+    /// <summary>
+    /// The meters listened to, as the settings said when listening started.
+    /// </summary>
+    private IReadOnlyList<string> _meters = [];
 
     /// <summary>
     /// When the measurements being added up began: the last report, or the start.
@@ -35,14 +41,20 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     private long _windowStart;
 
     /// <summary>
-    /// Core's <c>magic.frame.duration</c>, recorded as each frame ends, once it is listened to.
+    /// Core's <c>magic.core.frame.duration</c>, recorded as each frame ends, once it is listened to.
     /// </summary>
     private Instrument? _frameDuration;
 
     /// <summary>
-    /// Core's <c>magic.gem.hook.duration</c>, recorded after each gem's hook, once it is listened to.
+    /// Core's <c>magic.core.gem.hook.duration</c>, recorded after each gem's hook, once it is listened to.
     /// </summary>
     private Instrument? _hookDuration;
+
+    /// <summary>
+    /// Core's <c>magic.core.thread.work.duration</c>, recorded after each piece of work handed to an engine thread,
+    /// once it is listened to.
+    /// </summary>
+    private Instrument? _workDuration;
 
     public LogMetricsGem(LogMetricsSettings settings)
     {
@@ -50,42 +62,24 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         if (!settings.Enabled)
         {
             Debugging.Verbose("Metrics are not logged; --set LogMetrics.enabled=true turns them on.");
-            return;
         }
-
-        if (settings.IntervalSeconds <= 0)
+        else if (settings.IntervalSeconds <= 0)
         {
             Debugging.Error($"LogMetrics's intervalSeconds must be more than 0, not {settings.IntervalSeconds}; metrics are not logged.");
-            return;
         }
 
-        _listener.InstrumentPublished = Publish;
-        _listener.MeasurementsCompleted = Complete;
-        _listener.SetMeasurementEventCallback<byte>(Add);
-        _listener.SetMeasurementEventCallback<short>(Add);
-        _listener.SetMeasurementEventCallback<int>(Add);
-        _listener.SetMeasurementEventCallback<long>(Add);
-        _listener.SetMeasurementEventCallback<float>(Add);
-        _listener.SetMeasurementEventCallback<double>(Add);
-        _listener.SetMeasurementEventCallback<decimal>(Add);
-        _windowStart = Stopwatch.GetTimestamp();
-        _listener.Start();
-        _isListening = true;
+        Follow();
     }
 
     public void Dispose()
     {
-        if (_isListening)
-        {
-            Report();
-        }
-
-        _listener.Dispose();
+        Stop();
     }
 
     public void Update(in Frame frame)
     {
         _slowest.Current = frame.Index;
+        Follow();
         if (_isListening && Stopwatch.GetElapsedTime(_windowStart).TotalSeconds >= _settings.IntervalSeconds)
         {
             Report();
@@ -96,6 +90,60 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// Adds one measurement to its instrument's series for its tags, and Core's frame and hook times to the slowest
     /// frame. Runs on the thread that recorded it, often the main thread in the middle of a frame.
     /// </summary>
+    /// <summary>
+    /// Listens as the settings say: starts when they turn logging on, stops when they turn it off, and starts over
+    /// when the meters listened to change, so a change while running takes from the next interval.
+    /// </summary>
+    private void Follow()
+    {
+        bool isWanted = _settings.Enabled && _settings.IntervalSeconds > 0;
+        if (_isListening && (!isWanted || !_meters.SequenceEqual(_settings.Meters, StringComparer.Ordinal)))
+        {
+            Stop();
+        }
+
+        if (isWanted && !_isListening)
+        {
+            Start();
+        }
+    }
+
+    private void Start()
+    {
+        MeterListener listener = new() { InstrumentPublished = Publish, MeasurementsCompleted = Complete };
+        listener.SetMeasurementEventCallback<byte>(Add);
+        listener.SetMeasurementEventCallback<short>(Add);
+        listener.SetMeasurementEventCallback<int>(Add);
+        listener.SetMeasurementEventCallback<long>(Add);
+        listener.SetMeasurementEventCallback<float>(Add);
+        listener.SetMeasurementEventCallback<double>(Add);
+        listener.SetMeasurementEventCallback<decimal>(Add);
+        _meters = [.. _settings.Meters];
+        _listener = listener;
+        _windowStart = Stopwatch.GetTimestamp();
+        _isListening = true;
+        listener.Start();
+    }
+
+    /// <summary>
+    /// Reports what was measured since the last report, then stops listening and forgets the instruments.
+    /// </summary>
+    private void Stop()
+    {
+        if (!_isListening)
+        {
+            return;
+        }
+
+        Report();
+        _listener?.Dispose();
+        _listener = null;
+        _isListening = false;
+        _frameDuration = null;
+        _hookDuration = null;
+        _workDuration = null;
+    }
+
     private void Add<T>(Instrument instrument, T measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
         where T : struct, INumber<T>
     {
@@ -109,6 +157,10 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         if (instrument == _hookDuration)
         {
             _slowest.Add(value, tags);
+        }
+        else if (instrument == _workDuration)
+        {
+            _slowest.AddWork(value, tags);
         }
         else if (instrument == _frameDuration)
         {
@@ -124,7 +176,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     {
         double seconds = Stopwatch.GetElapsedTime(_windowStart).TotalSeconds;
         _windowStart = Stopwatch.GetTimestamp();
-        _listener.RecordObservableInstruments();
+        _listener?.RecordObservableInstruments();
         lock (_lock)
         {
             foreach (Measured measured in _measured)
@@ -153,13 +205,17 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             _measured.Add(measured);
         }
 
-        if (string.Equals(instrument.Name, "magic.frame.duration", StringComparison.Ordinal))
+        if (string.Equals(instrument.Name, "magic.core.frame.duration", StringComparison.Ordinal))
         {
             _frameDuration = instrument;
         }
-        else if (string.Equals(instrument.Name, "magic.gem.hook.duration", StringComparison.Ordinal))
+        else if (string.Equals(instrument.Name, "magic.core.gem.hook.duration", StringComparison.Ordinal))
         {
             _hookDuration = instrument;
+        }
+        else if (string.Equals(instrument.Name, "magic.core.thread.work.duration", StringComparison.Ordinal))
+        {
+            _workDuration = instrument;
         }
 
         listener.EnableMeasurementEvents(instrument, measured);
@@ -182,12 +238,12 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     }
 
     /// <summary>
-    /// Whether <paramref name="meter"/> is one of the settings' meters or under one: "Magic" takes "Magic" and
-    /// "Magic.Renderer", not "Magical".
+    /// Whether <paramref name="meter"/> is one of the settings' meters or under one: "Magic" takes "Magic.Core" and
+    /// "Magic.Gems.ClusterRendering", not "Magical".
     /// </summary>
     private bool Listens(string meter)
     {
-        foreach (string name in _settings.Meters)
+        foreach (string name in _meters)
         {
             if (meter.StartsWith(name, StringComparison.Ordinal) && (meter.Length == name.Length || meter[name.Length] == '.'))
             {
@@ -409,6 +465,14 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         private TimeSpan _paused;
 
         /// <summary>
+        /// How long each engine thread spent on work handed to it, in the frame being timed and in the slowest.
+        /// </summary>
+        private double _mainWork;
+        private double _renderWork;
+        private double _slowestMainWork;
+        private double _slowestRenderWork;
+
+        /// <summary>
         /// How long the garbage collector had paused the process for when the last frame ended.
         /// </summary>
         private TimeSpan _pausedBefore = GC.GetTotalPauseDuration();
@@ -423,7 +487,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// </summary>
         public void Add(double seconds, ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
-            Hook hook = new(Tag(tags, "magic.gem.name"), Tag(tags, "magic.frame.phase"), seconds);
+            Hook hook = new(Tag(tags, "magic.core.gem.name"), Tag(tags, "magic.core.frame.phase"), seconds);
             lock (_lock)
             {
                 _hooks.Add(hook);
@@ -431,8 +495,27 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         }
 
         /// <summary>
-        /// Ends the frame being timed, which took <paramref name="seconds"/>, keeping its hooks when it is the slowest
-        /// yet.
+        /// Keeps a piece of handed work's time in the frame being timed, under the thread that ran it.
+        /// </summary>
+        public void AddWork(double seconds, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        {
+            bool isRender = Tag(tags, "magic.core.thread.name") is "render";
+            lock (_lock)
+            {
+                if (isRender)
+                {
+                    _renderWork += seconds;
+                }
+                else
+                {
+                    _mainWork += seconds;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Ends the frame being timed, which took <paramref name="seconds"/>, keeping its hooks and handed work when it
+        /// is the slowest yet.
         /// </summary>
         public void Ended(double seconds)
         {
@@ -446,12 +529,16 @@ internal sealed class LogMetricsGem : IGem, IDisposable
                     _paused = paused - _pausedBefore;
                     _slowestHooks.Clear();
                     _slowestHooks.AddRange(_hooks);
+                    _slowestMainWork = _mainWork;
+                    _slowestRenderWork = _renderWork;
                 }
 
                 _pausedBefore = paused;
                 _sum += seconds;
                 _count++;
                 _hooks.Clear();
+                _mainWork = 0;
+                _renderWork = 0;
             }
         }
 
@@ -485,7 +572,18 @@ internal sealed class LogMetricsGem : IGem, IDisposable
                     }
                 }
 
-                text.Append(" outside the main thread's hooks ").Append(Amount(_seconds - hooked, "s")).Append("; GC paused ").Append(Amount(_paused.TotalSeconds, "s"));
+                text.Append(" outside the main thread's hooks ").Append(Amount(_seconds - hooked, "s"));
+                if (_slowestMainWork > 0)
+                {
+                    text.Append(", of it work handed to the main thread ").Append(Amount(_slowestMainWork, "s"));
+                }
+
+                if (_slowestRenderWork > 0)
+                {
+                    text.Append("; work handed to the render thread ").Append(Amount(_slowestRenderWork, "s"));
+                }
+
+                text.Append("; GC paused ").Append(Amount(_paused.TotalSeconds, "s"));
                 Debugging.Info(text.ToString());
                 _count = 0;
                 _sum = 0;

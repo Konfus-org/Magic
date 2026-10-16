@@ -9,8 +9,8 @@ Magic --project samples --set LogMetrics.enabled=true
 ```
 
 ```
-12:00:30.001 Info     f1800 t2 magic.frame.duration: 1800 in 30 s, mean 16.67 ms, min 15.9 ms, max 87.2 ms (LogMetricsGem.cs:267 Report)
-12:00:30.001 Info     f1800 t2 magic.gem.hook.duration {magic.gem.name=Window, magic.frame.phase=Update}: 1800 in 30 s, mean 0.21 ms, min 0.05 ms, max 71.3 ms (LogMetricsGem.cs:267 Report)
+12:00:30.001 Info     f1800 t2 magic.core.frame.duration: 1800 in 30 s, mean 16.67 ms, min 15.9 ms, max 87.2 ms (LogMetricsGem.cs:267 Report)
+12:00:30.001 Info     f1800 t2 magic.core.gem.hook.duration {magic.core.gem.name=Window, magic.core.frame.phase=Update}: 1800 in 30 s, mean 0.21 ms, min 0.05 ms, max 71.3 ms (LogMetricsGem.cs:267 Report)
 12:00:30.001 Info     f1800 t2 Slowest frame f1234 took 87.2 ms, 5.2x the mean: Ecs.Update 71.3 ms, Console.Update 0.1 ms, LogMetrics.Update 0.02 ms, outside the main thread's hooks 15.8 ms; GC paused 9.8 ms (LogMetricsGem.cs:479 Report)
 ```
 
@@ -22,9 +22,10 @@ In the project's `Presets/Default.preset`, by another preset, or `--set LogMetri
 | --- | --- | --- |
 | `enabled` | `false` | Whether metrics are logged. Off, the gem does not listen, so nothing is measured for it. |
 | `intervalSeconds` | `30` | How often, in seconds. 0 or less is an error, and nothing is logged. |
-| `meters` | `["Magic"]` | The meters listened to, each with the meters under it: `"Magic"` is Core's and every gem's `Magic.<Gem>`. `"System.Runtime"` is .NET's own: garbage collection, memory, the JIT and the thread pool. |
+| `meters` | `["Magic"]` | The meters listened to, each with the meters under it: `"Magic"` is Core's `Magic.Core` and every gem's `Magic.Gems.<Gem>`. `"System.Runtime"` is .NET's own: garbage collection, memory, the JIT and the thread pool. |
 
-`enabled` and `meters` are read as the gem starts; `intervalSeconds` every frame, so it changes while the gem runs.
+All three are followed every frame: turning logging on or off, or changing the meters, takes from the next interval,
+after a report of what was measured so far.
 
 ## Lines
 
@@ -39,11 +40,12 @@ Seconds are shown as milliseconds. An instrument recorded with the same tags in 
 ## Slowest frame
 
 A mean hides a stutter, so each report ends with the slowest frame since the last one, from Core's
-`magic.frame.duration` and `magic.gem.hook.duration`: how long it took against the mean, its three slowest gem hooks,
-the time outside the main thread's hooks (the frame loop, waiting for the render thread, listeners, the first call's
-JIT), and how long the garbage collector paused it. The render thread's hooks count in the main thread's frame they ran
-beside. A pause counts in whichever hook or gap it fell in, so a hook that only looks slow because of one shows up
-next to the pause. Without the `Magic` meter in `meters` there is no line.
+`magic.core.frame.duration`, `magic.core.gem.hook.duration` and `magic.core.thread.work.duration`: how long it took
+against the mean, its three slowest gem hooks, the time outside the main thread's hooks (the frame loop, waiting for the
+render thread, listeners, the first call's JIT) and how much of that was work handed to the main thread, the work handed
+to the render thread, and how long the garbage collector paused it. The render thread's hooks and work count in the main
+thread's frame they ran beside. A pause counts in whichever hook or gap it fell in, so a hook that only looks slow
+because of one shows up next to the pause. Without the `Magic` meter in `meters` there is no line.
 
 The first report's slowest frame is often the first frame, which compiles everything it calls, and the second's the
 frame the first report was made in, for the same reason.

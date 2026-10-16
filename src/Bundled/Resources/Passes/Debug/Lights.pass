@@ -1,0 +1,8 @@
+{
+    "description": "How many point and spot lights reach each pixel, as heat over the scene: blue one, white sixteen and more.",
+    "stage": "ui",
+    "kind": "fullscreen",
+    "shader": { "id": 11939 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

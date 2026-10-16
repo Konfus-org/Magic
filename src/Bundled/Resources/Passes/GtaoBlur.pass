@@ -2,11 +2,7 @@
     "stage": "occlusion",
     "kind": "compute",
     "shader": { "id": 11285 },
-    "reads": [
-        { "name": "Depth", "filter": "nearest" },
-        { "name": "AmbientOcclusionNoisy", "filter": "nearest" }
-    ],
-    "creates": [ { "name": "AmbientOcclusion", "format": "rgba8_unorm" } ],
+    "creates": [ { "name": "AmbientOcclusion", "filter": "nearest", "format": "rgba8_unorm" } ],
     "writes": [ { "name": "AmbientOcclusion" } ],
     "dispatch": { "per": "view" }
 }

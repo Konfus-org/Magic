@@ -7,6 +7,8 @@
 // no further than what is there now. Both are weighed by their brightness as they blend, so a lone bright sample does
 // not flicker. What Taa held where nothing was before, or where the view first comes, is drawn from the view alone.
 
+#include "Include/Color.hlsli"
+
 struct PassParams
 {
     // The share of the new frame a pixel takes where a sample of it falls on the pixel's centre; less where none does.
@@ -15,21 +17,6 @@ struct PassParams
     // The spread about the mean, in standard deviations, past which what was there is clipped.
     float clipSpread = 1.0;
 };
-
-float Luma(float3 color)
-{
-    return dot(color, float3(0.2126, 0.7152, 0.0722));
-}
-
-float3 ToYCoCg(float3 color)
-{
-    return float3(dot(color, float3(0.25, 0.5, 0.25)), dot(color, float3(0.5, 0.0, -0.5)), dot(color, float3(-0.25, 0.5, -0.25)));
-}
-
-float3 FromYCoCg(float3 color)
-{
-    return float3(color.x + color.y - color.z, color.x + color.z, color.x - color.y - color.z);
-}
 
 // The colour last frame left at a place, through a Catmull-Rom filter of five bilinear taps, its corners left out
 // (Jimenez 2016, "Filmic SMAA").
@@ -98,11 +85,11 @@ void main(uint3 id : SV_DispatchThreadID)
 
             // Blackman-Harris, as a Gaussian fitted to it, a pixel of the view wide.
             float weight = exp(-2.29 * dot(apart, apart));
-            float luma = 1.0 / (1.0 + Luma(color));
+            float luma = 1.0 / (1.0 + Luminance(color));
             sum += color * weight * luma;
             total += weight * luma;
             peak = max(peak, weight);
-            float3 ycocg = ToYCoCg(color);
+            float3 ycocg = RgbToYCoCg(color);
             moment1 += ycocg;
             moment2 += ycocg * ycocg;
 
@@ -137,14 +124,12 @@ void main(uint3 id : SV_DispatchThreadID)
     {
         float3 mean = moment1 / 9.0;
         float3 spread = sqrt(max(moment2 / 9.0 - mean * mean, 0.0)) * params.clipSpread;
-        float3 history = FromYCoCg(Clip(ToYCoCg(HistoryAt(historyUv)), mean, spread));
+        float3 history = YCoCgToRgb(Clip(RgbToYCoCg(HistoryAt(historyUv)), mean, spread));
         float share = max(params.feedback * peak, 0.02);
-        float currentWeight = share / (1.0 + Luma(current));
-        float historyWeight = (1.0 - share) / (1.0 + Luma(history));
+        float currentWeight = share / (1.0 + Luminance(current));
+        float historyWeight = (1.0 - share) / (1.0 + Luminance(history));
         result = (current * currentWeight + history * historyWeight) / (currentWeight + historyWeight);
     }
 
-    // Never, as no pixel is that far, but it keeps every read bound with its sampler, though read texel by texel.
-    float kept = id.x > 0x7FFFFFFFu ? KeepReadsAlive(uv) : 0.0;
-    Taa[id.xy] = float4(result + kept, 1.0);
+    Taa[id.xy] = float4(result, 1.0);
 }

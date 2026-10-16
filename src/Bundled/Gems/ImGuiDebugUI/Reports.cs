@@ -13,18 +13,13 @@ internal sealed class Reports
 {
     private readonly Lock _lock = new();
     private readonly Dictionary<(string Text, Vector3? Position), Report> _reports = [];
-
-    /// <summary>
-    /// How many reports show each text, wherever they are.
-    /// </summary>
-    private readonly Dictionary<string, int> _places = [];
-
     private long _reported;
 
     /// <summary>
     /// Shows <paramref name="text"/> until <paramref name="seconds"/> from <paramref name="now"/>, or keeps it showing
     /// that long when it already is; with 0 seconds it shows until the first frame it is not reported in. True when the
-    /// text was not showing anywhere, which is when a report that logs logs.
+    /// text was not showing anywhere, which is when a warning or error logs: looked up for those alone, the kind whose
+    /// answer is read.
     /// </summary>
     public bool Add(string text, ReportKind kind, Color color, Vector3? position, string? tooltip, float seconds, double now)
     {
@@ -45,6 +40,7 @@ internal sealed class Reports
                 return false;
             }
 
+            bool isNew = kind != ReportKind.Alarm || !IsShowing(text);
             _reports[(text, position)] = new Report
             {
                 Label = kind == ReportKind.Alarm ? $"!!! {text} !!!" : text,
@@ -56,9 +52,7 @@ internal sealed class Reports
                 Kind = kind,
                 Order = _reported++,
             };
-            int places = _places.GetValueOrDefault(text);
-            _places[text] = places + 1;
-            return places == 0;
+            return isNew;
         }
     }
 
@@ -77,16 +71,6 @@ internal sealed class Reports
                 {
                     // Removing while enumerating a Dictionary is allowed.
                     _reports.Remove((text, position));
-                    int places = _places[text] - 1;
-                    if (places == 0)
-                    {
-                        _places.Remove(text);
-                    }
-                    else
-                    {
-                        _places[text] = places;
-                    }
-
                     continue;
                 }
 
@@ -98,6 +82,22 @@ internal sealed class Reports
 
         world.Sort(static (left, right) => left.Order.CompareTo(right.Order));
         lines.Sort(static (left, right) => left.Order.CompareTo(right.Order));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="text"/> shows anywhere, at a place or as a line.
+    /// </summary>
+    private bool IsShowing(string text)
+    {
+        foreach ((string shown, _) in _reports.Keys)
+        {
+            if (string.Equals(shown, text, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private sealed class Report

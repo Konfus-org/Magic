@@ -1,14 +1,5 @@
 {
     "stage": "g_buffer",
     "kind": "draw",
-    "reads": [
-        { "name": "Visibility", "filter": "nearest" },
-        { "name": "VisiblePieces" },
-        { "name": "Instances" },
-        { "name": "Cards" },
-        { "name": "Clusters" },
-        { "name": "Geometry" },
-        { "name": "MaterialBins" }
-    ],
-    "draw": { "drawn": "surfaces", "colors": [ "Albedo", "Normal", "Material", "Hdr", "Velocity" ], "load": "clear", "args": "ResolveArgs", "instances": "TileList" }
+    "draw": { "drawn": "surfaces", "colors": [ "Albedo", "Normal", "Material", "Hdr", "Velocity" ], "contents": "clear", "args": "ResolveArgs", "instances": "TileList" }
 }

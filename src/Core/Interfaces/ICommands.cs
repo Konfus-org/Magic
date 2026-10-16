@@ -9,10 +9,11 @@ namespace Magic.Interfaces;
 public interface ICommands
 {
     /// <summary>
-    /// Adds the command <paramref name="name"/> until the subscription is disposed. <paramref name="run"/> gets the
-    /// words typed after the name, and runs on the main thread in <see cref="Phase.Update"/>.
+    /// Adds the command <paramref name="name"/> until the subscription is disposed. <paramref name="description"/> is
+    /// what <c>help</c> says of it: what it does, and the words it takes. <paramref name="run"/> gets the words typed
+    /// after the name, and runs on the main thread in <see cref="Phase.Update"/>.
     /// </summary>
-    Subscription Register(string name, Action<ReadOnlySpan<string>> run);
+    Subscription Register(string name, string description, Action<ReadOnlySpan<string>> run);
 
     /// <summary>
     /// Runs <paramref name="line"/> as if it were typed at the terminal, now: a console of another kind, such as a

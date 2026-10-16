@@ -18,20 +18,17 @@ namespace Magic.ClusterRendering;
 /// are drawn into the visibility buffer by when they clip (a masked surface's, or a card's or a fade's of any), the
 /// resolve bin its pixels are shaded into the G-buffer by, and whether it is in yet, transparent, masked or
 /// double-sided. A material, its surface and its textures load on workers and are taken in on the render thread; what is
-/// broken is drawn with the failure surface, its kind saying what broke (Surfaces/Failure.surf.hlsl). Render thread.
+/// broken is packed, in its own row, as the failure material for what broke (<see cref="Assets.Failure{T}"/>), a
+/// material like any other, loaded as the renderer starts and kept. Render thread.
+/// <para>
+/// A material is drawn only once it can be drawn as it should be: its textures in, and every pipeline it is drawn with
+/// compiled (<see cref="PassGraph.IsDrawable"/>). Until then its row stays as it was, not in for a new one, so nothing is
+/// drawn flat, black or not at all for a while and then changes; a material packed again, its file or a texture of it
+/// changed, keeps being drawn as it was until it can be drawn the new way.
+/// </para>
 /// </summary>
 internal sealed class Materials : IDisposable
 {
-    /// <summary>
-    /// The failure surface's kinds, as Surfaces/Failure.surf.hlsl numbers them.
-    /// </summary>
-    public const uint FailureShader = 1;
-    public const uint FailureRecord = 2;
-    public const uint FailureMesh = 3;
-    public const uint FailureTexture = 4;
-
-    public const string FailurePath = "Shaders/Surfaces/Failure.surf.hlsl";
-
     /// <summary>
     /// The raster bins every frame has, whose pixels do not clip: single-sided and double-sided. A surface's own clusters'
     /// come after, and its cards' <see cref="CardBins"/> after those (Shaders/Include/Culling.hlsli's CardBinOffset).
@@ -68,34 +65,45 @@ internal sealed class Materials : IDisposable
 
     private readonly Assets _assets;
     private readonly TexturePools _textures;
+    private readonly PassGraph _graph;
     private readonly Threads _threads;
     private readonly CancellationToken _stopping;
     private readonly Dictionary<Handle<Material>, MaterialEntry> _materials = [];
     private readonly Dictionary<Handle<Shader>, SurfaceEntry> _surfaces = [];
+
+    /// <summary>
+    /// The materials packed and waiting for their pipelines to be drawn (<see cref="MaterialEntry.Waiting"/>), or let go
+    /// since: those are passed over.
+    /// </summary>
+    private readonly List<Handle<Material>> _waiting = [];
 
     private readonly Dictionary<SurfaceKey, int> _rasterBins = [];
     private readonly Dictionary<SurfaceKey, int> _resolveBins = [];
     private readonly RangeAllocator _rows = new();
     private readonly Handle<Material> _default;
 
-    public Materials(IGpu gpu, Assets assets, TexturePools textures, Threads threads, CancellationToken stopping)
+    /// <summary>
+    /// The failure materials, by what broke, loading from the start; none for a kind whose file is missing, whose broken
+    /// materials are then drawn as the default.
+    /// </summary>
+    private readonly Dictionary<FailureType, Handle<Material>> _failures = [];
+
+    public Materials(IGpu gpu, Assets assets, TexturePools textures, PassGraph graph, Threads threads, CancellationToken stopping)
     {
         _assets = assets;
         _textures = textures;
+        _graph = graph;
         _threads = threads;
         _stopping = stopping;
         Records = new GpuArray<GpuMaterial>(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, 64);
         Gi = new GpuArray<GpuMaterialGi>(gpu, GpuBufferUsage.ComputeRead, 64);
         Bins = new GpuArray<uint>(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, 64);
-        Failure = assets.Find<Shader>(FailurePath);
-        if (Failure == Handle<Shader>.None)
-        {
-            Debugging.Error($"There is no failure surface at {FailurePath}, so broken materials are not drawn.");
-        }
-
         _default = assets.Default<Material>();
-        FailedMesh = new DrawnMaterial(FailureRow(FailureMesh), new SurfaceKey(Failure, false, false), MaterialType.Opaque);
-        WriteBins(FailedMesh);
+        foreach (FailureType type in Enum.GetValues<FailureType>())
+        {
+            _failures[type] = assets.Failure<Material>(type);
+            EntryOf(_failures[type]);
+        }
     }
 
     public void Dispose()
@@ -135,16 +143,6 @@ internal sealed class Materials : IDisposable
     public HashSet<SurfaceKey> TransparentSurfaces { get; } = [];
 
     /// <summary>
-    /// The failure surface, which a broken material is drawn with.
-    /// </summary>
-    public Handle<Shader> Failure { get; }
-
-    /// <summary>
-    /// What a renderer whose model does not load is drawn with.
-    /// </summary>
-    public DrawnMaterial FailedMesh { get; }
-
-    /// <summary>
     /// The materials whose row, surface or type changed since the scene last asked: whose instances it draws anew.
     /// </summary>
     public HashSet<Handle<Material>> Changed { get; } = [];
@@ -175,13 +173,27 @@ internal sealed class Materials : IDisposable
     }
 
     /// <summary>
+    /// The material drawn in a broken one's place when <paramref name="type"/> broke: what a model that does not load
+    /// is drawn with in every slot, for the mesh failure.
+    /// </summary>
+    public Handle<Material> Failure(FailureType type)
+    {
+        return _failures[type];
+    }
+
+    /// <summary>
+    /// Whether the material in <paramref name="row"/> is drawn: in, its textures in and its pipelines compiled.
+    /// </summary>
+    public bool IsShown(int row) => (Bins.Rows[row] & BinReady) != 0;
+
+    /// <summary>
     /// Lets the material go once no instance draws with it: its row and its variants' are freed, and the textures it
     /// samples that no other material does leave the pools, as do its cards' atlases no other variant has. It loads
-    /// again if it is asked for again. The default material stays.
+    /// again if it is asked for again. The default and failure materials stay.
     /// </summary>
     public void Release(Handle<Material> material)
     {
-        if (material == Handle<Material>.None || material == _default || !_materials.Remove(material, out MaterialEntry? entry))
+        if (material == Handle<Material>.None || material == _default || _failures.ContainsValue(material) || !_materials.Remove(material, out MaterialEntry? entry))
         {
             return;
         }
@@ -215,10 +227,12 @@ internal sealed class Materials : IDisposable
     }
 
     /// <summary>
-    /// A shader changed: a surface materials use is read again, and its materials packed again.
+    /// A shader changed: a surface materials use is read again, no longer broken until it fails again, and its
+    /// materials packed again.
     /// </summary>
     public void Reload(Shader shader)
     {
+        _graph.BrokenSurfaces.Remove(shader.Handle);
         if (!_surfaces.Remove(shader.Handle))
         {
             return;
@@ -234,21 +248,38 @@ internal sealed class Materials : IDisposable
     }
 
     /// <summary>
-    /// Packs again the materials whose textures came in or failed, then uploads what changed.
+    /// Packs again the materials whose textures came in or failed or whose surface failed to compile, draws those whose
+    /// pipelines are compiled now, then uploads what changed.
     /// </summary>
     public void Flush()
     {
-        if (_textures.Changed.Count > 0)
+        if (_textures.Changed.Count > 0 || _graph.Broke.Count > 0)
         {
             foreach ((Handle<Material> handle, MaterialEntry entry) in _materials)
             {
-                if (entry.Asset is { } material && UsesAny(material, _textures.Changed))
+                if (entry.Asset is { } material && (UsesAny(material, _textures.Changed) || _graph.Broke.Contains(material.Shader)))
                 {
                     Pack(handle, entry);
                 }
             }
 
             _textures.Changed.Clear();
+            _graph.Broke.Clear();
+        }
+
+        for (int i = _waiting.Count - 1; i >= 0; i--)
+        {
+            if (!_materials.TryGetValue(_waiting[i], out MaterialEntry? entry) || entry.Waiting is not { } waiting)
+            {
+                _waiting.RemoveAt(i);
+                continue;
+            }
+
+            if (_graph.IsDrawable(waiting.Drawn.Surface, waiting.Drawn.Type))
+            {
+                Show(_waiting[i], entry, waiting);
+                _waiting.RemoveAt(i);
+            }
         }
 
         Records.Flush();
@@ -373,14 +404,15 @@ internal sealed class Materials : IDisposable
     }
 
     /// <summary>
-    /// Writes a material's row and what it is drawn with: its surface's packing of its params, or the failure's kind
-    /// when it, its surface or a texture it samples is broken. A texture still loading packs as none until it is in.
+    /// Packs a material: its surface's packing of its params, or as the failure material for what broke when it, its
+    /// surface or a texture it samples is; drawn once its pipelines are compiled. Nothing while a texture it samples is
+    /// loading: it is packed again once the texture is in.
     /// </summary>
     private void Pack(Handle<Material> handle, MaterialEntry entry)
     {
         if (entry.Asset is not { } material)
         {
-            Use(handle, entry, FailureRecord, MaterialType.Opaque, doubleSided: false);
+            Break(handle, entry, FailureType.Shader, "Material does not load", doubleSided: false);
             return;
         }
 
@@ -389,19 +421,27 @@ internal sealed class Materials : IDisposable
             return;
         }
 
-        if (surface.Source is not { } source)
+        if (surface.Source is not { } source || _graph.BrokenSurfaces.Contains(material.Shader))
         {
-            Use(handle, entry, FailureShader, material.Type, material.DoubleSided);
+            Break(handle, entry, FailureType.Shader, "Surface does not compile", material.DoubleSided);
             return;
         }
 
+        bool isLoading = false;
         foreach (MaterialParam param in material.Params.Values)
         {
             if (param.Texture != Handle<Texture>.None && _textures.HasFailed(param.Texture))
             {
-                Use(handle, entry, FailureTexture, material.Type, material.DoubleSided);
+                Break(handle, entry, FailureType.Texture, "Texture does not load", material.DoubleSided);
                 return;
             }
+
+            isLoading |= param.Texture != Handle<Texture>.None && _textures.RefOf(param.Texture) == TexturePools.None;
+        }
+
+        if (isLoading)
+        {
+            return;
         }
 
         foreach (string unknown in source.Layout.Unknown(material.Params.Keys))
@@ -411,40 +451,77 @@ internal sealed class Materials : IDisposable
 
         GpuMaterial row = default;
         IReadOnlyDictionary<string, MaterialParam>?[] layers = [material.Params];
-        source.Layout.Write(layers, param => _textures.RefOf(param.Texture), MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
-        Records.Set(entry.Row, row);
+        source.Layout.Write(layers, param => _textures.RefOf(param.Texture), _ => null, MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
         (Vector3 color, Vector3 emission) = source.Layout.GiOf(material.Params);
-        Gi.Set(entry.Row, new GpuMaterialGi { Color = new Vector4(color, 1), Emission = new Vector4(emission, 0) });
-        entry.Failure = null;
-        Set(handle, entry, new DrawnMaterial(entry.Row, new SurfaceKey(material.Shader, material.Type == MaterialType.Masked, material.DoubleSided), material.Type));
+        GpuMaterialGi gi = new() { Color = new Vector4(color, 1), Emission = new Vector4(emission, 0) };
+        DrawnMaterial drawn = new(entry.Row, new SurfaceKey(material.Shader, material.Type == MaterialType.Masked, material.DoubleSided), material.Type);
+        entry.Broken = null;
+        Draw(handle, entry, new PackedMaterial(row, gi, drawn, null));
     }
 
     /// <summary>
-    /// Draws the material as the failure of <paramref name="kind"/>, keeping its blending and sides.
+    /// Packs the material as the failure material for <paramref name="type"/>, in its own row, opaque, keeping its
+    /// sides, once that material is drawn: until then it stays as it was, and is packed again when it is
+    /// (<see cref="Show"/>). A failure material that is itself broken stands in for nothing.
     /// </summary>
-    private void Use(Handle<Material> handle, MaterialEntry entry, uint kind, MaterialType type, bool doubleSided)
+    private void Break(Handle<Material> handle, MaterialEntry entry, FailureType type, string why, bool doubleSided)
     {
-        entry.Failure = kind switch
+        entry.Broken = type;
+        Handle<Material> failure = _failures[type];
+        if (handle == failure || EntryOf(failure).Packed is not { } packed)
         {
-            FailureShader => "Surface does not compile",
-            FailureTexture => "Texture does not load",
-            _ => "Material does not load",
-        };
-        Records.Set(entry.Row, FailureRecordOf(kind));
-        Gi.Set(entry.Row, _failureGi);
-        Set(handle, entry, new DrawnMaterial(entry.Row, new SurfaceKey(Failure, false, doubleSided), type == MaterialType.Transparent ? MaterialType.Opaque : type));
+            return;
+        }
+
+        DrawnMaterial drawn = new(entry.Row, packed.Drawn.Surface with { DoubleSided = doubleSided }, MaterialType.Opaque);
+        Draw(handle, entry, packed with { Gi = _failureGi, Drawn = drawn, Failure = why });
     }
 
     /// <summary>
-    /// What the material is drawn with, its row just written, and the bins it is drawn by.
+    /// Draws a material packed as soon as its pipelines are compiled: now, or once they are (<see cref="Flush"/>),
+    /// drawn as it was until then.
     /// </summary>
-    private void Set(Handle<Material> handle, MaterialEntry entry, DrawnMaterial drawn)
+    private void Draw(Handle<Material> handle, MaterialEntry entry, PackedMaterial packed)
     {
-        WriteBins(drawn);
-        if (entry.Drawn != drawn)
+        if (_graph.IsDrawable(packed.Drawn.Surface, packed.Drawn.Type))
         {
-            entry.Drawn = drawn;
-            Changed.Add(handle);
+            Show(handle, entry, packed);
+            return;
+        }
+
+        if (entry.Waiting is null)
+        {
+            _waiting.Add(handle);
+        }
+
+        entry.Waiting = packed;
+    }
+
+    /// <summary>
+    /// Writes a material's row as packed, what global illumination takes of it and the bins it is drawn by; a failure
+    /// material drawn packs again the broken materials waiting for it.
+    /// </summary>
+    private void Show(Handle<Material> handle, MaterialEntry entry, PackedMaterial packed)
+    {
+        entry.Waiting = null;
+        entry.Packed = packed;
+        entry.Failure = packed.Failure;
+        entry.Drawn = packed.Drawn;
+        Records.Set(entry.Row, packed.Record);
+        Gi.Set(entry.Row, packed.Gi);
+        WriteBins(packed.Drawn);
+        Changed.Add(handle);
+        if (!_failures.ContainsValue(handle))
+        {
+            return;
+        }
+
+        foreach ((Handle<Material> broken, MaterialEntry waiting) in _materials)
+        {
+            if (broken != handle && waiting.Broken is { } type && _failures[type] == handle)
+            {
+                Pack(broken, waiting);
+            }
         }
     }
 
@@ -487,27 +564,6 @@ internal sealed class Materials : IDisposable
         }
     }
 
-    /// <summary>
-    /// A row of its own for a failure kind, which no material file is.
-    /// </summary>
-    private int FailureRow(uint kind)
-    {
-        int row = _rows.Allocate(1);
-        Records.Set(row, FailureRecordOf(kind));
-        Gi.Set(row, _failureGi);
-        return row;
-    }
-
-    /// <summary>
-    /// The failure surface's record: its one param, the kind.
-    /// </summary>
-    private static GpuMaterial FailureRecordOf(uint kind)
-    {
-        GpuMaterial row = default;
-        row[0] = kind;
-        return row;
-    }
-
     private sealed class MaterialEntry(int row)
     {
         public int Row { get; } = row;
@@ -517,10 +573,31 @@ internal sealed class Materials : IDisposable
         public DrawnMaterial? Drawn { get; set; }
 
         /// <summary>
+        /// What it is drawn as; null until it is drawn.
+        /// </summary>
+        public PackedMaterial? Packed { get; set; }
+
+        /// <summary>
+        /// What it was packed as last, while it waits for its pipelines to be drawn so; null when it does not wait.
+        /// </summary>
+        public PackedMaterial? Waiting { get; set; }
+
+        /// <summary>
+        /// What broke, when it is packed as a failure material or waits for one to be drawn; null when it is not broken.
+        /// </summary>
+        public FailureType? Broken { get; set; }
+
+        /// <summary>
         /// Why it is drawn as the failure, in a few words; null when it is not.
         /// </summary>
         public string? Failure { get; set; }
     }
+
+    /// <summary>
+    /// A material packed: its row, what global illumination takes of it, what it is drawn with, and why it is drawn as the
+    /// failure, null when it is not.
+    /// </summary>
+    private sealed record PackedMaterial(GpuMaterial Record, GpuMaterialGi Gi, DrawnMaterial Drawn, string? Failure);
 
     private sealed class SurfaceEntry
     {

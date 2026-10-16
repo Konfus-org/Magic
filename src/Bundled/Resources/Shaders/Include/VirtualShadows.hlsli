@@ -17,7 +17,8 @@
 // NoView for none. A page's record is what owns it, a sun entry plus one or a light entry with LightOwner, the frame it
 // was last read in, so the pages read longest ago are the first taken for what is wanted now, and the rectangle of it
 // waiting to be drawn again: all of it when new, else where what moved since it was drawn reaches, as only that can
-// have changed, so a small caster moving in a big page draws little. The views read a page only when it is not dirty,
+// have changed, so a small caster moving in a big page draws little; and, only while the allocator gives pages out,
+// what it was taken from, which lets go of it once all are given. The views read a page only when it is not dirty,
 // else the next coarser, so nothing is ever unshadowed for waiting: a sun level past the last, or a light with none, is
 // lit.
 
@@ -36,6 +37,9 @@ static const uint SmallBorder = 2u;
 static const uint SmallContent = 28u;
 static const uint SunWindow = 64u;
 static const uint SunEntriesPerLevel = SunWindow * SunWindow;
+
+// Levels the sun's clipmap has at most, as the renderer's Shadows.MaxLevels.
+static const uint SunMaxLevels = 24u;
 static const uint PageDirty = 0x80000000u;
 static const uint PageSmall = 0x40000000u;
 static const uint PageNumber = 0x3FFFFFFFu;
@@ -57,12 +61,22 @@ static const float LightShadowBias = 3.0;
 // the pages one would, so many lights near the camera leave the pool room for the sun.
 static const float LightTexelPixels = 2.0;
 
+// Levels, as a share of a doubling, either side of where one sun level gives way to the next over which a pixel picks
+// between them by dither (SunLevelFor).
+static const float SunLevelBlend = 0.2;
+
+// The sun levels past a pixel's own that it marks (VirtualShadows/ShadowMark.comp.hlsl) and its soft shadow is searched
+// and filtered through, and no further: the page it reads is one it asked for, and its penumbra is at most a few of
+// that level's texels, so the nearer the camera comes, the sharper the shadow.
+static const uint SunSoftLevels = 3u;
+
 // A view's ShadowArgs, by byte: the indirect draws of the pages' clear and of the shadows' pieces, five words each;
-// whether the culls placed more jobs or pieces than there was room for, which leaves the pages drawn with them short of
-// casters, so the next frame draws them all again; how many pages a frame may draw, halved after a frame that ran out
-// of room and doubled back after one that did not, up to ShadowViews; and the indirect dispatches of the shadows'
-// instance and cluster culls, three words each on rows of twelve bytes. Its ShadowCounts, apart, as no pass writes what
-// it is dispatched by: how many pages are drawn, how many groups they are in, and the jobs and pieces the culls placed.
+// whether the culls placed more jobs or pieces than there was room for, which would leave the pages drawn with them
+// short of casters, so nothing is drawn and every page waits again (VirtualShadows/ShadowArgs.comp.hlsl); how many
+// pages a frame may draw, halved after a frame that ran out of room and doubled back after one that did not, up to
+// ShadowViews; and the indirect dispatches of the shadows' instance and cluster culls, three words each on rows of
+// twelve bytes. Its ShadowCounts, apart, as no pass writes what it is dispatched by: how many pages are drawn, how many
+// groups they are in, and the jobs and pieces the culls placed.
 static const uint ShadowArgsClear = 0u;
 static const uint ShadowArgsPieces = 20u;
 static const uint ShadowArgsOverflowed = 40u;
@@ -130,7 +144,8 @@ struct ShadowEntry
 
 // One page drawn this frame (Shaders/VirtualShadows/): what takes a camera-relative point onto the page as clip
 // (its four rows, the page's whole 128 texels, border included, -1 to 1), its pool page as an entry holds it, its
-// group, which culling finds its casters by, and the rectangle of it drawn, which is all that is cleared and drawn.
+// group, which culling finds its casters by, the rectangle of it drawn, which is all that is cleared and drawn, and the
+// row of ShadowTables its entry is, which waits again should the frame run out of room for casters.
 struct GpuShadowView
 {
     float4 row0;
@@ -140,7 +155,7 @@ struct GpuShadowView
     uint page;
     uint group;
     uint rect;
-    uint padding;
+    uint entry;
 };
 
 // What culling finds casters by: one sun page drawn, or the views of one light: the page's level, or the light's slot
@@ -250,20 +265,6 @@ bool ReachesViewRect(GpuShadowView view, float3 centre, float radius)
     return true;
 }
 
-#if defined(HAS_ShadowArgs) && defined(HAS_ShadowViews)
-// The rectangle a page last frame's view drew is drawn again with, as that frame ran out of room for casters and may
-// have left some out; none when it did not, or no view drew the page, or it drew no other page, so there is nothing
-// fewer to draw at once and what was drawn is kept.
-uint ShortRect(uint view)
-{
-    if (view >= CountOf(ShadowViews, 80u) || ShadowArgs.Load(ShadowArgsOverflowed) != 1u || ShadowArgs.Load(ShadowArgsViewRoom) <= 1u)
-    {
-        return 0u;
-    }
-
-    return LOAD(ShadowViews, GpuShadowView, view).rect;
-}
-#endif
 
 // The pool's texel a page's corner is at.
 uint2 PageCorner(uint page, GpuSunClipmap sun)
@@ -297,18 +298,17 @@ bool IsDrawn(uint page)
     return HasPage(page) && (page & PageDirty) == 0u;
 }
 
-// The view depth at which pixels want a sun level: where a pixel covers as much as its texels do.
-float SunReachOf(GpuSunClipmap sun, uint level)
-{
-    return sun.finest / (float)SunWindow / (float)PageContent * exp2((float)level) * LodScale;
-}
 
-// The sun level whose texels are as fine as a pixel at a view depth: a pixel there covers viewDepth / LodScale metres.
-uint SunLevelFor(GpuSunClipmap sun, float viewDepth)
+// The sun level whose texels are as fine as a pixel at a view depth: a pixel there covers viewDepth / PixelScale metres.
+// Within SunLevelBlend of a level's either side, a pixel picks between the two by dither, 0 to 1, more of it the
+// coarser the nearer it is to that, so the levels blend into each other rather than meeting at a line; a dither of 0
+// gives the finest it ever picks there.
+uint SunLevelFor(GpuSunClipmap sun, float viewDepth, float dither)
 {
     float finestTexel = sun.finest / (float)SunWindow / (float)PageContent;
-    float wanted = max(viewDepth / LodScale / finestTexel, 1.0);
-    return min((uint)ceil(log2(wanted)), sun.levels - 1u);
+    float wanted = max(viewDepth / PixelScale / finestTexel, 1.0);
+    float level = log2(wanted) + (dither * 2.0 - 1.0) * SunLevelBlend;
+    return min((uint)ceil(max(level, 0.0)), sun.levels - 1u);
 }
 
 // Which page of a sun level a camera-relative point is on, counted from the sun's origin, and where on it, 0 to 1;
@@ -359,13 +359,14 @@ float SunDepthOf(GpuSunClipmap sun, float3 position)
     return 0.5 - along / (2.0 * sun.depthRange);
 }
 
-// A cube face's axes: the way it looks, and right and up across it, right = cross(up, forward).
+// A cube face's axes: the way each looks, and up across it; right = cross(up, forward).
+static const float3 FaceForwards[6] = { float3(1.0, 0.0, 0.0), float3(-1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, -1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.0, 0.0, -1.0) };
+static const float3 FaceUps[6] = { float3(0.0, 1.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, -1.0), float3(0.0, 0.0, 1.0), float3(0.0, 1.0, 0.0), float3(0.0, 1.0, 0.0) };
+
 void FaceAxes(uint face, out float3 forward, out float3 right, out float3 up)
 {
-    float3 axes[6] = { float3(1.0, 0.0, 0.0), float3(-1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, -1.0, 0.0), float3(0.0, 0.0, 1.0), float3(0.0, 0.0, -1.0) };
-    float3 ups[6] = { float3(0.0, 1.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, -1.0), float3(0.0, 0.0, 1.0), float3(0.0, 1.0, 0.0), float3(0.0, 1.0, 0.0) };
-    forward = axes[face];
-    up = ups[face];
+    forward = FaceForwards[face];
+    up = FaceUps[face];
     right = cross(up, forward);
 }
 
@@ -475,8 +476,9 @@ uint FinestMip(uint bits)
 }
 
 // A light's page's entry in a table of entries a power of two from row first of the tables, counted from first, by
-// linear probing from its key's hash; NoView when it is not there.
-uint FindLightEntry(ByteAddressBuffer tables, uint first, uint key, uint entries)
+// linear probing from its key's hash; NoView when it is not there. The tables read-only or not.
+template<typename T>
+uint FindLightEntry(T tables, uint first, uint key, uint entries)
 {
     uint at = PcgHash(key) & (entries - 1u);
     [loop] for (uint probe = 0u; probe < LightProbes; probe++)
@@ -499,28 +501,6 @@ uint FindLightEntry(ByteAddressBuffer tables, uint first, uint key, uint entries
 }
 
 #if defined(STAGE_COMPUTE)
-uint FindLightEntry(RWByteAddressBuffer tables, uint first, uint key, uint entries)
-{
-    uint at = PcgHash(key) & (entries - 1u);
-    [loop] for (uint probe = 0u; probe < LightProbes; probe++)
-    {
-        uint found = tables.Load((first + at) * 16u + 4u);
-        if (found == key)
-        {
-            return at;
-        }
-
-        if (found == EmptyKey)
-        {
-            return NoView;
-        }
-
-        at = (at + 1u) & (entries - 1u);
-    }
-
-    return NoView;
-}
-
 // A light's page's entry, put in the first empty place its probe meets when it is not there; NoView when the table is
 // too full to put it in. A place already holding the key is read, not swapped, as most callers find it there.
 uint InsertLightEntry(RWByteAddressBuffer tables, uint first, uint key, uint entries)
@@ -604,15 +584,19 @@ float3 SunMoved(GpuSunClipmap sun, uint level, float3 position, float3 normal)
 
 // The share of the sun reaching a camera-relative point, its penumbra as wide as the sun's disc makes it (PCSS,
 // Fernando 2005), widened through the clipmap's coarser levels rather than more taps: the casters near the point found
-// two levels coarser than the pixel wants, their distance along the sun times the sun's angular diameter the penumbra,
-// and the point filtered at the level whose texels a third of that wide are, never finer than the pixel's own. The
-// point is pushed out by a texel of whichever level it is looked up in.
-float SunVirtualShadow(float3 position, float3 normal, float viewDepth)
+// at the coarsest level it may be filtered at, over all the filter reaches there, so every pixel whose filter could see
+// a caster finds it and the penumbra fades all the way out; their distance along the sun times the sun's angular
+// diameter the penumbra; and the point filtered at the level whose texels a third of that wide are, never finer than
+// the pixel's own nor more than SunSoftLevels coarser, so close up a wide penumbra is narrowed to what those levels
+// hold. The point is pushed out by a texel of whichever level it is looked up in. Both the pixel's level and the
+// filter's are picked by dither, 0 to 1, where two levels meet (SunLevelFor), so neither steps from one to the next.
+float SunVirtualShadow(float3 position, float3 normal, float viewDepth, float dither)
 {
     GpuSunClipmap sun = SunClipmapOf();
-    uint level = SunLevelFor(sun, viewDepth);
+    uint level = SunLevelFor(sun, viewDepth, dither);
     uint finest = level;
-    uint search = min(level + 2u, sun.levels - 1u);
+    uint widest = min(finest + SunSoftLevels, sun.levels - 1u);
+    uint search = widest;
     float3 moved = SunMoved(sun, search, position, normal);
     uint page;
     float2 place;
@@ -624,10 +608,12 @@ float SunVirtualShadow(float3 position, float3 normal, float viewDepth)
     float depth = SunDepthOf(sun, moved);
     float blockers = 0.0;
     float found = 0.0;
-    float step = 1.5 / (float)PageContent;
-    [unroll] for (uint i = 0u; i < 5u; i++)
+
+    // A 3 x 3 grid two texels apart, which with each texel's own width covers the 5 x 5 tent the filter reads.
+    float step = 2.0 / (float)PageContent;
+    [unroll] for (uint i = 0u; i < 9u; i++)
     {
-        float2 offset = i == 0u ? float2(0.0, 0.0) : float2(i % 2u == 0u ? 1.0 : -1.0, i < 3u ? 1.0 : -1.0) * step;
+        float2 offset = (float2(i % 3u, i / 3u) - 1.0) * step;
         float stored = PageDepthAt(page, place + offset, sun);
         blockers += stored > depth ? stored : 0.0;
         found += stored > depth ? 1.0 : 0.0;
@@ -638,10 +624,10 @@ float SunVirtualShadow(float3 position, float3 normal, float viewDepth)
         float distance = (blockers / found - depth) * 2.0 * sun.depthRange;
         float penumbra = distance * 2.0 * tan(SunAngularRadius);
         float finestTexel = sun.finest / (float)SunWindow / (float)PageContent;
-        level = max(finest, min((uint)ceil(log2(max(penumbra / (3.0 * finestTexel), 1.0))), sun.levels - 1u));
+        float wanted = log2(max(penumbra / (3.0 * finestTexel), 1.0)) + (dither * 2.0 - 1.0) * SunLevelBlend;
+        level = clamp((uint)ceil(max(wanted, 0.0)), finest, widest);
     }
 
-    level = max(level, finest);
     moved = SunMoved(sun, level, position, normal);
     uint drawn = level;
     if (!SunDrawnAt(sun, drawn, moved, page, place))
@@ -665,7 +651,7 @@ float LightVirtualShadow(uint slot, float3 toLight, float3 normal, float viewDep
 {
     GpuSunClipmap sun = SunClipmapOf();
     float distance = length(toLight);
-    uint mip = LightMipFor(viewDepth / LodScale, distance);
+    uint mip = LightMipFor(viewDepth / PixelScale, distance);
     [loop] for (; mip < LightMips; mip++)
     {
         float texel = 2.0 * distance / (float)FaceTexels(mip);

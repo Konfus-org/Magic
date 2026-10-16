@@ -2,17 +2,6 @@
     "stage": "probes",
     "kind": "compute",
     "shader": { "id": 11326 },
-    "reads": [
-        { "name": "GiLevels" },
-        { "name": "GiProbeState" },
-        { "name": "SkySh" },
-        { "name": "GiField", "filter": "linear" },
-        { "name": "GiSurface", "filter": "nearest" },
-        { "name": "GiEmission", "filter": "nearest" },
-        { "name": "GiIrradiance", "filter": "linear" },
-        { "name": "GiDistance", "filter": "linear" },
-        { "name": "SkyCube", "filter": "linear" }
-    ],
     "creates": [ { "name": "GiRays", "kind": "buffer", "type": "float4", "stride": 16, "per": "giRays" } ],
     "writes": [ { "name": "GiRays" } ],
     "dispatch": { "per": "giRays" }

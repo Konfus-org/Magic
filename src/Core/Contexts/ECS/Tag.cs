@@ -1,6 +1,8 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
+using Magic.Internal;
 using Magic.Services;
 
 namespace Magic.Contexts.ECS;
@@ -48,9 +50,11 @@ public readonly record struct Tag(int Id)
 
 /// <summary>
 /// The tags an entity has, inline so the component stays plain unmanaged data: up to <see cref="Capacity"/>, unordered,
-/// each once. A file gives an entity its tags by name, beside its components: <c>"tags": [ "spawn" ]</c>.
+/// each once. A file gives an entity its tags by name, beside its components: <c>"tags": [ "spawn" ]</c>. As JSON
+/// themselves, as a saved world holds them, they are an array of their ids.
 /// </summary>
 [InlineArray(Capacity)]
+[JsonConverter(typeof(TagsJsonConverter))]
 public struct Tags : IComponent, IEquatable<Tags>
 {
     public const int Capacity = 8;

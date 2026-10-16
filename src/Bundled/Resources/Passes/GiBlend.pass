@@ -2,10 +2,6 @@
     "stage": "probes",
     "kind": "compute",
     "shader": { "id": 11327 },
-    "reads": [
-        { "name": "GiLevels" },
-        { "name": "GiRays" }
-    ],
     "writes": [
         { "name": "GiIrradiance" },
         { "name": "GiDistance" },

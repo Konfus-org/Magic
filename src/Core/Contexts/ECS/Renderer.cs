@@ -9,43 +9,9 @@ namespace Magic.Contexts.ECS;
 /// </summary>
 public record struct Renderer : IComponent
 {
-    /// <summary>
-    /// Seconds a fade takes (<see cref="Fade"/>).
-    /// </summary>
-    public const float FadeSeconds = 0.4f;
-
     public Handle<Model> Model;
 
     public MaterialSlots Materials;
-
-    /// <summary>
-    /// Whether it is fading in or out: dissolving into view, or out of it, over <see cref="FadeSeconds"/> from when it
-    /// is set, so one thing can take another's place with neither popping. One fading in and one fading out from the same
-    /// frame between them draw each pixel once. A gem that fades one out destroys it once the fade is over, and sets one
-    /// that has faded in back to <see cref="RendererFade.None"/>.
-    /// </summary>
-    public RendererFade Fade;
-}
-
-/// <summary>
-/// How a <see cref="Renderer"/> is fading (<see cref="Renderer.Fade"/>).
-/// </summary>
-public enum RendererFade : byte
-{
-    /// <summary>
-    /// Drawn as it is.
-    /// </summary>
-    None,
-
-    /// <summary>
-    /// Dissolving into view.
-    /// </summary>
-    In,
-
-    /// <summary>
-    /// Dissolving out of view.
-    /// </summary>
-    Out,
 }
 
 /// <summary>

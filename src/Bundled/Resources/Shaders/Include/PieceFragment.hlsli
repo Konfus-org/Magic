@@ -1,12 +1,13 @@
 // What the fragment templates of pieces (Templates/VisibilityClip.frag.hlsl, Templates/Resolve.frag.hlsl,
 // Templates/ForwardPieces.frag.hlsl) hand a surface: where the pixel is, its normal (turned to the face seen on a
 // double-sided surface's back), its uv and their derivatives, which the caller works out, as the resolve has no
-// neighbouring pixels of its triangle to take them from, scaled by TextureLodScale, and which side of it the camera
+// neighbouring pixels of its triangle to take them from, scaled by TextureMipScale, and which side of it the camera
 // sees. Composed after the surface.
 //
-// A card's pixel (Core's Card) is the mesh as its atlases hold it, seen from the view nearest the camera, or near
-// halfway round to the next, dithered between the two, so a card shows one view whole most of the time and does not
-// speckle where two views of a boxy mesh disagree: its material's uv, its normal, how much of the texel the mesh
+// A card's pixel (Core's Card) is the mesh as its atlases hold it, seen from one of the two views either side of the
+// camera, dithered between them by how far round from one to the next the camera is, which the temporal upscale blends,
+// so a card turns smoothly as the camera goes round it rather than stepping from view to view: its material's uv, its
+// normal, how much of the texel the mesh
 // covers, and how far behind the card's quad the mesh is there, where the pixel is put, so it is lit, shadowed and
 // depth tested where the mesh would be. Its material's uv's derivatives are the atlas's read a pixel across and a pixel
 // down, as the uv comes from the atlas. A view's normals are as its side sees them, so they are turned on by as far
@@ -27,9 +28,6 @@
 static const float CardAtlasViews = 8.0;
 static const float CardColumns = 3.0;
 static const float CardCell = 85.0 / 256.0;
-
-// The share of the way round from one view to the next, either side of halfway, over which a card dithers between them.
-static const float CardBlend = 0.15;
 
 // The steepest an atlas is read at, as a share of it a pixel: its fourth mip, past which a view's cell would blur
 // into its neighbours'.
@@ -65,10 +63,9 @@ SurfaceInputs PieceInputsOf(PieceVaryings input, float2 uvDdx, float2 uvDdy, boo
     bool isCard = input.card.w != 0.0;
     [branch] if (isCard)
     {
-        float pick = InterleavedGradientNoise(input.clip.xy + float2(41.0, 23.0), 0u);
-        float toNext = saturate((frac(input.card.x) - 0.5 + CardBlend) / (2.0 * CardBlend));
-        float nearest = floor(input.card.x) + (toNext > pick ? 1.0 : 0.0);
-        float view = fmod(nearest, CardAtlasViews);
+        float pick = InterleavedGradientNoise(input.clip.xy + float2(41.0, 23.0), FrameIndex);
+        float shown = floor(input.card.x) + (frac(input.card.x) > pick ? 1.0 : 0.0);
+        float view = fmod(shown, CardAtlasViews);
         float2 local = float2(input.uv.x * 0.5 + 0.5, 0.5 - input.uv.y * 0.5);
         float2 atlas = (float2(fmod(view, CardColumns), floor(view / CardColumns)) + local) * CardCell;
         float2 atlasDdx = CardGradientOf(uvDdx);
@@ -96,7 +93,7 @@ SurfaceInputs PieceInputsOf(PieceVaryings input, float2 uvDdx, float2 uvDdy, boo
         {
             float3 normal = SampleTextureGrad(input.atlases.y, atlas, atlasDdx, atlasDdy).xyz * 2.0 - 1.0;
             bool isMirrored = input.card.z != 0.0;
-            float roundBy = (input.card.x - nearest) * (TwoPi / CardAtlasViews);
+            float roundBy = (input.card.x - shown) * (TwoPi / CardAtlasViews);
             float turn = input.card.y + (isMirrored ? -roundBy : roundBy);
             normal.x = isMirrored ? -normal.x : normal.x;
             float turnCos = cos(turn);
@@ -106,8 +103,8 @@ SurfaceInputs PieceInputsOf(PieceVaryings input, float2 uvDdx, float2 uvDdy, boo
         }
     }
 
-    inputs.uvDdx *= TextureLodScale;
-    inputs.uvDdy *= TextureLodScale;
+    inputs.uvDdx *= TextureMipScale;
+    inputs.uvDdy *= TextureMipScale;
     inputs.screenUv = input.clip.xy * ViewTexel;
     inputs.time = Time;
     inputs.cameraPosition = CameraPosition;

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
@@ -11,24 +12,33 @@ using Magic.Services;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// The world as Render reads it: copied on the main thread in LateUpdate, by systems that run on the ECS's threads,
-/// while the render thread is idle, and read on the render thread in the Render that follows, while the main thread is
-/// busy with the next frame's Update and FixedUpdate, which never touch it. Instances and lights are kept at their
-/// entity's slot, and only what changed is passed on (<see cref="Slots{T}.Changed"/>, <see cref="Slots{T}.Removed"/>),
-/// so a frame costs the render thread what moved, not what there is: the copy itself is a comparison per entity, on
-/// every thread, counted once per chunk.
+/// The world as Render reads it, copied twice over: on the main thread in LateUpdate, by systems that run on the ECS's
+/// threads, into the copy Render is not reading (<see cref="WorldCopy"/>), while the render thread may still be drawing
+/// the frame before; the two are swapped in Sync, when both threads hold still, and Render reads <see cref="Front"/>
+/// while the main thread is busy with the next frame, which writes only the other. Instances and lights are kept at
+/// their entity's slot, and only what changed is passed on (<see cref="Delta{T}"/>), so a frame costs the render thread
+/// what moved, not what there is: the copy itself is a comparison per entity, on every thread, counted once per chunk.
 /// </summary>
 internal sealed class Snapshot : IDisposable
 {
     private readonly List<Subscription> _systems = [];
+    private readonly Slots<InstanceCopy> _instances;
+    private readonly Slots<LightCopy> _lights;
+
+    /// <summary>
+    /// The copy LateUpdate writes. Main thread, and the ECS's threads under it.
+    /// </summary>
+    private WorldCopy _back = new();
 
     public Snapshot(World world)
     {
+        _instances = new Slots<InstanceCopy>(_back.Instances);
+        _lights = new Slots<LightCopy>(_back.Lights);
         _systems.Add(world.Add(new Starter(this)));
-        _systems.Add(world.Add(new InstanceCopier(Instances)));
-        _systems.Add(world.Add(new PointLightCopier(Lights)));
-        _systems.Add(world.Add(new SpotLightCopier(Lights)));
-        _systems.Add(world.Add(new CameraCopier(Cameras)));
+        _systems.Add(world.Add(new InstanceCopier(_instances)));
+        _systems.Add(world.Add(new PointLightCopier(_lights)));
+        _systems.Add(world.Add(new SpotLightCopier(_lights)));
+        _systems.Add(world.Add(new CameraCopier(this)));
         _systems.Add(world.Add(new PlayerFinder(this)));
         _systems.Add(world.Add(new SunCopier(this)));
         _systems.Add(world.Add(new SkyCopier(this)));
@@ -43,55 +53,37 @@ internal sealed class Snapshot : IDisposable
         }
     }
 
-    public Slots<InstanceCopy> Instances { get; } = new();
-
     /// <summary>
-    /// Every point and spot light by its entity's slot.
+    /// The copy Render reads: the frame LateUpdate last finished, swapped in by <see cref="Swap"/>. Render thread.
     /// </summary>
-    public Slots<LightCopy> Lights { get; } = new();
-
-    public List<CameraCopy> Cameras { get; } = [];
+    public WorldCopy Front { get; private set; } = new();
 
     /// <summary>
-    /// Where the first camera tagged player is, which detail is kept nearest to when there is too much; none without one.
-    /// </summary>
-    public Vector3D? Player { get; private set; }
-
-    /// <summary>
-    /// The first directional light, or none.
-    /// </summary>
-    public SunCopy? Sun { get; private set; }
-
-    /// <summary>
-    /// The world's sky, if it has one: its material, which may be none.
-    /// </summary>
-    public Handle<Material>? Sky { get; private set; }
-
-    /// <summary>
-    /// The world's effects, or none.
-    /// </summary>
-    public Handle<Pipeline> Effects { get; private set; }
-
-    /// <summary>
-    /// Ends a frame's copy, after the systems ran: takes in what outgrew the slots and finds what is gone.
+    /// Ends a frame's copy, after the systems ran: takes in what outgrew the slots and finds what is gone. LateUpdate.
     /// </summary>
     public void Finish()
     {
-        Instances.Finish();
-        Lights.Finish();
+        _instances.Finish();
+        _lights.Finish();
     }
 
     /// <summary>
-    /// Starts a frame's copy, before the systems run: what Render read of the last is done with.
+    /// Hands the copy just finished to Render, and takes the one Render is done with to write next. Sync, when neither
+    /// thread is touching either.
+    /// </summary>
+    public void Swap()
+    {
+        (Front, _back) = (_back, Front);
+    }
+
+    /// <summary>
+    /// Starts a frame's copy, before the systems run: the copy Render read two frames ago is written over.
     /// </summary>
     private void Begin()
     {
-        Instances.Begin();
-        Lights.Begin();
-        Player = null;
-        Sun = null;
-        Sky = null;
-        Effects = Handle<Pipeline>.None;
+        _back.Clear();
+        _instances.Begin(_back.Instances);
+        _lights.Begin(_back.Lights);
     }
 
     private static Vector3 IntensityOf(Color color, float intensity) => new Vector3(color.R, color.G, color.B) * intensity;
@@ -166,13 +158,13 @@ internal sealed class Snapshot : IDisposable
         }
     }
 
-    private sealed class CameraCopier(List<CameraCopy> cameras) : ISystem<Transform, Camera>
+    private sealed class CameraCopier(Snapshot snapshot) : ISystem<Transform, Camera>
     {
         public Phase Phase => Phase.LateUpdate;
 
         public void Run(in Frame frame, EcsQuery<Transform, Camera> query)
         {
-            cameras.Clear();
+            List<CameraCopy> cameras = snapshot._back.Cameras;
             foreach ((ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Camera> found) in query)
             {
                 for (int i = 0; i < found.Length; i++)
@@ -189,13 +181,14 @@ internal sealed class Snapshot : IDisposable
 
         public void Run(in Frame frame, EcsQuery<Camera, Transform, Tags> query)
         {
+            WorldCopy copy = snapshot._back;
             foreach ((_, _, Span<Transform> transforms, Span<Tags> tags) in query)
             {
-                for (int i = 0; i < tags.Length && snapshot.Player is null; i++)
+                for (int i = 0; i < tags.Length && copy.Player is null; i++)
                 {
                     if (tags[i].Has(Tag.Player))
                     {
-                        snapshot.Player = transforms[i].Position;
+                        copy.Player = transforms[i].Position;
                     }
                 }
             }
@@ -208,11 +201,12 @@ internal sealed class Snapshot : IDisposable
 
         public void Run(in Frame frame, EcsQuery<Transform, DirectionalLight> query)
         {
+            WorldCopy copy = snapshot._back;
             foreach ((_, Span<Transform> transforms, Span<DirectionalLight> lights) in query)
             {
-                if (snapshot.Sun is null && lights.Length > 0)
+                if (copy.Sun is null && lights.Length > 0)
                 {
-                    snapshot.Sun = new SunCopy(Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[0].Rotation)), IntensityOf(lights[0].Color, lights[0].Intensity));
+                    copy.Sun = new SunCopy(Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[0].Rotation)), IntensityOf(lights[0].Color, lights[0].Intensity));
                 }
             }
         }
@@ -224,11 +218,12 @@ internal sealed class Snapshot : IDisposable
 
         public void Run(in Frame frame, EcsQuery<Sky> query)
         {
+            WorldCopy copy = snapshot._back;
             foreach ((_, Span<Sky> skies) in query)
             {
-                if (snapshot.Sky is null && skies.Length > 0)
+                if (copy.Sky is null && skies.Length > 0)
                 {
-                    snapshot.Sky = skies[0].Material;
+                    copy.Sky = skies[0].Material;
                 }
             }
         }
@@ -240,11 +235,12 @@ internal sealed class Snapshot : IDisposable
 
         public void Run(in Frame frame, EcsQuery<PostProcessing> query)
         {
+            WorldCopy copy = snapshot._back;
             foreach ((_, Span<PostProcessing> found) in query)
             {
-                if (snapshot.Effects == Handle<Pipeline>.None && found.Length > 0)
+                if (copy.Effects == Handle<Pipeline>.None && found.Length > 0)
                 {
-                    snapshot.Effects = found[0].Effects;
+                    copy.Effects = found[0].Effects;
                 }
             }
         }
@@ -252,45 +248,137 @@ internal sealed class Snapshot : IDisposable
 }
 
 /// <summary>
-/// What one kind of entity was the last frame at each entity slot, taken from the ECS's threads at once: each seen this
-/// frame is compared with its copy, and noted as changed when it is new, its entity is a new one in the slot, or it
-/// differs. Slots past the end wait for <see cref="Finish"/>, which grows them; fewer seen than were live and new means
-/// some are gone, which only then are looked for.
+/// The world as one frame's Render reads it: what changed among the instances and lights since the copy before, and
+/// the cameras, player, sun, sky and effects as they were. There are two, written and read in turn
+/// (<see cref="Snapshot"/>).
 /// </summary>
-internal sealed class Slots<T>
-    where T : struct, IEquatable<T>
+internal sealed class WorldCopy
+{
+    public Delta<InstanceCopy> Instances { get; } = new();
+
+    /// <summary>
+    /// The point and spot lights, by their entity's slot.
+    /// </summary>
+    public Delta<LightCopy> Lights { get; } = new();
+
+    public List<CameraCopy> Cameras { get; } = [];
+
+    /// <summary>
+    /// Where the first camera tagged player is, which detail is kept nearest to when there is too much; none without one.
+    /// </summary>
+    public Vector3D? Player { get; set; }
+
+    /// <summary>
+    /// The first directional light, or none.
+    /// </summary>
+    public SunCopy? Sun { get; set; }
+
+    /// <summary>
+    /// The world's sky, if it has one: its material, which may be none.
+    /// </summary>
+    public Handle<Material>? Sky { get; set; }
+
+    /// <summary>
+    /// The world's effects, or none.
+    /// </summary>
+    public Handle<Pipeline> Effects { get; set; }
+
+    public void Clear()
+    {
+        Instances.Clear();
+        Lights.Clear();
+        Cameras.Clear();
+        Player = null;
+        Sun = null;
+        Sky = null;
+        Effects = Handle<Pipeline>.None;
+    }
+}
+
+/// <summary>
+/// What changed among one kind of entity between two copies: the slots whose value is new or changed, with the value,
+/// and the slots whose value is gone. Written from the ECS's threads at once (<see cref="Slots{T}"/>), read on the
+/// render thread.
+/// </summary>
+internal sealed class Delta<T>
+    where T : unmanaged
+{
+    private Change[] _changed = new Change[1024];
+    private int _changedCount;
+
+    /// <summary>
+    /// The slots there are, live or not: how many a table of them needs.
+    /// </summary>
+    public int Length { get; set; }
+
+    public ReadOnlySpan<Change> Changed => _changed.AsSpan(0, _changedCount);
+
+    public List<int> Removed { get; } = [];
+
+    public void Clear()
+    {
+        _changedCount = 0;
+        Removed.Clear();
+    }
+
+    /// <summary>
+    /// Notes <paramref name="slot"/> as changed to <paramref name="value"/>, from any thread; there is room for every
+    /// slot once (<see cref="Reserve"/>).
+    /// </summary>
+    public void Add(int slot, in T value)
+    {
+        _changed[Interlocked.Increment(ref _changedCount) - 1] = new Change(slot, value);
+    }
+
+    /// <summary>
+    /// Makes room for <paramref name="slots"/> changes, and says there are that many slots.
+    /// </summary>
+    public void Reserve(int slots)
+    {
+        Length = slots;
+        if (slots > _changed.Length)
+        {
+            Array.Resize(ref _changed, (int)BitOperations.RoundUpToPowerOf2((uint)slots));
+        }
+    }
+
+    /// <summary>
+    /// A slot's new value.
+    /// </summary>
+    public readonly record struct Change(int Slot, T Value);
+}
+
+/// <summary>
+/// What one kind of entity was the last frame at each entity slot, taken from the ECS's threads at once: each seen this
+/// frame is compared with its copy, and noted in the frame's <see cref="Delta{T}"/> as changed when it is new, its
+/// entity is a new one in the slot, or it differs. Slots past the end wait for <see cref="Finish"/>, which grows them;
+/// fewer seen than were live and new means some are gone, which only then are looked for. Main thread, and the ECS's
+/// threads under it.
+/// <para>
+/// The comparison is of the two values' bytes, in one call: a generated <c>Equals</c> is a call per field, which an
+/// unoptimised build does not inline, and this runs for every entity every frame. Equal bytes mean equal fields, so no
+/// change is missed; the values are copied whole out of the ECS's storage, which starts zeroed, so their padding
+/// matches too, and were it ever not to, the slot would only be passed on once more.
+/// </para>
+/// </summary>
+internal sealed class Slots<T>(Delta<T> into)
+    where T : unmanaged
 {
     /// <summary>
     /// Entities seen with a slot past the end, while their system ran on the ECS's threads.
     /// </summary>
     private readonly ConcurrentQueue<(Entity Entity, T Value)> _outgrew = new();
 
+    /// <summary>
+    /// The frame's delta, which this frame's changes go into.
+    /// </summary>
+    private Delta<T> _into = into;
+
     private Mirror[] _mirrors = new Mirror[1024];
-    private int[] _changed = new int[1024];
-    private int _changedCount;
     private int _seenCount;
     private int _liveCount;
     private int _newCount;
     private uint _stamp;
-
-    /// <summary>
-    /// The slots there are, live or not.
-    /// </summary>
-    public int Length => _mirrors.Length;
-
-    /// <summary>
-    /// The slots whose value is new or changed since the last frame.
-    /// </summary>
-    public ReadOnlySpan<int> Changed => _changed.AsSpan(0, _changedCount);
-
-    /// <summary>
-    /// The slots whose value is gone since the last frame.
-    /// </summary>
-    public List<int> Removed { get; } = [];
-
-    public ref readonly T this[int slot] => ref _mirrors[slot].Value;
-
-    public bool IsLive(int slot) => _mirrors[slot].IsLive;
 
     /// <summary>
     /// One seen this frame, on whichever thread its chunk is on; the chunk's counts go into <paramref name="tally"/>,
@@ -312,7 +400,7 @@ internal sealed class Slots<T>
             tally.New++;
         }
 
-        if (mirror.IsLive && mirror.Version == entity.Version && mirror.Value.Equals(value))
+        if (mirror.IsLive && mirror.Version == entity.Version && MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in mirror.Value)).SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value))))
         {
             return;
         }
@@ -320,7 +408,7 @@ internal sealed class Slots<T>
         mirror.IsLive = true;
         mirror.Version = entity.Version;
         mirror.Value = value;
-        _changed[Interlocked.Increment(ref _changedCount) - 1] = entity.Id;
+        _into.Add(entity.Id, value);
     }
 
     public void Count(in Tally tally)
@@ -329,25 +417,32 @@ internal sealed class Slots<T>
         Interlocked.Add(ref _newCount, tally.New);
     }
 
-    public void Begin()
+    /// <summary>
+    /// Starts a frame's copy, which goes <paramref name="into"/> the frame's delta, cleared.
+    /// </summary>
+    public void Begin(Delta<T> into)
     {
         unchecked
         {
             _stamp++;
         }
 
-        _changedCount = 0;
+        _into = into;
+        _into.Reserve(_mirrors.Length);
         _seenCount = 0;
         _newCount = 0;
-        Removed.Clear();
     }
 
     public void Finish()
     {
         while (_outgrew.TryDequeue(out (Entity Entity, T Value) late))
         {
-            Grow(ref _mirrors, late.Entity.Id + 1);
-            Grow(ref _changed, _mirrors.Length);
+            if (late.Entity.Id >= _mirrors.Length)
+            {
+                Array.Resize(ref _mirrors, (int)BitOperations.RoundUpToPowerOf2((uint)late.Entity.Id + 1));
+                _into.Reserve(_mirrors.Length);
+            }
+
             Tally tally = default;
             Take(late.Entity, late.Value, ref tally);
             Count(tally);
@@ -362,20 +457,12 @@ internal sealed class Slots<T>
                 if (mirror.IsLive && mirror.Stamp != _stamp)
                 {
                     mirror.IsLive = false;
-                    Removed.Add(slot);
+                    _into.Removed.Add(slot);
                 }
             }
         }
 
         _liveCount = _seenCount;
-    }
-
-    private static void Grow<TItem>(ref TItem[] array, int needed)
-    {
-        if (needed > array.Length)
-        {
-            Array.Resize(ref array, (int)BitOperations.RoundUpToPowerOf2((uint)needed));
-        }
     }
 
     /// <summary>

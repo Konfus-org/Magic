@@ -1,0 +1,8 @@
+{
+    "stage": "reflections",
+    "kind": "compute",
+    "shader": { "id": 11287 },
+    "creates": [ { "name": "Reflections", "filter": "nearest", "format": "rgba16_float", "history": true } ],
+    "writes": [ { "name": "Reflections" } ],
+    "dispatch": { "per": "view" }
+}

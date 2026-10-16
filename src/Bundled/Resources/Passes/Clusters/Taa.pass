@@ -2,12 +2,6 @@
     "stage": "post",
     "kind": "compute",
     "shader": { "id": 60050 },
-    "reads": [
-        { "name": "Hdr", "filter": "nearest" },
-        { "name": "Depth", "filter": "nearest" },
-        { "name": "Velocity", "filter": "nearest" },
-        { "name": "TaaHistory", "filter": "linear" }
-    ],
     "creates": [ { "name": "Taa", "format": "rgba16_float", "size": "output", "history": true } ],
     "writes": [ { "name": "Taa" } ],
     "dispatch": { "per": "output:Taa" }

@@ -1,0 +1,6 @@
+{
+    // Height fog: the air thick near the ground and thinning with height, lit by the sky and the sun. A world tunes it
+    // where its effects list it: { "pipeline": { "id": 11011 }, "params": { "HeightFog": { "color": { ... },
+    // "intensity": { "x": 0.004 }, "start": { "x": 0 }, "falloff": { "curve": { "id": ... } } } } }.
+    "entries": [ { "pass": { "id": 11199 } } ]
+}

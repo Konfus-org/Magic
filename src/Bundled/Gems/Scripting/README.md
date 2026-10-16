@@ -15,26 +15,24 @@ In the project's `Presets/Default.preset`, by another preset, or with `--set Scr
 ## Scripts
 
 A script is a `.cs` file with a `.meta` beside it, as any asset has, whose class is named like the file and is an
-`IScript`: an `IBehavior` for what its entity does each frame, a system of any kind the world adds
-(`ISystem<T1>`, `IParallelSystem<T1, T2>`, …) as well, or neither, when all it does is begin.
+`IScript`: an `IBehavior` for what its entity does each frame, a system script of any kind the world adds
+(`ISystemScript<T1>`, `IParallelSystemScript<T1, T2>`, …), or neither, when all it does is begin.
 
 ```csharp
-internal sealed class Hover(World world) : IBehavior
+internal sealed class Hover(Entity owner, World world) : IBehavior
 {
-    private Entity _entity;
     private double _restY;
 
     public float Height { get; set; }
 
-    public void Start(Entity entity)
+    public void Start()
     {
-        _entity = entity;
-        _restY = world.Get<Transform>(entity).Position.Y;
+        _restY = world.Get<Transform>(owner).Position.Y;
     }
 
     public void Update(in Frame frame)
     {
-        world.Get<Transform>(_entity).Position.Y = _restY + (Height * MathF.Abs(MathF.Sin((float)frame.Seconds)));
+        world.Get<Transform>(owner).Position.Y = _restY + (Height * MathF.Abs(MathF.Sin((float)frame.Seconds)));
     }
 }
 ```
@@ -42,9 +40,16 @@ internal sealed class Hover(World world) : IBehavior
 Nothing is compiled at run time: a project's scripts are its code, which the csproj beside its `.magic` file compiles
 from its `Assets/` and Core loads with the project ([Core's README](../../../Core/README.md#the-project-file)); a gem's
 own, from its `Resources/`, are compiled with the rest of the gem; and Magic's, from the bundled resources
-(`src/Bundled/Resources/`), with the rest of this one. Loading a script finds its class in the code loaded; a name none
-of it has, or two classes have, fails the load. So editing a script takes a build and a restart, as code does not
-reload.
+(`src/Bundled/Resources/`), by the project in that folder, into `Resources/Resources.dll` beside Magic, which Core loads
+as it loads a project's code. Loading a script finds its class in the code loaded (`Code.Types`), in which a gem that
+did not load, as Core reports, has no classes; a name none of it has, or two classes have, fails the load.
+
+So editing a script takes a build, and no restart: Core watches the project's code and Magic's scripts where they are
+built, loads a new build in place of the last, and has every script read again, as the class it is now
+([Core's README](../../../Core/README.md#the-project-file)). This gem then ends each live copy of a script read again
+and starts a new one of its class as it is now, made for the same entity with the same values, so the entity and its
+components stay while what the script kept in its own fields starts over; an entity a domain placed from a prefab is
+spawned again anyway, as the prefab is read again too. A script in a gem takes a restart, as the gem does.
 
 ## In a prefab
 
@@ -52,29 +57,48 @@ reload.
 { "name": "Cube", "components": { … }, "scripts": [ { "id": 3312, "height": 1 } ] }
 ```
 
-Each entry names a script by its id; every other key sets the script's public property of that name, as Core's JSON
-dialect names it (camelCase). The gem that reads prefabs has this gem make the script (`IScripts.Make`) and sets the
-values on it, read as their properties' types, so a prefab's part holds its scripts as it holds its components.
+Each entry names a script by its id; every other key is a value for the script's public property of that name, as
+Core's JSON dialect names it (camelCase). The gem that reads prefabs loads the script and reads each value as its
+property's type, so a prefab's part holds its scripts, each with its values, as it holds its components
+(`PrefabScript`). It makes none: a script is made for an entity.
 
 ## Making one
 
-Scripts work as components do: a part holds them made, with their values set, and each entity spawned from it gets its
-own copy.
+Scripts work as components do: a part holds them with their values, and each entity spawned from it gets its own copy,
+made for it when it is attached (`Attach`), on the main thread, and started there and then, while the entity lives:
 
-1. **Made** (`Make`): its one public constructor is called, each parameter given a service, as a gem's constructor is,
-   and an optional one its default when nothing provides it. It never gets its entity, as a script in a prefab is made
-   before there is one. Any thread, so a constructor only keeps what it is given.
-2. **Attached** (`Attach`), on the main thread, and started there and then, while its entity lives: a copy is made as
-   above, given each of the script's public property values, so a property's initialiser is its default and a prefab's
-   value replaces it. Then the copy's `Start(entity)` runs, with the entity's components there to read, and a system is
-   added to the ECS, through the `Add` that takes its kind (each, when it is several).
+1. **Made**: its one public constructor is called, given the entity it is attached to first, then a service for each
+   other parameter, as a gem's constructor is, and an optional one its default when nothing provides it. A constructor
+   only keeps what it is given and does no work: the script's values are not set yet, and the whole prefab is not
+   there for it to read.
+2. **Given its values**: each of the prefab's values is set on its property, so a property's initialiser is its default
+   and a prefab's value replaces it.
+3. **Started**: its `Start()` runs, with its values set and its entity's components there to read, and a system is added
+   to the ECS, through the `Add` that takes its kind (each, when it is several).
 
 When a script starts is the world's to say: it attaches each once whatever spawned with its entity is all there, and
 while a domain loads in place of the world, once the domain is there, unless its class is `[Impatient]`
-([Core's README](../../../Core/README.md#the-world)). This gem starts each as it is attached.
+([Core's README](../../../Core/README.md#the-world)). This gem makes and starts each as it is attached.
 
-A script that has other than one public constructor, asks for its entity or for what nothing provides, or throws while
-it is made or started, is an error, and its entity goes without it.
+A script that has other than one public constructor, whose constructor with parameters does not take its `Entity`
+first, that asks for what nothing provides, or that throws while it is made or started, is an error, and its entity
+goes without it. A pipeline script is made for no entity (`Make`), with services alone, and asking for an `Entity` is
+the error.
+
+## Saved and put back
+
+The world is saved as data across a restart ([Core's README](../../../Core/README.md#the-world)), and a script with
+it, as JSON by name (`Save`): its values, as a prefab names them, and the fields it kept for itself, by their own
+names (a property's or a primary constructor parameter's, for the field the compiler made). Not what its constructor
+was handed, a service, nor what it made rather than kept, a delegate, a task or a disposable such as a subscription,
+nor a field JSON cannot hold, which is warned about once per class: a copy put back starts over without those, as
+its constructor and initialisers leave them. An `Entity` is saved as its id and put back as the entity made for it,
+so a script that keeps the entities it spawned keeps them.
+
+Put back (`Restore`), a script is made as it is attached, its constructor given the entity and its services, then
+each saved value is set on its property or field, and it runs on: `Start()` is not called, as it is as it was, so a
+script that spawns or subscribes in `Start` does not do so twice, and one that measured something as it started
+keeps its measure. A saved value its class no longer has, or that no longer fits, is warned about once and left.
 
 ## Running
 

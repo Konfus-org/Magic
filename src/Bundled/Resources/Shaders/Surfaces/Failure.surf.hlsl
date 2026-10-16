@@ -1,64 +1,50 @@
 // The surface a broken thing is drawn with: pure emission (no lighting, no reflection) in a colour and pattern that
-// says what broke, breathing on a slow sine so it is never mistaken for a real material. The renderer never encodes
-// a colour: it only decides the kind and gives it as the material's kind (it holds the same numbers).
+// says what broke, breathing on a slow sine so it is never mistaken for a real material. Magenta is a shader, red an
+// asset that did not load. Its kind is set by the failure materials, Materials/Failures/<FailureType>.mat, which a
+// renderer draws in a broken material's place (Assets.Failure<Material>); the numbers are FailureType's.
 //
-//   FailureShader   solid magenta          the material's surface shader did not compile or parse
-//   FailureRecord   magenta/black checker  the material file, or the shader it names, is not an asset
-//   FailureMesh     red/black checker      the model did not load; drawn on a unit cube
-//   FailureTexture  red/black checker      a texture the material samples did not load
-//
-// When the failure is a surface shader that does not compile, the renderer compiles this surface with
-// FAILURE_FORCE 1 in its place: the materials still have the broken surface's layout, so the kind is fixed here
-// and their values are never read.
+//   1  Shader   solid magenta       the material does not load, or its surface does not compile
+//   2  Texture  red/black checker   a texture the material samples does not load
+//   3  Mesh     solid red           the model does not load; drawn on the failure cube
 
 #include "Include/Failure.hlsli"
 #include "Include/Surface.hlsli"
 
-#ifndef FAILURE_FORCE
-#define FAILURE_FORCE 0
-#endif
-
 static const uint FailureShader = 1u;
-static const uint FailureRecord = 2u;
+static const uint FailureTexture = 2u;
 static const uint FailureMesh = 3u;
-static const uint FailureTexture = 4u;
 
-// Checker cells per unit of uv. A mesh failure is coarser so the unit cube reads as one object rather than
-// a texture.
+// Checker cells per unit of uv.
 static const float CheckerCells = 8.0;
-static const float CheckerCellsMesh = 4.0;
 
 struct MaterialParams
 {
-    uint kind = 2;
+    uint kind = 1;
 };
 
-// The pattern in uv space: solid magenta for a shader failure (and any kind this file does not know), else
-// a checker of the kind's colour and black.
+// The pattern in uv space: solid magenta for a shader failure (and any kind this file does not know), solid red for a
+// mesh, a checker of red and black for a texture.
 float3 FailurePattern(uint kind, float2 uv)
 {
     bool isRed = kind == FailureMesh || kind == FailureTexture;
-    bool isCheckered = kind == FailureRecord || isRed;
     float3 color = isRed ? float3(1.0, 0.0, 0.0) : FailureColor;
+    if (kind != FailureTexture)
+    {
+        return color;
+    }
 
-    int2 cell = int2(floor(uv * (kind == FailureMesh ? CheckerCellsMesh : CheckerCells)));
+    int2 cell = int2(floor(uv * CheckerCells));
     bool isLit = ((cell.x + cell.y) & 1) == 0;
-    return (isLit || !isCheckered) ? color : float3(0.0, 0.0, 0.0);
+    return isLit ? color : float3(0.0, 0.0, 0.0);
 }
 
 Surface EvaluateSurface(SurfaceInputs input, MaterialParams material)
 {
-#if FAILURE_FORCE
-    uint kind = FailureShader;
-#else
-    uint kind = material.kind;
-#endif
-
     // Cutoff 0 so a masked variant never clips the glow away.
     Surface surface = DefaultSurface(input);
     surface.baseColor = float3(0.0, 0.0, 0.0);
     surface.specular = 0.0;
-    surface.emissive = FailurePattern(kind, input.uv) * FailureGlow * FailurePulse(input.time);
+    surface.emissive = FailurePattern(material.kind, input.uv) * FailureGlow * FailurePulse(input.time);
     surface.alphaCutoff = 0.0;
     return surface;
 }

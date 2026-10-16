@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO;
 using System.IO.Hashing;
@@ -5,8 +6,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using SDL;
@@ -17,12 +20,15 @@ namespace Magic.DxcShaderCompiler;
 /// <see cref="IShaderCompiler"/> on Microsoft's DirectXShaderCompiler (DXC), called directly so every option is the
 /// engine's: HLSL 2021, Shader Model 6.0, warnings as errors, and SPIR-V for Vulkan 1.1, whose subgroup operations are
 /// HLSL's wave intrinsics. Every shader is compiled to SPIR-V first, whatever the format asked for, since what it binds
-/// is read from that (SDL_shadercross's reflection); DXIL is compiled from the HLSL again, and Metal is translated from
-/// the SPIR-V (SDL_shadercross, over SPIRV-Cross). A shader's includes are shader assets, spliced in before DXC sees it.
+/// is read from that, by name (<see cref="SpirvBindings"/>); DXIL is compiled from the HLSL again, and Metal is
+/// translated from the SPIR-V (SDL_shadercross, over SPIRV-Cross). A shader's includes are shader assets, spliced in
+/// before DXC sees it.
 /// What it compiles is kept in the cache (<see cref="Caches"/>, which it writes for as <see cref="ICache{T}"/> of
 /// <see cref="GpuShader"/>): named by its source with its includes spliced in, its name, its stage and its format, so
 /// no two sources share an entry, and made with the debug-info setting, so a shader compiles once, and again only when
-/// it, an include or the setting changes. Each call makes its own DXC compiler, so it is safe from any thread.
+/// it, an include or the setting changes. Each call makes its own DXC compiler, so it is safe from any thread; a shader
+/// asked for while it already compiles waits for that compile rather than starting its own, so each compiles, and its
+/// entry is written, once.
 /// </summary>
 internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICache<GpuShader>, IDisposable
 {
@@ -30,7 +36,7 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// Raised whenever DXC's arguments change, or how a shader is written to the cache, so what was compiled before is
     /// compiled again.
     /// </summary>
-    private const int CacheVersion = 1;
+    private const int CacheVersion = 4;
 
     /// <summary>
     /// The text encoding DXC is told the source is in.
@@ -48,12 +54,23 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
 
     private readonly Assets _assets;
     private readonly DxcShaderCompilerSettings _settings;
+
+    /// <summary>
+    /// Whether the shaders were last compiled with debug info, so a change while running compiles them again.
+    /// </summary>
+    private bool _debugInfo;
     private readonly Caches _caches;
+
+    /// <summary>
+    /// The compiles on their way, by cache key, for a shader asked for again while it compiles to wait for.
+    /// </summary>
+    private readonly ConcurrentDictionary<ulong, Task<Result<GpuShader>>> _compiling = new();
 
     public DxcShaderCompilerGem(Assets assets, Caches caches, DxcShaderCompilerSettings settings)
     {
         _assets = assets;
         _settings = settings;
+        _debugInfo = settings.DebugInfo;
         _caches = caches;
 
         // SDL_shadercross links SDL, so SDL loads first: the copy every gem shares (GemLoadContext).
@@ -73,6 +90,20 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
         }
     }
 
+    /// <summary>
+    /// Compiles every shader again when debug info was turned on or off while running.
+    /// </summary>
+    public void Update(in Frame frame)
+    {
+        if (_settings.DebugInfo == _debugInfo)
+        {
+            return;
+        }
+
+        _debugInfo = _settings.DebugInfo;
+        _assets.RemakeAsync<Shader>().FireAndForget();
+    }
+
     public void Dispose()
     {
         NativeMethods.Quit();
@@ -81,7 +112,8 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
     public int Version => CacheVersion;
 
     /// <summary>
-    /// The code's length, then what <see cref="GpuShader"/> declares in its order, the code's bytes last.
+    /// The code's length, then what <see cref="GpuShader"/> declares in its order, its bindings each as name, kind and
+    /// register, the code's bytes last.
     /// </summary>
     public void Write(GpuShader value, Stream bytes)
     {
@@ -89,15 +121,17 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
         writer.Write(value.Code.Length);
         writer.Write(value.EntryPoint);
         writer.Write((int)value.Stage);
-        writer.Write(value.Samplers);
-        writer.Write(value.StorageTextures);
-        writer.Write(value.StorageBuffers);
-        writer.Write(value.UniformBuffers);
-        writer.Write(value.ReadWriteStorageTextures);
-        writer.Write(value.ReadWriteStorageBuffers);
         writer.Write(value.ThreadCountX);
         writer.Write(value.ThreadCountY);
         writer.Write(value.ThreadCountZ);
+        writer.Write(value.Bindings.Count);
+        foreach (GpuShaderBinding binding in value.Bindings)
+        {
+            writer.Write(binding.Name);
+            writer.Write((byte)binding.Kind);
+            writer.Write(binding.Register);
+        }
+
         writer.Write(value.Code.Span);
     }
 
@@ -105,19 +139,28 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
     {
         using BinaryReader reader = new(bytes, Encoding.UTF8, leaveOpen: true);
         int length = reader.ReadInt32();
+        string entryPoint = reader.ReadString();
+        GpuStage stage = (GpuStage)reader.ReadInt32();
+        uint threadsX = reader.ReadUInt32();
+        uint threadsY = reader.ReadUInt32();
+        uint threadsZ = reader.ReadUInt32();
+        int count = reader.ReadInt32();
+        List<GpuShaderBinding> bindings = new(count);
+        for (int i = 0; i < count; i++)
+        {
+            string name = reader.ReadString();
+            GpuBindingKind kind = (GpuBindingKind)reader.ReadByte();
+            bindings.Add(new GpuShaderBinding(name, kind, reader.ReadUInt32()));
+        }
+
         GpuShader shader = new()
         {
-            EntryPoint = reader.ReadString(),
-            Stage = (GpuStage)reader.ReadInt32(),
-            Samplers = reader.ReadUInt32(),
-            StorageTextures = reader.ReadUInt32(),
-            StorageBuffers = reader.ReadUInt32(),
-            UniformBuffers = reader.ReadUInt32(),
-            ReadWriteStorageTextures = reader.ReadUInt32(),
-            ReadWriteStorageBuffers = reader.ReadUInt32(),
-            ThreadCountX = reader.ReadUInt32(),
-            ThreadCountY = reader.ReadUInt32(),
-            ThreadCountZ = reader.ReadUInt32(),
+            EntryPoint = entryPoint,
+            Stage = stage,
+            Bindings = bindings,
+            ThreadCountX = threadsX,
+            ThreadCountY = threadsY,
+            ThreadCountZ = threadsZ,
             Code = reader.ReadBytes(length),
         };
         return shader.Code.Length == length ? Result.Success(shader) : Result.Failure<GpuShader>("its code is cut short.");
@@ -142,16 +185,47 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
 
         string source = $"#define {define} 1\n#line 1 \"{name}\"\n{spliced.Value}";
         ulong key = Hash($"{name}\n{stage}\n{format}\n{source}");
+        TaskCompletionSource<Result<GpuShader>> own = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<Result<GpuShader>> compiling = _compiling.GetOrAdd(key, own.Task);
+        if (compiling != own.Task)
+        {
+            return await compiling.WaitAsync(cancel).ConfigureAwait(false);
+        }
+
+        try
+        {
+            Result<GpuShader> made = await ReadOrCompileAsync(key, source, name, profile, stage, format).ConfigureAwait(false);
+            own.SetResult(made);
+            return made;
+        }
+        catch (Exception ex)
+        {
+            own.SetException(ex);
+            throw;
+        }
+        finally
+        {
+            _compiling.TryRemove(new(key, own.Task));
+        }
+    }
+
+    /// <summary>
+    /// What the cache holds of <paramref name="key"/>, made with the debug-info setting as it is now, else
+    /// <paramref name="source"/> compiled and kept there. Not cancelled: a compile is short and what it makes is kept,
+    /// and whoever else waits for it stops waiting on their own.
+    /// </summary>
+    private async Task<Result<GpuShader>> ReadOrCompileAsync(ulong key, string source, string name, string profile, GpuStage stage, GpuShaderFormat format)
+    {
         ulong version = _settings.DebugInfo ? 1UL : 0UL;
-        if (await _caches.ReadAsync<GpuShader>(key, version, cancel).ConfigureAwait(false) is { Ok: true } cached)
+        if (await _caches.ReadAsync<GpuShader>(key, version, CancellationToken.None).ConfigureAwait(false) is { Ok: true } cached)
         {
             return cached;
         }
 
-        Result<GpuShader> compiled = await Task.Run(() => Compile(source, name, profile, stage, format), cancel).ConfigureAwait(false);
+        Result<GpuShader> compiled = await Task.Run(() => Compile(source, name, profile, stage, format)).ConfigureAwait(false);
         if (compiled.Ok)
         {
-            await _caches.WriteAsync(key, version, compiled.Value, cancel).ConfigureAwait(false);
+            await _caches.WriteAsync(key, version, compiled.Value, CancellationToken.None).ConfigureAwait(false);
         }
 
         return compiled;
@@ -235,58 +309,26 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
     }
 
     /// <summary>
-    /// What a SPIR-V shader binds, counted as SDL GPU and the engine's binding model count it.
+    /// What a SPIR-V shader binds, by name, in the engine's binding model (<see cref="SpirvBindings"/>).
     /// </summary>
-    private static unsafe Result<GpuShader> Reflect(byte[] spirv, string name, GpuStage stage)
+    private static Result<GpuShader> Reflect(byte[] spirv, string name, GpuStage stage)
     {
-        fixed (byte* code = spirv)
+        Result<SpirvReflection> read = SpirvBindings.Read(spirv, stage);
+        if (!read.Ok)
         {
-            if (stage == GpuStage.Compute)
-            {
-                ComputeResources* compute = NativeMethods.ReflectComputeSpirv(code, (nuint)spirv.Length, 0);
-                if (compute == null)
-                {
-                    return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {SDL3.SDL_GetError()}");
-                }
-
-                GpuShader computeShader = new()
-                {
-                    Code = spirv,
-                    EntryPoint = "main",
-                    Stage = stage,
-                    Samplers = compute->Samplers,
-                    StorageTextures = compute->StorageTextures,
-                    StorageBuffers = compute->StorageBuffers,
-                    ReadWriteStorageTextures = compute->ReadWriteStorageTextures,
-                    ReadWriteStorageBuffers = compute->ReadWriteStorageBuffers,
-                    UniformBuffers = compute->UniformBuffers,
-                    ThreadCountX = compute->ThreadCountX,
-                    ThreadCountY = compute->ThreadCountY,
-                    ThreadCountZ = compute->ThreadCountZ,
-                };
-                SDL3.SDL_free(compute);
-                return Result.Success(computeShader);
-            }
-
-            GraphicsResources* graphics = NativeMethods.ReflectGraphicsSpirv(code, (nuint)spirv.Length, 0);
-            if (graphics == null)
-            {
-                return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {SDL3.SDL_GetError()}");
-            }
-
-            GpuShader shader = new()
-            {
-                Code = spirv,
-                EntryPoint = "main",
-                Stage = stage,
-                Samplers = graphics->Samplers,
-                StorageTextures = graphics->StorageTextures,
-                StorageBuffers = graphics->StorageBuffers,
-                UniformBuffers = graphics->UniformBuffers,
-            };
-            SDL3.SDL_free(graphics);
-            return Result.Success(shader);
+            return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {read.Error}");
         }
+
+        return Result.Success(new GpuShader
+        {
+            Code = spirv,
+            EntryPoint = "main",
+            Stage = stage,
+            Bindings = read.Value.Bindings,
+            ThreadCountX = read.Value.ThreadsX,
+            ThreadCountY = read.Value.ThreadsY,
+            ThreadCountZ = read.Value.ThreadsZ,
+        });
     }
 
     /// <summary>
@@ -380,9 +422,11 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
         List<string> arguments = ["-E", "main", "-T", profile, "-HV", "2021", "-WX", "-O3", "-Zpc"];
 
         // Vulkan's attributes ([[vk::image_format]]) mean nothing to DXIL, which warns that it ignores them; the SPIR-V
-        // compile, which always runs first, still checks every one with every warning on.
+        // compile, which always runs first, still checks every one with every warning on. A resource the shader does not
+        // use is dropped, so what is read from the SPIR-V is what the shader uses; its interface is kept whole, so the
+        // stages' varyings line up.
         arguments.AddRange(isSpirv
-            ? ["-spirv", "-fspv-target-env=vulkan1.1", "-fspv-flatten-resource-arrays", "-fspv-preserve-bindings", "-fspv-preserve-interface"]
+            ? ["-spirv", "-fspv-target-env=vulkan1.1", "-fspv-flatten-resource-arrays", "-fspv-preserve-interface"]
             : ["-Wno-ignored-attributes"]);
 
         if (_settings.DebugInfo)
@@ -468,35 +512,6 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
     }
 
     /// <summary>
-    /// The start of SDL_shadercross's <c>SDL_ShaderCross_GraphicsShaderMetadata</c>: its resource counts.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private struct GraphicsResources
-    {
-        public uint Samplers;
-        public uint StorageTextures;
-        public uint StorageBuffers;
-        public uint UniformBuffers;
-    }
-
-    /// <summary>
-    /// SDL_shadercross's <c>SDL_ShaderCross_ComputePipelineMetadata</c>.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ComputeResources
-    {
-        public uint Samplers;
-        public uint StorageTextures;
-        public uint StorageBuffers;
-        public uint ReadWriteStorageTextures;
-        public uint ReadWriteStorageBuffers;
-        public uint UniformBuffers;
-        public uint ThreadCountX;
-        public uint ThreadCountY;
-        public uint ThreadCountZ;
-    }
-
-    /// <summary>
     /// SDL_shadercross's <c>SDL_ShaderCross_SPIRV_Info</c>. <see cref="Stage"/> is its stage enum, in
     /// <see cref="GpuStage"/>'s order.
     /// </summary>
@@ -524,14 +539,6 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
         [LibraryImport("SDL3_shadercross", EntryPoint = "SDL_ShaderCross_Quit")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial void Quit();
-
-        [LibraryImport("SDL3_shadercross", EntryPoint = "SDL_ShaderCross_ReflectGraphicsSPIRV")]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static partial GraphicsResources* ReflectGraphicsSpirv(byte* bytecode, nuint size, uint properties);
-
-        [LibraryImport("SDL3_shadercross", EntryPoint = "SDL_ShaderCross_ReflectComputeSPIRV")]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static partial ComputeResources* ReflectComputeSpirv(byte* bytecode, nuint size, uint properties);
 
         [LibraryImport("SDL3_shadercross", EntryPoint = "SDL_ShaderCross_TranspileMSLFromSPIRV")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]

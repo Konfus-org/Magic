@@ -1,0 +1,11 @@
+{
+    // Height fog's density by metres above the world's origin, of its intensity: thickest on the ground, thinning
+    // quickly over the first tens of metres and gone by a few hundred, as air holds haze.
+    "keys": [
+        { "at": 0, "value": 1 },
+        { "at": 20, "value": 0.65 },
+        { "at": 60, "value": 0.3 },
+        { "at": 150, "value": 0.1 },
+        { "at": 300, "value": 0 }
+    ]
+}

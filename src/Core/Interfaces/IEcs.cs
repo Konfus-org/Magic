@@ -69,6 +69,20 @@ public interface IEcs
         where T : unmanaged, IComponent;
 
     /// <summary>
+    /// Gives the entity <paramref name="components"/>, each of its own type, known only as the program runs, as
+    /// <see cref="Create(ReadOnlySpan{IComponent})"/> makes one with them: a saved entity's, put back. They go in at
+    /// once, boxed, each overwriting the one of its type the entity has; for restoring what was saved, not for the
+    /// frame loop.
+    /// </summary>
+    void Set(Entity entity, ReadOnlySpan<IComponent> components);
+
+    /// <summary>
+    /// The entity's components, each boxed: for saving the world, not the frame loop, which reads them through
+    /// queries. Allocates.
+    /// </summary>
+    IComponent[] Components(Entity entity);
+
+    /// <summary>
     /// The entity's component by reference, so a write goes straight into storage. Good until the entity's components
     /// next change; throws when it has none.
     /// </summary>

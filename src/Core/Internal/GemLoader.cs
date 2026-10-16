@@ -1,9 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
-using System.Reflection;
 using Magic.Contexts.Assets;
-using Magic.Contexts.CmdLine;
+using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,54 +10,47 @@ using Microsoft.Extensions.DependencyInjection;
 namespace Magic.Internal;
 
 /// <summary>
-/// Turns the names in a project's gem list into running gems. Gem <c>Name</c> is the one <see cref="IGem"/> class in
-/// Gems/Name/Name.dll beside Magic. Core's services, <see cref="Assets"/> and <see cref="Caches"/> among them, every gem and the interfaces each
-/// provides, and the <see cref="World"/> over the ECS a gem provides, are registered with a service provider, which makes the gems in the order they are listed, each after
-/// whatever its constructor asks for, so the gems come back in dependency order. A constructor parameter whose type the gem
-/// declares itself is its settings object, made by <see cref="Settings"/> as the gem is, from the presets it read before
-/// any gem was made. A gem that is an <see cref="ILogSink"/>
-/// is added to the log once it is made, instead of provided. The components a gem declares are taken in as its
-/// assembly loads, so files can name them (<see cref="Components.Get"/>) before any gem is made, and where each
-/// assembly's assets are into <see cref="Project.Resources"/>. The project's own code, its scripts and components, is
-/// loaded first the same way, though it is no gem. Whatever goes wrong with one gem is logged, and the others are made
-/// without it.
+/// Loads the gems a project lists into the service provider <see cref="Engine"/> builds, and makes them once it has.
+/// Each gem's assembly (<see cref="GemAssembly"/>) is registered as its class and as every interface it provides; one
+/// that provides what Core or a gem listed before it provides is refused, as is a name listed twice. The types a gem's
+/// assembly holds are taken in as it loads (<see cref="Code"/>), so files can name its components before any gem is
+/// made, and where each assembly's assets are into <see cref="Project.Resources"/>. Magic's own scripts and the
+/// project's own code, its scripts and components, are loaded first the same way, though neither is a gem, and loaded
+/// again when they are built while the engine runs (<see cref="WatchCode"/>). The provider makes each gem after
+/// whatever its constructor asks for, so <see cref="Make"/> returns the gems in dependency order. A constructor
+/// parameter that is an <see cref="ISettings"/> is the gem's settings object, made by <see cref="Settings"/> as the
+/// gem is. A gem that is an <see cref="ILogSink"/> is added to the log once it is made, instead of provided. Whatever
+/// goes wrong with one gem is logged, and the others are made without it.
 /// </summary>
-internal static class GemLoader
+internal sealed class GemLoader
 {
     /// <summary>
-    /// The assembly metadata a build records the folder of its part's assets in, where it does not copy them beside it
-    /// (the root <c>Directory.Build.props</c>).
+    /// How long a code folder must have been left alone before what was built there is loaded: a build writes the
+    /// assembly, its symbols and what it depends on one after another.
     /// </summary>
-    private const string ResourcesKey = "Magic.Resources";
+    private static readonly TimeSpan _settle = TimeSpan.FromMilliseconds(300);
+
+    private readonly IFileSystem _files;
+    private readonly List<IGem> _made = [];
+    private readonly HashSet<Type> _tried = [];
+    private readonly List<GemAssembly> _gems = [];
 
     /// <summary>
-    /// Loads and makes the project's gems, in the order their hooks run, each with its settings object; the settings
-    /// they were made from; and the world, over the ECS a gem provides; none, which is warned about, when no gem does.
+    /// The code that is no gem, as far as it was there to load, to load again when it is built.
     /// </summary>
-    public static (List<IGem> Gems, World? World, Settings Settings) Load(Project project, IFileSystem files, Lifetime lifetime, Threads threads, Events events, Args args)
+    private readonly List<CodeFile> _code = [];
+
+    /// <summary>
+    /// Loads the project's code and the gems it lists, and registers the gems with <paramref name="services"/>, which
+    /// already holds what Core provides.
+    /// </summary>
+    public GemLoader(ServiceCollection services, IFileSystem files, Project project)
     {
-        // What a gem's constructor can ask for: Core's services, then what the gems provide. The assets, the settings
-        // and the cache are made once every gem's assembly, and so where its assets are, has been loaded.
-        ServiceCollection services = new();
-        services.AddSingleton(files);
-        services.AddSingleton(lifetime);
-        services.AddSingleton(threads);
-        services.AddSingleton(events);
-        services.AddSingleton(project);
-        services.AddSingleton(args);
-        services.AddSingleton(provider => new Assets(files, project, lifetime, events, provider));
-        services.AddSingleton(provider => new Settings(provider.GetRequiredService<Assets>(), events, project, args));
-        services.AddSingleton(provider => new Caches(files, provider));
+        _files = files;
+        LoadCode(files.Combine(AppContext.BaseDirectory, "Resources", "Resources.dll"), "Magic's scripts");
+        LoadCode(files.Combine(AppContext.BaseDirectory, "Projects", project.Name, project.Name + ".dll"), $"{project.Name}'s code");
 
-        if (LoadProjectCode(files, project) is { } code)
-        {
-            Components.Add(code);
-        }
-
-        List<IGem> made = [];
-        HashSet<Type> tried = [];
-        List<Candidate> registered = [];
-        List<string> resources = [ResourcesOf(files, typeof(GemLoader).Assembly)];
+        List<string> resources = [GemAssembly.ResourcesOf(files, typeof(GemLoader).Assembly)];
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
         foreach (string name in project.Gems)
         {
@@ -68,221 +60,111 @@ internal static class GemLoader
                 continue;
             }
 
-            Result<Candidate> loaded = LoadAssembly(files, name);
+            Result<GemAssembly> loaded = GemAssembly.Load(files, name);
             if (!loaded.Ok)
             {
                 Debugging.Error(loaded.Error);
                 continue;
             }
 
-            Candidate candidate = loaded.Value;
-            List<Type> provides = Provides(candidate.Type);
-            if (Clash(services, name, provides) is { } clash)
+            GemAssembly gem = loaded.Value;
+            if (Clash(services, gem) is { } clash)
             {
                 Debugging.Error(clash);
                 continue;
             }
 
-            services.AddSingleton(candidate.Type, provider => Make(provider, candidate, made, tried));
-            foreach (Type contract in provides)
+            services.AddSingleton(gem.Type, provider => MakeGem(provider, gem));
+            foreach (Type contract in gem.Provides)
             {
-                services.AddSingleton(contract, provider => provider.GetRequiredService(candidate.Type));
+                services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
             }
 
-            registered.Add(candidate);
-            resources.Add(ResourcesOf(files, candidate.Type.Assembly));
-            Components.Add(candidate.Types);
+            _gems.Add(gem);
+            resources.Add(gem.Resources);
+            Code.Add(gem.Path, gem.Types);
         }
 
         project.Resources = resources;
+    }
 
-        // The world is made once a gem asks for it, or once every gem is, over the ECS and the scripts the gems provide.
-        bool hasEcs = false;
-        foreach (ServiceDescriptor service in services)
+    /// <summary>
+    /// Watches where the code that is no gem was loaded from, until the subscription is disposed, and loads what is
+    /// built there again once the build has settled: its types replace its last build's (<see cref="Code"/>), and
+    /// <paramref name="assets"/> makes every script and every prefab again, as those are read as the classes code
+    /// holds, so the world runs the scripts as they are now. The gems are never loaded again: a gem takes a restart.
+    /// </summary>
+    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "The subscription returned owns the list, and disposing it disposes the list.")]
+    public Subscription WatchCode(Assets assets)
+    {
+        SubscriptionList watching = new();
+        foreach (CodeFile code in _code)
         {
-            hasEcs |= service.ServiceType == typeof(IEcs);
+            watching.Add(FileSystem.Watch(_files.Parent(code.Path), _ => ReloadCodeAsync(code, assets).FireAndForget()));
         }
 
-        if (hasEcs)
-        {
-            services.AddSingleton(provider => new World(provider.GetRequiredService<IEcs>(), provider.GetService<IScripts>(), provider.GetRequiredService<Assets>(), threads, events, project, lifetime));
-        }
+        return new Subscription(watching.Dispose);
+    }
 
-        // Not disposed: Engine ends the gems itself, one at a time, so one that throws cannot stop the rest ending. The
-        // settings are made first, as every gem's are made from the presets they read.
-        ServiceProvider container = services.BuildServiceProvider();
-        Settings settings = container.GetRequiredService<Settings>();
-        foreach (Candidate candidate in registered)
+    /// <summary>
+    /// Makes every gem that was registered, in the order they are listed, each after whatever its constructor asks for;
+    /// the gems, in the order they were made. A gem that could not be made has said why, and is left out.
+    /// </summary>
+    public List<IGem> Make(ServiceProvider container)
+    {
+        foreach (GemAssembly gem in _gems)
         {
             try
             {
-                container.GetRequiredService(candidate.Type);
+                container.GetRequiredService(gem.Type);
             }
             catch (InvalidOperationException)
             {
-                // Make has logged why the gem was not made.
+                // MakeGem has logged why the gem was not made.
             }
         }
 
-        return (made, WorldOf(container, hasEcs), settings);
+        return _made;
     }
 
     /// <summary>
-    /// The world, when a gem provides the ECS and it was made; null otherwise, which is said, as no domain then opens.
+    /// Loads the code at <paramref name="path"/> (<see cref="GemAssembly.LoadCode"/>) and takes in its types, and
+    /// keeps it to load again when it is built.
     /// </summary>
-    private static World? WorldOf(ServiceProvider container, bool hasEcs)
+    private void LoadCode(string path, string what)
     {
-        if (!hasEcs)
+        if (GemAssembly.LoadCode(_files, path, what) is { } types)
         {
-            Debugging.Warn("No gem the project lists provides the ECS, so there is no world, and no domain opens.");
-            return null;
-        }
-
-        try
-        {
-            return container.GetRequiredService<World>();
-        }
-        catch (InvalidOperationException ex)
-        {
-            Debugging.Error($"There is no world, and no domain opens: {ex.Message}");
-            return null;
+            Code.Add(path, types);
+            _code.Add(new CodeFile(path, what));
         }
     }
 
     /// <summary>
-    /// Where the part built as <paramref name="assembly"/> keeps its own assets: the folder its build recorded as
-    /// <see cref="ResourcesKey"/>, its source <c>Resources/</c>, which every build but a release records; else
-    /// <c>Resources/</c> beside it, where a release copies them.
+    /// Something in <paramref name="code"/>'s folder changed: once it has settled, the last change to come loads the
+    /// code again and has the scripts and prefabs made again.
     /// </summary>
-    private static string ResourcesOf(IFileSystem files, Assembly assembly)
+    private async Task ReloadCodeAsync(CodeFile code, Assets assets)
     {
-        foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
+        int change = code.Note();
+        await Task.Delay(_settle).ConfigureAwait(false);
+        if (!code.IsLatest(change) || GemAssembly.ReloadCode(_files, code.Path, code.What) is not { } types)
         {
-            if (string.Equals(metadata.Key, ResourcesKey, StringComparison.Ordinal) && metadata.Value is { Length: > 0 } folder)
-            {
-                return folder;
-            }
+            return;
         }
 
-        return files.Combine(files.Parent(assembly.Location), "Resources");
+        Code.Add(code.Path, types);
+        assets.Touch<Script>();
+        assets.Touch<Prefab>();
     }
 
     /// <summary>
-    /// The types of the project's own code, its scripts and the components they use: the <c>.cs</c> files under its
-    /// <c>Assets/</c>, which the project's csproj compiles into Projects/Name/Name.dll beside Magic, Name being the
-    /// project's. It loads into a context of its own, as a gem does, though it is no gem: it provides nothing, and takes
-    /// no settings. Null when the project has none built, as a project needs none, and when it cannot be loaded, which
-    /// is logged.
+    /// Why <paramref name="gem"/> is not made when it would provide something Core or a gem listed before it already
+    /// provides; null when it provides nothing that is taken.
     /// </summary>
-    private static Type[]? LoadProjectCode(IFileSystem files, Project project)
+    private static string? Clash(ServiceCollection services, GemAssembly gem)
     {
-        string path = files.Combine(AppContext.BaseDirectory, "Projects", project.Name, project.Name + ".dll");
-        if (!files.FileExists(path))
-        {
-            return null;
-        }
-
-        try
-        {
-            Type[] types = new GemLoadContext(path).LoadFromAssemblyPath(path).GetTypes();
-            Debugging.Info($"Loaded {project.Name}'s code");
-            return types;
-        }
-        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or ReflectionTypeLoadException)
-        {
-            Debugging.Error($"{project.Name}'s code could not be loaded from {path}: {ex.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Loads gem <paramref name="name"/>'s assembly and finds what making it takes: its one <see cref="IGem"/> class,
-    /// and its settings type if its constructor takes settings.
-    /// </summary>
-    private static Result<Candidate> LoadAssembly(IFileSystem files, string name)
-    {
-        string path = files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
-        if (!files.FileExists(path))
-        {
-            return Result.Failure<Candidate>($"Gem {name} was not found: there is no {path}.");
-        }
-
-        Type[] types;
-        try
-        {
-            types = new GemLoadContext(path).LoadFromAssemblyPath(path).GetTypes();
-        }
-        catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or ReflectionTypeLoadException)
-        {
-            return Result.Failure<Candidate>($"Gem {name} could not be loaded from {path}: {ex.Message}");
-        }
-
-        List<Type> gems = [];
-        foreach (Type type in types)
-        {
-            if (type.IsClass && !type.IsAbstract && type.IsAssignableTo(typeof(IGem)))
-            {
-                gems.Add(type);
-            }
-        }
-
-        if (gems.Count != 1)
-        {
-            return Result.Failure<Candidate>($"Gem {name} must hold exactly one class that implements IGem; it holds {gems.Count}.");
-        }
-
-        Type gem = gems[0];
-        ConstructorInfo[] constructors = gem.GetConstructors();
-        if (constructors.Length != 1)
-        {
-            return Result.Failure<Candidate>($"Gem {name}: {gem.Name} must have exactly one public constructor; it has {constructors.Length}.");
-        }
-
-        Type? settings = null;
-        foreach (ParameterInfo parameter in constructors[0].GetParameters())
-        {
-            Type type = parameter.ParameterType;
-            if (type.IsInterface || type.Assembly != gem.Assembly)
-            {
-                continue;
-            }
-
-            if (settings is not null)
-            {
-                return Result.Failure<Candidate>($"Gem {name}: {gem.Name} takes two settings objects, {settings.Name} and {type.Name}; a gem has one.");
-            }
-
-            settings = type;
-        }
-
-        return Result.Success(new Candidate(name, gem, settings, types));
-    }
-
-    /// <summary>
-    /// What a gem provides: every interface its class implements but <see cref="IGem"/>, <see cref="IDisposable"/> and
-    /// <see cref="ILogSink"/>, which Core takes itself, so any number of gems can be sinks.
-    /// </summary>
-    private static List<Type> Provides(Type gem)
-    {
-        List<Type> provides = [];
-        foreach (Type contract in gem.GetInterfaces())
-        {
-            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink))
-            {
-                provides.Add(contract);
-            }
-        }
-
-        return provides;
-    }
-
-    /// <summary>
-    /// Why gem <paramref name="name"/> is not made when it would provide something Core or a gem listed before it
-    /// already provides; null when it provides nothing that is taken.
-    /// </summary>
-    private static string? Clash(ServiceCollection services, string name, List<Type> provides)
-    {
-        foreach (Type contract in provides)
+        foreach (Type contract in gem.Provides)
         {
             foreach (ServiceDescriptor service in services)
             {
@@ -291,7 +173,7 @@ internal static class GemLoader
                 Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
                 if (provider.IsAssignableTo(contract))
                 {
-                    return $"Gem {name} provides {NameOf(contract)}, which {provider.Name} already provides; it is not made.";
+                    return $"Gem {gem.Name} provides {NameOf(contract)}, which {provider.Name} already provides; it is not made.";
                 }
             }
         }
@@ -315,52 +197,72 @@ internal static class GemLoader
 
     /// <summary>
     /// The service provider's factory for a gem: makes it from its settings object and the services its constructor
-    /// asks for, which the provider makes first, adds it to <paramref name="made"/>, and adds it to the log if it is an
+    /// asks for, which the provider makes first, adds it to what was made, and adds it to the log if it is an
     /// <see cref="ILogSink"/>. Why it could not be made, settings that do not fit it among the reasons, is logged here,
-    /// against the gem, and the gems that need it are told only that it was not. A gem is tried once
-    /// (<paramref name="tried"/>), which also ends a cycle of gems that need each other.
+    /// against the gem, and the gems that need it are told only that it was not. A gem is tried once, which also ends
+    /// a cycle of gems that need each other.
     /// </summary>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on.")]
-    private static IGem Make(IServiceProvider services, Candidate candidate, List<IGem> made, HashSet<Type> tried)
+    private IGem MakeGem(IServiceProvider services, GemAssembly gem)
     {
-        if (!tried.Add(candidate.Type))
+        if (!_tried.Add(gem.Type))
         {
-            throw new InvalidOperationException($"it needs {candidate.Name}, which was not made.");
+            throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
         }
 
-        Result<object?> settings = services.GetRequiredService<Settings>().Make(candidate.Name, candidate.Settings);
+        Result<ISettings?> settings = services.GetRequiredService<Settings>().Make(gem.Name, gem.Settings);
         if (!settings.Ok)
         {
-            Debugging.Error($"Gem {candidate.Name} was not made: {settings.Error}");
-            throw new InvalidOperationException($"it needs {candidate.Name}, which was not made.");
+            Debugging.Error($"Gem {gem.Name} was not made: {settings.Error}");
+            throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
         }
 
-        IGem gem;
+        IGem made;
         try
         {
-            gem = (IGem)ActivatorUtilities.CreateInstance(services, candidate.Type, settings.Value is { } given ? [given] : []);
+            made = (IGem)ActivatorUtilities.CreateInstance(services, gem.Type, settings.Value is { } given ? [given] : []);
         }
         catch (Exception ex)
         {
             // A service that is missing or was not made, and a gem that cannot start, say why in the message; anything
             // else is a bug in the gem, and its stack says where.
-            Debugging.Error($"Gem {candidate.Name} was not made: {(ex is InvalidOperationException ? ex.Message : ex.ToString())}");
-            throw new InvalidOperationException($"it needs {candidate.Name}, which was not made.", ex);
+            Debugging.Error($"Gem {gem.Name} was not made: {(ex is InvalidOperationException ? ex.Message : ex.ToString())}");
+            throw new InvalidOperationException($"it needs {gem.Name}, which was not made.", ex);
         }
 
-        made.Add(gem);
-        if (gem is ILogSink sink)
+        _made.Add(made);
+        if (made is ILogSink sink)
         {
             Debugging.Add(sink);
         }
 
-        Debugging.Info($"Gem {candidate.Name} started");
-        return gem;
+        Debugging.Info($"Gem {gem.Name} started");
+        return made;
     }
 
-    /// <param name="Name">The gem's name, as the project lists it.</param>
-    /// <param name="Type">Its one <see cref="IGem"/> class.</param>
-    /// <param name="Settings">The settings type its constructor takes, if any.</param>
-    /// <param name="Types">Every type in its assembly, among them the components it declares.</param>
-    private readonly record struct Candidate(string Name, Type Type, Type? Settings, Type[] Types);
+    /// <summary>
+    /// Code that is no gem: where it is built, what to call it in the log, and the changes its folder has had, of
+    /// which the latest loads it once it has settled.
+    /// </summary>
+    private sealed class CodeFile(string path, string what)
+    {
+        private int _changes;
+
+        public string Path { get; } = path;
+
+        public string What { get; } = what;
+
+        /// <summary>
+        /// Notes one more change to its folder: which one, to ask <see cref="IsLatest"/> of after the settle.
+        /// </summary>
+        public int Note()
+        {
+            return Interlocked.Increment(ref _changes);
+        }
+
+        public bool IsLatest(int change)
+        {
+            return change == Volatile.Read(ref _changes);
+        }
+    }
 }

@@ -19,10 +19,9 @@ camera draws into.
 | `wrap` | `repeat` | What is read past its edge: `repeat`, `clamp` or `mirror`. |
 | `filter` | `linear` | How it is read between texels: `linear` or `nearest`. |
 
-## Levels of detail
+## Mips
 
-A texture's levels of detail are its mips, which its loader makes anyway: nothing more is made or cached for them. A
-`Renderer` at `lod` n reads its textures from mip n down, so a texture with no mips has no levels of detail.
+A texture's mips are made by its loader anyway: nothing more is made or cached for them.
 
 ## Adding a texture
 

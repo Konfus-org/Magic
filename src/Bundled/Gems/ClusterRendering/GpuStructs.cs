@@ -63,9 +63,10 @@ internal struct FrameConstants
     public uint TileWords;
 
     /// <summary>
-    /// What the view's target is: 1 for a window's, whose image is UNORM and is encoded and dithered as it is shown.
+    /// How the view's image is encoded as it is shown, a <see cref="Magic.Contexts.Gpu.TargetEncoding"/>: what the
+    /// target's image expects, decided by its format.
     /// </summary>
-    public uint TargetIsWindow;
+    public uint TargetEncoding;
 
     /// <summary>
     /// A view depth's z-bin is <c>log2(depth) * ZBinScale + ZBinBias</c>, of <see cref="ZBinCount"/>.
@@ -105,7 +106,7 @@ internal struct FrameConstants
     /// <summary>
     /// Pixels a metre covers a metre in front of the camera, along the view's height.
     /// </summary>
-    public float LodScale;
+    public float PixelScale;
 
     /// <summary>
     /// The player's camera relative to this view's, which detail is kept nearest to when there is too much.
@@ -115,7 +116,7 @@ internal struct FrameConstants
     /// <summary>
     /// What uv gradients are scaled by: below 1 while a temporal upscale resolves the finer texels it reads.
     /// </summary>
-    public float TextureLodScale;
+    public float TextureMipScale;
 
     /// <summary>
     /// This frame's sub-pixel offset of <see cref="ViewProj"/>, in clip space.
@@ -206,17 +207,12 @@ internal enum GpuSceneFlags : uint
     /// It dissolves into view from <see cref="GpuSceneInstance.FadeStart"/>.
     /// </summary>
     FadeIn = 2,
-
-    /// <summary>
-    /// It dissolves out of view from <see cref="GpuSceneInstance.FadeStart"/>.
-    /// </summary>
-    FadeOut = 4,
 }
 
 /// <summary>
 /// A model in the <see cref="ClusterPool"/>: its sphere about its origin, its clusters, levels and cards, the unit-scale
-/// distance its cards are drawn from, 0 for none, its grid's step, and its distance field's slot in
-/// <see cref="MeshFields"/>, 0 for none.
+/// distance its cards are drawn from, 0 for none, its grid's step, its distance field's slot in <see cref="MeshFields"/>,
+/// 0 for none, and how far from its sphere's middle its clusters' error spheres reach.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuModel
@@ -231,9 +227,15 @@ internal struct GpuModel
     public float CardDistance;
     public float PositionStep;
     public uint Field;
+
+    /// <summary>
+    /// How far from <see cref="Bounds"/>' middle, in the model's space, any cluster's error sphere or its parent's
+    /// reaches: past the bounds, as each group's sphere encloses its clusters'. An instance picks the levels of clusters
+    /// it hands on by how near and far this reaches, so it never passes over the level a cluster's own test wants.
+    /// </summary>
+    public float ClusterReach;
     public uint Padding0;
     public uint Padding1;
-    public uint Padding2;
 }
 
 /// <summary>
@@ -258,8 +260,8 @@ internal struct GpuLevel
 internal struct GpuCluster
 {
     public Vector4 Bounds;
-    public Vector4 LodBounds;
-    public Vector4 ParentLodBounds;
+    public Vector4 ErrorBounds;
+    public Vector4 ParentErrorBounds;
     public float Error;
     public float ParentError;
     public uint Vertices;
@@ -270,9 +272,9 @@ internal struct GpuCluster
     public uint Padding1;
 
     /// <summary>
-    /// Triangles in the low 8 bits, vertices in the next 9, the material slot in the 3 after.
+    /// Triangles in the low 8 bits, vertices in the next 9, the material slot in the 3 after, the level in the 5 after.
     /// </summary>
-    public static uint CountsOf(int triangles, int vertices, int slot) => (uint)triangles | ((uint)vertices << 8) | ((uint)slot << 17);
+    public static uint CountsOf(int triangles, int vertices, int slot, int level) => (uint)triangles | ((uint)vertices << 8) | ((uint)slot << 17) | ((uint)level << 20);
 }
 
 /// <summary>
@@ -331,23 +333,27 @@ internal struct GpuGi
     public uint Rays;
 
     /// <summary>
-    /// Of the last frame's probe, what is kept as a new one is blended in.
-    /// </summary>
-    public float Hysteresis;
-
-    /// <summary>
     /// The frame's number: it turns the rays, so a probe's rays go a new way each time it is traced, and picks which of
     /// each level's probes are traced.
     /// </summary>
     public uint Seed;
+
+    public uint Padding0;
+
+    /// <summary>
+    /// Where the camera the levels are placed about is, from the world's origin: a place is lit by each level by how far
+    /// from it it is, so where one level gives way to the next moves with the camera, never in a level's steps.
+    /// </summary>
+    public Vector3 Camera;
 }
 
 /// <summary>
 /// One level of the scene's field and its probes, each finer one inside the next: its origin its first voxel's place in
 /// voxels of <see cref="Voxel"/> metres from the world's origin, a box of <see cref="GiVolume.Resolution"/> a
 /// side stored wrapping around, as is its grid of probes; the voxels made again this frame, a bit per brick of
-/// <see cref="GiVolume.Brick"/> voxels a side by where it is stored, and the box around them; and how many frames a
-/// probe of it waits to be traced again, <see cref="Period"/>.
+/// <see cref="GiVolume.Brick"/> voxels a side by where it is stored, and the box around them; how many frames a probe
+/// of it waits to be traced again, <see cref="Period"/>; and how much of what a probe held it keeps as it takes in what
+/// it was traced with, <see cref="Hysteresis"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Size = Bytes)]
 internal struct GpuGiLevel
@@ -361,7 +367,7 @@ internal struct GpuGiLevel
     public int DirtyMinX;
     public int DirtyMinY;
     public int DirtyMinZ;
-    public uint Padding0;
+    public float Hysteresis;
     public int DirtyMaxX;
     public int DirtyMaxY;
     public int DirtyMaxZ;

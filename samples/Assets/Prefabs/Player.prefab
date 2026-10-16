@@ -8,7 +8,7 @@
                 "Camera": {}
             },
             "scripts": [
-                { "id": 3315, "speed": 30 }
+                { "id": 3315, "speed": 30, "cruise": 40, "radius": 575, "orbit": 4 }
             ]
         }
     ]

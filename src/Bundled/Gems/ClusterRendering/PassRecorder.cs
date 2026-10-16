@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Numerics;
+using Magic.Contexts.Frames;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
 using Magic.Interfaces;
@@ -8,17 +9,15 @@ namespace Magic.ClusterRendering;
 
 /// <summary>
 /// Records a stage's passes, the one way every pass runs: what it makes made (or kept) and seeded, then for each of its
-/// iterations its constants pushed, every name it binds bound in the order its shader declares them, and its dispatch or
-/// draws, under a debug group of its name. A draw of pieces (the visibility buffer, transparent surfaces, depth) steps
-/// through the pieces a pass before it made with the static run of indices <paramref name="pieceIndices"/> holds, its
-/// vertex stage reading the scene's tables; a draw of the visibility buffer is one indirect draw per raster bin, and one
-/// of surfaces one per resolve bin, over the tiles a pass before it classified. Holds nothing of a frame between calls.
-/// Render thread.
+/// iterations its constants pushed, every name each of its stages binds bound at its slot (<see cref="StageBindings"/>),
+/// each looked up by name in the frame's or the view's resources, and its dispatch or draws, under a debug group of its
+/// name. A draw of pieces (the visibility buffer, transparent surfaces, depth) steps through the pieces a pass before
+/// it made with the static run of indices <paramref name="pieceIndices"/> holds; a draw of the visibility buffer is
+/// one indirect draw per raster bin, and one of surfaces one per resolve bin, over the tiles a pass before it
+/// classified. Holds nothing of a frame between calls. Render thread.
 /// </summary>
-internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, ClusterPool models, Materials materials, TexturePools textures, GpuBuffer pieceIndices) : IDisposable
+internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceIndices) : IDisposable
 {
-    private const int MaxBindings = 24;
-
     /// <summary>
     /// Groups a dispatch runs along x at most, as every API allows; more go on in y, which a shader that may run more
     /// reads back as one number (Shaders/Include/Culling.hlsli's LinearGroup).
@@ -30,9 +29,9 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
     /// </summary>
     public const uint PieceIndexCount = 96;
 
-    private readonly GpuSampler _nearest = gpu.CreateSampler(new GpuSamplerDesc(GpuFilter.Nearest, GpuAddress.Clamp));
-    private readonly GpuSampler _linear = gpu.CreateSampler(new GpuSamplerDesc(GpuFilter.Linear, GpuAddress.Clamp));
-    private readonly GpuSampler _comparison = gpu.CreateSampler(new GpuSamplerDesc(GpuFilter.Linear, GpuAddress.Clamp, Compare: GpuCompare.GreaterOrEqual));
+    private readonly GpuSampler _nearest = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Nearest, GpuWrap.Clamp));
+    private readonly GpuSampler _linear = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
+    private readonly GpuSampler _comparison = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp, Compare: GpuCompare.GreaterOrEqual));
 
     public void Dispose()
     {
@@ -43,7 +42,8 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
 
     /// <summary>
     /// The passes of <paramref name="stage"/> that are ready, in order, in <paramref name="scope"/>: the frame's
-    /// resources, and a view's for a view's stage.
+    /// resources, and a view's for a view's stage. One that never runs has what it would draw into shown as the
+    /// failure instead (<see cref="Fill"/>).
     /// </summary>
     public void Record(Listing listing, PassStage stage, in RecordScope scope)
     {
@@ -51,10 +51,15 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
         {
             if (!pass.IsReady)
             {
+                if (pass.HasFailed)
+                {
+                    Fill(listing, pass, scope);
+                }
+
                 continue;
             }
 
-            gpu.Commands.PushDebugGroup(pass.Name);
+            using GpuDebugGroup group = gpu.Commands.DebugGroup(pass.Name);
             Make(listing, pass, scope);
             uint iterations = pass.Pass.Each.Length == 0 ? 1 : scope.Counts.Of(pass.Pass.Each);
             for (uint iteration = 0; iteration < iterations; iteration++)
@@ -67,6 +72,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
                     PassKind.Compute => Compute(pass, scope, constants, iteration),
                     PassKind.Fullscreen => Fullscreen(pass, scope, constants, iteration),
                     PassKind.Draw => Draw(listing, pass, scope, constants, iteration),
+                    PassKind.Script => Script(pass, scope),
                     _ => false,
                 };
                 if (!isRecorded)
@@ -76,7 +82,6 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
             }
 
             Mipmaps(pass, scope);
-            gpu.Commands.PopDebugGroup();
         }
     }
 
@@ -93,8 +98,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
             bool isMade = set.Make(create.Name, KeyOf(created, scope));
             if (isMade && create.History && set.TryGet(ResourceInfo.HistoryOf(create.Name), out BoundResource history) && history.Texture != GpuTexture.None)
             {
-                gpu.Commands.BeginRenderPass([new GpuBinding(Texture: history.Texture)], GpuLoad.Clear);
-                gpu.Commands.EndRenderPass();
+                gpu.Commands.RenderPass([new GpuTextureLevel(history.Texture)], GpuContents.Clear).Dispose();
             }
 
             if (create.Seed.Length == 0 || !set.TryGet(create.Name, out BoundResource made) || !Find(scope, create.Seed, out BoundResource seed))
@@ -111,34 +115,87 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
         }
     }
 
+    /// <summary>
+    /// What a pass that never runs would draw into, made as it would have been and cleared to the failure's colour,
+    /// breathing: a fullscreen pass's target, or a draw's colours, at every layer its iterations would draw, so what it
+    /// would have drawn shows as broken and the passes after it read that. What a compute pass writes is left as it is
+    /// made; the words say why (Include/FailureBanner.hlsli).
+    /// </summary>
+    private void Fill(Listing listing, ListedPass pass, in RecordScope scope)
+    {
+        Make(listing, pass, scope);
+        if (pass.Pass.Kind is not (PassKind.Fullscreen or PassKind.Draw))
+        {
+            return;
+        }
+
+        using GpuDebugGroup group = gpu.Commands.DebugGroup(pass.Name);
+        Magic.Contexts.Assets.Color color = Failures.PulseColor(scope.Constants.Time);
+        uint iterations = pass.Pass.Each.Length == 0 ? 1 : scope.Counts.Of(pass.Pass.Each);
+        foreach (PassBinding write in pass.Pass.Kind == PassKind.Fullscreen ? pass.TextureWrites : ColorsOf(pass))
+        {
+            if (!Find(scope, write.Info.Name, out BoundResource target))
+            {
+                continue;
+            }
+
+            for (uint iteration = 0; iteration < iterations; iteration++)
+            {
+                gpu.Commands.RenderPass([new GpuTextureLevel(target.Texture, write.Level, LayerOf(pass, write, iteration))], GpuContents.Clear, color).Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// A draw's colours as bindings, at their first level and layer: each is a name the pass can see.
+    /// </summary>
+    private static List<PassBinding> ColorsOf(ListedPass pass)
+    {
+        List<PassBinding> colors = [];
+        foreach (string name in pass.Pass.Draw.Colors)
+        {
+            if (pass.Visible.Find(seen => string.Equals(seen.Name, name, StringComparison.Ordinal)) is { } info)
+            {
+                colors.Add(new PassBinding(info, 0, 0, GpuContents.Clear, false));
+            }
+        }
+
+        return colors;
+    }
+
     private bool Compute(ListedPass pass, in RecordScope scope, in FrameConstants constants, uint iteration)
     {
-        Span<GpuBinding> writes = stackalloc GpuBinding[MaxBindings];
-        int writeCount = 0;
-        foreach (PassBinding write in pass.TextureWrites)
+        if (pass.Bound(GpuStage.Compute) is not { } bound)
         {
-            if (!Find(scope, write.Info.Name, out BoundResource bound))
+            return false;
+        }
+
+        Span<GpuTextureLevel> textureWrites = stackalloc GpuTextureLevel[StageBindings.MaxStorage];
+        int textureCount = 0;
+        foreach (BoundName write in bound.TextureWrites)
+        {
+            if (!Find(scope, write.Binding.Info.Name, out BoundResource written))
             {
                 return false;
             }
 
-            writes[writeCount++] = new GpuBinding(Texture: bound.Texture, Level: write.Level, Layer: LayerOf(pass, write, iteration));
+            textureWrites[textureCount++] = new GpuTextureLevel(written.Texture, write.Binding.Level, LayerOf(pass, write.Binding, iteration));
         }
 
-        foreach (PassBinding write in pass.BufferWrites)
+        Span<GpuBuffer> bufferWrites = stackalloc GpuBuffer[StageBindings.MaxStorage];
+        int bufferCount = 0;
+        foreach (BoundName write in bound.BufferWrites)
         {
-            if (!Find(scope, write.Info.Name, out BoundResource bound))
+            if (!Find(scope, write.Binding.Info.Name, out BoundResource written))
             {
                 return false;
             }
 
-            writes[writeCount++] = new GpuBinding(bound.Buffer);
+            bufferWrites[bufferCount++] = written.Buffer;
         }
 
-        Span<GpuBinding> sampled = stackalloc GpuBinding[MaxBindings];
-        Span<GpuTexture> storage = stackalloc GpuTexture[MaxBindings];
-        Span<GpuBuffer> buffers = stackalloc GpuBuffer[MaxBindings];
-        if (!Reads(pass, scope, sampled, storage, buffers))
+        Reads reads = default;
+        if (!reads.Gather(bound, scope, this))
         {
             return false;
         }
@@ -150,60 +207,75 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
             return false;
         }
 
-        GpuCommands commands = gpu.Commands;
-        commands.Push(GpuStage.Compute, constants);
-        commands.BeginComputePass(writes[..writeCount]);
-        commands.BindPipeline(pass.Pipeline);
-        Bind(GpuStage.Compute, sampled[..pass.Sampled.Count], storage[..pass.StorageReads.Count], buffers[..pass.Buffers.Count]);
+        using GpuComputePass compute = gpu.Commands.ComputePass(textureWrites[..textureCount], bufferWrites[..bufferCount]);
+        compute.Constants(constants).Pipeline(pass.Pipeline);
+        reads.Bind(compute, bound);
         if (isIndirect)
         {
-            commands.DispatchIndirect(args.Buffer, (pass.Pass.Dispatch.First + iteration) * 3 * sizeof(uint));
+            compute.DispatchFromBuffer(args.Buffer, (pass.Pass.Dispatch.First + iteration) * 3 * sizeof(uint));
         }
         else
         {
             (uint x, uint y, uint z) = Groups(pass, scope);
-            commands.Dispatch(x, y, z);
+            compute.Dispatch(x, y, z);
         }
 
-        commands.EndComputePass();
         return true;
     }
 
     private bool Fullscreen(ListedPass pass, in RecordScope scope, in FrameConstants constants, uint iteration)
     {
         PassBinding write = pass.TextureWrites[0];
-        Span<GpuBinding> sampled = stackalloc GpuBinding[MaxBindings];
-        Span<GpuTexture> storage = stackalloc GpuTexture[MaxBindings];
-        Span<GpuBuffer> buffers = stackalloc GpuBuffer[MaxBindings];
-        if (!Find(scope, write.Info.Name, out BoundResource target) || !Reads(pass, scope, sampled, storage, buffers))
+        Reads reads = default;
+        if (pass.Bound(GpuStage.Fragment) is not { } bound || !Find(scope, write.Info.Name, out BoundResource target) || !reads.Gather(bound, scope, this))
         {
             return false;
         }
 
         Rectangle area = new(0, 0, (int)Math.Max(1, target.Width >> (int)write.Level), (int)Math.Max(1, target.Height >> (int)write.Level));
-        GpuCommands commands = gpu.Commands;
-        commands.Push(GpuStage.Fragment, constants);
-        commands.BeginRenderPass([new GpuBinding(Texture: target.Texture, Level: write.Level, Layer: LayerOf(pass, write, iteration))], write.Load);
-        commands.SetViewport(area);
-        commands.SetScissor(area);
-        commands.BindPipeline(pass.Pipeline);
-        Bind(GpuStage.Fragment, sampled[..pass.Sampled.Count], storage[..pass.StorageReads.Count], buffers[..pass.Buffers.Count]);
-        commands.Draw(3);
-        commands.EndRenderPass();
+        using GpuRenderPass render = gpu.Commands.RenderPass([new GpuTextureLevel(target.Texture, write.Level, LayerOf(pass, write, iteration))], write.Contents);
+        render.Viewport(area).Scissor(area).Pipeline(pass.Pipeline).Constants(GpuStage.Fragment, constants);
+        reads.Bind(render, GpuStage.Fragment, bound);
+        render.Draw(3);
         return true;
     }
 
     /// <summary>
-    /// A draw pass: one render pass into its targets, at the layer of its iteration when it runs for each of a count, or,
-    /// when it is tiled, over the whole target with each of the frame's tiles emptied first, and nothing at all when
-    /// there are none; then what it draws: the visibility buffer's pieces, a bin at a time, the G-buffer's tiles, a
-    /// resolve bin at a time, transparent pieces farthest first, depth for shadows (an iteration's arguments each), or
-    /// the sky.
+    /// A script pass: its script records into the one texture it writes, the target itself in a target's stage, told
+    /// the texture's format and encoding, which its pipelines are made for.
+    /// </summary>
+    private static bool Script(ListedPass pass, in RecordScope scope)
+    {
+        PassBinding write = pass.TextureWrites[0];
+        if (pass.Script is not { } script || !Find(scope, write.Info.Name, out BoundResource target))
+        {
+            return false;
+        }
+
+        bool isTarget = write.Info.IsTarget;
+        Rectangle area = new(0, 0, (int)Math.Max(1, target.Width), (int)Math.Max(1, target.Height));
+        script.Record(new PipelineScriptContext(
+            scope.Commands,
+            target.Texture,
+            area,
+            isTarget ? scope.TargetFormat : write.Info.Format,
+            isTarget ? scope.TargetEncoding : TargetEncoding.Linear,
+            write.Contents,
+            scope.Now));
+        return true;
+    }
+
+    /// <summary>
+    /// A draw pass: one render pass into its targets, at the layer of its iteration when it runs for each of a count;
+    /// both stages' bindings bound once, every pipeline of the draw being bound alike; then what it draws: the
+    /// visibility buffer's pieces, a bin at a time, the G-buffer's tiles, a resolve bin at a time, transparent pieces
+    /// farthest first, depth for shadows (an iteration's arguments each), or the sky.
     /// </summary>
     private bool Draw(Listing listing, ListedPass pass, in RecordScope scope, in FrameConstants constants, uint iteration)
     {
         PassDraw draw = pass.Pass.Draw;
-        Span<GpuBinding> colors = stackalloc GpuBinding[8];
+        uint layer = pass.Pass.Each.Length > 0 ? iteration : 0;
+        Span<GpuTextureLevel> colors = stackalloc GpuTextureLevel[8];
         Size size = Size.Empty;
         for (int i = 0; i < draw.Colors.Count; i++)
         {
@@ -212,7 +284,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
                 return false;
             }
 
-            colors[i] = new GpuBinding(Texture: color.Texture, Layer: pass.Pass.Each.Length > 0 && !draw.Tiled ? iteration : 0);
+            colors[i] = new GpuTextureLevel(color.Texture, 0, layer);
             size = new Size((int)color.Width, (int)color.Height);
         }
 
@@ -229,75 +301,43 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
             return false;
         }
 
-        size = size.IsEmpty ? new Size((int)depth.Width, (int)depth.Height) : size;
-        Span<GpuBinding> sampled = stackalloc GpuBinding[TexturePools.Count + MaxBindings];
-        Span<GpuTexture> storage = stackalloc GpuTexture[MaxBindings];
-        Span<GpuBuffer> buffers = stackalloc GpuBuffer[PassGraph.PiecesBuffers + MaxBindings];
-        if (!Reads(pass, scope, sampled[TexturePools.Count..], storage, buffers[PassGraph.PiecesBuffers..]))
+        Reads vertexReads = default;
+        Reads fragmentReads = default;
+        if (pass.Bound(GpuStage.Vertex) is not { } vertexBound || pass.Bound(GpuStage.Fragment) is not { } fragmentBound
+            || !vertexReads.Gather(vertexBound, scope, this) || !fragmentReads.Gather(fragmentBound, scope, this))
         {
             return false;
         }
 
-        if (draw.Tiled && scope.Tiles.Count == 0)
-        {
-            return true;
-        }
-
+        size = size.IsEmpty ? new Size((int)depth.Width, (int)depth.Height) : size;
         Rectangle area = new(Point.Empty, size);
-        GpuCommands commands = gpu.Commands;
-        commands.Push(GpuStage.Vertex, constants);
-        commands.Push(GpuStage.Fragment, constants);
-        commands.BeginRenderPass(colors[..draw.Colors.Count], draw.Load, default, depth.Texture, pass.Pass.Each.Length > 0 && !draw.Tiled ? iteration : 0);
-        if (draw.Tiled)
-        {
-            commands.BindPipeline(pass.Clear);
-            foreach (Rectangle tile in scope.Tiles)
-            {
-                commands.SetViewport(tile);
-                commands.SetScissor(tile);
-                commands.Draw(3);
-            }
-        }
-
-        commands.SetViewport(area);
-        commands.SetScissor(area);
-        if (draw.Drawn == PassDrawn.Depth)
-        {
-            BindPieces(instances.Buffer, buffers, pass.Buffers.Count);
-            commands.BindPipeline(pass.Pipeline);
-            commands.DrawIndexedIndirect(args.Buffer, (uint)((draw.First + iteration) * GpuArray<GpuDrawArgs>.RowBytes), 1);
-            commands.EndRenderPass();
-            return true;
-        }
-
-        textures.Bind(sampled);
-        buffers[0] = materials.Records.Buffer;
-        Bind(GpuStage.Fragment, sampled[..(TexturePools.Count + pass.Sampled.Count)], storage[..pass.StorageReads.Count], buffers[..1]);
-        if (pass.Buffers.Count > 0)
-        {
-            gpu.Commands.BindStorageBuffers(GpuStage.Fragment, 1, buffers[PassGraph.PiecesBuffers..(PassGraph.PiecesBuffers + pass.Buffers.Count)]);
-        }
-
+        using GpuRenderPass render = gpu.Commands.RenderPass(colors[..draw.Colors.Count], draw.Contents, default, new GpuTextureLevel(depth.Texture, 0, layer));
+        render.Viewport(area).Scissor(area).Constants(GpuStage.Vertex, constants).Constants(GpuStage.Fragment, constants);
+        vertexReads.Bind(render, GpuStage.Vertex, vertexBound);
+        fragmentReads.Bind(render, GpuStage.Fragment, fragmentBound);
         switch (draw.Drawn)
         {
+            case PassDrawn.Depth:
+                BindPieces(render, instances.Buffer)
+                    .Pipeline(pass.Pipeline)
+                    .DrawIndexedFromBuffer(args.Buffer, (uint)((draw.First + iteration) * GpuArray<GpuDrawArgs>.RowBytes), 1);
+                break;
             case PassDrawn.Visibility:
-                Visibility(listing, pass, scope, args, instances);
+                Visibility(render, listing, pass, scope, args, instances);
                 break;
             case PassDrawn.Surfaces:
-                Resolve(listing, pass, scope, args, instances);
+                Resolve(render, listing, pass, scope, args, instances);
                 break;
             case PassDrawn.Transparent:
-                Transparent(listing, pass, scope);
+                Transparent(render, listing, pass, scope);
                 break;
             case PassDrawn.Sky:
-                Sky(listing, pass, scope);
+                Sky(render, listing, pass, scope);
                 break;
-            case PassDrawn.Depth:
             default:
                 break;
         }
 
-        commands.EndRenderPass();
         return true;
     }
 
@@ -306,9 +346,9 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
     /// fixed bins draw what does not clip, single and double sided; then each surface's bin of clusters and its bin of
     /// cards, which take six indices, not a piece's 96, both with its pipeline.
     /// </summary>
-    private void Visibility(Listing listing, ListedPass pass, in RecordScope scope, BoundResource args, BoundResource instances)
+    private void Visibility(GpuRenderPass render, Listing listing, ListedPass pass, in RecordScope scope, BoundResource args, BoundResource instances)
     {
-        BindPieces(instances.Buffer, [], 0);
+        BindPieces(render, instances.Buffer);
         for (int bin = 0; bin < Materials.FixedRasterBins; bin++)
         {
             DrawBin(new SurfaceKey(Handle<Shader>.None, false, bin == 1), bin);
@@ -328,18 +368,16 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
                 return;
             }
 
-            gpu.Commands.BindPipeline(pipeline);
-            gpu.Commands.DrawIndexedIndirect(args.Buffer, (uint)((pass.Pass.Draw.First + bin) * GpuArray<GpuDrawArgs>.RowBytes), 1);
+            render.Pipeline(pipeline).DrawIndexedFromBuffer(args.Buffer, (uint)((pass.Pass.Draw.First + bin) * GpuArray<GpuDrawArgs>.RowBytes), 1);
         }
     }
 
     /// <summary>
     /// The G-buffer: each resolve bin's tiles with its surface's pipeline, from the arguments the classifying pass counted.
     /// </summary>
-    private void Resolve(Listing listing, ListedPass pass, in RecordScope scope, BoundResource args, BoundResource tiles)
+    private void Resolve(GpuRenderPass render, Listing listing, ListedPass pass, in RecordScope scope, BoundResource args, BoundResource tiles)
     {
-        gpu.Commands.BindVertexBuffers(0, [tiles.Buffer]);
-        gpu.Commands.BindIndexBuffer(pieceIndices, wide: false);
+        BindPieces(render, tiles.Buffer);
         for (int bin = 0; bin < scope.ResolveBins.Count; bin++)
         {
             GpuPipeline pipeline = graph.SurfacePipeline(listing, pass, scope.ResolveBins[bin]);
@@ -348,35 +386,33 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
                 continue;
             }
 
-            gpu.Commands.BindPipeline(pipeline);
-            gpu.Commands.DrawIndexedIndirect(args.Buffer, (uint)(bin * GpuArray<GpuDrawArgs>.RowBytes), 1);
+            render.Pipeline(pipeline).DrawIndexedFromBuffer(args.Buffer, (uint)(bin * GpuArray<GpuDrawArgs>.RowBytes), 1);
         }
     }
 
     /// <summary>
     /// The world's sky, its material's surface or the renderer's own, over what nothing was drawn on.
     /// </summary>
-    private void Sky(Listing listing, ListedPass pass, in RecordScope scope)
+    private void Sky(GpuRenderPass render, Listing listing, ListedPass pass, in RecordScope scope)
     {
         GpuPipeline sky = graph.SurfacePipeline(listing, pass, scope.Sky);
         if (sky != GpuPipeline.None)
         {
-            gpu.Commands.BindPipeline(sky);
-            gpu.Commands.Draw(3);
+            render.Pipeline(sky).Draw(3);
         }
     }
 
     /// <summary>
     /// The view's transparent pieces, farthest instance first, a run of one surface at a time.
     /// </summary>
-    private void Transparent(Listing listing, ListedPass pass, in RecordScope scope)
+    private void Transparent(GpuRenderPass render, Listing listing, ListedPass pass, in RecordScope scope)
     {
         if (scope.TransparentRuns.Count == 0)
         {
             return;
         }
 
-        BindPieces(scope.TransparentPieces, [], 0);
+        BindPieces(render, scope.TransparentPieces);
         GpuPipeline bound = GpuPipeline.None;
         foreach (TransparentRun run in scope.TransparentRuns)
         {
@@ -388,87 +424,19 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
 
             if (pipeline != bound)
             {
-                gpu.Commands.BindPipeline(pipeline);
+                render.Pipeline(pipeline);
                 bound = pipeline;
             }
 
-            gpu.Commands.DrawIndexed(PieceIndexCount, 0, 0, (uint)run.Count, (uint)run.First);
+            render.DrawIndexed(PieceIndexCount, 0, 0, (uint)run.Count, (uint)run.First);
         }
     }
 
     /// <summary>
-    /// Binds pieces to draw: their instance-rate buffer, the indices, and the scene's tables the pieces' vertex stage
-    /// reads, then <paramref name="reads"/> of a pass's own after them.
+    /// Binds pieces to draw: their instance-rate buffer and the indices. The scene's tables their vertex stage reads are
+    /// bound as any stage's reads are.
     /// </summary>
-    private void BindPieces(GpuBuffer pieces, Span<GpuBuffer> reads, int readCount)
-    {
-        GpuCommands commands = gpu.Commands;
-        commands.BindVertexBuffers(0, [pieces]);
-        commands.BindIndexBuffer(pieceIndices, wide: false);
-        commands.BindStorageBuffers(GpuStage.Vertex, 0, [scene.Instances.Buffer, models.Models.Buffer, models.Clusters.Buffer, models.Cards.Buffer, models.Geometry]);
-        if (readCount > 0)
-        {
-            commands.BindStorageBuffers(GpuStage.Vertex, PassGraph.PiecesBuffers, reads[PassGraph.PiecesBuffers..(PassGraph.PiecesBuffers + readCount)]);
-        }
-    }
-
-    private void Bind(GpuStage stage, ReadOnlySpan<GpuBinding> sampled, ReadOnlySpan<GpuTexture> storage, ReadOnlySpan<GpuBuffer> buffers)
-    {
-        if (!sampled.IsEmpty)
-        {
-            gpu.Commands.BindTextures(stage, 0, sampled);
-        }
-
-        if (!storage.IsEmpty)
-        {
-            gpu.Commands.BindStorageTextures(stage, 0, storage);
-        }
-
-        if (!buffers.IsEmpty)
-        {
-            gpu.Commands.BindStorageBuffers(stage, 0, buffers);
-        }
-    }
-
-    /// <summary>
-    /// What the pass reads, sampled textures with the sampler their filter asks for, textures read with none, and buffers;
-    /// false when one is not there yet.
-    /// </summary>
-    private bool Reads(ListedPass pass, in RecordScope scope, Span<GpuBinding> sampled, Span<GpuTexture> storage, Span<GpuBuffer> buffers)
-    {
-        for (int i = 0; i < pass.Sampled.Count; i++)
-        {
-            PassBinding read = pass.Sampled[i];
-            if (!Find(scope, read.Info.Name, out BoundResource bound))
-            {
-                return false;
-            }
-
-            sampled[i] = new GpuBinding(Texture: bound.Texture, Sampler: SamplerOf(read));
-        }
-
-        for (int i = 0; i < pass.StorageReads.Count; i++)
-        {
-            if (!Find(scope, pass.StorageReads[i].Info.Name, out BoundResource bound))
-            {
-                return false;
-            }
-
-            storage[i] = bound.Texture;
-        }
-
-        for (int i = 0; i < pass.Buffers.Count; i++)
-        {
-            if (!Find(scope, pass.Buffers[i].Info.Name, out BoundResource bound))
-            {
-                return false;
-            }
-
-            buffers[i] = bound.Buffer;
-        }
-
-        return true;
-    }
+    private GpuRenderPass BindPieces(GpuRenderPass render, GpuBuffer pieces) => render.VertexBuffers([pieces]).IndexBuffer(pieceIndices, GpuIndexSize.Bits16);
 
     private void Mipmaps(ListedPass pass, in RecordScope scope)
     {
@@ -494,14 +462,27 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
         }
     }
 
-    private GpuSampler SamplerOf(PassBinding read) => read.Filter switch
+    /// <summary>
+    /// The sampler a texture is read through: its own, where the frame binds it with one (the materials' textures), else
+    /// by its filter: nearest for depth and single-channel textures, linear for the rest, unless its filter says.
+    /// </summary>
+    private GpuSampler SamplerOf(ResourceInfo info, in BoundResource resource)
     {
-        PassFilter.Nearest => _nearest,
-        PassFilter.Linear => _linear,
-        PassFilter.Comparison => _comparison,
-        PassFilter.Default => read.Info.IsDepth || read.Info.Format is GpuFormat.R32Float or GpuFormat.R32Uint or GpuFormat.R16Float ? _nearest : _linear,
-        _ => read.Info.IsDepth || read.Info.Format is GpuFormat.R32Float or GpuFormat.R32Uint or GpuFormat.R16Float ? _nearest : _linear,
-    };
+        if (resource.Sampler != GpuSampler.None)
+        {
+            return resource.Sampler;
+        }
+
+        bool isNearest = info.IsDepth || info.Format is GpuFormat.R32Float or GpuFormat.R32Uint or GpuFormat.R16Float;
+        return info.Filter switch
+        {
+            PassFilter.Nearest => _nearest,
+            PassFilter.Linear => _linear,
+            PassFilter.Comparison => _comparison,
+            PassFilter.Default => isNearest ? _nearest : _linear,
+            _ => isNearest ? _nearest : _linear,
+        };
+    }
 
     /// <summary>
     /// How many groups a compute pass runs: enough threads for the view or a texture it writes, one per of a count (rows
@@ -517,11 +498,11 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
         }
 
         bool isView = string.Equals(dispatch.Per, "view", StringComparison.Ordinal);
-        if (isView || dispatch.Per.StartsWith("output:", StringComparison.Ordinal))
+        if (isView || pass.DispatchOutput.Length > 0)
         {
             Vector2 view = scope.Constants.ViewSize;
             (uint width, uint height) = ((uint)view.X, (uint)view.Y);
-            if (!isView && Find(scope, dispatch.Per["output:".Length..], out BoundResource output))
+            if (!isView && Find(scope, pass.DispatchOutput, out BoundResource output))
             {
                 (width, height) = (output.Width, output.Height);
             }
@@ -564,7 +545,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
 
         // Sampled whether or not a pass reads it: the renderer shows the view's Ldr, which no pass does. A texture kept
         // from frame to frame is drawn into once as it is made, to empty its history.
-        GpuTextureUsage usage = created.TextureUsage | (created.Info.IsStorageRead ? GpuTextureUsage.None : GpuTextureUsage.Sampler) | (created.Info.IsDepth ? GpuTextureUsage.DepthTarget : GpuTextureUsage.None)
+        GpuTextureUsage usage = created.TextureUsage | (created.Info.IsStorageRead ? GpuTextureUsage.None : GpuTextureUsage.Sampled) | (created.Info.IsDepth ? GpuTextureUsage.DepthTarget : GpuTextureUsage.None)
             | (create.History ? GpuTextureUsage.ColorTarget : GpuTextureUsage.None);
         return new ResourceKey(false, create.Format, created.Info.Shape, usage, GpuBufferUsage.None, width, height, layers, levels, 0, create.History);
     }
@@ -584,12 +565,107 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Scene scene, Clust
     }
 
     private static uint Ceiling(uint count, uint per) => (Math.Max(1, count) + Math.Max(1, per) - 1) / Math.Max(1, per);
+
+    /// <summary>
+    /// What a stage reads this frame, gathered from what it binds, each at its slot: sampled textures with the sampler
+    /// each is read through, textures read with none, and buffers; false when one is not there yet.
+    /// </summary>
+    private ref struct Reads
+    {
+        private Buffer16<GpuSampledTexture> _sampled;
+        private Buffer8<GpuTexture> _storage;
+        private Buffer8<GpuBuffer> _buffers;
+
+        public bool Gather(StageBindings bound, in RecordScope scope, PassRecorder recorder)
+        {
+            foreach (BoundName read in bound.Sampled)
+            {
+                if (!Find(scope, read.Binding.Info.Name, out BoundResource resource))
+                {
+                    return false;
+                }
+
+                _sampled[(int)read.Slot] = new GpuSampledTexture(resource.Texture, recorder.SamplerOf(read.Binding.Info, resource));
+            }
+
+            foreach (BoundName read in bound.StorageReads)
+            {
+                if (!Find(scope, read.Binding.Info.Name, out BoundResource resource))
+                {
+                    return false;
+                }
+
+                _storage[(int)read.Slot] = resource.Texture;
+            }
+
+            foreach (BoundName read in bound.Buffers)
+            {
+                if (!Find(scope, read.Binding.Info.Name, out BoundResource resource))
+                {
+                    return false;
+                }
+
+                _buffers[(int)read.Slot] = resource.Buffer;
+            }
+
+            return true;
+        }
+
+        public void Bind(GpuRenderPass render, GpuStage stage, StageBindings bound)
+        {
+            if (bound.Sampled.Count > 0)
+            {
+                render.Textures(stage, _sampled[..bound.Sampled.Count]);
+            }
+
+            if (bound.StorageReads.Count > 0)
+            {
+                render.RawTextures(stage, _storage[..bound.StorageReads.Count]);
+            }
+
+            if (bound.Buffers.Count > 0)
+            {
+                render.Buffers(stage, _buffers[..bound.Buffers.Count]);
+            }
+        }
+
+        public void Bind(GpuComputePass compute, StageBindings bound)
+        {
+            if (bound.Sampled.Count > 0)
+            {
+                compute.Textures(_sampled[..bound.Sampled.Count]);
+            }
+
+            if (bound.StorageReads.Count > 0)
+            {
+                compute.RawTextures(_storage[..bound.StorageReads.Count]);
+            }
+
+            if (bound.Buffers.Count > 0)
+            {
+                compute.Buffers(_buffers[..bound.Buffers.Count]);
+            }
+        }
+    }
+
+    [System.Runtime.CompilerServices.InlineArray(StageBindings.MaxSampled)]
+    private struct Buffer16<T>
+    {
+        private T _first;
+    }
+
+    [System.Runtime.CompilerServices.InlineArray(StageBindings.MaxStorage)]
+    private struct Buffer8<T>
+    {
+        private T _first;
+    }
 }
 
 /// <summary>
-/// What a stage records against: the frame's resources and a view's, the constants and counts of the frame or the view,
-/// the surfaces of the raster and resolve bins, the view's transparent pieces and their runs, the sky's surface, and the
-/// tile each run of a tiled draw draws into.
+/// What a stage records against: the frame's resources and a view's, or a target's in a target's stage, the constants
+/// and counts of the frame or the view, the surfaces of the raster and resolve bins, the view's transparent pieces and
+/// their runs, the sky's surface, and what a script is told: the commands, the frame now, and the target's format and
+/// encoding.
 /// </summary>
 internal readonly record struct RecordScope(
     ResourceSet Frame,
@@ -601,7 +677,10 @@ internal readonly record struct RecordScope(
     IReadOnlyList<TransparentRun> TransparentRuns,
     GpuBuffer TransparentPieces,
     SurfaceKey Sky,
-    IReadOnlyList<Rectangle> Tiles);
+    GpuCommands Commands,
+    Frame Now,
+    GpuFormat TargetFormat = GpuFormat.Invalid,
+    TargetEncoding TargetEncoding = TargetEncoding.Linear);
 
 /// <summary>
 /// A run of a view's transparent pieces drawn with one surface's pipeline.
@@ -610,9 +689,9 @@ internal readonly record struct TransparentRun(SurfaceKey Surface, int First, in
 
 /// <summary>
 /// The counts a pass file can name, for how many times a pass runs, how many groups it dispatches and how big a buffer it
-/// makes is: the scene's and the view's, the lights' (the world's light slots, and those a view holds), and the shadows'
-/// (their tables' entries, the pages drawn a frame at most, their groups, and the pool's pages to take). A number names
-/// itself.
+/// makes is: the scene's and the view's (its tiles times its resolve bins, <c>tileEntries</c>, among them), the lights'
+/// (the world's light slots, and those a view holds), and the shadows' (their tables' entries, the pages drawn a frame
+/// at most, their groups, and the pool's pages to take). A number names itself.
 /// </summary>
 internal readonly record struct Counts(
     uint Instances,
@@ -626,9 +705,7 @@ internal readonly record struct Counts(
     uint HizLevels,
     uint Lights,
     uint ZBins,
-    uint LightTiles,
     uint LightTileWords,
-    uint Moved,
     uint GiRays = 0,
     uint GiProbeThreads = 0,
     uint SceneLights = 0,
@@ -645,16 +722,12 @@ internal readonly record struct Counts(
         "clusters" => Clusters,
         "jobs" => Jobs,
         "rasterBins" => RasterBins,
-        "resolveBins" => ResolveBins,
-        "tiles" => Tiles,
         "tileEntries" => Tiles * Math.Max(1, ResolveBins),
         "hizTexels" => HizTexels,
         "hizLevels" => HizLevels,
         "lights" => Lights,
         "zBins" => ZBins,
-        "lightTiles" => LightTiles,
         "lightTileWords" => LightTileWords,
-        "moved" => Moved,
         "giRays" => GiRays,
         "giProbeThreads" => GiProbeThreads,
         "sceneLights" => SceneLights,

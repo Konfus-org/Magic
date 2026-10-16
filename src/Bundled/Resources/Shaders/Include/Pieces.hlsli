@@ -20,7 +20,7 @@
 static const uint PieceTriangles = 32u;
 static const uint CardBit = 0x80000000u;
 
-// Seconds a fade takes (Core's Renderer.FadeSeconds).
+// Seconds a fade in takes.
 static const float FadeSeconds = 0.4;
 
 // The share either side of the distance a model's cards take over from its clusters over which both are drawn, each
@@ -50,6 +50,11 @@ uint ClusterTriangles(GpuCluster cluster)
 uint ClusterSlot(GpuCluster cluster)
 {
     return (cluster.counts >> 17) & 7u;
+}
+
+uint ClusterLevel(GpuCluster cluster)
+{
+    return (cluster.counts >> 20) & 31u;
 }
 
 uint ClusterPieces(GpuCluster cluster)
@@ -112,21 +117,20 @@ float CardTakeover(GpuModel model, GpuSceneInstance instance, float distance)
     }
 
     // A view of half height tanY sees as far as a 60 degree one sees distance * tan(30) / tanY.
-    float tanY = ViewSize.y * 0.5 / LodScale;
+    float tanY = ViewSize.y * 0.5 / PixelScale;
     float seen = distance * tanY / 0.57735027;
     float start = model.cardDistance * instance.maxScale;
     return saturate((seen / start - (1.0 - CardBand)) / (2.0 * CardBand));
 }
 
 // What of a piece is kept as it dissolves, as two thresholds of a pixel's dither: it is kept where the dither is under
-// x and not under y. A fade in raises x, a fade out raises y; a card taking over raises x for the card and y for the
-// clusters, so the two between them draw each pixel once.
+// x and not under y. A fade in raises x; a card taking over raises x for the card and y for the clusters, so the two
+// between them draw each pixel once.
 float2 DissolveOf(GpuSceneInstance instance, float takeover, bool isCard)
 {
     float2 dissolve = float2(1.0, 0.0);
     float progress = FadeProgress(instance);
     dissolve.x = (instance.flags & SceneFadeIn) != 0u ? progress : dissolve.x;
-    dissolve.y = (instance.flags & SceneFadeOut) != 0u ? progress : dissolve.y;
     dissolve.x = isCard ? min(dissolve.x, takeover) : dissolve.x;
     dissolve.y = isCard ? dissolve.y : max(dissolve.y, takeover);
     return dissolve;

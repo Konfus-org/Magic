@@ -1,0 +1,7 @@
+{
+    // The debug UI drawn over each target once every view in it is composed, in the colours the target shows.
+    "stage": "overlay",
+    "kind": "script",
+    "script": { "id": 11710 },
+    "writes": [ { "name": "Target", "contents": "keep" } ]
+}

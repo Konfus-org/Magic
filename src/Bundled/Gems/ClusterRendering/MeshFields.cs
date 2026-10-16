@@ -29,12 +29,18 @@ internal sealed class MeshFields : IDisposable
     public const int CacheVersion = 1;
 
     /// <summary>
+    /// Models whose distance fields are held at once, 64 KB each.
+    /// </summary>
+    public const int Capacity = 1024;
+
+    /// <summary>
     /// Bricks along the atlas's width and height; it is as many bricks deep as its capacity needs.
     /// </summary>
     private const int Across = 8;
 
     /// <summary>
-    /// Texels past a surface its distance is exact to, of the field's coarsest step; and the margin around the model.
+    /// Texels past a surface its distance is exact to, of the field's coarsest step; and the margin around the model. The
+    /// shaders' MeshFieldBand (Probes/GiJobs.hlsli).
     /// </summary>
     private const float Band = 2.5f;
 
@@ -50,7 +56,7 @@ internal sealed class MeshFields : IDisposable
         _assets = assets;
         _caches = caches;
         int deep = Math.Max(1, (capacity + (Across * Across) - 1) / (Across * Across));
-        Atlas = gpu.CreateTexture(new GpuTextureDesc(GpuFormat.R16Float, GpuTextureUsage.Sampler, Across * Resolution, Across * Resolution, 1, (uint)(deep * Resolution), GpuTextureKind.Texture3D));
+        Atlas = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.R16Float, GpuTextureUsage.Sampled, Across * Resolution, Across * Resolution, 1, (uint)(deep * Resolution), GpuTextureKind.Texture3D));
         Table = new GpuArray<GpuMeshField>(gpu, GpuBufferUsage.ComputeRead, Across * Across * deep);
 
         // Slot 0 stands for none, as a mesh row with no field holds.

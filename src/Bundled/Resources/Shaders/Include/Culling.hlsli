@@ -23,9 +23,9 @@ static const uint CountPiecesFirst = 7u;    // of those, the first phase's
 // CullArgs, three uints each: what each indirect pass dispatches by.
 static const uint ArgsClusterCull = 0u;
 static const uint ArgsPieceWrite = 1u;
-static const uint ArgsInstanceRecull = 2u;
+static const uint ArgsInstanceCullSecond = 2u;
 static const uint ArgsClusterRetest = 3u;
-static const uint ArgsClusterRecull = 4u;
+static const uint ArgsClusterCullSecond = 4u;
 static const uint ArgsPieceWriteSecond = 5u;
 
 // Raster bins: the two that do not clip, single-sided then double-sided; a surface's own clusters' from 2, and its
@@ -60,38 +60,25 @@ uint BucketOf(float3 centre)
     return BucketOfDistance(length(centre - PriorityPosition));
 }
 
-// Where a view's depth pyramid's level starts in HiZ, and how many texels it is across and down: level 0 is the depth
-// halved, each after it halved again, rounding up, down to one texel.
-uint2 HiZSize(uint level)
+// How many texels a view's depth pyramid's level is across and down, and where it starts in HiZ: level 0 is the depth
+// halved, each after it halved again, rounding up, down to one texel, each stored after the one before.
+void HiZLevel(uint level, out uint2 size, out uint offset)
 {
-    uint2 size = (uint2)ViewSize;
+    size = (uint2)ViewSize;
+    offset = 0u;
     [loop] for (uint at = 0u; at <= level; at++)
     {
         size = max((size + 1u) / 2u, uint2(1u, 1u));
+        offset += at < level ? size.x * size.y : 0u;
     }
-
-    return size;
-}
-
-uint HiZOffset(uint level)
-{
-    uint offset = 0u;
-    uint2 size = (uint2)ViewSize;
-    [loop] for (uint at = 0u; at < level; at++)
-    {
-        size = max((size + 1u) / 2u, uint2(1u, 1u));
-        offset += size.x * size.y;
-    }
-
-    return offset;
 }
 
 #if defined(HAS_HiZ)
-float HiZAt(uint level, uint2 texel)
+// The depth a level of size texels starting at offset holds at a texel, the level's last past its edge.
+float HiZAt(uint2 size, uint offset, uint2 texel)
 {
-    uint2 size = HiZSize(level);
     texel = min(texel, size - 1u);
-    return asfloat(HiZ.Load((HiZOffset(level) + texel.y * size.x + texel.x) * 4u));
+    return asfloat(HiZ.Load((offset + texel.y * size.x + texel.x) * 4u));
 }
 
 // Whether a sphere is hidden behind what the pyramid holds: its rectangle on screen read at the level where it spans two
@@ -123,7 +110,10 @@ bool IsHidden(float4 clip, float radius)
     uint2 from = (uint2)(first / (float)(1u << level));
     uint2 to = (uint2)(last / (float)(1u << level));
     to = min(to, from + 1u);
-    float farthest = min(min(HiZAt(level, from), HiZAt(level, uint2(to.x, from.y))), min(HiZAt(level, uint2(from.x, to.y)), HiZAt(level, to)));
+    uint2 size;
+    uint offset;
+    HiZLevel(level, size, offset);
+    float farthest = min(min(HiZAt(size, offset, from), HiZAt(size, offset, uint2(to.x, from.y))), min(HiZAt(size, offset, uint2(from.x, to.y)), HiZAt(size, offset, to)));
     float nearest = Near / (clip.w - radius);
     return nearest < farthest;
 }

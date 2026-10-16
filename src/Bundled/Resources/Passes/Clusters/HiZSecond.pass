@@ -1,9 +1,8 @@
 {
-    "stage": "depth",
+    "stage": "visibility",
     "kind": "compute",
     "shader": { "id": 60026 },
     "each": "hizLevels",
-    "reads": [ { "name": "Depth", "filter": "nearest" } ],
     "writes": [ { "name": "HiZ" } ],
     "dispatch": { "args": "HiZArgs" }
 }

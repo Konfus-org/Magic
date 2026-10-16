@@ -3,12 +3,16 @@ using Magic.Interfaces;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// The telemetry: what the engine measures, summed up over the last second (<see cref="Telemetry"/>), a tab per meter and
-/// a header per area, which a click folds away, with an instrument's description shown while the mouse rests on its
-/// lines. It listens only while it is open, so nothing is measured for it otherwise; Copy gives every tab.
+/// The telemetry: what the engine measures, summed up over the last second (<see cref="Telemetry"/>), a tab per entry
+/// of the settings' tabs and a header per meter and area under it, which a click folds away, holding a table of its
+/// rows, a column each for the name, the value, how many or how much a second, and the most, with an instrument's
+/// description shown while the mouse rests on its rows. It listens only while it is open, so nothing is measured for
+/// it otherwise; Copy gives every tab.
 /// </summary>
 internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugToolsSettings settings) : IDisposable
 {
+    private static readonly string[] _columns = ["Name", "Value", "Per second", "Max"];
+
     private readonly Telemetry _telemetry = new(settings);
     private int _tab;
 
@@ -27,15 +31,15 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
         }
 
         _telemetry.Refresh();
-        ReadOnlySpan<string> meters = _telemetry.Meters;
-        if (meters.IsEmpty)
+        ReadOnlySpan<string> tabs = _telemetry.Tabs;
+        if (tabs.IsEmpty)
         {
             ui.Label("Measuring for a second...");
         }
         else
         {
-            ui.Tabs("##meters", ref _tab, meters);
-            Draw(meters[Math.Clamp(_tab, 0, meters.Length - 1)]);
+            ui.Tabs("##tabs", ref _tab, tabs);
+            Draw(tabs[Math.Clamp(_tab, 0, tabs.Length - 1)]);
         }
 
         if (window.IsCopyClicked)
@@ -47,25 +51,34 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
     }
 
     /// <summary>
-    /// <paramref name="meter"/>'s lines, under a header per area.
+    /// <paramref name="tab"/>'s rows, a table under a header per meter and area.
     /// </summary>
-    private void Draw(string meter)
+    private void Draw(string tab)
     {
         IReadOnlyList<TelemetryLine> lines = _telemetry.Lines;
-        string area = string.Empty;
-        bool isUnfolded = true;
+        string header = string.Empty;
+        bool isUnfolded = false;
         for (int i = 0; i < lines.Count; i++)
         {
             TelemetryLine line = lines[i];
-            if (!string.Equals(line.Meter, meter, StringComparison.Ordinal))
+            if (!string.Equals(line.Tab, tab, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            if (!string.Equals(line.Area, area, StringComparison.Ordinal))
+            if (!string.Equals(line.Header, header, StringComparison.Ordinal))
             {
-                area = line.Area;
-                isUnfolded = ui.Header(area);
+                if (isUnfolded)
+                {
+                    ui.EndTable();
+                }
+
+                header = line.Header;
+                isUnfolded = ui.Header(header);
+                if (isUnfolded)
+                {
+                    ui.Table(header, _columns);
+                }
             }
 
             if (!isUnfolded)
@@ -73,11 +86,16 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
                 continue;
             }
 
-            ui.Label(line.Text);
+            ui.Row([line.Name, line.Value, line.Rate, line.Max]);
             if (line.Description is { Length: > 0 } description)
             {
                 ui.Tooltip(description);
             }
+        }
+
+        if (isUnfolded)
+        {
+            ui.EndTable();
         }
     }
 }

@@ -3,22 +3,21 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Reflection;
 using Magic.Contexts.Frames;
-using Magic.Contexts.Threading;
 using Magic.Interfaces;
 using Magic.Services;
 
 namespace Magic.Internal;
 
 /// <summary>
-/// The frames, on two threads. The main thread runs a frame's Update, FixedUpdate and LateUpdate, then hands it to the
-/// render thread for Render and goes on to the next frame; before the next LateUpdate it waits until the render thread
-/// is done, so the render thread runs at most one frame behind and LateUpdate is a point where both hold still: there,
+/// The frames, on two threads. The main thread runs a frame's Update, FixedUpdate and LateUpdate, waits until the render
+/// thread is done with the frame before, runs Sync, then hands the frame to the render thread for Render and goes on to
+/// the next; so the render thread runs at most one frame behind, and Sync is the one point where both hold still: there,
 /// first, the settings changed since the last frame are copied into the gems' objects (<see cref="Settings"/>). The
 /// main thread's phases run each gem's hook in the order the gems were made, Render in reverse, and only on the gems
 /// that implement it. FixedUpdate runs once for every <see cref="FixedStep"/> since the last frame. The frames are
-/// measured on the meter <c>Magic</c>.
+/// measured on the meter <c>Magic.Core</c>.
 /// </summary>
-internal sealed unsafe class FrameLoop : IDisposable
+internal sealed class FrameLoop : IDisposable
 {
     /// <summary>
     /// The time FixedUpdate moves the world on by: 60 steps a second.
@@ -31,20 +30,9 @@ internal sealed unsafe class FrameLoop : IDisposable
     /// </summary>
     private const int MaxFixedSteps = 8;
 
-    /// <summary>
-    /// The bucket boundaries, in seconds, advised to exporters that count a histogram in buckets: fine below a
-    /// millisecond, where most gem hooks fall, with edges at the frame budgets of 240, 144, 120, 60 and 30 frames a
-    /// second. Their own are made for milliseconds, and would put every frame in the first.
-    /// </summary>
-    private static readonly InstrumentAdvice<double> _secondsBuckets = new()
-    {
-        HistogramBucketBoundaries = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30, 0.05, 0.1, 0.25, 0.5, 1],
-    };
-
-    private static readonly Meter _meter = new("Magic");
-    private static readonly Histogram<double> _frameDuration = _meter.CreateHistogram("magic.frame.duration", "s", "Time from one frame's start to the next's.", tags: null, advice: _secondsBuckets);
-    private static readonly Histogram<double> _renderWait = _meter.CreateHistogram("magic.frame.render_wait.duration", "s", "How long the main thread waited for the render thread to finish the frame before, ahead of LateUpdate.", tags: null, advice: _secondsBuckets);
-    private static readonly Histogram<double> _hookDuration = _meter.CreateHistogram("magic.gem.hook.duration", "s", "How long one gem's hook took, tagged with the gem's name and the phase.", tags: null, advice: _secondsBuckets);
+    private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram("magic.core.frame.duration", "s", "Time from one frame's start to the next's.", tags: null, advice: Metrics.FrameBuckets);
+    private static readonly Histogram<double> _renderWait = Metrics.Meter.CreateHistogram("magic.core.frame.render_wait.duration", "s", "How long the main thread waited for the render thread to finish the frame before, ahead of Sync.", tags: null, advice: Metrics.FrameBuckets);
+    private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram("magic.core.gem.hook.duration", "s", "How long one gem's hook took, tagged with the gem's name and the phase.", tags: null, advice: Metrics.FrameBuckets);
     private static readonly string[] _phases = Enum.GetNames<Phase>();
 
     private readonly IGem[] _gems;
@@ -89,7 +77,7 @@ internal sealed unsafe class FrameLoop : IDisposable
     /// </summary>
     private double _fixedSeconds;
 
-    public FrameLoop(IReadOnlyList<IGem> gems, Lifetime lifetime, Threads threads, Events events, Settings settings, ulong frameLimit)
+    public FrameLoop(IReadOnlyList<IGem> gems, Lifetime lifetime, Threads threads, Events events, Settings settings, ulong frameLimit, double startSeconds)
     {
         _gems = [.. gems];
         _names = new string[_gems.Length];
@@ -111,6 +99,8 @@ internal sealed unsafe class FrameLoop : IDisposable
         _settings = settings;
         _frameLimit = frameLimit;
         _renderFrame = RenderFrame;
+        _fixedSeconds = startSeconds;
+        Seconds = startSeconds;
     }
 
     public void Dispose()
@@ -119,13 +109,20 @@ internal sealed unsafe class FrameLoop : IDisposable
     }
 
     /// <summary>
+    /// The frame clock (<see cref="Frame.Seconds"/>) as of the last frame started, from where the run before left
+    /// it when this one goes on from it, else 0: what a run started again goes on from. Main thread.
+    /// </summary>
+    public double Seconds { get; private set; }
+
+    /// <summary>
     /// Runs frames until the run stops or the frame limit is reached, then waits for the last to be rendered. On the main
     /// thread.
     /// </summary>
     public void Run()
     {
         long start = Stopwatch.GetTimestamp();
-        double previousSeconds = 0;
+        double began = Seconds;
+        double previousSeconds = began;
         for (ulong index = 0; !_lifetime.IsStopping; index++)
         {
             if (index == _frameLimit)
@@ -134,7 +131,7 @@ internal sealed unsafe class FrameLoop : IDisposable
                 break;
             }
 
-            double seconds = Stopwatch.GetElapsedTime(start).TotalSeconds;
+            double seconds = began + Stopwatch.GetElapsedTime(start).TotalSeconds;
             Frame frame = new(index, (float)(seconds - previousSeconds), seconds);
             if (index > 0)
             {
@@ -142,42 +139,51 @@ internal sealed unsafe class FrameLoop : IDisposable
             }
 
             previousSeconds = seconds;
+            Seconds = seconds;
             Debugging.Frame = index;
 
             _threads.RunMainWork();
             _events.Deliver();
-            RunPhase(Phase.Update, &Update, frame);
+            RunPhase(Phase.Update, frame);
             RunFixedSteps(frame);
+            RunPhase(Phase.LateUpdate, frame);
             WaitForRender();
             _settings.ApplyChanges();
-            RunPhase(Phase.LateUpdate, &LateUpdate, frame);
+            RunPhase(Phase.Sync, frame);
 
             _rendering = frame;
             _rendered.Reset();
-            _threads.Post(EngineThread.Render, _renderFrame);
+            _threads.HandFrame(_renderFrame);
         }
 
         WaitForRender();
     }
 
-    private static void Update(IGem gem, in Frame frame)
+    /// <summary>
+    /// Calls <paramref name="gem"/>'s hook for <paramref name="phase"/>.
+    /// </summary>
+    private static void Call(IGem gem, Phase phase, in Frame frame)
     {
-        gem.Update(frame);
-    }
-
-    private static void FixedUpdate(IGem gem, in Frame frame)
-    {
-        gem.FixedUpdate(frame);
-    }
-
-    private static void LateUpdate(IGem gem, in Frame frame)
-    {
-        gem.LateUpdate(frame);
-    }
-
-    private static void Render(IGem gem, in Frame frame)
-    {
-        gem.Render(frame);
+        switch (phase)
+        {
+            case Phase.Update:
+                gem.Update(frame);
+                break;
+            case Phase.FixedUpdate:
+                gem.FixedUpdate(frame);
+                break;
+            case Phase.LateUpdate:
+                gem.LateUpdate(frame);
+                break;
+            case Phase.Sync:
+                gem.Sync(frame);
+                break;
+            case Phase.Render:
+                gem.Render(frame);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(phase), phase, "There is no such phase.");
+        }
     }
 
     /// <summary>
@@ -195,7 +201,7 @@ internal sealed unsafe class FrameLoop : IDisposable
             }
 
             _fixedSeconds += FixedStep;
-            RunPhase(Phase.FixedUpdate, &FixedUpdate, frame with { DeltaSeconds = (float)FixedStep, Seconds = _fixedSeconds });
+            RunPhase(Phase.FixedUpdate, frame with { DeltaSeconds = (float)FixedStep, Seconds = _fixedSeconds });
         }
     }
 
@@ -206,7 +212,7 @@ internal sealed unsafe class FrameLoop : IDisposable
     {
         try
         {
-            RunPhase(Phase.Render, &Render, _rendering);
+            RunPhase(Phase.Render, _rendering);
         }
         finally
         {
@@ -226,12 +232,12 @@ internal sealed unsafe class FrameLoop : IDisposable
     }
 
     /// <summary>
-    /// Calls <paramref name="hook"/>, the hook for <paramref name="phase"/>, on every gem that implements it and is still
-    /// in the loop, timing each while something listens. A gem that throws is logged and leaves the frame loop for good,
-    /// on both threads; the frame goes on without it.
+    /// Calls the hook for <paramref name="phase"/> on every gem that implements it and is still in the loop, timing each
+    /// while something listens. A gem that throws is logged and leaves the frame loop for good, on both threads; the
+    /// frame goes on without it.
     /// </summary>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the engine goes on.")]
-    private void RunPhase(Phase phase, delegate*<IGem, in Frame, void> hook, in Frame frame)
+    private void RunPhase(Phase phase, in Frame frame)
     {
         foreach (int i in _hooked[(int)phase])
         {
@@ -244,7 +250,7 @@ internal sealed unsafe class FrameLoop : IDisposable
             long start = timed ? Stopwatch.GetTimestamp() : 0;
             try
             {
-                hook(_gems[i], frame);
+                Call(_gems[i], phase, frame);
             }
             catch (Exception ex)
             {
@@ -256,7 +262,7 @@ internal sealed unsafe class FrameLoop : IDisposable
             // Outside the try: a listener that throws is its own failure, not this gem's.
             if (timed)
             {
-                _hookDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new("magic.gem.name", _names[i]), new("magic.frame.phase", _phases[(int)phase]));
+                _hookDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new("magic.core.gem.name", _names[i]), new("magic.core.frame.phase", _phases[(int)phase]));
             }
         }
     }

@@ -18,20 +18,32 @@ namespace Magic.ConsoleCommands;
 /// console of another kind hands its lines to <see cref="Run"/>. Built in: <c>help</c>, <c>quit</c>, <c>wait</c> and
 /// <c>screenshot</c>.
 /// </summary>
-internal sealed class ConsoleCommandsGem : IGem, ICommands, IDisposable
+internal sealed class ConsoleCommandsGem : IGem, ICommands
 {
-    private readonly Channel<string> _lines = Channel.CreateUnbounded<string>(new() { SingleReader = true, SingleWriter = true });
-    private readonly Dictionary<string, Action<ReadOnlySpan<string>>> _commands = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>
+    /// The lines read from the terminal, the process's rather than a run's: a run started again
+    /// (<see cref="Lifetime.Restart"/>) goes on from where the last left off, so what is piped in is one script for the
+    /// whole process.
+    /// </summary>
+    private static readonly Channel<string> _lines = Channel.CreateUnbounded<string>(new() { SingleReader = true, SingleWriter = true });
+
+    /// <summary>
+    /// Whether the thread reading the terminal has been started, which the first gem made does.
+    /// </summary>
+    private static int _isReading;
+
+    /// <summary>
+    /// Frames left before the lines after a <c>wait</c> run: the process's, as the lines are, so a wait goes on across a
+    /// restart, the frames of the restart itself not counted.
+    /// </summary>
+    private static int _waiting;
+
+    private readonly Dictionary<string, Command> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly IFileSystem _files;
     private readonly Threads _threads;
     private readonly CancellationToken _stopping;
     private readonly IGpu? _gpu;
     private readonly IWindow? _window;
-
-    /// <summary>
-    /// Frames left before the lines after a <c>wait</c> run.
-    /// </summary>
-    private int _waiting;
 
     public ConsoleCommandsGem(Lifetime lifetime, Threads threads, IFileSystem files, IGpu? gpu = null, IWindow? window = null)
     {
@@ -40,21 +52,22 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands, IDisposable
         _stopping = lifetime.Stopping;
         _gpu = gpu;
         _window = window;
-        _commands.Add("help", _ => Help());
-        _commands.Add("quit", _ => lifetime.Stop("quit typed in the terminal"));
-        _commands.Add("wait", Wait);
-        _commands.Add("screenshot", _ => Screenshot());
+        _commands.Add("help", new Command("Lists every command and what it does.", _ => Help()));
+        _commands.Add("quit", new Command("Stops the run.", _ => lifetime.Stop("quit typed in the terminal")));
+        _commands.Add("wait", new Command("Holds the lines after it back for that many frames: wait 100.", Wait));
+        _commands.Add("screenshot", new Command("Saves the window's next image as Screenshots/<time>.png beside Magic.", _ => Screenshot()));
 
-        // A thread of its own rather than a task: a terminal read cannot be cancelled on every OS, so the thread waits in
-        // it until a line comes or the process ends.
-        threads.RunAsync("Terminal input", _ => ReadLines()).FireAndForget();
+        // A thread of its own rather than a task, and a background one: a terminal read cannot be cancelled on every OS,
+        // so the thread waits in it until a line comes or the process ends, through every run of the process.
+        if (Interlocked.Exchange(ref _isReading, 1) == 0)
+        {
+            new Thread(ReadLines) { IsBackground = true, Name = "Terminal input" }.Start();
+        }
     }
 
-    public void Dispose() => _lines.Writer.TryComplete();
-
-    public Subscription Register(string name, Action<ReadOnlySpan<string>> run)
+    public Subscription Register(string name, string description, Action<ReadOnlySpan<string>> run)
     {
-        if (!_commands.TryAdd(name, run))
+        if (!_commands.TryAdd(name, new Command(description, run)))
         {
             throw new ArgumentException($"There is already a command named {name}.", nameof(name));
         }
@@ -70,13 +83,13 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands, IDisposable
             return;
         }
 
-        if (!_commands.TryGetValue(words[0], out Action<ReadOnlySpan<string>>? run))
+        if (!_commands.TryGetValue(words[0], out Command? command))
         {
             Debugging.Warn($"There is no command {words[0]}; help lists them.");
             return;
         }
 
-        run(words.AsSpan(1));
+        command.Run(words.AsSpan(1));
     }
 
     public void Update(in Frame frame)
@@ -155,13 +168,25 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands, IDisposable
     }
 
     /// <summary>
-    /// <c>help</c>: every command's name, in order.
+    /// <c>help</c>: every command's name and what it does, a line each, in order.
     /// </summary>
     private void Help()
     {
         string[] names = [.. _commands.Keys];
         Array.Sort(names, StringComparer.OrdinalIgnoreCase);
-        Debugging.Info($"Commands: {string.Join(", ", names)}");
+        int width = 0;
+        foreach (string name in names)
+        {
+            width = Math.Max(width, name.Length);
+        }
+
+        StringBuilder text = new("Commands:");
+        foreach (string name in names)
+        {
+            text.Append("\n  ").Append(name.PadRight(width)).Append("  ").Append(_commands[name].Description);
+        }
+
+        Debugging.Info(text.ToString());
     }
 
     /// <summary>
@@ -196,7 +221,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands, IDisposable
 
     private async Task SaveAsync(IGpu gpu, IWindow window, string path)
     {
-        Task<Result<GpuImage>> capture = await _threads.InvokeAsync(EngineThread.Render, () => gpu.CaptureAsync(gpu.Target(window)), _stopping).ConfigureAwait(false);
+        Task<Result<GpuImage>> capture = await _threads.InvokeAsync(EngineThread.Render, () => gpu.CaptureAsync(gpu.WindowTarget(window)), _stopping).ConfigureAwait(false);
         Result<GpuImage> image = await capture.ConfigureAwait(false);
         if (!image.Ok)
         {
@@ -215,15 +240,17 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands, IDisposable
         }
     }
 
-    private void ReadLines()
+    private static void ReadLines()
     {
         while (Console.ReadLine() is { } line)
         {
             // Input piped from some shells starts with a byte order mark.
-            if (!_lines.Writer.TryWrite(line.TrimStart('﻿')))
-            {
-                return;
-            }
+            _lines.Writer.TryWrite(line.TrimStart('﻿'));
         }
     }
+
+    /// <summary>
+    /// One command: what <c>help</c> says of it, and what runs with the words typed after its name.
+    /// </summary>
+    private sealed record Command(string Description, Action<ReadOnlySpan<string>> Run);
 }

@@ -36,4 +36,49 @@ uint4 TilesOf(float3 centre, float radius)
     return uint4(first, last);
 }
 
+// The bits of a mask word that are lights first to last.
+uint RangeMask(uint word, uint first, uint last)
+{
+    uint start = word * 32u;
+    bool isOutside = first > last || last < start || first > start + 31u;
+    uint low = max(first, start) - start;
+    uint high = min(last, start + 31u) - start;
+    return isOutside ? 0u : (0xFFFFFFFFu >> (31u - high)) & (0xFFFFFFFFu << low);
+}
+
+#if defined(HAS_LightBins) && defined(HAS_LightTiles)
+// The lights that reach a pixel, as whatever lights it walks them: the first and last of the view's lights that can
+// reach the depths of its z-bin (LightBins), and the words of its tile's mask (LightTiles), of which it visits the bits
+// between the two. The words visited are merged across the wave, as each word's bits are (LightWalkMask), so the walk
+// is the same for every lane; a light a lane did not need gives it nothing, its reach ending where it does.
+struct LightWalk
+{
+    uint first;
+    uint last;
+    uint tileWords;
+    uint firstWord;
+    uint lastWord;
+};
+
+LightWalk LightWalkOf(float2 pixel, float viewDepth)
+{
+    LightWalk walk;
+    uint2 range = LightBins.Load2(ZBinOf(viewDepth) * 8u);
+    walk.first = range.x;
+    walk.last = range.y;
+    uint2 tile = (uint2)pixel / LightTileSize;
+    walk.tileWords = (tile.y * TileCountX + tile.x) * TileWords;
+    walk.firstWord = WaveActiveMin(range.x <= range.y ? range.x >> 5u : 0xFFFFFFFFu);
+    walk.lastWord = WaveActiveMax(range.x <= range.y ? range.y >> 5u : 0u);
+    return walk;
+}
+
+// The lights of a word of the walk that any lane's pixel needs, a bit each: the same for every lane, so the light
+// each bit names is read once for the wave (WaveReadLaneFirst).
+uint LightWalkMask(LightWalk walk, uint word)
+{
+    return WaveActiveBitOr(LightTiles.Load((walk.tileWords + word) * 4u) & RangeMask(word, walk.first, walk.last));
+}
+#endif
+
 #endif

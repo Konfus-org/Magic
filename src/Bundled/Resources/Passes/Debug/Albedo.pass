@@ -1,0 +1,8 @@
+{
+    "description": "The G-buffer's base colour, unlit; black where nothing was drawn.",
+    "stage": "ui",
+    "kind": "fullscreen",
+    "shader": { "id": 11932 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

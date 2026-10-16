@@ -2,8 +2,8 @@ namespace Magic.Contexts.Frames;
 
 /// <summary>
 /// The parts of a frame, in the order they run. Every gem's hook for one phase runs before any gem's hook for the
-/// next, so data flows one way from the start of a frame to its end. The first three run on the main thread; Render
-/// runs on the render thread, alongside the next frame's Update and FixedUpdate.
+/// next, so data flows one way from the start of a frame to its end. The first four run on the main thread; Render
+/// runs on the render thread, alongside the next frame's Update, FixedUpdate and LateUpdate.
 /// </summary>
 public enum Phase
 {
@@ -19,13 +19,20 @@ public enum Phase
     FixedUpdate,
 
     /// <summary>
-    /// Copying what Render will read: the one point where both engine threads hold still, since the render thread has
-    /// finished the frame before. Main thread.
+    /// Preparing what Render will read, into what Render is not reading, as the render thread may still be drawing the
+    /// frame before. Main thread.
     /// </summary>
     LateUpdate,
 
     /// <summary>
-    /// Drawing what LateUpdate copied, submitting and presenting it, and taking in the OS's events. Render thread, from
+    /// The one point where both engine threads hold still, once the render thread has finished the frame before:
+    /// swapping what LateUpdate prepared in for Render to read, and nothing more, as every gem waits on it. The settings
+    /// changed since the last frame are applied just before. Main thread.
+    /// </summary>
+    Sync,
+
+    /// <summary>
+    /// Drawing what Sync swapped in, submitting and presenting it, and taking in the OS's events. Render thread, from
     /// the last gem made to the first.
     /// </summary>
     Render,

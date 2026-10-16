@@ -1,0 +1,11 @@
+{
+    // The grid's haze by metres above the ground: thick in the valleys, thinning over the hills and the city's towers,
+    // and nothing above the mountains.
+    "keys": [
+        { "at": 0, "value": 1 },
+        { "at": 40, "value": 0.6 },
+        { "at": 120, "value": 0.25 },
+        { "at": 300, "value": 0.08 },
+        { "at": 800, "value": 0 }
+    ]
+}

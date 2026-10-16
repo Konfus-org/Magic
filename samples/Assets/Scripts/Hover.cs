@@ -10,11 +10,8 @@ namespace Magic.Samples.Assets.Scripts;
 /// <see cref="Seconds"/>: a script, a behaviour a prefab attaches as <c>{ "id": 3312, "height": 1 }</c>, which sets
 /// its height.
 /// </summary>
-internal sealed class Hover(World world) : IBehavior
+internal sealed class Hover(Entity owner, World world) : IBehavior
 {
-    private readonly World _world = world;
-    private Entity _entity;
-
     /// <summary>
     /// Its height as it spawned, which it rises from.
     /// </summary>
@@ -30,15 +27,14 @@ internal sealed class Hover(World world) : IBehavior
     /// </summary>
     public float Seconds { get; set; } = 2;
 
-    public void Start(Entity entity)
+    public void Start()
     {
-        _entity = entity;
-        _restY = _world.Get<Transform>(entity).Position.Y;
+        _restY = world.Get<Transform>(owner).Position.Y;
     }
 
     public void Update(in Frame frame)
     {
         float rise = (1 - MathF.Cos((float)(frame.Seconds * Math.Tau / Seconds))) / 2;
-        _world.Get<Transform>(_entity).Position.Y = _restY + (Height * rise);
+        world.Get<Transform>(owner).Position.Y = _restY + (Height * rise);
     }
 }

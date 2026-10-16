@@ -69,7 +69,7 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
     {
         _drawn.Clear();
         _seen.Clear();
-        foreach (CameraCopy camera in frame.Snapshot.Cameras)
+        foreach (CameraCopy camera in frame.Copy.Cameras)
         {
             _seen.Add(camera.Entity);
             if (Target(camera.Camera.Target) is not { } target)
@@ -87,12 +87,12 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
             _drawn.Add(view);
         }
 
-        foreach (Entity gone in new List<Entity>(_views.Keys))
+        foreach ((Entity entity, View view) in _views)
         {
-            if (!_seen.Contains(gone))
+            if (!_seen.Contains(entity))
             {
-                _views.Remove(gone, out View? view);
-                view?.Dispose();
+                _views.Remove(entity);
+                view.Dispose();
             }
         }
 
@@ -118,8 +118,8 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
         }
 
         GpuTexture image = Window();
-        Size size = image == GpuTexture.None ? Size.Empty : gpu.Size(image);
-        return size.IsEmpty ? null : new ViewTarget(image, target.Section.AreaIn(size), gpu.Format(image), true);
+        Size size = image == GpuTexture.None ? Size.Empty : gpu.SizeOf(image);
+        return size.IsEmpty ? null : new ViewTarget(image, target.Section.AreaIn(size), gpu.FormatOf(image), true);
     }
 
     /// <summary>
@@ -129,7 +129,7 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
     {
         if (window is not null && _windowTarget == GpuTexture.None)
         {
-            _windowTarget = gpu.Target(window);
+            _windowTarget = gpu.WindowTarget(window);
         }
 
         return _windowTarget;
@@ -148,7 +148,7 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
         uint height = (uint)Math.Max(1, loaded.Value.Height);
         threads.Post(EngineThread.Render, () =>
         {
-            GpuTexture texture = gpu.CreateTexture(new GpuTextureDesc(GpuFormat.Rgba16Float, GpuTextureUsage.Sampler | GpuTextureUsage.ColorTarget, width, height));
+            GpuTexture texture = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.Rgba16Float, GpuTextureUsage.Sampled | GpuTextureUsage.ColorTarget, width, height));
             _renderTextures[handle] = BoundResource.Of(texture, width, height);
         });
     }
@@ -158,12 +158,23 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
 /// What every view is worked out from this frame: the copy of the world, the frame, the scene and its models and
 /// materials, the sky's row, the frame's counts, where the player is, and whether views jitter.
 /// </summary>
-internal readonly record struct ViewFrame(Snapshot Snapshot, Frame Frame, Scene Scene, ClusterPool Models, Materials Materials, int SkyMaterial, Counts Counts, Vector3D? Player, bool Jitters);
+internal readonly record struct ViewFrame(WorldCopy Copy, Frame Frame, Scene Scene, ClusterPool Models, Materials Materials, int SkyMaterial, Counts Counts, Vector3D? Player, bool Jitters);
 
 /// <summary>
 /// Where a view draws: a texture, the rectangle of it, its format, and whether it is a window's.
 /// </summary>
-internal readonly record struct ViewTarget(GpuTexture Texture, Rectangle Area, GpuFormat Format, bool IsWindow);
+internal readonly record struct ViewTarget(GpuTexture Texture, Rectangle Area, GpuFormat Format, bool IsWindow)
+{
+    /// <summary>
+    /// How the view's image is encoded as it is shown: as it is into a render texture, which is linear, and into a
+    /// window as its image's format expects, which is what the window's composition made it.
+    /// </summary>
+    public TargetEncoding Encoding => !IsWindow ? TargetEncoding.Linear
+        : Format is GpuFormat.Rgba8Unorm or GpuFormat.Bgra8Unorm ? TargetEncoding.Srgb
+        : Format == GpuFormat.Rgb10A2Unorm ? TargetEncoding.Pq
+        : Format == GpuFormat.Rgba16Float ? TargetEncoding.ScRgb
+        : TargetEncoding.Linear;
+}
 
 /// <summary>
 /// One camera's view: its resources, kept from frame to frame, the last frame's view-projection and camera position,
@@ -222,21 +233,22 @@ internal sealed class View : IDisposable
 
     /// <summary>
     /// Works out the frame for this view: its sizes, the targets drawn at the size it is drawn at, its constants, and its
-    /// transparent pieces.
+    /// transparent pieces. The size it is shown at is its target's, which the post stage upscales to, unless the output
+    /// filter is nearest: then it is the drawn size, and only the output pass scales, crisply.
     /// </summary>
     public void Prepare(CameraCopy camera, ViewTarget target, ClusterRenderingSettings settings, in ViewFrame frame)
     {
         Target = target;
-        float scale = Math.Clamp(settings.RenderScale, 0.1f, 2);
-        uint width = (uint)Math.Max(1, MathF.Ceiling(target.Area.Width * scale));
-        uint height = (uint)Math.Max(1, MathF.Ceiling(target.Area.Height * scale));
-        Make("Depth", GpuFormat.D32Float, GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampler, width, height);
+        (uint width, uint height) = DrawnSize(target.Area.Width, target.Area.Height, settings.RenderWidth, settings.RenderHeight);
+        // Nearest keeps the low resolution to the output pass, so the post stage runs at the drawn size, not the target's.
+        Vector2 output = settings.OutputFilter == GpuFilter.Nearest ? new Vector2(width, height) : new Vector2(target.Area.Width, target.Area.Height);
+        Make("Depth", GpuFormat.D32Float, GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampled, width, height);
         Make("Visibility", GpuFormat.R32Uint, GpuTextureUsage.ColorTarget | GpuTextureUsage.GraphicsRead | GpuTextureUsage.ComputeRead, width, height);
-        Make("Albedo", GpuFormat.Rgba8Srgb, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler, width, height);
-        Make("Normal", GpuFormat.Rgb10A2Unorm, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler, width, height);
-        Make("Material", GpuFormat.Rgba8Unorm, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler, width, height);
-        Make("Hdr", GpuFormat.Rgba16Float, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler, width, height);
-        Make("Velocity", GpuFormat.Rg16Float, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler, width, height);
+        Make("Albedo", GpuFormat.Rgba8Srgb, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
+        Make("Normal", GpuFormat.Rgb10A2Unorm, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
+        Make("Material", GpuFormat.Rgba8Unorm, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
+        Make("Hdr", GpuFormat.Rgba16Float, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
+        Make("Velocity", GpuFormat.Rg16Float, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
 
         Camera lens = camera.Camera;
         Position = camera.Transform.Position;
@@ -261,7 +273,7 @@ internal sealed class View : IDisposable
         float binScale = Views.ZBinCount / MathF.Log2(Views.ZBinFar / lens.Near);
         uint resolveTiles = (width + Views.ResolveTile - 1) / Views.ResolveTile * ((height + Views.ResolveTile - 1) / Views.ResolveTile);
         (uint hizTexels, uint hizLevels) = HiZOf(width, height);
-        Counts = frame.Counts with { Tiles = resolveTiles, HizTexels = hizTexels, HizLevels = hizLevels, LightTiles = tilesX * tilesY, LightTileWords = tilesX * tilesY * tileWords };
+        Counts = frame.Counts with { Tiles = resolveTiles, HizTexels = hizTexels, HizLevels = hizLevels, LightTileWords = tilesX * tilesY * tileWords };
         Constants = new FrameConstants
         {
             ViewProj = viewProj,
@@ -273,9 +285,9 @@ internal sealed class View : IDisposable
             ProjScale = new Vector2(1 / tanX, 1 / tanY),
             Near = lens.Near,
             Far = lens.Far,
-            SunDirection = frame.Snapshot.Sun?.Direction ?? Vector3.UnitZ,
+            SunDirection = frame.Copy.Sun?.Direction ?? Vector3.UnitZ,
             SunAngularRadius = 0.00465f,
-            SunIlluminance = frame.Snapshot.Sun?.Illuminance ?? Vector3.Zero,
+            SunIlluminance = frame.Copy.Sun?.Illuminance ?? Vector3.Zero,
             LightCount = frame.Counts.Lights,
             FrameIndex = (uint)(frame.Frame.Index % uint.MaxValue),
             TileCountX = tilesX,
@@ -284,17 +296,17 @@ internal sealed class View : IDisposable
             ZBinBias = -MathF.Log2(lens.Near) * binScale,
             ZBinCount = Views.ZBinCount,
             DeltaSeconds = frame.Frame.DeltaSeconds,
-            TargetIsWindow = target.IsWindow ? 1u : 0u,
+            TargetEncoding = (uint)target.Encoding,
             SkyMaterial = (uint)frame.SkyMaterial,
             PrevViewProj = _lastViewProj,
             CameraLow = (Position - high).ToVector3(),
             ClusterError = Math.Clamp(settings.ClusterError, 0.25f, 16),
             CameraMotion = (Position - _lastPosition).ToVector3(),
-            LodScale = height * 0.5f / tanY,
+            PixelScale = height * 0.5f / tanY,
             PriorityPosition = ((frame.Player ?? Position) - Position).ToVector3(),
-            TextureLodScale = frame.Jitters ? MathF.Min(1, scale) : 1,
+            TextureMipScale = frame.Jitters ? MathF.Min(1, height / MathF.Max(1, output.Y)) : 1,
             Jitter = jitter,
-            OutputSize = new Vector2(target.Area.Width, target.Area.Height),
+            OutputSize = output,
         };
 
         _lastViewProj = view * still;
@@ -309,6 +321,18 @@ internal sealed class View : IDisposable
     /// The texels of a view's depth pyramid, the depth halved again and again down to one texel, the farthest of each
     /// four kept, and how many levels it has.
     /// </summary>
+    /// <summary>
+    /// The size a view is drawn at: its target's, or the width and height the settings ask for, one of them alone
+    /// keeping the target's proportions; a pixel at least, and four times the target each way at most.
+    /// </summary>
+    private static (uint Width, uint Height) DrawnSize(float targetWidth, float targetHeight, int wantedWidth, int wantedHeight)
+    {
+        float proportion = targetHeight > 0 ? targetWidth / targetHeight : 1;
+        float width = wantedWidth > 0 ? wantedWidth : wantedHeight > 0 ? wantedHeight * proportion : targetWidth;
+        float height = wantedHeight > 0 ? wantedHeight : wantedWidth > 0 ? wantedWidth / proportion : targetHeight;
+        return ((uint)Math.Clamp(MathF.Ceiling(width), 1, Math.Max(1, MathF.Ceiling(targetWidth * 4))), (uint)Math.Clamp(MathF.Ceiling(height), 1, Math.Max(1, MathF.Ceiling(targetHeight * 4))));
+    }
+
     private static (uint Texels, uint Levels) HiZOf(uint width, uint height)
     {
         uint texels = 0;

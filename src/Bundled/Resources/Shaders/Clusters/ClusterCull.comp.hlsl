@@ -20,7 +20,7 @@ float ErrorPixels(GpuSceneInstance instance, float4 sphere, float error)
 {
     float3 centre = ScenePosition(instance, sphere.xyz);
     float distance = max(length(centre) - sphere.w * instance.maxScale, Near);
-    return error * instance.maxScale * LodScale / distance;
+    return error * instance.maxScale * PixelScale / distance;
 }
 
 void Test(uint slot, uint index, uint bucket, uint mode)
@@ -40,7 +40,7 @@ void Test(uint slot, uint index, uint bucket, uint mode)
     }
 
     float allowed = ClusterError * asfloat(Budget.Load((Buckets + bucket) * 4u));
-    if (ErrorPixels(instance, cluster.lodBounds, cluster.error) > allowed || ErrorPixels(instance, cluster.parentLodBounds, cluster.parentError) <= allowed)
+    if (ErrorPixels(instance, cluster.errorBounds, cluster.error) > allowed || ErrorPixels(instance, cluster.parentErrorBounds, cluster.parentError) <= allowed)
     {
         return;
     }
@@ -59,8 +59,7 @@ void Test(uint slot, uint index, uint bucket, uint mode)
     {
         if (mode == 0u)
         {
-            uint hidden;
-            CullCounts.InterlockedAdd(CountHiddenClusters * 4u, 1u, hidden);
+            uint hidden = WaveAllocate(CullCounts, CountHiddenClusters * 4u, 1u);
             if (hidden < CountOf(HiddenClusters, 8u))
             {
                 HiddenClusters.Store2(hidden * 8u, uint2(slot, index | (bucket << 26)));
@@ -74,8 +73,7 @@ void Test(uint slot, uint index, uint bucket, uint mode)
     float takeover = CardTakeover(model, instance, length(ScenePosition(instance, model.bounds.xyz)));
     uint bin = BinOf(bins, Dissolves(DissolveOf(instance, takeover, false)), false);
     uint pieces = ClusterPieces(cluster);
-    uint at;
-    CullCounts.InterlockedAdd(CountClusters * 4u, 1u, at);
+    uint at = WaveAllocate(CullCounts, CountClusters * 4u, 1u);
     if (at < CountOf(VisibleClusters, 16u))
     {
         VisibleClusters.Store4(at * 16u, uint4(slot, index, bin, pieces));

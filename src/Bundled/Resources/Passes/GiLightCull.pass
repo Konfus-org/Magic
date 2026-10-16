@@ -1,0 +1,8 @@
+{
+    "stage": "probes",
+    "kind": "compute",
+    "shader": { "id": 11331 },
+    "creates": [ { "name": "GiFieldLights", "kind": "buffer", "type": "uint", "stride": 4, "per": "sceneLights", "copies": "2", "seed": "Zeros" } ],
+    "writes": [ { "name": "GiFieldLights" } ],
+    "dispatch": { "per": "sceneLights" }
+}

@@ -8,15 +8,25 @@ using Rectangle = System.Drawing.Rectangle;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A frame's GPU commands, in order, with the bindings and bytes they point into: plain data, which the
-/// <see cref="IGpu"/> provider turns into its API's calls when it submits the frame, and then clears. One method per
-/// command (<see cref="GpuCommandType"/>); the render thread's, as <see cref="IGpu"/> is. A gem records into
-/// <see cref="IGpu.Commands"/> in its Render hook, so what a gem made later records goes on top.
+/// A frame's GPU commands, in order, with the handles and bytes they point into: plain data, which the
+/// <see cref="IGpu"/> provider turns into its API's calls when it submits the frame, and then clears. The render
+/// thread's, as <see cref="IGpu"/> is. A gem records into <see cref="IGpu.Commands"/> in its Render hook, so what a
+/// gem made later records goes on top.
+/// <para>
+/// Drawing and computing happen inside a pass: <see cref="RenderPass"/> and <see cref="ComputePass"/> each hand back
+/// the commands that are legal inside it, which chain, and end the pass when disposed, so a pass is a
+/// <c>using</c> block. Between passes a frame copies, makes mipmaps and names stretches of itself for a GPU debugger
+/// (<see cref="DebugGroup"/>, a <c>using</c> block too).
+/// </para>
 /// </summary>
 public sealed class GpuCommands
 {
     private readonly List<GpuCommand> _commands = [];
-    private readonly List<GpuBinding> _bindings = [];
+    private readonly List<GpuTextureLevel> _levels = [];
+    private readonly List<GpuSampledTexture> _sampled = [];
+    private readonly List<GpuTexture> _textures = [];
+    private readonly List<GpuBuffer> _buffers = [];
+    private readonly List<GpuTextureRegion> _regions = [];
     private readonly List<byte> _bytes = [];
 
     public ReadOnlySpan<GpuCommand> Commands => CollectionsMarshal.AsSpan(_commands);
@@ -24,10 +34,36 @@ public sealed class GpuCommands
     public int Count => _commands.Count;
 
     /// <summary>
-    /// The run of bindings <paramref name="command"/> points at.
+    /// The run of texture levels <paramref name="command"/> points at.
     /// </summary>
-    public ReadOnlySpan<GpuBinding> BindingsOf(in GpuCommand command)
-        => CollectionsMarshal.AsSpan(_bindings).Slice(command.RunStart, command.RunLength);
+    public ReadOnlySpan<GpuTextureLevel> LevelsOf(in GpuCommand command)
+        => CollectionsMarshal.AsSpan(_levels).Slice(command.RunStart, command.RunLength);
+
+    /// <summary>
+    /// The run of sampled textures <paramref name="command"/> points at.
+    /// </summary>
+    public ReadOnlySpan<GpuSampledTexture> SampledOf(in GpuCommand command)
+        => CollectionsMarshal.AsSpan(_sampled).Slice(command.RunStart, command.RunLength);
+
+    /// <summary>
+    /// The run of textures <paramref name="command"/> points at.
+    /// </summary>
+    public ReadOnlySpan<GpuTexture> TexturesOf(in GpuCommand command)
+        => CollectionsMarshal.AsSpan(_textures).Slice(command.RunStart, command.RunLength);
+
+    /// <summary>
+    /// The run of buffers <paramref name="command"/> points at: its second run for a compute pass, whose first is its
+    /// levels.
+    /// </summary>
+    public ReadOnlySpan<GpuBuffer> BuffersOf(in GpuCommand command) => command.Type == GpuCommandType.BeginComputePass
+        ? CollectionsMarshal.AsSpan(_buffers).Slice(command.SecondRunStart, command.SecondRunLength)
+        : CollectionsMarshal.AsSpan(_buffers).Slice(command.RunStart, command.RunLength);
+
+    /// <summary>
+    /// The run of texture regions <paramref name="command"/> points at.
+    /// </summary>
+    public ReadOnlySpan<GpuTextureRegion> RegionsOf(in GpuCommand command)
+        => CollectionsMarshal.AsSpan(_regions).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
     /// The run of bytes <paramref name="command"/> points at.
@@ -38,229 +74,155 @@ public sealed class GpuCommands
     public void Clear()
     {
         _commands.Clear();
-        _bindings.Clear();
+        _levels.Clear();
+        _sampled.Clear();
+        _textures.Clear();
+        _buffers.Clear();
+        _regions.Clear();
         _bytes.Clear();
     }
 
     /// <summary>
-    /// A render pass into <paramref name="colors"/>, each a texture at a mip level and layer (none for a depth-only
-    /// pass), and <paramref name="depth"/> at <paramref name="depthLayer"/> unless it is
-    /// <see cref="GpuTexture.None"/>. <paramref name="load"/> goes for every target: a clear is to
-    /// <paramref name="clear"/>, and depth to 0, reverse-Z's far.
-    /// </summary>
-    public void BeginRenderPass(ReadOnlySpan<GpuBinding> colors, GpuLoad load, Color clear = default, GpuTexture depth = default, uint depthLayer = 0)
-    {
-        (int start, int length) = Add(colors);
-        _commands.Add(new GpuCommand(GpuCommandType.BeginRenderPass, Depth: depth, DepthLayer: depthLayer, Load: load, Clear: clear, RunStart: start, RunLength: length));
-    }
-
-    public void EndRenderPass()
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.EndRenderPass));
-    }
-
-    /// <summary>
-    /// A compute pass that writes <paramref name="writes"/>: buffers, and textures as storage at a mip level and layer.
-    /// </summary>
-    public void BeginComputePass(ReadOnlySpan<GpuBinding> writes)
-    {
-        (int start, int length) = Add(writes);
-        _commands.Add(new GpuCommand(GpuCommandType.BeginComputePass, RunStart: start, RunLength: length));
-    }
-
-    public void EndComputePass()
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.EndComputePass));
-    }
-
-    public void SetViewport(Rectangle area)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.SetViewport, Area: area));
-    }
-
-    public void SetScissor(Rectangle area)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.SetScissor, Area: area));
-    }
-
-    public void BindPipeline(GpuPipeline pipeline)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.BindPipeline, Pipeline: pipeline));
-    }
-
-    public void BindVertexBuffers(uint slot, ReadOnlySpan<GpuBuffer> buffers)
-    {
-        (int start, int length) = Add(buffers);
-        _commands.Add(new GpuCommand(GpuCommandType.BindVertexBuffers, Slot: slot, RunStart: start, RunLength: length));
-    }
-
-    /// <summary>
-    /// The index buffer, of 32-bit indices when <paramref name="wide"/>, else 16-bit.
-    /// </summary>
-    public void BindIndexBuffer(GpuBuffer buffer, bool wide)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.BindIndexBuffer, Buffer: buffer, Wide: wide));
-    }
-
-    /// <summary>
-    /// Read-only storage buffers, from <paramref name="slot"/> on. Slots count a stage's storage buffers alone: the
-    /// first is slot 0, whatever <c>READ(n)</c> it has after the stage's textures (Shaders/Include/Bindings.hlsli).
-    /// </summary>
-    public void BindStorageBuffers(GpuStage stage, uint slot, ReadOnlySpan<GpuBuffer> buffers)
-    {
-        (int start, int length) = Add(buffers);
-        _commands.Add(new GpuCommand(GpuCommandType.BindStorageBuffers, Stage: stage, Slot: slot, RunStart: start, RunLength: length));
-    }
-
-    /// <summary>
-    /// Read-only storage textures, from <paramref name="slot"/> on. Slots count a stage's storage textures alone: the
-    /// first is slot 0, whatever <c>READ(n)</c> it has after the stage's sampled textures.
-    /// </summary>
-    public void BindStorageTextures(GpuStage stage, uint slot, ReadOnlySpan<GpuTexture> textures)
-    {
-        int start = _bindings.Count;
-        foreach (GpuTexture texture in textures)
-        {
-            _bindings.Add(new GpuBinding(Texture: texture));
-        }
-
-        _commands.Add(new GpuCommand(GpuCommandType.BindStorageTextures, Stage: stage, Slot: slot, RunStart: start, RunLength: textures.Length));
-    }
-
-    /// <summary>
-    /// Sampled textures, each with its sampler, from <paramref name="slot"/> on: slot n is <c>READ(n)</c> with
-    /// <c>SAMPLER(n)</c>.
-    /// </summary>
-    public void BindTextures(GpuStage stage, uint slot, ReadOnlySpan<GpuBinding> textures)
-    {
-        (int start, int length) = Add(textures);
-        _commands.Add(new GpuCommand(GpuCommandType.BindTextures, Stage: stage, Slot: slot, RunStart: start, RunLength: length));
-    }
-
-    /// <summary>
-    /// The stage's one constant block (<c>UNIFORM(0)</c>), copied now; a struct laid out as the <c>cbuffer</c> is, in
-    /// whole 16-byte rows.
-    /// </summary>
-    public void Push<T>(GpuStage stage, in T constants)
-        where T : unmanaged
-    {
-        int start = _bytes.Count;
-        _bytes.AddRange(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)));
-        _commands.Add(new GpuCommand(GpuCommandType.PushConstants, Stage: stage, RunStart: start, RunLength: Unsafe.SizeOf<T>()));
-    }
-
-    public void Draw(uint vertices, uint instances = 1, uint firstVertex = 0, uint firstInstance = 0)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.Draw, Count: vertices, Instances: instances, First: firstVertex, FirstInstance: firstInstance));
-    }
-
-    public void DrawIndexed(uint indices, uint firstIndex = 0, int vertexOffset = 0, uint instances = 1, uint firstInstance = 0)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.DrawIndexed, Count: indices, First: firstIndex, VertexOffset: vertexOffset, Instances: instances, FirstInstance: firstInstance));
-    }
-
-    /// <summary>
-    /// <paramref name="count"/> indexed draws, their arguments read from <paramref name="arguments"/> at
-    /// <paramref name="offset"/>, 20 bytes each: indices, instances, first index, vertex offset, first instance.
-    /// </summary>
-    public void DrawIndexedIndirect(GpuBuffer arguments, uint offset, uint count)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.DrawIndexedIndirect, Buffer: arguments, Offset: offset, Count: count));
-    }
-
-    public void Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.Dispatch, GroupsX: groupsX, GroupsY: groupsY, GroupsZ: groupsZ));
-    }
-
-    /// <summary>
-    /// The groups read from <paramref name="arguments"/> at <paramref name="offset"/>: three <c>uint</c>s.
-    /// </summary>
-    public void DispatchIndirect(GpuBuffer arguments, uint offset = 0)
-    {
-        _commands.Add(new GpuCommand(GpuCommandType.DispatchIndirect, Buffer: arguments, Offset: offset));
-    }
-
-    /// <summary>
-    /// Copies <paramref name="width"/> by <paramref name="height"/> texels from the corner of one level and layer of a
-    /// texture into another's, of the same format; outside any pass.
-    /// </summary>
-    public void CopyTexture(GpuBinding source, GpuBinding destination, uint width, uint height)
-    {
-        int start = _bindings.Count;
-        _bindings.Add(source);
-        _bindings.Add(destination);
-        _commands.Add(new GpuCommand(GpuCommandType.CopyTexture, Area: new Rectangle(0, 0, (int)width, (int)height), RunStart: start, RunLength: 2));
-    }
-
-    /// <summary>
-    /// Copies <paramref name="bytes"/> from one buffer to another; outside any pass.
-    /// </summary>
-    public void CopyBuffer(GpuBuffer source, uint sourceOffset, GpuBuffer destination, uint destinationOffset, uint bytes)
-    {
-        int start = _bindings.Count;
-        _bindings.Add(new GpuBinding(source));
-        _bindings.Add(new GpuBinding(destination));
-        _commands.Add(new GpuCommand(GpuCommandType.CopyBuffer, First: sourceOffset, Offset: destinationOffset, Count: bytes, RunStart: start, RunLength: 2));
-    }
-
-    /// <summary>
-    /// Draws a whole level of a layer of one texture into another's, scaled to fit and filtered; outside any pass. The
-    /// destination may be a window's target, the source never.
-    /// </summary>
-    public void Blit(GpuBinding source, GpuBinding destination, GpuFilter filter)
-    {
-        int start = _bindings.Count;
-        _bindings.Add(source);
-        _bindings.Add(destination);
-        _commands.Add(new GpuCommand(GpuCommandType.Blit, Slot: (uint)filter, RunStart: start, RunLength: 2));
-    }
-
-    /// <summary>
-    /// Makes every level of <paramref name="texture"/> past the first from the one before, each layer alone; outside any
-    /// pass. The texture is sampled and drawn into (<see cref="GpuTextureUsage.Sampler"/> and
-    /// <see cref="GpuTextureUsage.ColorTarget"/>).
-    /// </summary>
-    public void GenerateMipmaps(GpuTexture texture)
-    {
-        int start = _bindings.Count;
-        _bindings.Add(new GpuBinding(Texture: texture));
-        _commands.Add(new GpuCommand(GpuCommandType.GenerateMipmaps, RunStart: start, RunLength: 1));
-    }
-
-    /// <summary>
     /// Starts a group a GPU debugger (RenderDoc, PIX, Xcode) shows the commands after it under, named
-    /// <paramref name="name"/>, until <see cref="PopDebugGroup"/>; outside any pass. Allocates nothing.
+    /// <paramref name="name"/>, until the group is disposed; outside any pass. Allocates nothing.
     /// </summary>
-    public void PushDebugGroup(string name)
+    public GpuDebugGroup DebugGroup(string name)
     {
         int start = _bytes.Count;
         int length = Encoding.UTF8.GetByteCount(name);
         CollectionsMarshal.SetCount(_bytes, start + length);
         Encoding.UTF8.GetBytes(name, CollectionsMarshal.AsSpan(_bytes)[start..]);
-        _commands.Add(new GpuCommand(GpuCommandType.PushDebugGroup, RunStart: start, RunLength: length));
+        _commands.Add(new GpuCommand(GpuCommandType.BeginDebugGroup, RunStart: start, RunLength: length));
+        return new GpuDebugGroup(this);
     }
 
-    public void PopDebugGroup()
+    /// <summary>
+    /// Starts a render pass into <paramref name="colors"/> (none for a depth-only pass) and <paramref name="depth"/>
+    /// unless its texture is <see cref="GpuTexture.None"/>, each one level of one layer. <paramref name="contents"/>
+    /// goes for every target: a clear is to <paramref name="clear"/>, and depth to 0, reverse-Z's far. The pass ends
+    /// when what is handed back is disposed.
+    /// </summary>
+    public GpuRenderPass RenderPass(ReadOnlySpan<GpuTextureLevel> colors, GpuContents contents, Color clear = default, GpuTextureLevel depth = default)
     {
-        _commands.Add(new GpuCommand(GpuCommandType.PopDebugGroup));
+        int start = _levels.Count;
+        _levels.AddRange(colors);
+        _commands.Add(new GpuCommand(GpuCommandType.BeginRenderPass, Depth: depth, Contents: contents, Clear: clear, RunStart: start, RunLength: colors.Length));
+        return new GpuRenderPass(this);
     }
 
-    private (int Start, int Length) Add(ReadOnlySpan<GpuBinding> bindings)
+    /// <summary>
+    /// Starts a compute pass that writes <paramref name="textures"/>, each one level of one layer, and
+    /// <paramref name="buffers"/>. The pass ends when what is handed back is disposed.
+    /// </summary>
+    public GpuComputePass ComputePass(ReadOnlySpan<GpuTextureLevel> textures, ReadOnlySpan<GpuBuffer> buffers)
     {
-        int start = _bindings.Count;
-        _bindings.AddRange(bindings);
-        return (start, bindings.Length);
+        int levelStart = _levels.Count;
+        _levels.AddRange(textures);
+        int bufferStart = _buffers.Count;
+        _buffers.AddRange(buffers);
+        _commands.Add(new GpuCommand(GpuCommandType.BeginComputePass, RunStart: levelStart, RunLength: textures.Length, SecondRunStart: bufferStart, SecondRunLength: buffers.Length));
+        return new GpuComputePass(this);
     }
 
-    private (int Start, int Length) Add(ReadOnlySpan<GpuBuffer> buffers)
+    /// <summary>
+    /// Copies the texels of <paramref name="from"/> (its size, the whole level where it says 0) into
+    /// <paramref name="to"/>, from its corner, between textures of the same format; outside any pass.
+    /// </summary>
+    public GpuCommands CopyTexture(in GpuTextureRegion from, in GpuTextureRegion to)
     {
-        int start = _bindings.Count;
-        foreach (GpuBuffer buffer in buffers)
-        {
-            _bindings.Add(new GpuBinding(buffer));
-        }
-
-        return (start, buffers.Length);
+        int start = _regions.Count;
+        _regions.Add(from);
+        _regions.Add(to);
+        _commands.Add(new GpuCommand(GpuCommandType.CopyTexture, RunStart: start, RunLength: 2));
+        return this;
     }
+
+    /// <summary>
+    /// Copies <paramref name="bytes"/> from <paramref name="from"/> at <paramref name="fromOffset"/> to
+    /// <paramref name="to"/> at <paramref name="toOffset"/>; outside any pass.
+    /// </summary>
+    public GpuCommands CopyBuffer(GpuBuffer from, uint fromOffset, GpuBuffer to, uint toOffset, uint bytes)
+    {
+        int start = _buffers.Count;
+        _buffers.Add(from);
+        _buffers.Add(to);
+        _commands.Add(new GpuCommand(GpuCommandType.CopyBuffer, First: fromOffset, Offset: toOffset, Count: bytes, RunStart: start, RunLength: 2));
+        return this;
+    }
+
+    /// <summary>
+    /// Makes every level of <paramref name="texture"/> past the first from the one before, each layer alone; outside any
+    /// pass. The texture is sampled and drawn into (<see cref="GpuTextureUsage.Sampled"/> and
+    /// <see cref="GpuTextureUsage.ColorTarget"/>).
+    /// </summary>
+    public GpuCommands GenerateMipmaps(GpuTexture texture)
+    {
+        _commands.Add(new GpuCommand(GpuCommandType.GenerateMipmaps, Texture: texture));
+        return this;
+    }
+
+    internal void EndDebugGroup() => _commands.Add(new GpuCommand(GpuCommandType.EndDebugGroup));
+
+    internal void EndRenderPass() => _commands.Add(new GpuCommand(GpuCommandType.EndRenderPass));
+
+    internal void EndComputePass() => _commands.Add(new GpuCommand(GpuCommandType.EndComputePass));
+
+    internal void Viewport(Rectangle area) => _commands.Add(new GpuCommand(GpuCommandType.Viewport, Area: area));
+
+    internal void Scissor(Rectangle area) => _commands.Add(new GpuCommand(GpuCommandType.Scissor, Area: area));
+
+    internal void Pipeline(GpuPipeline pipeline) => _commands.Add(new GpuCommand(GpuCommandType.Pipeline, Pipeline: pipeline));
+
+    internal void VertexBuffers(ReadOnlySpan<GpuBuffer> buffers)
+    {
+        int start = _buffers.Count;
+        _buffers.AddRange(buffers);
+        _commands.Add(new GpuCommand(GpuCommandType.VertexBuffers, RunStart: start, RunLength: buffers.Length));
+    }
+
+    internal void IndexBuffer(GpuBuffer buffer, GpuIndexSize size) => _commands.Add(new GpuCommand(GpuCommandType.IndexBuffer, Buffer: buffer, IndexSize: size));
+
+    internal void Buffers(GpuStage stage, ReadOnlySpan<GpuBuffer> buffers)
+    {
+        int start = _buffers.Count;
+        _buffers.AddRange(buffers);
+        _commands.Add(new GpuCommand(GpuCommandType.Buffers, Stage: stage, RunStart: start, RunLength: buffers.Length));
+    }
+
+    internal void RawTextures(GpuStage stage, ReadOnlySpan<GpuTexture> textures)
+    {
+        int start = _textures.Count;
+        _textures.AddRange(textures);
+        _commands.Add(new GpuCommand(GpuCommandType.RawTextures, Stage: stage, RunStart: start, RunLength: textures.Length));
+    }
+
+    internal void Textures(GpuStage stage, ReadOnlySpan<GpuSampledTexture> textures)
+    {
+        int start = _sampled.Count;
+        _sampled.AddRange(textures);
+        _commands.Add(new GpuCommand(GpuCommandType.Textures, Stage: stage, RunStart: start, RunLength: textures.Length));
+    }
+
+    internal void Constants<T>(GpuStage stage, in T constants)
+        where T : unmanaged
+    {
+        int start = _bytes.Count;
+        _bytes.AddRange(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)));
+        _commands.Add(new GpuCommand(GpuCommandType.Constants, Stage: stage, RunStart: start, RunLength: Unsafe.SizeOf<T>()));
+    }
+
+    internal void Draw(uint vertices, uint instances, uint firstVertex, uint firstInstance)
+        => _commands.Add(new GpuCommand(GpuCommandType.Draw, Count: vertices, Instances: instances, First: firstVertex, FirstInstance: firstInstance));
+
+    internal void DrawIndexed(uint indices, uint firstIndex, int vertexOffset, uint instances, uint firstInstance)
+        => _commands.Add(new GpuCommand(GpuCommandType.DrawIndexed, Count: indices, First: firstIndex, VertexOffset: vertexOffset, Instances: instances, FirstInstance: firstInstance));
+
+    internal void DrawIndexedFromBuffer(GpuBuffer arguments, uint offset, uint count)
+        => _commands.Add(new GpuCommand(GpuCommandType.DrawIndexedFromBuffer, Buffer: arguments, Offset: offset, Count: count));
+
+    internal void Dispatch(uint groupsX, uint groupsY, uint groupsZ)
+        => _commands.Add(new GpuCommand(GpuCommandType.Dispatch, GroupsX: groupsX, GroupsY: groupsY, GroupsZ: groupsZ));
+
+    internal void DispatchFromBuffer(GpuBuffer arguments, uint offset)
+        => _commands.Add(new GpuCommand(GpuCommandType.DispatchFromBuffer, Buffer: arguments, Offset: offset));
 }

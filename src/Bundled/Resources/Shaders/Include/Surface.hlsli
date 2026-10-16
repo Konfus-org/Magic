@@ -10,7 +10,7 @@
 //
 // Members of MaterialParams may be float/int/uint/bool, their 2..4 vectors, Color, or TextureRef. A member may
 // carry a default ("= float4(1, 1, 1, 1)") and a role for global illumination (": GiColor", ": GiColorMap",
-// ": GiEmissive"); the renderer reads both and strips them before the compiler sees the struct. It packs a
+// ": GiMetallic", ": GiEmissive"); the renderer reads both and strips them before the compiler sees the struct. It packs a
 // material's values and generates their loader, so the layout is never written by hand.
 //
 // A TextureRef names a texture the renderer resolved, or is TextureNone for "no texture" (the surface's factor

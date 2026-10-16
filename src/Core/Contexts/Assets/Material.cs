@@ -50,8 +50,9 @@ public enum MaterialType : byte
 /// <summary>
 /// One material parameter, whatever its type in the shader, whose declaration says which part is read: a scalar is
 /// <see cref="X"/> (a bool is non-zero), a vector <see cref="X"/> to <see cref="W"/>, a colour <see cref="R"/> to
-/// <see cref="A"/>, a texture <see cref="Texture"/> or <see cref="RenderTexture"/>. In a file: <c>{ "x": 0.8 }</c>,
-/// <c>{ "r": 1, "g": 0.5, "b": 0, "a": 1 }</c>, <c>{ "texture": { "id": 36 } }</c>; what it leaves out is 0 or none.
+/// <see cref="A"/>, a texture <see cref="Texture"/> or <see cref="RenderTexture"/>, a curve <see cref="Curve"/>. In a
+/// file: <c>{ "x": 0.8 }</c>, <c>{ "r": 1, "g": 0.5, "b": 0, "a": 1 }</c>, <c>{ "texture": { "id": 36 } }</c>,
+/// <c>{ "curve": { "id": 3364 } }</c>; what it leaves out is 0 or none, and a curve left out the default curve.
 /// </summary>
 public sealed class MaterialParam
 {
@@ -77,4 +78,6 @@ public sealed class MaterialParam
     /// A texture a camera draws into, sampled in place of <see cref="Texture"/>.
     /// </summary>
     public Handle<RenderTexture> RenderTexture { get; set; }
+
+    public Handle<Curve> Curve { get; set; }
 }

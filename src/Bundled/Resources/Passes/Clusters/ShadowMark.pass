@@ -1,14 +1,7 @@
 {
-    "stage": "occlusion",
+    "stage": "shadows",
     "kind": "compute",
     "shader": { "id": 60041 },
-    "reads": [
-        { "name": "Depth", "filter": "nearest" },
-        { "name": "SunClipmap" },
-        { "name": "Lights" },
-        { "name": "LightBins" },
-        { "name": "LightTiles" }
-    ],
     "writes": [ { "name": "ShadowTables" } ],
     "dispatch": { "per": "view" }
 }

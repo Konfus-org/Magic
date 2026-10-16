@@ -1,7 +1,0 @@
-{
-    "stage": "occlusion",
-    "kind": "draw",
-    "shader": { "id": 60048 },
-    "reads": [ { "name": "ShadowViews" }, { "name": "SunClipmap" } ],
-    "draw": { "drawn": "depth", "depth": "ShadowPool", "load": "load", "args": "ShadowArgs", "first": 0, "instances": "ShadowPieces", "depthCompare": "always" }
-}

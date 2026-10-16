@@ -1,8 +1,7 @@
 {
-    "stage": "occlusion",
+    "stage": "shadows",
     "kind": "compute",
     "shader": { "id": 60040 },
-    "reads": [ { "name": "SunClipmap" } ],
     "creates": [
         { "name": "ShadowArgs", "kind": "buffer", "type": "uint", "stride": 4, "rows": 18 },
         { "name": "ShadowCounts", "kind": "buffer", "type": "uint", "stride": 4, "rows": 4, "seed": "Zeros" },

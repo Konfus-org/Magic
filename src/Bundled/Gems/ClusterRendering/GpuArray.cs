@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Gpu;
 using Magic.Interfaces;
@@ -49,7 +50,7 @@ internal sealed class GpuArray<T> : IDisposable
         _gpu.Release(Buffer);
     }
 
-    public static int RowBytes => Marshal.SizeOf<T>();
+    public static int RowBytes => Unsafe.SizeOf<T>();
 
     public GpuBuffer Buffer { get; private set; }
 

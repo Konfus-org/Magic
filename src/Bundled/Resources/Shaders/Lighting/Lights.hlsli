@@ -87,13 +87,15 @@ float SpotAttenuation(float3 l, float3 forward, float2 scaleOffset)
 // The sun, or any light infinitely far: forward is the way it shines (its entity's +Z), illuminance its lux times its
 // colour, and angularRadius its disc's half-angle in radians (the sun's is 0.00465). The highlight looks toward the
 // point of the disc nearest the reflection (Lagarde & de Rousiers 2014), so a smooth surface shows the disc rather
-// than a pinpoint.
+// than a pinpoint, and its lobe widens by the disc as a sphere light's does by the sphere, scaled back to keep its
+// energy, so a mirror's glint is no brighter than the sun.
 LightSample DirectionalLight(Shading shading, float3 forward, float3 illuminance, float angularRadius)
 {
     LightSample light;
     light.l = -forward;
     light.illuminance = illuminance;
-    light.specularScale = 1.0;
+    float widened = saturate(shading.alpha + tan(angularRadius) / 3.0);
+    light.specularScale = Pow2(shading.alpha / max(widened, 1e-4));
 
     float3 reflected = reflect(-shading.view, shading.normal);
     float cosRadius = cos(angularRadius);
@@ -123,16 +125,6 @@ LightSample SphereLight(Shading shading, float3 toLight, float3 intensity, float
 }
 
 // The luminance a surface sends toward the viewer from one light, before that light's shadowing.
-// The bits of a mask word that are lights first to last.
-uint RangeMask(uint word, uint first, uint last)
-{
-    uint start = word * 32u;
-    bool isOutside = first > last || last < start || first > start + 31u;
-    uint low = max(first, start) - start;
-    uint high = min(last, start + 31u) - start;
-    return isOutside ? 0u : (0xFFFFFFFFu >> (31u - high)) & (0xFFFFFFFFu << low);
-}
-
 float3 ShadeLight(Shading shading, LightSample light)
 {
     float nolCentre = dot(shading.normal, light.l);

@@ -6,19 +6,19 @@
 #include "Include/Math.hlsli"
 
 // Texels a side of the mip read, and threads in the group.
-#define FACE_SIZE 16u
-#define THREADS 64u
+static const uint FaceSize = 16u;
+static const uint Threads = 64u;
 
-groupshared float3 Sums[THREADS][9];
+groupshared float3 Sums[Threads][9];
 
-[numthreads(THREADS, 1, 1)]
+[numthreads(64, 1, 1)]
 void main(uint thread : SV_GroupIndex)
 {
     float width;
     float height;
     float levels;
     SkyCube.GetDimensions(0u, width, height, levels);
-    float level = clamp(log2(width / (float)FACE_SIZE), 0.0, levels - 1.0);
+    float level = clamp(log2(width / (float)FaceSize), 0.0, levels - 1.0);
 
     float3 sums[9];
     [unroll] for (uint i = 0u; i < 9u; i++)
@@ -26,13 +26,13 @@ void main(uint thread : SV_GroupIndex)
         sums[i] = float3(0.0, 0.0, 0.0);
     }
 
-    for (uint texel = thread; texel < 6u * FACE_SIZE * FACE_SIZE; texel += THREADS)
+    for (uint texel = thread; texel < 6u * FaceSize * FaceSize; texel += Threads)
     {
-        uint face = texel / (FACE_SIZE * FACE_SIZE);
-        uint inFace = texel % (FACE_SIZE * FACE_SIZE);
-        float2 uv = (float2(inFace % FACE_SIZE, inFace / FACE_SIZE) + 0.5) / (float)FACE_SIZE;
+        uint face = texel / (FaceSize * FaceSize);
+        uint inFace = texel % (FaceSize * FaceSize);
+        float2 uv = (float2(inFace % FaceSize, inFace / FaceSize) + 0.5) / (float)FaceSize;
         float2 st = uv * 2.0 - 1.0;
-        float solidAngle = 4.0 / (Pow2((float)FACE_SIZE) * pow(1.0 + dot(st, st), 1.5));
+        float solidAngle = 4.0 / (Pow2((float)FaceSize) * pow(1.0 + dot(st, st), 1.5));
         float3 direction = CubeDirection(face, uv);
         float3 radiance = SkyCube.SampleLevel(SkyCubeSampler, direction, level).rgb * solidAngle;
         sums[0] += radiance * 0.282095;
@@ -55,7 +55,7 @@ void main(uint thread : SV_GroupIndex)
     [branch] if (thread < 9u)
     {
         float3 total = float3(0.0, 0.0, 0.0);
-        for (uint other = 0u; other < THREADS; other++)
+        for (uint other = 0u; other < Threads; other++)
         {
             total += Sums[other][thread];
         }

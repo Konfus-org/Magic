@@ -12,31 +12,55 @@ namespace Magic.ClusterRendering;
 /// The scene as the GPU draws it, kept up to date from the <see cref="Snapshot"/>'s changes rather than rebuilt: a row
 /// per entity slot (<see cref="GpuSceneInstance"/>) naming its model's row and its material slots' rows, which are made
 /// the first time they are asked for and never change as what they name loads, so an instance is written when it
-/// changes and at no other time. Everything else, which clusters of it to draw and how finely, whether it is seen at all,
-/// how far through a fade it is, the GPU works out each frame from these rows. Render thread.
+/// changes, once more when what it draws can be drawn, and at no other time. Everything else, which clusters of it to
+/// draw and how finely, whether it is seen at all, how far through a fade it is, the GPU works out each frame from these
+/// rows. Render thread.
 /// <para>
 /// An instance's row holds where it was the frame before as well, for velocity: when it changes the old place is kept as
-/// that, and the frame after, unless it changed again, its row is written once more with the two the same. A fade
-/// (<see cref="Renderer.Fade"/>) is written as the time it started, which the GPU dissolves it by. Transparent surfaces
+/// that, and the frame after, unless it changed again, its row is written once more with the two the same. A fade is
+/// written as the time it started, which the GPU dissolves it by. Transparent surfaces
 /// are drawn forward, farthest first, so the instances with any are kept apart for the views to sort
 /// (<see cref="Transparent"/>). A model or material no instance uses any more is let go as the frame's changes are taken
 /// in, so what is not drawn is not kept.
+/// </para>
+/// <para>
+/// The instances that draw the same model with the same materials share a <see cref="Look"/>, and what follows from it,
+/// their material slots' rows, whether any is transparent and why they are drawn as the failure, is worked out once for
+/// all of them, so writing an instance costs its transform. A model or material that only comes in changes no row; one
+/// that fails is passed on to its looks' instances.
+/// </para>
+/// <para>
+/// Nothing pops in. A look is drawn once it can be drawn as it should be, its model and its cards' atlases in and each
+/// of its materials drawn (<see cref="ClusterPool.IsDrawable"/>, <see cref="Materials.IsShown"/>), and from then on;
+/// until it is, its instances' rows are empty, so nothing of them is drawn, casts or is in the field global illumination
+/// traces. One that waited for it dissolves into view over the shaders' <c>FadeSeconds</c> from when it could be
+/// drawn, and what is made from the scene and kept is made again where it stands; one whose look is drawn already
+/// appears as it is, as it was made to.
 /// </para>
 /// </summary>
 internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materials materials) : IDisposable
 {
     /// <summary>
+    /// Rows changed in a frame past which they are worked out on the thread pool's threads, as a domain arriving changes
+    /// tens of thousands at once.
+    /// </summary>
+    private const int ParallelRows = 4096;
+
+    /// <summary>
     /// The instances drawn as the failure, by slot: why, in a few words, and what failed, by its path.
     /// </summary>
     private readonly Dictionary<int, (string Why, string What)> _failures = [];
-    private readonly Dictionary<Handle<Model>, HashSet<int>> _byModel = [];
-    private readonly Dictionary<Handle<Material>, HashSet<int>> _byMaterial = [];
 
     /// <summary>
-    /// The models and materials an instance stopped using this frame: let go at its end, unless another took them up.
+    /// What the instances drawing each look share, while any does.
     /// </summary>
-    private readonly HashSet<Handle<Model>> _droppedModels = [];
-    private readonly HashSet<Handle<Material>> _droppedMaterials = [];
+    private readonly Dictionary<Look, LookEntry> _looks = [];
+
+    /// <summary>
+    /// The looks an instance stopped drawing this frame: let go at its end, with their models and materials when no other
+    /// look draws them, unless another instance took them up.
+    /// </summary>
+    private readonly HashSet<Look> _droppedLooks = [];
 
     /// <summary>
     /// The slots written as moving last frame, whose last place is set to their place this frame unless they move again.
@@ -45,6 +69,25 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     private readonly List<int> _stillMoving = [];
     private readonly List<MovedSphere> _moved = [];
     private InstanceEntry[] _entries = new InstanceEntry[1024];
+
+    /// <summary>
+    /// The slots changed this frame, each with whether its row keeps its last place, and the rows worked out for them,
+    /// set together once every change is taken in.
+    /// </summary>
+    private readonly List<(int Slot, bool KeepsLast)> _changed = [];
+    private GpuSceneInstance[] _rows = [];
+    private Action<int>? _workOut;
+
+    /// <summary>
+    /// The looks with an instance changed this frame, whose model's row is asked for once, as near as the nearest.
+    /// </summary>
+    private readonly List<LookEntry> _nearer = [];
+
+    /// <summary>
+    /// The models and materials some look still draws, gathered once a frame that drops a look (<see cref="LetGo"/>).
+    /// </summary>
+    private readonly HashSet<Handle<Model>> _drawnModels = [];
+    private readonly HashSet<Handle<Material>> _drawnMaterials = [];
 
     public void Dispose()
     {
@@ -69,9 +112,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     public IReadOnlyDictionary<int, (string Why, string What)> Failures => _failures;
 
     /// <summary>
-    /// This frame's spheres, each around an instance where it was or where it is, that moved, changed model, came, went
-    /// or whose model came in: where what is made from the scene and kept, shadows and the field global illumination
-    /// traces, is made again.
+    /// This frame's spheres, each around an instance where it was or where it is, that moved, changed model, came, went,
+    /// could be drawn at last, or whose model or a material came in again: where what is made from the scene and kept,
+    /// shadows and the field global illumination traces, is made again.
     /// </summary>
     public IReadOnlyList<MovedSphere> Moved => _moved;
 
@@ -89,9 +132,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// Takes in what changed since the last frame, then uploads it. <paramref name="time"/> is the frame's, which a fade
     /// starts at; <paramref name="player"/> where detail is wanted first.
     /// </summary>
-    public void Update(Snapshot snapshot, float time, Vector3D player)
+    public void Update(WorldCopy copy, float time, Vector3D player)
     {
-        Slots<InstanceCopy> instances = snapshot.Instances;
+        Delta<InstanceCopy> instances = copy.Instances;
         if (_entries.Length < instances.Length)
         {
             Array.Resize(ref _entries, instances.Length);
@@ -99,15 +142,17 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 
         _moved.Clear();
         _stillMoving.Clear();
-        foreach (int slot in snapshot.Instances.Removed)
+        foreach (int slot in instances.Removed)
         {
             Remove(slot);
         }
 
-        foreach (int slot in instances.Changed)
+        foreach (ref readonly Delta<InstanceCopy>.Change change in instances.Changed)
         {
-            Change(slot, instances[slot], time, player);
+            Change(change.Slot, change.Value, time, player);
         }
+
+        WriteChanged();
 
         // What moved last frame and not this one stands where it was: its last place becomes its place.
         foreach (int slot in _moving)
@@ -122,8 +167,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 
         _moving.Clear();
         _moving.AddRange(_stillMoving);
-        Rebound();
-        Recheck();
+        Recheck(time);
         LetGo();
         Instances.Flush();
     }
@@ -135,7 +179,8 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         Renderer renderer = instance.Renderer;
         bool wasLive = entry.IsLive;
         bool hasMoved = !wasLive || entry.Transform != transform;
-        if (wasLive && (entry.Renderer.Model != renderer.Model || entry.Renderer.Materials != renderer.Materials))
+        bool isNewLook = !wasLive || entry.Renderer.Model != renderer.Model || entry.Renderer.Materials != renderer.Materials;
+        if (wasLive && isNewLook)
         {
             Forget(slot, ref entry);
         }
@@ -145,33 +190,111 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             AddMoved(entry, transform, renderer.Model);
         }
 
-        bool isNewFade = !wasLive || entry.Renderer.Fade != renderer.Fade;
         entry.Transform = transform;
         entry.Renderer = renderer;
         entry.IsLive = true;
         entry.WrittenFor = time;
-        entry.FadeStart = isNewFade ? time : entry.FadeStart;
-        Write(slot, ref entry, (float)(transform.Position - player).Length, wasLive && hasMoved);
-        if (hasMoved)
+        entry.FadeStart = wasLive ? entry.FadeStart : time;
+        entry.Look = isNewLook ? Take(slot, new Look(renderer.Model, renderer.Materials), time) : entry.Look;
+        if (entry.Look is not { } look)
+        {
+            return;
+        }
+
+        float distance = (float)(transform.Position - player).Length;
+        if (distance < look.Nearest)
+        {
+            if (look.Nearest == float.MaxValue)
+            {
+                _nearer.Add(look);
+            }
+
+            look.Nearest = distance;
+        }
+
+        // A new row's last place is its place already; a moved one's becomes it the frame after, unless it moves again.
+        _changed.Add((slot, wasLive && hasMoved));
+        if (wasLive && hasMoved)
         {
             _stillMoving.Add(slot);
         }
     }
 
     /// <summary>
-    /// Writes an instance's row: its transform, split into high and low floats; where it was, the old row's place when
-    /// it moved, else its own; its model's row and its material slots', tracking each; and how it fades.
+    /// Asks for each changed look's model as near as its nearest changed instance, which orders what the pool takes in
+    /// first, then works out every changed row, on the thread pool's threads when there are many, and sets them.
     /// </summary>
-    private void Write(int slot, ref InstanceEntry entry, float distance, bool keepsLast)
+    private void WriteChanged()
     {
+        foreach (LookEntry look in _nearer)
+        {
+            look.ModelRow = models.RowOf(look.HasFailed ? models.Failed : look.Look.Model, look.Nearest);
+            look.Nearest = float.MaxValue;
+        }
+
+        _nearer.Clear();
+        if (_rows.Length < _changed.Count)
+        {
+            Array.Resize(ref _rows, (int)BitOperations.RoundUpToPowerOf2((uint)_changed.Count));
+        }
+
+        if (_changed.Count >= ParallelRows)
+        {
+            Parallel.For(0, _changed.Count, _workOut ??= WorkOut);
+        }
+        else
+        {
+            for (int i = 0; i < _changed.Count; i++)
+            {
+                WorkOut(i);
+            }
+        }
+
+        for (int i = 0; i < _changed.Count; i++)
+        {
+            Instances.Set(_changed[i].Slot, _rows[i]);
+        }
+
+        _changed.Clear();
+    }
+
+    /// <summary>
+    /// Works out the <paramref name="index"/>-th changed row. It only reads, so it runs on any thread.
+    /// </summary>
+    private void WorkOut(int index)
+    {
+        (int slot, bool keepsLast) = _changed[index];
+        _rows[index] = RowOf(slot, _entries[slot], keepsLast);
+    }
+
+    /// <summary>
+    /// Writes an instance's row again as it stands, keeping no last place.
+    /// </summary>
+    private void Write(int slot, in InstanceEntry entry)
+    {
+        Instances.Set(slot, RowOf(slot, entry, keepsLast: false));
+    }
+
+    /// <summary>
+    /// An instance's row: its transform, split into high and low floats; where it was, the old row's place when it
+    /// moved, else its own; its model's row and its material slots', its look's; and how it fades, in from when its look
+    /// could be drawn when it waited for that. Empty while its look cannot be drawn yet.
+    /// </summary>
+    private GpuSceneInstance RowOf(int slot, in InstanceEntry entry, bool keepsLast)
+    {
+        if (entry.Look is not { IsReady: true } look)
+        {
+            return default;
+        }
+
         Transform transform = entry.Transform;
-        Renderer renderer = entry.Renderer;
         Matrix4x4 linear = transform.RelativeTo(transform.Position);
         Vector3D position = transform.Position;
         Vector3 high = position.ToVector3();
         Vector3 low = (position - high).ToVector3();
         Vector3 scale = Vector3.Abs(transform.Scale);
         bool isMirrored = transform.Scale.X * transform.Scale.Y * transform.Scale.Z < 0;
+        bool hasWaited = look.ReadyAt > entry.FadeStart;
         GpuSceneInstance row = new()
         {
             Row0 = new Vector4(linear.M11, linear.M21, linear.M31, high.X),
@@ -180,9 +303,8 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             Low = low,
             MaxScale = MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z)),
             Flags = (uint)((isMirrored ? GpuSceneFlags.Mirrored : GpuSceneFlags.None)
-                | (renderer.Fade == RendererFade.In ? GpuSceneFlags.FadeIn : GpuSceneFlags.None)
-                | (renderer.Fade == RendererFade.Out ? GpuSceneFlags.FadeOut : GpuSceneFlags.None)),
-            FadeStart = entry.FadeStart,
+                | (hasWaited ? GpuSceneFlags.FadeIn : GpuSceneFlags.None)),
+            FadeStart = hasWaited ? look.ReadyAt : entry.FadeStart,
         };
 
         GpuSceneInstance last = keepsLast ? Instances.Rows[slot] : row;
@@ -190,18 +312,49 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         row.PrevRow1 = last.Row1;
         row.PrevRow2 = last.Row2;
         row.PrevLow = last.Low;
+        row.Model = (uint)look.ModelRow;
+        row.Materials = look.Rows;
+        return row;
+    }
 
-        Track(_byModel, renderer.Model, slot);
-        bool hasFailed = models.HasFailed(renderer.Model);
-        row.Model = (uint)models.RowOf(hasFailed ? models.Failed : renderer.Model, distance);
-        (string Why, string What)? failure = hasFailed ? ("Model does not load", assets.Path(renderer.Model) ?? string.Empty) : null;
+    /// <summary>
+    /// The entry of what the instances drawing <paramref name="look"/> share, worked out the first time one does, with
+    /// <paramref name="slot"/> now among them and counted as transparent or failed as they are.
+    /// </summary>
+    private LookEntry Take(int slot, Look look, float time)
+    {
+        if (!_looks.TryGetValue(look, out LookEntry? entry))
+        {
+            entry = new LookEntry(look);
+            Resolve(entry, time);
+            _looks[look] = entry;
+        }
+
+        entry.Slots.Add(slot);
+        Classify(slot, entry);
+        return entry;
+    }
+
+    /// <summary>
+    /// Works out what a look's instances share from its model and materials as they are now: its model's row and its
+    /// material slots', or the failure's when the model failed, whether any is transparent, why they are drawn as the
+    /// failure, and whether they can be drawn, from <paramref name="time"/> when they could not before. Once they can,
+    /// they are drawn for as long as the look is, as what it names loads again.
+    /// </summary>
+    private void Resolve(LookEntry entry, float time)
+    {
+        Look look = entry.Look;
+        bool hasFailed = models.HasFailed(look.Model);
+        (string Why, string What)? failure = hasFailed ? ("Model does not load", assets.Path(look.Model) ?? string.Empty) : null;
         bool isTransparent = false;
+        bool areShown = true;
+        MaterialRows rows = default;
         for (int i = 0; i < 8; i++)
         {
-            Handle<Material> material = MaterialIn(renderer.Materials, i);
-            Track(_byMaterial, material, slot);
-            int materialRow = hasFailed ? materials.FailedMesh.Row : materials.RowOf(material);
-            row.Materials[i >> 1] |= (uint)materialRow << ((i & 1) * 16);
+            Handle<Material> material = MaterialIn(look.Materials, i);
+            int materialRow = materials.RowOf(hasFailed ? materials.Failure(FailureType.Mesh) : material);
+            rows[i >> 1] |= (uint)materialRow << ((i & 1) * 16);
+            areShown &= materials.IsShown(materialRow);
             isTransparent |= !hasFailed && materials.Get(material) is { Type: MaterialType.Transparent };
             if (!hasFailed && materials.FailureOf(material) is { } why)
             {
@@ -209,23 +362,33 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             }
         }
 
-        Instances.Set(slot, row);
-        if (isTransparent)
+        entry.HasFailed = hasFailed;
+        entry.ModelRow = models.RowOf(hasFailed ? models.Failed : look.Model, float.MaxValue);
+
+        entry.Rows = rows;
+        entry.IsTransparent = isTransparent;
+        entry.Failure = failure;
+        if (!entry.IsReady && areShown && models.IsDrawable(hasFailed ? models.Failed : look.Model))
+        {
+            entry.IsReady = true;
+            entry.ReadyAt = time;
+        }
+    }
+
+    /// <summary>
+    /// Counts <paramref name="slot"/> among the transparent, once its look can be drawn, and the failed, as its look is;
+    /// it is in neither before.
+    /// </summary>
+    private void Classify(int slot, LookEntry look)
+    {
+        if (look.IsTransparent && look.IsReady)
         {
             Transparent.Add(slot);
         }
-        else
-        {
-            Transparent.Remove(slot);
-        }
 
-        if (failure is { } failed)
+        if (look.Failure is { } failure)
         {
-            _failures[slot] = failed;
-        }
-        else
-        {
-            _failures.Remove(slot);
+            _failures[slot] = failure;
         }
     }
 
@@ -273,115 +436,159 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// The instances of each model taken in since the last frame: their shape is new where they stand.
+    /// Works out again every look that draws a model or material that came in, failed or changed since the last frame,
+    /// the failure model's looks among them when it did, and passes on what changed: its instances' rows when it can be
+    /// drawn at last, or its model failed or came back,
+    /// which of them are transparent or drawn as the failure when that changed, and spheres about them where shadows and
+    /// the field are made again, when they can be drawn at last or what they draw came in again. A model or material
+    /// that only came in changes no row of a look already drawn, as its row is the one they named all along. Everything
+    /// <see cref="Resolve"/> reads of a model or material counts it changed when it changes, so no other look can differ.
     /// </summary>
-    private void Rebound()
+    private void Recheck(float time)
     {
-        foreach (Handle<Model> model in models.Changed)
+        if (models.Changed.Count == 0 && materials.Changed.Count == 0)
         {
-            if (!_byModel.TryGetValue(model, out HashSet<int>? slots))
+            return;
+        }
+
+        bool hasFailureChanged = models.Changed.Contains(models.Failed) || materials.Changed.Contains(materials.Failure(FailureType.Mesh));
+        foreach (LookEntry entry in _looks.Values)
+        {
+            // A look whose model failed draws the failure model and its material, so it is worked out again as they come in.
+            if (!models.Changed.Contains(entry.Look.Model) && !(entry.HasFailed && hasFailureChanged) && !DrawsAny(entry.Look, materials.Changed))
             {
                 continue;
             }
 
-            foreach (int slot in slots)
+            bool hadFailed = entry.HasFailed;
+            bool wasReady = entry.IsReady;
+            bool wasTransparent = entry.IsTransparent;
+            (string Why, string What)? failure = entry.Failure;
+            Resolve(entry, time);
+            bool isRowChanged = entry.HasFailed != hadFailed || entry.IsReady != wasReady;
+            bool isRemade = entry.IsReady;
+            if (!isRowChanged && !isRemade && entry.IsTransparent == wasTransparent && entry.Failure == failure)
             {
-                if (SphereOf(_entries[slot].Transform, model) is { } sphere)
+                continue;
+            }
+
+            foreach (int slot in entry.Slots)
+            {
+                Transparent.Remove(slot);
+                _failures.Remove(slot);
+                Classify(slot, entry);
+                if (isRowChanged)
+                {
+                    Write(slot, _entries[slot]);
+                }
+
+                if (isRemade && SphereOf(_entries[slot].Transform, entry.Look.Model) is { } sphere)
                 {
                     _moved.Add(sphere);
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Writes again the instances whose model failed, or whose material came in or failed, since the last frame: which
-    /// are transparent, drawn as the failure, or labelled, follows from them.
-    /// </summary>
-    private void Recheck()
-    {
-        foreach (Handle<Model> model in models.Changed)
-        {
-            Rewrite(_byModel, model);
-        }
 
         models.Changed.Clear();
-        foreach (Handle<Material> material in materials.Changed)
-        {
-            Rewrite(_byMaterial, material);
-        }
-
         materials.Changed.Clear();
-
-        void Rewrite<T>(Dictionary<Handle<T>, HashSet<int>> users, Handle<T> handle)
-            where T : IAsset<T>
-        {
-            if (!users.TryGetValue(handle, out HashSet<int>? slots))
-            {
-                return;
-            }
-
-            foreach (int slot in new List<int>(slots))
-            {
-                ref InstanceEntry entry = ref _entries[slot];
-                Write(slot, ref entry, float.MaxValue, keepsLast: false);
-            }
-        }
     }
 
     /// <summary>
-    /// Lets go of the models and materials no instance uses any more, so what is not drawn is not kept: they load again
-    /// when an instance takes them up again.
+    /// Whether <paramref name="look"/> draws any of <paramref name="drawn"/> in one of its slots.
+    /// </summary>
+    private static bool DrawsAny(Look look, HashSet<Handle<Material>> drawn)
+    {
+        if (drawn.Count == 0)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < 8; i++)
+        {
+            if (drawn.Contains(MaterialIn(look.Materials, i)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Lets go of the looks no instance draws any more, and of their models and materials when no other look draws them,
+    /// so what is not drawn is not kept: they load again when an instance takes them up again.
     /// </summary>
     private void LetGo()
     {
-        foreach (Handle<Model> model in _droppedModels)
+        if (_droppedLooks.Count == 0)
         {
-            if (_byModel.TryGetValue(model, out HashSet<int>? slots) && slots.Count == 0)
+            return;
+        }
+
+        foreach (Look dropped in _droppedLooks)
+        {
+            if (_looks.TryGetValue(dropped, out LookEntry? entry) && entry.Slots.Count == 0)
             {
-                _byModel.Remove(model);
-                models.Release(model);
+                _looks.Remove(dropped);
             }
         }
 
-        foreach (Handle<Material> material in _droppedMaterials)
+        // What the looks left draw, gathered once: a domain going away drops thousands of looks in one frame.
+        _drawnModels.Clear();
+        _drawnMaterials.Clear();
+        foreach (Look look in _looks.Keys)
         {
-            if (_byMaterial.TryGetValue(material, out HashSet<int>? slots) && slots.Count == 0)
+            _drawnModels.Add(look.Model);
+            for (int i = 0; i < 8; i++)
             {
-                _byMaterial.Remove(material);
-                materials.Release(material);
+                _drawnMaterials.Add(MaterialIn(look.Materials, i));
             }
         }
 
-        _droppedModels.Clear();
-        _droppedMaterials.Clear();
+        foreach (Look dropped in _droppedLooks)
+        {
+            if (_looks.ContainsKey(dropped))
+            {
+                continue;
+            }
+
+            if (!_drawnModels.Contains(dropped.Model))
+            {
+                models.Release(dropped.Model);
+            }
+
+            for (int i = 0; i < 8; i++)
+            {
+                Handle<Material> material = MaterialIn(dropped.Materials, i);
+                if (!_drawnMaterials.Contains(material))
+                {
+                    materials.Release(material);
+                }
+            }
+        }
+
+        _droppedLooks.Clear();
     }
 
     /// <summary>
-    /// Stops tracking what an instance uses, and takes it out of the transparent and the failed.
+    /// Takes an instance out of its look, and out of the transparent and the failed.
     /// </summary>
     private void Forget(int slot, ref InstanceEntry entry)
     {
-        if (!entry.IsLive)
+        if (!entry.IsLive || entry.Look is not { } look)
         {
             return;
         }
 
         _failures.Remove(slot);
         Transparent.Remove(slot);
-        if (Untrack(_byModel, entry.Renderer.Model, slot))
+        look.Slots.Remove(slot);
+        if (look.Slots.Count == 0)
         {
-            _droppedModels.Add(entry.Renderer.Model);
+            _droppedLooks.Add(new Look(entry.Renderer.Model, entry.Renderer.Materials));
         }
 
-        for (int i = 0; i < 8; i++)
-        {
-            Handle<Material> material = MaterialIn(entry.Renderer.Materials, i);
-            if (Untrack(_byMaterial, material, slot))
-            {
-                _droppedMaterials.Add(material);
-            }
-        }
+        entry.Look = null;
     }
 
     public static Handle<Material> MaterialIn(in MaterialSlots slots, int slot) => slot switch
@@ -396,35 +603,50 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         _ => slots.Slot7,
     };
 
-    private static void Track<T>(Dictionary<Handle<T>, HashSet<int>> users, Handle<T> handle, int slot)
-        where T : IAsset<T>
-    {
-        if (!users.TryGetValue(handle, out HashSet<int>? slots))
-        {
-            slots = [];
-            users[handle] = slots;
-        }
-
-        slots.Add(slot);
-    }
-
     /// <summary>
-    /// Stops <paramref name="slot"/> using <paramref name="handle"/>; true when it was the last that did.
+    /// What an instance draws, but not how it fades: the instances that share one share their rows' model and materials.
     /// </summary>
-    private static bool Untrack<T>(Dictionary<Handle<T>, HashSet<int>> users, Handle<T> handle, int slot)
-        where T : IAsset<T>
+    private readonly record struct Look(Handle<Model> Model, MaterialSlots Materials);
+
+    /// <summary>
+    /// What the instances drawing a look share: their slots, what <see cref="Resolve"/> worked out for them, and the
+    /// nearest of them changed this frame, its model asked for as near (<see cref="WriteChanged"/>).
+    /// </summary>
+    private sealed class LookEntry(Look look)
     {
-        return users.TryGetValue(handle, out HashSet<int>? slots) && slots.Remove(slot) && slots.Count == 0;
+        public Look Look { get; } = look;
+
+        public HashSet<int> Slots { get; } = [];
+
+        public int ModelRow { get; set; }
+
+        public float Nearest { get; set; } = float.MaxValue;
+
+        public MaterialRows Rows { get; set; }
+
+        public bool HasFailed { get; set; }
+
+        public bool IsTransparent { get; set; }
+
+        public (string Why, string What)? Failure { get; set; }
+
+        /// <summary>
+        /// Whether its instances can be drawn as they should be, and since when, in the frame's time.
+        /// </summary>
+        public bool IsReady { get; set; }
+
+        public float ReadyAt { get; set; }
     }
 
     /// <summary>
-    /// An instance as the scene holds it: where it is and what it draws, when its fade started, and the frame's time it
-    /// was last written for.
+    /// An instance as the scene holds it: where it is and what it draws, and its look's entry, when its fade started, and
+    /// the frame's time it was last written for.
     /// </summary>
     private struct InstanceEntry
     {
         public Transform Transform;
         public Renderer Renderer;
+        public LookEntry? Look;
         public float FadeStart;
         public float WrittenFor;
         public bool IsLive;

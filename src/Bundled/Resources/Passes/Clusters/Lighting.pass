@@ -2,26 +2,5 @@
     "stage": "lighting",
     "kind": "fullscreen",
     "shader": { "id": 11243 },
-    "reads": [
-        { "name": "Depth", "filter": "nearest" },
-        { "name": "Albedo", "filter": "nearest" },
-        { "name": "Normal", "filter": "nearest" },
-        { "name": "Material", "filter": "nearest" },
-        { "name": "ShadowPool", "filter": "comparison" },
-        { "name": "SkyCube", "filter": "linear" },
-        { "name": "Dfg", "filter": "linear" },
-        { "name": "Lights" },
-        { "name": "LightBins" },
-        { "name": "LightTiles" },
-        { "name": "SkySh" },
-        { "name": "Exposure" },
-        { "name": "ShadowTables" },
-        { "name": "SunClipmap" },
-        { "name": "ContactShadows", "filter": "nearest", "optional": true },
-        { "name": "AmbientOcclusion", "filter": "nearest", "optional": true },
-        { "name": "GiLevels", "optional": true },
-        { "name": "GiIrradiance", "filter": "linear", "optional": true },
-        { "name": "GiDistance", "filter": "linear", "optional": true }
-    ],
-    "writes": [ { "name": "Hdr", "load": "load", "blend": "add" } ]
+    "writes": [ { "name": "Hdr", "contents": "keep", "blend": "add" } ]
 }

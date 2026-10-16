@@ -1,6 +1,6 @@
 // The probes' rays: a thread a ray of every probe due this frame (Lighting/Gi.hlsli's GiDueProbe) that lights anything
-// (Probes/GiClassify), marched through the scene's field. A ray that hits takes the light its surface gives back: what it gives off, the sun as far
-// as the field lets it through, and everything else as the probes held it last time, which is how light bounces again
+// (Probes/GiClassify), marched through the scene's field. A ray that hits takes the light its surface gives back: what it gives off, the sun and the
+// lights near it as far as the field lets them through, and everything else as the probes held it last time, which is how light bounces again
 // and again; one that misses takes the sky's. Written with how far it went, or 0 for one that starts inside something.
 
 #include "Lighting/Gi.hlsli"
@@ -27,7 +27,7 @@ void main(uint3 thread : SV_DispatchThreadID)
     GiHit hit = GiTrace(origin, direction, index, header.levels, maxDistance);
     if (!hit.isHit)
     {
-        STORE(GiRays, float4, thread.x, float4(SkyCube.SampleLevel(SkyCubeSampler, direction, 1.0).rgb, maxDistance));
+        STORE(GiRays, float4, thread.x, float4(SkyCube.SampleLevel(SkyCubeSampler, direction, 2.0).rgb, maxDistance));
         return;
     }
 
@@ -37,34 +37,13 @@ void main(uint3 thread : SV_DispatchThreadID)
         return;
     }
 
-    GpuGiLevel hitLevel = GiLevel(hit.level);
-    float3 normal = GiNormalAt(hitLevel, hit.level, hit.position);
-    float3 uvw = (float3(GiStored(GiVoxelOf(hitLevel, hit.position), hit.level)) + 0.5) / float3(GiResolution, GiResolution, GiResolution * GiMaxLevels);
-    float4 surface = GiSurface.SampleLevel(GiSurfaceSampler, uvw, 0.0);
-    float3 albedo = surface.a > 0.0 ? surface.rgb : float3(0.5, 0.5, 0.5);
-    float3 radiance = GiEmission.SampleLevel(GiEmissionSampler, uvw, 0.0).rgb;
-    [branch] if (any(SunIlluminance > 0.0))
-    {
-        float facing = saturate(dot(normal, -SunDirection));
-        [branch] if (facing > 0.0)
-        {
-            float visible = GiSunVisibility(hit.position + normal * hitLevel.voxel, -SunDirection, hit.level, header.levels);
-            radiance += albedo * SunIlluminance * (facing * visible * InvPi);
-        }
-    }
-
-    // What the probes held last time arriving there, the sky's where they hold nothing.
-    float held;
-    float3 bounced = GiIrradianceAt(hit.position, normal, normal, held);
     float3 sh[9];
     [unroll] for (uint i = 0u; i < 9u; i++)
     {
         sh[i] = LOAD(SkySh, float4, i).rgb;
     }
 
-    radiance += albedo * lerp(ShIrradiance(normal, sh), bounced, held);
-
     // The field's surfaces stand out from the true ones by most of a voxel (Probes/GiJobs.hlsli), and a ray stops a
     // little short of those: the way to the true surface is that much further, which what the probe sees by needs.
-    STORE(GiRays, float4, thread.x, float4(radiance, hit.distance + 0.95 * hitLevel.voxel));
+    STORE(GiRays, float4, thread.x, float4(GiHitRadiance(hit, header.levels, sh), hit.distance + 0.95 * GiLevel(hit.level).voxel));
 }

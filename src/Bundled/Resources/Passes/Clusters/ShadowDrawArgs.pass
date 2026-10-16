@@ -1,0 +1,8 @@
+{
+    "stage": "shadows",
+    "kind": "compute",
+    "shader": { "id": 60047 },
+    "writes": [ { "name": "ShadowArgs" }, { "name": "ShadowTables" } ],
+    "dispatch": { "groups": [ 1 ] },
+    "params": { "step": { "x": 1 } }
+}

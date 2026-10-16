@@ -1,14 +1,16 @@
 using System.ComponentModel;
 using Magic.Contexts.Assets;
+using Magic.Interfaces;
 
 namespace Magic.PipelineLoader;
 
 /// <summary>
 /// What the machine overrides of every pipeline: set in the project's <c>Presets/Default.preset</c>, by another
-/// preset, or with <c>--set PipelineLoader.off=["AutoExposure"]</c>.
+/// preset, or with <c>--set PipelineLoader.off=["AutoExposure"]</c>. Changed while running, every pipeline is made
+/// again.
 /// </summary>
-[Browsable(false)]
-internal sealed class PipelineSettings
+[Category("Render/Pipeline")]
+internal sealed class PipelineSettings : ISettings
 {
     /// <summary>
     /// Passes and pipelines this machine leaves out wherever they are listed, by their file name without its extension:

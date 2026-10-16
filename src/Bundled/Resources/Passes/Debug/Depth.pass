@@ -1,0 +1,8 @@
+{
+    "description": "The view's depth: white a metre away, black four kilometres out, a shade and a contour a doubling.",
+    "stage": "ui",
+    "kind": "fullscreen",
+    "shader": { "id": 11930 },
+    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
+    "writes": [ { "name": "DebugView" } ]
+}

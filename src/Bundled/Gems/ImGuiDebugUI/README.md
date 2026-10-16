@@ -18,7 +18,8 @@ In the project's `Presets/Default.preset`, by another preset, or `--set ImGuiDeb
 | `reportSeconds` | `5` | How long a line on screen, or a warning or error in the world, stays when its report does not say. |
 | `textDistance` | `50` | Metres from a camera beyond which text in the world is not shown in its view. |
 
-`font` and `fontSize` are read as the gem starts; the others whenever they are used, so they change while it runs.
+Each is read whenever it is used, so they change while it runs: `font` is written in once the new one loads, and
+`fontSize` draws the glyphs stretched from the font's own size.
 
 ## Frames
 
@@ -26,18 +27,26 @@ ImGui's frame is the main thread's, and drawing it the render thread's:
 
 1. **Update** hands ImGui the frame's input and starts its frame. A gem that takes `IDebugUI` is made after this one, so
    its Update runs after, and the widgets it calls there go into this frame. A widget called outside it throws.
-2. **LateUpdate** ends any window left open, with an error the first time, draws what is reported, ends ImGui's frame
-   and copies what it drew: vertices, indices, the draws into them, and what changed in its textures.
-3. **Render**, a frame behind, takes in the texture changes, uploads the vertices and indices, and records one render
-   pass of draws onto the window's image, as it is, after the gems made after this one have drawn theirs: a gem that
-   takes `IDebugUI`, and any the project lists after this one. So a project lists it before its renderer, as the
-   samples do, to have the UI on top of the scene. The pipeline is made for the window's format once the shaders,
-   `Shaders/Overlay/`, are compiled; until then, and for good when they do not compile, which is an error, nothing is
-   drawn.
+2. **LateUpdate** ends any window left open, with an error the first time, and draws what is reported.
+3. **Sync**, while both threads hold still, ends ImGui's frame and copies what it drew: vertices, indices, the draws
+   into them, and what changed in its textures. The copy is small, so it is made there rather than kept twice over.
+4. **Render**, a frame behind, is the renderer's: the gem ships a pipeline script (`Resources/Scripts/DebugUi.cs`), a
+   pass of the renderer's overlay stage (`Resources/Passes/DebugUi.pass`, in `Resources/Pipelines/Overlay.pipeline`,
+   which the renderer runs unless its settings name another), run once for the window after every view in it is
+   composed, so the UI is on top of the scene whatever order the project lists its gems in. The script takes in the
+   texture changes, uploads the vertices and indices, and records the draws into the window's image, encoded as its
+   format expects. Its pipeline is made for the window's format once the shaders, `Shaders/Overlay/`, are compiled;
+   until then, and for good when they do not compile, which is an error, nothing is drawn. The renderer makes the
+   script anew with each listing of the frame it builds, so the UI is away while the first compiles.
 
 ImGui lays out in window pixels, so `fontSize` says how big the UI is. Its colours, the engine's look among them, are
-already encoded for the window's image and are written as they are; a `Color` a gem gives is linear, and is encoded to
-sRGB first. Copy and paste go through the window's clipboard.
+encoded for an SDR window's image; a `Color` a gem gives is linear, and is encoded to sRGB first. An SDR window's
+image takes them as they are. A window the GPU provider composes another way (linear or HDR) has an image of another
+format, and the overlay's shader decodes them and encodes for it, as the renderer's last pass does for the scene: as
+they are for an sRGB-typed image the GPU encodes, PQ at the scene's paper white for an HDR10 image, scRGB at it for a
+half-float one. The GPU blends in the image's space, so a translucent window blends in sRGB code over an SDR image,
+as ImGui means it to, and in linear over a linear or scRGB one, where it comes out a touch lighter. Copy and paste go
+through the window's clipboard.
 
 ## Reports
 
@@ -49,7 +58,7 @@ sRGB first. Copy and paste go through the window's clipboard.
 - What is reported shows, and `Enabled` is true, while the window has an image: always in a Debug build, and in any
   other only while a window drawn with the widgets is open. Reports made meanwhile are kept as ever, and logged.
 - Lines go down the left of the window, those reported every frame first, then the rest oldest first, as many of the
-  last as fit, each with a dark shadow. Text in the
+  last as fit, each on a dark plate. Text in the
   world is centred on its place on a dark plate, in every view of a camera that draws into the window, has it in
   front, and is within `textDistance` of it: projected as the renderer frames that camera's part of the window. Both
   are drawn under the windows, so a window stays readable over them.

@@ -31,16 +31,22 @@ public record struct Transform : IComponent
     /// whose (0, 0, 0) is at <paramref name="origin"/>, in floats, which are exact near it. A prefab's parts pass
     /// <c>default</c>, as theirs is the prefab's own space.
     /// </summary>
-    public readonly Matrix4x4 RelativeTo(Vector3D origin) => Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation((Position - origin).ToVector3());
+    public readonly Matrix4x4 RelativeTo(Vector3D origin)
+    {
+        return Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation((Position - origin).ToVector3());
+    }
 
     /// <summary>
     /// This transform, a child's, relative to <paramref name="parent"/>, as the world sees it: scaled, turned, then
     /// moved by the parent's. A prefab's part is placed under its parent's place this way.
     /// </summary>
-    public readonly Transform Under(in Transform parent) => new()
+    public readonly Transform Under(Transform parent)
     {
-        Position = parent.Position + Vector3D.Transform(Position * parent.Scale, parent.Rotation),
-        Rotation = parent.Rotation * Rotation,
-        Scale = parent.Scale * Scale,
-    };
+        return new()
+        {
+            Position = parent.Position + Vector3D.Transform(Position * parent.Scale, parent.Rotation),
+            Rotation = parent.Rotation * Rotation,
+            Scale = parent.Scale * Scale,
+        };
+    }
 }

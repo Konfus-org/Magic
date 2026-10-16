@@ -131,7 +131,7 @@ ResolveOutput main(TileVaryings input)
     stored.metallic = surface.metallic;
     stored.specular = surface.specular;
     stored.modelData = surface.modelData;
-    GBufferOutput written = EncodeGBuffer(stored, surface.emissive + KeepBindingsAlive(instance.flags, uv));
+    GBufferOutput written = EncodeGBuffer(stored, surface.emissive);
 
     // A card moves as its centre does; a cluster's point as its instance moved it.
     float3 place = here.x * places[0] + here.y * places[1] + here.z * places[2];

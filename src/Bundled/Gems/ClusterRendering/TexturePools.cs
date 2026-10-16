@@ -32,6 +32,13 @@ internal sealed class TexturePools : IDisposable
     public const int Count = 8;
 
     /// <summary>
+    /// The pools' names, which the frame binds them by and a surface's shader reads them by
+    /// (Shaders/Include/SurfaceBindings.hlsli): colour (sRGB) then data (linear), each 256, 512, 1024 and 2048 texels a
+    /// side.
+    /// </summary>
+    public static readonly string[] Names = ["PoolSrgb256", "PoolSrgb512", "PoolSrgb1024", "PoolSrgb2048", "PoolLinear256", "PoolLinear512", "PoolLinear1024", "PoolLinear2048"];
+
+    /// <summary>
     /// Raised whenever how a texture is resampled or compressed changes, so the cache's are made again.
     /// </summary>
     public const int CacheVersion = 2;
@@ -59,6 +66,11 @@ internal sealed class TexturePools : IDisposable
 
     private readonly GpuTexture _empty;
 
+    /// <summary>
+    /// The taps the sampler filters with at a grazing angle, 1 to 16.
+    /// </summary>
+    private float _anisotropy;
+
     public TexturePools(IGpu gpu, Assets assets, Caches caches, Threads threads, float anisotropy, CancellationToken stopping)
     {
         _gpu = gpu;
@@ -71,9 +83,10 @@ internal sealed class TexturePools : IDisposable
             _pools[i] = new Pool(i < 4 ? GpuFormat.Bc7Srgb : GpuFormat.Bc7Unorm, (uint)_sizes[i % 4]);
         }
 
-        _empty = gpu.CreateTexture(new GpuTextureDesc(GpuFormat.Rgba8Unorm, GpuTextureUsage.Sampler, 1, 1, 1, 1, GpuTextureKind.Texture2DArray));
+        _empty = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.Rgba8Unorm, GpuTextureUsage.Sampled, 1, 1, 1, 1, GpuTextureKind.Texture2DArray));
         gpu.Upload(new GpuTextureRegion(_empty), [255, 255, 255, 255]);
-        Sampler = gpu.CreateSampler(new GpuSamplerDesc(GpuFilter.Linear, GpuAddress.Repeat, Math.Clamp(anisotropy, 1, 16)));
+        _anisotropy = Math.Clamp(anisotropy, 1, 16);
+        Sampler = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Repeat, _anisotropy));
     }
 
     public void Dispose()
@@ -87,7 +100,24 @@ internal sealed class TexturePools : IDisposable
         _gpu.Release(Sampler);
     }
 
-    public GpuSampler Sampler { get; }
+    public GpuSampler Sampler { get; private set; }
+
+    /// <summary>
+    /// Filters with <paramref name="anisotropy"/> taps at most from now on, 1 to 16: a sampler made again, the old one
+    /// released. Render thread.
+    /// </summary>
+    public void UseAnisotropy(float anisotropy)
+    {
+        float clamped = Math.Clamp(anisotropy, 1, 16);
+        if (clamped == _anisotropy)
+        {
+            return;
+        }
+
+        _anisotropy = clamped;
+        _gpu.Release(Sampler);
+        Sampler = _gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Repeat, clamped));
+    }
 
     /// <summary>
     /// The textures taken in, or failed, since the materials last asked: whose materials are packed anew.
@@ -147,15 +177,11 @@ internal sealed class TexturePools : IDisposable
     }
 
     /// <summary>
-    /// The pools in order, for the eight sampled textures a surface pipeline binds first.
+    /// A pool's texture as it stands, an empty one while it holds nothing.
     /// </summary>
-    public void Bind(Span<GpuBinding> bindings)
+    public GpuTexture TextureOf(int pool)
     {
-        for (int i = 0; i < Count; i++)
-        {
-            GpuTexture texture = _pools[i].Texture == GpuTexture.None ? _empty : _pools[i].Texture;
-            bindings[i] = new GpuBinding(Texture: texture, Sampler: Sampler);
-        }
+        return _pools[pool].Texture == GpuTexture.None ? _empty : _pools[pool].Texture;
     }
 
     /// <summary>
@@ -429,13 +455,12 @@ internal sealed class TexturePools : IDisposable
         private void Grow(IGpu gpu, uint capacity)
         {
             uint levels = (uint)LevelsOf(size);
-            GpuTexture grown = gpu.CreateTexture(new GpuTextureDesc(format, GpuTextureUsage.Sampler, size, size, levels, capacity, GpuTextureKind.Texture2DArray));
+            GpuTexture grown = gpu.CreateTexture(new GpuTextureDescription(format, GpuTextureUsage.Sampled, size, size, levels, capacity, GpuTextureKind.Texture2DArray));
             for (uint layer = 0; layer < _used; layer++)
             {
                 for (uint level = 0; level < levels; level++)
                 {
-                    uint side = Math.Max(1, size >> (int)level);
-                    gpu.Commands.CopyTexture(new GpuBinding(Texture: Texture, Level: level, Layer: layer), new GpuBinding(Texture: grown, Level: level, Layer: layer), side, side);
+                    gpu.Commands.CopyTexture(new GpuTextureRegion(Texture, level, layer), new GpuTextureRegion(grown, level, layer));
                 }
             }
 

@@ -23,9 +23,9 @@ namespace Magic.ImGuiDebugUI;
 /// <para>
 /// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
 /// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported,
-/// ends the frame and copies what ImGui drew (<see cref="DrawLists"/>); <see cref="Render"/> draws that copy over the
-/// window (<see cref="Overlay"/>), after the gems made after this one have drawn, so it is on top of what they drew.
-/// Reports come from any thread and are kept until they have shown (<see cref="Reports"/>).
+/// ends the frame and copies what ImGui drew (<see cref="DrawLists"/>); the renderer draws that copy over the window
+/// with the gem's pipeline script (<see cref="Resources.Scripts.DebugUi"/>), a pass of its overlay stage, once every view in the window
+/// is composed. Reports come from any thread and are kept until they have shown (<see cref="Reports"/>).
 /// </para>
 /// </summary>
 internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
@@ -39,14 +39,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private const float Stretch = -1.17549435E-38f;
 
     /// <summary>
-    /// Text in the world sits on a dark plate, so it reads over anything behind it.
+    /// Text in the world, and the lines on screen, sit on a dark plate, so they read over anything behind them, a
+    /// white debug view too.
     /// </summary>
     private const uint Plate = 0xC0000000;
-
-    /// <summary>
-    /// The lines on screen have no plate: a dark copy a pixel down and right keeps them readable over a bright scene.
-    /// </summary>
-    private const uint Shadow = 0xFF000000;
 
     private static readonly Vector2 _platePadding = new(4, 2);
     private static readonly Vector2 _linesMargin = new(8, 8);
@@ -70,10 +66,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private readonly IInput? _input;
     private readonly ImGuiContextPtr _context;
     private readonly Reports _reports = new();
-    private readonly DrawLists _drawLists = new();
-    private readonly Overlay _overlay;
     private readonly CameraViews _views;
-    private readonly Subscription? _viewing;
+    private readonly Subscription _viewing;
     private readonly List<ShownReport> _world = [];
     private readonly List<ShownReport> _lines = [];
 
@@ -88,9 +82,9 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private readonly List<Level> _levels = [];
 
     /// <summary>
-    /// By a nested view's id, the height of what followed it in its parent last frame.
+    /// By a nested view's ImGui id, the height of what followed it in its parent last frame.
     /// </summary>
-    private readonly Dictionary<string, float> _reserved = [];
+    private readonly Dictionary<uint, float> _reserved = [];
 
     /// <summary>
     /// By a document's id, its text as ImGui edits it, encoded once.
@@ -103,19 +97,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private readonly HashSet<string> _placed = [];
 
     /// <summary>
-    /// By a row of tabs' id, the tab ImGui showed last frame.
+    /// By a row of tabs' ImGui id, the tab ImGui showed last frame.
     /// </summary>
-    private readonly Dictionary<string, int> _tabs = [];
+    private readonly Dictionary<uint, int> _tabs = [];
 
     /// <summary>
     /// By a field's label, what it shows and its hidden ImGui id, made once rather than every frame.
     /// </summary>
     private readonly Dictionary<string, (string Shown, string Id)> _fields = [];
-
-    /// <summary>
-    /// The ids of what is nested in a window, <c>parent/child</c>, made once rather than every frame.
-    /// </summary>
-    private readonly Dictionary<(string Parent, string Child), string> _paths = [];
 
     /// <summary>
     /// This gem, for ImGui's clipboard callbacks.
@@ -127,6 +116,15 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private GCHandle _pasted;
 
+    private readonly Assets _assets;
+    private readonly Threads _threads;
+    private readonly CancellationToken _stopping;
+
+    /// <summary>
+    /// The font the settings last named, so a change while running loads the new one.
+    /// </summary>
+    private Handle<Font> _fontAsked;
+
     private FontSource? _font;
     private int _depth;
     private int _windowsDrawn;
@@ -134,11 +132,21 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private bool _hasLoggedUnended;
     private volatile bool _isShowing;
 
-    public unsafe ImGuiDebugUIGem(ImGuiDebugUISettings settings, IGpu gpu, IShaderCompiler compiler, Assets assets, IWindow window, IFileSystem files, Threads threads, Lifetime lifetime, IInput? input = null, World? world = null)
+    /// <summary>
+    /// Whether ImGui shows the table open, and how many columns it has; rows go nowhere while it does not.
+    /// </summary>
+    private bool _isTableShown;
+    private int _tableColumns;
+
+    public unsafe ImGuiDebugUIGem(ImGuiDebugUISettings settings, Assets assets, IWindow window, IFileSystem files, Threads threads, Lifetime lifetime, World world, IInput? input = null)
     {
         _settings = settings;
         _window = window;
         _input = input;
+        _assets = assets;
+        _threads = threads;
+        _stopping = lifetime.Stopping;
+        _fontAsked = settings.Font;
 
         // The bindings load cimgui themselves, by a path: the machine's, found from the gem's dependencies as its load
         // context finds every other native library.
@@ -161,17 +169,15 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         platform.PlatformSetClipboardTextFn = (delegate* unmanaged[Cdecl]<ImGuiContext*, byte*, void>)&SetClipboard;
         platform.PlatformGetClipboardTextFn = (delegate* unmanaged[Cdecl]<ImGuiContext*, byte*>)&GetClipboard;
 
-        _overlay = new Overlay(gpu, window, compiler, assets, threads, lifetime.Stopping);
         _views = new CameraViews(window);
-        _viewing = world?.Add(_views);
+        _viewing = world.Add(_views);
         _isShowing = IsAlwaysShowing && window.Width > 0;
-        LoadFontAsync(assets, threads, lifetime.Stopping).FireAndForget();
+        LoadFontAsync().FireAndForget();
     }
 
     public void Dispose()
     {
-        _viewing?.Dispose();
-        _overlay.Dispose();
+        _viewing.Dispose();
         ImGui.DestroyContext(_context);
         _font?.Dispose();
         _self.Free();
@@ -184,10 +190,22 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public bool Enabled => _isShowing;
 
     /// <summary>
+    /// What ImGui drew last frame, copied in <see cref="Sync"/>, which the gem's pipeline script draws from on the render
+    /// thread.
+    /// </summary>
+    internal DrawLists DrawLists { get; } = new();
+
+    /// <summary>
     /// Hands ImGui the frame's input and starts its frame, which the widgets called in Update go into.
     /// </summary>
     public void Update(in Frame frame)
     {
+        if (_settings.Font != _fontAsked)
+        {
+            _fontAsked = _settings.Font;
+            LoadFontAsync().FireAndForget();
+        }
+
         ImGuiIOPtr io = ImGui.GetIO();
         if (_input is { } input)
         {
@@ -198,13 +216,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         io.DisplaySize = new Vector2(_window.Width, _window.Height);
         io.DisplayFramebufferScale = Vector2.One;
         io.DeltaTime = Math.Max(frame.DeltaSeconds, 1e-4f);
+        ImGui.GetStyle().FontSizeBase = _settings.FontSize;
         ImGui.NewFrame();
         _isInFrame = true;
         _windowsDrawn = 0;
     }
 
     /// <summary>
-    /// Draws what is reported under the frame's windows, ends ImGui's frame, and copies what it drew for Render.
+    /// Draws what is reported under the frame's windows: the last of the frame's widgets.
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
@@ -228,15 +247,17 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             DrawWorld();
             DrawLines();
         }
-
-        ImGui.Render();
-        _isInFrame = false;
-        _drawLists.Copy(ImGui.GetDrawData(), _window.Width, _window.Height);
     }
 
-    public void Render(in Frame frame)
+    /// <summary>
+    /// Ends ImGui's frame and copies what it drew for the render thread, which read the copy before until now: small
+    /// enough to do while both threads hold still, rather than keep two copies.
+    /// </summary>
+    public void Sync(in Frame frame)
     {
-        _overlay.Draw(_drawLists);
+        ImGui.Render();
+        _isInFrame = false;
+        DrawLists.Copy(ImGui.GetDrawData(), _window.Width, _window.Height);
     }
 
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null)
@@ -295,7 +316,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         // What followed each view nested in this one, measured now that everything after them is laid out.
         float end = ImGui.GetCursorPosY();
-        foreach ((string id, float closedAt) in level.Closed)
+        foreach ((uint id, float closedAt) in level.Closed)
         {
             _reserved[id] = end - closedAt;
         }
@@ -336,10 +357,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         return ImGui.Button(label);
     }
 
-    public unsafe bool Input(string label, ref string text)
+    public unsafe bool Input(string label, ref string text, string? hint = null, bool focus = false)
     {
         ThrowIfOutsideFrame();
-        if (ImGui.IsWindowAppearing())
+        if (focus && ImGui.IsWindowAppearing())
         {
             ImGui.SetKeyboardFocusHere();
         }
@@ -352,7 +373,9 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         bool isEntered;
         fixed (byte* buffer = _typed)
         {
-            isEntered = ImGui.InputText(id, buffer, InputBytes, ImGuiInputTextFlags.EnterReturnsTrue);
+            isEntered = hint is null
+                ? ImGui.InputText(id, buffer, InputBytes, ImGuiInputTextFlags.EnterReturnsTrue)
+                : ImGui.InputTextWithHint(id, hint, buffer, InputBytes, ImGuiInputTextFlags.EnterReturnsTrue);
         }
 
         if (isEntered || ImGui.IsItemEdited())
@@ -441,13 +464,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public bool Tabs(string label, ref int index, ReadOnlySpan<string> options)
     {
         ThrowIfOutsideFrame();
+        uint id = ImGui.GetID(label);
         if (!ImGui.BeginTabBar(label))
         {
             return false;
         }
 
         // ImGui keeps its own selection: the caller's index is pushed only when it is not the tab ImGui last showed.
-        string id = _depth > 0 ? PathOf(_levels[_depth - 1].Id, label) : label;
         int shown = _tabs.GetValueOrDefault(id, -1);
         int chosen = index;
         for (int i = 0; i < options.Length; i++)
@@ -477,6 +500,61 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         ThrowIfOutsideFrame();
         return ImGui.CollapsingHeader(label, ImGuiTreeNodeFlags.DefaultOpen);
+    }
+
+    public void Table(string label, ReadOnlySpan<string> columns)
+    {
+        ThrowIfOutsideFrame();
+        _tableColumns = columns.Length;
+        _isTableShown = ImGui.BeginTable(label, columns.Length, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
+        if (!_isTableShown)
+        {
+            return;
+        }
+
+        foreach (string column in columns)
+        {
+            ImGui.TableSetupColumn(column);
+        }
+
+        ImGui.TableHeadersRow();
+    }
+
+    public void Row(ReadOnlySpan<string> cells)
+    {
+        ThrowIfOutsideFrame();
+        if (!_isTableShown)
+        {
+            return;
+        }
+
+        ImGui.TableNextRow();
+        for (int i = 1; i < cells.Length && i < _tableColumns; i++)
+        {
+            ImGui.TableSetColumnIndex(i);
+            ImGui.TextUnformatted(cells[i]);
+        }
+
+        // The first cell last, spanning the row, so the row is the item a tooltip after it rests on. Rows may start
+        // with the same text, so the row's index, not its text, is its id.
+        if (cells.Length > 0 && _tableColumns > 0)
+        {
+            ImGui.TableSetColumnIndex(0);
+            ImGui.PushID(ImGui.TableGetRowIndex());
+            ImGui.Selectable(cells[0], false, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.Disabled);
+            ImGui.PopID();
+        }
+    }
+
+    public void EndTable()
+    {
+        ThrowIfOutsideFrame();
+        if (_isTableShown)
+        {
+            ImGui.EndTable();
+        }
+
+        _isTableShown = false;
     }
 
     public void Tooltip(string text)
@@ -525,9 +603,15 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         return (Byte(color.A) << 24) | (Byte(Encode(color.B)) << 16) | (Byte(Encode(color.G)) << 8) | Byte(Encode(color.R));
 
-        static float Encode(float linear) => linear <= 0.0031308f ? linear * 12.92f : (1.055f * MathF.Pow(linear, 1 / 2.4f)) - 0.055f;
+        static float Encode(float linear)
+        {
+            return linear <= 0.0031308f ? linear * 12.92f : (1.055f * MathF.Pow(linear, 1 / 2.4f)) - 0.055f;
+        }
 
-        static uint Byte(float value) => (uint)MathF.Round(Math.Clamp(value, 0, 1) * 255);
+        static uint Byte(float value)
+        {
+            return (uint)MathF.Round(Math.Clamp(value, 0, 1) * 255);
+        }
     }
 
     /// <summary>
@@ -555,20 +639,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// <paramref name="child"/>'s id in <paramref name="parent"/>, <c>parent/child</c>.
-    /// </summary>
-    private string PathOf(string parent, string child)
-    {
-        if (!_paths.TryGetValue((parent, child), out string? path))
-        {
-            path = $"{parent}/{child}";
-            _paths[(parent, child)] = path;
-        }
-
-        return path;
-    }
-
-    /// <summary>
     /// The text of a tooltip begun, wrapped to a readable width, and the tooltip ended.
     /// </summary>
     private static void WriteTooltip(string text)
@@ -577,11 +647,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ImGui.TextUnformatted(text);
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
-    }
-
-    private static bool IsInside(Vector2 point, Vector2 min, Vector2 max)
-    {
-        return point.X >= min.X && point.Y >= min.Y && point.X < max.X && point.Y < max.Y;
     }
 
     /// <summary>
@@ -639,7 +704,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         level.IsNested = depth > 0;
         if (!level.IsNested)
         {
-            level.Id = title;
             _windowsDrawn++;
 
             // Each new window a step down and right of the last, so none opens on top of another. Sizes go by the font,
@@ -659,8 +723,9 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             return;
         }
 
-        // As tall as the parent's room less what followed this view last frame: all of it, the first time.
-        level.Id = PathOf(_levels[depth - 1].Id, title);
+        // As tall as the parent's room less what followed this view last frame: all of it, the first time. The view's
+        // id is the one ImGui gives it, from the title and the window it is in.
+        level.Id = ImGui.GetID(title);
         float reserved = _reserved.GetValueOrDefault(level.Id);
         ImGuiWindowFlags flags = scrollable ? ImGuiWindowFlags.HorizontalScrollbar : ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
         ImGui.BeginChild(title, new Vector2(0, -reserved), ImGuiChildFlags.Borders, flags);
@@ -691,7 +756,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         }
 
         ImDrawListPtr under = ImGui.GetBackgroundDrawList();
-        Vector2 mouse = ImGui.GetIO().MousePos;
         bool canHover = !ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow);
         foreach (ShownReport report in _world)
         {
@@ -708,7 +772,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
                 Vector2 max = corner + size + _platePadding;
                 under.AddRectFilled(min, max, Plate, 3f);
                 under.AddText(corner, Packed(report.Color), report.Label);
-                if (report.Tooltip is { } tooltip && canHover && IsInside(mouse, min, max))
+                if (report.Tooltip is { } tooltip && canHover && ImGui.IsMouseHoveringRect(min, max, false))
                 {
                     ImGui.BeginTooltip();
                     WriteTooltip(tooltip);
@@ -729,7 +793,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         }
 
         ImDrawListPtr under = ImGui.GetBackgroundDrawList();
-        Vector2 mouse = ImGui.GetIO().MousePos;
         bool canHover = !ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow);
         float lineHeight = ImGui.GetTextLineHeightWithSpacing();
         int fitting = Math.Max(1, (int)((_window.Height - (2 * _linesMargin.Y)) / lineHeight));
@@ -737,9 +800,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         for (int i = Math.Max(0, _lines.Count - fitting); i < _lines.Count; i++)
         {
             ShownReport line = _lines[i];
-            under.AddText(at + Vector2.One, Shadow, line.Label);
+            Vector2 size = ImGui.CalcTextSize(line.Label);
+            under.AddRectFilled(at - _platePadding, at + size + _platePadding, Plate, 3f);
             under.AddText(at, Packed(line.Color), line.Label);
-            if (line.Tooltip is { } tooltip && canHover && IsInside(mouse, at, at + ImGui.CalcTextSize(line.Label)))
+            if (line.Tooltip is { } tooltip && canHover && ImGui.IsMouseHoveringRect(at, at + size, false))
             {
                 ImGui.BeginTooltip();
                 WriteTooltip(tooltip);
@@ -750,25 +814,30 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// Loads the font on a worker, then has the main thread make it ImGui's between two frames. Until then, or when it
-    /// does not load, ImGui writes in its own font.
+    /// Loads the settings' font on a worker, then has the main thread make it ImGui's between two frames, in place of
+    /// the one before. Until the first loads, or when it does not load, ImGui writes in its own font, or in the one
+    /// before.
     /// </summary>
-    private async Task LoadFontAsync(Assets assets, Threads threads, CancellationToken stopping)
+    private async Task LoadFontAsync()
     {
-        Handle<Font> handle = _settings.Font == Handle<Font>.None ? assets.Default<Font>() : _settings.Font;
-        Result<Font> font = await assets.LoadAsync(handle, stopping).ConfigureAwait(false);
+        Handle<Font> handle = _settings.Font == Handle<Font>.None ? _assets.Default<Font>() : _settings.Font;
+        Result<Font> font = await _assets.LoadAsync(handle, _stopping).ConfigureAwait(false);
         if (!font.Ok)
         {
-            Debugging.Warn($"The debug UI writes in ImGui's own font: its font does not load: {font.Error}");
+            Debugging.Warn($"The debug UI writes in the font it did: its font does not load: {font.Error}");
             return;
         }
 
-        threads.Post(EngineThread.Main, () =>
+        _threads.Post(EngineThread.Main, () =>
         {
-            if (!stopping.IsCancellationRequested)
+            if (_stopping.IsCancellationRequested)
             {
-                _font = new FontSource(font.Value, _settings.FontSize);
+                return;
             }
+
+            _font?.Remove();
+            _font?.Dispose();
+            _font = new FontSource(font.Value, _settings.FontSize);
         });
     }
 
@@ -778,13 +847,16 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private sealed class Level
     {
-        public string Id { get; set; } = string.Empty;
+        /// <summary>
+        /// A nested view's ImGui id; a window needs none.
+        /// </summary>
+        public uint Id { get; set; }
 
         public bool IsNested { get; set; }
 
         public bool IsScrollable { get; set; }
 
-        public List<(string Id, float ClosedAt)> Closed { get; } = [];
+        public List<(uint Id, float ClosedAt)> Closed { get; } = [];
     }
 
     /// <summary>

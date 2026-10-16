@@ -12,7 +12,7 @@
         "SdlTextureLoader",
         "SdlFontLoader",
         "AssimpModelLoader",
-        "ModelLodGenerator",
+        "ClusterGenerator",
         "PrefabLoader",
         "PipelineLoader",
         "ImGuiDebugUI",

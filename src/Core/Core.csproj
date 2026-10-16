@@ -26,4 +26,17 @@
   <ItemGroup>
     <AdditionalFiles Include="BannedSymbols.txt" />
   </ItemGroup>
+
+  <!-- Built alone (dotnet build src/Core, dotnet run, a run from an IDE), Magic builds the bundled gems and resources
+       with it, which reference it rather than the other way round, so none is left stale against a new Magic, which
+       would not load it. They take the Magic just built rather than building it again, which would be a cycle. A
+       solution build builds them all itself, so under one this is skipped, which would build each twice at once; built
+       alone, MSBuild names the solution *Undefined* rather than nothing. -->
+  <ItemGroup>
+    <BundledProject Include="../Bundled/Gems/*/*.csproj;../Bundled/Resources/Resources.csproj" />
+  </ItemGroup>
+
+  <Target Name="BuildBundled" AfterTargets="Build" Condition="('$(SolutionName)' == '' or '$(SolutionName)' == '*Undefined*') and '$(BuildingInsideVisualStudio)' != 'true'">
+    <MSBuild Projects="@(BundledProject)" Targets="Build" Properties="BuildProjectReferences=false;Configuration=$(Configuration)" BuildInParallel="true" />
+  </Target>
 </Project>

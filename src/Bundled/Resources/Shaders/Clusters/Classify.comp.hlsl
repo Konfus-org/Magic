@@ -5,6 +5,7 @@
 // in the top 8.
 
 #include "Include/Culling.hlsli"
+#include "Include/Failure.hlsli"
 
 static const uint TileSize = 8u;
 
@@ -20,15 +21,21 @@ void main(uint3 tile : SV_GroupID, uint3 id : SV_DispatchThreadID, uint thread :
 
     GroupMemoryBarrierWithGroupSync();
     uint visible = all(id.xy < (uint2)ViewSize) ? Visibility.Load(int3(id.xy, 0)) : 0u;
-
-    // Never, as no pixel is that far, but it keeps every read bound with its sampler, though read texel by texel.
-    visible += id.x > 0x7FFFFFFFu ? asuint(KeepReadsAlive(float2(0.0, 0.0))) : 0u;
     if (visible != 0u)
     {
         uint3 piece = VisiblePieces.Load3(((visible - 1u) >> 5) * 12u);
         GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, piece.x);
         uint slot = (piece.y & CardBit) != 0u ? LOAD(Cards, GpuCard, piece.y & ~CardBit).slot : ClusterSlot(LOAD(Clusters, GpuCluster, piece.y >> 2));
-        uint bin = (MaterialBins.Load(SceneMaterial(instance, slot) * 4u) >> 16) & 0xFFu;
+        uint material = SceneMaterial(instance, slot);
+
+        // A row past the materials reads nothing meant: raised, and binned with the first.
+        bool isInRange = material < CountOf(MaterialBins, 4u);
+        [branch] if (!isInRange)
+        {
+            RaiseFailure(Failures, FailureMaterialRange);
+        }
+
+        uint bin = isInRange ? (MaterialBins.Load(material * 4u) >> 16) & 0xFFu : 0u;
         InterlockedOr(BinMask[bin >> 5], 1u << (bin & 31u));
     }
 

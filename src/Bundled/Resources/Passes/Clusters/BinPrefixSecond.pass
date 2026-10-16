@@ -1,8 +1,7 @@
 {
-    "stage": "depth",
+    "stage": "visibility",
     "kind": "compute",
     "shader": { "id": 60024 },
-    "reads": [ { "name": "VisibleClusters" }, { "name": "VisiblePieces" } ],
     "writes": [
         { "name": "BinArgs" },
         { "name": "BinCounts" },

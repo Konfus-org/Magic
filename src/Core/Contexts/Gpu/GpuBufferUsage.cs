@@ -11,9 +11,9 @@ public enum GpuBufferUsage : byte
     Index = 1 << 1,
 
     /// <summary>
-    /// The arguments of indirect draws and dispatches.
+    /// The arguments of draws and dispatches the GPU reads from a buffer (<see cref="GpuRenderPass.DrawIndexedFromBuffer"/>, <see cref="GpuComputePass.DispatchFromBuffer"/>).
     /// </summary>
-    Indirect = 1 << 2,
+    Arguments = 1 << 2,
 
     /// <summary>
     /// Read by vertex and fragment shaders as a storage buffer.

@@ -1,14 +1,85 @@
 // Which probes light anything this frame, a thread a probe of every level (Lighting/Gi.hlsli's GiIsUsed): one that does
-// not is not traced, and counts for nothing. One not used, or not yet traced since its slot last held another probe or
-// none, has its irradiance blanked, counting for nothing until it is, rather than lighting with what it, or the probe
-// before it, saw.
+// not is not traced, and counts for nothing. A probe keeps what it holds (GiHistory) for as long as its slot holds it,
+// used or not, so one that goes out of use and back, as something moves past it, picks up where it left off. One that
+// comes into use holding nothing, as a level moves and its slots take new probes, is given the next coarser level's light
+// where it is, from the eight probes of it around as a place between them would be lit, and the sky's at the coarsest,
+// so it lights at once and near enough rather than counting for nothing until it is traced; what it sees is taken to be
+// open until then. Its irradiance tile is written again whenever that changes: from what it holds, counting, while it is
+// used and holds anything, else blank, counting for nothing.
 
 #include "Lighting/Gi.hlsli"
+#include "Lighting/Ibl.hlsli"
+
+// Gives the probe at probeIndex the next coarser level's light where it is; false when none of that level's probes
+// around it has been traced yet. Only a traced one is read: one seeded, or a slot taking another probe, may be written
+// by another thread of this dispatch.
+bool Seed(GpuGi header, uint index, GpuGiLevel level, int3 probe, uint probeIndex)
+{
+    float3 sh[9];
+    uint around[8];
+    float weights[8];
+    float total = 0.0;
+    bool isCoarsest = index + 1u >= header.levels;
+    [unroll] for (uint i = 0u; i < 9u; i++)
+    {
+        sh[i] = isCoarsest ? LOAD(SkySh, float4, i).rgb : float3(0.0, 0.0, 0.0);
+    }
+
+    GpuGiLevel coarse = GiLevel(min(index + 1u, header.levels - 1u));
+    float3 grid = GiProbePosition(level, probe) / ((float)GiStride * coarse.voxel) - 0.5;
+    int3 base = (int3)floor(grid);
+    float3 alpha = grid - float3(base);
+    [unroll] for (uint corner = 0u; corner < 8u; corner++)
+    {
+        int3 offset = int3(corner & 1u, (corner >> 1u) & 1u, (corner >> 2u) & 1u);
+        int3 coarseProbe = base + offset;
+        around[corner] = GiProbeIndex(coarseProbe, index + 1u);
+        int4 state = isCoarsest ? int4(0, 0, 0, 0) : LOAD(GiProbeState, int4, around[corner]);
+        float3 trilinear = select(offset != 0, alpha, 1.0 - alpha);
+        weights[corner] = all(state.xyz == coarseProbe) && (state.w & GiProbeHeld) != 0 ? trilinear.x * trilinear.y * trilinear.z : 0.0;
+        total += weights[corner];
+    }
+
+    if (!isCoarsest && total <= 0.0)
+    {
+        return false;
+    }
+
+    [loop] for (uint texel = 0u; texel < GiIrradianceInside * GiIrradianceInside; texel++)
+    {
+        float3 irradiance = float3(0.0, 0.0, 0.0);
+        if (isCoarsest)
+        {
+            irradiance = ShIrradiance(GiTexelDirection(uint2(1u + texel % GiIrradianceInside, 1u + texel / GiIrradianceInside), GiIrradianceSide), sh) * GiStoreScale;
+        }
+        else
+        {
+            [unroll] for (uint coarseCorner = 0u; coarseCorner < 8u; coarseCorner++)
+            {
+                irradiance += weights[coarseCorner] > 0.0 ? GiUnpackHalf(GiHistory.Load2(GiIrradianceHistory(around[coarseCorner], texel) * 4u)).rgb * weights[coarseCorner] : float3(0.0, 0.0, 0.0);
+            }
+
+            irradiance /= total;
+        }
+
+        GiHistory.Store2(GiIrradianceHistory(probeIndex, texel) * 4u, GiPackHalf(float4(irradiance, 0.0)));
+    }
+
+    float open = GiMaxSpacings * (float)GiStride * level.voxel;
+    uint2 distanceCorner = GiTile(probe, index) * GiDistanceSide;
+    [loop] for (uint distanceTexel = 0u; distanceTexel < GiDistanceSide * GiDistanceSide; distanceTexel++)
+    {
+        GiDistance[distanceCorner + uint2(distanceTexel % GiDistanceSide, distanceTexel / GiDistanceSide)] = float2(open, open * open);
+    }
+
+    return true;
+}
 
 [numthreads(64, 1, 1)]
 void main(uint3 thread : SV_DispatchThreadID)
 {
-    if (thread.x >= GiProbes * GiProbes * GiProbes * GiHeader().levels)
+    GpuGi header = GiHeader();
+    if (thread.x >= GiProbes * GiProbes * GiProbes * header.levels)
     {
         return;
     }
@@ -17,10 +88,18 @@ void main(uint3 thread : SV_DispatchThreadID)
     GpuGiLevel level;
     int3 probe = GiProbeOf(thread.x, index, level);
     int4 state = LOAD(GiProbeState, int4, thread.x);
+    bool isSame = all(state.xyz == probe);
+    int holds = isSame ? state.w & (GiProbeHeld | GiProbeSeeded) : 0;
+    bool wasShown = isSame && (state.w & GiProbeUsed) != 0 && holds != 0;
     bool isUsed = GiIsUsed(level, index, probe);
-    bool isHeld = isUsed && (state.w & GiProbeHeld) != 0 && all(state.xyz == probe);
-    STORE(GiProbeState, int4, thread.x, int4(probe, (isUsed ? GiProbeUsed : 0) | (isHeld ? GiProbeHeld : 0)));
-    if (isHeld)
+    if (isUsed && holds == 0 && Seed(header, index, level, probe, thread.x))
+    {
+        holds = GiProbeSeeded;
+    }
+
+    STORE(GiProbeState, int4, thread.x, int4(probe, (isUsed ? GiProbeUsed : 0) | holds));
+    bool isShown = isUsed && holds != 0;
+    if (isSame && isShown == wasShown)
     {
         return;
     }
@@ -28,6 +107,10 @@ void main(uint3 thread : SV_DispatchThreadID)
     uint2 corner = GiTile(probe, index) * GiIrradianceSide;
     [loop] for (uint texel = 0u; texel < GiIrradianceSide * GiIrradianceSide; texel++)
     {
-        GiIrradiance[corner + uint2(texel % GiIrradianceSide, texel / GiIrradianceSide)] = float4(0.0, 0.0, 0.0, 0.0);
+        uint2 at = uint2(texel % GiIrradianceSide, texel / GiIrradianceSide);
+        uint2 source = GiBorderSource(at, GiIrradianceSide) - 1u;
+        uint inside = source.y * GiIrradianceInside + source.x;
+        float3 held = isShown ? GiUnpackHalf(GiHistory.Load2(GiIrradianceHistory(thread.x, inside) * 4u)).rgb : float3(0.0, 0.0, 0.0);
+        GiIrradiance[corner + at] = float4(held, isShown ? 1.0 : 0.0);
     }
 }

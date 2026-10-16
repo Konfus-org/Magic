@@ -1,0 +1,15 @@
+{
+    "stage": "visibility",
+    "kind": "compute",
+    "shader": { "id": 60021 },
+    "writes": [
+        { "name": "CullCounts" },
+        { "name": "BinCounts" },
+        { "name": "Budget" },
+        { "name": "HiddenInstances" },
+        { "name": "Jobs" },
+        { "name": "VisibleClusters" }
+    ],
+    "dispatch": { "args": "CullArgs", "first": 2 },
+    "params": { "phase": { "x": 2 } }
+}

@@ -10,7 +10,7 @@ In the project's `Presets/Default.preset`, by another preset, or `--set DxcShade
 
 | Key | Default | |
 | --- | --- | --- |
-| `debugInfo` | `false` | Embed each shader's source and symbols, so a GPU capture (RenderDoc, PIX, Xcode) steps through it. |
+| `debugInfo` | `false` | Embed each shader's source and symbols, so a GPU capture (RenderDoc, PIX, Xcode) steps through it. Changed while running, every shader is compiled again. |
 
 ## Behaviour
 
@@ -22,14 +22,16 @@ In the project's `Presets/Default.preset`, by another preset, or `--set DxcShade
   that keep DXC's errors naming its file and line, and its guards keep a second copy out. An include no asset is at
   is left for DXC to report; one that does not load fails the compile with the asset's error.
 - SPIR-V first, whatever the format asked for: for Vulkan 1.1 (`-fspv-target-env=vulkan1.1`), so wave intrinsics
-  become subgroup operations, with bindings kept where the source puts them. What a shader binds is counted from it
-  (SDL_shadercross's reflection), which is what a GPU needs to make a pipeline.
+  become subgroup operations. What a shader binds is read from the SPIR-V by name (`SpirvBindings`): each resource it
+  uses, what it is and the register it is at; a resource the shader does not use is dropped by the compiler and so
+  not listed. The counts of each kind are what a GPU needs to make a pipeline; the names are what a renderer binds by.
 - DXIL is compiled from the HLSL again, signed by DXC's `dxil` library, which the gem loads first so DXC finds it.
   Vulkan's attributes (`[[vk::image_format]]`) mean nothing to DXIL, so its compile alone does not warn of them.
 - Metal is translated from the SPIR-V (SDL_shadercross, over SPIRV-Cross) to Metal Shading Language 2.3, which has the
   SIMD-group functions wave intrinsics become; the entry point is renamed `main0`.
 - DXC runs on a worker, never the caller's thread. Each call makes its own DXC compiler, so the gem is safe from any
-  thread.
+  thread. A shader asked for while it already compiles, as when the passes are built again before the last build is
+  done, waits for that compile rather than starting its own, so each compiles, and its cache entry is written, once.
 - A failure is a `Result` carrying DXC's own text, file and line, so it reads like any compiler's.
 
 ## Cache

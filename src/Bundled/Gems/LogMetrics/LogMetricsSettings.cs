@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Magic.Interfaces;
 
 namespace Magic.LogMetrics;
 
@@ -6,12 +7,12 @@ namespace Magic.LogMetrics;
 /// What LogMetrics logs and how often. Set in the project's <c>Presets/Default.preset</c>, by another preset, or with
 /// <c>--set LogMetrics.enabled=true</c>.
 /// </summary>
-internal sealed class LogMetricsSettings
+[Category("Debug")]
+internal sealed class LogMetricsSettings : ISettings
 {
     /// <summary>
     /// Off unless asked for, so a project can list the gem and only the runs that want metrics log them.
     /// </summary>
-    [Browsable(false)]
     public bool Enabled { get; set; }
 
     /// <summary>
@@ -20,8 +21,7 @@ internal sealed class LogMetricsSettings
     public double IntervalSeconds { get; set; } = 30;
 
     /// <summary>
-    /// The meters listened to, each with the meters under it: "Magic" is Core's and every gem's "Magic.Gem".
+    /// The meters listened to, each with the meters under it: "Magic" is Core's "Magic.Core" and every gem's "Magic.Gems.&lt;Gem&gt;".
     /// </summary>
-    [Browsable(false)]
     public IReadOnlyList<string> Meters { get; set; } = ["Magic"];
 }

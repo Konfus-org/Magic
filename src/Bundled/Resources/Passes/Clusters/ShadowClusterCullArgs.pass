@@ -1,9 +1,8 @@
 {
-    "stage": "occlusion",
+    "stage": "shadows",
     "kind": "compute",
     "shader": { "id": 60047 },
-    "reads": [ { "name": "ShadowCounts" }, { "name": "ShadowJobs" }, { "name": "ShadowPieces" } ],
-    "writes": [ { "name": "ShadowArgs" } ],
+    "writes": [ { "name": "ShadowArgs" }, { "name": "ShadowTables" } ],
     "dispatch": { "groups": [ 1 ] },
     "params": { "step": { "x": 0 } }
 }

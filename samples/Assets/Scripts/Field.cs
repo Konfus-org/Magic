@@ -13,7 +13,7 @@ namespace Magic.Samples.Assets.Scripts;
 /// <c>{ "id": 3314, "instances": 2000, "lights": 500, "model": { "id": 517 }, "material": { "id": 3322 } }</c>, to see many
 /// of each at once and measure what they cost. They are its own, so they go when its entity does.
 /// </summary>
-internal sealed class Field(World world) : IScript, IDisposable
+internal sealed class Field(Entity owner, World world) : IScript, IDisposable
 {
     private readonly List<Entity> _spawned = [];
 
@@ -48,11 +48,11 @@ internal sealed class Field(World world) : IScript, IDisposable
     public Handle<Material> Material { get; set; }
 
     /// <summary>
-    /// Spawns everything around <paramref name="entity"/>.
+    /// Spawns everything around its entity.
     /// </summary>
-    public void Start(Entity entity)
+    public void Start()
     {
-        Vector3D centre = world.Get<Transform>(entity).Position;
+        Vector3D centre = world.Get<Transform>(owner).Position;
         Transform[] transforms = new Transform[Instances];
         Renderer[] renderers = new Renderer[Instances];
         for (int i = 0; i < Instances; i++)

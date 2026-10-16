@@ -44,9 +44,7 @@ void main(uint3 thread : SV_DispatchThreadID)
             break;
         }
 
-        // Back onto the view as it was drawn, a sub-pixel off (Jitter), which ViewPosition took out.
-        float2 ndc = along.xy * ProjScale / along.z + Jitter;
-        float2 at = float2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5) * ViewSize;
+        float2 at = ViewPixel(along);
         [branch] if (any(at < 0.0) || any(at >= ViewSize))
         {
             break;

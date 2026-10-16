@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
@@ -46,6 +47,9 @@ internal sealed class ClusterPool : IDisposable
     private readonly MeshFields _fields;
     private readonly ClusterRenderingSettings _settings;
     private readonly CancellationToken _stopping;
+    private static readonly Counter<long> _uploaded = ClusterRenderingGem.Meter.CreateCounter<long>("magic.gems.cluster_rendering.pool.upload.size", "By", "Bytes of models taken into the pool.");
+    private static readonly Gauge<int> _heldModels = ClusterRenderingGem.Meter.CreateGauge<int>("magic.gems.cluster_rendering.pool.models", "{model}", "Models held in the pool.");
+
     private readonly Dictionary<Handle<Model>, ModelEntry> _models = [];
     private readonly List<ModelEntry> _ready = [];
     private readonly RangeAllocator _words = new();
@@ -76,7 +80,7 @@ internal sealed class ClusterPool : IDisposable
         Cards = new GpuArray<GpuCard>(gpu, read, 256);
         _wordCapacity = 1 << 22;
         Geometry = gpu.CreateBuffer(read, (uint)_wordCapacity * sizeof(uint));
-        Failed = assets.Default<Model>();
+        Failed = assets.Failure<Model>(FailureType.Mesh);
     }
 
     public void Dispose()
@@ -102,13 +106,14 @@ internal sealed class ClusterPool : IDisposable
     public GpuBuffer Geometry { get; private set; }
 
     /// <summary>
-    /// The model a renderer whose model does not load is drawn with, in the failure look: the default model.
+    /// The model a renderer whose model does not load is drawn with, in the mesh failure material: the failure cube
+    /// (<see cref="Assets.Failure{T}"/>).
     /// </summary>
     public Handle<Model> Failed { get; }
 
     /// <summary>
-    /// The models taken in, again or for the first time, or failed, since the scene last asked: whose instances' bounds
-    /// changed.
+    /// The models taken in, again or for the first time, failed, or whose cards' atlases or field came in, since the scene
+    /// last asked: whose instances can be drawn now, or are drawn anew.
     /// </summary>
     public HashSet<Handle<Model>> Changed { get; } = [];
 
@@ -131,6 +136,12 @@ internal sealed class ClusterPool : IDisposable
     }
 
     public bool HasFailed(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && entry.HasFailed;
+
+    /// <summary>
+    /// Whether the model can be drawn as it should be: it is in, and its cards' atlases are in, or one failed and its
+    /// clusters stand in for its cards at every distance, so nothing about it changes once it shows.
+    /// </summary>
+    public bool IsDrawable(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && CanDraw(entry);
 
     /// <summary>
     /// The sphere around the model at full detail, in its own space; none until it is in.
@@ -175,7 +186,9 @@ internal sealed class ClusterPool : IDisposable
 
     /// <summary>
     /// Takes in the models packed since, the nearest to the player first, as many as the frame's budget allows (always
-    /// one, however big); writes cards whose atlases came in; then uploads what changed.
+    /// one, however big); writes cards whose atlases came in, and the rows of the models whose cards are all in now,
+    /// counting changed every model that can or cannot be drawn where it could not or could before; then uploads what
+    /// changed.
     /// </summary>
     public void Flush()
     {
@@ -190,11 +203,24 @@ internal sealed class ClusterPool : IDisposable
         }
 
         _ready.RemoveRange(0, taken);
+        _uploaded.Add(sent);
+        _heldModels.Record(_models.Count);
         if (_textures.Changed.Count > 0)
         {
             foreach (ModelEntry entry in _models.Values)
             {
+                bool wereIn = entry.AreCardsIn;
+                bool wasDrawable = CanDraw(entry);
                 WriteCards(entry);
+                if (entry.AreCardsIn != wereIn)
+                {
+                    WriteRow(entry);
+                }
+
+                if (entry.AreCardsIn != wereIn || CanDraw(entry) != wasDrawable)
+                {
+                    Changed.Add(entry.Handle);
+                }
             }
         }
 
@@ -291,14 +317,19 @@ internal sealed class ClusterPool : IDisposable
             Use(card.Card.Normals.Handle, 1);
         }
 
+        entry.Field = 0;
         WriteCards(entry);
-        WriteRow(entry, 0);
+        WriteRow(entry);
         Changed.Add(entry.Handle);
         MakeFieldAsync(entry, packed).FireAndForget();
         return (packed.Words.Length * sizeof(uint)) + (packed.Clusters.Length * GpuArray<GpuCluster>.RowBytes);
     }
 
-    private void WriteRow(ModelEntry entry, uint field)
+    /// <summary>
+    /// The model's row: its cards only once their atlases are all in, as a card without its atlas would be drawn a flat
+    /// square; until then its clusters are drawn at every distance.
+    /// </summary>
+    private void WriteRow(ModelEntry entry)
     {
         if (entry.In is not { } packed)
         {
@@ -308,20 +339,21 @@ internal sealed class ClusterPool : IDisposable
         Models.Set(entry.Row, new GpuModel
         {
             Bounds = packed.Bounds,
+            ClusterReach = packed.ClusterReach,
             FirstCluster = (uint)entry.FirstCluster,
             ClusterCount = (uint)packed.Clusters.Length,
             FirstLevel = (uint)entry.FirstLevel,
             LevelCount = (uint)packed.Levels.Length,
             FirstCard = (uint)entry.FirstCard,
-            CardCount = (uint)packed.Cards.Length,
+            CardCount = entry.AreCardsIn ? (uint)packed.Cards.Length : 0,
             CardDistance = packed.CardDistance,
             PositionStep = packed.Step,
-            Field = field,
+            Field = entry.Field,
         });
     }
 
     /// <summary>
-    /// The model's cards with their atlases' refs as they are now: none while an atlas loads.
+    /// The model's cards with their atlases' refs as they are now, none while an atlas loads, and whether they are all in.
     /// </summary>
     private void WriteCards(ModelEntry entry)
     {
@@ -330,15 +362,40 @@ internal sealed class ClusterPool : IDisposable
             return;
         }
 
+        bool areIn = true;
         for (int i = 0; i < packed.Cards.Length; i++)
         {
             PackedCard card = packed.Cards[i];
-            Cards.Set(entry.FirstCard + i, card.Row with { Surface = _textures.RefOf(card.Card.Surface.Handle), Normals = _textures.RefOf(card.Card.Normals.Handle) });
+            uint surface = _textures.RefOf(card.Card.Surface.Handle);
+            uint normals = _textures.RefOf(card.Card.Normals.Handle);
+            areIn &= surface != TexturePools.None && normals != TexturePools.None;
+            Cards.Set(entry.FirstCard + i, card.Row with { Surface = surface, Normals = normals });
         }
+
+        entry.AreCardsIn = areIn;
+    }
+
+    private bool CanDraw(ModelEntry entry) => entry.In is { } packed && (entry.AreCardsIn || HasFailedAtlas(packed));
+
+    /// <summary>
+    /// Whether an atlas of the model's cards failed, so they are never drawn.
+    /// </summary>
+    private bool HasFailedAtlas(PackedModel packed)
+    {
+        foreach (PackedCard card in packed.Cards)
+        {
+            if (_textures.HasFailed(card.Card.Surface.Handle) || _textures.HasFailed(card.Card.Normals.Handle))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
-    /// Reads or makes the model's field on a worker, from its coarsest clusters, then names it in its row.
+    /// Reads or makes the model's field on a worker, from its coarsest clusters, then names it in its row, and counts
+    /// the model changed so what is made from its instances' fields is made again.
     /// </summary>
     private async Task MakeFieldAsync(ModelEntry entry, PackedModel packed)
     {
@@ -350,7 +407,9 @@ internal sealed class ClusterPool : IDisposable
                 return;
             }
 
-            WriteRow(entry, _fields.Take(entry.Handle, field));
+            entry.Field = _fields.Take(entry.Handle, field);
+            WriteRow(entry);
+            Changed.Add(entry.Handle);
         });
     }
 
@@ -449,7 +508,18 @@ internal sealed class ClusterPool : IDisposable
             }
         }
 
-        return new PackedModel([.. words], [.. clusters], [.. levels], [.. packedCards], bounds, step, model.Cards?.Distance ?? 0, hierarchy.Cut(float.MaxValue));
+        // Each group's error sphere encloses its clusters', so a coarser cluster's, or its parent's, can reach past the
+        // bounds: an instance picks its levels of clusters by how near and far all of them reach, or it can pass over
+        // the level a cluster's own test wants and draw nothing there.
+        Vector3 middle = new(bounds.X, bounds.Y, bounds.Z);
+        float clusterReach = bounds.W;
+        foreach (GpuCluster cluster in clusters)
+        {
+            clusterReach = MathF.Max(clusterReach, Vector3.Distance(middle, new Vector3(cluster.ErrorBounds.X, cluster.ErrorBounds.Y, cluster.ErrorBounds.Z)) + cluster.ErrorBounds.W);
+            clusterReach = MathF.Max(clusterReach, Vector3.Distance(middle, new Vector3(cluster.ParentErrorBounds.X, cluster.ParentErrorBounds.Y, cluster.ParentErrorBounds.Z)) + cluster.ParentErrorBounds.W);
+        }
+
+        return new PackedModel([.. words], [.. clusters], [.. levels], [.. packedCards], bounds, clusterReach, step, model.Cards?.Distance ?? 0, hierarchy.Cut(float.MaxValue));
 
         // A level is a run of one level's clusters, with the least error and the most parent error of any in it.
         void Add(ClusterHierarchy added, Span<uint> packed)
@@ -488,13 +558,13 @@ internal sealed class ClusterPool : IDisposable
                 clusters.Add(new GpuCluster
                 {
                     Bounds = cluster.Bounds,
-                    LodBounds = cluster.LodBounds,
-                    ParentLodBounds = cluster.ParentLodBounds,
+                    ErrorBounds = cluster.ErrorBounds,
+                    ParentErrorBounds = cluster.ParentErrorBounds,
                     Error = cluster.Error,
                     ParentError = parentError,
                     Vertices = firstVertex,
                     Triangles = firstTriangle,
-                    Counts = GpuCluster.CountsOf(cluster.TriangleCount, cluster.VertexCount, cluster.MaterialSlot),
+                    Counts = GpuCluster.CountsOf(cluster.TriangleCount, cluster.VertexCount, cluster.MaterialSlot, cluster.Level),
                     Step = step,
                 });
                 if (cluster.Level == 0)
@@ -580,9 +650,9 @@ internal sealed class ClusterPool : IDisposable
                         MaterialSlot = mesh.MaterialSlot,
                         Level = 0,
                         Bounds = sphere,
-                        LodBounds = sphere,
+                        ErrorBounds = sphere,
                         Error = 0,
-                        ParentLodBounds = sphere,
+                        ParentErrorBounds = sphere,
                         ParentError = float.PositiveInfinity,
                     });
                 }
@@ -690,7 +760,8 @@ internal sealed class ClusterPool : IDisposable
 
     /// <summary>
     /// A model as the pool holds it: its row, what was packed and is in, what is packed and waits its turn, where it is in
-    /// the pool, and how near the player the nearest instance asking for it was.
+    /// the pool, its field's row, whether its cards' atlases are all in, and how near the player the nearest instance
+    /// asking for it was.
     /// </summary>
     private sealed class ModelEntry(Handle<Model> handle, int row)
     {
@@ -710,6 +781,10 @@ internal sealed class ClusterPool : IDisposable
 
         public int FirstCard { get; set; }
 
+        public uint Field { get; set; }
+
+        public bool AreCardsIn { get; set; }
+
         public float Distance { get; set; } = float.MaxValue;
 
         public bool HasFailed { get; set; }
@@ -720,10 +795,11 @@ internal sealed class ClusterPool : IDisposable
 
 /// <summary>
 /// A model packed for the <see cref="ClusterPool"/>: its words, its clusters with their words counted from its first,
-/// its levels with their clusters counted from its first, its cards, its sphere, its grid's step, the unit-scale distance
-/// its cards take over from its clusters (0 for none), and its coarsest triangles.
+/// its levels with their clusters counted from its first, its cards, its sphere, how far from the sphere's middle its
+/// clusters' error spheres reach, its grid's step, the unit-scale distance its cards take over from its clusters (0 for
+/// none), and its coarsest triangles.
 /// </summary>
-internal sealed record PackedModel(uint[] Words, GpuCluster[] Clusters, GpuLevel[] Levels, PackedCard[] Cards, Vector4 Bounds, float Step, float CardDistance, IReadOnlyList<Mesh> Coarsest);
+internal sealed record PackedModel(uint[] Words, GpuCluster[] Clusters, GpuLevel[] Levels, PackedCard[] Cards, Vector4 Bounds, float ClusterReach, float Step, float CardDistance, IReadOnlyList<Mesh> Coarsest);
 
 /// <summary>
 /// A card of a packed model: the card its atlases are read from, and its row but for their refs.

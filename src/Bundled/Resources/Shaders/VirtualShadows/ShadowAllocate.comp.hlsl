@@ -1,16 +1,21 @@
 // Gives the pages wanted this frame the pool's pages, and picks which are drawn, in one group:
 //
-// 1. Every wanted entry with no page is counted by priority: the sun's four coarsest levels first, as every pixel falls
-//    back on them and they are few, then by distance from the player, four buckets to a doubling, a sun level by how
-//    far the pixels that want it are, a light by where it is. A light's page at its coarsest mip takes a small page,
-//    the rest whole ones.
-// 2. The pool's pages no view read this frame are listed, each kind apart: those nothing owns first, then those read
-//    longest ago, then the rest.
-// 3. Each request takes the next listed page of its kind in priority order, the page's last owner, when a sun entry,
-//    losing it; a request past the pages there are gets none, and its pixels read the next coarser.
+// 1. Every wanted entry with no page is counted by priority: each light's coarsest mip first, as its pixels fall back
+//    on it and they are few; then the sun's levels, coarsest first, as a coarse page shadows four times the ground the
+//    next finer does, so after a turn every pixel soon has some shadow, which then sharpens; then lights by distance
+//    from the player, four buckets to a doubling. A light's page at its coarsest mip takes a small page, the rest
+//    whole ones.
+// 2. The pool's pages are listed, each kind apart: those nothing owns first, then those read longest ago, then the rest
+//    no view read this frame; then the whole pages a view did read for a light, the farthest lights' first.
+// 3. Each request takes the next listed page of its kind in priority order, unless a light that comes before it or
+//    with it holds the page, so past the pages there are, the farthest lights are shadowed through their coarser mips;
+//    a request with none to take gets none, and its pixels read the next coarser. The entries the pages were taken
+//    from let go of them only once every request has taken its own, so none wanted this frame turns into a request
+//    partway through.
 // 4. Every wanted page that waits to be drawn (new, or something in it moved) is counted by the same priority, and the
 //    first as many as the frame may draw (ShadowArgsViewRoom) become this frame's views: what takes a point onto the
-//    page, its pool page, and the rectangle of it waiting, which its record lets go of; the rest wait. Each sun page
+//    page, its pool page, its entry's row, and the rectangle of it waiting, which its record lets go of; the rest
+//    wait. Each sun page
 //    drawn and each light with a view is a group (ShadowGroups), which culling finds casters by: a page with its view,
 //    a light with the faces and mips they are at and where it is.
 // 5. The view's ShadowArgs: the pages' clear, a quad each, and the shadows' instance cull, a thread an instance; and in
@@ -19,14 +24,22 @@
 #include "Include/Culling.hlsli"
 #include "Include/VirtualShadows.hlsli"
 
-static const uint Classes = Buckets + 1u;
+// The classes requests and drawn pages are ordered by: lights' small pages, then the sun's levels, coarsest first,
+// then lights' whole pages by distance.
+static const uint Classes = 1u + SunMaxLevels + Buckets;
 
 // Frames since a page was read past which it is taken before those read since.
 static const uint StaleFrames = 60u;
 
+// A listed page is its index, with above it the priority of the light holding it, Classes for a page free to take,
+// which every request comes before.
+static const uint ClassShift = 24u;
+static const uint CandidateIndex = (1u << ClassShift) - 1u;
+
 groupshared uint Requested[2][Classes];
 groupshared uint Taken[2][Classes];
 groupshared uint Listed[2];
+groupshared uint Held[Classes];
 groupshared uint Drawn[Classes];
 groupshared uint DrawnTaken[Classes];
 groupshared uint Groups;
@@ -34,12 +47,7 @@ groupshared uint ViewRoom;
 
 uint SunClass(GpuSunClipmap sun, uint level)
 {
-    return level + 4u >= sun.levels ? 0u : 1u + BucketOfDistance(SunReachOf(sun, level));
-}
-
-uint LightClass(uint key)
-{
-    return 1u + BucketOf(SceneLightPosition(LOAD(SceneLights, GpuSceneLight, LightSlotOfKey(key))));
+    return sun.levels - level;
 }
 
 // 0 for a whole page, 1 for a small one.
@@ -48,22 +56,36 @@ uint KindOfKey(uint key)
     return MipOfKey(key) == LightMips - 1u ? 1u : 0u;
 }
 
+// A light's small page is first: its pixels read through it while their own pages wait, so a light whose small page
+// waited would light them unshadowed. Its whole pages come after every sun level.
+uint LightClass(uint key)
+{
+    return KindOfKey(key) == 1u ? 0u : 1u + SunMaxLevels + BucketOf(SceneLightPosition(LOAD(SceneLights, GpuSceneLight, LightSlotOfKey(key))));
+}
+
 // Whether an entry is wanted this frame and has a page waiting to be drawn.
 bool IsWaiting(ShadowEntry entry, uint frame)
 {
     return entry.wanted == frame && HasPage(entry.page) && (entry.page & PageDirty) != 0u;
 }
 
-// Takes a pool page from the sun entry that last had it, when it still does.
-void TakeFromSun(GpuSunClipmap sun, uint record, uint page)
+// The priority of the light whose entry in this frame's table holds a page a view read this frame, which a request
+// nearer than it may take, the light falling back on its coarser mips; 0, which no request comes before, for any other
+// page, and for the sun's, whose coarser levels are what nearer pixels' soft shadows are filtered through.
+uint HeldClass(GpuSunClipmap sun, uint2 record)
 {
-    uint owner = ShadowTables.Load(record * 16u);
-    if (owner == 0u || (owner & LightOwner) != 0u)
+    if ((record.x & LightOwner) == 0u || record.y != sun.frame)
     {
-        return;
+        return 0u;
     }
 
-    uint row = sun.sunTable + owner - 1u;
+    return LightClass(ShadowTables.Load((sun.lightTable + (record.x & ~LightOwner)) * 16u + 4u));
+}
+
+// Takes a pool page from the entry that last had it, the sun's or a light's in this frame's table, when it still does.
+void TakeFrom(GpuSunClipmap sun, uint owner, uint page)
+{
+    uint row = (owner & LightOwner) != 0u ? sun.lightTable + (owner & ~LightOwner) : sun.sunTable + owner - 1u;
     if ((ShadowTables.Load(row * 16u) & ~PageDirty) == page)
     {
         ShadowTables.Store(row * 16u, 0u);
@@ -95,7 +117,7 @@ GpuShadowView SunView(GpuSunClipmap sun, GpuSunLevel row, uint level, int2 page)
     view.page = 0u;
     view.group = level;
     view.rect = WholeRect;
-    view.padding = 0u;
+    view.entry = 0u;
     return view;
 }
 
@@ -117,7 +139,7 @@ GpuShadowView LightView(uint key)
     view.page = 0u;
     view.group = slot | LightOwner;
     view.rect = WholeRect;
-    view.padding = 0u;
+    view.entry = 0u;
     return view;
 }
 
@@ -136,6 +158,7 @@ void main(uint thread : SV_GroupIndex)
         Requested[1][clear] = 0u;
         Taken[0][clear] = 0u;
         Taken[1][clear] = 0u;
+        Held[clear] = 0u;
         Drawn[clear] = 0u;
         DrawnTaken[clear] = 0u;
     }
@@ -189,12 +212,50 @@ void main(uint thread : SV_GroupIndex)
             {
                 uint at;
                 InterlockedAdd(Listed[kind], 1u, at);
-                ShadowCandidates.Store((kind == 0u ? at : wholePages + at) * 4u, index);
+                ShadowCandidates.Store((kind == 0u ? at : wholePages + at) * 4u, index | (Classes << ClassShift));
             }
         }
 
         DeviceMemoryBarrierWithGroupSync();
     }
+
+    // Then the whole pages a view read this frame for a light, by the light's priority, the farthest first.
+    for (uint hc = thread; hc < wholePages; hc += 1024u)
+    {
+        uint klass = HeldClass(sun, ShadowTables.Load2(hc * 16u));
+        if (klass > 0u)
+        {
+            InterlockedAdd(Held[klass], 1u);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    if (thread == 0u)
+    {
+        uint at = Listed[0];
+        for (uint c = Classes - 1u; c > 0u; c--)
+        {
+            uint count = Held[c];
+            Held[c] = at;
+            at += count;
+        }
+
+        Listed[0] = at;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+    for (uint hp = thread; hp < wholePages; hp += 1024u)
+    {
+        uint klass = HeldClass(sun, ShadowTables.Load2(hp * 16u));
+        if (klass > 0u)
+        {
+            uint at;
+            InterlockedAdd(Held[klass], 1u, at);
+            ShadowCandidates.Store(at * 4u, hp | (klass << ClassShift));
+        }
+    }
+
+    DeviceMemoryBarrierWithGroupSync();
 
     // Each class's first place in its kind's order.
     if (thread < 2u)
@@ -210,7 +271,8 @@ void main(uint thread : SV_GroupIndex)
 
     GroupMemoryBarrierWithGroupSync();
 
-    // 3. Each request takes the next page of its kind, in priority order.
+    // 3. Each request takes the next page of its kind, in priority order, unless a light that comes before it or with
+    //    it holds it; the page's record keeps what owned it, which lets go of it below.
     for (uint s = thread; s < sunEntries; s += 1024u)
     {
         ShadowEntry entry = TABLE_ENTRY(ShadowTables, sun.sunTable + s);
@@ -224,15 +286,15 @@ void main(uint thread : SV_GroupIndex)
         uint rank;
         InterlockedAdd(Taken[0][klass], 1u, rank);
         rank += Requested[0][klass];
-        if (rank >= Listed[0])
+        uint candidate = rank < Listed[0] ? ShadowCandidates.Load(rank * 4u) : 0u;
+        if (candidate >> ClassShift <= klass)
         {
             continue;
         }
 
-        uint index = ShadowCandidates.Load(rank * 4u);
-        TakeFromSun(sun, index, index + 1u);
+        uint index = candidate & CandidateIndex;
         ShadowTables.Store2((sun.sunTable + s) * 16u, uint2((index + 1u) | PageDirty, SunTagOf(SunPageAt(SunLevelOf(level), s))));
-        ShadowTables.Store3(index * 16u, uint3(s + 1u, sun.frame, WholeRect));
+        ShadowTables.Store4(index * 16u, uint4(s + 1u, sun.frame, WholeRect, ShadowTables.Load(index * 16u)));
     }
 
     for (uint t = thread; t < lightEntries; t += 1024u)
@@ -248,21 +310,36 @@ void main(uint thread : SV_GroupIndex)
         uint rank;
         InterlockedAdd(Taken[kind][klass], 1u, rank);
         rank += Requested[kind][klass];
-        if (rank >= Listed[kind])
+        uint candidate = rank < Listed[kind] ? ShadowCandidates.Load((kind == 0u ? rank : wholePages + rank) * 4u) : 0u;
+        if (candidate >> ClassShift <= klass)
         {
             continue;
         }
 
-        uint index = ShadowCandidates.Load((kind == 0u ? rank : wholePages + rank) * 4u);
-        uint page = (index + 1u) | (kind == 1u ? PageSmall : 0u);
+        uint page = ((candidate & CandidateIndex) + 1u) | (kind == 1u ? PageSmall : 0u);
         uint record = RecordOf(sun, page);
-        if (kind == 0u)
-        {
-            TakeFromSun(sun, record, page);
-        }
-
         ShadowTables.Store((sun.lightTable + t) * 16u, page | PageDirty);
-        ShadowTables.Store3(record * 16u, uint3(t | LightOwner, sun.frame, WholeRect));
+        ShadowTables.Store4(record * 16u, uint4(t | LightOwner, sun.frame, WholeRect, ShadowTables.Load(record * 16u)));
+    }
+
+    DeviceMemoryBarrierWithGroupSync();
+
+    // The entries the pages were taken from let go of them, when they have not since been given them again.
+    for (uint g = thread; g < wholePages + sun.smallPages; g += 1024u)
+    {
+        uint kind = g < wholePages ? 0u : 1u;
+        uint index = kind == 0u ? g : g - wholePages;
+        uint record = kind == 0u ? index : records + index;
+        uint4 row = ShadowTables.Load4(record * 16u);
+        if (row.w != 0u)
+        {
+            if (row.w != row.x)
+            {
+                TakeFrom(sun, row.w, (index + 1u) | (kind == 1u ? PageSmall : 0u));
+            }
+
+            ShadowTables.Store(record * 16u + 12u, 0u);
+        }
     }
 
     DeviceMemoryBarrierWithGroupSync();
@@ -325,6 +402,7 @@ void main(uint thread : SV_GroupIndex)
         GpuShadowView view = SunView(sun, row, level, page);
         view.page = entry.page & ~PageDirty;
         view.rect = TakeRect(sun, view.page);
+        view.entry = sun.sunTable + vs;
         STORE(ShadowViews, GpuShadowView, rank, view);
         ShadowTables.Store((sun.sunTable + vs) * 16u, view.page);
         ShadowTables.Store((sun.sunTable + vs) * 16u + 12u, rank);
@@ -363,6 +441,7 @@ void main(uint thread : SV_GroupIndex)
         GpuShadowView view = LightView(entry.tag);
         view.page = entry.page & ~PageDirty;
         view.rect = TakeRect(sun, view.page);
+        view.entry = sun.lightTable + vl;
         STORE(ShadowViews, GpuShadowView, rank, view);
         ShadowTables.Store((sun.lightTable + vl) * 16u, view.page);
         ShadowTables.Store((sun.lightTable + vl) * 16u + 12u, rank);

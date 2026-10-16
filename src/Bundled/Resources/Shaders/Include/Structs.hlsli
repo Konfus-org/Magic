@@ -56,9 +56,11 @@ struct GpuGi
 {
     uint levels;
     uint rays;
-    float hysteresis;
     uint seed;
-    uint4 padding[6];
+    uint padding0;
+    float3 camera;
+    uint padding1;
+    uint4 padding[5];
 };
 
 struct GpuGiLevel
@@ -66,7 +68,7 @@ struct GpuGiLevel
     int3 origin;
     float voxel;
     int3 dirtyMin;
-    uint padding0;
+    float hysteresis;
     int3 dirtyMax;
     uint period;
     uint4 dirty[4];
@@ -75,7 +77,6 @@ struct GpuGiLevel
 // A scene instance's flags.
 static const uint SceneMirrored = 1u;
 static const uint SceneFadeIn = 2u;
-static const uint SceneFadeOut = 4u;
 
 // A scene instance, by its entity's slot: the rows of transpose(world) (xyz its turn and scale, w its position's high
 // float, which low adds to, so a far position is still exact relative to the camera), and the last frame's the same way;
@@ -100,8 +101,9 @@ struct GpuSceneInstance
 };
 
 // A model in the cluster pool: its sphere about its origin, its clusters, its levels (GpuLevel) and its cards
-// (GpuCard), the unit-scale distance its cards are drawn from (0 for none), its grid's step and its distance field's
-// slot.
+// (GpuCard), the unit-scale distance its cards are drawn from (0 for none), its grid's step, its distance field's slot,
+// and how far from its sphere's middle any cluster's error sphere or its parent's reaches, past the sphere, as each
+// group's sphere encloses its clusters'.
 struct GpuModel
 {
     float4 bounds;
@@ -114,7 +116,8 @@ struct GpuModel
     float cardDistance;
     float positionStep;
     uint field;
-    uint3 padding;
+    float clusterReach;
+    uint2 padding;
 };
 
 // One level of a model's clusters: where they are, the least error of any of them, and the most error of any of their
@@ -129,12 +132,13 @@ struct GpuLevel
 
 // One cluster: the sphere around it, its group's sphere and error and its parent's (Core's Cluster), where its
 // vertices and triangles start in the geometry's words, its counts (triangles in the low 8 bits, vertices in the next
-// 9, its material slot in the 3 after) and its model's grid step, which its vertices' positions are in.
+// 9, its material slot in the 3 after, its level in the 5 after) and its model's grid step, which its vertices'
+// positions are in.
 struct GpuCluster
 {
     float4 bounds;
-    float4 lodBounds;
-    float4 parentLodBounds;
+    float4 errorBounds;
+    float4 parentErrorBounds;
     float error;
     float parentError;
     uint vertices;
@@ -221,6 +225,5 @@ uint SceneMaterial(GpuSceneInstance instance, uint slot)
     uint word = instance.materials[slot >> 1];
     return (slot & 1u) != 0u ? word >> 16 : word & 0xFFFFu;
 }
-
 
 #endif

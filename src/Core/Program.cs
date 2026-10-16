@@ -3,8 +3,6 @@ using System.CommandLine.Parsing;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime;
 using Magic.Contexts.CmdLine;
-using Magic.Contexts.Settings;
-using Magic.Contexts.Utils;
 using Magic.Services;
 
 namespace Magic;
@@ -44,8 +42,7 @@ internal static class Program
         {
             foreach (Token token in result.Tokens)
             {
-                Result<Setting> setting = Settings.Parse(token.Value);
-                if (!setting.Ok)
+                if (Settings.Parse(token.Value) is { Ok: false } setting)
                 {
                     result.AddError(setting.Error);
                 }
@@ -78,21 +75,12 @@ internal static class Program
         // A game would rather have the heap grow than have every thread stopped for a full collection mid-frame.
         GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
 
-        List<Setting> overrides = [];
-        foreach (string text in parsed.GetValue(settings) ?? [])
-        {
-            if (Settings.Parse(text) is { Ok: true } setting)
-            {
-                overrides.Add(setting.Value);
-            }
-        }
-
         Args args = new()
         {
             ProjectPath = parsed.GetRequiredValue(project),
             FrameLimit = parsed.GetValue(frames) ?? ulong.MaxValue,
             Headless = parsed.GetValue(headless),
-            Settings = overrides,
+            Settings = parsed.GetValue(settings) ?? [],
             Preset = parsed.GetValue(preset) ?? string.Empty,
         };
 

@@ -19,9 +19,9 @@ public sealed class Model : IAsset<Model>, ISpawnable
     public required IReadOnlyList<Mesh> Meshes { get; init; }
 
     /// <summary>
-    /// Its triangles in clusters at every level of detail, which a renderer cuts through per cluster as it draws, so
-    /// detail follows distance across the model. A gem makes them as it loads (<see cref="ILoadPostProcessor{T}"/>);
-    /// null when none does, and a renderer then draws its meshes as they are.
+    /// Its triangles in clusters at every level, finest to coarsest, which a renderer cuts through per cluster as it
+    /// draws, so detail follows distance across the model. A gem makes them as it loads
+    /// (<see cref="ILoadPostProcessor{T}"/>); null when none does, and a renderer then draws its meshes as they are.
     /// </summary>
     public ClusterHierarchy? Clusters { get; init; }
 
@@ -35,7 +35,7 @@ public sealed class Model : IAsset<Model>, ISpawnable
     /// <summary>
     /// Makes one entity at <paramref name="at"/> that draws it.
     /// </summary>
-    public Entity[] Spawn(World world, in Transform at)
+    public Entity[] Spawn(World world, Transform at)
     {
         return [world.Create([at, new Renderer { Model = Handle }])];
     }

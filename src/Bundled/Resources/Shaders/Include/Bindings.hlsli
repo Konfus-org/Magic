@@ -10,6 +10,9 @@
 //               texture a shader writes states its format for Vulkan, [[vk::image_format("rgba16f")]], which
 //               otherwise needs a device feature to write it; DXIL ignores the attribute.
 //   UNIFORM(n)  constant blocks. A stage has exactly one, at UNIFORM(0).
+//   Names:      a shader a renderer composes (a pass's, a surface's) reads the frame's textures and buffers by name:
+//               the renderer declares every name the pass can see ahead of it, numbered as above, and binds whichever
+//               the shader uses, read back from its compile; the shader binds nothing itself.
 //   Buffers:    a storage buffer is byte-addressed, ByteAddressBuffer or RWByteAddressBuffer, never structured: a GPU
 //               gem may view it as raw bytes (Direct3D 12 does), and a structured buffer would then read its element
 //               size from a view that has none, which some GPUs take as 0. Its elements go through LOAD and STORE, its
@@ -36,7 +39,8 @@
 //   Language:   HLSL 2021 (and(), or() and select() for vector logic), Shader Model 6.0, warnings are errors.
 //   Waves:      wave intrinsics (Vulkan 1.1 subgroups, Metal SIMD-groups) where every lane that calls one is
 //               active and the result is the same whatever the wave's size, 32 or 64 by GPU: scalarising a loop,
-//               reducing a group. Never a result that depends on which lanes share a wave.
+//               reducing a group, or handing out the places of a count (WaveAllocate), which the atomics' order
+//               already made arbitrary. Never otherwise a result that depends on which lanes share a wave.
 //   Limits:     no 16-bit types (slow on GPUs still in use), no runtime-indexed resource arrays.
 //   Semantics:  vertex inputs are TEXCOORDn, declared in n order; SV_VertexID / SV_InstanceID are never read by
 //               the mesh path (first_instance is not portable): the instance index arrives in an instance-rate
@@ -69,8 +73,9 @@ typedef float4 Color;
 #define LOAD(buffer, T, index) (buffer).Load<T>((index) * sizeof(T))
 #define STORE(buffer, T, index, value) (buffer).Store<T>((index) * sizeof(T), (value))
 
-// How many elements of size bytes a storage buffer holds.
-uint CountOf(ByteAddressBuffer buffer, uint size)
+// How many elements of size bytes a storage buffer holds, read-only or not.
+template<typename T>
+uint CountOf(T buffer, uint size)
 {
     uint bytes;
     buffer.GetDimensions(bytes);
@@ -78,11 +83,21 @@ uint CountOf(ByteAddressBuffer buffer, uint size)
 }
 
 #if defined(STAGE_COMPUTE)
-uint CountOf(RWByteAddressBuffer buffer, uint size)
+// The first of the count places a lane takes in a count a buffer keeps at a byte offset: the wave's places taken
+// together by one atomic (Adinets 2014, "Optimized Filtering with Warp-Aggregated Atomics"), each lane's after the
+// lanes' before it, as the places were as arbitrary as the atomics' order already. Only the lanes active where it is
+// called take places.
+uint WaveAllocate(RWByteAddressBuffer counts, uint offset, uint count)
 {
-    uint bytes;
-    buffer.GetDimensions(bytes);
-    return bytes / size;
+    uint before = WavePrefixSum(count);
+    uint total = WaveActiveSum(count);
+    uint first = 0u;
+    if (WaveIsFirstLane())
+    {
+        counts.InterlockedAdd(offset, total, first);
+    }
+
+    return WaveReadLaneFirst(first) + before;
 }
 #endif
 

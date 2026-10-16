@@ -5,22 +5,25 @@ namespace Magic.Contexts.Gpu;
 
 /// <summary>
 /// One GPU command, as <see cref="GpuCommands"/> records it: plain data whose <see cref="Type"/> says which fields mean
-/// something; the rest are default. A run, of bindings or of bytes, is a slice of the list's own
-/// (<see cref="GpuCommands.BindingsOf"/>, <see cref="GpuCommands.BytesOf"/>).
+/// something; the rest are default. A run (of texture levels, sampled textures, textures, buffers, regions or bytes)
+/// is a slice of the list's own, which the list hands back by the command (<see cref="GpuCommands.LevelsOf"/> and
+/// the others like it).
 /// </summary>
 public readonly record struct GpuCommand(
     GpuCommandType Type,
     GpuStage Stage = GpuStage.Vertex,
     GpuPipeline Pipeline = default,
     GpuBuffer Buffer = default,
-    GpuTexture Depth = default,
-    uint DepthLayer = 0,
-    GpuLoad Load = GpuLoad.Load,
+    GpuTexture Texture = default,
+    GpuTextureLevel Depth = default,
+    GpuContents Contents = GpuContents.Keep,
     Color Clear = default,
     Rectangle Area = default,
-    uint Slot = 0,
+    GpuIndexSize IndexSize = GpuIndexSize.Bits16,
     int RunStart = 0,
     int RunLength = 0,
+    int SecondRunStart = 0,
+    int SecondRunLength = 0,
     uint Count = 0,
     uint Instances = 1,
     uint First = 0,
@@ -29,25 +32,24 @@ public readonly record struct GpuCommand(
     uint Offset = 0,
     uint GroupsX = 0,
     uint GroupsY = 0,
-    uint GroupsZ = 0,
-    bool Wide = false);
+    uint GroupsZ = 0);
 
 /// <summary>
-/// What a <see cref="GpuCommand"/> does; each says which fields it uses.
+/// What a <see cref="GpuCommand"/> does; each says which fields and which run it uses.
 /// </summary>
 public enum GpuCommandType : byte
 {
     /// <summary>
-    /// The run: the colour targets, none for a depth-only pass. <see cref="GpuCommand.Depth"/> (at
-    /// <see cref="GpuCommand.DepthLayer"/>) or none; <see cref="GpuCommand.Load"/> for all of them, a clear to
-    /// <see cref="GpuCommand.Clear"/> and depth to 0, reverse-Z's far.
+    /// The run of levels: the colour targets, none for a depth-only pass. <see cref="GpuCommand.Depth"/>, or none;
+    /// <see cref="GpuCommand.Contents"/> for all of them, a clear to <see cref="GpuCommand.Clear"/> and depth to 0,
+    /// reverse-Z's far.
     /// </summary>
     BeginRenderPass,
 
     EndRenderPass,
 
     /// <summary>
-    /// The run: the buffers, and the textures as storage, the pass writes.
+    /// The run of levels: the textures the pass writes; the second run, of buffers: the buffers it writes.
     /// </summary>
     BeginComputePass,
 
@@ -56,47 +58,47 @@ public enum GpuCommandType : byte
     /// <summary>
     /// <see cref="GpuCommand.Area"/>, in target pixels.
     /// </summary>
-    SetViewport,
+    Viewport,
 
     /// <summary>
     /// Area, in target pixels.
     /// </summary>
-    SetScissor,
+    Scissor,
 
     /// <summary>
     /// <see cref="GpuCommand.Pipeline"/>: a graphics one inside a render pass, a compute one inside a compute pass.
     /// </summary>
-    BindPipeline,
+    Pipeline,
 
     /// <summary>
-    /// <see cref="GpuCommand.Slot"/>, the first slot; the run, the buffers.
+    /// The run of buffers: the vertex buffers, from slot 0.
     /// </summary>
-    BindVertexBuffers,
+    VertexBuffers,
 
     /// <summary>
-    /// <see cref="GpuCommand.Buffer"/>, with 32-bit indices when <see cref="GpuCommand.Wide"/>, else 16-bit.
+    /// <see cref="GpuCommand.Buffer"/>, of indices of <see cref="GpuCommand.IndexSize"/>.
     /// </summary>
-    BindIndexBuffer,
+    IndexBuffer,
 
     /// <summary>
-    /// <see cref="GpuCommand.Stage"/> and Slot; the run, the read-only storage buffers.
+    /// <see cref="GpuCommand.Stage"/>; the run of buffers: what it reads, from register 0.
     /// </summary>
-    BindStorageBuffers,
+    Buffers,
 
     /// <summary>
-    /// Stage and Slot; the run, the read-only storage textures.
+    /// Stage; the run of textures: what it reads texel by texel, with no sampler, from register 0.
     /// </summary>
-    BindStorageTextures,
+    RawTextures,
 
     /// <summary>
-    /// Stage and Slot; the run, the sampled textures, each with its sampler.
+    /// Stage; the run of sampled textures: what it reads through a sampler, from register 0.
     /// </summary>
-    BindTextures,
+    Textures,
 
     /// <summary>
-    /// Stage; the run, the bytes of the stage's one constant block.
+    /// Stage; the run of bytes: the stage's one constant block.
     /// </summary>
-    PushConstants,
+    Constants,
 
     /// <summary>
     /// <see cref="GpuCommand.Count"/> vertices from <see cref="GpuCommand.First"/>, <see cref="GpuCommand.Instances"/>
@@ -110,9 +112,9 @@ public enum GpuCommandType : byte
     DrawIndexed,
 
     /// <summary>
-    /// Count indexed draws, read from Buffer at <see cref="GpuCommand.Offset"/>.
+    /// Count indexed draws, their arguments read from Buffer at <see cref="GpuCommand.Offset"/>.
     /// </summary>
-    DrawIndexedIndirect,
+    DrawIndexedFromBuffer,
 
     /// <summary>
     /// <see cref="GpuCommand.GroupsX"/> by <see cref="GpuCommand.GroupsY"/> by <see cref="GpuCommand.GroupsZ"/> groups.
@@ -122,60 +124,62 @@ public enum GpuCommandType : byte
     /// <summary>
     /// The groups, read from Buffer at Offset.
     /// </summary>
-    DispatchIndirect,
+    DispatchFromBuffer,
 
     /// <summary>
-    /// Outside any pass. The run: the source and destination textures, each at a level and layer;
-    /// <see cref="GpuCommand.Area"/>'s width and height, the texels copied from each one's corner.
+    /// Outside any pass. The run of regions: the source, whose size is copied, and the destination.
     /// </summary>
     CopyTexture,
 
     /// <summary>
-    /// Outside any pass. The run: the source and destination buffers; <see cref="GpuCommand.Count"/> bytes from
+    /// Outside any pass. The run of buffers: the source and destination; <see cref="GpuCommand.Count"/> bytes from
     /// <see cref="GpuCommand.First"/> in the source to <see cref="GpuCommand.Offset"/> in the destination.
     /// </summary>
     CopyBuffer,
 
     /// <summary>
-    /// Outside any pass. The run: the source and destination textures, each a whole level of a layer, the source scaled
-    /// to the destination, filtered as <see cref="GpuCommand.Slot"/> says (a <see cref="GpuFilter"/>).
-    /// </summary>
-    Blit,
-
-    /// <summary>
-    /// Outside any pass. The run: the texture, whose levels past the first are made from it.
+    /// Outside any pass. <see cref="GpuCommand.Texture"/>, whose levels past the first are made from it.
     /// </summary>
     GenerateMipmaps,
 
     /// <summary>
     /// Outside any pass. The run of bytes: the group's name, UTF-8; what a GPU debugger shows the commands up to the
-    /// matching <see cref="PopDebugGroup"/> under.
+    /// matching <see cref="EndDebugGroup"/> under.
     /// </summary>
-    PushDebugGroup,
+    BeginDebugGroup,
 
     /// <summary>
-    /// Outside any pass: ends the last group pushed.
+    /// Outside any pass: ends the last group begun.
     /// </summary>
-    PopDebugGroup,
+    EndDebugGroup,
 }
 
 /// <summary>
-/// What a render pass does with its targets' contents when it starts.
+/// What a render pass does with what its targets hold when it starts.
 /// </summary>
-public enum GpuLoad : byte
+public enum GpuContents : byte
 {
     /// <summary>
-    /// Keeps them, to draw over.
+    /// Keeps it, to draw over.
     /// </summary>
-    Load,
+    Keep,
 
     /// <summary>
-    /// Clears them.
+    /// Clears it.
     /// </summary>
     Clear,
 
     /// <summary>
-    /// Leaves them undefined: for a pass that covers every pixel.
+    /// Throws it away, leaving the targets undefined: for a pass that covers every pixel.
     /// </summary>
-    DontCare,
+    Discard,
+}
+
+/// <summary>
+/// How wide each index of an index buffer is.
+/// </summary>
+public enum GpuIndexSize : byte
+{
+    Bits16,
+    Bits32,
 }

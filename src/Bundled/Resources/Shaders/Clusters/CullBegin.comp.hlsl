@@ -1,9 +1,9 @@
 // Shares a view's detail out nearest the player first (Budget): from how many pieces each distance bucket drew last
 // frame, the buckets past where the view's pieces would not fit draw coarser this frame, their clusters' error allowed
-// to cover twice as many pixels again each frame they would not fit, and a little less again each frame they do, back
-// down to what the settings ask. A bucket is never finer than a nearer one. Then last frame's counts are emptied for
-// this frame's, and each level of the view's depth pyramid is given as many groups as it has texels (HiZArgs). One
-// group.
+// to cover twice as many pixels again each frame they would not fit, and a little less again each frame they fit with
+// room to spare, back down to what the settings ask; in between they hold, so detail settles rather than going back and
+// forth from frame to frame. A bucket is never finer than a nearer one. Then last frame's counts are emptied for this
+// frame's, and each level of the view's depth pyramid is given as many groups as it has texels (HiZArgs). One group.
 
 #include "Include/Culling.hlsli"
 
@@ -11,6 +11,10 @@ struct PassParams
 {
     // The share of the view's pieces the buckets are kept within, below 1 so a sudden turn still fits.
     float fill = 0.85;
+
+    // The share below which a bucket drawn coarser is drawn finer again: well under fill, so that once a bucket is fine
+    // enough to fit, it is not made coarse again by the detail it gets back.
+    float refill = 0.6;
 
     // The most a bucket's error is scaled by.
     float maxScale = 64.0;
@@ -37,7 +41,8 @@ void main(uint index : SV_GroupIndex)
     // A budget never written yet reads as nothing, or as no number at all: either is the settings' own.
     float scale = asfloat(Budget.Load((Buckets + index) * 4u));
     scale = scale >= 1.0 && scale <= params.maxScale ? scale : 1.0;
-    scale = (float)upTo > params.fill * (float)capacity ? min(scale * 2.0, params.maxScale) : max(scale * 0.8, 1.0);
+    float used = (float)upTo / (float)capacity;
+    scale = used > params.fill ? min(scale * 2.0, params.maxScale) : used < params.refill ? max(scale * 0.8, 1.0) : scale;
     Scales[index] = scale;
     GroupMemoryBarrierWithGroupSync();
 
@@ -51,6 +56,9 @@ void main(uint index : SV_GroupIndex)
     Budget.Store(index * 4u, 0u);
     if (index < CountOf(HiZArgs, 12u))
     {
-        HiZArgs.Store3(index * 12u, uint3((HiZSize(index) + 7u) / 8u, 1u));
+        uint2 size;
+        uint offset;
+        HiZLevel(index, size, offset);
+        HiZArgs.Store3(index * 12u, uint3((size + 7u) / 8u, 1u));
     }
 }

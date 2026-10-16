@@ -1,6 +1,8 @@
 using System.IO;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Frames;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -14,6 +16,28 @@ namespace Magic.PipelineLoader;
 /// </summary>
 internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings) : IGem, ILoadPostProcessor<Pipeline>
 {
+    /// <summary>
+    /// The overrides the pipelines were last made with, so a change while running makes them again: the settings'
+    /// objects, which are new ones once set, or once a preset is applied.
+    /// </summary>
+    private IReadOnlyList<string> _off = settings.Off;
+    private IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> _params = settings.Params;
+
+    /// <summary>
+    /// Makes every pipeline again when what the machine overrides was changed while running.
+    /// </summary>
+    public void Update(in Frame frame)
+    {
+        if (ReferenceEquals(_off, settings.Off) && ReferenceEquals(_params, settings.Params))
+        {
+            return;
+        }
+
+        _off = settings.Off;
+        _params = settings.Params;
+        assets.RemakeAsync<Pipeline>().FireAndForget();
+    }
+
     public async Task<Result<Pipeline>> ProcessAsync(Pipeline asset, ulong version, CancellationToken cancel)
     {
         List<PipelinePass> passes = [];

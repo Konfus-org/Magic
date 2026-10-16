@@ -20,8 +20,9 @@ dotnet test Magic.slnx
 Build/net10.0/Debug/bin/Magic --project samples
 ```
 
-Build the solution: building `src/Core` alone does not build the gems, which reference Core rather than the other
-way round. Run from an IDE or with `dotnet run --project src/Core`, Magic opens the Samples project. Only a `Release`
+Building `src/Core` alone builds the bundled gems and resources with it, so `dotnet run --project src/Core` or a run
+from an IDE never loads a gem left stale against a new Magic; the solution build adds the samples' own code. Run from
+an IDE or with `dotnet run --project src/Core`, Magic opens the Samples project. Only a `Release`
 build copies the engine's and the gems' assets beside Magic; the others read them where they are in the repository, so
 building stays fast and an edit to one reaches a running engine at once.
 
@@ -34,7 +35,7 @@ project's own, its `Presets/Default.preset`, and under `--set`. `--verbose` also
 that is usually noise. Exit codes: 0 clean, 1 bad arguments or a project that cannot be opened, 2 an error was logged
 under `--fail-on-error`. A
 crash ends the process with the OS's crash code and leaves a `.crash` file in `Logs/` beside Magic. What is slow to
-make, such as a compiled shader or a model's levels of detail, is kept in `Cache/` beside Magic, and made again when
+make, such as a compiled shader or a model's clusters, is kept in `Cache/` beside Magic, and made again when
 what it was made from changes; deleting the folder is always safe.
 
 The build is strict: every compiler, analyzer, MSBuild and NuGet warning is an error. `.editorconfig` holds the
@@ -57,13 +58,13 @@ windows and their events to and so becomes the render thread:
    and changed while running through Core's `Settings` ([Core's README](src/Core/README.md#gem-settings)). Every other
    interface it implements is what it provides, but `ILogSink`, which makes it somewhere the log goes. Gems are made in
    dependency order, and in the project's order where dependencies do not decide.
-3. **Runs frames, on two threads.** A frame runs four phases, and each phase calls that hook on every gem that has one,
+3. **Runs frames, on two threads.** A frame runs five phases, and each phase calls that hook on every gem that has one,
    so data flows one way from the start of a frame to its end. A main thread started beside the render thread runs the
-   game's, in the order the gems were made: `Update`, `FixedUpdate` (once per fixed step) and `LateUpdate`. The
-   render thread then runs `Render`, in reverse order, while the main thread goes on to the next frame, so drawing and
-   presenting never hold the game up. `LateUpdate` is the one point where both hold still, and copies what `Render`
-   will read. Work on other threads is tasks, and hands what it made to the main or render thread through `Threads`
-   ([Core's README](src/Core/README.md#threads)).
+   game's, in the order the gems were made: `Update`, `FixedUpdate` (once per fixed step), `LateUpdate` and `Sync`.
+   The render thread then runs `Render`, in reverse order, while the main thread goes on to the next frame, so drawing
+   and presenting never hold the game up. `LateUpdate` prepares what `Render` will read, into a copy `Render` is not
+   reading; `Sync` is the one point where both hold still, and swaps the copies. Work on other threads is tasks, and
+   hands what it made to the main or render thread through `Threads` ([Core's README](src/Core/README.md#threads)).
 4. **Ends the gems**, in reverse order, on the render thread, once a gem stops the run (`Lifetime.Stop`), Ctrl+C is
    pressed in a `--headless` run or the `--frames` limit is reached.
 

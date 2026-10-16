@@ -13,7 +13,9 @@ namespace Magic.ClusterRendering;
 /// what moved (<see cref="Scene.Moved"/>) the bricks it touched. Each level has a grid of <see cref="Probes"/> probes a
 /// side, a share of them traced each frame: all of the finest level's every
 /// <see cref="ClusterRenderingSettings.GiUpdateEvery"/> frames, and of each coarser level, whose probes light what is
-/// further and larger, half as often. Render thread.
+/// further and larger, half as often. A probe blends what it was traced with into what it held by how long it waited,
+/// so light everywhere follows a change in about the same time whatever the frame rate and however seldom a level is
+/// traced (<see cref="Response"/>). Render thread.
 /// </summary>
 internal sealed class GiVolume : IDisposable
 {
@@ -44,6 +46,19 @@ internal sealed class GiVolume : IDisposable
     private const int Reach = 4;
 
     private const int Bricks = Resolution / Brick;
+
+    /// <summary>
+    /// Seconds the finest level's probes take to come most of the way (all but 1/e) to a change of light; each coarser
+    /// level, traced half as often, takes √2 times as long, so the fewer tracings it blends are no noisier.
+    /// </summary>
+    private const float Response = 0.3f;
+
+    /// <summary>
+    /// The least and most of what a probe held it keeps as it takes in a tracing: never so little that one tracing's
+    /// noise shows, nor so much that it never moves.
+    /// </summary>
+    private const float LeastKept = 0.5f;
+    private const float MostKept = 0.98f;
 
     private readonly Level[] _levels = new Level[MaxLevels];
     private uint _frame;
@@ -93,9 +108,10 @@ internal sealed class GiVolume : IDisposable
 
     /// <summary>
     /// Places the levels around <paramref name="camera"/>, marks what is made again, from where they moved and from
-    /// <paramref name="moved"/>, and uploads them with which probes are traced this frame.
+    /// <paramref name="moved"/>, and uploads them with which probes are traced this frame and how much of what they held
+    /// they keep, from the frame's <paramref name="seconds"/>.
     /// </summary>
-    public void Plan(Vector3D camera, IReadOnlyList<MovedSphere> moved, ClusterRenderingSettings settings)
+    public void Plan(Vector3D camera, IReadOnlyList<MovedSphere> moved, float seconds, ClusterRenderingSettings settings)
     {
         int levels = Math.Clamp(settings.GiLevels, 1, MaxLevels);
         float finest = Math.Clamp(settings.GiVoxel, 0.05f, 4);
@@ -118,6 +134,7 @@ internal sealed class GiVolume : IDisposable
 
             level.Voxel = voxel;
             level.Period = every << index;
+            level.Hysteresis = Math.Clamp(MathF.Exp(-level.Period * seconds / (Response * MathF.Pow(MathF.Sqrt(2), index))), LeastKept, MostKept);
             level.IsHeld = true;
             foreach (MovedSphere sphere in moved)
             {
@@ -137,8 +154,8 @@ internal sealed class GiVolume : IDisposable
         {
             Levels = (uint)levels,
             Rays = rays,
-            Hysteresis = 0.97f,
             Seed = _frame,
+            Camera = camera.ToVector3(),
         };
         Rows.Set(0, Unsafe.As<GpuGi, GpuGiLevel>(ref header));
         for (int index = 0; index < MaxLevels; index++)
@@ -182,6 +199,11 @@ internal sealed class GiVolume : IDisposable
         /// Frames a probe of it waits to be traced again.
         /// </summary>
         public uint Period { get; set; } = 1;
+
+        /// <summary>
+        /// How much of what a probe of it held it keeps as it takes in what it was traced with.
+        /// </summary>
+        public float Hysteresis { get; set; }
 
         public void Clear()
         {
@@ -250,6 +272,7 @@ internal sealed class GiVolume : IDisposable
                 DirtyMaxY = isDirty ? ((_high.Y + 1) * Brick) - 1 : -1,
                 DirtyMaxZ = isDirty ? ((_high.Z + 1) * Brick) - 1 : -1,
                 Period = Period,
+                Hysteresis = Hysteresis,
                 Dirty = _dirty,
             };
         }

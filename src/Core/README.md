@@ -16,21 +16,21 @@ fills a gem's constructor parameters from:
 | Parameter | Comes from |
 | --- | --- |
 | `IFileSystem`, `Lifetime`, `Threads`, `Events`, `Project`, `Args`, `Settings`, `Assets`, `Caches` | Core |
-| `World` | Core, once a gem provides the ECS ([the world](#the-world)) |
+| `World` | Core ([the world](#the-world)) |
 | `IServiceProvider` | Core: the service provider itself, for a gem that finds a service by its type as it runs, as `Assets` finds the `IAssetLoader<T>` a gem provides for an asset type |
 | An interface | the gem that implements it, which is made first |
-| A type the gem declares itself | the gem's settings, below |
+| An `ISettings` | the gem's settings, below |
 
 A parameter with a default value (`IWindow? window = null`) is optional: when no gem provides it, the gem gets the
 default. A gem that provides it but fails to start takes the gems that need it down too, optional or not.
 
 ## Gem settings
 
-A gem with settings declares a class for them, plain data like a file type, which Core reads in its JSON dialect
-(below).
+A gem with settings declares a class for them, an `ISettings`: plain data like a file type, which Core reads in its
+JSON dialect (below).
 
 ```csharp
-internal sealed class WindowSettings
+internal sealed class WindowSettings : ISettings
 {
     public int Width { get; set; } = 1280;
 }
@@ -78,11 +78,19 @@ Each is checked at once, and says why not, changing nothing, when the key names 
 not fit; applying a preset drops what was set while running. A change reaches the gems at the frame's sync point, after
 the main thread has waited for the render thread and before LateUpdate: the new values are copied into the object each
 gem holds, so a gem reads its settings on either engine thread and never sees a change halfway, and `Get` reads it back
-at once. A gem that reads a setting every frame sees it change; one it reads only as it starts is marked
-`[Browsable(false)]` (`System.ComponentModel`), and a settings window does not offer it, as it changes nothing until the
-next run. `[Range(min, max)]` (`System.ComponentModel.DataAnnotations`) bounds a number a window offers.
-`Settings.Gems` lists each gem's name and settings object, `Settings.Presets` the presets in `Presets/`, and
-`Settings.Preset` the one applied. `Settings` can be used from any thread.
+at once. A gem that reads a setting every frame sees it change; one it reads only as it starts, the GPU device opened
+say, is marked `[RequireRestart]`, and changing it ends the run and starts it again at once with every setting as it
+is and the world as it was ([The world](#the-world)): a settings window says so on the row. `[Range(min, max)]`
+(`System.ComponentModel.DataAnnotations`) bounds a number a window offers.
+`[Category("Render/Shadows")]` (`System.ComponentModel`), on a property or its class, groups a setting with the other
+gems' settings of its kind in a UI: a tab, Render, and past the slash a header in it, Shadows. The tabs are few and
+broad, Render, Window, Input, Scripting and Debug; a setting without a category, or without a slash, sits under its gem's
+name.
+`Settings.All` lists every setting as it is now, for a settings UI to show: its name, its description, which is its doc
+comment (the build writes every assembly's comments into a documentation file beside it, so nothing repeats them),
+the gem it belongs to, its type, its value and its attributes, `[RequireRestart]` and `[Range]` among them.
+`Settings.Presets` lists the presets in `Presets/`, and `Settings.Preset` is the one applied. `Settings` can be used
+from any thread.
 
 A key for a gem the project does not list is left out of a preset, as one preset serves every project, and is an error
 on the command line, where it is ignored; so is a key for a gem that takes no settings. A `--preset` no preset has is
@@ -93,8 +101,9 @@ an error naming the key, and that gem is not made.
 
 There is one dialect, `Json.Options` (`Magic.Services`): camelCase keys matched exactly, enums by their names in
 snake_case (`"clamp"`, `"masked"`), comments and trailing commas allowed, a public field read as a property is (a
-component's), and a key the type does not have, or a null where the type allows none, refused. Any type reads in it
-as it is, Core's, a gem's or a game's: .NET's serializer finds its members by reflection, so nothing is declared for
+component's), a float that is infinite or not a number written and read as `"Infinity"`, `"-Infinity"` or `"NaN"`,
+and a key the type does not have, or a null where the type allows none, refused. Any type reads in it as it is,
+Core's, a gem's or a game's: .NET's serializer finds its members by reflection, so nothing is declared for
 it. `Json.Read<T>(bytes)` reads one, skipping a byte order mark, and says why when it cannot; `JsonSerializer` takes
 `Json.Options` for anything else. Magic is never trimmed or compiled ahead of time, as gems load from disk at run
 time, so the reflection is always there.
@@ -103,7 +112,7 @@ time, so the reflection is always there.
 
 A component is an unmanaged struct that implements `IComponent` (`Magic.Interfaces`), a marker with nothing in it:
 the world takes only those, and a file names one by its type's name. Core finds them in its own code, and in the
-project's and each gem's as they load, before any gem is made (`Components.Named`), so declaring one is all a gem or a
+project's and each gem's as they load, before any gem is made (`Code.Component`), so declaring one is all a gem or a
 game does:
 
 ```csharp
@@ -125,22 +134,21 @@ which scripts run more often near and detail is kept nearest to ([the world](#th
 ## Scripts
 
 A script (`IScript`) is what an entity does, as its components are what it holds: a `.cs` asset whose class, named
-like the file, implements it. The project's code ([the project file](#the-project-file)), or the gem it belongs to,
-compiles it, so the asset (`Script`) is that class. Scripts work as components do: a prefab's part holds its scripts,
-made with their values set, and each entity spawned from the part gets its own copy of each.
+like the file, implements it. The project's code ([the project file](#the-project-file)), the gem it belongs to, or
+Core for the engine's own, compiles it, so the asset (`Script`) is that class. Scripts work as components do: a prefab's
+part holds its scripts with their values (`PrefabScript`), and each entity spawned from the part gets its own copy of
+each, made for it.
 
 ```csharp
-internal sealed class Hover(World world) : IBehavior
+internal sealed class Hover(Entity owner, World world) : IBehavior   // keeps its entity and services, nothing more
 {
-    private Entity _entity;
     private double _restY;
 
     public float Height { get; set; }                 // a value: its initialiser the default, a prefab sets it
 
-    public void Start(Entity entity)                  // begins on its entity, its values set
+    public void Start()                               // begins on its entity, its values set
     {
-        _entity = entity;
-        _restY = world.Get<Transform>(entity).Position.Y;
+        _restY = world.Get<Transform>(owner).Position.Y;
     }
 
     public void Update(in Frame frame) { … }
@@ -149,12 +157,13 @@ internal sealed class Hover(World world) : IBehavior
 
 | | |
 | --- | --- |
-| `IScript` | A script. Its constructor takes the services it needs, never its entity, as a script in a prefab is made before there is one; its public `{ get; set; }` properties are its values; `Start(entity)` is where it begins on its entity, on the main thread, with the entity's components there to read. |
-| `IScripts.Make` | A script of a class, made with the services its constructor asks for: what a prefab's part holds once its values are set. Any thread. |
-| `World.Attach` | Gives an entity its own copy of a script, through `IScripts.Attach`: made anew, given the script's property values, started on the entity once whatever spawned with it is all there, and run until the entity is destroyed, when it is disposed if it is `IDisposable`. Main thread. |
+| `IScript` | A script. Its constructor takes the entity it is attached to first, then the services it needs, and only keeps them: it does no work, as its values are not set yet. Its public `{ get; set; }` properties are its values; `Start()` is where it begins, on the main thread, with its values set and the entity's components there to read. |
+| `ISystemScript`, `IParallelSystemScript` | A script that is also a system, of any kind the world takes (`ISystemScript<T1>` and on, up to four components): added to the ECS while its entity lives. The entity it is made for holds it and is no entity it runs over. |
+| `IScripts.Make` | A script of a class that runs on no entity, as a pipeline script does, made with the services its constructor asks for. Any thread. |
+| `World.Attach` | Gives an entity its own copy of a script, through `IScripts.Attach`: made for the entity, given the prefab's values, started once whatever spawned with it is all there, and run until the entity is destroyed, when it is disposed if it is `IDisposable`. Main thread. |
 | `[Impatient]` | Marks a script's class that starts as it is attached. Any other waits until whatever is spawning it has all spawned, and while a domain loads in place of the world, until the domain is there, so it never sees half a prefab or a world half loaded: the loading domain's own scripts, such as a progress bar, are impatient, or never run. |
 | `IBehavior` | A script that runs each frame: `Update`, `FixedUpdate` and `LateUpdate`, each optional, called on the main thread: `FixedUpdate` every step, the others each frame, or less often far from the player's cameras (tagged `player`), handed the time since the last call as the frame's delta. |
-| A system | A script that is also a system, of any kind the world takes: added to the ECS while its entity lives. |
+| `IPipelineScript` | A script that records part of a frame: a pass of kind `script` names it, and the renderer makes it for each listing of the frame it builds and calls it on the render thread to draw into the pass's target, with pipelines of its own (`PipelineScriptContext`); never on an entity. A hook at a point of the frame for code that is no gem: a HUD, an overlay, the debug UI. |
 
 ## The project file
 
@@ -175,7 +184,16 @@ A project's own code is its scripts and the components they use: the `.cs` files
 beside the `.magic` file, named like the project, compiles into `Projects/<Name>/<Name>.dll` beside Magic (the
 samples' `Directory.Build.props` sets that up). It is no gem and is not listed: Core loads it, when it has been built,
 into a load context of its own as it loads a gem, and takes in its components before any gem is made. It provides
-nothing and takes no settings, so it holds only scripts, components and the plain types they use.
+nothing and takes no settings, so it holds only scripts, components and the plain types they use. Magic's own scripts,
+the `.cs` assets among the bundled resources, are built the same way by the project in that folder, into
+`Resources/Resources.dll` beside Magic, and loaded before the project's code.
+
+Both are loaded from their bytes, so a build can write them while the engine runs, and Core watches their folders:
+once a build there has settled, it loads the code again beside the last build, whose types stay for whatever still
+holds them, and the new types replace the old by name (`Code`). Every script and every prefab is then made again, as a
+script is the class named like its file and a prefab names its components, and what is made from those after them,
+so the world spawns again what a domain placed and the scripts run as they are now
+([hot reload](../Bundled/Resources/README.md#hot-reload)). A gem is never loaded again: a gem takes a restart.
 
 `Project.Resources`, the folders of the engine's own assets and each gem's, is set as the gems load. A part's own
 assets are its `Resources/` folder (the engine's, Core's and its bundled gems', are `src/Bundled/Resources/`), which a
@@ -196,7 +214,7 @@ a gem plugs a file format into. How assets are laid out, found, read and reloade
 | `Assets` (`Magic.Services`) | Finds an asset by its path (`Find<T>`), a type's default (`Default<T>`) and the assets in a folder (`Paths`), loads one (`LoadAsync<T>`), says what one was made from (`Dependencies<T>`) and its version (`Version<T>`), and hands out one a gem made rather than read from a file (`Add<T>`), from any thread. |
 | `IJsonAsset<T>`, `ITextAsset<T>` | What an asset type implements in place of `IAsset<T>` when its file is the class as JSON (`Material : IJsonAsset<Material>`), or UTF-8 text kept in its `Text`. `Assets` reads both, so the class is all there is to write, and its sidecar holds only the id. |
 | `IAssetLoader<T>` | A file format: what is on disk made into what the engine works with. It is handed the file's asset path, its bytes and the import settings its sidecar holds beside the id, which it reads as a type of its own (`Json.Read<TextureMeta>(settings)`), so no loader handles the sidecar's format; it loads asynchronously, and the assets it loads as it reads one, as a prefab loads the prefabs it places, are what that one is made from (`Dependencies<T>`). A gem provides one for its format by implementing it, as any interface, and it reads every file of its type; a type no gem reads is read as JSON or text when it is an `IJsonAsset<T>` or an `ITextAsset<T>`, and refused otherwise. |
-| `ILoadPostProcessor<T>` | Work on an asset once its loader has made it, before anyone gets it, on every load and reload: a model's levels of detail, a pipeline's passes. A gem provides one for a type by implementing it; what it returns is the asset everyone gets. It is handed the asset's version, a hash of its file and sidecar, to check what it cached against. What it loads as it works is what the asset is made from (`Dependencies<T>`): when one of those is made again, the asset is made again after it. |
+| `ILoadPostProcessor<T>` | Work on an asset once its loader has made it, before anyone gets it, on every load and reload: a model's clusters, a pipeline's passes. A gem provides one for a type by implementing it; what it returns is the asset everyone gets. It is handed the asset's version, a hash of its file and sidecar, to check what it cached against. What it loads as it works is what the asset is made from (`Dependencies<T>`): when one of those is made again, the asset is made again after it. |
 
 Core's asset types are those more than one gem uses: one makes them, another reads them, as a `Prefab`, a bundle of
 entities, is both a domain's chunk and the project's player. An asset type is what the engine works with, not the shape
@@ -205,8 +223,10 @@ under it, which its loader made of the file, so nothing past the loader handles 
 shape, such as a `Domain`, is read as its class (`IJsonAsset<T>`). A type only one gem reads is that gem's own, and
 implements `IAsset<T>` all the same.
 
-Every asset type has a default, `<Type>s/Default` with one of its extensions, which `Default<T>` finds and a project
-replaces by having its own at the same path.
+Every asset type has a default, `<Type>s/Default` with one of its extensions in the engine's own `Resources/`, which
+`Default<T>` finds; a project's or a gem's file at that path is an asset like any other, found by its path, never the
+default. A type a renderer draws a failure as also has a failure asset for each kind of failure,
+`<Type>s/Failures/<FailureType>`, found by `Failure<T>(FailureType)` the same way.
 
 **What is kept.** A loaded asset is kept for as long as anything that uses it holds it, and let go once nothing does;
 asked for again, it loads again. Nothing counts references and nothing sets a budget: whoever uses an asset holds it,
@@ -226,7 +246,7 @@ types it uses:
 
 ## The cache
 
-What is slow to make is kept so that a later run reads it rather than making it again: a model's levels of detail, a
+What is slow to make is kept so that a later run reads it rather than making it again: a model's clusters, a
 compiled shader. It works as the assets do: Core holds the entries, and each type of thing kept has a gem that says
 how it is written.
 
@@ -239,7 +259,7 @@ how it is written.
   or a hash naming what is not an asset, such as a shader's source and stage, so each variant of a shader has its own.
 - **The version** is a hash of everything the entry was made from: the asset's version, which its post-processor is
   handed, and the settings it was made with. Read with another version, or written by another
-  `ICache<T>.Version`, an entry is dirty: it is deleted, the read fails, and the caller makes it again and writes it.
+  `ICache<T>.Version`, an entry is dirty: the read fails, and the caller makes it again and writes it over it.
   So an asset that changes, while the engine runs or while it does not, has what was made from it made again.
 - An entry is the file `Cache/<Type>/<key>`: the version it was made from and the type's `ICache<T>.Version`, then
   what the type's `ICache<T>` wrote. A write goes beside the entry first and is then moved over it, so a reader, or the
@@ -263,10 +283,12 @@ if (compiled.Ok)
 
 ## The world
 
-`World` (`Magic.Services`) is the game world, and the one place game code and gems act on it. Core makes it once a
-gem provides the ECS (`IEcs`), and opens the project's entry point through it on the first frame. Underneath, the pieces
-stay separate: the ECS gem keeps the entities and runs the systems, the scripting gem runs the scripts (`IScripts`), and
-the assets load what the world opens and spawns. Only those pieces take `IEcs`; everything else takes `World`.
+`World` (`Magic.Services`) is the game world, and the one place game code and gems act on it. Core always makes it,
+and opens the project's entry point through it on the first frame. Underneath, the pieces stay separate: the ECS gem
+keeps the entities and runs the systems (`IEcs`), the scripting gem runs the scripts (`IScripts`), and the assets load
+what the world opens and spawns. Only those pieces take `IEcs`; everything else takes `World`. Without a gem that
+provides the ECS, the world holds no entities: no domain opens, which is warned about, a call that needs entities
+throws saying so, and `End` still works.
 
 | | |
 | --- | --- |
@@ -274,6 +296,7 @@ the assets load what the world opens and spawns. Only those pieces take `IEcs`; 
 | `Spawn`, `SpawnAsync` | Puts an asset in the world at a transform, as the asset says (`ISpawnable`), and hands back the entities made, the caller's to destroy: a `Prefab` its parts, each placed under its parent, a `Model` one entity that draws it. `SpawnAsync` loads it first. |
 | `Attach` | Gives an entity its own copy of a script ([Scripts](#scripts)). |
 | `OpenAsync`, `Close`, `Opened`, `IsLoading` | The domains open in it (below). |
+| `Save`, `RestoreAsync` | The world as data (`WorldState`), and the world put back from it (below). |
 | `End` | Ends the game: the frames stop, and the gems end. |
 
 It is the main thread's, but `OpenAsync` and `SpawnAsync`, which any thread may call. It does nothing each frame:
@@ -300,6 +323,19 @@ distance, so the whole world is there at once.
   where it is; prefabs added to its folder spawn, and those removed go. The player is not spawned again: what the
   player has done is the game's.
 
+`Save` writes the whole world as data, a `WorldState`: the domains open, with the entities each of their prefabs
+spawned, every entity with its components as JSON by their names and its scripts as JSON by name
+([Scripts](#scripts)), and the frame clock. It holds nothing of the code that made it, so it outlives the run, and
+restores into whatever code is loaded then, as a file read would. `RestoreAsync` puts the world back from one, in
+place of whatever is open, all in one frame: it reads each domain's folder on workers first, as opening one does, so a
+prefab added since spawns and one gone has its entities destroyed, then makes every entity anew, gives each its
+components, and puts its scripts back without starting them. An `Entity` is saved as its id and read back as the
+entity made for it, so what refers to another entity, in a component or a script, still does; the id of one destroyed
+before the save reads as none. The engine saves the world as a run ends to restart (`Lifetime.Restart`) and restores
+it on the first frame of the next, so the game goes on where it was, the frames going on from the saved clock. A
+component or script no code loaded declares, or whose saved values no longer fit it, is an error, and the entity goes
+without it.
+
 ## Events
 
 `Events` is how gems tell each other what happened. Anything publishes a message, a struct, from any
@@ -321,18 +357,20 @@ them:
 | Thread | |
 | --- | --- |
 | Render | The process's first thread, which the OS ties windows and their events to: start-up, gem constructors and `Dispose`, the `Render` hooks, and so the window and the GPU. |
-| Main | Started beside it: the `Update`, `FixedUpdate` and `LateUpdate` hooks, and the ECS. |
+| Main | Started beside it: the `Update`, `FixedUpdate`, `LateUpdate` and `Sync` hooks, and the ECS. |
 
 ```
-main:    Update N  FixedUpdate N  (wait)  LateUpdate N  |  Update N+1  FixedUpdate N+1  (wait)  LateUpdate N+1  | ...
-render:                                                 |  Render N                                             |  Render N+1 ...
+main:    Update N  FixedUpdate N  LateUpdate N  (wait)  Sync N  |  Update N+1  FixedUpdate N+1  LateUpdate N+1  (wait)  Sync N+1  | ...
+render:                                                         |  Render N                                                       |  Render N+1 ...
 ```
 
-The main thread hands a frame to the render thread after `LateUpdate` and goes on to the next; before the next
-`LateUpdate` it waits until the render thread is done with it (`magic.frame.render_wait.duration`). So the render
-thread runs at most one frame behind, and `LateUpdate` is the point where both hold still: a gem copies there what its
-`Render` reads, and `Render` reads nothing else. Everything else is tasks on .NET's thread pool (`Task.Run`, async code,
-`.FireAndForget()`), and an ECS gem may spread a parallel system over threads of its own.
+The main thread hands a frame to the render thread after `Sync` and goes on to the next; before the next `Sync` it waits
+until the render thread is done with it (`magic.core.frame.render_wait.duration`). So the render thread runs at most one
+frame behind, and `Sync` is the one point where both hold still. A gem prepares in `LateUpdate` what its `Render` reads,
+into a copy `Render` is not reading, as the render thread may still be drawing the frame before; in `Sync` it swaps the
+two, and nothing more, as every gem waits on it; and `Render` reads only that copy. Everything else is tasks on .NET's
+thread pool (`Task.Run`, async code, `.FireAndForget()`), and an ECS gem may spread a parallel system over threads of
+its own.
 
 Each phase calls only the gems that implement its hook, since the rest do nothing. The main thread's hooks run in the
 order the gems were made, so a gem is up to date before the gems that take it read it: the gem providing `IInput` takes
@@ -345,7 +383,7 @@ it drew: the gem providing `IGpu` submits and presents in its `Render`, after ev
 
 | | |
 | --- | --- |
-| `Post(thread, work)` | Runs `work` there, in the order handed over: the main thread at the start of the next frame, before `Update`; the render thread between frames. What it throws is logged. |
+| `Post(thread, work)` | Runs `work` there, in the order handed over: the main thread at the start of the next frame, before `Update`; the render thread between frames. What it throws is logged, and each piece is timed while something listens (`magic.core.thread.work.duration`), as a hook is, since it stalls the frame as a hook does. |
 | `InvokeAsync(thread, work, cancel)` | The same, as a task that ends once it has run, with what it returned or threw. |
 | `RunAsync(name, work)` | `work` on a thread of its own, for work as long as the run (reading the terminal), given `Lifetime.Stopping`. |
 | `IsCurrent(thread)` | Whether the calling thread may do that thread's work now: it is that thread, or that thread is not running. |
@@ -380,11 +418,11 @@ Core holds what every gem that draws shares, and no graphics API:
 
 | | |
 | --- | --- |
-| `IGpu` | The GPU one level above the API: make buffers, textures, samplers and pipelines, upload to them, and record the frame's commands into `IGpu.Commands`, all on the render thread. The provider submits and presents them in its `Render` hook; it is made before every gem that takes it, so its `Render` runs after theirs, and a gem that takes it records in `Render`. `IGpu.DebugView`, which any thread may set, names the stage of the frame (`PassStage`) to show in place of the finished image, or none: whatever draws the frame reads it, and the provider only keeps it. |
-| Render targets | A render target is a `GpuTexture`: a texture a gem made (a render texture, which it can then sample, as an editor's viewport is), or a window's, from `IGpu.Target(window)`. Whatever draws asks `IGpu.Format` and `IGpu.Size` of its target and treats the two alike; a window's can be drawn into, never sampled or read, but `IGpu.CaptureAsync` reads back what it shows next, for a screenshot. |
-| `GpuCommands` | A frame's commands as plain data, `GpuCommand`s with the bindings and bytes they point into, one method per command. |
+| `IGpu` | The GPU one level above the API: make buffers, textures, samplers and pipelines, upload to them, and record the frame's commands into `IGpu.Commands`, all on the render thread. The provider submits and presents them in its `Render` hook; it is made before every gem that takes it, so its `Render` runs after theirs, and a gem that takes it records in `Render`. `IGpu.DebugView`, which any thread may set, names a debug view to show in place of the finished image, or none: whatever draws the frame reads it and decides what the name shows, and the provider only keeps it. |
+| Render targets | A render target is a `GpuTexture`: a texture a gem made (a render texture, which it can then sample, as an editor's viewport is), or a window's, from `IGpu.WindowTarget(window)`. Whatever draws asks `IGpu.FormatOf` and `IGpu.SizeOf` of its target and treats the two alike; a window's can be drawn into, never sampled or read, but `IGpu.CaptureAsync` reads back what it shows next, for a screenshot. |
+| `GpuCommands` | A frame's commands as plain data, `GpuCommand`s with the handles and bytes they point into. Drawing and computing happen inside a pass: `RenderPass` and `ComputePass` hand back a `GpuRenderPass` or `GpuComputePass` holding only the commands legal inside it, which chain, and end the pass when disposed, so a pass is a `using` block, as a `DebugGroup` is. Copies and mipmaps go between passes. |
 | `IShaderCompiler` | HLSL to the bytecode the GPU takes (`IGpu.ShaderFormat`), with the counts of what it binds, compiled on a worker. Each `#include "path"` is the shader asset at `Shaders/path`, which the compiler loads. What it compiled is kept in [the cache](#the-cache), so a shader compiles once. |
-| `Gpu*` types | Handles (`GpuBuffer`, `GpuTexture`, …) and plain descriptions (`GpuTextureDesc`, `GpuPipelineDesc`, …). |
+| `Gpu*` types | Handles (`GpuBuffer`, `GpuTexture`, …), what a command points at (`GpuTextureLevel`, one level of one layer; `GpuSampledTexture`, a texture with its sampler; `GpuTextureRegion`, a box of a level) and plain descriptions (`GpuTextureDescription`, `GpuPipelineDescription`, …). |
 
 Shaders follow the binding model and conventions of `Shaders/Include/Bindings.hlsli`, and are written against the
 shader library in [Resources/Shaders](../Bundled/Resources/Shaders/README.md).
@@ -456,7 +494,9 @@ internal sealed class FileLogGem(FileLogSettings settings) : IGem, ILogSink, IDi
   thread: a slow sink delays the log, never a frame. What it shares with the gem's hooks, which run on the engine's
   threads meanwhile, needs a lock.
 - A sink gets the lines logged from when its gem is made until just before the gem is disposed, which waits, up to
-  5 seconds, until the sink has had every line logged before, so its `Dispose` can close what it writes to.
+  5 seconds, until the sink has had every line logged before, so its `Dispose` can close what it writes to. The first
+  sink of the run gets the lines logged before any gem was made first, the last 10,000 of them, so a console has the
+  whole run; the log keeps them only until then.
 - A sink that throws is dropped, and what it threw is logged as an error.
 - Unlike the other interfaces a gem implements, `ILogSink` is not provided to other gems, so any number of gems can be
   sinks.
@@ -483,7 +523,7 @@ window as it likes. It does two things:
 | | |
 | --- | --- |
 | Reports | From any thread, shown with the next frame drawn. `Text` puts a few words at a place in the world, or a line on screen above the others, for the frame it is called in, so it is called every frame they should show; a line on screen this way is never logged. `Info`, `Warn` and `Error` put a line on screen for a while, or, for a warning or error given a position, text at that place, and are logged as the `Debugging` call of their name is, a warning or error once while it stays up. Text in the world, warnings and errors take a tooltip, shown while the mouse rests on them. Check `Enabled` before building text: false while nothing shows. |
-| Widgets | Windows drawn in immediate mode on the main thread, by a gem made after the UI gem, in its Update: what is called in a frame is that frame's windows. `Begin` opens a window, or a view nested in the one open, and `End` closes it; between them go labels, buttons, fields, sliders, choices, tabs, headers and a right-click menu, each answering from the frame's input. |
+| Widgets | Windows drawn in immediate mode on the main thread, by a gem made after the UI gem, in its Update: what is called in a frame is that frame's windows. `Begin` opens a window, or a view nested in the one open, and `End` closes it; between them go labels, buttons, fields, sliders, choices, tabs, headers, tables of rows and a right-click menu, each answering from the frame's input. |
 
 ```csharp
 if (_debug.Enabled && _material.Failed)
@@ -500,29 +540,32 @@ the log all the same.
 What the engine measures is published as .NET metrics (`System.Diagnostics.Metrics`), so Core has no telemetry types
 of its own:
 
-- **Tracking.** Each part makes its own `Meter`, `Magic` for Core and `Magic.<Gem>` for a gem, and records on its
+- **Tracking.** Each part makes its own `Meter`, `Magic.Core` for Core and `Magic.Gems.<Gem>` for a gem, and records on its
   instruments (counters, histograms, gauges) with tags. Recording costs next to nothing while nothing listens, so it
   belongs in the frame loop.
 - **Naming.** Instruments and tags are named as OpenTelemetry names them, so exporters, dashboards and the debug UI lay
   them out alike: lowercase and dotted, from the general to the particular, starting with the meter's name in
-  snake_case (`magic.` for Core, `magic.<gem>.` for a gem); a histogram of times ends in `.duration`. Units are `s` for
-  seconds, `By` for bytes and a count's in braces (`{entity}`). A tag is namespaced the same way (`magic.gem.name`),
+  snake_case (`magic.core.` for Core, `magic.gems.<gem>.` for a gem); a histogram of times ends in `.duration`. Units are `s` for
+  seconds, `By` for bytes and a count's in braces (`{entity}`). A tag is namespaced the same way (`magic.core.gem.name`),
   and has few values, such as a gem or a phase, never an id or a path: every set of values is a series of its own in
   every tool. A histogram of times advises bucket boundaries that fit what it times, as exporters' own are made for
   milliseconds.
 - **Doing something with it.** Any number of gems listen, with a `MeterListener` or OpenTelemetry's exporters, and
   send what they hear to a backend, a database, a profiler view or the log every so often.
-  `dotnet-counters monitor -n Magic --counters Magic` shows it with no gem at all.
+  `dotnet-counters monitor -n Magic --counters Magic.Core` shows Core's with no gem at all.
 
 Core records:
 
 | Instrument | Unit | Tags | |
 | --- | --- | --- | --- |
-| `magic.frame.duration` | `s` | | Time from one frame's start to the next's, on the main thread. |
-| `magic.frame.render_wait.duration` | `s` | | How long the main thread waited for the render thread before `LateUpdate`: when it is most of the frame, drawing is what holds the game up. Timed only while something listens. |
-| `magic.gem.hook.duration` | `s` | `magic.gem.name`, `magic.frame.phase` | How long each gem's hook took: where a frame's time goes. The gem is named as the project lists it, the phase as its hook is. Only the hooks a gem implements are called, so only they are timed, and only while something listens. |
+| `magic.core.frame.duration` | `s` | | Time from one frame's start to the next's, on the main thread. |
+| `magic.core.frame.render_wait.duration` | `s` | | How long the main thread waited for the render thread before `Sync`: when it is most of the frame, drawing is what holds the game up. Timed only while something listens. |
+| `magic.core.gem.hook.duration` | `s` | `magic.core.gem.name`, `magic.core.frame.phase` | How long each gem's hook took: where a frame's time goes. The gem is named as the project lists it, the phase as its hook is. Only the hooks a gem implements are called, so only they are timed, and only while something listens. |
+| `magic.core.thread.work.duration` | `s` | `magic.core.thread.name` | How long each piece of work handed to an engine thread (`Threads.Post`, `InvokeAsync`) took, on `main` or `render`: what stalls a frame from outside the hooks, such as a pipeline made on the render thread or a domain arriving on the main one. Timed only while something listens. |
+| `magic.core.asset.load.duration` | `s` | `magic.core.asset.type` | How long an asset took to read, make and post-process, by its type. |
 
-Their buckets are 0.1 ms to 1 s, with edges at the frame budgets of 240, 144, 120, 60 and 30 frames a second.
+The frame timings' buckets are 0.1 ms to 1 s, with edges at the frame budgets of 240, 144, 120, 60 and 30 frames a
+second; a load's are 1 ms to 10 s.
 
 A listener's callback runs inside the code that recorded, on its thread: the main or render thread for Core's
 instruments. It adds the numbers up and hands them to a thread of its own, never blocking. What it throws surfaces where

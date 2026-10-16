@@ -1,5 +1,3 @@
-using Magic.Contexts.Settings;
-
 namespace Magic.Contexts.CmdLine;
 
 /// <summary>
@@ -24,9 +22,9 @@ public sealed class Args
     public bool Headless { get; init; }
 
     /// <summary>
-    /// Gem settings that win over the presets' (--set).
+    /// Gem settings that win over the presets' (--set), each a <c>Gem.path=value</c> line as given.
     /// </summary>
-    public IReadOnlyList<Setting> Settings { get; init; } = [];
+    public IReadOnlyList<string> Settings { get; init; } = [];
 
     /// <summary>
     /// The preset applied over the default one (--preset): <c>Presets/&lt;Preset&gt;.preset</c>, the project's or the

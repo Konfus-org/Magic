@@ -2,14 +2,6 @@
     "stage": "cull",
     "kind": "compute",
     "shader": { "id": 60021 },
-    "reads": [
-        { "name": "Instances" },
-        { "name": "Models" },
-        { "name": "Levels" },
-        { "name": "Cards" },
-        { "name": "MaterialBins" },
-        { "name": "HiZ" }
-    ],
     "writes": [
         { "name": "CullCounts" },
         { "name": "BinCounts" },

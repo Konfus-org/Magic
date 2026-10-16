@@ -1,8 +1,7 @@
 {
-    "stage": "occlusion",
+    "stage": "shadows",
     "kind": "compute",
     "shader": { "id": 60042 },
-    "reads": [ { "name": "SunClipmap" }, { "name": "Moved" }, { "name": "ShadowArgs" }, { "name": "ShadowViews" } ],
     "writes": [ { "name": "ShadowTables" } ],
     "dispatch": { "per": "sunEntries" }
 }

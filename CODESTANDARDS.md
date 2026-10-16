@@ -150,8 +150,9 @@ so reading the code says what the thing is and why it is kept. Several kept for 
   settings object included, are constructor parameters, including what it uses of another gem's work (a renderer
   takes the window it draws into): that order is the order gems are made in and, reversed, disposed in.
 - A gem never reads the command line or the project file: what it can be told arrives as its settings object, plain
-  data like a file type (Serialization). Its settings can change while running, between frames, so a setting it reads
-  only as it starts is `[Browsable(false)]`, and a settings window does not offer what would change nothing.
+  data like a file type (Serialization). Its settings can change while running, between frames, and a gem follows
+  each: it reads it where it is used, or compares it each frame with what it last applied. One it can only read as it
+  starts is `[RequireRestart]`, and changing it starts the engine again.
 - A gem frees what it started (a native library, a subsystem) in `Dispose`, once nothing of its own is still running
   on a worker.
 - A gem's constructor, `Dispose` and `Render` run on the render thread; `Update`, `FixedUpdate` and `LateUpdate` on
@@ -166,12 +167,14 @@ so reading the code says what the thing is and why it is kept. Several kept for 
 - What a gem tells others has happened is a message, a struct, on `Events`; whoever listens watches it and keeps the
   `Subscription`.
 - A script is a `.cs` asset under a project's `Assets/`, a gem's `Resources/` or `src/Bundled/Resources/`, its class
-  named like the file and an `IScript`: an `IBehavior` for what one entity does each frame, and a system when it works
-  over many. The project's code, or the gem it belongs to, compiles it, and a prefab attaches it to an entity by the
-  file's id. A game is its assets and that code, never a gem of its own. Scripts work as components do: a prefab holds
-  them with their values set, and each entity spawned gets its own copy. So its constructor takes only what it asks for
-  as a gem's does, never its `Entity`; its values are its public `{ get; set; }` properties; and `Start(entity)` is
-  where it begins on its entity.
+  named like the file and an `IScript`: an `IBehavior` for what one entity does each frame, and a system script
+  (`ISystemScript<T1>`, `IParallelSystemScript<T1, T2>`, …) when it works over many. The project's code, the gem it
+  belongs to, or the bundled resources' own project compiles it, and a prefab attaches it to an entity by the file's
+  id. A game is its assets and that code, never a gem of its own. Scripts work as components do: a prefab holds them
+  with their values, and each entity spawned gets its own copy, made for it. So its constructor takes the `Entity` it
+  is attached to first, then what it asks for as a gem's does, and only keeps them: no work in a constructor, as its
+  values are not set yet. Its values are its public `{ get; set; }` properties, and `Start()` is where it begins, with
+  them set. A pipeline script runs on no entity, so its constructor takes services alone.
 
 ### Serialization
 
@@ -320,8 +323,8 @@ which means two files may never differ by case alone.
 
 - Drawing goes through `IGpu`: a gem makes GPU objects and records a frame's commands as plain data
   (`GpuCommands`), which the GPU gem turns into its API's calls. Backend-specific code lives only in that gem.
-- What is drawn into is a render target, a `GpuTexture`: a render texture, or a window's (`IGpu.Target`). Drawing code
-  takes a target and asks its format and size; it never assumes a window.
+- What is drawn into is a render target, a `GpuTexture`: a render texture, or a window's (`IGpu.WindowTarget`). Drawing
+  code takes a target and asks its format and size; it never assumes a window.
 - A GPU feature is used only if Vulkan, D3D12 and Metal all have it.
 
 ### HLSL
@@ -331,8 +334,9 @@ which means two files may never differ by case alone.
 - Resources bind through `Include/Bindings.hlsli`'s macros (`READ`, `SAMPLER`, `WRITE`, `UNIFORM`), never a register
   by hand. Its header holds the conventions every shader is written against: frame, winding, reverse-Z, matrices,
   physical light units and pre-exposure, colour.
-- Wave intrinsics only where the result cannot depend on the wave's size, 32 or 64 by GPU. No 16-bit types and no
-  runtime-indexed resource arrays.
+- Wave intrinsics only where the result cannot depend on the wave's size, 32 or 64 by GPU, or where it hands out the
+  places of a count the atomics' order already made arbitrary (`WaveAllocate`). No 16-bit types and no runtime-indexed
+  resource arrays.
 - A value that can go wrong is kept from it where it arises: roughness clamped (`RoughnessToAlpha`), n·v kept above 0,
   `NormalizeOrZero` where a vector can be zero, explicit gradients or levels (`SampleGrad`, `SampleLevel`) inside a
   branch.

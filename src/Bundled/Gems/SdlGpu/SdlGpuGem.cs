@@ -1,6 +1,7 @@
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Numerics;
 using System.Text;
-using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Threading;
@@ -8,7 +9,7 @@ using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
 using SDL;
-using Size = System.Drawing.Size;
+using System.Drawing;
 
 namespace Magic.SdlGpu;
 
@@ -73,9 +74,10 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private readonly Dictionary<uint, GpuTexture> _windows = [];
 
     /// <summary>
-    /// <see cref="DebugView"/>'s stage as a number, -1 for none: an int, so any thread reads and writes it whole.
+    /// Whether the windows present on the display's refresh, as the settings said when they were last followed.
     /// </summary>
-    private int _debugView = -1;
+    private bool _vsyncPresenting;
+    private Composition _composing;
 
     /// <summary>
     /// The images of the window targets this frame has drawn into, by texture id: 0 for a window with none.
@@ -97,6 +99,10 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// cycled so SDL hands out fresh memory while a frame in flight still reads the old, unmapped at submit. A frame
     /// that needs more swaps in one twice the size, which stays.
     /// </summary>
+    private static readonly Meter _meter = new("Magic.Gems.SdlGpu");
+    private static readonly Counter<long> _staged = _meter.CreateCounter<long>("magic.gems.sdl_gpu.upload.size", "By", "Bytes staged to upload to the GPU.");
+    private static readonly Histogram<double> _acquireWait = _meter.CreateHistogram("magic.gems.sdl_gpu.present.acquire.duration", "s", "How long the render thread waited for a window's next image: the time vsync holds the frame.", tags: null, advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30, 0.05, 0.1, 0.25, 0.5, 1] });
+
     private SDL_GPUTransferBuffer* _staging;
     private uint _stagingCapacity = InitialStagingBytes;
     private byte* _stagingMapped;
@@ -118,6 +124,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     public SdlGpuGem(SdlGpuSettings settings, Threads threads)
     {
         _settings = settings;
+        _vsyncPresenting = settings.Vsync;
+        _composing = settings.Composition;
         _threads = threads;
 
         // The SDL this gem draws through is the platform gem's, which opens the windows and quits SDL as it ends:
@@ -142,9 +150,9 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL3.SDL_SetBooleanProperty(properties, SDL3.SDL_PROP_GPU_DEVICE_CREATE_DEBUGMODE_BOOLEAN, settings.Validation);
         SDL3.SDL_SetBooleanProperty(properties, SDL3.SDL_PROP_GPU_DEVICE_CREATE_PREFERLOWPOWER_BOOLEAN, settings.LowPower);
         SDL3.SDL_SetPointerProperty(properties, SDL3.SDL_PROP_GPU_DEVICE_CREATE_VULKAN_OPTIONS_POINTER, (nint)(&vulkan));
-        if (settings.Driver.Length > 0)
+        if (DriverName(settings.Driver) is { Length: > 0 } driver)
         {
-            SDL3.SDL_SetStringProperty(properties, SDL3.SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, settings.Driver);
+            SDL3.SDL_SetStringProperty(properties, SDL3.SDL_PROP_GPU_DEVICE_CREATE_NAME_STRING, driver);
         }
 
         _device = SDL3.SDL_CreateGPUDeviceWithProperties(properties);
@@ -161,10 +169,10 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             : formats.HasFlag(SDL_GPUShaderFormat.SDL_GPU_SHADERFORMAT_DXIL) ? GpuShaderFormat.Dxil
             : GpuShaderFormat.Msl;
         string name = SDL3.SDL_GetStringProperty(SDL3.SDL_GetGPUDeviceProperties(_device), SDL3.SDL_PROP_GPU_DEVICE_NAME_STRING, "an unnamed GPU") ?? "an unnamed GPU";
-        Device = $"{name} ({SDL3.SDL_GetGPUDeviceDriver(_device)})";
+        Name = $"{name} ({SDL3.SDL_GetGPUDeviceDriver(_device)})";
         SDL3.SDL_SetGPUAllowedFramesInFlight(_device, FramesInFlight);
         _staging = CreateTransferBuffer(SDL_GPUTransferBufferUsage.SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, _stagingCapacity);
-        Debugging.Info($"GPU: {Device}, shaders {ShaderFormat}, validation {settings.Validation}");
+        Debugging.Info($"GPU: {Name}, shaders {ShaderFormat}, validation {settings.Validation}");
     }
 
     public void Dispose()
@@ -221,7 +229,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL3.SDL_QuitSubSystem(SDL_InitFlags.SDL_INIT_VIDEO);
     }
 
-    public string Device { get; }
+    public string Name { get; }
 
     public GpuShaderFormat ShaderFormat { get; }
 
@@ -235,25 +243,65 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     }
 
     /// <summary>
-    /// Kept for whatever draws the frame, which reads it; the GPU itself draws nothing differently.
+    /// Kept for whatever draws the frame, which reads it; the GPU itself draws nothing differently. A reference, which
+    /// any thread reads and writes whole.
     /// </summary>
-    public PassStage? DebugView
-    {
-        get
-        {
-            int stage = Volatile.Read(ref _debugView);
-            return stage < 0 ? null : (PassStage)stage;
-        }
-
-        set => Volatile.Write(ref _debugView, value is { } stage ? (int)stage : -1);
-    }
+    public string DebugView { get; set; } = string.Empty;
 
     /// <summary>
     /// Render runs from the last gem made to the first, so every gem that takes this one has recorded by now.
     /// </summary>
     public void Render(in Frame frame)
     {
+        FollowSwapchain();
         Submit();
+    }
+
+    /// <summary>
+    /// SDL's name for <paramref name="driver"/>, what it is asked for by name; empty for <see cref="GpuDriver.Auto"/>, its
+    /// own choice.
+    /// </summary>
+    private static string DriverName(GpuDriver driver)
+    {
+        return driver switch
+        {
+            GpuDriver.Vulkan => "vulkan",
+            GpuDriver.Direct3d12 => "direct3d12",
+            GpuDriver.Metal => "metal",
+            GpuDriver.Auto or _ => string.Empty,
+        };
+    }
+
+    /// <summary>
+    /// Presents every window the way the settings now say, when vsync or the composition was changed while running:
+    /// the window's image is in the new composition's format from the next frame.
+    /// </summary>
+    private void FollowSwapchain()
+    {
+        if (_vsyncPresenting == _settings.Vsync && _composing == _settings.Composition)
+        {
+            return;
+        }
+
+        _vsyncPresenting = _settings.Vsync;
+        _composing = _settings.Composition;
+        foreach ((uint id, GpuTexture target) in _windows)
+        {
+            SDL_Window* window = id == 0 ? null : SDL3.SDL_GetWindowFromID((SDL_WindowID)id);
+            if (window == null)
+            {
+                continue;
+            }
+
+            SDL_GPUPresentMode present = PresentMode(window);
+            SDL_GPUSwapchainComposition composition = CompositionFor(window, (SDL_WindowID)id);
+            if (!SDL3.SDL_SetGPUSwapchainParameters(_device, window, composition, present))
+            {
+                Debugging.Warn($"Window {id} presents as it did, not {composition} with {present}: {SDL3.SDL_GetError()}");
+            }
+
+            _textures[target.Id] = _textures[target.Id] with { Format = SDL3.SDL_GetGPUSwapchainTextureFormat(_device, window).ToMagic() };
+        }
     }
 
     public GpuBuffer CreateBuffer(GpuBufferUsage usage, uint bytes)
@@ -265,32 +313,32 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         return buffer == null ? throw Failed($"a {bytes}-byte buffer") : new GpuBuffer(_buffers.Add((nint)buffer));
     }
 
-    public GpuTexture CreateTexture(in GpuTextureDesc desc)
+    public GpuTexture CreateTexture(in GpuTextureDescription description)
     {
         ThrowIfNotRender();
 
         SDL_GPUTextureCreateInfo info = new()
         {
-            type = desc.Kind.ToSdl(),
-            format = desc.Format.ToSdl(),
-            usage = desc.Usage.ToSdl(),
-            width = desc.Width,
-            height = desc.Height,
-            layer_count_or_depth = desc.Kind == GpuTextureKind.Cube ? 6 : desc.Layers,
-            num_levels = desc.Levels,
+            type = description.Kind.ToSdl(),
+            format = description.Format.ToSdl(),
+            usage = description.Usage.ToSdl(),
+            width = description.Width,
+            height = description.Height,
+            layer_count_or_depth = description.Kind == GpuTextureKind.Cube ? 6 : description.Layers,
+            num_levels = description.Levels,
             sample_count = SDL_GPUSampleCount.SDL_GPU_SAMPLECOUNT_1,
         };
         SDL_GPUTexture* texture = SDL3.SDL_CreateGPUTexture(_device, &info);
         if (texture == null)
         {
-            throw Failed($"a {desc.Width} x {desc.Height} {desc.Format} texture");
+            throw Failed($"a {description.Width} x {description.Height} {description.Format} texture");
         }
 
-        uint depth = desc.Kind == GpuTextureKind.Texture3D ? desc.Layers : 1;
-        return new GpuTexture(_textures.Add(new TextureObject((nint)texture, desc.Format, desc.Width, desc.Height, depth)));
+        uint depth = description.Kind == GpuTextureKind.Texture3D ? description.Layers : 1;
+        return new GpuTexture(_textures.Add(new TextureObject((nint)texture, description.Format, description.Width, description.Height, depth)));
     }
 
-    public GpuTexture Target(IWindow window)
+    public GpuTexture WindowTarget(IWindow window)
     {
         ThrowIfNotRender();
 
@@ -312,14 +360,14 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         return target;
     }
 
-    public GpuFormat Format(GpuTexture texture)
+    public GpuFormat FormatOf(GpuTexture texture)
     {
         ThrowIfNotRender();
 
         return _textures[texture.Id].Format;
     }
 
-    public Size Size(GpuTexture texture)
+    public Size SizeOf(GpuTexture texture)
     {
         ThrowIfNotRender();
 
@@ -332,80 +380,80 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL_Window* native = (SDL_Window*)window.Native;
         if (native == null || SDL3.SDL_GetWindowFlags(native).HasFlag(SDL_WindowFlags.SDL_WINDOW_MINIMIZED))
         {
-            return System.Drawing.Size.Empty;
+            return Size.Empty;
         }
 
         int width;
         int height;
-        return SDL3.SDL_GetWindowSizeInPixels(native, &width, &height) ? new Size(width, height) : System.Drawing.Size.Empty;
+        return SDL3.SDL_GetWindowSizeInPixels(native, &width, &height) ? new Size(width, height) : Size.Empty;
     }
 
-    public GpuSampler CreateSampler(in GpuSamplerDesc desc)
+    public GpuSampler CreateSampler(in GpuSamplerDescription description)
     {
         ThrowIfNotRender();
 
         SDL_GPUSamplerCreateInfo info = new()
         {
-            min_filter = desc.Filter.ToSdl(),
-            mag_filter = desc.Filter.ToSdl(),
-            mipmap_mode = desc.Filter.ToSdlMipmaps(),
-            address_mode_u = desc.Address.ToSdl(),
-            address_mode_v = desc.Address.ToSdl(),
-            address_mode_w = desc.Address.ToSdl(),
-            max_anisotropy = desc.Anisotropy,
-            enable_anisotropy = desc.Anisotropy > 1,
-            compare_op = (desc.Compare ?? GpuCompare.Never).ToSdl(),
-            enable_compare = desc.Compare is not null,
+            min_filter = description.Filter.ToSdl(),
+            mag_filter = description.Filter.ToSdl(),
+            mipmap_mode = description.Filter.ToSdlMipmaps(),
+            address_mode_u = description.Wrap.ToSdl(),
+            address_mode_v = description.Wrap.ToSdl(),
+            address_mode_w = description.Wrap.ToSdl(),
+            max_anisotropy = description.Anisotropy,
+            enable_anisotropy = description.Anisotropy > 1,
+            compare_op = (description.Compare ?? GpuCompare.Never).ToSdl(),
+            enable_compare = description.Compare is not null,
             max_lod = 1000,
         };
         SDL_GPUSampler* sampler = SDL3.SDL_CreateGPUSampler(_device, &info);
         return sampler == null ? throw Failed("a sampler") : new GpuSampler(_samplers.Add((nint)sampler));
     }
 
-    public Result<GpuPipeline> CreatePipeline(GpuPipelineDesc desc)
+    public Result<GpuPipeline> CreatePipeline(GpuPipelineDescription description)
     {
         ThrowIfNotRender();
 
-        SDL_GPUShader* vertex = CreateShader(desc.Vertex);
+        SDL_GPUShader* vertex = CreateShader(description.Vertex);
         if (vertex == null)
         {
             return Result.Failure<GpuPipeline>($"The GPU would not make the vertex shader: {SDL3.SDL_GetError()}");
         }
 
-        SDL_GPUShader* fragment = CreateShader(desc.Fragment);
+        SDL_GPUShader* fragment = CreateShader(description.Fragment);
         if (fragment == null)
         {
             SDL3.SDL_ReleaseGPUShader(_device, vertex);
             return Result.Failure<GpuPipeline>($"The GPU would not make the fragment shader: {SDL3.SDL_GetError()}");
         }
 
-        SDL_GPUVertexBufferDescription* buffers = stackalloc SDL_GPUVertexBufferDescription[desc.Buffers.Count];
-        for (int i = 0; i < desc.Buffers.Count; i++)
+        SDL_GPUVertexBufferDescription* buffers = stackalloc SDL_GPUVertexBufferDescription[description.VertexBuffers.Count];
+        for (int i = 0; i < description.VertexBuffers.Count; i++)
         {
-            GpuVertexBuffer buffer = desc.Buffers[i];
+            GpuVertexBuffer buffer = description.VertexBuffers[i];
             buffers[i] = new SDL_GPUVertexBufferDescription
             {
                 slot = buffer.Slot,
-                pitch = buffer.Pitch,
+                pitch = buffer.Stride,
                 input_rate = buffer.PerInstance ? SDL_GPUVertexInputRate.SDL_GPU_VERTEXINPUTRATE_INSTANCE : SDL_GPUVertexInputRate.SDL_GPU_VERTEXINPUTRATE_VERTEX,
             };
         }
 
-        SDL_GPUVertexAttribute* inputs = stackalloc SDL_GPUVertexAttribute[desc.Inputs.Count];
-        for (int i = 0; i < desc.Inputs.Count; i++)
+        SDL_GPUVertexAttribute* inputs = stackalloc SDL_GPUVertexAttribute[description.VertexInputs.Count];
+        for (int i = 0; i < description.VertexInputs.Count; i++)
         {
-            GpuVertexInput input = desc.Inputs[i];
+            GpuVertexInput input = description.VertexInputs[i];
             inputs[i] = new SDL_GPUVertexAttribute { location = input.Location, buffer_slot = input.Slot, format = input.Format.ToSdl(), offset = input.Offset };
         }
 
-        SDL_GPUColorTargetDescription* colors = stackalloc SDL_GPUColorTargetDescription[desc.Colors.Count];
-        for (int i = 0; i < desc.Colors.Count; i++)
+        SDL_GPUColorTargetDescription* colors = stackalloc SDL_GPUColorTargetDescription[description.ColorFormats.Count];
+        for (int i = 0; i < description.ColorFormats.Count; i++)
         {
-            GpuBlend blend = i < desc.Blends.Count ? desc.Blends[i] : GpuBlend.None;
-            colors[i] = new SDL_GPUColorTargetDescription { format = desc.Colors[i].ToSdl(), blend_state = blend.ToSdl() };
+            GpuBlend blend = i < description.Blends.Count ? description.Blends[i] : GpuBlend.None;
+            colors[i] = new SDL_GPUColorTargetDescription { format = description.ColorFormats[i].ToSdl(), blend_state = blend.ToSdl() };
         }
 
-        bool hasDepth = desc.Depth != GpuFormat.Invalid;
+        bool hasDepth = description.DepthFormat != GpuFormat.Invalid;
         SDL_GPUGraphicsPipelineCreateInfo info = new()
         {
             vertex_shader = vertex,
@@ -413,34 +461,34 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             vertex_input_state = new SDL_GPUVertexInputState
             {
                 vertex_buffer_descriptions = buffers,
-                num_vertex_buffers = (uint)desc.Buffers.Count,
+                num_vertex_buffers = (uint)description.VertexBuffers.Count,
                 vertex_attributes = inputs,
-                num_vertex_attributes = (uint)desc.Inputs.Count,
+                num_vertex_attributes = (uint)description.VertexInputs.Count,
             },
             primitive_type = SDL_GPUPrimitiveType.SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
             rasterizer_state = new SDL_GPURasterizerState
             {
                 fill_mode = SDL_GPUFillMode.SDL_GPU_FILLMODE_FILL,
-                cull_mode = desc.Cull.ToSdl(),
+                cull_mode = description.Cull.ToSdl(),
                 front_face = SDL_GPUFrontFace.SDL_GPU_FRONTFACE_CLOCKWISE,
-                depth_bias_constant_factor = desc.DepthBias,
-                depth_bias_slope_factor = desc.DepthBiasSlope,
-                depth_bias_clamp = desc.DepthBiasClamp,
-                enable_depth_bias = desc.DepthBias != 0 || desc.DepthBiasSlope != 0,
-                enable_depth_clip = desc.DepthClip,
+                depth_bias_constant_factor = description.DepthBias,
+                depth_bias_slope_factor = description.DepthBiasSlope,
+                depth_bias_clamp = description.DepthBiasClamp,
+                enable_depth_bias = description.DepthBias != 0 || description.DepthBiasSlope != 0,
+                enable_depth_clip = description.DepthClip,
             },
             multisample_state = new SDL_GPUMultisampleState { sample_count = SDL_GPUSampleCount.SDL_GPU_SAMPLECOUNT_1 },
             depth_stencil_state = new SDL_GPUDepthStencilState
             {
-                compare_op = desc.DepthCompare.ToSdl(),
+                compare_op = description.DepthCompare.ToSdl(),
                 enable_depth_test = hasDepth,
-                enable_depth_write = hasDepth && desc.DepthWrite,
+                enable_depth_write = hasDepth && description.DepthWrite,
             },
             target_info = new SDL_GPUGraphicsPipelineTargetInfo
             {
                 color_target_descriptions = colors,
-                num_color_targets = (uint)desc.Colors.Count,
-                depth_stencil_format = desc.Depth.ToSdl(),
+                num_color_targets = (uint)description.ColorFormats.Count,
+                depth_stencil_format = description.DepthFormat.ToSdl(),
                 has_depth_stencil_target = hasDepth,
             },
         };
@@ -885,14 +933,37 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         }
 
         SDL_GPUPresentMode present = PresentMode(window);
-        if (!SDL3.SDL_SetGPUSwapchainParameters(_device, window, SDL_GPUSwapchainComposition.SDL_GPU_SWAPCHAINCOMPOSITION_SDR, present))
+        SDL_GPUSwapchainComposition composition = CompositionFor(window, id);
+        if (!SDL3.SDL_SetGPUSwapchainParameters(_device, window, composition, present))
         {
-            Debugging.Warn($"Window {id} presents as SDL chose, not {present}: {SDL3.SDL_GetError()}");
+            Debugging.Warn($"Window {id} presents as SDL chose, not {composition} with {present}: {SDL3.SDL_GetError()}");
         }
 
         GpuFormat format = SDL3.SDL_GetGPUSwapchainTextureFormat(_device, window).ToMagic();
-        Debugging.Verbose($"Window {id} is a render target: {format}, presenting with {present}.");
+        Debugging.Verbose($"Window {id} is a render target: {format}, composed {composition}, presenting with {present}.");
         return format;
+    }
+
+    /// <summary>
+    /// The composition the settings ask for, where the window supports it; SDR, which every window does, otherwise,
+    /// and a warning says so.
+    /// </summary>
+    private SDL_GPUSwapchainComposition CompositionFor(SDL_Window* window, SDL_WindowID id)
+    {
+        SDL_GPUSwapchainComposition asked = _settings.Composition switch
+        {
+            Composition.SdrLinear => SDL_GPUSwapchainComposition.SDL_GPU_SWAPCHAINCOMPOSITION_SDR_LINEAR,
+            Composition.Hdr10 => SDL_GPUSwapchainComposition.SDL_GPU_SWAPCHAINCOMPOSITION_HDR10_ST2084,
+            Composition.HdrLinear => SDL_GPUSwapchainComposition.SDL_GPU_SWAPCHAINCOMPOSITION_HDR_EXTENDED_LINEAR,
+            Composition.Sdr or _ => SDL_GPUSwapchainComposition.SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+        };
+        if (asked == SDL_GPUSwapchainComposition.SDL_GPU_SWAPCHAINCOMPOSITION_SDR || SDL3.SDL_WindowSupportsGPUSwapchainComposition(_device, window, asked))
+        {
+            return asked;
+        }
+
+        Debugging.Warn($"Window {id} does not support the {_settings.Composition} composition: it is composed SDR.");
+        return SDL_GPUSwapchainComposition.SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
     }
 
     /// <summary>
@@ -981,6 +1052,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private (nint Buffer, uint Offset) Stage(ReadOnlySpan<byte> data)
     {
         uint bytes = (uint)data.Length;
+        _staged.Add(bytes);
         uint offset = (_stagingUsed + 15u) & ~15u;
         if (_stagingMapped != null && offset + bytes > _stagingCapacity)
         {
@@ -1115,14 +1187,14 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 SDL3.SDL_EndGPUComputePass(_computePass);
                 _computePass = null;
                 break;
-            case GpuCommandType.SetViewport:
+            case GpuCommandType.Viewport:
             {
                 SDL_GPUViewport viewport = new() { x = command.Area.X, y = command.Area.Y, w = command.Area.Width, h = command.Area.Height, max_depth = 1 };
                 SDL3.SDL_SetGPUViewport(_renderPass, &viewport);
                 break;
             }
 
-            case GpuCommandType.SetScissor:
+            case GpuCommandType.Scissor:
             {
                 // Inside the target's corner: a scissor that starts before it is an error on some backends.
                 int x = Math.Max(command.Area.X, 0);
@@ -1132,29 +1204,29 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 break;
             }
 
-            case GpuCommandType.BindPipeline:
+            case GpuCommandType.Pipeline:
                 BindPipeline(command.Pipeline);
                 break;
-            case GpuCommandType.BindVertexBuffers:
+            case GpuCommandType.VertexBuffers:
                 BindVertexBuffers(command);
                 break;
-            case GpuCommandType.BindIndexBuffer:
+            case GpuCommandType.IndexBuffer:
             {
                 SDL_GPUBufferBinding index = new() { buffer = (SDL_GPUBuffer*)_buffers[command.Buffer.Id] };
-                SDL3.SDL_BindGPUIndexBuffer(_renderPass, &index, command.Wide ? SDL_GPUIndexElementSize.SDL_GPU_INDEXELEMENTSIZE_32BIT : SDL_GPUIndexElementSize.SDL_GPU_INDEXELEMENTSIZE_16BIT);
+                SDL3.SDL_BindGPUIndexBuffer(_renderPass, &index, command.IndexSize == GpuIndexSize.Bits32 ? SDL_GPUIndexElementSize.SDL_GPU_INDEXELEMENTSIZE_32BIT : SDL_GPUIndexElementSize.SDL_GPU_INDEXELEMENTSIZE_16BIT);
                 break;
             }
 
-            case GpuCommandType.BindStorageBuffers:
-                BindStorageBuffers(command);
+            case GpuCommandType.Buffers:
+                BindBuffers(command);
                 break;
-            case GpuCommandType.BindStorageTextures:
-                BindStorageTextures(command);
+            case GpuCommandType.RawTextures:
+                BindRawTextures(command);
                 break;
-            case GpuCommandType.BindTextures:
+            case GpuCommandType.Textures:
                 BindTextures(command);
                 break;
-            case GpuCommandType.PushConstants:
+            case GpuCommandType.Constants:
                 PushConstants(commandBuffer, command);
                 break;
             case GpuCommandType.Draw:
@@ -1163,13 +1235,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             case GpuCommandType.DrawIndexed:
                 SDL3.SDL_DrawGPUIndexedPrimitives(_renderPass, command.Count, command.Instances, command.First, command.VertexOffset, command.FirstInstance);
                 break;
-            case GpuCommandType.DrawIndexedIndirect:
+            case GpuCommandType.DrawIndexedFromBuffer:
                 SDL3.SDL_DrawGPUIndexedPrimitivesIndirect(_renderPass, (SDL_GPUBuffer*)_buffers[command.Buffer.Id], command.Offset, command.Count);
                 break;
             case GpuCommandType.Dispatch:
                 SDL3.SDL_DispatchGPUCompute(_computePass, command.GroupsX, command.GroupsY, command.GroupsZ);
                 break;
-            case GpuCommandType.DispatchIndirect:
+            case GpuCommandType.DispatchFromBuffer:
                 SDL3.SDL_DispatchGPUComputeIndirect(_computePass, (SDL_GPUBuffer*)_buffers[command.Buffer.Id], command.Offset);
                 break;
             case GpuCommandType.CopyTexture:
@@ -1178,16 +1250,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             case GpuCommandType.CopyBuffer:
                 CopyBuffer(commandBuffer, command);
                 break;
-            case GpuCommandType.Blit:
-                Blit(commandBuffer, command);
-                break;
             case GpuCommandType.GenerateMipmaps:
-                SDL3.SDL_GenerateMipmapsForGPUTexture(commandBuffer, (SDL_GPUTexture*)_textures[_commands.BindingsOf(command)[0].Texture.Id].Handle);
+                SDL3.SDL_GenerateMipmapsForGPUTexture(commandBuffer, (SDL_GPUTexture*)_textures[command.Texture.Id].Handle);
                 break;
-            case GpuCommandType.PushDebugGroup:
-                PushDebugGroup(commandBuffer, command);
+            case GpuCommandType.BeginDebugGroup:
+                BeginDebugGroup(commandBuffer, command);
                 break;
-            case GpuCommandType.PopDebugGroup:
+            case GpuCommandType.EndDebugGroup:
                 SDL3.SDL_PopGPUDebugGroup(commandBuffer);
                 break;
             default:
@@ -1197,7 +1266,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BeginRenderPass(SDL_GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<GpuBinding> colors = _commands.BindingsOf(command);
+        ReadOnlySpan<GpuTextureLevel> colors = _commands.LevelsOf(command);
         SDL_GPUColorTargetInfo* targets = stackalloc SDL_GPUColorTargetInfo[colors.Length];
         for (int i = 0; i < colors.Length; i++)
         {
@@ -1214,12 +1283,12 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 mip_level = colors[i].Level,
                 layer_or_depth_plane = colors[i].Layer,
                 clear_color = new SDL_FColor { r = command.Clear.R, g = command.Clear.G, b = command.Clear.B, a = command.Clear.A },
-                load_op = command.Load.ToSdl(),
+                load_op = command.Contents.ToSdl(),
                 store_op = SDL_GPUStoreOp.SDL_GPU_STOREOP_STORE,
             };
         }
 
-        if (command.Depth == GpuTexture.None)
+        if (command.Depth.Texture == GpuTexture.None)
         {
             _renderPass = SDL3.SDL_BeginGPURenderPass(commandBuffer, targets, (uint)colors.Length, null);
             return;
@@ -1227,41 +1296,34 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
         SDL_GPUDepthStencilTargetInfo depth = new()
         {
-            texture = Texture(commandBuffer, command.Depth),
-            load_op = command.Load.ToSdl(),
+            texture = Texture(commandBuffer, command.Depth.Texture),
+            load_op = command.Contents.ToSdl(),
             store_op = SDL_GPUStoreOp.SDL_GPU_STOREOP_STORE,
             stencil_load_op = SDL_GPULoadOp.SDL_GPU_LOADOP_DONT_CARE,
             stencil_store_op = SDL_GPUStoreOp.SDL_GPU_STOREOP_DONT_CARE,
-            layer = (byte)command.DepthLayer,
+            mip_level = (byte)command.Depth.Level,
+            layer = (byte)command.Depth.Layer,
         };
         _renderPass = SDL3.SDL_BeginGPURenderPass(commandBuffer, targets, (uint)colors.Length, &depth);
     }
 
     private void BeginComputePass(SDL_GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<GpuBinding> writes = _commands.BindingsOf(command);
-        int textureCount = 0;
-        foreach (GpuBinding write in writes)
+        ReadOnlySpan<GpuTextureLevel> levels = _commands.LevelsOf(command);
+        ReadOnlySpan<GpuBuffer> written = _commands.BuffersOf(command);
+        SDL_GPUStorageTextureReadWriteBinding* textures = stackalloc SDL_GPUStorageTextureReadWriteBinding[levels.Length];
+        SDL_GPUStorageBufferReadWriteBinding* buffers = stackalloc SDL_GPUStorageBufferReadWriteBinding[written.Length];
+        for (int i = 0; i < levels.Length; i++)
         {
-            textureCount += write.Texture != GpuTexture.None ? 1 : 0;
+            textures[i] = new SDL_GPUStorageTextureReadWriteBinding { texture = (SDL_GPUTexture*)_textures[levels[i].Texture.Id].Handle, mip_level = levels[i].Level, layer = levels[i].Layer };
         }
 
-        SDL_GPUStorageTextureReadWriteBinding* textures = stackalloc SDL_GPUStorageTextureReadWriteBinding[textureCount];
-        SDL_GPUStorageBufferReadWriteBinding* buffers = stackalloc SDL_GPUStorageBufferReadWriteBinding[writes.Length - textureCount];
-        int texture = 0;
-        int buffer = 0;
-        foreach (GpuBinding write in writes)
+        for (int i = 0; i < written.Length; i++)
         {
-            if (write.Texture != GpuTexture.None)
-            {
-                textures[texture++] = new SDL_GPUStorageTextureReadWriteBinding { texture = (SDL_GPUTexture*)_textures[write.Texture.Id].Handle, mip_level = write.Level, layer = write.Layer };
-                continue;
-            }
-
-            buffers[buffer++] = new SDL_GPUStorageBufferReadWriteBinding { buffer = (SDL_GPUBuffer*)_buffers[write.Buffer.Id] };
+            buffers[i] = new SDL_GPUStorageBufferReadWriteBinding { buffer = (SDL_GPUBuffer*)_buffers[written[i].Id] };
         }
 
-        _computePass = SDL3.SDL_BeginGPUComputePass(commandBuffer, textures, (uint)texture, buffers, (uint)buffer);
+        _computePass = SDL3.SDL_BeginGPUComputePass(commandBuffer, textures, (uint)levels.Length, buffers, (uint)written.Length);
     }
 
     private void BindPipeline(GpuPipeline pipeline)
@@ -1278,60 +1340,60 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BindVertexBuffers(in GpuCommand command)
     {
-        ReadOnlySpan<GpuBinding> run = _commands.BindingsOf(command);
+        ReadOnlySpan<GpuBuffer> run = _commands.BuffersOf(command);
         SDL_GPUBufferBinding* buffers = stackalloc SDL_GPUBufferBinding[run.Length];
         for (int i = 0; i < run.Length; i++)
         {
-            buffers[i] = new SDL_GPUBufferBinding { buffer = (SDL_GPUBuffer*)_buffers[run[i].Buffer.Id] };
+            buffers[i] = new SDL_GPUBufferBinding { buffer = (SDL_GPUBuffer*)_buffers[run[i].Id] };
         }
 
-        SDL3.SDL_BindGPUVertexBuffers(_renderPass, command.Slot, buffers, (uint)run.Length);
+        SDL3.SDL_BindGPUVertexBuffers(_renderPass, 0, buffers, (uint)run.Length);
     }
 
-    private void BindStorageBuffers(in GpuCommand command)
+    private void BindBuffers(in GpuCommand command)
     {
-        ReadOnlySpan<GpuBinding> run = _commands.BindingsOf(command);
+        ReadOnlySpan<GpuBuffer> run = _commands.BuffersOf(command);
         SDL_GPUBuffer** buffers = stackalloc SDL_GPUBuffer*[run.Length];
         for (int i = 0; i < run.Length; i++)
         {
-            buffers[i] = (SDL_GPUBuffer*)_buffers[run[i].Buffer.Id];
+            buffers[i] = (SDL_GPUBuffer*)_buffers[run[i].Id];
         }
 
         switch (command.Stage)
         {
             case GpuStage.Vertex:
-                SDL3.SDL_BindGPUVertexStorageBuffers(_renderPass, command.Slot, buffers, (uint)run.Length);
+                SDL3.SDL_BindGPUVertexStorageBuffers(_renderPass, 0, buffers, (uint)run.Length);
                 break;
             case GpuStage.Fragment:
-                SDL3.SDL_BindGPUFragmentStorageBuffers(_renderPass, command.Slot, buffers, (uint)run.Length);
+                SDL3.SDL_BindGPUFragmentStorageBuffers(_renderPass, 0, buffers, (uint)run.Length);
                 break;
             case GpuStage.Compute:
-                SDL3.SDL_BindGPUComputeStorageBuffers(_computePass, command.Slot, buffers, (uint)run.Length);
+                SDL3.SDL_BindGPUComputeStorageBuffers(_computePass, 0, buffers, (uint)run.Length);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command.Stage, "There is no such shader stage.");
         }
     }
 
-    private void BindStorageTextures(in GpuCommand command)
+    private void BindRawTextures(in GpuCommand command)
     {
-        ReadOnlySpan<GpuBinding> run = _commands.BindingsOf(command);
+        ReadOnlySpan<GpuTexture> run = _commands.TexturesOf(command);
         SDL_GPUTexture** textures = stackalloc SDL_GPUTexture*[run.Length];
         for (int i = 0; i < run.Length; i++)
         {
-            textures[i] = (SDL_GPUTexture*)_textures[run[i].Texture.Id].Handle;
+            textures[i] = (SDL_GPUTexture*)_textures[run[i].Id].Handle;
         }
 
         switch (command.Stage)
         {
             case GpuStage.Vertex:
-                SDL3.SDL_BindGPUVertexStorageTextures(_renderPass, command.Slot, textures, (uint)run.Length);
+                SDL3.SDL_BindGPUVertexStorageTextures(_renderPass, 0, textures, (uint)run.Length);
                 break;
             case GpuStage.Fragment:
-                SDL3.SDL_BindGPUFragmentStorageTextures(_renderPass, command.Slot, textures, (uint)run.Length);
+                SDL3.SDL_BindGPUFragmentStorageTextures(_renderPass, 0, textures, (uint)run.Length);
                 break;
             case GpuStage.Compute:
-                SDL3.SDL_BindGPUComputeStorageTextures(_computePass, command.Slot, textures, (uint)run.Length);
+                SDL3.SDL_BindGPUComputeStorageTextures(_computePass, 0, textures, (uint)run.Length);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command.Stage, "There is no such shader stage.");
@@ -1340,7 +1402,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BindTextures(in GpuCommand command)
     {
-        ReadOnlySpan<GpuBinding> run = _commands.BindingsOf(command);
+        ReadOnlySpan<GpuSampledTexture> run = _commands.SampledOf(command);
         SDL_GPUTextureSamplerBinding* textures = stackalloc SDL_GPUTextureSamplerBinding[run.Length];
         for (int i = 0; i < run.Length; i++)
         {
@@ -1354,13 +1416,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         switch (command.Stage)
         {
             case GpuStage.Vertex:
-                SDL3.SDL_BindGPUVertexSamplers(_renderPass, command.Slot, textures, (uint)run.Length);
+                SDL3.SDL_BindGPUVertexSamplers(_renderPass, 0, textures, (uint)run.Length);
                 break;
             case GpuStage.Fragment:
-                SDL3.SDL_BindGPUFragmentSamplers(_renderPass, command.Slot, textures, (uint)run.Length);
+                SDL3.SDL_BindGPUFragmentSamplers(_renderPass, 0, textures, (uint)run.Length);
                 break;
             case GpuStage.Compute:
-                SDL3.SDL_BindGPUComputeSamplers(_computePass, command.Slot, textures, (uint)run.Length);
+                SDL3.SDL_BindGPUComputeSamplers(_computePass, 0, textures, (uint)run.Length);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(command), command.Stage, "There is no such shader stage.");
@@ -1389,66 +1451,31 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         }
     }
 
+    /// <summary>
+    /// The source region's size (the whole level where it says 0) from each region's corner.
+    /// </summary>
     private void CopyTexture(SDL_GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<GpuBinding> run = _commands.BindingsOf(command);
-        SDL_GPUTextureLocation source = new() { texture = (SDL_GPUTexture*)_textures[run[0].Texture.Id].Handle, mip_level = run[0].Level, layer = run[0].Layer };
-        SDL_GPUTextureLocation destination = new() { texture = (SDL_GPUTexture*)_textures[run[1].Texture.Id].Handle, mip_level = run[1].Level, layer = run[1].Layer };
+        ReadOnlySpan<GpuTextureRegion> run = _commands.RegionsOf(command);
+        SDL_GPUTextureRegion from = TextureRegion(run[0]);
+        SDL_GPUTextureLocation source = new() { texture = from.texture, mip_level = from.mip_level, layer = from.layer, x = from.x, y = from.y, z = from.z };
+        SDL_GPUTextureLocation destination = new() { texture = (SDL_GPUTexture*)_textures[run[1].Texture.Id].Handle, mip_level = run[1].Level, layer = run[1].Layer, x = run[1].X, y = run[1].Y, z = run[1].Z };
         SDL_GPUCopyPass* copyPass = SDL3.SDL_BeginGPUCopyPass(commandBuffer);
-        SDL3.SDL_CopyGPUTextureToTexture(copyPass, &source, &destination, (uint)command.Area.Width, (uint)command.Area.Height, 1, cycle: false);
+        SDL3.SDL_CopyGPUTextureToTexture(copyPass, &source, &destination, from.w, from.h, from.d, cycle: false);
         SDL3.SDL_EndGPUCopyPass(copyPass);
     }
 
     private void CopyBuffer(SDL_GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<GpuBinding> run = _commands.BindingsOf(command);
-        SDL_GPUBufferLocation source = new() { buffer = (SDL_GPUBuffer*)_buffers[run[0].Buffer.Id], offset = command.First };
-        SDL_GPUBufferLocation destination = new() { buffer = (SDL_GPUBuffer*)_buffers[run[1].Buffer.Id], offset = command.Offset };
+        ReadOnlySpan<GpuBuffer> run = _commands.BuffersOf(command);
+        SDL_GPUBufferLocation source = new() { buffer = (SDL_GPUBuffer*)_buffers[run[0].Id], offset = command.First };
+        SDL_GPUBufferLocation destination = new() { buffer = (SDL_GPUBuffer*)_buffers[run[1].Id], offset = command.Offset };
         SDL_GPUCopyPass* copyPass = SDL3.SDL_BeginGPUCopyPass(commandBuffer);
         SDL3.SDL_CopyGPUBufferToBuffer(copyPass, &source, &destination, command.Count, cycle: false);
         SDL3.SDL_EndGPUCopyPass(copyPass);
     }
 
-    /// <summary>
-    /// Whole levels, the source scaled to the destination; a window's image is acquired as a render pass's is, and the
-    /// blit skipped while there is none.
-    /// </summary>
-    private void Blit(SDL_GPUCommandBuffer* commandBuffer, in GpuCommand command)
-    {
-        ReadOnlySpan<GpuBinding> run = _commands.BindingsOf(command);
-        SDL_GPUTexture* destination = Texture(commandBuffer, run[1].Texture);
-        if (destination == null)
-        {
-            return;
-        }
-
-        TextureObject from = _textures[run[0].Texture.Id];
-        System.Drawing.Size to = Size(run[1].Texture);
-        SDL_GPUBlitInfo info = new()
-        {
-            source = new SDL_GPUBlitRegion
-            {
-                texture = (SDL_GPUTexture*)from.Handle,
-                mip_level = run[0].Level,
-                layer_or_depth_plane = run[0].Layer,
-                w = Math.Max(1, from.Width >> (int)run[0].Level),
-                h = Math.Max(1, from.Height >> (int)run[0].Level),
-            },
-            destination = new SDL_GPUBlitRegion
-            {
-                texture = destination,
-                mip_level = run[1].Level,
-                layer_or_depth_plane = run[1].Layer,
-                w = (uint)Math.Max(1, to.Width >> (int)run[1].Level),
-                h = (uint)Math.Max(1, to.Height >> (int)run[1].Level),
-            },
-            load_op = SDL_GPULoadOp.SDL_GPU_LOADOP_DONT_CARE,
-            filter = ((GpuFilter)command.Slot).ToSdl(),
-        };
-        SDL3.SDL_BlitGPUTexture(commandBuffer, &info);
-    }
-
-    private void PushDebugGroup(SDL_GPUCommandBuffer* commandBuffer, in GpuCommand command)
+    private void BeginDebugGroup(SDL_GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
         ReadOnlySpan<byte> name = _commands.BytesOf(command);
         byte* terminated = stackalloc byte[name.Length + 1];
@@ -1492,7 +1519,10 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private static SDL_GPUTexture* Acquire(SDL_GPUCommandBuffer* commandBuffer, WindowObject window, uint* width, uint* height)
     {
         SDL_GPUTexture* image = null;
-        if (!SDL3.SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, (SDL_Window*)window.Native, &image, width, height))
+        long start = Stopwatch.GetTimestamp();
+        bool isAcquired = SDL3.SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, (SDL_Window*)window.Native, &image, width, height);
+        _acquireWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+        if (!isAcquired)
         {
             Debugging.Warn($"Window {window.Id}'s image was not acquired: {SDL3.SDL_GetError()}");
             return null;
@@ -1595,7 +1625,11 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         /// <summary>
         /// What <paramref name="id"/> holds; the default for an id that holds nothing.
         /// </summary>
-        public T this[uint id] => id < _items.Count && _isLive[(int)id] ? _items[(int)id] : default;
+        public T this[uint id]
+        {
+            get => id < _items.Count && _isLive[(int)id] ? _items[(int)id] : default;
+            set => _items[(int)id] = value;
+        }
 
         public uint Add(T item)
         {

@@ -9,9 +9,9 @@ attaches, and `IScripts` when a gem provides it, to make scripts. It has no sett
 
 A file becomes a tree of parts (`PrefabPart`), one for each entity it holds:
 
-- **Components.** A file names each component by its type's name: any struct implementing `IComponent` that Core or a
-  loaded gem declares (`Components.Get`), its JSON read as that type in Core's dialect. A name that is no such type is
-  an error, logged once, and that component is left out.
+- **Components.** A file names each component by its type's name: any struct implementing `IComponent` that Core, the
+  project's code or a loaded gem declares (`Code.Component`), its JSON read as that type in Core's dialect. A name that
+  is no such type is an error, logged once, and that component is left out.
 - **Tags.** An entity's `tags`, up to eight, become a `Tags` among its components; past eight, or an empty name, is
   warned about and left out.
 - **Scripts.** Each script entry names a script by its id; the script is loaded, made by whatever provides `IScripts`

@@ -2,7 +2,6 @@
     "stage": "light_culling",
     "kind": "compute",
     "shader": { "id": 60031 },
-    "reads": [ { "name": "Lights" } ],
     "creates": [
         { "name": "LightStarts", "kind": "buffer", "type": "uint", "stride": 4, "rows": 1024 },
         { "name": "Lights", "kind": "buffer", "type": "GpuLight", "stride": 80, "per": "lights" }

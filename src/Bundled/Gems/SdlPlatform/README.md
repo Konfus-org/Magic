@@ -10,8 +10,13 @@ In the project's `Presets/Default.preset`, by another preset, or `--set SdlPlatf
 | --- | --- | --- |
 | `width` | `1280` | The window's width, in screen points (pixels at 100% display scaling). |
 | `height` | `720` | The window's height, in screen points. |
+| `mouseSensitivity` | `1` | What the mouse's motion is multiplied by: above 1 turns faster, 0.1 to 10. |
+| `invertMouseY` | `false` | Mouse motion up reads as down, and down as up. |
+| `stickDeadZone` | `0.15` | How far a stick or trigger is pushed before it reads as anything but 0, 0 to 0.5 of its reach; past it, what is read grows from 0 to 1 at full deflection. |
+| `invertStickY` | `false` | Pushing a stick up reads as down, and down as up. |
 
-Both are read as the window opens, so they change nothing while it runs.
+All are followed every frame. Changed while running, the window is resized, and dragging the window changes it and
+leaves the size settings as they were; the input settings take from the next frame.
 
 ## Behaviour
 
@@ -38,11 +43,13 @@ Both are read as the window opens, so they change nothing while it runs.
   can show up as several (a keyboard with media keys, one receiver for a keyboard and a mouse).
 - Keys are physical (SDL scancodes), so `KeyW` is the same key on every layout. What they type is `IInput.Text`, as
   the layout and input method make it: SDL's text input is on for as long as the window is open.
-- The mouse's position and motion are in window pixels, converted from SDL's points; the wheel is in notches, away
-  from the player positive whatever the OS's scrolling direction.
+- The mouse's position and motion are in window pixels, converted from SDL's points, the motion multiplied by
+  `mouseSensitivity` and flipped by `invertMouseY`; the wheel is in notches, away from the player positive whatever the
+  OS's scrolling direction.
 - A gamepad is a device once SDL has opened it; input from one it could not open is ignored.
-- Gamepads use SDL's standard layout: buttons by position, sticks -1 to 1 with up positive (SDL's y grows downward),
-  triggers 0 to 1. Sticks and triggers are read every frame rather than added up from events.
+- Gamepads use SDL's standard layout: buttons by position, sticks -1 to 1 with up positive (SDL's y grows downward)
+  unless `invertStickY`, triggers 0 to 1, each 0 inside `stickDeadZone` and growing from there to 1 at full deflection.
+  Sticks and triggers are read every frame rather than added up from events.
 
 ## Natives
 

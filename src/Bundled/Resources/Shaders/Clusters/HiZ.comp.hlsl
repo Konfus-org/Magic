@@ -9,7 +9,9 @@
 void main(uint3 id : SV_DispatchThreadID)
 {
     uint level = PassIteration();
-    uint2 size = HiZSize(level);
+    uint2 size;
+    uint offset;
+    HiZLevel(level, size, offset);
     if (any(id.xy >= size))
     {
         return;
@@ -25,18 +27,17 @@ void main(uint3 id : SV_DispatchThreadID)
     }
     else
     {
-        uint2 below = HiZSize(level - 1u);
-        uint offset = HiZOffset(level - 1u);
+        uint2 below;
+        uint offsetBelow;
+        HiZLevel(level - 1u, below, offsetBelow);
         uint2 last = below - 1u;
         uint2 a = min(under, last);
         uint2 b = min(under + uint2(1u, 0u), last);
         uint2 c = min(under + uint2(0u, 1u), last);
         uint2 d = min(under + 1u, last);
-        farthest = min(min(asfloat(HiZ.Load((offset + a.y * below.x + a.x) * 4u)), asfloat(HiZ.Load((offset + b.y * below.x + b.x) * 4u))),
-            min(asfloat(HiZ.Load((offset + c.y * below.x + c.x) * 4u)), asfloat(HiZ.Load((offset + d.y * below.x + d.x) * 4u))));
+        farthest = min(min(asfloat(HiZ.Load((offsetBelow + a.y * below.x + a.x) * 4u)), asfloat(HiZ.Load((offsetBelow + b.y * below.x + b.x) * 4u))),
+            min(asfloat(HiZ.Load((offsetBelow + c.y * below.x + c.x) * 4u)), asfloat(HiZ.Load((offsetBelow + d.y * below.x + d.x) * 4u))));
     }
 
-    // Never, as a level is never that deep, but it keeps the depth bound with its sampler, though read texel by texel.
-    farthest += level > 64u ? KeepReadsAlive(float2(0.0, 0.0)) : 0.0;
-    HiZ.Store((HiZOffset(level) + id.y * size.x + id.x) * 4u, asuint(farthest));
+    HiZ.Store((offset + id.y * size.x + id.x) * 4u, asuint(farthest));
 }

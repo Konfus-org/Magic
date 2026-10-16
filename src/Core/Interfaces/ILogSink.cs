@@ -6,8 +6,10 @@ namespace Magic.Interfaces;
 /// <summary>
 /// Somewhere log lines go besides the terminal: a file, an editor's console, a log service. A gem is one by
 /// implementing it: <see cref="Debugging"/> sends it every line logged from when the gem is made until just before it
-/// is disposed, which waits until it has had every line logged before, so its Dispose can close what it writes to.
-/// Unlike the other interfaces a gem implements, it is not provided to other gems, so any number of gems can be sinks.
+/// is disposed, which waits until it has had every line logged before, so its Dispose can close what it writes to. The
+/// first sink of the run gets the lines logged before any gem was made first, the last 10,000 of them, so a console
+/// has the whole run. Unlike the other interfaces a gem implements, it is not provided to other gems, so any number of
+/// gems can be sinks.
 /// <para>
 /// <see cref="Write"/> runs on the log's own background thread, one line at a time in the order lines were logged,
 /// never on the main thread: a slow sink delays the log, never a frame. It is never called twice at once, but what it

@@ -1,21 +1,25 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using System.Text;
+using System.Text.Json;
 
 namespace Magic.DebugTools;
 
 /// <summary>
-/// What the meters listened to measure, summed up each second as lines laid out as the instruments are named, as an
-/// exporter shows them: a meter's together, in the order the settings list the meters, and in one an area's, the part
-/// of the name after its first dot, so <c>dotnet.gc.collections</c> is <c>collections</c> in the area <c>gc</c>; a name
-/// of two parts is its own area. An instrument measured without tags is one line; with tags, a line of its name, then
-/// one per set of tags, showing their values. A histogram's line is how many a second, their mean and most, so the
-/// frame's duration says the frame rate, its time and the slowest frame; a counter's is its total over the second and
-/// its rate; a running total's, such as the garbage collector's, the total and how fast it rose; a gauge's its latest
-/// value. Seconds are shown as milliseconds, bytes as megabytes, and a count's unit, such as <c>{collection}</c>, not at
-/// all, as the name says what is counted.
+/// What the meters listened to measure, summed up each second as rows laid out as the instruments are named, as an
+/// exporter shows them: a tab per entry of the settings' tabs, holding the meters under its prefix, a meter's rows
+/// together and, in one, an area's. An area is the part of an instrument's name after its meter's, so
+/// <c>magic.core.frame.duration</c> is <c>duration</c> in the area <c>frame</c> of <c>Magic.Core</c>, and a name that
+/// does not start with its meter's, as .NET's <c>dotnet.gc.collections</c>, loses its first part instead; a name with
+/// nothing after its area is its own area. An instrument measured without tags is one row; with tags, a row of its
+/// name, then one per set of tags, showing their values. A row's cells are the name, the value, how many or how much
+/// a second, and the most: a histogram's are its mean, how many a second and its most, so the frame's duration says
+/// the frame time, the frame rate and the slowest frame; a counter's its total over the second and its rate; a running
+/// total's, such as the garbage collector's, the total and how fast it rose; a gauge's its latest value alone. Seconds are shown as milliseconds, bytes as megabytes, and a count's unit, such as
+/// <c>{collection}</c>, not at all, as the name says what is counted.
 /// <para>
 /// It listens only between <see cref="Listen"/> on and off. Measurements are added up on the thread that records
 /// them, without allocating after a series' first, so listening is cheap in the frame loop; the lines are made on the
@@ -27,14 +31,19 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     private readonly Lock _lock = new();
 
     /// <summary>
-    /// The instruments listened to, kept in the order their lines show: the meters as the settings list them, a meter's
+    /// The instruments listened to, kept in the order their lines show: the tabs as the settings list them, a meter's
     /// together and, in one, an area's, each in the order they were first published.
     /// </summary>
     private readonly List<Measured> _measured = [];
 
     private readonly List<TelemetryLine> _lines = [];
-    private string[] _meters = [];
+    private string[] _tabs = [];
     private MeterListener? _listener;
+
+    /// <summary>
+    /// The tabs listened under, so a change to them while running listens again.
+    /// </summary>
+    private IReadOnlyDictionary<string, string> _tabsListened = settings.Tabs;
 
     /// <summary>
     /// When the second being summed up began.
@@ -47,9 +56,9 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     public IReadOnlyList<TelemetryLine> Lines => _lines;
 
     /// <summary>
-    /// The meters of the last second's lines, in their order.
+    /// The tabs of the last second's lines, in their order.
     /// </summary>
-    public ReadOnlySpan<string> Meters => _meters;
+    public ReadOnlySpan<string> Tabs => _tabs;
 
     public void Dispose()
     {
@@ -72,10 +81,11 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             listener.Dispose();
             _listener = null;
             _lines.Clear();
-            _meters = [];
+            _tabs = [];
             return;
         }
 
+        _tabsListened = settings.Tabs;
         _listener = new MeterListener { InstrumentPublished = Publish, MeasurementsCompleted = Complete };
         _listener.SetMeasurementEventCallback<byte>(Add);
         _listener.SetMeasurementEventCallback<short>(Add);
@@ -94,6 +104,12 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// </summary>
     public void Refresh()
     {
+        if (_listener is not null && !ReferenceEquals(_tabsListened, settings.Tabs))
+        {
+            Listen(false);
+            Listen(true);
+        }
+
         double seconds = Stopwatch.GetElapsedTime(_secondStart).TotalSeconds;
         if (_listener is not { } listener || seconds < 1)
         {
@@ -111,30 +127,30 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             }
         }
 
-        _meters = MetersOf(_lines);
+        _tabs = TabsOf(_lines);
     }
 
     /// <summary>
-    /// Every line as one text, under its meter's name and its area's.
+    /// Every line as one text, under its tab's name and its header's.
     /// </summary>
     public string AllText()
     {
         StringBuilder text = new();
-        string meter = string.Empty;
-        string area = string.Empty;
+        string tab = string.Empty;
+        string header = string.Empty;
         foreach (TelemetryLine line in _lines)
         {
-            if (!string.Equals(line.Meter, meter, StringComparison.Ordinal))
+            if (!string.Equals(line.Tab, tab, StringComparison.Ordinal))
             {
-                meter = line.Meter;
-                area = string.Empty;
-                text.Append(text.Length == 0 ? string.Empty : "\n").Append("# ").Append(meter).Append('\n');
+                tab = line.Tab;
+                header = string.Empty;
+                text.Append(text.Length == 0 ? string.Empty : "\n").Append("# ").Append(tab).Append('\n');
             }
 
-            if (!string.Equals(line.Area, area, StringComparison.Ordinal))
+            if (!string.Equals(line.Header, header, StringComparison.Ordinal))
             {
-                area = line.Area;
-                text.Append(area).Append('\n');
+                header = line.Header;
+                text.Append(header).Append('\n');
             }
 
             text.Append("  ").Append(line.Text).Append('\n');
@@ -144,20 +160,29 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     }
 
     /// <summary>
-    /// The meters of <paramref name="lines"/>, which keep each meter's together, in their order.
+    /// Whether <paramref name="meter"/> is <paramref name="prefix"/> or under it: "Magic" takes "Magic.Core" and
+    /// "Magic.Gems.ClusterRendering", not "Magical".
     /// </summary>
-    private static string[] MetersOf(List<TelemetryLine> lines)
+    private static bool IsUnder(string meter, string prefix)
     {
-        List<string> meters = [];
+        return meter.StartsWith(prefix, StringComparison.Ordinal) && (meter.Length == prefix.Length || meter[prefix.Length] == '.');
+    }
+
+    /// <summary>
+    /// The tabs of <paramref name="lines"/>, which keep each tab's together, in their order.
+    /// </summary>
+    private static string[] TabsOf(List<TelemetryLine> lines)
+    {
+        List<string> tabs = [];
         foreach (TelemetryLine line in lines)
         {
-            if (meters.Count == 0 || !string.Equals(meters[^1], line.Meter, StringComparison.Ordinal))
+            if (tabs.Count == 0 || !string.Equals(tabs[^1], line.Tab, StringComparison.Ordinal))
             {
-                meters.Add(line.Meter);
+                tabs.Add(line.Tab);
             }
         }
 
-        return [.. meters];
+        return [.. tabs];
     }
 
     /// <summary>
@@ -185,35 +210,34 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     }
 
     /// <summary>
-    /// Listens to a new instrument when its meter is one of the settings' meters, as they are when listening starts, or
-    /// under one: "Magic" takes "Magic" and "Magic.Renderer", not "Magical".
+    /// Listens to a new instrument when its meter is under one of the settings' tabs, as they are when listening
+    /// starts.
     /// </summary>
     private void Publish(Instrument instrument, MeterListener listener)
     {
         string meter = instrument.Meter.Name;
-        IReadOnlyList<string> names = settings.Meters;
-        for (int order = 0; order < names.Count; order++)
+        int order = 0;
+        foreach ((string tab, string prefix) in settings.Tabs)
         {
-            string name = names[order];
-            if (!meter.StartsWith(name, StringComparison.Ordinal) || (meter.Length != name.Length && meter[name.Length] != '.'))
+            if (IsUnder(meter, prefix))
             {
-                continue;
+                Measured measured = new(instrument, order, tab, prefix);
+                lock (_lock)
+                {
+                    _measured.Insert(PlaceOf(measured), measured);
+                }
+
+                listener.EnableMeasurementEvents(instrument, measured);
+                return;
             }
 
-            Measured measured = new(instrument, order);
-            lock (_lock)
-            {
-                _measured.Insert(PlaceOf(measured), measured);
-            }
-
-            listener.EnableMeasurementEvents(instrument, measured);
-            return;
+            order++;
         }
     }
 
     /// <summary>
     /// Where <paramref name="added"/> goes among the instruments listened to, to keep their order: after the last of its
-    /// meter and area, else after the last of its meter, else before the first whose meter the settings list later.
+    /// meter and area, else after the last of its meter, else before the first whose tab the settings list later.
     /// </summary>
     private int PlaceOf(Measured added)
     {
@@ -288,19 +312,23 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
     /// <summary>
     /// One instrument's measurements over the second, a series per set of tags. Any thread may record one, so it is
-    /// locked. <paramref name="order"/> is where the settings list its meter.
+    /// locked. <paramref name="order"/> is where the settings list its tab, <paramref name="tab"/>, and
+    /// <paramref name="prefix"/> the tab's, which its meter is under.
     /// </summary>
-    private sealed class Measured(Instrument instrument, int order)
+    private sealed class Measured(Instrument instrument, int order, string tab, string prefix)
     {
         private readonly Lock _lock = new();
         private readonly List<Series> _series = [];
         private readonly Summary _summary = SummaryOf(instrument);
 
         /// <summary>
-        /// The instrument's name split as its lines show it: its area, the part after its first dot, and its name in the
-        /// area, what follows; a name of two parts, or one, is its own area.
+        /// The instrument's name split as its lines show it: its area, its name in the area, and the header its lines
+        /// are under, its meter's name past the tab's prefix and then its area, or the area alone for the meter the
+        /// prefix names.
         /// </summary>
-        private readonly (string Area, string Name) _parts = PartsOf(instrument.Name);
+        private readonly (string Area, string Name, string Header) _parts = PartsOf(instrument, prefix);
+
+        public string Tab => tab;
 
         public string Meter => instrument.Meter.Name;
 
@@ -334,11 +362,11 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
                     if (series.Tags.Length > 0 && !isNamed)
                     {
-                        lines.Add(new TelemetryLine(Meter, Area, _parts.Name, instrument.Description));
+                        lines.Add(new TelemetryLine(Tab, Meter, Area, _parts.Header, _parts.Name, string.Empty, string.Empty, string.Empty, instrument.Description));
                         isNamed = true;
                     }
 
-                    lines.Add(new TelemetryLine(Meter, Area, Describe(series, seconds), instrument.Description));
+                    lines.Add(Describe(series, seconds));
                     series.Clear();
                 }
             }
@@ -360,17 +388,22 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             return kind == typeof(ObservableCounter<>) || kind == typeof(ObservableUpDownCounter<>) ? Summary.Running : Summary.Latest;
         }
 
-        private static (string Area, string Name) PartsOf(string name)
+        /// <summary>
+        /// <paramref name="instrument"/>'s name without its meter's: what follows the meter's name in snake_case, as
+        /// instruments are named after their meter (<c>magic.core.</c> for <c>Magic.Core</c>), or what follows its
+        /// first part when it is named otherwise; then its area, up to the next dot, and its name in the area, the
+        /// rest, or the area again when there is none. The header is the meter past the tab's <paramref name="prefix"/>
+        /// and the area, or the area alone for the meter the prefix names.
+        /// </summary>
+        private static (string Area, string Name, string Header) PartsOf(Instrument instrument, string prefix)
         {
-            int first = name.IndexOf('.', StringComparison.Ordinal);
-            int second = first < 0 ? -1 : name.IndexOf('.', first + 1);
-            if (second < 0)
-            {
-                string area = name[(first + 1)..];
-                return (area, area);
-            }
-
-            return (name[(first + 1)..second], name[(second + 1)..]);
+            string meter = instrument.Meter.Name;
+            string name = instrument.Name;
+            string own = string.Join('.', meter.Split('.').Select(JsonNamingPolicy.SnakeCaseLower.ConvertName)) + ".";
+            string rest = name.StartsWith(own, StringComparison.Ordinal) ? name[own.Length..] : name[(name.IndexOf('.', StringComparison.Ordinal) + 1)..];
+            int dot = rest.IndexOf('.', StringComparison.Ordinal);
+            string area = dot < 0 ? rest : rest[..dot];
+            return (area, dot < 0 ? rest : rest[(dot + 1)..], meter.Length == prefix.Length ? area : $"{meter[(prefix.Length + 1)..]} {area}");
         }
 
         /// <summary>
@@ -392,43 +425,27 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         }
 
         /// <summary>
-        /// <paramref name="series"/>' line: the instrument's name when it has no tags, else its tags' values, indented
-        /// under the name, then what it measured over the last <paramref name="seconds"/>.
+        /// <paramref name="series"/>' row: the instrument's name when it has no tags, else its tags' values, indented
+        /// under the name, then what it measured over the last <paramref name="seconds"/>, in the cells it has.
         /// </summary>
-        private string Describe(Series series, double seconds)
+        private TelemetryLine Describe(Series series, double seconds)
         {
             string? unit = instrument.Unit;
             ReadOnlySpan<KeyValuePair<string, object?>> tags = series.Tags;
-            StringBuilder text = new(tags.Length == 0 ? _parts.Name : "  ");
+            StringBuilder name = new(tags.Length == 0 ? _parts.Name : "  ");
             for (int i = 0; i < tags.Length; i++)
             {
-                text.Append(i == 0 ? string.Empty : " ").Append(tags[i].Value);
+                name.Append(i == 0 ? string.Empty : " ").Append(tags[i].Value);
             }
 
-            text.Append(": ");
-            switch (_summary)
+            (string value, string rate, string max) = _summary switch
             {
-                case Summary.Distribution:
-                    text.Append(CultureInfo.InvariantCulture, $"{series.Count / seconds:0.#}/s, mean {Amount(series.Sum / series.Count, unit)}, max {Amount(series.Max, unit)}");
-                    break;
-                case Summary.Total:
-                    text.Append(CultureInfo.InvariantCulture, $"{Amount(series.Sum, unit)}, {Amount(series.Sum / seconds, unit)}/s");
-                    break;
-                case Summary.Running:
-                    text.Append(Amount(series.Last, unit));
-                    if (series.Previous is { } previous)
-                    {
-                        text.Append(", ").Append(Amount((series.Last - previous) / seconds, unit)).Append("/s");
-                    }
-
-                    break;
-                case Summary.Latest:
-                default:
-                    text.Append(Amount(series.Last, unit));
-                    break;
-            }
-
-            return text.ToString();
+                Summary.Distribution => (Amount(series.Sum / series.Count, unit), string.Create(CultureInfo.InvariantCulture, $"{series.Count / seconds:0.#}/s"), Amount(series.Max, unit)),
+                Summary.Total => (Amount(series.Sum, unit), $"{Amount(series.Sum / seconds, unit)}/s", string.Empty),
+                Summary.Running => (Amount(series.Last, unit), series.Previous is { } previous ? $"{Amount((series.Last - previous) / seconds, unit)}/s" : string.Empty, string.Empty),
+                Summary.Latest or _ => (Amount(series.Last, unit), string.Empty, string.Empty),
+            };
+            return new TelemetryLine(Tab, Meter, Area, _parts.Header, name.ToString(), value, rate, max, instrument.Description);
         }
     }
 
@@ -493,6 +510,32 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
 /// <summary>
 /// One line of the telemetry: an instrument's numbers over the last second, its name above a line per set of tags, or
-/// one of those, under its meter and its area. <see cref="Description"/> is the instrument's own: what it measures.
+/// one of those, under its tab and its header, its meter past the tab's prefix and its area, as the cells of a row:
+/// its name, its value (a histogram's mean, a counter's total, a gauge's latest), how many or how much a second, and a
+/// histogram's most, each empty where the instrument has none. <see cref="Description"/> is the instrument's own: what
+/// it measures.
 /// </summary>
-internal readonly record struct TelemetryLine(string Meter, string Area, string Text, string? Description);
+internal readonly record struct TelemetryLine(string Tab, string Meter, string Area, string Header, string Name, string Value, string Rate, string Max, string? Description)
+{
+    /// <summary>
+    /// The row as one line of text, for Copy: the name, then the cells it has.
+    /// </summary>
+    public string Text
+    {
+        get
+        {
+            StringBuilder text = new(Name);
+            string between = ": ";
+            foreach (string cell in (ReadOnlySpan<string>)[Value, Rate, Max.Length == 0 ? string.Empty : $"max {Max}"])
+            {
+                if (cell.Length > 0)
+                {
+                    text.Append(between).Append(cell);
+                    between = ", ";
+                }
+            }
+
+            return text.ToString();
+        }
+    }
+}

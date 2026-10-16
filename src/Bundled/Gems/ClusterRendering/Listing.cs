@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
@@ -22,11 +20,12 @@ internal sealed class Listing(IGpu gpu) : IDisposable
         foreach (ListedPass pass in Passes)
         {
             gpu.Release(pass.Pipeline);
-            gpu.Release(pass.Clear);
             foreach (GpuPipeline surface in pass.Surfaces.Values)
             {
                 gpu.Release(surface);
             }
+
+            (pass.Script as IDisposable)?.Dispose();
         }
     }
 
@@ -41,6 +40,12 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     /// What the passes make, by name.
     /// </summary>
     public Dictionary<string, CreatedResource> Created { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Why a pass does not run or a pipeline does not load, a line each, which the frame says in words across every view
+    /// (<see cref="Failures"/>) for as long as it draws with this listing; the whole of each is in the log.
+    /// </summary>
+    public List<string> Failures { get; } = [];
 
     /// <summary>
     /// Pipelines still to come back, and the build itself until it has asked for them all: one from the start, so a
@@ -70,18 +75,22 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     }
 
     /// <summary>
-    /// Walks the passes in frame order and keeps those whose every name stands for something by then: the renderer's, or
-    /// made by a pass before it that it can see (what a stage that runs once a frame makes, every pass after it sees; what
-    /// a view's stage makes, the passes after it in that view). One that does not fit is said once and left out, and so
-    /// is what it would make. Then counts the pipelines to wait for: a pass's own, and a draw's for the
-    /// <paramref name="variants"/> it draws (<see cref="ListedPass.VariantsOf"/>).
+    /// Walks the passes in frame order and keeps those whose every name it writes, makes or draws with stands for
+    /// something by then: the renderer's, or made by a pass before it that it can see (what a stage that runs once a
+    /// frame makes, every pass after it sees; what a view's stage makes, the passes after it in that view), which are
+    /// what its shaders can read (<see cref="ListedPass.Visible"/>). One that does not fit is said once and left out,
+    /// and so is what it would make; <paramref name="failures"/> is what was already found not to load as the passes
+    /// were. Then counts the pipelines to wait for: a pass's own, and a draw's for the <paramref name="variants"/> it
+    /// draws (<see cref="ListedPass.VariantsOf"/>).
     /// </summary>
-    public void Fit(List<Loaded> loaded, SceneVariants variants)
+    public void Fit(List<Loaded> loaded, List<string> failures, SceneVariants variants)
     {
-        Dictionary<string, ResourceInfo> names = new(ResourceInfo.Engine, StringComparer.Ordinal);
+        Failures.AddRange(failures);
+        List<ResourceInfo> names = [.. ResourceInfo.Engine.Values];
         foreach (PassStage stage in Enum.GetValues<PassStage>())
         {
             bool isFrame = stage < PassStage.Cull;
+            bool isTarget = stage >= PassStage.Overlay;
             foreach (Loaded pass in loaded)
             {
                 if (pass.Pass.Stage != stage)
@@ -96,32 +105,27 @@ internal sealed class Listing(IGpu gpu) : IDisposable
                     made[create.Name] = create;
                 }
 
-                if (listed.Bind(names, made, isFrame) is { } why)
+                if (listed.Bind(names, made, isFrame, isTarget) is { } why)
                 {
                     Debugging.Error($"Pass {pass.Name} does not run: {why}");
+                    Failures.Add($"Pass {pass.Name} does not run: {FirstLine(why)}");
                     continue;
                 }
 
                 foreach ((string name, PassCreate create) in made)
                 {
-                    ResourceInfo info = ResourceInfo.Of(create, isFrame);
-                    names[name] = info;
+                    ResourceInfo info = ResourceInfo.Of(create, isFrame, isTarget);
+                    names.Add(info);
                     Created[name] = new CreatedResource(create, info);
                     if (create.History)
                     {
-                        names[ResourceInfo.HistoryOf(name)] = info with { Name = ResourceInfo.HistoryOf(name) };
+                        names.Add(info with { Name = ResourceInfo.HistoryOf(name) });
                     }
                 }
 
                 Stages[(int)stage].Add(listed);
                 Passes.Add(listed);
             }
-        }
-
-        foreach (ListedPass pass in Passes)
-        {
-            pass.Use(Created);
-            pass.UseDispatch(Created);
         }
 
         Pending = 1 + Passes.Count;
@@ -141,7 +145,21 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     }
 
     /// <summary>
-    /// A pass's own pipeline came back, or why not, which is said once and leaves it out.
+    /// Adds what each pass's shaders use each thing a pass makes for to what that thing is made with, once every pass
+    /// knows what its shaders use (<see cref="ListedPass.Bound"/>).
+    /// </summary>
+    public void Use()
+    {
+        foreach (ListedPass pass in Passes)
+        {
+            pass.Use(Created);
+            pass.UseDispatch(Created);
+        }
+    }
+
+    /// <summary>
+    /// A pass's own pipeline came back, or why not, which is said once and leaves it out: it never runs, and what it
+    /// would draw into is shown as the failure.
     /// </summary>
     public void Take(ListedPass pass, Result<GpuPipeline> made)
     {
@@ -149,6 +167,8 @@ internal sealed class Listing(IGpu gpu) : IDisposable
         if (!made.Ok)
         {
             Debugging.Error($"Pass {pass.Name} does not run: {made.Error}");
+            Failures.Add($"Pass {pass.Name} does not run: {FirstLine(made.Error)}");
+            pass.HasFailed = true;
             return;
         }
 
@@ -186,6 +206,19 @@ internal sealed class Listing(IGpu gpu) : IDisposable
         {
             pass.Surfaces.Remove(variant);
         }
+        else
+        {
+            pass.Broken.Add(variant);
+        }
+    }
+
+    /// <summary>
+    /// The first line of an error, which is as much as a line across the view can say.
+    /// </summary>
+    public static string FirstLine(string error)
+    {
+        int end = error.IndexOf('\n', StringComparison.Ordinal);
+        return (end < 0 ? error : error[..end]).Trim();
     }
 
     private static List<ListedPass>[] NewStages()
@@ -211,11 +244,13 @@ internal sealed record CreatedResource(PassCreate Create, ResourceInfo Info)
 }
 
 /// <summary>
-/// A pass as a listing runs it: its file, its packed params, what each name it binds stands for in binding order, and
-/// its pipelines.
+/// A pass as a listing runs it: its file, its packed params, the names its shaders can see and what each stage of them
+/// binds, and its pipelines.
 /// </summary>
 internal sealed class ListedPass(Loaded loaded)
 {
+    private readonly StageBindings?[] _bound = new StageBindings?[3];
+
     public Pass Pass => loaded.Pass;
 
     /// <summary>
@@ -229,14 +264,21 @@ internal sealed class ListedPass(Loaded loaded)
 
     public PassWords Params => loaded.Params;
 
-    public List<PassBinding> Sampled { get; } = [];
+    /// <summary>
+    /// The texture a compute pass dispatched <c>output:Name</c> runs a thread per texel of; empty for any other dispatch.
+    /// </summary>
+    public string DispatchOutput { get; } = loaded.Pass.Dispatch.Per.StartsWith("output:", StringComparison.Ordinal) ? loaded.Pass.Dispatch.Per["output:".Length..] : string.Empty;
 
     /// <summary>
-    /// The textures it reads texel by texel with no sampler (<see cref="ResourceInfo.IsStorageRead"/>).
+    /// Every name its shaders can read, in the order the frame makes them: the renderer's, what the passes before it
+    /// made that it can see, and its own.
     /// </summary>
-    public List<PassBinding> StorageReads { get; } = [];
+    public List<ResourceInfo> Visible { get; } = [];
 
-    public List<PassBinding> Buffers { get; } = [];
+    /// <summary>
+    /// Why what its shaders use could not be found, which fails its pipelines; empty while it could.
+    /// </summary>
+    public string ProbeError { get; set; } = string.Empty;
 
     public List<PassBinding> TextureWrites { get; } = [];
 
@@ -260,9 +302,15 @@ internal sealed class ListedPass(Loaded loaded)
     public GpuPipeline Pipeline { get; set; }
 
     /// <summary>
-    /// A tiled draw's: depth 0, the farthest, everywhere it draws, which empties its tile before it draws into it.
+    /// A script pass's script, made for this listing; none for any other pass, or until it is made.
     /// </summary>
-    public GpuPipeline Clear { get; set; }
+    public IPipelineScript? Script { get; set; }
+
+    /// <summary>
+    /// Its pipeline could not be made, so it never runs: what it would draw into is shown as the failure instead
+    /// (<see cref="PassRecorder"/>).
+    /// </summary>
+    public bool HasFailed { get; set; }
 
     /// <summary>
     /// A compute shader's threads per group, which its groups are counted by.
@@ -285,52 +333,67 @@ internal sealed class ListedPass(Loaded loaded)
     /// </summary>
     public Dictionary<SurfaceKey, GpuPipeline> Surfaces { get; } = [];
 
+    /// <summary>
+    /// The variants whose pipeline neither its surface nor the failure in its place made, which nothing waits for.
+    /// </summary>
+    public HashSet<SurfaceKey> Broken { get; } = [];
+
     public bool IsReady { get; set; }
 
     /// <summary>
-    /// Resolves what the pass reads, writes and draws with, in binding order; why not, when a name stands for nothing it
-    /// can see by then, or the pass is not one the renderer runs.
+    /// What a stage of it binds, once its shaders were probed; none before, or for a stage it has none of.
     /// </summary>
-    public string? Bind(Dictionary<string, ResourceInfo> names, Dictionary<string, PassCreate> made, bool isFrame)
+    public StageBindings? Bound(GpuStage stage) => _bound[(int)stage];
+
+    public void SetBound(GpuStage stage, StageBindings? bound)
     {
-        foreach (string name in made.Keys)
+        _bound[(int)stage] = bound;
+    }
+
+    /// <summary>
+    /// Resolves what the pass writes and draws with, and gathers what it can see; why not, when a name stands for nothing
+    /// it can see by then, or the pass is not one the renderer runs.
+    /// </summary>
+    public string? Bind(List<ResourceInfo> names, Dictionary<string, PassCreate> made, bool isFrame, bool isTarget)
+    {
+        foreach (ResourceInfo info in names)
         {
-            if (names.ContainsKey(name))
+            if (made.ContainsKey(info.Name))
             {
-                return $"it makes {name}, which the renderer or a pass before it already has.";
+                return $"it makes {info.Name}, which the renderer or a pass before it already has.";
+            }
+
+            if (Sees(info, isFrame, isTarget))
+            {
+                Visible.Add(info);
             }
         }
 
-        foreach (PassRead read in Pass.Reads)
+        foreach (PassCreate create in made.Values)
         {
-            if (Made(names, made, read.Name, isFrame) is not { } info)
+            ResourceInfo info = ResourceInfo.Of(create, isFrame, isTarget);
+            Visible.Add(info);
+            if (create.History)
             {
-                if (read.Optional)
-                {
-                    continue;
-                }
-
-                return $"it reads {read.Name}, which neither it nor anything before it makes.";
+                Visible.Add(info with { Name = ResourceInfo.HistoryOf(create.Name) });
             }
-
-            (info.IsBuffer ? Buffers : info.IsStorageRead ? StorageReads : Sampled).Add(new PassBinding(info, read.Filter, 0, 0, GpuLoad.Load, false));
         }
 
         foreach (PassWrite write in Pass.Writes)
         {
-            if (Made(names, made, write.Name, isFrame) is not { } info)
+            if (Made(names, made, write.Name, isFrame, isTarget) is not { } info)
             {
                 return $"it writes {write.Name}, which neither it nor anything before it makes.";
             }
 
-            (info.IsBuffer ? BufferWrites : TextureWrites).Add(new PassBinding(info, PassFilter.Default, write.Level, write.Layer, write.Load, write.Mipmaps));
+            (info.IsBuffer ? BufferWrites : TextureWrites).Add(new PassBinding(info, write.Level, write.Layer, write.Contents, write.Mipmaps));
         }
 
         if (Pass.Kind == PassKind.Draw)
         {
             foreach (string color in Pass.Draw.Colors)
             {
-                if (Made(names, made, color, isFrame) is not { } info)
+                if (Made(names, made, color, isFrame, isTarget) is not { } info)
                 {
                     return $"it draws into {color}, which neither it nor anything before it makes.";
                 }
@@ -341,14 +404,14 @@ internal sealed class ListedPass(Loaded loaded)
 
             foreach (string name in (string[])[Pass.Draw.Depth, Pass.Draw.Args, Pass.Draw.Instances])
             {
-                if (name.Length > 0 && Made(names, made, name, isFrame) is null)
+                if (name.Length > 0 && Made(names, made, name, isFrame, isTarget) is null)
                 {
                     return $"it draws with {name}, which neither it nor anything before it makes.";
                 }
             }
         }
 
-        if (Pass.Kind == PassKind.Compute && Pass.Dispatch.Args.Length > 0 && Made(names, made, Pass.Dispatch.Args, isFrame) is null)
+        if (Pass.Kind == PassKind.Compute && Pass.Dispatch.Args.Length > 0 && Made(names, made, Pass.Dispatch.Args, isFrame, isTarget) is null)
         {
             return $"it dispatches by {Pass.Dispatch.Args}, which neither it nor anything before it makes.";
         }
@@ -359,6 +422,9 @@ internal sealed class ListedPass(Loaded loaded)
             PassKind.Compute when TextureWrites.Count + BufferWrites.Count == 0 => "a compute pass writes something.",
             PassKind.Fullscreen when Pass.Shader == Handle<Shader>.None => "a fullscreen pass names its fragment shader.",
             PassKind.Fullscreen when TextureWrites.Count != 1 || BufferWrites.Count > 0 => "a fullscreen pass writes one texture, its target.",
+            PassKind.Fullscreen when TextureWrites[0].Info.IsTarget => $"only a script pass draws into {ResourceInfo.TargetName}, whose format is known only as it is drawn into; a fullscreen pass in the overlay stage writes what it makes.",
+            PassKind.Script when Pass.Script == Handle<Script>.None => "a script pass names its script.",
+            PassKind.Script when TextureWrites.Count != 1 || BufferWrites.Count > 0 => "a script pass writes one texture, its target.",
             PassKind.Draw when Pass.Draw.Drawn == PassDrawn.Depth && Pass.Shader == Handle<Shader>.None => "a depth draw names its vertex shader.",
             PassKind.Draw when Pass.Draw.Drawn is PassDrawn.Visibility or PassDrawn.Surfaces or PassDrawn.Depth && (Pass.Draw.Args.Length == 0 || Pass.Draw.Instances.Length == 0) => "a draw of pieces or tiles names the arguments and instances a pass before it made.",
             PassKind.Draw when TextureWrites.Count + BufferWrites.Count > 0 => "a draw pass draws into its colours and depth, and writes nothing else.",
@@ -385,30 +451,39 @@ internal sealed class ListedPass(Loaded loaded)
     }
 
     /// <summary>
-    /// Adds what this pass uses each thing it names that a pass makes for to what that thing is made with.
+    /// Adds what this pass's shaders use each thing they name that a pass makes for to what that thing is made with.
     /// </summary>
     public void Use(Dictionary<string, CreatedResource> created)
     {
-        GpuBufferUsage read = Pass.Kind == PassKind.Compute ? GpuBufferUsage.ComputeRead : GpuBufferUsage.GraphicsRead;
-        foreach (PassBinding binding in Sampled)
+        foreach (StageBindings? bound in _bound)
         {
-            Add(created, binding.Info.Name, GpuTextureUsage.Sampler, GpuBufferUsage.None);
-        }
+            if (bound is null)
+            {
+                continue;
+            }
 
-        foreach (PassBinding binding in StorageReads)
-        {
-            Add(created, binding.Info.Name, Pass.Kind == PassKind.Compute ? GpuTextureUsage.ComputeRead : GpuTextureUsage.GraphicsRead, GpuBufferUsage.None);
-        }
+            GpuTextureUsage storage = Pass.Kind == PassKind.Compute ? GpuTextureUsage.ComputeRead : GpuTextureUsage.GraphicsRead;
+            GpuBufferUsage read = Pass.Kind == PassKind.Compute ? GpuBufferUsage.ComputeRead : GpuBufferUsage.GraphicsRead;
+            foreach (BoundName name in bound.Sampled)
+            {
+                Add(created, name.Binding.Info.Name, GpuTextureUsage.Sampled, GpuBufferUsage.None);
+            }
 
-        foreach (PassBinding binding in Buffers)
-        {
-            Add(created, binding.Info.Name, GpuTextureUsage.None, read);
+            foreach (BoundName name in bound.StorageReads)
+            {
+                Add(created, name.Binding.Info.Name, storage, GpuBufferUsage.None);
+            }
+
+            foreach (BoundName name in bound.Buffers)
+            {
+                Add(created, name.Binding.Info.Name, GpuTextureUsage.None, read);
+            }
         }
 
         foreach (PassBinding binding in TextureWrites)
         {
             GpuTextureUsage usage = Pass.Kind == PassKind.Compute ? GpuTextureUsage.ComputeWrite : GpuTextureUsage.ColorTarget;
-            Add(created, binding.Info.Name, usage | (binding.Mipmaps ? GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampler : GpuTextureUsage.None), GpuBufferUsage.None);
+            Add(created, binding.Info.Name, usage | (binding.Mipmaps ? GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled : GpuTextureUsage.None), GpuBufferUsage.None);
         }
 
         foreach (PassBinding binding in BufferWrites)
@@ -427,7 +502,7 @@ internal sealed class ListedPass(Loaded loaded)
         }
 
         Add(created, Pass.Draw.Depth, GpuTextureUsage.DepthTarget, GpuBufferUsage.None);
-        Add(created, Pass.Draw.Args, GpuTextureUsage.None, GpuBufferUsage.Indirect);
+        Add(created, Pass.Draw.Args, GpuTextureUsage.None, GpuBufferUsage.Arguments);
         Add(created, Pass.Draw.Instances, GpuTextureUsage.None, GpuBufferUsage.Vertex);
     }
 
@@ -438,111 +513,71 @@ internal sealed class ListedPass(Loaded loaded)
     {
         if (Pass.Kind == PassKind.Compute && Pass.Dispatch.Args.Length > 0)
         {
-            Add(created, Pass.Dispatch.Args, GpuTextureUsage.None, GpuBufferUsage.Indirect);
+            Add(created, Pass.Dispatch.Args, GpuTextureUsage.None, GpuBufferUsage.Arguments);
         }
     }
 
     /// <summary>
-    /// The declarations of what the pass binds, in the order the renderer binds it: its sampled textures with their
-    /// samplers after the <paramref name="sampledBefore"/> the renderer binds first, then the textures it reads with no
-    /// sampler, then <paramref name="firstBuffers"/>, the buffers the renderer binds, then the buffers it reads, then, for
-    /// compute, the textures and buffers it writes.
-    /// Then <c>KeepReadsAlive</c>, which reads each once, for a template to keep them bound however little its surface
-    /// reads: the compiler drops what a shader does not use, and its count would no longer match the file's. Each read is
-    /// defined first, <c>HAS_Name</c>, so a shader can do without an optional one the listing left out.
+    /// The declarations a shader of <paramref name="stage"/> of this pass is given (<see cref="StageBindings.Header"/>):
+    /// every name it can see, and for compute every name it writes; at the slots of <paramref name="bound"/> when it is
+    /// known what the shader uses.
     /// </summary>
-    public string Header(GpuStage stage, int sampledBefore, IReadOnlyList<string> firstBuffers)
+    public string Header(GpuStage stage, StageBindings? bound)
     {
-        StringBuilder header = new("#include \"Include/Frame.hlsli\"\n#include \"Include/Structs.hlsli\"\n");
-        foreach (PassBinding binding in (List<PassBinding>)[.. Sampled, .. StorageReads, .. Buffers])
-        {
-            header.Append(CultureInfo.InvariantCulture, $"#define HAS_{binding.Info.Name} 1\n");
-        }
-
-        int read = sampledBefore;
-        foreach (PassBinding binding in Sampled)
-        {
-            string sampler = binding.Filter == PassFilter.Comparison ? "SamplerComparisonState" : "SamplerState";
-            header.Append(CultureInfo.InvariantCulture, $"{binding.Info.ReadType} {binding.Info.Name} : READ({read});\n{sampler} {binding.Info.Name}Sampler : SAMPLER({read});\n");
-            read++;
-        }
-
-        foreach (PassBinding binding in StorageReads)
-        {
-            header.Append(CultureInfo.InvariantCulture, $"{binding.Info.ReadType} {binding.Info.Name} : READ({read++});\n");
-        }
-
-        foreach (string firstBuffer in firstBuffers)
-        {
-            header.Append(CultureInfo.InvariantCulture, $"{firstBuffer} : READ({read++});\n");
-        }
-
-        foreach (PassBinding binding in Buffers)
-        {
-            header.Append(CultureInfo.InvariantCulture, $"{binding.Info.ReadType} {binding.Info.Name} : READ({read++});\n");
-        }
-
-        // A surface template calls it where no draw goes, so every read stays bound whatever the surface uses.
-        header.Append("float KeepReadsAlive(float2 uv)\n{\n    float nothing = 0.0;\n");
-        foreach (PassBinding binding in (List<PassBinding>)[.. Sampled, .. StorageReads, .. Buffers])
-        {
-            header.Append(CultureInfo.InvariantCulture, $"    nothing += {binding.Info.KeepAlive(binding.Filter)};\n");
-        }
-
-        header.Append("    return nothing;\n}\n");
-        if (stage != GpuStage.Compute)
-        {
-            return header.ToString();
-        }
-
-        int write = 0;
-        foreach (PassBinding binding in TextureWrites)
-        {
-            header.Append(CultureInfo.InvariantCulture, $"{binding.Info.WriteType} {binding.Info.Name} : WRITE({write++});\n");
-        }
-
-        foreach (PassBinding binding in BufferWrites)
-        {
-            header.Append(CultureInfo.InvariantCulture, $"{binding.Info.WriteType} {binding.Info.Name} : WRITE({write++});\n");
-        }
-
-        return header.ToString();
+        return StageBindings.Header(stage, Visible, WritesOf(stage), bound);
     }
 
     /// <summary>
-    /// Why a compiled shader binds other than the file says.
+    /// What a stage's shader is given to write: a compute pass's writes, nothing for any other stage, which draws into
+    /// its target.
     /// </summary>
-    public string Mismatch(uint textures, uint buffers, uint writes)
+    public IReadOnlyList<PassBinding> WritesOf(GpuStage stage)
     {
-        return $"its shader uses {textures} textures, {buffers} buffers and {writes} writes, where its file reads {Sampled.Count + StorageReads.Count} textures and {Buffers.Count} buffers and writes {TextureWrites.Count + BufferWrites.Count}: "
-            + "the compiler drops what a shader does not use, so a file names only what its shader uses.";
+        return stage == GpuStage.Compute ? [.. TextureWrites, .. BufferWrites] : [];
     }
 
-    private static ResourceInfo? Find(Dictionary<string, ResourceInfo> names, string name, bool isFrame)
+    /// <summary>
+    /// Whether a pass of a stage's scope can see a name: every pass the frame's; a view's stages the views'; a target's
+    /// stages the targets'.
+    /// </summary>
+    private static bool Sees(ResourceInfo info, bool isFrame, bool isTarget)
     {
-        return names.TryGetValue(name, out ResourceInfo? info) && (info.IsFrame || !isFrame) ? info : null;
+        return info.IsFrame || (isTarget ? info.IsTarget : !isFrame && !info.IsTarget);
+    }
+
+    private static ResourceInfo? Find(List<ResourceInfo> names, string name, bool isFrame, bool isTarget)
+    {
+        foreach (ResourceInfo info in names)
+        {
+            if (string.Equals(info.Name, name, StringComparison.Ordinal) && Sees(info, isFrame, isTarget))
+            {
+                return info;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
     /// What a name stands for to a pass: what it makes itself, or the last frame's copy of what it keeps from frame to
     /// frame, or what the renderer or a pass before it has.
     /// </summary>
-    private static ResourceInfo? Made(Dictionary<string, ResourceInfo> names, Dictionary<string, PassCreate> made, string name, bool isFrame)
+    private static ResourceInfo? Made(List<ResourceInfo> names, Dictionary<string, PassCreate> made, string name, bool isFrame, bool isTarget)
     {
         if (made.TryGetValue(name, out PassCreate? create))
         {
-            return ResourceInfo.Of(create, isFrame);
+            return ResourceInfo.Of(create, isFrame, isTarget);
         }
 
         foreach (PassCreate kept in made.Values)
         {
             if (kept.History && string.Equals(ResourceInfo.HistoryOf(kept.Name), name, StringComparison.Ordinal))
             {
-                return ResourceInfo.Of(kept, isFrame) with { Name = name };
+                return ResourceInfo.Of(kept, isFrame, isTarget) with { Name = name };
             }
         }
 
-        return Find(names, name, isFrame);
+        return Find(names, name, isFrame, isTarget);
     }
 
     private static void Add(Dictionary<string, CreatedResource> created, string name, GpuTextureUsage textures, GpuBufferUsage buffers)
@@ -560,10 +595,10 @@ internal sealed class ListedPass(Loaded loaded)
 /// surface of none for the bins that do not clip), the resolve bins' into the G-buffer, transparent forward, and the
 /// sky's.
 /// </summary>
-internal sealed record SceneVariants(IReadOnlyCollection<SurfaceKey> Raster, IReadOnlyCollection<SurfaceKey> Resolve, IReadOnlyCollection<SurfaceKey> Transparent, SurfaceKey Sky);
+internal readonly record struct SceneVariants(IReadOnlyCollection<SurfaceKey> Raster, IReadOnlyCollection<SurfaceKey> Resolve, IReadOnlyCollection<SurfaceKey> Transparent, SurfaceKey Sky);
 
 /// <summary>
-/// One name a pass binds: what it stands for, how it is sampled, and for a write the level and layer, what happens to
-/// what was there, and whether its mips are made after.
+/// One name a pass binds: what it stands for, and for a write the level and layer, what happens to what was there, and
+/// whether its mips are made after.
 /// </summary>
-internal readonly record struct PassBinding(ResourceInfo Info, PassFilter Filter, uint Level, uint Layer, GpuLoad Load, bool Mipmaps);
+internal readonly record struct PassBinding(ResourceInfo Info, uint Level, uint Layer, GpuContents Contents, bool Mipmaps);
