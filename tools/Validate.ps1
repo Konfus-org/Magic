@@ -1,0 +1,88 @@
+<#
+.SYNOPSIS
+Runs the checks a change must pass: a clean build, the tests, and the samples headless and with a window.
+
+.DESCRIPTION
+The steps run in order and the first failure ends the run with that step's exit code; a run that passes exits 0.
+The build already treats every warning as an error, so a clean build is one that exits 0. The sample runs pass
+--fail-on-error, so an error logged during a run exits 2. The Window step needs a display and a GPU; the others do
+not. Runs from any current directory.
+
+.PARAMETER Configuration
+The build configuration: Debug, Optimize or Release.
+
+.PARAMETER Frames
+How many frames each sample run lasts.
+
+.PARAMETER Project
+The project the sample runs open: a .magic file or the folder holding one, relative to the repository root.
+
+.PARAMETER Only
+The steps to run when not all of them: Build, Test, Headless, Window, in that order whatever order they are given.
+
+.EXAMPLE
+tools/Validate.ps1
+
+.EXAMPLE
+tools/Validate.ps1 -Only Build,Headless
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet('Debug', 'Optimize', 'Release')]
+    [string] $Configuration = 'Debug',
+    [ValidateRange(1, [int]::MaxValue)]
+    [int] $Frames = 120,
+    [string] $Project = 'samples',
+    [ValidateSet('Build', 'Test', 'Headless', 'Window')]
+    [string[]] $Only = @('Build', 'Test', 'Headless', 'Window')
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+# A native command's exit code is read below, never thrown (PowerShell 7.4 would otherwise throw on it).
+$PSNativeCommandUseErrorActionPreference = $false
+
+$root = Split-Path -Parent $PSScriptRoot
+$solution = Join-Path $root 'Magic.slnx'
+$magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'net10.0') $Configuration) 'bin'
+$magic = Join-Path $magic 'Magic'
+if (Test-Path "$magic.exe") { $magic = "$magic.exe" }
+$projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
+
+$steps = @(
+    @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration } }
+    @{ Name = 'Test'; Run = { dotnet test $solution --configuration $Configuration } }
+    @{ Name = 'Headless'; Run = { & $magic --project $projectPath --frames $Frames --fail-on-error --headless } }
+    @{ Name = 'Window'; Run = { & $magic --project $projectPath --frames $Frames --fail-on-error } }
+)
+
+$code = 0
+$failed = $null
+$summary = @()
+foreach ($step in $steps) {
+    if ($Only -notcontains $step.Name) { continue }
+    if ($step.Name -ne 'Build' -and $step.Name -ne 'Test' -and -not (Test-Path $magic)) {
+        Write-Output "There is no $magic to run: build first (tools/Validate.ps1 -Only Build)."
+        exit 1
+    }
+
+    Write-Output ""
+    Write-Output "==> $($step.Name)"
+    $started = [System.Diagnostics.Stopwatch]::StartNew()
+    & $step.Run
+    $code = $LASTEXITCODE
+    $summary += '{0,-9} exit {1} in {2:n0} s' -f $step.Name, $code, $started.Elapsed.TotalSeconds
+    if ($code -ne 0) {
+        $failed = $step.Name
+        break
+    }
+}
+
+Write-Output ""
+foreach ($line in $summary) { Write-Output $line }
+if ($null -eq $failed) {
+    Write-Output 'PASSED'
+} else {
+    Write-Output "FAILED: $failed exited $code"
+}
+exit $code

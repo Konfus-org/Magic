@@ -50,7 +50,9 @@ This document outlines the strict rules, workflows, and verification steps for A
 
 ## Validation & Verification Steps
 
-Execute these verification checks in order before concluding your work:
+Execute these verification checks in order before concluding your work. `tools/Validate.ps1` runs steps 1 and 2
+in one go and reports each step's exit code; `tools/Screenshot.ps1` does step 3 and prints the image's path. Both
+run under `pwsh` and Windows PowerShell; see [Tools](tools/README.md). What they run:
 
 1. **Clean Build Compilation:** 
    Build `Magic.slnx`. Treat all relevant compiler warnings as errors. A perfectly clean build is mandatory.
