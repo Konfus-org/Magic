@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Magic.Contexts.Utils;
+using Magic.Interfaces;
 
 namespace Magic.Services;
 
@@ -8,9 +9,10 @@ namespace Magic.Services;
 /// The code loaded: Magic's own assembly, and each gem's, the project's and the bundled scripts' as it loads, by the
 /// path it was loaded from, so one loaded again, as the project's is when it is built while the engine runs, replaces
 /// its last build. What a file names from code, a script's class or a component's struct, is found here by the name
-/// of its type (<see cref="Get"/>): the assemblies are searched once per name, what each resolved to is kept for
-/// the run, and forgotten when an assembly is added or replaced. A gem asks for it as it asks for any service, as the
-/// one that reads <c>.cs</c> files does to find a script's class. Safe from any thread.
+/// of its type (<see cref="Get"/>), checked to be what the file is for (<see cref="Get{T}"/>): the assemblies are
+/// searched once per name, what each resolved to is kept for the run, and forgotten when an assembly is added or
+/// replaced. A gem asks for it as it asks for any service, as the one that reads <c>.cs</c> files does to find a
+/// script's class. Safe from any thread.
 /// </summary>
 public sealed class Assemblies
 {
@@ -58,6 +60,22 @@ public sealed class Assemblies
     public Result<Type> Get(string name)
     {
         return _named.GetOrAdd(name, Search);
+    }
+
+    /// <summary>
+    /// <see cref="Get"/>, when the type is a <typeparamref name="T"/>: a component's struct for
+    /// <see cref="IComponent"/>, a script's class for <see cref="IScript"/>. Why not, when it is not one, or no one
+    /// type is named so.
+    /// </summary>
+    public Result<Type> Get<T>(string name)
+    {
+        Result<Type> type = Get(name);
+        if (!type.Ok || type.Value.IsAssignableTo(typeof(T)))
+        {
+            return type;
+        }
+
+        return Result.Failure<Type>($"{name} is a {type.Value.FullName}, not a {typeof(T).Name}.");
     }
 
     /// <summary>

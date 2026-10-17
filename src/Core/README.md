@@ -119,7 +119,7 @@ time, so the reflection is always there.
 
 A component is an unmanaged struct that implements `IComponent` (`Magic.Interfaces`), a marker with nothing in it:
 the world takes only those, and a file names one by its type's name, which Core finds in the code loaded, its own, the
-project's and each gem's (`World.Component`), so declaring one is all a gem or a game does. Two types of one name are
+project's and each gem's (`Assemblies.Get<T>`), so declaring one is all a gem or a game does. Two types of one name are
 an error, as a file could mean either. A game's component reloads as its scripts do, since only data names it: built
 again, it is read again and the entities holding it respawn. The engine's own are its contract, as its interfaces
 are, since the world, the renderer and every script are compiled against them; they change with a restart:

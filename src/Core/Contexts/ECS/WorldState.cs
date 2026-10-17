@@ -43,7 +43,7 @@ public sealed record DomainState(Handle<Domain> Domain, DomainOpenMode Mode, IRe
 public sealed record EntityState(int Id, IReadOnlyList<ComponentState> Components, IReadOnlyList<ScriptState> Scripts);
 
 /// <summary>
-/// A component on an entity of the saved world: which, by its type's name (<see cref="World.Component"/>), and its
+/// A component on an entity of the saved world: which, by its type's name (<see cref="Assemblies.Get{T}"/>), and its
 /// fields as JSON.
 /// </summary>
 public sealed record ComponentState(string Type, JsonElement Values);

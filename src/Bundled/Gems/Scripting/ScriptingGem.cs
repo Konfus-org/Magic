@@ -144,15 +144,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             return new(Result.Failure<Script>($"its .meta holds settings, {settings.GetRawText()}, which a script file does not take."));
         }
 
-        Result<Type> type = _assemblies.Get(Path.GetFileNameWithoutExtension(path));
-        if (!type.Ok)
-        {
-            return new(Result.Failure<Script>(type.Error));
-        }
-
-        return new(type.Value.IsAssignableTo(typeof(IScript))
-            ? Result.Success(new Script { Type = type.Value })
-            : Result.Failure<Script>($"{type.Value.Name} is no script: a script's class implements IScript."));
+        Result<Type> type = _assemblies.Get<IScript>(Path.GetFileNameWithoutExtension(path));
+        return new(type.Ok ? Result.Success(new Script { Type = type.Value }) : Result.Failure<Script>(type.Error));
     }
 
     public Result<IScript> Make(Script script)

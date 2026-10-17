@@ -252,30 +252,6 @@ public sealed class World : IDisposable
         _scripts?.Attach(entity, script);
     }
 
-    /// <summary>
-    /// The component named <paramref name="name"/>, its type's name, with <paramref name="values"/> read as its fields in
-    /// Core's dialect: what a prefab or a saved world holds of it. Why not, when no code loaded declares a component of
-    /// that name, more than one type has it, or the values are not its fields. Any thread.
-    /// </summary>
-    public Result<IComponent> Component(string name, JsonElement values)
-    {
-        Result<Type> type = _assemblies.Get(name);
-        if (!type.Ok)
-        {
-            return Result.Failure<IComponent>(type.Error);
-        }
-
-        if (!type.Value.IsValueType || !type.Value.IsAssignableTo(typeof(IComponent)))
-        {
-            return Result.Failure<IComponent>($"{name} is no component: a component is a struct implementing IComponent.");
-        }
-
-        Result<object> read = Json.Read(values, type.Value);
-        return read.Ok
-            ? Result.Success((IComponent)read.Value)
-            : Result.Failure<IComponent>($"its values are not a {name}: {read.Error}");
-    }
-
     /// <inheritdoc cref="IEcs.Create()"/>
     public Entity Create()
     {
@@ -525,20 +501,21 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
-    /// A saved component read back as the type its name names (<see cref="Component"/>); null, and an error logged once
+    /// A saved component read back as the type its name names (<see cref="Assemblies.Get{T}"/>); null, and an error logged once
     /// per name in <paramref name="failed"/>, when no code loaded declares it or its values no longer fit it.
     /// </summary>
     private IComponent? ComponentOf(ComponentState saved, HashSet<string> failed)
     {
-        Result<IComponent> component = Component(saved.Type, saved.Values);
-        if (component.Ok)
+        Result<Type> type = _assemblies.Get<IComponent>(saved.Type);
+        Result<object> read = type.Ok ? Json.Read(saved.Values, type.Value) : Result.Failure<object>(type.Error);
+        if (read.Ok)
         {
-            return component.Value;
+            return (IComponent)read.Value;
         }
 
         if (failed.Add(saved.Type))
         {
-            Debugging.Error($"Saved {saved.Type} components are not put back, so entities go without them: {component.Error}");
+            Debugging.Error($"Saved {saved.Type} components are not put back, so entities go without them: {read.Error}");
         }
 
         return null;

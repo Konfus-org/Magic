@@ -13,13 +13,13 @@ namespace Magic.PrefabLoader;
 
 /// <summary>
 /// Reads <c>.prefab</c> files into <see cref="Prefab"/>s (<see cref="IAssetLoader{T}"/>), what the engine spawns: each
-/// entity a <see cref="PrefabPart"/>, with its components read as their types by name (<see cref="World.Component"/>),
+/// entity a <see cref="PrefabPart"/>, with its components read as their types by name (<see cref="Assemblies.Get{T}"/>),
 /// its scripts named by the id of their <see cref="Script"/> and their values read as its properties' types
 /// (<see cref="PrefabScript"/>), its tags as a <see cref="Tags"/> and its scripts as a <see cref="Scripts"/> among its
 /// components, and the entities under it, a prefab it places among them. What it loads as it reads one is what that
 /// one is made from, so it is read again when one of them changes.
 /// </summary>
-internal sealed class PrefabLoaderGem(Assets assets, World world) : IGem, IAssetLoader<Prefab>
+internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IGem, IAssetLoader<Prefab>
 {
     /// <summary>
     /// The key of a script entry that names the script, as a handle's does.
@@ -27,7 +27,7 @@ internal sealed class PrefabLoaderGem(Assets assets, World world) : IGem, IAsset
     private const string Id = "id";
 
     private readonly Assets _assets = assets;
-    private readonly World _world = world;
+    private readonly Assemblies _assemblies = assemblies;
 
     /// <summary>
     /// The components files name that could not be read, each said once. Read on workers.
@@ -80,7 +80,8 @@ internal sealed class PrefabLoaderGem(Assets assets, World world) : IGem, IAsset
         List<IComponent> components = [];
         foreach ((string component, JsonElement json) in entity.Components)
         {
-            Result<IComponent> read = _world.Component(component, json);
+            Result<Type> type = _assemblies.Get<IComponent>(component);
+            Result<object> read = type.Ok ? Json.Read(json, type.Value) : Result.Failure<object>(type.Error);
             if (!read.Ok)
             {
                 if (_unread.TryAdd(component, true))
@@ -91,7 +92,7 @@ internal sealed class PrefabLoaderGem(Assets assets, World world) : IGem, IAsset
                 continue;
             }
 
-            components.Add(read.Value);
+            components.Add((IComponent)read.Value);
         }
 
         if (TagsOf(entity, name, path) is { } tags)

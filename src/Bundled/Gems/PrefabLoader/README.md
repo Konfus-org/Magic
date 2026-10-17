@@ -10,8 +10,8 @@ gives and attaches. It has no settings.
 A file becomes a tree of parts (`PrefabPart`), one for each entity it holds:
 
 - **Components.** A file names each component by its type's name, its JSON read as that type in Core's dialect
-  (`World.Component`). A name no code loaded declares, or one two types share, or JSON that is not the type's fields,
-  is an error, logged once per name, and the component is left out.
+  (`Assemblies.Get<T>`, then `Json.Read`). A name no code loaded declares, or one two types share, or JSON that is not
+  the type's fields, is an error, logged once per name, and the component is left out.
 - **Tags.** An entity's `tags`, up to eight, become a `Tags` among its components; past eight, or an empty name, is
   warned about and left out.
 - **Scripts.** Each script entry names the `.cs` asset that declares it by its id, and every other key is a value for
