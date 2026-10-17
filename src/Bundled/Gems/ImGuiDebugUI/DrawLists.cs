@@ -1,4 +1,3 @@
-using Hexa.NET.ImGui;
 using Rectangle = System.Drawing.Rectangle;
 
 namespace Magic.ImGuiDebugUI;
@@ -42,23 +41,23 @@ internal sealed unsafe class DrawLists
     /// Copies the frame ImGui just ended, for a window of <paramref name="width"/> by <paramref name="height"/> pixels,
     /// and answers ImGui's asks about its textures.
     /// </summary>
-    public void Copy(ImDrawDataPtr data, int width, int height)
+    public void Copy(ImDrawData* data, int width, int height)
     {
         CopyTextures(data);
-        Grow(ref _vertices, data.TotalVtxCount);
-        Grow(ref _indices, data.TotalIdxCount);
+        Grow(ref _vertices, data->TotalVtxCount);
+        Grow(ref _indices, data->TotalIdxCount);
         _calls.Clear();
         Rectangle window = new(0, 0, width, height);
         int vertexBase = 0;
         int indexBase = 0;
-        for (int listIndex = 0; listIndex < data.CmdListsCount; listIndex++)
+        for (int listIndex = 0; listIndex < data->CmdLists.Size; listIndex++)
         {
-            ImDrawListPtr list = data.CmdLists[listIndex];
-            new ReadOnlySpan<ImDrawVert>(list.VtxBuffer.Data, list.VtxBuffer.Size).CopyTo(_vertices.AsSpan(vertexBase));
-            new ReadOnlySpan<ushort>(list.IdxBuffer.Data, list.IdxBuffer.Size).CopyTo(_indices.AsSpan(indexBase));
-            for (int commandIndex = 0; commandIndex < list.CmdBuffer.Size; commandIndex++)
+            ImDrawList* list = data->CmdLists.Data[listIndex];
+            new ReadOnlySpan<ImDrawVert>(list->VtxBuffer.Data, list->VtxBuffer.Size).CopyTo(_vertices.AsSpan(vertexBase));
+            new ReadOnlySpan<ushort>(list->IdxBuffer.Data, list->IdxBuffer.Size).CopyTo(_indices.AsSpan(indexBase));
+            for (int commandIndex = 0; commandIndex < list->CmdBuffer.Size; commandIndex++)
             {
-                ImDrawCmd command = list.CmdBuffer.Data[commandIndex];
+                ImDrawCmd command = list->CmdBuffer.Data[commandIndex];
                 if (command.UserCallback != null || command.ElemCount == 0)
                 {
                     continue;
@@ -74,12 +73,12 @@ internal sealed unsafe class DrawLists
                     continue;
                 }
 
-                ImTextureID texture = command.TexRef.TexData != null ? command.TexRef.TexData->TexID : command.TexRef.TexID;
-                _calls.Add(new DrawCall((uint)texture.Handle, clip, command.ElemCount, (uint)indexBase + command.IdxOffset, vertexBase + (int)command.VtxOffset));
+                ulong texture = command.TexRef.TexData != null ? command.TexRef.TexData->TexID : command.TexRef.TexID;
+                _calls.Add(new DrawCall((uint)texture, clip, command.ElemCount, (uint)indexBase + command.IdxOffset, vertexBase + (int)command.VtxOffset));
             }
 
-            vertexBase += list.VtxBuffer.Size;
-            indexBase += list.IdxBuffer.Size;
+            vertexBase += list->VtxBuffer.Size;
+            indexBase += list->IdxBuffer.Size;
         }
 
         _vertexCount = vertexBase;
@@ -97,11 +96,11 @@ internal sealed unsafe class DrawLists
     /// <summary>
     /// The texture's pixels as RGBA8: as they are, or ImGui's one-byte coverage made white with it as alpha.
     /// </summary>
-    private static byte[] Rgba(ImTextureDataPtr texture)
+    private static byte[] Rgba(ImTextureData* texture)
     {
-        int count = texture.Width * texture.Height;
-        ReadOnlySpan<byte> pixels = new(texture.Pixels, count * texture.BytesPerPixel);
-        if (texture.BytesPerPixel == 4)
+        int count = texture->Width * texture->Height;
+        ReadOnlySpan<byte> pixels = new(texture->Pixels, count * texture->BytesPerPixel);
+        if (texture->BytesPerPixel == 4)
         {
             return pixels.ToArray();
         }
@@ -122,29 +121,29 @@ internal sealed unsafe class DrawLists
     /// ImGui asks its renderer to make, update and let go of its textures: each ask becomes a change for the render
     /// thread, with the pixels copied, and is answered at once, with a number of the gem's own for a new one.
     /// </summary>
-    private void CopyTextures(ImDrawDataPtr data)
+    private void CopyTextures(ImDrawData* data)
     {
-        ImVector<ImTextureDataPtr>* textures = data.Handle->Textures;
+        ImVector.ImTextureDataPtr* textures = data->Textures;
         for (int i = 0; textures != null && i < textures->Size; i++)
         {
-            ImTextureDataPtr texture = textures->Data[i];
-            if (texture.Status == ImTextureStatus.WantCreate)
+            ImTextureData* texture = textures->Data[i];
+            if (texture->Status == ImTextureStatus.WantCreate)
             {
                 uint id = _nextTexture++;
-                Change(new TextureChange(id, texture.Width, texture.Height, Rgba(texture)));
-                texture.SetTexID(new ImTextureID(id));
-                texture.SetStatus(ImTextureStatus.Ok);
+                Change(new TextureChange(id, texture->Width, texture->Height, Rgba(texture)));
+                ImTextureData.SetTexID(texture, id);
+                ImTextureData.SetStatus(texture, ImTextureStatus.Ok);
             }
-            else if (texture.Status == ImTextureStatus.WantUpdates)
+            else if (texture->Status == ImTextureStatus.WantUpdates)
             {
-                Change(new TextureChange((uint)texture.TexID.Handle, texture.Width, texture.Height, Rgba(texture)));
-                texture.SetStatus(ImTextureStatus.Ok);
+                Change(new TextureChange((uint)texture->TexID, texture->Width, texture->Height, Rgba(texture)));
+                ImTextureData.SetStatus(texture, ImTextureStatus.Ok);
             }
-            else if (texture.Status == ImTextureStatus.WantDestroy && texture.UnusedFrames > 0)
+            else if (texture->Status == ImTextureStatus.WantDestroy && texture->UnusedFrames > 0)
             {
-                Change(new TextureChange((uint)texture.TexID.Handle, 0, 0, null));
-                texture.SetTexID(ImTextureID.Null);
-                texture.SetStatus(ImTextureStatus.Destroyed);
+                Change(new TextureChange((uint)texture->TexID, 0, 0, null));
+                ImTextureData.SetTexID(texture, 0);
+                ImTextureData.SetStatus(texture, ImTextureStatus.Destroyed);
             }
         }
     }

@@ -24,7 +24,7 @@ public interface IFileSystem
 
     /// <summary>
     /// The files directly in <paramref name="folder"/> with <paramref name="extension"/> (such as ".magic"),
-    /// compared ignoring case.
+    /// compared ignoring case; every file when it is empty.
     /// </summary>
     IReadOnlyList<string> Find(string folder, string extension);
 

@@ -1,3 +1,7 @@
 <!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>The debug UI's windows, drawn with the debug UI's widgets.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
 </Project>

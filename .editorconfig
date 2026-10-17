@@ -355,3 +355,15 @@ dotnet_diagnostic.CS0649.severity = none
 [src/Bundled/Gems/ConsoleCommands/ConsoleCommandsGem.cs]
 # ConsoleCommands reads the terminal.
 dotnet_diagnostic.RS0030.severity = none
+
+[tests/**.cs]
+# A test is named as the sentence it checks (tests/README.md), underscores and all.
+dotnet_diagnostic.IDE1006.severity = none
+dotnet_diagnostic.CA1707.severity = none
+# xunit finds only public test classes.
+dotnet_diagnostic.CA1515.severity = none
+# xunit runs a test on its own context (CODESTANDARDS Async).
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.VSTHRD200.severity = none
+# What a test hands to the type it tests, that type owns: a subscription added to a list is the list's to end.
+dotnet_code_quality.dispose_ownership_transfer_at_method_call = true

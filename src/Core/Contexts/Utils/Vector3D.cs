@@ -3,7 +3,7 @@ using System.Numerics;
 namespace Magic.Contexts.Utils;
 
 /// <summary>
-/// A point or a direction in double precision, in metres: where an entity is (<see cref="ECS.Transform.Position"/>).
+/// A point or a direction in double precision, in metres: where an entity is (<see cref="Components.Transform.Position"/>).
 /// Doubles hold a position to a tenth of a millimetre out past the Sun's distance from the origin, where floats are a
 /// millimetre out by 8 km, so a world has no edge to its precision. What is near something else is worked out as the difference,
 /// which is small, and turned to floats only then (<see cref="ToVector3"/>), as the GPU and shaders take it.

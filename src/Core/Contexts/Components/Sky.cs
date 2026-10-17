@@ -1,7 +1,7 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 
-namespace Magic.Contexts.ECS;
+namespace Magic.Contexts.Components;
 
 /// <summary>
 /// What the sky looks like: the material it is drawn with, <c>{ "material": { "id": 710 } }</c>; none leaves it to

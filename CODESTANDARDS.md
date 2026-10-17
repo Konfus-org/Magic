@@ -9,7 +9,7 @@
 - **Small changes**: Make the smallest change that does the job, and keep it simple.
 - **Modern C#**: Use current C# and .NET, and follow the `.editorconfig` (the build enforces most of it).
 - **Portable**: All code runs on every major platform; see [Cross Platform](#cross-platform).
-- **Dependencies**: Third-party libraries come from NuGet.
+- **Dependencies**: Third-party managed libraries come from NuGet. A native library is declared to the build, which clones the library's repository at a pinned commit, builds it for the machine and generates its C# API from the headers ([Gems](src/Bundled/Gems/README.md#native-libraries)); no binding is written by hand, and no third-party wrapper, package, prebuilt binary or copied code stands in for one.
 
 ## Code style
 
@@ -148,7 +148,8 @@ so reading the code says what the thing is and why it is kept. Several kept for 
 
 - A gem is `internal sealed class X : IGem` plus the Core interfaces it provides; what it depends on, its own
   settings object included, are constructor parameters, including what it uses of another gem's work (a renderer
-  takes the window it draws into): that order is the order gems are made in and, reversed, disposed in.
+  takes the window it draws into): that order is the order gems are made in and, reversed, disposed in. Its csproj
+  says what it is, in the SDK's `Description`, `Version` and `Authors`, and nothing else declares those.
 - A gem never reads the command line or the project file: what it can be told arrives as its settings object, plain
   data like a file type (Serialization). Its settings can change while running, between frames, and a gem follows
   each: it reads it where it is used, or compares it each frame with what it last applied. One it can only read as it
@@ -158,8 +159,11 @@ so reading the code says what the thing is and why it is kept. Several kept for 
 - A gem's constructor, `Dispose` and `Render` run on the render thread; `Update`, `FixedUpdate` and `LateUpdate` on
   the main thread. What a gem owns is used on one of them, and the other hands it work through `Threads`. `Render`
   reads only what the gem copied in `LateUpdate`, since the main thread is changing everything else.
-- A component is an unmanaged struct with public fields that implements `IComponent`; declaring it is all it takes for
-  the ECS to hold it and a file to name it.
+- A component is an unmanaged struct with public fields that implements `IComponent`; declaring it is all it takes
+  for the ECS to hold it and a file to name it, by its type's name, which Core finds in the code loaded. A game's
+  component reloads as its scripts do, since only data names it: built again, it is read again. The engine's own are
+  its contract, as its interfaces are, since the world, the renderer and every script are compiled against them, and
+  they change with a restart.
 - Work over entities is a system that names the components it looks at, up to four (`ISystem<T1>` and on; `ISystem`
   for every entity), and an `IParallelSystem` when it is work over many entities. Its `Phase` is stated when not
   `Update`: `Update`, `FixedUpdate` or `LateUpdate`. It is added to the world (`World.Add`) and kept as a
@@ -171,7 +175,8 @@ so reading the code says what the thing is and why it is kept. Several kept for 
   (`ISystemScript<T1>`, `IParallelSystemScript<T1, T2>`, …) when it works over many. The project's code, the gem it
   belongs to, or the bundled resources' own project compiles it, and a prefab attaches it to an entity by the file's
   id. A game is its assets and that code, never a gem of its own. Scripts work as components do: a prefab holds them
-  with their values, and each entity spawned gets its own copy, made for it. So its constructor takes the `Entity` it
+  with their values, an entity names its own in a `Scripts` component, and each entity spawned gets its own copy, made
+  for it. So its constructor takes the `Entity` it
   is attached to first, then what it asks for as a gem's does, and only keeps them: no work in a constructor, as its
   values are not set yet. Its values are its public `{ get; set; }` properties, and `Start()` is where it begins, with
   them set. A pipeline script runs on no entity, so its constructor takes services alone.
@@ -311,13 +316,14 @@ which means two files may never differ by case alone.
 - No OS APIs in Core: no P/Invoke, no registry, no `.exe`/`.so`/`.dylib` names, no `OperatingSystem.Is*`.
   Anything platform-specific lives in a gem, behind one of Core's interfaces (`IWindow`, `IInput`, `IGpu`),
   guarded by `OperatingSystem.IsWindows()` and its siblings.
-- A native library is referenced by its logical name (`"name"`, never `"name.dll"`). Its binaries come from NuGet,
-  and its gem's load context picks the one for the machine it runs on.
+- A native library is referenced by its logical name (`"name"`, never `"name.dll"`). Its binary comes with the gem
+  that declares it, built from the library's own source, under `runtimes/<rid>/native/`, where the gem's load
+  context finds it.
 - A native library loads once. Each gem loads in its own context, but a library one gem has loaded is the one every
   gem that binds the same name gets (`GemLoadContext`), so a window it opened is one window to every gem. The
-  versions agree because `Directory.Packages.props` pins one per package.
-- No csproj names a runtime identifier: a gem carries every platform's native binaries, and its load context picks
-  the machine's.
+  versions agree because one gem declares each library and the others reference that gem.
+- No csproj names a runtime identifier: a gem carries the native binaries built on the machine that built it, which
+  is the one it runs on.
 
 ## Graphics
 

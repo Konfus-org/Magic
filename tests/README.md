@@ -3,9 +3,11 @@
 Tests live here, in `tests/`, apart from the code they test, so no project carries its tests. Each project that has
 any gets one xunit project of its own here, named `<Project>.Tests`: `tests/Core.Tests/` for `src/Core`,
 `tests/<Gem>.Tests/` for a gem. A test project references what it tests, and only plain project references besides.
-There are none yet.
+Its root namespace is `Magic.Tests` for Core's and `Magic.<Gem>.Tests` for a gem's, so a test file's namespace follows
+its folder as any other's does. A gem's types are internal, so a gem gets a test project only once it has public types
+with behaviour. `dotnet test` runs them through the testing platform xunit v3 ships, which `global.json` names.
 
-## Every test
+## Rules
 
 - **One class, one file.** `FooTests.cs` tests `Foo` and nothing else, in the test project of the project `Foo` is
   in, under the folder `Foo` is in: `tests/Core.Tests/Contexts/ResultTests.cs` for `src/Core/Contexts/Result.cs`.
@@ -29,9 +31,6 @@ There are none yet.
   that changes whenever the feature is polished. No restating the implementation as the expected value.
 - Name a test after the behavior it checks, as a sentence: `A_disposed_watch_hears_nothing_more`.
 - Use `[Theory]` with `[InlineData]` for the same behavior over several inputs, not a loop inside one test.
-
-## Unit tests
-
 - **One unit.** A unit test drives one class through its public API. No end to end: two subsystems working
   together are not a unit test, and are not tested for now.
 - **No I/O.** Never the file system, the network, a native library, the clock or an unseeded `Random`: anything

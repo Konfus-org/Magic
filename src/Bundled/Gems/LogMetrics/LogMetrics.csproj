@@ -1,3 +1,7 @@
 <!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Logs what the engine measures: a line per instrument each interval, and the slowest frame.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
 </Project>

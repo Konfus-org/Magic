@@ -50,8 +50,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 
 $root = Split-Path -Parent $PSScriptRoot
-$magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'net10.0') $Configuration) 'bin'
-$magic = Join-Path $magic 'Magic'
+$magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 if (Test-Path "$magic.exe") { $magic = "$magic.exe" }
 if (-not (Test-Path $magic)) {
     Write-Host "There is no $magic to run: build first (tools/Validate.ps1 -Only Build)."

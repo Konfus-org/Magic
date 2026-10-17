@@ -1,4 +1,3 @@
-using Hexa.NET.ImGui;
 using Magic.Contexts.Input;
 using Magic.Interfaces;
 
@@ -8,23 +7,23 @@ namespace Magic.ImGuiDebugUI;
 /// The frame's input as ImGui takes it: each key Magic knows as ImGui's key, the mouse in window pixels, and what was
 /// typed. ImGui drops a key event that says what it already knows, so every key is told every frame.
 /// </summary>
-internal static class ImGuiInput
+internal static unsafe class ImGuiInput
 {
     private static readonly (Control Control, ImGuiKey Key)[] _keys = Keys();
 
-    public static void Feed(ImGuiIOPtr io, IInput input)
+    public static void Feed(ImGuiIO* io, IInput input, TextArena text)
     {
         foreach ((Control control, ImGuiKey key) in _keys)
         {
             FeedKey(io, key, input[control]);
         }
 
-        io.AddKeyEvent(ImGuiKey.ModCtrl, input[Control.KeyLeftCtrl].IsDown || input[Control.KeyRightCtrl].IsDown);
-        io.AddKeyEvent(ImGuiKey.ModShift, input[Control.KeyLeftShift].IsDown || input[Control.KeyRightShift].IsDown);
-        io.AddKeyEvent(ImGuiKey.ModAlt, input[Control.KeyLeftAlt].IsDown || input[Control.KeyRightAlt].IsDown);
-        io.AddKeyEvent(ImGuiKey.ModSuper, input[Control.KeyLeftSuper].IsDown || input[Control.KeyRightSuper].IsDown);
+        ImGuiIO.AddKeyEvent(io, ImGuiKey.ImGuiModCtrl, input[Control.KeyLeftCtrl].IsDown || input[Control.KeyRightCtrl].IsDown);
+        ImGuiIO.AddKeyEvent(io, ImGuiKey.ImGuiModShift, input[Control.KeyLeftShift].IsDown || input[Control.KeyRightShift].IsDown);
+        ImGuiIO.AddKeyEvent(io, ImGuiKey.ImGuiModAlt, input[Control.KeyLeftAlt].IsDown || input[Control.KeyRightAlt].IsDown);
+        ImGuiIO.AddKeyEvent(io, ImGuiKey.ImGuiModSuper, input[Control.KeyLeftSuper].IsDown || input[Control.KeyRightSuper].IsDown);
 
-        io.AddMousePosEvent(input[Control.MouseX].Value, input[Control.MouseY].Value);
+        ImGuiIO.AddMousePosEvent(io, input[Control.MouseX].Value, input[Control.MouseY].Value);
         FeedButton(io, (int)ImGuiMouseButton.Left, input[Control.MouseLeft]);
         FeedButton(io, (int)ImGuiMouseButton.Right, input[Control.MouseRight]);
         FeedButton(io, (int)ImGuiMouseButton.Middle, input[Control.MouseMiddle]);
@@ -34,37 +33,37 @@ internal static class ImGuiInput
         float wheelY = input[Control.MouseWheelY].Value;
         if (wheelX != 0 || wheelY != 0)
         {
-            io.AddMouseWheelEvent(-wheelX, wheelY);
+            ImGuiIO.AddMouseWheelEvent(io, -wheelX, wheelY);
         }
 
         // Only while a field has the keyboard: the key that opens a window must not be typed into the field it opens.
-        if (io.WantTextInput && input.Text.Length > 0)
+        if (io->WantTextInput && input.Text.Length > 0)
         {
-            io.AddInputCharactersUTF8(input.Text);
+            ImGuiIO.AddInputCharactersUTF8(io, text.Of(input.Text));
         }
     }
 
     /// <summary>
     /// A key's state, with a tap that went down and up between two frames told as both.
     /// </summary>
-    private static void FeedKey(ImGuiIOPtr io, ImGuiKey key, ControlState state)
+    private static void FeedKey(ImGuiIO* io, ImGuiKey key, ControlState state)
     {
         if (state.WasPressed && !state.IsDown)
         {
-            io.AddKeyEvent(key, true);
+            ImGuiIO.AddKeyEvent(io, key, true);
         }
 
-        io.AddKeyEvent(key, state.IsDown);
+        ImGuiIO.AddKeyEvent(io, key, state.IsDown);
     }
 
-    private static void FeedButton(ImGuiIOPtr io, int button, ControlState state)
+    private static void FeedButton(ImGuiIO* io, int button, ControlState state)
     {
         if (state.WasPressed && !state.IsDown)
         {
-            io.AddMouseButtonEvent(button, true);
+            ImGuiIO.AddMouseButtonEvent(io, button, true);
         }
 
-        io.AddMouseButtonEvent(button, state.IsDown);
+        ImGuiIO.AddMouseButtonEvent(io, button, state.IsDown);
     }
 
     /// <summary>

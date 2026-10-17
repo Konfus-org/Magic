@@ -143,8 +143,8 @@ put at a domain's spawn:
 }
 ```
 
-A game's code is its scripts, the `.cs` assets under `Assets/`, each a class named like its file, and the components
-and plain types they use beside them: the csproj beside the `.magic` file compiles them, and Core loads what it built
+A game's code is its scripts, the `.cs` assets under `Assets/`, each a class named like its file, the
+components they use, and the plain types beside them: the csproj beside the `.magic` file compiles them, and Core loads what it built
 with the project ([Core's README](../../Core/README.md#the-project-file)). It is no gem, so it provides nothing; what a
 game needs from a gem, such as a file format, is a gem the project lists.
 

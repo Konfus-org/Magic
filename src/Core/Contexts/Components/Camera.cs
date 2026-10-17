@@ -1,7 +1,7 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 
-namespace Magic.Contexts.ECS;
+namespace Magic.Contexts.Components;
 
 /// <summary>
 /// A perspective camera, looking along its entity's +Z, drawing into its <see cref="Target"/>. A zero reads as its

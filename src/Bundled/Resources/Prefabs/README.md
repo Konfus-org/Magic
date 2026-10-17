@@ -27,8 +27,8 @@ at a domain's spawn. Its positions are relative to where it is put, and its rota
 | --- | --- |
 | `name` | What messages call it. |
 | `tags` | Labels by name, up to eight, given to it as a `Tags` component: `spawn` marks where a domain puts the player, `player` the player's camera, and any other is the game's. |
-| `components` | By type name, any component Core or a loaded gem declares, each as its own JSON. |
-| `scripts` | Scripts (`.cs` assets) by id, each one's copy run by every entity spawned from it: `[ { "id": N, "height": 1 } ]`. Every key beside `id` sets the script's public property of that name. |
+| `components` | By type name, any component Core, the project's code or a loaded gem declares, each as its own JSON. |
+| `scripts` | Scripts (`.cs` assets) by id, up to eight, named in the entity's `Scripts` component and each one's copy run by every entity spawned from it: `[ { "id": N, "height": 1 } ]`. Every key beside `id` sets the script's public property of that name. |
 | `children` | The entities under it, their transforms relative to its own. |
 | `prefab` | Another prefab, whose entities go under this one, before its own `children`: a forest's cell places trees, `{ "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 12, "y": 0, "z": 40 }, "scale": { "x": 1.2, "y": 1.2, "z": 1.2 } } } }`. |
 
@@ -47,9 +47,10 @@ places is what it is made from, so changing a tree's prefab reads every prefab t
 
 ## What must agree
 
-- Component names match a struct in Core or a loaded gem, and their JSON its fields (camelCase; handles as
-  `{ "id" }`).
+- Component names match a struct in Core, the project's code or a loaded gem, and their JSON its fields (camelCase;
+  handles as `{ "id" }`).
 - `Renderer` model and material ids exist.
-- Script ids exist, and each override key matches a public property of the script with a setter.
+- Script ids exist, each a `.cs` asset declaring a class, and each override key matches a public property of the
+  script with a setter.
 - Placed prefab ids exist, and no prefab places itself, directly or through others.
 - A script's class has one public constructor that takes services, never its entity, which it is given in `Start`.

@@ -14,8 +14,8 @@ internal sealed class PrefabFile
 
 /// <summary>
 /// One entity of a <see cref="PrefabFile"/>: what messages call it, its tags, its components, each by its type's name
-/// and as that type's JSON, read once the type is found, its scripts, and the entities under it; and when it names a
-/// <see cref="Prefab"/>, that prefab's parts under it too.
+/// and as that type's JSON, its scripts, each by the id of its <see cref="Script"/> with its values beside, the
+/// entities under it; and when it names a <see cref="Prefab"/>, that prefab's parts under it too.
 /// </summary>
 internal sealed class PrefabFileEntity
 {

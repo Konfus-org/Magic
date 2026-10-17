@@ -1,27 +1,33 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
+using Magic.Attributes;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 
 namespace Magic.Scripting;
 
 /// <summary>
-/// Makes and runs scripts (<see cref="IScript"/>): provides <see cref="IScripts"/>, and reads <c>.cs</c> files
-/// (<see cref="IAssetLoader{T}"/> of <see cref="Script"/>) as the class of the file's name that Magic or a loaded gem
-/// compiled. An entity is given its own copy of a script as it is attached, which the <see cref="World"/> does once
-/// whatever spawned with the entity is all there: made for the entity, its constructor given it first and then the
-/// services it asks for, given the values the prefab holds for it, then started. A system goes on the
-/// <see cref="IEcs"/>, through the Add that takes its kind; an <see cref="IBehavior"/> has its hooks called in this gem's.
-/// Each ends with its entity. A pipeline script is made the same way for no entity, and never asks for one. A script
+/// Reads, makes and runs scripts (<see cref="IScript"/>): provides <see cref="IScripts"/>, and reads a <c>.cs</c>
+/// file as the class named like it in the code loaded (<see cref="Script"/>, <see cref="LoadAsync"/>). Each entity's
+/// <see cref="Scripts"/> says which it runs: every frame (<see cref="Reconcile"/>) a copy is made for each script an
+/// entity names and has no copy of, its constructor given the entity first and then the services it asks for, given
+/// the values the prefab holds for it (<see cref="Attach"/>) or its defaults, then started; and a copy whose entity no
+/// longer names it, or is gone, ends. Nothing starts while a domain loads in place of the world
+/// (<see cref="WorldLoading"/>), unless its class is <see cref="ImpatientAttribute"/>.
+/// A system goes on the <see cref="IEcs"/>, through the Add that takes its kind; an <see cref="IBehavior"/> has its
+/// hooks called in this gem's. A pipeline script is made the same way for no entity, and never asks for one. A script
 /// read again, as the code it is in was built, has each live copy ended and a new one of its class started in its
 /// place, for the same entity with the same values. A script is saved with the world as its values and the fields it
 /// kept for itself, as JSON, and put back from them without being started, as it is as it was.
@@ -48,15 +54,45 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
 
     private readonly ScriptingSettings _settings;
     private readonly IEcs _ecs;
+    private readonly Assets _assets;
+    private readonly Assemblies _assemblies;
     [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "Core's, which Core ends after every gem.")]
     private readonly Threads _threads;
     private readonly IServiceProvider _services;
-    private readonly Subscription _reloads;
+    private readonly SubscriptionList _watching = new();
 
     /// <summary>
     /// The scripts made, in the order they were made. Main thread.
     /// </summary>
     private readonly List<Attached> _attached = [];
+
+    /// <summary>
+    /// The scripts made, by the entity and the script asset of each. Main thread.
+    /// </summary>
+    private readonly Dictionary<(Entity Entity, Handle<Script> Script), Attached> _live = [];
+
+    /// <summary>
+    /// The values given for scripts not started yet (<see cref="Attach"/>), by entity and script asset. Main thread.
+    /// </summary>
+    private readonly Dictionary<(Entity Entity, Handle<Script> Script), PrefabScript> _pending = [];
+
+    /// <summary>
+    /// The script assets of scripts an entity names without values, loaded (<see cref="Fetch"/>), or null while one
+    /// loads. Main thread.
+    /// </summary>
+    private readonly Dictionary<Handle<Script>, Script?> _loaded = [];
+
+    /// <summary>
+    /// Scripts that could not be started, or whose asset did not load, each said once, so an entity naming one is not
+    /// tried again every frame. Main thread.
+    /// </summary>
+    private readonly HashSet<(Entity Entity, Handle<Script> Script)> _failed = [];
+
+    /// <summary>
+    /// Scripts named with no copy, found this frame and started once the query is over, as a start may spawn. Main
+    /// thread.
+    /// </summary>
+    private readonly List<(Entity Entity, Handle<Script> Script)> _starting = [];
 
     /// <summary>
     /// Where the player's cameras are, as of this frame's Update. Main thread.
@@ -69,45 +105,98 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private readonly HashSet<string> _unkept = new(StringComparer.Ordinal);
 
-    public ScriptingGem(ScriptingSettings settings, IEcs ecs, Threads threads, Events events, IServiceProvider services)
+    /// <summary>
+    /// Whether a domain is loading in place of the world, as last told (<see cref="WorldLoading"/>): a script that is
+    /// not <see cref="ImpatientAttribute"/> waits while one is. Main thread.
+    /// </summary>
+    private bool _isLoading;
+
+    public ScriptingGem(ScriptingSettings settings, IEcs ecs, Assets assets, Assemblies assemblies, Threads threads, Events events, IServiceProvider services)
     {
         _settings = settings;
         _ecs = ecs;
+        _assets = assets;
+        _assemblies = assemblies;
         _threads = threads;
         _services = services;
-        _reloads = events.Watch<AssetReloaded<Script>>(reloaded => _threads.Post(EngineThread.Main, () => Restart(reloaded.Asset)));
+        _watching.Add(events.Watch<AssetReloaded<Script>>(reloaded => _threads.Post(EngineThread.Main, () => Restart(reloaded.Asset))));
+        _watching.Add(events.Watch<WorldLoading>(loading => _isLoading = loading.IsLoading));
     }
 
     public void Dispose()
     {
-        _reloads.Dispose();
+        _watching.Dispose();
 
         // Scripts end on the main thread, the ECS's, which still runs what it is handed while the gems end.
         _threads.Post(EngineThread.Main, EndAll);
     }
 
+    /// <summary>
+    /// The <c>.cs</c> file at <paramref name="path"/> as a <see cref="Script"/>: the class named like the file, an
+    /// <see cref="IScript"/>, found in the code loaded (<see cref="Assemblies"/>). The file's bytes are not read: its
+    /// class is compiled with the project's code, or the gem's; why not, when no code loaded declares the class, or
+    /// its <c>.meta</c> holds settings, which a script takes none of. Any thread.
+    /// </summary>
     public ValueTask<Result<Script>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel)
     {
-        return new(Load(path, settings));
+        if (settings.GetPropertyCount() != 0)
+        {
+            return new(Result.Failure<Script>($"its .meta holds settings, {settings.GetRawText()}, which a script file does not take."));
+        }
+
+        Result<Type> type = _assemblies.Get(Path.GetFileNameWithoutExtension(path));
+        if (!type.Ok)
+        {
+            return new(Result.Failure<Script>(type.Error));
+        }
+
+        return new(type.Value.IsAssignableTo(typeof(IScript))
+            ? Result.Success(new Script { Type = type.Value })
+            : Result.Failure<Script>($"{type.Value.Name} is no script: a script's class implements IScript."));
     }
 
     public Result<IScript> Make(Script script)
     {
-        return MakeOf(script.Class, entity: null);
+        return MakeOf(script.Type, entity: null);
     }
 
     public void Attach(Entity entity, PrefabScript script)
     {
-        StartOn(entity, script);
+        if (!_ecs.IsAlive(entity))
+        {
+            return;
+        }
+
+        Handle<Script> handle = script.Script.Handle;
+        Scripts scripts = _ecs.Has<Scripts>(entity) ? _ecs.Get<Scripts>(entity) : default;
+        if (!scripts.Has(handle))
+        {
+            if (!scripts.Add(handle))
+            {
+                Debugging.Error($"Script {script.Script.Type.Name} is left off entity {entity.Id}: an entity has at most {Scripts.Capacity} scripts.");
+                return;
+            }
+
+            _ecs.Set(entity, in scripts);
+        }
+
+        _pending[(entity, handle)] = script;
+        _failed.Remove((entity, handle));
     }
 
     public void Save(Entity entity, ICollection<ScriptState> into)
     {
-        foreach (Attached attached in _attached)
+        if (!_ecs.Has<Scripts>(entity))
         {
-            if (attached.Entity == entity)
+            return;
+        }
+
+        Scripts scripts = _ecs.Get<Scripts>(entity);
+        foreach (Handle<Script> handle in scripts)
+        {
+            if (_live.TryGetValue((entity, handle), out Attached? attached))
             {
-                into.Add(new ScriptState(attached.Script.Script.Handle, StateOf(attached.Instance)));
+                into.Add(new ScriptState(handle, StateOf(attached.Instance)));
             }
         }
     }
@@ -116,34 +205,13 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     {
         if (_ecs.IsAlive(entity))
         {
-            Keep(entity, script.Class, Put(entity, script, state));
+            Keep(entity, script, Put(entity, script, state));
         }
-    }
-
-    private static Result<Script> Load(string path, JsonElement settings)
-    {
-        if (settings.GetPropertyCount() != 0)
-        {
-            return Result.Failure<Script>($"its .meta holds settings, {settings.GetRawText()}, which a script does not take.");
-        }
-
-        string name = Path.GetFileNameWithoutExtension(path);
-        List<Type> found = ClassesNamed(name);
-        if (found.Count == 0)
-        {
-            return Result.Failure<Script>($"no code loaded has a class {name} that is an IBehavior or a system: the project's code, or the gem that compiles it, is to be built, or the gem listed.");
-        }
-
-        if (found.Count > 1)
-        {
-            return Result.Failure<Script>($"{found.Count} classes are named {name} ({string.Join(", ", found.ConvertAll(type => type.FullName))}); a script's class has a name of its own.");
-        }
-
-        return Result.Success(new Script { Class = found[0] });
     }
 
     public void Update(in Frame frame)
     {
+        Reconcile();
         FindCameras();
         Run(Phase.Update, frame);
     }
@@ -156,27 +224,6 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     public void LateUpdate(in Frame frame)
     {
         Run(Phase.LateUpdate, frame);
-    }
-
-    /// <summary>
-    /// The classes a script named <paramref name="name"/> can be: each top-level class of that name, neither abstract
-    /// nor generic, that is an <see cref="IScript"/>, in the code loaded (<see cref="Code.Types"/>): Core's, the
-    /// project's as it is built now, and each gem's. Every gem is loaded before any is made, so all of them are there
-    /// by the time a script loads; one that did not load, which Core reports, has no classes there.
-    /// </summary>
-    private static List<Type> ClassesNamed(string name)
-    {
-        List<Type> classes = [];
-        foreach (Type type in Code.Types)
-        {
-            if (string.Equals(type.Name, name, StringComparison.Ordinal) && type.IsClass && !type.IsAbstract && !type.IsNested
-                && !type.ContainsGenericParameters && type.IsAssignableTo(typeof(IScript)))
-            {
-                classes.Add(type);
-            }
-        }
-
-        return classes;
     }
 
     /// <summary>
@@ -371,30 +418,142 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     }
 
     /// <summary>
-    /// Starts <paramref name="entity"/>'s own copy of <paramref name="script"/> and runs it, while the entity lives. One
-    /// that cannot be made or throws as it starts is an error, and the entity goes without it.
+    /// Makes the scripts what each entity's <see cref="Scripts"/> says: ends a copy whose entity no longer names its
+    /// script, or is gone, and starts one for each script named that has none, with the values given for it
+    /// (<see cref="Attach"/>) or its defaults, unless the world is loading and the class is not
+    /// <see cref="ImpatientAttribute"/>. An asset nothing gave values for is loaded first (<see cref="Fetch"/>), and the
+    /// script starts once it has. The starts come after the query, as a start may spawn. Main thread, before the
+    /// frame's behaviours run.
     /// </summary>
-    private void StartOn(Entity entity, PrefabScript script)
+    private void Reconcile()
     {
-        if (_ecs.IsAlive(entity))
+        for (int i = 0; i < _attached.Count; i++)
         {
-            Keep(entity, script.Script.Class, Start(entity, script));
+            Attached attached = _attached[i];
+            if (!_ecs.IsAlive(attached.Entity) || !_ecs.Has<Scripts>(attached.Entity) || !_ecs.Get<Scripts>(attached.Entity).Has(attached.Script.Script.Handle))
+            {
+                Drop(attached);
+                _attached.RemoveAt(i--);
+            }
+        }
+
+        _starting.Clear();
+        foreach ((ReadOnlySpan<Entity> entities, Span<Scripts> scripts) in _ecs.Query<Scripts>())
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                foreach (Handle<Script> handle in scripts[i])
+                {
+                    if (handle != Handle<Script>.None && !_live.ContainsKey((entities[i], handle)) && !_failed.Contains((entities[i], handle)))
+                    {
+                        _starting.Add((entities[i], handle));
+                    }
+                }
+            }
+        }
+
+        foreach ((Entity entity, Handle<Script> handle) in _starting)
+        {
+            if (!_pending.TryGetValue((entity, handle), out PrefabScript? script))
+            {
+                if (!_loaded.TryGetValue(handle, out Script? loaded))
+                {
+                    Fetch(handle);
+                    continue;
+                }
+
+                if (loaded is null)
+                {
+                    continue;
+                }
+
+                script = new PrefabScript(loaded, new Dictionary<string, object?>(StringComparer.Ordinal));
+            }
+
+            if (_isLoading && !script.Script.Type.IsDefined(typeof(ImpatientAttribute), inherit: false))
+            {
+                continue;
+            }
+
+            _pending.Remove((entity, handle));
+            Keep(entity, script.Script, Start(entity, script));
+        }
+
+        if (_pending.Count > 0)
+        {
+            foreach ((Entity Entity, Handle<Script> Script) waiting in _pending.Keys)
+            {
+                if (!_ecs.IsAlive(waiting.Entity))
+                {
+                    _starting.Add(waiting);
+                }
+            }
+
+            foreach ((Entity Entity, Handle<Script> Script) dead in _starting)
+            {
+                _pending.Remove(dead);
+            }
         }
     }
 
     /// <summary>
-    /// Runs <paramref name="attached"/>, when it was made; else logs why a <paramref name="type"/> is left off
-    /// <paramref name="entity"/>.
+    /// Loads the script asset <paramref name="handle"/>, which an entity names and nothing gave values for, so a
+    /// script of it can start with its defaults; one that does not load is an error, and the entities naming it go
+    /// without it.
     /// </summary>
-    private void Keep(Entity entity, Type type, Result<Attached> attached)
+    private void Fetch(Handle<Script> handle)
+    {
+        _loaded[handle] = null;
+        LoadAsync().FireAndForget();
+
+        async Task LoadAsync()
+        {
+            Result<Script> loaded = await _assets.LoadAsync(handle, CancellationToken.None).ConfigureAwait(false);
+            _threads.Post(EngineThread.Main, () =>
+            {
+                if (loaded.Ok)
+                {
+                    _loaded[handle] = loaded.Value;
+                    return;
+                }
+
+                _loaded.Remove(handle);
+                Debugging.Error($"Script {_assets.Path(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture)} is left off the entities naming it: {loaded.Error}");
+                foreach ((Entity Entity, Handle<Script> Script) named in _starting)
+                {
+                    if (named.Script == handle)
+                    {
+                        _failed.Add(named);
+                    }
+                }
+            });
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="attached"/>, when it was made; else logs why <paramref name="script"/>'s class is left off
+    /// <paramref name="entity"/>, and leaves it off until it is attached again.
+    /// </summary>
+    private void Keep(Entity entity, Script script, Result<Attached> attached)
     {
         if (!attached.Ok)
         {
-            Debugging.Error($"Script {type.Name} is left off entity {entity.Id}: {attached.Error}");
+            Debugging.Error($"Script {script.Type.Name} is left off entity {entity.Id}: {attached.Error}");
+            _failed.Add((entity, script.Handle));
             return;
         }
 
         _attached.Add(attached.Value);
+        _live[(entity, script.Handle)] = attached.Value;
+    }
+
+    /// <summary>
+    /// Ends <paramref name="attached"/> and forgets it; its place in <see cref="_attached"/> is the caller's to take.
+    /// </summary>
+    private void Drop(Attached attached)
+    {
+        End(attached);
+        _live.Remove((attached.Entity, attached.Script.Script.Handle));
     }
 
     /// <summary>
@@ -405,7 +564,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a script throws as it starts, the entity goes without it, and the others are started.")]
     private Result<Attached> Start(Entity entity, PrefabScript script)
     {
-        Type type = script.Script.Class;
+        Type type = script.Script.Type;
         Result<IScript> made = MakeOf(type, entity);
         if (!made.Ok)
         {
@@ -441,7 +600,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private Result<Attached> Put(Entity entity, Script script, ScriptState state)
     {
-        Type type = script.Class;
+        Type type = script.Type;
         Result<IScript> made = MakeOf(type, entity);
         if (!made.Ok)
         {
@@ -537,16 +696,14 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private void Write(Dictionary<string, JsonElement> values, Type type, string name, Type valueType, object? value)
     {
-        try
+        Result<JsonElement> json = Json.Write(value, valueType);
+        if (json.Ok)
         {
-            values[name] = JsonSerializer.SerializeToElement(value, valueType, Json.Options);
+            values[name] = json.Value;
         }
-        catch (Exception ex) when (ex is NotSupportedException or JsonException or InvalidOperationException)
+        else if (_unkept.Add($"{type.Name}.{name}"))
         {
-            if (_unkept.Add($"{type.Name}.{name}"))
-            {
-                Debugging.Warn($"Script {type.Name}'s {name} is not saved, so a copy put back starts over without it: {ex.Message}");
-            }
+            Debugging.Warn($"Script {type.Name}'s {name} is not saved, so a copy put back starts over without it: {json.Error}");
         }
     }
 
@@ -556,21 +713,27 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private bool TryRead(Type type, string name, JsonElement json, Type valueType, out object? value)
     {
-        try
+        if (json.ValueKind == JsonValueKind.Null)
         {
-            value = json.Deserialize(valueType, Json.Options);
+            // A reference the script had none of: what it is put back as.
+            value = null;
             return true;
         }
-        catch (Exception ex) when (ex is NotSupportedException or JsonException)
-        {
-            if (_unkept.Add($"{type.Name}.{name}"))
-            {
-                Debugging.Warn($"Script {type.Name}'s saved {name} is not put back, as it no longer fits: {ex.Message}");
-            }
 
-            value = null;
-            return false;
+        Result<object> read = Json.Read(json, valueType);
+        if (read.Ok)
+        {
+            value = read.Value;
+            return true;
         }
+
+        if (_unkept.Add($"{type.Name}.{name}"))
+        {
+            Debugging.Warn($"Script {type.Name}'s saved {name} is not put back, as it no longer fits: {read.Error}");
+        }
+
+        value = null;
+        return false;
     }
 
     /// <summary>
@@ -581,12 +744,21 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private void Restart(Script script)
     {
-        List<Attached> restarting = _attached.FindAll(attached => attached.Script.Script.Handle == script.Handle && attached.Script.Script.Class != script.Class);
+        if (_loaded.ContainsKey(script.Handle))
+        {
+            _loaded[script.Handle] = script;
+        }
+
+        List<Attached> restarting = _attached.FindAll(attached => attached.Script.Script.Handle == script.Handle && attached.Script.Script.Type != script.Type);
         foreach (Attached attached in restarting)
         {
-            End(attached);
+            Drop(attached);
             _attached.Remove(attached);
-            StartOn(attached.Entity, attached.Script with { Script = script });
+            if (_ecs.IsAlive(attached.Entity))
+            {
+                PrefabScript given = attached.Script with { Script = script };
+                Keep(attached.Entity, script, Start(attached.Entity, given));
+            }
         }
     }
 
@@ -650,7 +822,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             Attached attached = _attached[i];
             if (!_ecs.IsAlive(attached.Entity))
             {
-                End(attached);
+                Drop(attached);
                 _attached.RemoveAt(i--);
                 continue;
             }
@@ -692,7 +864,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             catch (Exception ex)
             {
                 Debugging.Error($"Script {behavior.GetType().Name} on entity {attached.Entity.Id} threw in {phase} and was taken off: {ex}");
-                End(attached);
+                _failed.Add((attached.Entity, attached.Script.Script.Handle));
+                Drop(attached);
                 _attached.RemoveAt(i--);
             }
         }
@@ -708,10 +881,11 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     {
         foreach (Attached attached in _attached)
         {
-            End(attached);
+            Drop(attached);
         }
 
         _attached.Clear();
+        _pending.Clear();
     }
 
     /// <summary>

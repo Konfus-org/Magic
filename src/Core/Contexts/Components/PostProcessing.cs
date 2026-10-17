@@ -1,7 +1,7 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 
-namespace Magic.Contexts.ECS;
+namespace Magic.Contexts.Components;
 
 /// <summary>
 /// How a world's image is finished: the effects a renderer adds to its frame, such as exposure, tonemapping or ambient

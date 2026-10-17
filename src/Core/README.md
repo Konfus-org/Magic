@@ -17,12 +17,17 @@ fills a gem's constructor parameters from:
 | --- | --- |
 | `IFileSystem`, `Lifetime`, `Threads`, `Events`, `Project`, `Args`, `Settings`, `Assets`, `Caches` | Core |
 | `World` | Core ([the world](#the-world)) |
+| `Assemblies` | Core: the code loaded, where the type a file names, a script's class, is found by its name |
 | `IServiceProvider` | Core: the service provider itself, for a gem that finds a service by its type as it runs, as `Assets` finds the `IAssetLoader<T>` a gem provides for an asset type |
 | An interface | the gem that implements it, which is made first |
 | An `ISettings` | the gem's settings, below |
 
 A parameter with a default value (`IWindow? window = null`) is optional: when no gem provides it, the gem gets the
 default. A gem that provides it but fails to start takes the gems that need it down too, optional or not.
+
+A gem that provides what the world is built on, the ECS or the scripts, cannot take `World`: the world is made over
+them, and the loader reports the cycle. What such a gem needs of the world reaches it as data, as the gem that runs
+scripts hears `WorldLoading` on [`Events`](#events) rather than reading `World.IsLoading`.
 
 ## Gem settings
 
@@ -104,16 +109,20 @@ snake_case (`"clamp"`, `"masked"`), comments and trailing commas allowed, a publ
 component's), a float that is infinite or not a number written and read as `"Infinity"`, `"-Infinity"` or `"NaN"`,
 and a key the type does not have, or a null where the type allows none, refused. Any type reads in it as it is,
 Core's, a gem's or a game's: .NET's serializer finds its members by reflection, so nothing is declared for
-it. `Json.Read<T>(bytes)` reads one, skipping a byte order mark, and says why when it cannot; `JsonSerializer` takes
-`Json.Options` for anything else. Magic is never trimmed or compiled ahead of time, as gems load from disk at run
+it. `Json.Read<T>(bytes)` reads one, skipping a byte order mark, and says why when it cannot; `Json.Read(element, type)`
+and `Json.Write(value, type)` read and write a value whose type is known only at run time, as a saved world holds a
+component by its type's name, and say why when JSON cannot hold it; `JsonSerializer` takes `Json.Options` for anything
+else. Magic is never trimmed or compiled ahead of time, as gems load from disk at run
 time, so the reflection is always there.
 
 ## Components
 
 A component is an unmanaged struct that implements `IComponent` (`Magic.Interfaces`), a marker with nothing in it:
-the world takes only those, and a file names one by its type's name. Core finds them in its own code, and in the
-project's and each gem's as they load, before any gem is made (`Code.Component`), so declaring one is all a gem or a
-game does:
+the world takes only those, and a file names one by its type's name, which Core finds in the code loaded, its own, the
+project's and each gem's (`World.Component`), so declaring one is all a gem or a game does. Two types of one name are
+an error, as a file could mean either. A game's component reloads as its scripts do, since only data names it: built
+again, it is read again and the entities holding it respawn. The engine's own are its contract, as its interfaces
+are, since the world, the renderer and every script are compiled against them; they change with a restart:
 
 ```csharp
 internal record struct Spin : IComponent
@@ -129,13 +138,17 @@ does with the camera's position (`Transform.RelativeTo`).
 A tag is a label with no data that a file names without any code declaring it: `"tags": [ "spawn" ]` on an entity,
 beside its components, gives it a `Tags` component holding up to eight `Tag`s, each a stable hash of its name
 (`Tag.Of`). The engine's own are `Tag.Spawn`, where a domain puts the player, and `Tag.Player`, the player's camera,
-which scripts run more often near and detail is kept nearest to ([the world](#the-world)).
+which scripts run more often near and detail is kept nearest to ([the world](#the-world)). An entity's scripts are
+held the same way: a `Scripts` component of up to eight `.cs` asset handles, which a prefab's `scripts` list gives it
+and any system can query ([Scripts](#scripts)).
 
 ## Scripts
 
 A script (`IScript`) is what an entity does, as its components are what it holds: a `.cs` asset whose class, named
 like the file, implements it. The project's code ([the project file](#the-project-file)), the gem it belongs to, or
-Core for the engine's own, compiles it, so the asset (`Script`) is that class. Scripts work as components do: a prefab's
+Core for the engine's own, compiles it, and the gem that runs scripts reads the asset (`Script`) as that class, the
+type named like the file in the code loaded (`Assemblies`), as Core reads a component's struct. Scripts work as
+components do: a prefab's
 part holds its scripts with their values (`PrefabScript`), and each entity spawned from the part gets its own copy of
 each, made for it.
 
@@ -160,8 +173,9 @@ internal sealed class Hover(Entity owner, World world) : IBehavior   // keeps it
 | `IScript` | A script. Its constructor takes the entity it is attached to first, then the services it needs, and only keeps them: it does no work, as its values are not set yet. Its public `{ get; set; }` properties are its values; `Start()` is where it begins, on the main thread, with its values set and the entity's components there to read. |
 | `ISystemScript`, `IParallelSystemScript` | A script that is also a system, of any kind the world takes (`ISystemScript<T1>` and on, up to four components): added to the ECS while its entity lives. The entity it is made for holds it and is no entity it runs over. |
 | `IScripts.Make` | A script of a class that runs on no entity, as a pipeline script does, made with the services its constructor asks for. Any thread. |
-| `World.Attach` | Gives an entity its own copy of a script, through `IScripts.Attach`: made for the entity, given the prefab's values, started once whatever spawned with it is all there, and run until the entity is destroyed, when it is disposed if it is `IDisposable`. Main thread. |
-| `[Impatient]` | Marks a script's class that starts as it is attached. Any other waits until whatever is spawning it has all spawned, and while a domain loads in place of the world, until the domain is there, so it never sees half a prefab or a world half loaded: the loading domain's own scripts, such as a progress bar, are impatient, or never run. |
+| `Scripts` | The component that says which scripts an entity has, by their `.cs` assets: the gem that runs scripts makes a copy of each named and has no copy of, and ends a copy whose handle is gone or whose entity is destroyed, when it is disposed if it is `IDisposable`. Adding a handle attaches a script with its defaults; removing one detaches it. |
+| `World.Attach` | Gives an entity its own copy of a script with the prefab's values, through `IScripts.Attach`: its handle joins the entity's `Scripts`, and in the next frame, once whatever spawned with it is all there, the copy is made for the entity, given the values and started. Main thread. |
+| `[Impatient]` | Marks a script's class that starts even while a domain loads in place of the world. Any other waits until the domain is there, so it never sees a world half loaded: the loading domain's own scripts, such as a progress bar, are impatient, or never run. |
 | `IBehavior` | A script that runs each frame: `Update`, `FixedUpdate` and `LateUpdate`, each optional, called on the main thread: `FixedUpdate` every step, the others each frame, or less often far from the player's cameras (tagged `player`), handed the time since the last call as the frame's delta. |
 | `IPipelineScript` | A script that records part of a frame: a pass of kind `script` names it, and the renderer makes it for each listing of the frame it builds and calls it on the render thread to draw into the pass's target, with pipelines of its own (`PipelineScriptContext`); never on an entity. A hook at a point of the frame for code that is no gem: a HUD, an overlay, the debug UI. |
 
@@ -176,22 +190,23 @@ into a `Project`:
 | `entryPoint` | required | The domain it opens with: `{ "id": 3301 }`. |
 | `loading` | the engine's | The domain shown while another replaces the world; without it, the engine's own loading domain. |
 | `player` | none | The prefab put at a domain's spawn when it replaces the world: `{ "id": 3316 }`. Its camera is tagged `player`. |
-| `gems` | none by default | The gems to run, by their folder names under `Gems/`. |
+| `gems` | none by default | The gems to run, by their folder names under `Gems/`, each with the version it must be when that matters: `"Name"` runs whatever version is there, `"Name@1.2"` only a 1.2.x, and a gem of another version is not made. A gem's version, author and description are its csproj's `Version`, `Authors` and `Description`, read from its assembly, so nothing is declared twice; what a gem depends on is what its constructor asks for, so that is not listed either. |
 
 `Project.Root`, the folder the file is in, is set by `ProjectFile`; a `root` key in the file is ignored.
 
 A project's own code is its scripts and the components they use: the `.cs` files under its `Assets/`, which a csproj
 beside the `.magic` file, named like the project, compiles into `Projects/<Name>/<Name>.dll` beside Magic (the
 samples' `Directory.Build.props` sets that up). It is no gem and is not listed: Core loads it, when it has been built,
-into a load context of its own as it loads a gem, and takes in its components before any gem is made. It provides
+into a load context of its own as it loads a gem, and takes in its assembly before any gem is made. It provides
 nothing and takes no settings, so it holds only scripts, components and the plain types they use. Magic's own scripts,
 the `.cs` assets among the bundled resources, are built the same way by the project in that folder, into
 `Resources/Resources.dll` beside Magic, and loaded before the project's code.
 
 Both are loaded from their bytes, so a build can write them while the engine runs, and Core watches their folders:
 once a build there has settled, it loads the code again beside the last build, whose types stay for whatever still
-holds them, and the new types replace the old by name (`Code`). Every script and every prefab is then made again, as a
-script is the class named like its file and a prefab names its components, and what is made from those after them,
+holds them, and the new assembly replaces the old. Every script and every prefab is then made again, as a script is
+the class named like its file and a prefab names its components by their types, and what is made from those after
+them,
 so the world spawns again what a domain placed and the scripts run as they are now
 ([hot reload](../Bundled/Resources/README.md#hot-reload)). A gem is never loaded again: a gem takes a restart.
 
@@ -324,8 +339,8 @@ distance, so the whole world is there at once.
   player has done is the game's.
 
 `Save` writes the whole world as data, a `WorldState`: the domains open, with the entities each of their prefabs
-spawned, every entity with its components as JSON by their names and its scripts as JSON by name
-([Scripts](#scripts)), and the frame clock. It holds nothing of the code that made it, so it outlives the run, and
+spawned, every entity with its components as JSON by their types' names and its scripts by their assets with their
+values as JSON ([Scripts](#scripts)), and the frame clock. It holds nothing of the code that made it, so it outlives the run, and
 restores into whatever code is loaded then, as a file read would. `RestoreAsync` puts the world back from one, in
 place of whatever is open, all in one frame: it reads each domain's folder on workers first, as opening one does, so a
 prefab added since spawns and one gone has its entities destroyed, then makes every entity anew, gives each its
@@ -333,8 +348,8 @@ components, and puts its scripts back without starting them. An `Entity` is save
 entity made for it, so what refers to another entity, in a component or a script, still does; the id of one destroyed
 before the save reads as none. The engine saves the world as a run ends to restart (`Lifetime.Restart`) and restores
 it on the first frame of the next, so the game goes on where it was, the frames going on from the saved clock. A
-component or script no code loaded declares, or whose saved values no longer fit it, is an error, and the entity goes
-without it.
+component no code loaded declares, a script whose asset does not load, or one whose saved values no longer fit it,
+is an error, and the entity goes without it.
 
 ## Events
 
@@ -410,7 +425,10 @@ Each gem loads in its own `AssemblyLoadContext`, its managed dependencies from i
 different versions of a package. A native library is the exception: `GemLoadContext` loads it once, from the folder of
 the first gem that binds it, and hands every gem that binds the same name after that copy. Two copies of a library in
 one process would each keep their own state, so a GPU gem could not draw into a window the platform gem's copy opened;
-`Directory.Packages.props` pins one version of each package, so every gem that binds a name expects the same library.
+one gem declares each library and the others reference it, so every gem that binds a name expects the same one. A
+library is found by the gem's dependency file, which lists what its packages brought, or else under the gem's
+`runtimes/<rid>/native/`, where the build puts the binary a gem declares
+([Gems](../Bundled/Gems/README.md#native-libraries)).
 
 ## The GPU
 
@@ -565,7 +583,9 @@ Core records:
 | `magic.core.asset.load.duration` | `s` | `magic.core.asset.type` | How long an asset took to read, make and post-process, by its type. |
 
 The frame timings' buckets are 0.1 ms to 1 s, with edges at the frame budgets of 240, 144, 120, 60 and 30 frames a
-second; a load's are 1 ms to 10 s.
+second; a load's are 1 ms to 10 s. The instrument and tag names are constants on `Metrics` (`Magic.Contexts.Telemetry`),
+so a listener that singles one out compares against the name Core records under, and a rename is a build error rather
+than a line that quietly stops appearing.
 
 A listener's callback runs inside the code that recorded, on its thread: the main or render thread for Core's
 instruments. It adds the numbers up and hands them to a thread of its own, never blocking. What it throws surfaces where

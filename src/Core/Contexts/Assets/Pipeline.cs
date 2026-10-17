@@ -1,4 +1,4 @@
-using Magic.Contexts.ECS;
+using Magic.Contexts.Components;
 using Magic.Interfaces;
 
 namespace Magic.Contexts.Assets;

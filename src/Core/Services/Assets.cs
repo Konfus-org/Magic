@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Subscriptions;
+using Magic.Contexts.Telemetry;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -46,7 +47,7 @@ public sealed class Assets
     /// build copying a folder, writes several times in a row.
     /// </summary>
     private static readonly TimeSpan _settle = TimeSpan.FromMilliseconds(300);
-    private static readonly Histogram<double> _loadDuration = Metrics.Meter.CreateHistogram("magic.core.asset.load.duration", "s", "How long an asset took to read, make and post-process, tagged with its type.", tags: null, advice: Metrics.WorkBuckets);
+    private static readonly Histogram<double> _loadDuration = Metrics.Meter.CreateHistogram(Metrics.AssetLoadDuration, "s", "How long an asset took to read, make and post-process, tagged with its type.", tags: null, advice: Metrics.WorkBuckets);
 
     private readonly IFileSystem _files;
     private readonly Events _events;
@@ -596,7 +597,7 @@ public sealed class Assets
     {
         long start = Stopwatch.GetTimestamp();
         Result<T> read = await ReadAndProcessAsync<T>(id).ConfigureAwait(false);
-        _loadDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new KeyValuePair<string, object?>("magic.core.asset.type", typeof(T).Name));
+        _loadDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new KeyValuePair<string, object?>(Metrics.AssetTypeTag, typeof(T).Name));
         return read;
     }
 

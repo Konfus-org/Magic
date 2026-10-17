@@ -1,7 +1,7 @@
 # Scripting
 
-Runs the scripts prefabs attach to entities: provides `IScripts` ([Core's README](../../../Core/README.md#scripts)), and
-reads `.cs` files, as `Script` assets, for Core's `Assets`.
+Reads and runs the scripts prefabs attach to entities: provides `IScripts`
+([Core's README](../../../Core/README.md#scripts)), and reads a `.cs` file as the class it declares (`Script`).
 
 ## Settings
 
@@ -41,8 +41,8 @@ Nothing is compiled at run time: a project's scripts are its code, which the csp
 from its `Assets/` and Core loads with the project ([Core's README](../../../Core/README.md#the-project-file)); a gem's
 own, from its `Resources/`, are compiled with the rest of the gem; and Magic's, from the bundled resources
 (`src/Bundled/Resources/`), by the project in that folder, into `Resources/Resources.dll` beside Magic, which Core loads
-as it loads a project's code. Loading a script finds its class in the code loaded (`Code.Types`), in which a gem that
-did not load, as Core reports, has no classes; a name none of it has, or two classes have, fails the load.
+as it loads a project's code. This gem reads a `.cs` asset as the class named like the file, found in the code loaded
+(Core's `Assemblies`); a name none of it declares, or two classes have, fails the load.
 
 So editing a script takes a build, and no restart: Core watches the project's code and Magic's scripts where they are
 built, loads a new build in place of the last, and has every script read again, as the class it is now
@@ -64,8 +64,11 @@ property's type, so a prefab's part holds its scripts, each with its values, as 
 
 ## Making one
 
-Scripts work as components do: a part holds them with their values, and each entity spawned from it gets its own copy,
-made for it when it is attached (`Attach`), on the main thread, and started there and then, while the entity lives:
+Which scripts an entity has is its `Scripts` component, up to eight `.cs` asset handles: a prefab's part gives its
+entity one from its scripts list, with each script's values beside (`Attach`), and game code adds or removes a handle
+as it changes any component. Every frame, before the behaviours run, this gem makes the copies what the component says:
+a copy for each handle an entity has no copy of, with the values given for it or the script's defaults, and the end of
+a copy whose handle is gone or whose entity is. A copy is made on the main thread, while the entity names it:
 
 1. **Made**: its one public constructor is called, given the entity it is attached to first, then a service for each
    other parameter, as a gem's constructor is, and an optional one its default when nothing provides it. A constructor
@@ -76,9 +79,10 @@ made for it when it is attached (`Attach`), on the main thread, and started ther
 3. **Started**: its `Start()` runs, with its values set and its entity's components there to read, and a system is added
    to the ECS, through the `Add` that takes its kind (each, when it is several).
 
-When a script starts is the world's to say: it attaches each once whatever spawned with its entity is all there, and
-while a domain loads in place of the world, once the domain is there, unless its class is `[Impatient]`
-([Core's README](../../../Core/README.md#the-world)). This gem makes and starts each as it is attached.
+A script starts in the frame after it is attached, so whatever spawned with its entity is all there, and not while
+a domain loads in place of the world, until the domain is there, unless its class is `[Impatient]`
+([Core's README](../../../Core/README.md#the-world)). A handle whose `.cs` asset does not load, or whose script cannot
+be made, is an error once, and the entity goes without that script until it is attached again.
 
 A script that has other than one public constructor, whose constructor with parameters does not take its `Entity`
 first, that asks for what nothing provides, or that throws while it is made or started, is an error, and its entity
@@ -131,4 +135,4 @@ a mirror or a minimap.
 A behaviour that must see every frame, such as one reading a key the frame it is pressed, sees it on a near entity or
 one without a `Transform`; `maxInterval` 1 turns pacing off.
 
-The default script, `Scripts/Default.cs`, is a behaviour that does nothing.
+The default `.cs` asset, `Scripts/Default.cs`, is a behaviour that does nothing.

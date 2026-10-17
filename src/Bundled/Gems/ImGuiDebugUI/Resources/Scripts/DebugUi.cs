@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Hexa.NET.ImGui;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Threading;

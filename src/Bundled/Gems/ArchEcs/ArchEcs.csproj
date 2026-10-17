@@ -1,5 +1,10 @@
 <!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>The entity world, through Arch: provides IEcs, which the World is built on.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Arch" />
   </ItemGroup>

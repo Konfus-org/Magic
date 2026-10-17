@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;

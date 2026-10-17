@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
@@ -11,25 +12,27 @@ using Magic.Services;
 namespace Magic.PrefabLoader;
 
 /// <summary>
-/// Reads <c>.prefab</c> files into <see cref="Prefab"/>s (<see cref="IAssetLoader{T}"/>), what the
-/// engine spawns: each entity a <see cref="PrefabPart"/>, with its components read as their types
-/// (<see cref="Code.Component"/>), its tags as a <see cref="Tags"/>, its scripts (<see cref="PrefabScript"/>) with
-/// their values read as their properties' types, and the entities under it, a prefab it places among them. What it
-/// loads as it reads one is what that one is made from, so it is read again when one of them changes.
+/// Reads <c>.prefab</c> files into <see cref="Prefab"/>s (<see cref="IAssetLoader{T}"/>), what the engine spawns: each
+/// entity a <see cref="PrefabPart"/>, with its components read as their types by name (<see cref="World.Component"/>),
+/// its scripts named by the id of their <see cref="Script"/> and their values read as its properties' types
+/// (<see cref="PrefabScript"/>), its tags as a <see cref="Tags"/> and its scripts as a <see cref="Scripts"/> among its
+/// components, and the entities under it, a prefab it places among them. What it loads as it reads one is what that
+/// one is made from, so it is read again when one of them changes.
 /// </summary>
-internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab>
+internal sealed class PrefabLoaderGem(Assets assets, World world) : IGem, IAssetLoader<Prefab>
 {
     /// <summary>
     /// The key of a script entry that names the script, as a handle's does.
     /// </summary>
-    private const string ScriptId = "id";
+    private const string Id = "id";
 
     private readonly Assets _assets = assets;
+    private readonly World _world = world;
 
     /// <summary>
-    /// The names files have given that are no component, each said once. Read on workers.
+    /// The components files name that could not be read, each said once. Read on workers.
     /// </summary>
-    private readonly ConcurrentDictionary<string, bool> _unknown = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _unread = new(StringComparer.Ordinal);
 
     public async ValueTask<Result<Prefab>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel)
     {
@@ -67,9 +70,9 @@ internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab
 
     /// <summary>
     /// The part <paramref name="entity"/> is: its components, its tags among them, its scripts, and the parts under it,
-    /// those of the prefab it places first; why not, when a component is not one, a script is not named by its id, or the
-    /// prefab it places does not load. A script that does not load or is given a value it has no property for is an
-    /// error, and the part goes without it.
+    /// those of the prefab it places first; why not, when a script is not named by its id, or the prefab it places does
+    /// not load. A component no code declares or whose values are not its, logged once, and a script that does not load
+    /// or is given a value it does not take, are errors, and the part goes without them.
     /// </summary>
     private async Task<Result<PrefabPart>> PartOfAsync(PrefabFileEntity entity, string path, CancellationToken cancel)
     {
@@ -77,22 +80,18 @@ internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab
         List<IComponent> components = [];
         foreach ((string component, JsonElement json) in entity.Components)
         {
-            if (TypeOf(component) is not { } type)
+            Result<IComponent> read = _world.Component(component, json);
+            if (!read.Ok)
             {
+                if (_unread.TryAdd(component, true))
+                {
+                    Debugging.Error($"{path}'s {name} goes without component {component}: {read.Error}");
+                }
+
                 continue;
             }
 
-            try
-            {
-                if (json.Deserialize(type, Json.Options) is IComponent value)
-                {
-                    components.Add(value);
-                }
-            }
-            catch (JsonException ex)
-            {
-                return Result.Failure<PrefabPart>($"{name}'s {component} is not one: {ex.Message}");
-            }
+            components.Add(read.Value);
         }
 
         if (TagsOf(entity, name, path) is { } tags)
@@ -103,19 +102,24 @@ internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab
         List<PrefabScript> scripts = [];
         foreach (IReadOnlyDictionary<string, JsonElement> entry in entity.Scripts)
         {
-            if (ScriptOf(entry) is not { } script)
+            if (HandleOf(entry) is not { } handle)
             {
-                return Result.Failure<PrefabPart>($"{name} has a script that is not named by its id, {{ \"{ScriptId}\": N }}, a whole number above 0.");
+                return Result.Failure<PrefabPart>($"{name} has a script that is not named by its id, {{ \"{Id}\": N }}, a whole number above 0.");
             }
 
-            Result<PrefabScript> one = await ScriptAsync(script, entry, cancel).ConfigureAwait(false);
-            if (!one.Ok)
+            Result<PrefabScript> script = await ScriptAsync(handle, entry, cancel).ConfigureAwait(false);
+            if (!script.Ok)
             {
-                Debugging.Error($"{path}'s {name} goes without script {_assets.Path(script) ?? script.Id.ToString(CultureInfo.InvariantCulture)}: {one.Error}");
+                Debugging.Error($"{path}'s {name} goes without script {NameOf(handle)}: {script.Error}");
                 continue;
             }
 
-            scripts.Add(one.Value);
+            scripts.Add(script.Value);
+        }
+
+        if (ScriptsOf(scripts, name, path) is { } held)
+        {
+            components.Add(held);
         }
 
         List<PrefabPart> children = [];
@@ -141,27 +145,33 @@ internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab
     }
 
     /// <summary>
-    /// The script <paramref name="script"/> as a part holds it: loaded, with each key of its entry but the id as the
-    /// value of its public property of that name, read as the property's type; why not, when it does not load, or is
-    /// given a key it has no property for or a value that is not one.
+    /// The script <paramref name="handle"/> declares as a part holds it: loaded, with each key of its entry but the id
+    /// as the value of its public property of that name, read as the property's type; why not, when it does not load,
+    /// declares no script, or is given a key it has no property for or a value that is not one.
     /// </summary>
-    private async Task<Result<PrefabScript>> ScriptAsync(Handle<Script> script, IReadOnlyDictionary<string, JsonElement> entry, CancellationToken cancel)
+    private async Task<Result<PrefabScript>> ScriptAsync(Handle<Script> handle, IReadOnlyDictionary<string, JsonElement> entry, CancellationToken cancel)
     {
-        Result<Script> loaded = await _assets.LoadAsync(script, cancel).ConfigureAwait(false);
+        Result<Script> loaded = await _assets.LoadAsync(handle, cancel).ConfigureAwait(false);
         if (!loaded.Ok)
         {
             return Result.Failure<PrefabScript>(loaded.Error);
         }
 
+        Type type = loaded.Value.Type;
+        if (!type.IsAssignableTo(typeof(IScript)))
+        {
+            return Result.Failure<PrefabScript>($"{type.Name} is no script: a script is a class implementing IScript.");
+        }
+
         Dictionary<string, object?> values = new(StringComparer.Ordinal);
         foreach ((string key, JsonElement json) in entry)
         {
-            if (string.Equals(key, ScriptId, StringComparison.Ordinal))
+            if (string.Equals(key, Id, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            if (PropertyOf(loaded.Value.Class, key) is not { } property)
+            if (PropertyOf(type, key) is not { } property)
             {
                 return Result.Failure<PrefabScript>($"it is given {key}, which it has no public property with a setter for.");
             }
@@ -177,24 +187,6 @@ internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab
         }
 
         return Result.Success(new PrefabScript(loaded.Value, values));
-    }
-
-    /// <summary>
-    /// The component named <paramref name="name"/>; null, and an error logged once, when no component has the name.
-    /// </summary>
-    private Type? TypeOf(string name)
-    {
-        if (Code.Component(name) is { } type)
-        {
-            return type;
-        }
-
-        if (_unknown.TryAdd(name, true))
-        {
-            Debugging.Error($"Prefabs name a component {name}, which is no struct implementing IComponent that Core or a gem declares; it is left out of them.");
-        }
-
-        return null;
     }
 
     /// <summary>
@@ -221,6 +213,30 @@ internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab
     }
 
     /// <summary>
+    /// The entity's <see cref="Scripts"/>, naming each of its part's <paramref name="scripts"/>, or null when it has
+    /// none. One named twice, or past <see cref="Scripts.Capacity"/>, is warned about and left out of the part.
+    /// </summary>
+    private static Scripts? ScriptsOf(List<PrefabScript> scripts, string name, string path)
+    {
+        if (scripts.Count == 0)
+        {
+            return null;
+        }
+
+        Scripts held = default;
+        for (int i = 0; i < scripts.Count; i++)
+        {
+            if (!held.Add(scripts[i].Script.Handle))
+            {
+                Debugging.Warn($"{path}'s {name} goes without script {scripts[i].Script.Type.Name}: it is named twice, or an entity has at most {Scripts.Capacity} scripts.");
+                scripts.RemoveAt(i--);
+            }
+        }
+
+        return held;
+    }
+
+    /// <summary>
     /// <paramref name="type"/>'s public property with a setter that a file names <paramref name="key"/>, in Core's
     /// dialect; null when it has none.
     /// </summary>
@@ -241,10 +257,15 @@ internal sealed class PrefabLoaderGem(Assets assets) : IGem, IAssetLoader<Prefab
     /// <summary>
     /// The script a script entry names by its id; null when it names none.
     /// </summary>
-    private static Handle<Script>? ScriptOf(IReadOnlyDictionary<string, JsonElement> entry)
+    private static Handle<Script>? HandleOf(IReadOnlyDictionary<string, JsonElement> entry)
     {
-        return entry.TryGetValue(ScriptId, out JsonElement id) && id.ValueKind == JsonValueKind.Number && id.TryGetUInt64(out ulong value) && value != 0
+        return entry.TryGetValue(Id, out JsonElement id) && id.ValueKind == JsonValueKind.Number && id.TryGetUInt64(out ulong value) && value != 0
             ? new Handle<Script>(value)
             : null;
+    }
+
+    private string NameOf(Handle<Script> handle)
+    {
+        return _assets.Path(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture);
     }
 }

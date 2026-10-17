@@ -78,8 +78,9 @@ public static class Engine
 
         Debugging.Info($"Running {project.Name} from {project.Root}");
         Events events = new();
-        ServiceCollection services = CreateCoreServices(files, lifetime, threads, events, project, args);
-        GemLoader loader = new(services, files, project);
+        Assemblies assemblies = new();
+        ServiceCollection services = CreateCoreServices(files, lifetime, threads, events, project, args, assemblies);
+        GemLoader loader = new(services, files, project, assemblies);
 
         // Not disposed: the gems are ended below one at a time, so one that throws cannot stop the rest ending.
         ServiceProvider container = services.BuildServiceProvider();
@@ -119,11 +120,14 @@ public static class Engine
     /// <summary>
     /// What a gem's constructor can ask for of Core, before what the gems provide: the assets, the settings and the
     /// cache are made once every gem's assembly, and so where its assets are, has been loaded. The world is made once
-    /// a gem asks for it, or once every gem is, over the ECS and the scripts the gems provide, when they do.
+    /// a gem asks for it, or once every gem is, over the ECS and the scripts the gems provide, when they do. The code
+    /// loaded, <paramref name="assemblies"/>, is a service too: the gem that reads <c>.cs</c> files finds a script's
+    /// class in it.
     /// </summary>
-    private static ServiceCollection CreateCoreServices(IFileSystem files, Lifetime lifetime, Threads threads, Events events, Project project, Args args)
+    private static ServiceCollection CreateCoreServices(IFileSystem files, Lifetime lifetime, Threads threads, Events events, Project project, Args args, Assemblies assemblies)
     {
         ServiceCollection services = new();
+        services.AddSingleton(assemblies);
         services.AddSingleton(files);
         services.AddSingleton(lifetime);
         services.AddSingleton(threads);
@@ -133,25 +137,16 @@ public static class Engine
         services.AddSingleton(provider => new Assets(files, project, lifetime, events, provider));
         services.AddSingleton(provider => new Settings(provider.GetRequiredService<Assets>(), files, events, project, args, lifetime));
         services.AddSingleton(provider => new Caches(files, provider));
-        services.AddSingleton(provider => new World(Provided<IEcs>(provider), Provided<IScripts>(provider), provider.GetRequiredService<Assets>(), threads, events, project, lifetime));
+        services.AddSingleton(provider => new World(
+            provider.GetService<IEcs>(),
+            provider.GetService<IScripts>(),
+            assemblies,
+            provider.GetRequiredService<Assets>(),
+            threads,
+            events,
+            project,
+            lifetime));
         return services;
-    }
-
-    /// <summary>
-    /// The <typeparamref name="T"/> a gem provides; null when no gem the project lists does, and when the gem that does
-    /// was not made, which it has said why.
-    /// </summary>
-    private static T? Provided<T>(IServiceProvider provider)
-        where T : class
-    {
-        try
-        {
-            return provider.GetService<T>();
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
     }
 
     /// <summary>

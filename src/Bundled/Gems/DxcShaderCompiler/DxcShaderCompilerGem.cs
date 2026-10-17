@@ -12,7 +12,6 @@ using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
-using SDL;
 
 namespace Magic.DxcShaderCompiler;
 
@@ -21,7 +20,7 @@ namespace Magic.DxcShaderCompiler;
 /// engine's: HLSL 2021, Shader Model 6.0, warnings as errors, and SPIR-V for Vulkan 1.1, whose subgroup operations are
 /// HLSL's wave intrinsics. Every shader is compiled to SPIR-V first, whatever the format asked for, since what it binds
 /// is read from that, by name (<see cref="SpirvBindings"/>); DXIL is compiled from the HLSL again, and Metal is
-/// translated from the SPIR-V (SDL_shadercross, over SPIRV-Cross). A shader's includes are shader assets, spliced in
+/// translated from the SPIR-V by SPIRV-Cross (<see cref="Metal"/>). A shader's includes are shader assets, spliced in
 /// before DXC sees it.
 /// What it compiles is kept in the cache (<see cref="Caches"/>, which it writes for as <see cref="ICache{T}"/> of
 /// <see cref="GpuShader"/>): named by its source with its includes spliced in, its name, its stage and its format, so
@@ -30,7 +29,7 @@ namespace Magic.DxcShaderCompiler;
 /// asked for while it already compiles waits for that compile rather than starting its own, so each compiles, and its
 /// entry is written, once.
 /// </summary>
-internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICache<GpuShader>, IDisposable
+internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches, DxcShaderCompilerSettings settings) : IGem, IShaderCompiler, ICache<GpuShader>
 {
     /// <summary>
     /// Raised whenever DXC's arguments change, or how a shader is written to the cache, so what was compiled before is
@@ -43,52 +42,23 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
     /// </summary>
     private const uint Utf8CodePage = 65001;
 
-    /// <summary>
-    /// The Metal Shading Language translated to: 2.3 (macOS 11) has the SIMD-group functions wave intrinsics become.
-    /// </summary>
-    private const string MslVersion = "2.3.0";
-
     private static readonly Guid _compilerClass = new("73e22d93-e6ce-47f3-b5bf-f0664f39c1b0");
     private static readonly Guid _compilerInterface = new("228b4687-5a6a-4730-900c-9702b2203f54");
     private static readonly Guid _resultInterface = new("58346cda-dde7-4497-9461-6f87af5e0659");
 
-    private readonly Assets _assets;
-    private readonly DxcShaderCompilerSettings _settings;
+    private readonly Assets _assets = assets;
+    private readonly DxcShaderCompilerSettings _settings = settings;
 
     /// <summary>
     /// Whether the shaders were last compiled with debug info, so a change while running compiles them again.
     /// </summary>
-    private bool _debugInfo;
-    private readonly Caches _caches;
+    private bool _debugInfo = settings.DebugInfo;
+    private readonly Caches _caches = caches;
 
     /// <summary>
     /// The compiles on their way, by cache key, for a shader asked for again while it compiles to wait for.
     /// </summary>
     private readonly ConcurrentDictionary<ulong, Task<Result<GpuShader>>> _compiling = new();
-
-    public DxcShaderCompilerGem(Assets assets, Caches caches, DxcShaderCompilerSettings settings)
-    {
-        _assets = assets;
-        _settings = settings;
-        _debugInfo = settings.DebugInfo;
-        _caches = caches;
-
-        // SDL_shadercross links SDL, so SDL loads first: the copy every gem shares (GemLoadContext).
-        int sdl = SDL3.SDL_GetVersion();
-        Debugging.Verbose($"Shader compiler on SDL {sdl / 1000000}.{sdl / 1000 % 1000}.{sdl % 1000}");
-
-        // DXC signs DXIL with dxil, which it loads by name from the OS's search path, where this gem's folder is not:
-        // loaded here first, it is found already in the process. Unsigned DXIL is refused by Direct3D 12.
-        if (OperatingSystem.IsWindows() && !NativeLibrary.TryLoad("dxil", typeof(DxcShaderCompilerGem).Assembly, null, out _))
-        {
-            Debugging.Warn("dxil was not found, so DXIL shaders are not signed and Direct3D 12 will refuse them.");
-        }
-
-        if (!NativeMethods.Init())
-        {
-            throw new InvalidOperationException($"SDL_shadercross could not start: {SDL3.SDL_GetError()}");
-        }
-    }
 
     /// <summary>
     /// Compiles every shader again when debug info was turned on or off while running.
@@ -102,11 +72,6 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
 
         _debugInfo = _settings.DebugInfo;
         _assets.RemakeAsync<Shader>().FireAndForget();
-    }
-
-    public void Dispose()
-    {
-        NativeMethods.Quit();
     }
 
     public int Version => CacheVersion;
@@ -300,7 +265,7 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
         {
             GpuShaderFormat.Spirv => spirv,
             GpuShaderFormat.Dxil => Dxc(source, name, profile, isSpirv: false),
-            GpuShaderFormat.Msl => Msl(spirv.Value, name, stage),
+            GpuShaderFormat.Msl => Metal.Translate(spirv.Value, name, stage),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "There is no such shader format."),
         };
         return code.Ok
@@ -329,36 +294,6 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
             ThreadCountY = read.Value.ThreadsY,
             ThreadCountZ = read.Value.ThreadsZ,
         });
-    }
-
-    /// <summary>
-    /// SPIR-V translated to Metal Shading Language source, its entry point renamed <c>main0</c>.
-    /// </summary>
-    private static unsafe Result<byte[]> Msl(byte[] spirv, string name, GpuStage stage)
-    {
-        SDL_PropertiesID properties = SDL3.SDL_CreateProperties();
-        SDL3.SDL_SetStringProperty(properties, "SDL_shadercross.spirv.msl.version", MslVersion);
-        try
-        {
-            fixed (byte* code = spirv)
-            fixed (byte* entry = "main"u8)
-            {
-                SpirvInfo info = new() { Bytecode = code, BytecodeSize = (nuint)spirv.Length, EntryPoint = entry, Stage = (int)stage, Properties = (uint)properties };
-                byte* msl = NativeMethods.TranspileMslFromSpirv(&info);
-                if (msl == null)
-                {
-                    return Result.Failure<byte[]>($"{name}: SPIR-V could not be translated to Metal: {SDL3.SDL_GetError()}");
-                }
-
-                byte[] text = MemoryMarshal.CreateReadOnlySpanFromNullTerminated(msl).ToArray();
-                SDL3.SDL_free(msl);
-                return Result.Success(text);
-            }
-        }
-        finally
-        {
-            SDL3.SDL_DestroyProperties(properties);
-        }
     }
 
     [GeneratedRegex("""^\s*#\s*include\s+"(?<path>[^"]+)"\s*(//.*)?$""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
@@ -477,7 +412,19 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
             }
 
             output = Output(result, 4);
-            return output == 0 ? Result.Failure<byte[]>($"{name}: DXC compiled nothing.") : Result.Success(Bytes(output).ToArray());
+            if (output == 0)
+            {
+                return Result.Failure<byte[]>($"{name}: DXC compiled nothing.");
+            }
+
+            // Direct3D 12 takes DXIL only with the validator's hash in its container; the gem writes it (DxilHash).
+            byte[] code = Bytes(output).ToArray();
+            if (!isSpirv)
+            {
+                DxilHash.Sign(code);
+            }
+
+            return Result.Success(code);
         }
         finally
         {
@@ -511,37 +458,10 @@ internal sealed partial class DxcShaderCompilerGem : IGem, IShaderCompiler, ICac
         public uint Encoding;
     }
 
-    /// <summary>
-    /// SDL_shadercross's <c>SDL_ShaderCross_SPIRV_Info</c>. <see cref="Stage"/> is its stage enum, in
-    /// <see cref="GpuStage"/>'s order.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private unsafe struct SpirvInfo
-    {
-        public byte* Bytecode;
-        public nuint BytecodeSize;
-        public byte* EntryPoint;
-        public int Stage;
-        public uint Properties;
-    }
-
     private static unsafe partial class NativeMethods
     {
         [LibraryImport("dxcompiler")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
         public static partial int DxcCreateInstance(Guid* classId, Guid* interfaceId, nint* instance);
-
-        [LibraryImport("SDL3_shadercross", EntryPoint = "SDL_ShaderCross_Init")]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        [return: MarshalAs(UnmanagedType.U1)]
-        public static partial bool Init();
-
-        [LibraryImport("SDL3_shadercross", EntryPoint = "SDL_ShaderCross_Quit")]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static partial void Quit();
-
-        [LibraryImport("SDL3_shadercross", EntryPoint = "SDL_ShaderCross_TranspileMSLFromSPIRV")]
-        [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static partial byte* TranspileMslFromSpirv(SpirvInfo* info);
     }
 }

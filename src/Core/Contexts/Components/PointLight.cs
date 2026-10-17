@@ -1,13 +1,13 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 
-namespace Magic.Contexts.ECS;
+namespace Magic.Contexts.Components;
 
 /// <summary>
-/// Light from a small sphere at its entity's position, shining in a cone along its +Z. A zero reads as its default, so
-/// <c>new SpotLight()</c>, or <c>{}</c> in a file, is a white 800 lumen spot, 60 degrees across, reaching 10 m.
+/// Light from a small sphere at its entity's position, shining every way. A zero reads as its default, so
+/// <c>new PointLight()</c>, or <c>{}</c> in a file, is a white 800 lumen bulb, 5 cm across, reaching 10 m.
 /// </summary>
-public record struct SpotLight : IComponent
+public record struct PointLight : IComponent
 {
     public Color Color
     {
@@ -16,11 +16,11 @@ public record struct SpotLight : IComponent
     }
 
     /// <summary>
-    /// Luminous intensity in candela, lumens / π, so narrowing the cone does not brighten it: an 800 lumen spot is 255.
+    /// Luminous intensity in candela, lumens / 4π: an 800 lumen bulb is 64.
     /// </summary>
     public float Intensity
     {
-        readonly get => field == 0 ? 255 : field;
+        readonly get => field == 0 ? 64 : field;
         set;
     }
 
@@ -39,25 +39,6 @@ public record struct SpotLight : IComponent
     public float Radius
     {
         readonly get => field == 0 ? 0.05f : field;
-        set;
-    }
-
-    /// <summary>
-    /// Degrees from the cone's axis to its edge, where the light ends.
-    /// </summary>
-    public float OuterAngle
-    {
-        readonly get => field == 0 ? 30 : field;
-        set;
-    }
-
-    /// <summary>
-    /// Degrees from the cone's axis to where the light starts fading towards the edge; by default three quarters of
-    /// <see cref="OuterAngle"/>.
-    /// </summary>
-    public float InnerAngle
-    {
-        readonly get => field == 0 ? OuterAngle * 0.75f : field;
         set;
     }
 

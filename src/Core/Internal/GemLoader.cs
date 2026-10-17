@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
@@ -12,9 +13,10 @@ namespace Magic.Internal;
 /// <summary>
 /// Loads the gems a project lists into the service provider <see cref="Engine"/> builds, and makes them once it has.
 /// Each gem's assembly (<see cref="GemAssembly"/>) is registered as its class and as every interface it provides; one
-/// that provides what Core or a gem listed before it provides is refused, as is a name listed twice. The types a gem's
-/// assembly holds are taken in as it loads (<see cref="Code"/>), so files can name its components before any gem is
-/// made, and where each assembly's assets are into <see cref="Project.Resources"/>. Magic's own scripts and the
+/// that provides what Core or a gem listed before it provides is refused, as is a name listed twice, and one that is
+/// not the version the project asks for (<see cref="Project.Gems"/>). The types a gem's
+/// assembly is taken in as it loads (<see cref="Assemblies"/>), so files can name its components and scripts before
+/// any gem is made, and where each assembly's assets are into <see cref="Project.Resources"/>. Magic's own scripts and the
 /// project's own code, its scripts and components, are loaded first the same way, though neither is a gem, and loaded
 /// again when they are built while the engine runs (<see cref="WatchCode"/>). The provider makes each gem after
 /// whatever its constructor asks for, so <see cref="Make"/> returns the gems in dependency order. A constructor
@@ -31,8 +33,14 @@ internal sealed class GemLoader
     private static readonly TimeSpan _settle = TimeSpan.FromMilliseconds(300);
 
     private readonly IFileSystem _files;
+    private readonly Assemblies _assemblies;
     private readonly List<IGem> _made = [];
     private readonly HashSet<Type> _tried = [];
+
+    /// <summary>
+    /// The gems whose constructors are running, so one asked for by what it needs is told it is a cycle.
+    /// </summary>
+    private readonly HashSet<Type> _making = [];
     private readonly List<GemAssembly> _gems = [];
 
     /// <summary>
@@ -44,16 +52,20 @@ internal sealed class GemLoader
     /// Loads the project's code and the gems it lists, and registers the gems with <paramref name="services"/>, which
     /// already holds what Core provides.
     /// </summary>
-    public GemLoader(ServiceCollection services, IFileSystem files, Project project)
+    public GemLoader(ServiceCollection services, IFileSystem files, Project project, Assemblies assemblies)
     {
         _files = files;
+        _assemblies = assemblies;
         LoadCode(files.Combine(AppContext.BaseDirectory, "Resources", "Resources.dll"), "Magic's scripts");
         LoadCode(files.Combine(AppContext.BaseDirectory, "Projects", project.Name, project.Name + ".dll"), $"{project.Name}'s code");
 
         List<string> resources = [GemAssembly.ResourcesOf(files, typeof(GemLoader).Assembly)];
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string name in project.Gems)
+        foreach (string listing in project.Gems)
         {
+            int at = listing.IndexOf('@', StringComparison.Ordinal);
+            string name = at < 0 ? listing : listing[..at];
+            string wanted = at < 0 ? string.Empty : listing[(at + 1)..];
             if (!listed.Add(name))
             {
                 Debugging.Error($"Gem {name} is listed twice in {project.Name}; it is made once.");
@@ -68,6 +80,12 @@ internal sealed class GemLoader
             }
 
             GemAssembly gem = loaded.Value;
+            if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
+            {
+                Debugging.Error($"Gem {name} is {gem.Version.ToString(3)}, and {project.Name} asks for {wanted}; it is not made.");
+                continue;
+            }
+
             if (Clash(services, gem) is { } clash)
             {
                 Debugging.Error(clash);
@@ -82,7 +100,7 @@ internal sealed class GemLoader
 
             _gems.Add(gem);
             resources.Add(gem.Resources);
-            Code.Add(gem.Path, gem.Types);
+            _assemblies.Add(gem.Path, gem.Assembly);
         }
 
         project.Resources = resources;
@@ -90,7 +108,7 @@ internal sealed class GemLoader
 
     /// <summary>
     /// Watches where the code that is no gem was loaded from, until the subscription is disposed, and loads what is
-    /// built there again once the build has settled: its types replace its last build's (<see cref="Code"/>), and
+    /// built there again once the build has settled: its assembly replaces its last build's (<see cref="Assemblies"/>), and
     /// <paramref name="assets"/> makes every script and every prefab again, as those are read as the classes code
     /// holds, so the world runs the scripts as they are now. The gems are never loaded again: a gem takes a restart.
     /// </summary>
@@ -128,14 +146,14 @@ internal sealed class GemLoader
     }
 
     /// <summary>
-    /// Loads the code at <paramref name="path"/> (<see cref="GemAssembly.LoadCode"/>) and takes in its types, and
+    /// Loads the code at <paramref name="path"/> (<see cref="GemAssembly.LoadCode"/>) and takes in its assembly, and
     /// keeps it to load again when it is built.
     /// </summary>
     private void LoadCode(string path, string what)
     {
-        if (GemAssembly.LoadCode(_files, path, what) is { } types)
+        if (GemAssembly.LoadCode(_files, path, what) is { } assembly)
         {
-            Code.Add(path, types);
+            _assemblies.Add(path, assembly);
             _code.Add(new CodeFile(path, what));
         }
     }
@@ -148,14 +166,39 @@ internal sealed class GemLoader
     {
         int change = code.Note();
         await Task.Delay(_settle).ConfigureAwait(false);
-        if (!code.IsLatest(change) || GemAssembly.ReloadCode(_files, code.Path, code.What) is not { } types)
+        if (!code.IsLatest(change) || GemAssembly.ReloadCode(_files, code.Path, code.What) is not { } assembly)
         {
             return;
         }
 
-        Code.Add(code.Path, types);
+        _assemblies.Add(code.Path, assembly);
         assets.Touch<Script>();
         assets.Touch<Prefab>();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="version"/> is the one a project asks for as <paramref name="wanted"/>: the parts it
+    /// gives, <c>1</c>, <c>1.2</c> or <c>1.2.3</c>, each match, and the rest may be anything. Anything that is not
+    /// one to four numbers matches no version.
+    /// </summary>
+    private static bool IsVersion(Version version, string wanted)
+    {
+        ReadOnlySpan<int> parts = [version.Major, version.Minor, version.Build, version.Revision];
+        string[] asked = wanted.Split('.');
+        if (asked.Length > parts.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < asked.Length; i++)
+        {
+            if (!int.TryParse(asked[i], NumberStyles.None, CultureInfo.InvariantCulture, out int part) || part != parts[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -199,12 +242,17 @@ internal sealed class GemLoader
     /// The service provider's factory for a gem: makes it from its settings object and the services its constructor
     /// asks for, which the provider makes first, adds it to what was made, and adds it to the log if it is an
     /// <see cref="ILogSink"/>. Why it could not be made, settings that do not fit it among the reasons, is logged here,
-    /// against the gem, and the gems that need it are told only that it was not. A gem is tried once, which also ends
-    /// a cycle of gems that need each other.
+    /// against the gem, and the gems that need it are told only that it was not. A gem is tried once; one asked for
+    /// while its constructor runs, by something it needs, is a cycle, which is said.
     /// </summary>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on.")]
     private IGem MakeGem(IServiceProvider services, GemAssembly gem)
     {
+        if (_making.Contains(gem.Type))
+        {
+            throw new InvalidOperationException($"it needs {gem.Name}, which is being made: a cycle, as {gem.Name} needs something that needs it.");
+        }
+
         if (!_tried.Add(gem.Type))
         {
             throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
@@ -218,6 +266,7 @@ internal sealed class GemLoader
         }
 
         IGem made;
+        _making.Add(gem.Type);
         try
         {
             made = (IGem)ActivatorUtilities.CreateInstance(services, gem.Type, settings.Value is { } given ? [given] : []);
@@ -229,6 +278,10 @@ internal sealed class GemLoader
             Debugging.Error($"Gem {gem.Name} was not made: {(ex is InvalidOperationException ? ex.Message : ex.ToString())}");
             throw new InvalidOperationException($"it needs {gem.Name}, which was not made.", ex);
         }
+        finally
+        {
+            _making.Remove(gem.Type);
+        }
 
         _made.Add(made);
         if (made is ILogSink sink)
@@ -236,7 +289,8 @@ internal sealed class GemLoader
             Debugging.Add(sink);
         }
 
-        Debugging.Info($"Gem {gem.Name} started");
+        string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
+        Debugging.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
         return made;
     }
 

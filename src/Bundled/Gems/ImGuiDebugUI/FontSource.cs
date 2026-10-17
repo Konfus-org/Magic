@@ -1,6 +1,4 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using Hexa.NET.ImGui;
 using Magic.Contexts.Assets;
 
 namespace Magic.ImGuiDebugUI;
@@ -15,7 +13,8 @@ internal sealed unsafe class FontSource : IDisposable
 {
     private readonly GCHandle _font;
     private readonly ImFontLoader* _loader;
-    private readonly ImFontPtr _added;
+    private readonly nint* _handle;
+    private readonly ImFont* _added;
 
     /// <summary>
     /// Adds <paramref name="font"/> to the current context's atlas, as its default font, at <paramref name="size"/>: the
@@ -24,30 +23,33 @@ internal sealed unsafe class FontSource : IDisposable
     public FontSource(Font font, float size)
     {
         _font = GCHandle.Alloc(font);
-        _loader = (ImFontLoader*)ImGui.MemAlloc((nuint)sizeof(ImFontLoader));
+        _loader = (ImFontLoader*)ImGui.MemAlloc((ulong)sizeof(ImFontLoader));
         *_loader = default;
-        _loader->FontSrcContainsGlyph = (delegate* unmanaged[Cdecl]<ImFontAtlas*, ImFontConfig*, uint, byte>)&ContainsGlyph;
-        _loader->FontBakedInit = (delegate* unmanaged[Cdecl]<ImFontAtlas*, ImFontConfig*, ImFontBaked*, void*, byte>)&InitBaked;
-        _loader->FontBakedLoadGlyph = (delegate* unmanaged[Cdecl]<ImFontAtlas*, ImFontConfig*, ImFontBaked*, void*, uint, ImFontGlyph*, float*, byte>)&LoadGlyph;
+        _loader->FontSrcContainsGlyph = &ContainsGlyph;
+        _loader->FontBakedInit = &InitBaked;
+        _loader->FontBakedLoadGlyph = &LoadGlyph;
 
-        // ImGui copies a font's data, here the asset's handle, as the atlas does not own it.
-        nint handle = GCHandle.ToIntPtr(_font);
-        ImFontConfigPtr config = ImGui.ImFontConfig();
-        config.FontLoader = _loader;
-        config.FontData = &handle;
-        config.FontDataSize = sizeof(nint);
-        config.FontDataOwnedByAtlas = false;
-        config.SizePixels = size;
+        // The font's data is the asset's handle, in memory of this object's own: ImGui copies data the atlas does not
+        // own, but only once it first reads the font, so the original must outlive this call.
+        _handle = (nint*)ImGui.MemAlloc((ulong)sizeof(nint));
+        *_handle = GCHandle.ToIntPtr(_font);
+        ImFontConfig* config = ImFontConfig.ImFontConfig_();
+        config->FontLoader = _loader;
+        config->FontData = _handle;
+        config->FontDataSize = sizeof(nint);
+        config->FontDataOwnedByAtlas = false;
+        config->SizePixels = size;
 
-        ImGuiIOPtr io = ImGui.GetIO();
-        _added = io.Fonts.AddFont(config);
-        io.FontDefault = _added;
-        config.Destroy();
+        ImGuiIO* io = ImGui.GetIONil();
+        _added = ImFontAtlas.AddFont(io->Fonts, config);
+        io->FontDefault = _added;
+        ImFontConfig.Destroy(config);
     }
 
     public void Dispose()
     {
         ImGui.MemFree(_loader);
+        ImGui.MemFree(_handle);
         _font.Free();
     }
 
@@ -57,7 +59,7 @@ internal sealed unsafe class FontSource : IDisposable
     /// </summary>
     public void Remove()
     {
-        ImGui.GetIO().Fonts.RemoveFont(_added);
+        ImFontAtlas.RemoveFont(ImGui.GetIONil()->Fonts, _added);
     }
 
     private static Font? FontOf(ImFontConfig* source)
@@ -65,59 +67,59 @@ internal sealed unsafe class FontSource : IDisposable
         return GCHandle.FromIntPtr(*(nint*)source->FontData).Target as Font;
     }
 
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static byte ContainsGlyph(ImFontAtlas* atlas, ImFontConfig* source, uint codepoint)
+    [UnmanagedCallersOnly]
+    private static bool ContainsGlyph(ImFontAtlas* atlas, ImFontConfig* source, uint codepoint)
     {
-        return (byte)(FontOf(source) is { } font && font.Glyphs.ContainsKey(codepoint) ? 1 : 0);
+        return FontOf(source) is { } font && font.Glyphs.ContainsKey(codepoint);
     }
 
     /// <summary>
     /// The font's line, scaled to the size ImGui draws it at.
     /// </summary>
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static byte InitBaked(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData)
+    [UnmanagedCallersOnly]
+    private static bool InitBaked(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData)
     {
         if (FontOf(source) is not { } font)
         {
-            return 0;
+            return false;
         }
 
         float scale = baked->Size / font.LineHeight;
         baked->Ascent = font.Ascent * scale;
         baked->Descent = (font.Ascent - font.LineHeight) * scale;
-        return 1;
+        return true;
     }
 
     /// <summary>
     /// One character of the asset into ImGui's atlas, or only how far it moves the pen when that is all ImGui asks for.
     /// Drawn at the asset's size its pixels land one to one; at any other size ImGui stretches them.
     /// </summary>
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static byte LoadGlyph(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData, uint codepoint, ImFontGlyph* glyph, float* advance)
+    [UnmanagedCallersOnly]
+    private static bool LoadGlyph(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData, uint codepoint, ImFontGlyph* glyph, float* advance)
     {
         if (FontOf(source) is not { } font || !font.Glyphs.TryGetValue(codepoint, out Glyph loaded))
         {
-            return 0;
+            return false;
         }
 
         float scale = baked->Size / font.LineHeight;
         if (advance != null)
         {
             *advance = loaded.Advance * scale;
-            return 1;
+            return true;
         }
 
         glyph->Codepoint = codepoint;
         glyph->AdvanceX = loaded.Advance * scale;
         if (loaded.Width == 0 || loaded.Height == 0)
         {
-            return 1;
+            return true;
         }
 
-        int rectangle = ImGuiP.ImFontAtlasPackAddRect(atlas, loaded.Width, loaded.Height);
+        int rectangle = ImGui.ImFontAtlasPackAddRect(atlas, loaded.Width, loaded.Height, null);
         if (rectangle < 0)
         {
-            return 0;
+            return false;
         }
 
         glyph->X0 = loaded.BearingX * scale;
@@ -130,9 +132,9 @@ internal sealed unsafe class FontSource : IDisposable
         ReadOnlySpan<byte> pixels = font.Pixels.Span[(((loaded.Y * font.Width) + loaded.X) * 4)..];
         fixed (byte* first = pixels)
         {
-            ImGuiP.ImFontAtlasBakedSetFontGlyphBitmap(atlas, baked, source, glyph, ImGuiP.ImFontAtlasPackGetRect(atlas, rectangle), first, ImTextureFormat.Rgba32, font.Width * 4);
+            ImGui.ImFontAtlasBakedSetFontGlyphBitmap(atlas, baked, source, glyph, ImGui.ImFontAtlasPackGetRect(atlas, rectangle), first, ImTextureFormat.Rgba32, font.Width * 4);
         }
 
-        return 1;
+        return true;
     }
 }

@@ -1,0 +1,27 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>SDL3 and its image and font libraries' C APIs, generated, for the gems built on SDL.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- A generated C API is pointers and fixed buffers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <!-- Each library is built here from the source SDL releases: SDL first, installed so the two can find it, then the
+       two against it, their shared library alone. SDL_image reads its formats itself; SDL_ttf brings FreeType and
+       HarfBuzz with it. Linux needs the X11 and Wayland development packages for SDL. -->
+  <ItemGroup>
+    <NativeLibrary Include="SDL3" Repository="https://github.com/libsdl-org/SDL" Commit="release-3.4.18"
+                   Headers="include/SDL3/SDL.h" IncludePath="include"
+                   Cmake="-DSDL_TEST_LIBRARY=OFF -DSDL_EXAMPLES=OFF -DSDL_INSTALL_TESTS=OFF" />
+    <NativeLibrary Include="SDL3_image" Repository="https://github.com/libsdl-org/SDL_image" Commit="release-3.4.8"
+                   Headers="include/SDL3_image/SDL_image.h" IncludePath="include" Prefixes="SDL_IMAGE=IMG" CmakeTarget="SDL3_image-shared"
+                   Cmake="-DSDLIMAGE_VENDORED=OFF -DSDLIMAGE_SAMPLES=OFF -DSDLIMAGE_AVIF=OFF -DSDLIMAGE_WEBP=OFF -DSDLIMAGE_TIF=OFF -DSDLIMAGE_JXL=OFF -DCMAKE_PREFIX_PATH={built:SDL3}" />
+    <NativeLibrary Include="SDL3_ttf" Repository="https://github.com/libsdl-org/SDL_ttf" Commit="release-3.2.2"
+                   Headers="include/SDL3_ttf/SDL_ttf.h;include/SDL3_ttf/SDL_textengine.h" IncludePath="include" Prefixes="SDL_TTF=TTF" CmakeTarget="SDL3_ttf-shared"
+                   Cmake="-DSDLTTF_VENDORED=ON -DSDLTTF_SAMPLES=OFF -DSDLTTF_PLUTOSVG=OFF -DCMAKE_PREFIX_PATH={built:SDL3}" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,10 @@
+<!-- Core's tests (tests/README.md): Magic's public types, each driven as a gem would drive it. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Magic.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Core/Core.csproj" />
+  </ItemGroup>
+</Project>

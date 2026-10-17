@@ -1,3 +1,4 @@
+using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Interfaces;
 using Magic.Services;
@@ -23,9 +24,9 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
 
     /// <summary>
     /// Makes an entity of each part, a part before the parts under it, each with a copy of its components and its
-    /// transform placed under its parent's, the top parts' under <paramref name="at"/>; then attaches each part's
-    /// scripts, once every entity is made, so a script starts on the whole prefab. A part without a transform is where
-    /// its parent is.
+    /// transform placed under its parent's, the top parts' under <paramref name="at"/>; then hands each part's scripts,
+    /// with their values, to the world (<see cref="World.Attach"/>), which starts them in the next frame, on the whole
+    /// prefab. A part without a transform is where its parent is.
     /// </summary>
     public Entity[] Spawn(World world, Transform at)
     {
@@ -93,7 +94,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
 }
 
 /// <summary>
-/// A script as a <see cref="PrefabPart"/> holds it: which, and the values the prefab gives it, each a public property's
+/// A script as a <see cref="PrefabPart"/> holds it: the <see cref="Script"/> that declares it, and the values the prefab gives it, each a public property's
 /// name and its value read as the property's type. A script is made for an entity, so a part cannot hold one made
 /// (<see cref="IScript"/>); it holds what each entity spawned from it has its own copy made from.
 /// </summary>
@@ -112,7 +113,7 @@ public sealed class PrefabPart
     public string Name { get; init; } = string.Empty;
 
     /// <summary>
-    /// Its components, each of its own type, its tags among them as a <see cref="ECS.Tags"/>.
+    /// Its components, each of its own type, its tags among them as a <see cref="Components.Tags"/>.
     /// </summary>
     public IReadOnlyList<IComponent> Components { get; init; } = [];
 

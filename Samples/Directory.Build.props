@@ -2,11 +2,11 @@
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
 
   <!-- A project's own code: the scripts and the components they use, the .cs files under its Assets/, compiled by the
-       csproj beside its .magic file, named like the project, into Projects/<Name>/ beside Magic, which loads it with
-       the project. It is no gem: Magic only takes in its types. -->
+       csproj beside its .magic file, named like the project, into Projects/<Name>/ beside Magic (the root
+       Directory.Build.props places it there), which loads it with the project. It is no gem: Magic only takes in its
+       types. -->
   <PropertyGroup>
     <RootNamespace>Magic.$(MSBuildProjectName)</RootNamespace>
-    <OutputPath>$(MagicBin)Projects/$(MSBuildProjectName)/</OutputPath>
     <!-- Copies the project's own NuGet dependencies, native ones included, next to it. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>

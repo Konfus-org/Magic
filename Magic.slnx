@@ -5,6 +5,9 @@
     <BuildType Name="Release" />
   </Configurations>
   <Project Path="src/Core/Core.csproj" />
+  <Folder Name="/Tools/">
+    <Project Path="tools/NativeBindingsGenerator/NativeBindingsGenerator.csproj" />
+  </Folder>
   <Folder Name="/Gems/">
     <Project Path="src/Bundled/Gems/ArchEcs/ArchEcs.csproj" />
     <Project Path="src/Bundled/Gems/AssimpModelLoader/AssimpModelLoader.csproj" />
@@ -18,6 +21,7 @@
     <Project Path="src/Bundled/Gems/PipelineLoader/PipelineLoader.csproj" />
     <Project Path="src/Bundled/Gems/PrefabLoader/PrefabLoader.csproj" />
     <Project Path="src/Bundled/Gems/Scripting/Scripting.csproj" />
+    <Project Path="src/Bundled/Gems/SdlBindings/SdlBindings.csproj" />
     <Project Path="src/Bundled/Gems/SdlFontLoader/SdlFontLoader.csproj" />
     <Project Path="src/Bundled/Gems/SdlGpu/SdlGpu.csproj" />
     <Project Path="src/Bundled/Gems/SdlPlatform/SdlPlatform.csproj" />
@@ -25,4 +29,7 @@
   </Folder>
   <Project Path="src/Bundled/Resources/Resources.csproj" />
   <Project Path="samples/Samples.csproj" />
+  <Folder Name="/Tests/">
+    <Project Path="tests/Core.Tests/Core.Tests.csproj" />
+  </Folder>
 </Solution>

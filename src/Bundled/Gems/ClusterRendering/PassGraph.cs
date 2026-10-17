@@ -464,13 +464,13 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         Result<IScript> made = scripts.Make(asset.Value);
         if (!made.Ok)
         {
-            return Result.Failure<IPipelineScript>($"its script {asset.Value.Class.Name} cannot be made: {made.Error}");
+            return Result.Failure<IPipelineScript>($"its script {asset.Value.Type.Name} cannot be made: {made.Error}");
         }
 
         if (made.Value is not IPipelineScript script)
         {
             (made.Value as IDisposable)?.Dispose();
-            return Result.Failure<IPipelineScript>($"its script {asset.Value.Class.Name} is no IPipelineScript.");
+            return Result.Failure<IPipelineScript>($"its script {asset.Value.Type.Name} is no IPipelineScript.");
         }
 
         return Result.Success(script);

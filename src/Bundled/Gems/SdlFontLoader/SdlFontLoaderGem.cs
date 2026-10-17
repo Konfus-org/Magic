@@ -1,10 +1,10 @@
 using System.Collections.Frozen;
 using System.Text.Json;
+using Magic.SdlBindings;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
-using SDL;
 
 namespace Magic.SdlFontLoader;
 
@@ -33,10 +33,10 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     public SdlFontLoaderGem()
     {
         // SDL itself first, so SDL_ttf binds to the SDL every gem shares.
-        _ = SDL3.SDL_GetVersion();
-        if (!SDL3_ttf.TTF_Init())
+        _ = SDL.GetVersion();
+        if (!TTF.Init())
         {
-            throw new InvalidOperationException($"SDL_ttf could not start: {SDL3.SDL_GetError()}");
+            throw new InvalidOperationException($"SDL_ttf could not start: {CString.Read(SDL.GetError())}");
         }
     }
 
@@ -48,7 +48,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         lock (_loading)
         {
             _stopped = true;
-            SDL3_ttf.TTF_Quit();
+            TTF.Quit();
         }
     }
 
@@ -80,11 +80,11 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         // SDL_ttf reads the file for as long as the font is open, so it stays pinned until then.
         fixed (byte* bytes = file)
         {
-            SDL_IOStream* io = SDL3.SDL_IOFromConstMem((nint)bytes, (nuint)file.Length);
-            TTF_Font* font = io == null ? null : SDL3_ttf.TTF_OpenFontIO(io, closeio: true, size);
+            SDL.IOStream* io = SDL.IOFromConstMem(bytes, (ulong)file.Length);
+            TTF.Font* font = io == null ? null : TTF.OpenFontIO(io, closeio: true, size);
             if (font == null)
             {
-                return Result.Failure<Font>($"SDL_ttf could not read it: {SDL3.SDL_GetError()}");
+                return Result.Failure<Font>($"SDL_ttf could not read it: {CString.Read(SDL.GetError())}");
             }
 
             try
@@ -93,7 +93,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
                 for (uint codepoint = 32; codepoint <= 255; codepoint++)
                 {
                     // Printable ASCII, then Latin-1 past its control characters.
-                    if (codepoint is > 126 and < 160 || !SDL3_ttf.TTF_FontHasGlyph(font, codepoint))
+                    if (codepoint is > 126 and < 160 || !TTF.FontHasGlyph(font, codepoint))
                     {
                         continue;
                     }
@@ -107,11 +107,11 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
                     drawn.Add(glyph.Value);
                 }
 
-                return Result.Success(Pack(size, SDL3_ttf.TTF_GetFontLineSkip(font), SDL3_ttf.TTF_GetFontAscent(font), drawn));
+                return Result.Success(Pack(size, TTF.GetFontLineSkip(font), TTF.GetFontAscent(font), drawn));
             }
             finally
             {
-                SDL3_ttf.TTF_CloseFont(font);
+                TTF.CloseFont(font);
             }
         }
     }
@@ -120,47 +120,47 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     /// <paramref name="codepoint"/>'s image as tightly packed RGBA8 rows, white with its coverage in alpha, and where it
     /// goes from the pen. A character that draws nothing, a space, has no pixels and still moves the pen.
     /// </summary>
-    private static Result<Drawn> DrawGlyph(TTF_Font* font, uint codepoint)
+    private static Result<Drawn> DrawGlyph(TTF.Font* font, uint codepoint)
     {
         int minX;
         int maxX;
         int minY;
         int maxY;
         int advance;
-        if (!SDL3_ttf.TTF_GetGlyphMetrics(font, codepoint, &minX, &maxX, &minY, &maxY, &advance))
+        if (!TTF.GetGlyphMetrics(font, codepoint, &minX, &maxX, &minY, &maxY, &advance))
         {
-            return Result.Failure<Drawn>($"SDL_ttf could not measure U+{codepoint:X4}: {SDL3.SDL_GetError()}");
+            return Result.Failure<Drawn>($"SDL_ttf could not measure U+{codepoint:X4}: {CString.Read(SDL.GetError())}");
         }
 
-        TTF_ImageType type;
-        SDL_Surface* image = SDL3_ttf.TTF_GetGlyphImage(font, codepoint, &type);
-        if (image == null || image->w == 0 || image->h == 0)
+        TTF.ImageType type;
+        SDL.Surface* image = TTF.GetGlyphImage(font, codepoint, &type);
+        if (image == null || image->W == 0 || image->H == 0)
         {
             if (image != null)
             {
-                SDL3.SDL_DestroySurface(image);
+                SDL.DestroySurface(image);
             }
 
             return Result.Success(new Drawn(codepoint, [], 0, 0, minX, maxY, advance));
         }
 
         // R, G, B, A bytes in memory whatever the machine's byte order.
-        SDL_Surface* rgba = SDL3.SDL_ConvertSurface(image, SDL3.SDL_PIXELFORMAT_RGBA32);
-        SDL3.SDL_DestroySurface(image);
+        SDL.Surface* rgba = SDL.ConvertSurface(image, SDL.PixelFormat.Rgba32);
+        SDL.DestroySurface(image);
         if (rgba == null)
         {
-            return Result.Failure<Drawn>($"SDL could not convert U+{codepoint:X4} to RGBA8: {SDL3.SDL_GetError()}");
+            return Result.Failure<Drawn>($"SDL could not convert U+{codepoint:X4} to RGBA8: {CString.Read(SDL.GetError())}");
         }
 
-        int row = rgba->w * 4;
-        byte[] pixels = GC.AllocateUninitializedArray<byte>(row * rgba->h);
-        for (int y = 0; y < rgba->h; y++)
+        int row = rgba->W * 4;
+        byte[] pixels = GC.AllocateUninitializedArray<byte>(row * rgba->H);
+        for (int y = 0; y < rgba->H; y++)
         {
-            new ReadOnlySpan<byte>((byte*)rgba->pixels + (y * rgba->pitch), row).CopyTo(pixels.AsSpan(y * row, row));
+            new ReadOnlySpan<byte>((byte*)rgba->Pixels + (y * rgba->Pitch), row).CopyTo(pixels.AsSpan(y * row, row));
         }
 
-        Drawn drawn = new(codepoint, pixels, rgba->w, rgba->h, minX, maxY, advance);
-        SDL3.SDL_DestroySurface(rgba);
+        Drawn drawn = new(codepoint, pixels, rgba->W, rgba->H, minX, maxY, advance);
+        SDL.DestroySurface(rgba);
         return Result.Success(drawn);
     }
 

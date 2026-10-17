@@ -2,8 +2,8 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
+using Magic.Contexts.Telemetry;
 using Magic.Contexts.Threading;
-using Magic.Internal;
 
 namespace Magic.Services;
 
@@ -241,7 +241,7 @@ public sealed class Threads : IDisposable
     /// </summary>
     private sealed class WorkQueue(string name) : IDisposable
     {
-        private static readonly Histogram<double> _workDuration = Metrics.Meter.CreateHistogram("magic.core.thread.work.duration", "s", "How long one piece of work handed to an engine thread took, tagged with the thread.", tags: null, advice: Metrics.FrameBuckets);
+        private static readonly Histogram<double> _workDuration = Metrics.Meter.CreateHistogram(Metrics.WorkDuration, "s", "How long one piece of work handed to an engine thread took, tagged with the thread.", tags: null, advice: Metrics.FrameBuckets);
 
         // Completed when the thread ends: a write after that fails, so nothing is left behind unrun.
         private readonly Channel<Pending> _work = Channel.CreateUnbounded<Pending>(new UnboundedChannelOptions { SingleReader = true });
@@ -338,7 +338,7 @@ public sealed class Threads : IDisposable
             // Outside the try: a listener that throws is its own failure, not the work's.
             if (timed)
             {
-                _workDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new KeyValuePair<string, object?>("magic.core.thread.name", name));
+                _workDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new KeyValuePair<string, object?>(Metrics.ThreadNameTag, name));
             }
         }
 

@@ -1,5 +1,5 @@
 using System.Numerics;
-using Hexa.NET.ImGui;
+using System.Runtime.InteropServices;
 
 namespace Magic.ImGuiDebugUI;
 
@@ -7,24 +7,24 @@ namespace Magic.ImGuiDebugUI;
 /// The engine's look: violet glass, lilac edges, pink where something is held, white text, everything rounded. Colours
 /// are as ImGui takes them, already encoded, as what it draws goes into the window's image as it is.
 /// </summary>
-internal static class Look
+internal static unsafe class Look
 {
-    public static void Apply(ImGuiStylePtr style)
+    public static void Apply(ImGuiStyle* style)
     {
         ImGui.StyleColorsDark(style);
-        style.WindowRounding = 10f;
-        style.ChildRounding = 8f;
-        style.PopupRounding = 8f;
-        style.FrameRounding = 6f;
-        style.GrabRounding = 6f;
-        style.TabRounding = 6f;
-        style.ScrollbarRounding = 10f;
-        style.WindowBorderSize = 1f;
-        style.FrameBorderSize = 0f;
-        style.WindowPadding = new Vector2(12f, 10f);
-        style.FramePadding = new Vector2(8f, 5f);
-        style.ItemSpacing = new Vector2(8f, 6f);
-        style.WindowTitleAlign = new Vector2(0.5f, 0.5f);
+        style->WindowRounding = 10f;
+        style->ChildRounding = 8f;
+        style->PopupRounding = 8f;
+        style->FrameRounding = 6f;
+        style->GrabRounding = 6f;
+        style->TabRounding = 6f;
+        style->ScrollbarRounding = 10f;
+        style->WindowBorderSize = 1f;
+        style->FrameBorderSize = 0f;
+        style->WindowPadding = new Vector2(12f, 10f).Im;
+        style->FramePadding = new Vector2(8f, 5f).Im;
+        style->ItemSpacing = new Vector2(8f, 6f).Im;
+        style->WindowTitleAlign = new Vector2(0.5f, 0.5f).Im;
 
         Vector4 white = new(1f, 1f, 1f, 1f);
         Vector4 pink = new(1f, 0.52f, 0.86f, 1f);
@@ -33,7 +33,7 @@ internal static class Look
         Vector4 plum = new(0.36f, 0.17f, 0.60f, 1f);
         Vector4 night = new(0.17f, 0.08f, 0.32f, 1f);
 
-        Span<Vector4> colors = style.Colors;
+        Span<Vector4> colors = MemoryMarshal.Cast<ImVec4, Vector4>((Span<ImVec4>)style->Colors);
         colors[(int)ImGuiCol.Text] = white;
         colors[(int)ImGuiCol.TextDisabled] = lilac with { W = 0.7f };
         colors[(int)ImGuiCol.WindowBg] = night with { W = 0.90f };

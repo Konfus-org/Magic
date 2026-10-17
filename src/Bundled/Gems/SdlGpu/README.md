@@ -1,6 +1,7 @@
 # SdlGpu
 
-The GPU, through SDL GPU ([ppy.SDL3-CS](https://github.com/ppy/SDL3-CS)): provides `IGpu` on Vulkan, Direct3D 12 or
+The GPU, through SDL GPU, called through SDL's generated API ([Gems](../README.md#native-libraries)), which the SDL bindings gem provides: provides
+`IGpu` on Vulkan, Direct3D 12 or
 Metal. It draws through the SDL a platform gem started, into its windows, so a project lists that gem before it;
 listed first, SdlGpu is not made and says so.
 
@@ -54,5 +55,5 @@ followed every frame, and every window presents the new way from the next.
 
 ## Natives
 
-The bindings only: SDL is the platform gem's copy, shared by name (`GemLoadContext`), so the gem's folder carries no
-SDL.
+The SDL bindings gem carries SDL for this machine, and every gem that references it copies it beside itself, but the SDL that runs is the
+platform gem's copy, shared by name (`GemLoadContext`): the first gem to bind a library loads it for all.

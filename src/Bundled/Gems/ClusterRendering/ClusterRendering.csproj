@@ -1,5 +1,10 @@
 <!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Draws the world GPU-driven, as clusters at the detail each part of it needs.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- XxHash3: what a field of a model a gem made is kept by, as such a model has no file to be versioned by. -->
     <PackageReference Include="System.IO.Hashing" />

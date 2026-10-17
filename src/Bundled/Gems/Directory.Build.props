@@ -1,15 +1,21 @@
 <Project>
   <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
 
-  <!-- Every project under this folder is a gem: a plugin Magic loads from bin/Gems/<Name>/<Name>.dll. -->
+  <!-- Every project under this folder is a gem: a plugin Magic loads from Gems/<Name>/<Name>.dll beside it (the root
+       Directory.Build.props places it there). Its csproj says what it is, in the SDK's own properties: Description,
+       Version (1.0.0 unless it says) and Authors, which the bundled gems share. Magic reads them from the assembly
+       (GemAssembly). -->
   <PropertyGroup>
     <RootNamespace>Magic.$(MSBuildProjectName)</RootNamespace>
-    <OutputPath>$(MagicBin)Gems/$(MSBuildProjectName)/</OutputPath>
+    <Authors>Konfus</Authors>
     <!-- Copies the gem's own NuGet dependencies, native ones included, next to it. -->
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Description and Version become assembly attributes on their own; Authors does not, so it is recorded as the
+         resources folder is (the root Directory.Build.props). -->
+    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
     <!-- Compiled against, never copied: at run time a gem uses the Magic that loaded it. -->
     <ProjectReference Include="$(MSBuildThisFileDirectory)../../Core/Core.csproj" Private="false" ExcludeAssets="runtime" />
   </ItemGroup>

@@ -39,7 +39,8 @@ engine runs: the cells are data, made once.
 
 A script is a `.cs` file with a `.meta` beside it, an `IScript`, attached to an entity by its id; it works as a
 component does, each entity spawned getting its own copy with the prefab's values. A component a script uses is
-declared beside it, and a prefab names it as it names Core's:
+declared beside it, under `Components/`, read again when the project is built, and a prefab names it as it names
+Core's:
 
 ```json
 "components": {

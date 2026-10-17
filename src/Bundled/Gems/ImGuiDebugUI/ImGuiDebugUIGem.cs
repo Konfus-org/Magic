@@ -1,16 +1,13 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Runtime.Loader;
 using System.Text;
 using System.Text.Unicode;
-using Hexa.NET.ImGui;
-using HexaGen.Runtime;
+using Magic.Contexts.Utils;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Threading;
-using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
@@ -31,7 +28,6 @@ namespace Magic.ImGuiDebugUI;
 internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 {
     private const int InputBytes = 256;
-    private const string ContextMenu = "##context";
 
     /// <summary>
     /// ImGui's -FLT_MIN width: up to the right edge of whatever the field is in.
@@ -64,8 +60,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private readonly ImGuiDebugUISettings _settings;
     private readonly IWindow _window;
     private readonly IInput? _input;
-    private readonly ImGuiContextPtr _context;
+    private readonly unsafe ImGuiContext* _context;
     private readonly Reports _reports = new();
+
+    /// <summary>
+    /// What ImGui is told this frame, as the C strings it reads: labels, the text of fields and lines.
+    /// </summary>
+    private readonly TextArena _text = new();
     private readonly CameraViews _views;
     private readonly Subscription _viewing;
     private readonly List<ShownReport> _world = [];
@@ -138,7 +139,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private bool _isTableShown;
     private int _tableColumns;
 
-    public unsafe ImGuiDebugUIGem(ImGuiDebugUISettings settings, Assets assets, IWindow window, IFileSystem files, Threads threads, Lifetime lifetime, World world, IInput? input = null)
+    public unsafe ImGuiDebugUIGem(ImGuiDebugUISettings settings, Assets assets, IWindow window, Threads threads, Lifetime lifetime, World world, IInput? input = null)
     {
         _settings = settings;
         _window = window;
@@ -148,26 +149,20 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _stopping = lifetime.Stopping;
         _fontAsked = settings.Font;
 
-        // The bindings load cimgui themselves, by a path: the machine's, found from the gem's dependencies as its load
-        // context finds every other native library.
-        string library = new AssemblyDependencyResolver(typeof(ImGuiDebugUIGem).Assembly.Location).ResolveUnmanagedDllToPath("cimgui")
-            ?? throw new InvalidOperationException("The gem carries no cimgui for this machine.");
-        LibraryLoader.CustomLoadFolders.Add(files.Parent(library));
-
-        _context = ImGui.CreateContext();
+        _context = ImGui.CreateContext(null);
         ImGui.SetCurrentContext(_context);
-        ImGuiIOPtr io = ImGui.GetIO();
-        io.IniFilename = null;
-        io.BackendFlags |= ImGuiBackendFlags.RendererHasTextures | ImGuiBackendFlags.RendererHasVtxOffset;
-        ImGuiStylePtr style = ImGui.GetStyle();
+        ImGuiIO* io = ImGui.GetIONil();
+        io->IniFilename = null;
+        io->BackendFlags |= ImGuiBackendFlags.RendererHasTextures | ImGuiBackendFlags.RendererHasVtxOffset;
+        ImGuiStyle* style = ImGui.GetStyle();
         Look.Apply(style);
-        style.FontSizeBase = settings.FontSize;
+        style->FontSizeBase = settings.FontSize;
 
         _self = GCHandle.Alloc(this);
-        ImGuiPlatformIOPtr platform = ImGui.GetPlatformIO();
-        platform.PlatformClipboardUserData = (void*)GCHandle.ToIntPtr(_self);
-        platform.PlatformSetClipboardTextFn = (delegate* unmanaged[Cdecl]<ImGuiContext*, byte*, void>)&SetClipboard;
-        platform.PlatformGetClipboardTextFn = (delegate* unmanaged[Cdecl]<ImGuiContext*, byte*>)&GetClipboard;
+        ImGuiPlatformIO* platform = ImGui.GetPlatformIONil();
+        platform->PlatformClipboardUserData = (void*)GCHandle.ToIntPtr(_self);
+        platform->PlatformSetClipboardTextFn = &SetClipboard;
+        platform->PlatformGetClipboardTextFn = &GetClipboard;
 
         _views = new CameraViews(window);
         _viewing = world.Add(_views);
@@ -175,11 +170,12 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         LoadFontAsync().FireAndForget();
     }
 
-    public void Dispose()
+    public unsafe void Dispose()
     {
         _viewing.Dispose();
         ImGui.DestroyContext(_context);
         _font?.Dispose();
+        _text.Dispose();
         _self.Free();
         if (_pasted.IsAllocated)
         {
@@ -198,7 +194,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// <summary>
     /// Hands ImGui the frame's input and starts its frame, which the widgets called in Update go into.
     /// </summary>
-    public void Update(in Frame frame)
+    public unsafe void Update(in Frame frame)
     {
         if (_settings.Font != _fontAsked)
         {
@@ -206,17 +202,18 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             LoadFontAsync().FireAndForget();
         }
 
-        ImGuiIOPtr io = ImGui.GetIO();
+        _text.Reset();
+        ImGuiIO* io = ImGui.GetIONil();
         if (_input is { } input)
         {
-            ImGuiInput.Feed(io, input);
+            ImGuiInput.Feed(io, input, _text);
         }
 
         // Laid out in window pixels: the font size says how big the UI is.
-        io.DisplaySize = new Vector2(_window.Width, _window.Height);
-        io.DisplayFramebufferScale = Vector2.One;
-        io.DeltaTime = Math.Max(frame.DeltaSeconds, 1e-4f);
-        ImGui.GetStyle().FontSizeBase = _settings.FontSize;
+        io->DisplaySize = new Vector2(_window.Width, _window.Height).Im;
+        io->DisplayFramebufferScale = Vector2.One.Im;
+        io->DeltaTime = Math.Max(frame.DeltaSeconds, 1e-4f);
+        ImGui.GetStyle()->FontSizeBase = _settings.FontSize;
         ImGui.NewFrame();
         _isInFrame = true;
         _windowsDrawn = 0;
@@ -253,7 +250,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// Ends ImGui's frame and copies what it drew for the render thread, which read the copy before until now: small
     /// enough to do while both threads hold still, rather than keep two copies.
     /// </summary>
-    public void Sync(in Frame frame)
+    public unsafe void Sync(in Frame frame)
     {
         ImGui.Render();
         _isInFrame = false;
@@ -337,24 +334,24 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _levels[_depth - 1].Closed.Add((level.Id, ImGui.GetCursorPosY()));
     }
 
-    public void Label(string text, Color? color = null)
+    public unsafe void Label(string text, Color? color = null)
     {
         ThrowIfOutsideFrame();
         if (color is not { } tint)
         {
-            ImGui.TextUnformatted(text);
+            ImGui.TextUnformatted(_text.Of(text), null);
             return;
         }
 
-        ImGui.PushStyleColor(ImGuiCol.Text, Packed(tint));
-        ImGui.TextUnformatted(text);
-        ImGui.PopStyleColor();
+        ImGui.PushStyleColorU32(ImGuiCol.Text, Packed(tint));
+        ImGui.TextUnformatted(_text.Of(text), null);
+        ImGui.PopStyleColor(1);
     }
 
-    public bool Button(string label)
+    public unsafe bool Button(string label)
     {
         ThrowIfOutsideFrame();
-        return ImGui.Button(label);
+        return ImGui.Button(_text.Of(label), default);
     }
 
     public unsafe bool Input(string label, ref string text, string? hint = null, bool focus = false)
@@ -362,20 +359,20 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ThrowIfOutsideFrame();
         if (focus && ImGui.IsWindowAppearing())
         {
-            ImGui.SetKeyboardFocusHere();
+            ImGui.SetKeyboardFocusHere(0);
         }
 
         // Text too long for the field is cut, not an error.
         Utf8.FromUtf16(text, _typed.AsSpan(0, InputBytes - 1), out _, out int written);
         _typed[written] = 0;
 
-        string id = LabelField(label);
+        byte* id = LabelField(label);
         bool isEntered;
         fixed (byte* buffer = _typed)
         {
             isEntered = hint is null
-                ? ImGui.InputText(id, buffer, InputBytes, ImGuiInputTextFlags.EnterReturnsTrue)
-                : ImGui.InputTextWithHint(id, hint, buffer, InputBytes, ImGuiInputTextFlags.EnterReturnsTrue);
+                ? ImGui.InputText(id, buffer, InputBytes, ImGuiInputTextFlags.EnterReturnsTrue, null, null)
+                : ImGui.InputTextWithHint(id, _text.Of(hint), buffer, InputBytes, ImGuiInputTextFlags.EnterReturnsTrue, null, null);
         }
 
         if (isEntered || ImGui.IsItemEdited())
@@ -395,19 +392,19 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public unsafe bool Document(string label, ref string text, bool readOnly = false)
     {
         ThrowIfOutsideFrame();
-        string id = LabelField(label);
-        if (!_documents.TryGetValue(id, out DocumentBuffer? document) || !ReferenceEquals(document.Text, text) || document.IsReadOnly != readOnly)
+        byte* id = LabelField(label);
+        if (!_documents.TryGetValue(label, out DocumentBuffer? document) || !ReferenceEquals(document.Text, text) || document.IsReadOnly != readOnly)
         {
             document = new DocumentBuffer(text, readOnly);
-            _documents[id] = document;
+            _documents[label] = document;
         }
 
-        float height = (document.Lines * ImGui.GetTextLineHeight()) + (ImGui.GetStyle().FramePadding.Y * 2);
+        float height = (document.Lines * ImGui.GetTextLineHeight()) + (ImGui.GetStyle()->FramePadding.Y * 2);
         ImGuiInputTextFlags flags = readOnly ? ImGuiInputTextFlags.ReadOnly : ImGuiInputTextFlags.None;
         bool isChanged;
         fixed (byte* buffer = document.Bytes)
         {
-            isChanged = ImGui.InputTextMultiline(id, buffer, (nuint)document.Bytes.Length, new Vector2(Stretch, height), flags);
+            isChanged = ImGui.InputTextMultiline(id, buffer, (ulong)document.Bytes.Length, new Vector2(Stretch, height).Im, flags, null, null);
         }
 
         if (!isChanged)
@@ -416,28 +413,34 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         }
 
         text = Encoding.UTF8.GetString(document.Bytes, 0, Array.IndexOf(document.Bytes, (byte)0));
-        _documents[id] = new DocumentBuffer(text, readOnly);
+        _documents[label] = new DocumentBuffer(text, readOnly);
         return true;
     }
 
-    public bool Checkbox(string label, ref bool value)
+    public unsafe bool Checkbox(string label, ref bool value)
     {
         ThrowIfOutsideFrame();
-        return ImGui.Checkbox(LabelField(label), ref value);
+        fixed (bool* flag = &value)
+        {
+            return ImGui.Checkbox(LabelField(label), flag);
+        }
     }
 
-    public bool Slider(string label, ref float value, float min = 0f, float max = 0f)
+    public unsafe bool Slider(string label, ref float value, float min = 0f, float max = 0f)
     {
         ThrowIfOutsideFrame();
         float speed = Math.Max(Math.Abs(value) * 0.01f, 0.1f);
-        return ImGui.DragFloat(LabelField(label), ref value, speed, min, max, "%.6g");
+        fixed (float* held = &value)
+        {
+            return ImGui.DragFloat(LabelField(label), held, speed, min, max, Literal("%.6g"u8), ImGuiSliderFlags.None);
+        }
     }
 
-    public bool Choice(string label, ref int index, ReadOnlySpan<string> options)
+    public unsafe bool Choice(string label, ref int index, ReadOnlySpan<string> options)
     {
         ThrowIfOutsideFrame();
-        string id = LabelField(label);
-        if (!ImGui.BeginCombo(id, index >= 0 && index < options.Length ? options[index] : string.Empty))
+        byte* id = LabelField(label);
+        if (!ImGui.BeginCombo(id, _text.Of(index >= 0 && index < options.Length ? options[index] : string.Empty), ImGuiComboFlags.None))
         {
             return false;
         }
@@ -445,7 +448,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         int chosen = index;
         for (int i = 0; i < options.Length; i++)
         {
-            if (ImGui.Selectable(options[i], i == index))
+            if (ImGui.SelectableBool(_text.Of(options[i]), i == index, ImGuiSelectableFlags.None, default))
             {
                 chosen = i;
             }
@@ -461,11 +464,12 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         return true;
     }
 
-    public bool Tabs(string label, ref int index, ReadOnlySpan<string> options)
+    public unsafe bool Tabs(string label, ref int index, ReadOnlySpan<string> options)
     {
         ThrowIfOutsideFrame();
-        uint id = ImGui.GetID(label);
-        if (!ImGui.BeginTabBar(label))
+        byte* title = _text.Of(label);
+        uint id = ImGui.GetIDStr(title);
+        if (!ImGui.BeginTabBar(title, ImGuiTabBarFlags.None))
         {
             return false;
         }
@@ -476,7 +480,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         for (int i = 0; i < options.Length; i++)
         {
             ImGuiTabItemFlags flags = i == index && index != shown ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
-            if (!ImGui.BeginTabItem(options[i], flags))
+            if (!ImGui.BeginTabItem(_text.Of(options[i]), null, flags))
             {
                 continue;
             }
@@ -496,17 +500,17 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         return true;
     }
 
-    public bool Header(string label)
+    public unsafe bool Header(string label)
     {
         ThrowIfOutsideFrame();
-        return ImGui.CollapsingHeader(label, ImGuiTreeNodeFlags.DefaultOpen);
+        return ImGui.CollapsingHeaderTreeNodeFlags(_text.Of(label), ImGuiTreeNodeFlags.DefaultOpen);
     }
 
-    public void Table(string label, ReadOnlySpan<string> columns)
+    public unsafe void Table(string label, ReadOnlySpan<string> columns)
     {
         ThrowIfOutsideFrame();
         _tableColumns = columns.Length;
-        _isTableShown = ImGui.BeginTable(label, columns.Length, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
+        _isTableShown = ImGui.BeginTable(_text.Of(label), columns.Length, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg, default, 0f);
         if (!_isTableShown)
         {
             return;
@@ -514,13 +518,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         foreach (string column in columns)
         {
-            ImGui.TableSetupColumn(column);
+            ImGui.TableSetupColumn(_text.Of(column), ImGuiTableColumnFlags.None, 0f, 0);
         }
 
         ImGui.TableHeadersRow();
     }
 
-    public void Row(ReadOnlySpan<string> cells)
+    public unsafe void Row(ReadOnlySpan<string> cells)
     {
         ThrowIfOutsideFrame();
         if (!_isTableShown)
@@ -528,11 +532,11 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             return;
         }
 
-        ImGui.TableNextRow();
+        ImGui.TableNextRow(ImGuiTableRowFlags.None, 0f);
         for (int i = 1; i < cells.Length && i < _tableColumns; i++)
         {
             ImGui.TableSetColumnIndex(i);
-            ImGui.TextUnformatted(cells[i]);
+            ImGui.TextUnformatted(_text.Of(cells[i]), null);
         }
 
         // The first cell last, spanning the row, so the row is the item a tooltip after it rests on. Rows may start
@@ -540,8 +544,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         if (cells.Length > 0 && _tableColumns > 0)
         {
             ImGui.TableSetColumnIndex(0);
-            ImGui.PushID(ImGui.TableGetRowIndex());
-            ImGui.Selectable(cells[0], false, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.Disabled);
+            ImGui.PushIDInt(ImGui.TableGetRowIndex());
+            ImGui.SelectableBool(_text.Of(cells[0]), false, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.Disabled, default);
             ImGui.PopID();
         }
     }
@@ -566,23 +570,24 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         }
     }
 
-    public bool MenuItem(string label)
+    public unsafe bool MenuItem(string label)
     {
         ThrowIfOutsideFrame();
 
         // Over the window's own items and nested views too (a document is one), not only its empty space.
         const ImGuiHoveredFlags Over = ImGuiHoveredFlags.ChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem | ImGuiHoveredFlags.AllowWhenBlockedByPopup;
-        if (ImGui.IsMouseReleased(ImGuiMouseButton.Right) && ImGui.IsWindowHovered(Over))
+        byte* menu = Literal("##context"u8);
+        if (ImGui.IsMouseReleasedNil(ImGuiMouseButton.Right) && ImGui.IsWindowHovered(Over))
         {
-            ImGui.OpenPopup(ContextMenu);
+            ImGui.OpenPopupStr(menu, ImGuiPopupFlags.None);
         }
 
-        if (!ImGui.BeginPopup(ContextMenu))
+        if (!ImGui.BeginPopup(menu, ImGuiWindowFlags.None))
         {
             return false;
         }
 
-        bool isClicked = ImGui.MenuItem(label);
+        bool isClicked = ImGui.MenuItemBool(_text.Of(label), null, false, true);
         ImGui.EndPopup();
         return isClicked;
     }
@@ -618,7 +623,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// Lays out a field: its label, up to any <c>##</c>, on the left, then the field stretched to the right edge. Returns
     /// the field's hidden ImGui id: the whole label, so fields that share what they show stay apart.
     /// </summary>
-    private string LabelField(string label)
+    private unsafe byte* LabelField(string label)
     {
         if (!_fields.TryGetValue(label, out (string Shown, string Id) field))
         {
@@ -630,23 +635,32 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         if (field.Shown.Length > 0)
         {
             ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(field.Shown);
-            ImGui.SameLine();
+            ImGui.TextUnformatted(_text.Of(field.Shown), null);
+            ImGui.SameLine(0f, -1f);
         }
 
         ImGui.SetNextItemWidth(Stretch);
-        return field.Id;
+        return _text.Of(field.Id);
     }
 
     /// <summary>
     /// The text of a tooltip begun, wrapped to a readable width, and the tooltip ended.
     /// </summary>
-    private static void WriteTooltip(string text)
+    private unsafe void WriteTooltip(string text)
     {
         ImGui.PushTextWrapPos(ImGui.GetFontSize() * 30f);
-        ImGui.TextUnformatted(text);
+        ImGui.TextUnformatted(_text.Of(text), null);
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
+    }
+
+    /// <summary>
+    /// A UTF-8 literal as the C string ImGui reads: the literal's bytes sit in the assembly's static data and never
+    /// move, so no copy and no pinning is needed. For <c>u8</c> literals only.
+    /// </summary>
+    private static unsafe byte* Literal(ReadOnlySpan<byte> utf8)
+    {
+        return (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(utf8));
     }
 
     /// <summary>
@@ -654,20 +668,20 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private static unsafe ImGuiDebugUIGem? Self()
     {
-        void* user = ImGui.GetPlatformIO().PlatformClipboardUserData;
+        void* user = ImGui.GetPlatformIONil()->PlatformClipboardUserData;
         return user == null ? null : GCHandle.FromIntPtr((nint)user).Target as ImGuiDebugUIGem;
     }
 
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    [UnmanagedCallersOnly]
     private static unsafe void SetClipboard(ImGuiContext* context, byte* text)
     {
         if (Self() is { } gem)
         {
-            gem._window.Clipboard = Marshal.PtrToStringUTF8((nint)text) ?? string.Empty;
+            gem._window.Clipboard = CString.Read(text);
         }
     }
 
-    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    [UnmanagedCallersOnly]
     private static unsafe byte* GetClipboard(ImGuiContext* context)
     {
         if (Self() is not { } gem)
@@ -711,24 +725,25 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             float step = _settings.FontSize * 2;
             if (_placed.Add(title))
             {
-                ImGui.SetNextWindowPos(new Vector2(step * _placed.Count, step * _placed.Count), ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowPos(new Vector2(step * _placed.Count, step * _placed.Count).Im, ImGuiCond.FirstUseEver, default);
             }
 
             if (scrollable)
             {
-                ImGui.SetNextWindowSize(new Vector2(32, 18) * _settings.FontSize, ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowSize((new Vector2(32, 18) * _settings.FontSize).Im, ImGuiCond.FirstUseEver);
             }
 
-            ImGui.Begin(title, visible, scrollable ? ImGuiWindowFlags.None : ImGuiWindowFlags.AlwaysAutoResize);
+            ImGui.Begin(_text.Of(title), visible, scrollable ? ImGuiWindowFlags.None : ImGuiWindowFlags.AlwaysAutoResize);
             return;
         }
 
         // As tall as the parent's room less what followed this view last frame: all of it, the first time. The view's
         // id is the one ImGui gives it, from the title and the window it is in.
-        level.Id = ImGui.GetID(title);
+        byte* name = _text.Of(title);
+        level.Id = ImGui.GetIDStr(name);
         float reserved = _reserved.GetValueOrDefault(level.Id);
         ImGuiWindowFlags flags = scrollable ? ImGuiWindowFlags.HorizontalScrollbar : ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
-        ImGui.BeginChild(title, new Vector2(0, -reserved), ImGuiChildFlags.Borders, flags);
+        ImGui.BeginChildStr(name, new Vector2(0, -reserved).Im, ImGuiChildFlags.Borders, flags);
     }
 
     /// <summary>
@@ -748,14 +763,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// its tooltip while the mouse rests on the plate and on no window. ImGui draws its background under every window,
     /// so the windows stay readable over what is reported.
     /// </summary>
-    private void DrawWorld()
+    private unsafe void DrawWorld()
     {
         if (_world.Count == 0 || _views.Views.Count == 0)
         {
             return;
         }
 
-        ImDrawListPtr under = ImGui.GetBackgroundDrawList();
+        ImDrawList* under = ImGui.GetBackgroundDrawList(null);
         bool canHover = !ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow);
         foreach (ShownReport report in _world)
         {
@@ -766,13 +781,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
                     continue;
                 }
 
-                Vector2 size = ImGui.CalcTextSize(report.Label);
+                byte* label = _text.Of(report.Label);
+                Vector2 size = TextSize(label);
                 Vector2 corner = center - (size * 0.5f);
                 Vector2 min = corner - _platePadding;
                 Vector2 max = corner + size + _platePadding;
-                under.AddRectFilled(min, max, Plate, 3f);
-                under.AddText(corner, Packed(report.Color), report.Label);
-                if (report.Tooltip is { } tooltip && canHover && ImGui.IsMouseHoveringRect(min, max, false))
+                ImDrawList.AddRectFilled(under, min.Im, max.Im, Plate, 3f, ImDrawFlags.None);
+                ImDrawList.AddTextVec2(under, corner.Im, Packed(report.Color), label, null);
+                if (report.Tooltip is { } tooltip && canHover && ImGui.IsMouseHoveringRect(min.Im, max.Im, false))
                 {
                     ImGui.BeginTooltip();
                     WriteTooltip(tooltip);
@@ -785,14 +801,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// The lines down the left of the window, oldest first, as many of the last as fit, with a line's tooltip while the
     /// mouse rests on it and on no window.
     /// </summary>
-    private void DrawLines()
+    private unsafe void DrawLines()
     {
         if (_lines.Count == 0)
         {
             return;
         }
 
-        ImDrawListPtr under = ImGui.GetBackgroundDrawList();
+        ImDrawList* under = ImGui.GetBackgroundDrawList(null);
         bool canHover = !ImGui.IsWindowHovered(ImGuiHoveredFlags.AnyWindow);
         float lineHeight = ImGui.GetTextLineHeightWithSpacing();
         int fitting = Math.Max(1, (int)((_window.Height - (2 * _linesMargin.Y)) / lineHeight));
@@ -800,10 +816,11 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         for (int i = Math.Max(0, _lines.Count - fitting); i < _lines.Count; i++)
         {
             ShownReport line = _lines[i];
-            Vector2 size = ImGui.CalcTextSize(line.Label);
-            under.AddRectFilled(at - _platePadding, at + size + _platePadding, Plate, 3f);
-            under.AddText(at, Packed(line.Color), line.Label);
-            if (line.Tooltip is { } tooltip && canHover && ImGui.IsMouseHoveringRect(at, at + size, false))
+            byte* label = _text.Of(line.Label);
+            Vector2 size = TextSize(label);
+            ImDrawList.AddRectFilled(under, (at - _platePadding).Im, (at + size + _platePadding).Im, Plate, 3f, ImDrawFlags.None);
+            ImDrawList.AddTextVec2(under, at.Im, Packed(line.Color), label, null);
+            if (line.Tooltip is { } tooltip && canHover && ImGui.IsMouseHoveringRect(at.Im, (at + size).Im, false))
             {
                 ImGui.BeginTooltip();
                 WriteTooltip(tooltip);
@@ -811,6 +828,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
             at.Y += lineHeight;
         }
+    }
+
+    /// <summary>
+    /// How big a C string draws in the current font, unwrapped.
+    /// </summary>
+    private static unsafe Vector2 TextSize(byte* text)
+    {
+        return ImGui.CalcTextSize(text, null, false, -1f).Vector;
     }
 
     /// <summary>

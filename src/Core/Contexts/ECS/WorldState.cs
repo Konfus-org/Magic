@@ -8,9 +8,9 @@ namespace Magic.Contexts.ECS;
 /// <summary>
 /// The world as data (<see cref="World.Save"/>), which outlives the run that made it: the domains open, every entity
 /// with its components and its scripts, and the frame clock, which <see cref="World.RestoreAsync"/> puts back. The
-/// engine carries one across a restart (<see cref="Lifetime.Restart"/>). It names a component by its type's name and
-/// a script by its asset, and holds their values as JSON, so it keeps nothing of the code that made it: it restores
-/// into the code loaded then, as a file read would, which is what lets a restart load code again.
+/// engine carries one across a restart (<see cref="Lifetime.Restart"/>). It names a component by its type's name
+/// and a script by its asset, and holds their values as JSON, so it keeps nothing of the code that made it: it
+/// restores into the code loaded then, as a file read would, which is what lets a restart load code again.
 /// </summary>
 public sealed record WorldState
 {
@@ -38,10 +38,15 @@ public sealed record DomainState(Handle<Domain> Domain, DomainOpenMode Mode, IRe
 
 /// <summary>
 /// An entity of the saved world: its id, its own within the save and what a component or a script refers to it by
-/// (an <see cref="Entity"/> as JSON is its id), its components as JSON by their names (<see cref="Code.Component"/>),
-/// and its scripts.
+/// (an <see cref="Entity"/> as JSON is its id), its components and its scripts.
 /// </summary>
-public sealed record EntityState(int Id, IReadOnlyDictionary<string, JsonElement> Components, IReadOnlyList<ScriptState> Scripts);
+public sealed record EntityState(int Id, IReadOnlyList<ComponentState> Components, IReadOnlyList<ScriptState> Scripts);
+
+/// <summary>
+/// A component on an entity of the saved world: which, by its type's name (<see cref="World.Component"/>), and its
+/// fields as JSON.
+/// </summary>
+public sealed record ComponentState(string Type, JsonElement Values);
 
 /// <summary>
 /// A script on an entity of the saved world: which, and its values as JSON by name, as the gem that runs scripts

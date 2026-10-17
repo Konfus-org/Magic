@@ -6,7 +6,7 @@ namespace Magic.SdlPlatform;
 
 /// <summary>
 /// The window SdlPlatform opens, and how it reads the mouse and gamepads. Set in the project's
-/// <c>Presets/Default.preset</c>, by another preset, or with <c>--set SdlPlatform.width=...</c>. Sizes are in screen
+/// <c>Presets/Default.preset</c>, by another preset, or with <c>--set SdlPlatform.Width=...</c>. Sizes are in screen
 /// points, which are pixels at 100% display scaling. Changed while running, the window is resized; dragging the window
 /// changes it and leaves them as they were. The input settings take from the next frame.
 /// </summary>

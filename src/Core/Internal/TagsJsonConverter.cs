@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 
 namespace Magic.Internal;

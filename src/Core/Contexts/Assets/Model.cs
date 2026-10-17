@@ -1,3 +1,4 @@
+using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Interfaces;
 using Magic.Services;

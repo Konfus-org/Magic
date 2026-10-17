@@ -1,0 +1,22 @@
+<Project>
+  <!-- Every test project (tests/README.md): what they all share, so a <Project>.Tests csproj names only its root
+       namespace and what it tests. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- xunit v3 tests are a program of their own, which dotnet test runs. -->
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- The program lands under Tests/ beside Magic, apart from what ships (the root Directory.Build.props places it
+         there); what it writes when run goes under Build too. -->
+    <TestingPlatformCommandLineArguments>--results-directory "$(MSBuildThisFileDirectory)../Build/TestOutput/$(MSBuildProjectName)"</TestingPlatformCommandLineArguments>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

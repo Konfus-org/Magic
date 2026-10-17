@@ -30,7 +30,9 @@ public sealed class Project
     public Handle<Prefab> Player { get; set; }
 
     /// <summary>
-    /// The gems to run, by name. Where dependencies do not decide, gems are made in this order.
+    /// The gems to run, by name, each with the version it must be when that matters: <c>Name</c> runs whatever
+    /// version of that gem is there, <c>Name@1.2</c> only a 1.2.x, and a gem of another version is not made. Where
+    /// dependencies do not decide, gems are made in this order.
     /// </summary>
     public IReadOnlyList<string> Gems { get; set; } = [];
 

@@ -1,7 +1,9 @@
 using System.Numerics;
+using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Interfaces;
+using Magic.Samples.Assets.Components;
 
 namespace Magic.Samples.Assets.Scripts;
 
@@ -20,13 +22,4 @@ internal sealed class SpinSystem : IParallelSystemScript<Transform, Spin>
             transforms[i].Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitY, radians) * transforms[i].Rotation);
         }
     }
-}
-
-/// <summary>
-/// Turns its entity about the world's up axis, as <see cref="SpinSystem"/> runs: a component, which a prefab names as
-/// <c>"Spin": { "degreesPerSecond": 45 }</c>.
-/// </summary>
-internal record struct Spin : IComponent
-{
-    public float DegreesPerSecond;
 }

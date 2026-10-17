@@ -1,7 +1,7 @@
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
 
-namespace Magic.Contexts.ECS;
+namespace Magic.Contexts.Components;
 
 /// <summary>
 /// Draws a model where its entity's <see cref="Transform"/> puts it, each of the model's meshes with the material in

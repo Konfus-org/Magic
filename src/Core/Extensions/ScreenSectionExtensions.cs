@@ -1,4 +1,4 @@
-using Magic.Contexts.ECS;
+using Magic.Contexts.Components;
 using Point = System.Drawing.Point;
 using Rectangle = System.Drawing.Rectangle;
 using Size = System.Drawing.Size;

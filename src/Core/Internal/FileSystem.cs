@@ -28,7 +28,7 @@ internal sealed class FileSystem : IFileSystem
         List<string> found = [];
         foreach (string file in Directory.EnumerateFiles(folder))
         {
-            if (string.Equals(Path.GetExtension(file), extension, StringComparison.OrdinalIgnoreCase))
+            if (extension.Length == 0 || string.Equals(Path.GetExtension(file), extension, StringComparison.OrdinalIgnoreCase))
             {
                 found.Add(file);
             }
@@ -47,7 +47,7 @@ internal sealed class FileSystem : IFileSystem
         List<string> found = [];
         foreach (string file in Directory.EnumerateFiles(folder, "*", _under))
         {
-            if (string.Equals(Path.GetExtension(file), extension, StringComparison.OrdinalIgnoreCase))
+            if (extension.Length == 0 || string.Equals(Path.GetExtension(file), extension, StringComparison.OrdinalIgnoreCase))
             {
                 found.Add(Relative(folder, file));
             }

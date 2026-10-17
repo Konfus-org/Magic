@@ -1,17 +1,24 @@
 <!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- DXC and SDL_shadercross are C APIs: sources, results and DXC's COM interfaces are pointers. -->
+    <Description>HLSL to SPIR-V, DXIL or Metal, through DirectXShaderCompiler and SPIRV-Cross: provides IShaderCompiler.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- DXC and SPIRV-Cross are C APIs: sources, results and DXC's COM interfaces are pointers. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!-- DXC is a COM API, bound by hand in the gem, so only its library is built, from Microsoft's repository with its
+       own predefined parameters, SPIR-V code generation and no tests: an LLVM, so the one build that takes long (and
+       Python 3). SPIRV-Cross's C API is generated and built from Khronos's repository. -->
   <ItemGroup>
-    <!-- SDL_shadercross is built on SDL: it frees what it returns with SDL_free and reads options as SDL properties. -->
-    <PackageReference Include="ppy.SDL3-CS" />
-    <!-- DXC, SPIRV-Cross and SDL_shadercross, built for each OS; the gem's load context picks the machine's. -->
-    <PackageReference Include="SDL3-CS.Linux.Shadercross" />
-    <PackageReference Include="SDL3-CS.MacOS.Shadercross" />
-    <PackageReference Include="SDL3-CS.Windows.Shadercross" />
+    <NativeLibrary Include="dxcompiler" Repository="https://github.com/microsoft/DirectXShaderCompiler" Commit="v1.9.2609" CmakeTarget="dxcompiler"
+                   Cmake="-C {source}/cmake/caches/PredefinedParams.cmake -DHLSL_INCLUDE_TESTS=OFF -DSPIRV_BUILD_TESTS=OFF -DLLVM_INCLUDE_TESTS=OFF -DCLANG_INCLUDE_TESTS=OFF -DLLVM_ENABLE_ASSERTIONS=OFF -DHLSL_BUILD_DXILCONV=OFF -DLLVM_APPEND_VC_REV=OFF" />
+    <NativeLibrary Include="spirv-cross-c-shared" Repository="https://github.com/KhronosGroup/SPIRV-Cross" Commit="vulkan-sdk-1.4.363.0"
+                   Headers="spirv_cross_c.h" IncludePath="." Prefixes="spvc=Spvc;SPVC=Spvc;Spv=Spv;SPV=Spv" Class="Spvc"
+                   Cmake="-DSPIRV_CROSS_SHARED=ON -DSPIRV_CROSS_STATIC=OFF -DSPIRV_CROSS_CLI=OFF -DSPIRV_CROSS_ENABLE_TESTS=OFF" />
     <!-- XxHash3: what names a compiled shader in the cache, and the version of its source. -->
     <PackageReference Include="System.IO.Hashing" />
   </ItemGroup>

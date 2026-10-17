@@ -1,7 +1,9 @@
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 using Magic.Interfaces;
+using Magic.Services;
 
 namespace Magic.Internal;
 
@@ -9,9 +11,11 @@ namespace Magic.Internal;
 /// Where one gem's assemblies load: the gem, its NuGet dependencies and its native libraries, all from its folder.
 /// What the gem does not carry (Magic, the framework) comes from the host, so a gem and Core share one
 /// <see cref="IGem"/>, and two gems can depend on different versions of the same package. A native library is the
-/// exception: it loads once, from the folder of the first gem that binds it, and every gem after shares that copy.
+/// exception: it loads once, from the folder of the first gem that binds it, and every gem after shares that copy. One
+/// is found by the gem's dependency file, which lists what its packages brought, or else under the gem's
+/// <c>runtimes/&lt;rid&gt;/native/</c>, where the build puts the binaries a gem declares itself.
 /// </summary>
-internal sealed class GemLoadContext(string gemPath) : AssemblyLoadContext(Path.GetFileNameWithoutExtension(gemPath))
+internal sealed class GemLoadContext(string gemPath, IFileSystem files) : AssemblyLoadContext(Path.GetFileNameWithoutExtension(gemPath))
 {
     /// <summary>
     /// Native libraries by the name gems bind them by. Two copies of one library would each keep state of their own: a
@@ -35,14 +39,39 @@ internal sealed class GemLoadContext(string gemPath) : AssemblyLoadContext(Path.
                 return loaded;
             }
 
-            if (_resolver.ResolveUnmanagedDllToPath(unmanagedDllName) is not { } path)
+            if ((_resolver.ResolveUnmanagedDllToPath(unmanagedDllName) ?? Carried(unmanagedDllName)) is not { } path)
             {
                 return 0;
             }
 
+            Debugging.Verbose($"Native library {unmanagedDllName} loads from {path}.");
             nint handle = LoadUnmanagedDllFromPath(path);
             _natives[unmanagedDllName] = handle;
             return handle;
         }
+    }
+
+    /// <summary>
+    /// The binary for this machine the gem carries under <c>runtimes/&lt;rid&gt;/native/</c>: the file named like
+    /// the library, with or without the <c>lib</c> Unix puts in front. Null when the gem carries none.
+    /// </summary>
+    private string? Carried(string name)
+    {
+        string folder = files.Combine(files.Parent(gemPath), "runtimes", RuntimeInformation.RuntimeIdentifier, "native");
+        if (!files.FolderExists(folder))
+        {
+            return null;
+        }
+
+        foreach (string file in files.Find(folder, ""))
+        {
+            string stem = Path.GetFileNameWithoutExtension(file);
+            if (string.Equals(stem, name, StringComparison.OrdinalIgnoreCase) || string.Equals(stem, "lib" + name, StringComparison.OrdinalIgnoreCase))
+            {
+                return file;
+            }
+        }
+
+        return null;
     }
 }

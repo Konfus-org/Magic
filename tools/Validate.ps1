@@ -44,8 +44,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 $root = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $root 'Magic.slnx'
-$magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'net10.0') $Configuration) 'bin'
-$magic = Join-Path $magic 'Magic'
+$magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 if (Test-Path "$magic.exe") { $magic = "$magic.exe" }
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 

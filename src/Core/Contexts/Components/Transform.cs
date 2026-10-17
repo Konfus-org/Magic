@@ -2,7 +2,7 @@ using System.Numerics;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 
-namespace Magic.Contexts.ECS;
+namespace Magic.Contexts.Components;
 
 /// <summary>
 /// Where an entity is, which way it faces and how big it is, in metres. +Y is up, +X right and +Z forward, left-handed:

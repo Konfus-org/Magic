@@ -1,5 +1,6 @@
 using System.Numerics;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;

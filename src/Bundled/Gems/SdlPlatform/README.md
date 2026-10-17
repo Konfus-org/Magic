@@ -1,6 +1,7 @@
 # SdlPlatform
 
-The window and input, through SDL3 ([ppy.SDL3-CS](https://github.com/ppy/SDL3-CS)): provides `IWindow` and `IInput`.
+The window and input, through SDL3, called through its generated API ([Gems](../README.md#native-libraries)), which the SDL bindings gem provides:
+provides `IWindow` and `IInput`.
 
 ## Settings
 
@@ -53,6 +54,7 @@ leaves the size settings as they were; the input settings take from the next fra
 
 ## Natives
 
-ppy.SDL3-CS carries SDL for every platform it supports, and the gem's load context picks the one for the machine. The
-SDL it loads is every gem's: a gem that binds SDL after it gets the library already loaded (`GemLoadContext`), which
-is how a GPU gem draws into this gem's window.
+The SDL bindings gem this one references carries SDL for the machine it was built on, which the gem's load context loads.
+The SDL it loads is every gem's: a gem that binds SDL after it gets the library already loaded (`GemLoadContext`),
+which is how a GPU gem draws into this gem's window. As it starts, the gem checks that the SDL it got is at least the
+version the binding was generated from, the oldest that serves it; SDL keeps its ABI, so a newer one does.

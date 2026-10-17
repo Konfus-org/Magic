@@ -4,8 +4,10 @@ namespace Magic.Contexts.Assets;
 
 /// <summary>
 /// A C# script: a <c>.cs</c> file whose class, named like the file, is an <see cref="IScript"/>. The project's code, or
-/// the gem it belongs to, compiles it; the asset is that class, found among the code loaded, which
-/// <see cref="IScripts"/> makes scripts of.
+/// the gem it belongs to, compiles it; the gem that runs scripts reads the asset as that class, found by its name in
+/// the code loaded (<see cref="Services.Assemblies"/>). A prefab names a script by this asset's id, as it names any
+/// asset, so the file can be renamed with its class and nothing that names it notices; the project's are read again
+/// when its code is built.
 /// </summary>
 public sealed class Script : IAsset<Script>
 {
@@ -16,5 +18,5 @@ public sealed class Script : IAsset<Script>
     /// <summary>
     /// The class the file declares.
     /// </summary>
-    public required Type Class { get; init; }
+    public required Type Type { get; init; }
 }

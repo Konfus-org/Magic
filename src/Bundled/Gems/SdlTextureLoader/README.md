@@ -1,6 +1,7 @@
 # SdlTextureLoader
 
-Images to textures, through SDL_image ([ppy.SDL3_image-CS](https://github.com/ppy/SDL3-CS)): provides
+Images to textures, through SDL_image, called through its generated API ([Gems](../README.md#native-libraries)), which the SDL bindings gem provides:
+provides
 `IAssetLoader<Texture>`. What a texture's `.meta` holds is in [Textures](../../Resources/Textures/README.md).
 
 ## Behaviour
@@ -13,6 +14,5 @@ Images to textures, through SDL_image ([ppy.SDL3_image-CS](https://github.com/pp
 
 ## Natives
 
-ppy.SDL3_image-CS carries SDL_image, and the SDL it is built on, for every platform it supports, and the gem's load
-context picks the machine's. SDL is called before SDL_image, so SDL_image binds to the SDL every gem shares
+The SDL bindings gem carries SDL_image and SDL for this machine, which the gem's load context loads. SDL is called before SDL_image, so SDL_image binds to the SDL every gem shares
 (`GemLoadContext`).

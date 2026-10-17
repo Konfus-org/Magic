@@ -20,11 +20,23 @@
     <NuGetAuditLevel>low</NuGetAuditLevel>
   </PropertyGroup>
 
-  <!-- Output: Build/obj/<Project>/, and Build/net10.0/<Configuration>/bin/ for Magic (gems go under its Gems/). -->
+  <!-- Output. Build/bin/<Configuration>/ is Magic's folder, and where it loads the rest from: the bundled gems from
+       Gems/<Name>/, the bundled scripts from Resources/, a project's code from Projects/<Name>/; tests and the build's
+       tools, which never ship, go under Tests/<Name>/ and Tools/<Name>/. A project is placed by where its source is,
+       here rather than in its own folder, because MSBuild fixes the intermediate folder before any project file or
+       nearer Directory.Build.props is read. Build/obj/<Configuration>/ mirrors it: a project's intermediate files are
+       where its output is. -->
   <PropertyGroup>
-    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)Build/obj/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
-    <MagicBin>$(MSBuildThisFileDirectory)Build/$(TargetFramework)/$(Configuration)/bin/</MagicBin>
-    <OutputPath>$(MagicBin)</OutputPath>
+    <MagicSource>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').Replace('\', '/'))/</MagicSource>
+    <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Gems/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Resources/'))">Resources/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('samples/'))">Projects/$(MSBuildProjectName)/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('tests/'))">Tests/$(MSBuildProjectName)/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('tools/'))">Tools/$(MSBuildProjectName)/</MagicOutput>
+    <MagicBin>$(MSBuildThisFileDirectory)Build/bin/$(Configuration)/</MagicBin>
+    <OutputPath>$(MagicBin)$(MagicOutput)</OutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)Build/obj/$(Configuration)/$(MagicOutput)</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
 

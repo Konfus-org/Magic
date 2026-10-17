@@ -66,6 +66,41 @@ public static class Json
         return value is null ? Result.Failure<T>("it is null.") : Result.Success(value);
     }
 
+    /// <summary>
+    /// <paramref name="json"/> as a <paramref name="type"/> known only at run time, as a saved world holds a component
+    /// by its type's name, or why it is not one.
+    /// </summary>
+    public static Result<object> Read(JsonElement json, Type type)
+    {
+        object? value;
+        try
+        {
+            value = json.Deserialize(type, Options);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or JsonException)
+        {
+            return Result.Failure<object>(ex.Message);
+        }
+
+        return value is null ? Result.Failure<object>("it is null.") : Result.Success(value);
+    }
+
+    /// <summary>
+    /// <paramref name="value"/>, a <paramref name="type"/> known only at run time, as JSON in the dialect, or why JSON
+    /// cannot hold it: a type the serializer does not take, or one that refers to itself.
+    /// </summary>
+    public static Result<JsonElement> Write(object? value, Type type)
+    {
+        try
+        {
+            return Result.Success(JsonSerializer.SerializeToElement(value, type, Options));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or NotSupportedException or JsonException)
+        {
+            return Result.Failure<JsonElement>(ex.Message);
+        }
+    }
+
     private static JsonSerializerOptions Dialect()
     {
         JsonSerializerOptions options = new()

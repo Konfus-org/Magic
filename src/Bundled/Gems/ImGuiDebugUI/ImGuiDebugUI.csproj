@@ -1,12 +1,22 @@
 <!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <Description>The debug UI, drawn with Dear ImGui: provides IDebugUI.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <!-- Dear ImGui is a C API: its context, draw lists, fonts and textures are pointers. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!-- Dear ImGui through cimgui, its C API, built here from cimgui's repository with the Dear ImGui it was generated
+       from, with 32-bit characters, as the header is read with, and without the obsolete API. -->
   <ItemGroup>
-    <!-- Dear ImGui (cimgui) for each OS, which the gem points the bindings' own loader at. -->
-    <PackageReference Include="Hexa.NET.ImGui" />
+    <NativeLibrary Include="cimgui" Repository="https://github.com/cimgui/cimgui" Commit="1.92.9dock"
+                   Headers="cimgui.h" IncludePath="."
+                   Defines="CIMGUI_DEFINE_ENUMS_AND_STRUCTS;IMGUI_USE_WCHAR32;IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1"
+                   Prefixes="ig=ImGui;IMGUI=ImGui" Class="ImGui"
+                   Cmake="-DIMGUI_WCHAR32=ON" />
   </ItemGroup>
 </Project>

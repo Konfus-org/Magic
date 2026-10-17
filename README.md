@@ -10,17 +10,33 @@ are in the [code standards](CODESTANDARDS.md).
 
 ## Building and running
 
-Needs the .NET 10 SDK. Configurations: `Debug` (integer overflow checked), `Optimize` (optimised, full symbols),
+### Requirements
+
+- The .NET 10 SDK; `global.json` names the version, and a later feature band of it serves.
+- git, CMake, Python 3 and a C++ toolchain: every native library is built from its own repository by the first
+  build ([Gems](src/Bundled/Gems/README.md#native-libraries)). On Windows the toolchain is Visual Studio with its
+  "Desktop development with C++" workload, which brings the Windows SDK and the DIA SDK that DirectXShaderCompiler
+  needs; on Linux, gcc or clang with SDL's build dependencies (the X11 and Wayland development packages); on macOS,
+  the Xcode command line tools. The first build takes half an hour to an hour, almost all of it DirectXShaderCompiler, an LLVM, and leaves
+  about 6 GB of sources and build files under `Build/NativeLibs/`; after that nothing is built again until a
+  library's commit changes.
+- An internet connection for the first build, which clones the libraries.
+- A GPU with a driver for Vulkan 1.1, Direct3D 12 or Metal, which the engine renders through.
+- PowerShell for the scripts under `tools/`: `pwsh` on Linux and macOS, and Windows PowerShell 5.1 serves on Windows.
+
+Configurations: `Debug` (integer overflow checked), `Optimize` (optimised, full symbols),
 `Release` (optimised, no symbols). Only a release presents on the display's refresh by default; the others draw
 uncapped, so the frame rate they show is the true one.
 
 ```powershell
 dotnet build Magic.slnx
 dotnet test Magic.slnx
-Build/net10.0/Debug/bin/Magic --project samples
+Build/bin/Debug/Magic --project samples
 ```
 
-Building `src/Core` alone builds the bundled gems and resources with it, so `dotnet run --project src/Core` or a run
+The first build clones the native libraries into `Build/NativeLibs/` (`MagicNativeLibs` moves it), builds them for
+this machine and generates their C# from the headers ([Gems](src/Bundled/Gems/README.md#native-libraries)); after
+that a build touches them only when one's commit changes. Building `src/Core` alone builds the bundled gems and resources with it, so `dotnet run --project src/Core` or a run
 from an IDE never loads a gem left stale against a new Magic; the solution build adds the samples' own code. Run from
 an IDE or with `dotnet run --project src/Core`, Magic opens the Samples project. Only a `Release`
 build copies the engine's and the gems' assets beside Magic; the others read them where they are in the repository, so
@@ -52,7 +68,9 @@ windows and their events to and so becomes the render thread:
 2. **Makes the gems**, once it has loaded the project's own code, if it has any: its scripts and their components,
    which the csproj beside its `.magic` file compiles from its `Assets/` ([Core's README](src/Core/README.md#the-project-file)).
    Gem `Name` is `Gems/Name/Name.dll` beside Magic, loaded into its own `AssemblyLoadContext`
-   with its own dependencies, and holds exactly one class that implements `IGem`. That class's constructor
+   with its own dependencies, and holds exactly one class that implements `IGem`. Its csproj says who made it, what
+   it is and its version, which the log names as it starts; a project that needs a particular version lists the gem
+   as `Name@1.2`, and any other version is not made. That class's constructor
    parameters are what it needs: Core's services, the assets among them, interfaces other gems implement, and its own
    settings object, filled from its defaults, then the project's own preset, the preset applied over it, then `--set`,
    and changed while running through Core's `Settings` ([Core's README](src/Core/README.md#gem-settings)). Every other
@@ -85,8 +103,8 @@ src/Bundled/Gems/<Name>/   the gems that ship with Magic, one project each
 src/Bundled/Resources/     the engine's own assets, its bundled gems' among them, as one project
 samples/                   sample projects, each a .magic file, its Assets/ (data, settings and scripts), and a csproj
 tests/                     tests, one project per project tested
-tools/                     what the build runs, such as the bindings generator, and the scripts that check a change; nothing here ships
-Build/                     build output, not in git
+tools/                     what the build runs, such as the native bindings generator, and the scripts that check a change; nothing here ships
+Build/                     build output, not in git: bin/ and obj/ by configuration, and what the tests write
 ```
 
 Each project has a README with its details. Core files its code by kind, one folder and namespace each, and a gem is

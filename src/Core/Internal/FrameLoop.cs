@@ -3,6 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Reflection;
 using Magic.Contexts.Frames;
+using Magic.Contexts.Telemetry;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -30,9 +31,12 @@ internal sealed class FrameLoop : IDisposable
     /// </summary>
     private const int MaxFixedSteps = 8;
 
-    private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram("magic.core.frame.duration", "s", "Time from one frame's start to the next's.", tags: null, advice: Metrics.FrameBuckets);
-    private static readonly Histogram<double> _renderWait = Metrics.Meter.CreateHistogram("magic.core.frame.render_wait.duration", "s", "How long the main thread waited for the render thread to finish the frame before, ahead of Sync.", tags: null, advice: Metrics.FrameBuckets);
-    private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram("magic.core.gem.hook.duration", "s", "How long one gem's hook took, tagged with the gem's name and the phase.", tags: null, advice: Metrics.FrameBuckets);
+    private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram(
+        Metrics.FrameDuration, "s", "Time from one frame's start to the next's.", tags: null, advice: Metrics.FrameBuckets);
+    private static readonly Histogram<double> _renderWait = Metrics.Meter.CreateHistogram(
+        Metrics.RenderWaitDuration, "s", "How long the main thread waited for the render thread to finish the frame before, ahead of Sync.", tags: null, advice: Metrics.FrameBuckets);
+    private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram(
+        Metrics.HookDuration, "s", "How long one gem's hook took, tagged with the gem's name and the phase.", tags: null, advice: Metrics.FrameBuckets);
     private static readonly string[] _phases = Enum.GetNames<Phase>();
 
     private readonly IGem[] _gems;
@@ -100,6 +104,7 @@ internal sealed class FrameLoop : IDisposable
         _frameLimit = frameLimit;
         _renderFrame = RenderFrame;
         _fixedSeconds = startSeconds;
+
         Seconds = startSeconds;
     }
 
@@ -144,10 +149,12 @@ internal sealed class FrameLoop : IDisposable
 
             _threads.RunMainWork();
             _events.Deliver();
+
             RunPhase(Phase.Update, frame);
             RunFixedSteps(frame);
             RunPhase(Phase.LateUpdate, frame);
             WaitForRender();
+
             _settings.ApplyChanges();
             RunPhase(Phase.Sync, frame);
 
@@ -262,7 +269,7 @@ internal sealed class FrameLoop : IDisposable
             // Outside the try: a listener that throws is its own failure, not this gem's.
             if (timed)
             {
-                _hookDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new("magic.core.gem.name", _names[i]), new("magic.core.frame.phase", _phases[(int)phase]));
+                _hookDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new(Metrics.GemNameTag, _names[i]), new(Metrics.FramePhaseTag, _phases[(int)phase]));
             }
         }
     }
