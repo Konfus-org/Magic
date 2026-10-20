@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
+using Magic.Internal;
 
 namespace Magic.Services;
 
@@ -30,13 +31,11 @@ public sealed class Caches
 
     private readonly IFileSystem _files;
     private readonly IServiceProvider _services;
-    private readonly string _folder;
 
     internal Caches(IFileSystem files, IServiceProvider services)
     {
         _files = files;
         _services = services;
-        _folder = files.Combine(AppContext.BaseDirectory, "Cache");
     }
 
     /// <summary>
@@ -45,7 +44,7 @@ public sealed class Caches
     /// </summary>
     public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, CancellationToken cancel)
     {
-        if (CacheOf<T>() is not { } cache)
+        if (_services.Provided<ICache<T>>(out _) is not { } cache)
         {
             return Result.Failure<T>($"no gem the project lists caches {typeof(T).Name}s.");
         }
@@ -76,7 +75,7 @@ public sealed class Caches
     /// </summary>
     public async Task WriteAsync<T>(ulong key, ulong version, T value, CancellationToken cancel)
     {
-        if (CacheOf<T>() is not { } cache)
+        if (_services.Provided<ICache<T>>(out _) is not { } cache)
         {
             Debugging.Warn($"No gem the project lists caches {typeof(T).Name}s, so one is not kept.");
             return;
@@ -91,27 +90,11 @@ public sealed class Caches
     }
 
     /// <summary>
-    /// The <see cref="ICache{T}"/> a gem provides; null when none does, or the gem that does was not made, which Core
-    /// has said why.
-    /// </summary>
-    private ICache<T>? CacheOf<T>()
-    {
-        try
-        {
-            return _services.GetService(typeof(ICache<T>)) as ICache<T>;
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is.
+    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is: beside Magic, in <c>Cache/</c>.
     /// </summary>
     private string FileOf<T>(ulong key)
     {
-        return _files.Combine(_folder, typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
+        return _files.Combine(AppContext.BaseDirectory, "Cache", typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
     }
 
     /// <summary>

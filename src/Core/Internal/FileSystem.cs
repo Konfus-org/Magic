@@ -28,7 +28,7 @@ internal sealed class FileSystem : IFileSystem
         List<string> found = [];
         foreach (string file in Directory.EnumerateFiles(folder))
         {
-            if (extension.Length == 0 || string.Equals(Path.GetExtension(file), extension, StringComparison.OrdinalIgnoreCase))
+            if (HasExtension(file, extension))
             {
                 found.Add(file);
             }
@@ -47,7 +47,7 @@ internal sealed class FileSystem : IFileSystem
         List<string> found = [];
         foreach (string file in Directory.EnumerateFiles(folder, "*", _under))
         {
-            if (extension.Length == 0 || string.Equals(Path.GetExtension(file), extension, StringComparison.OrdinalIgnoreCase))
+            if (HasExtension(file, extension))
             {
                 found.Add(Relative(folder, file));
             }
@@ -102,11 +102,7 @@ internal sealed class FileSystem : IFileSystem
         {
             return Result.Success(File.ReadAllBytes(path));
         }
-        catch (IOException ex)
-        {
-            return Result.Failure<byte[]>(ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return Result.Failure<byte[]>(ex.Message);
         }
@@ -118,11 +114,7 @@ internal sealed class FileSystem : IFileSystem
         {
             return Result.Success(await File.ReadAllBytesAsync(path, cancel).ConfigureAwait(false));
         }
-        catch (IOException ex)
-        {
-            return Result.Failure<byte[]>(ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return Result.Failure<byte[]>(ex.Message);
         }
@@ -139,11 +131,7 @@ internal sealed class FileSystem : IFileSystem
             File.Move(beside, path, overwrite: true);
             return Result.Success();
         }
-        catch (IOException ex)
-        {
-            return Result.Failure(ex.Message);
-        }
-        catch (UnauthorizedAccessException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return Result.Failure(ex.Message);
         }
@@ -168,14 +156,19 @@ internal sealed class FileSystem : IFileSystem
             File.Delete(path);
             return Result.Success();
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return Result.Failure(ex.Message);
         }
-        catch (UnauthorizedAccessException ex)
-        {
-            return Result.Failure(ex.Message);
-        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="file"/> has <paramref name="extension"/>, compared ignoring case; every file has an empty
+    /// one.
+    /// </summary>
+    private static bool HasExtension(string file, string extension)
+    {
+        return extension.Length == 0 || string.Equals(Path.GetExtension(file), extension, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

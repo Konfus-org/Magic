@@ -117,23 +117,16 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
     /// Magic's, the <c>.cs</c> files among the bundled resources, compiled into Resources/Resources.dll beside it. Each
     /// loads into a context of its own, as a gem does, though it provides nothing and takes no settings. Null when
     /// <paramref name="what"/> is not built, as a project needs no code, and when it cannot be loaded, which is logged.
+    /// Loaded <paramref name="again"/>, as it is built now, it goes into a new context beside the last, which stays for
+    /// whatever holds its types, and one gone by then is an error.
     /// </summary>
-    public static Assembly? LoadCode(IFileSystem files, string path, string what)
+    public static Assembly? LoadCode(IFileSystem files, string path, string what, bool again)
     {
-        return files.FileExists(path) ? LoadCodeAssembly(files, path, what, again: false) : null;
-    }
+        if (!again && !files.FileExists(path))
+        {
+            return null;
+        }
 
-    /// <summary>
-    /// Loads code (<see cref="LoadCode"/>) again, as it is built now, into a new context beside the last, which stays
-    /// for whatever holds its types: the assembly the file holds now, or null when it cannot be loaded, which is logged.
-    /// </summary>
-    public static Assembly? ReloadCode(IFileSystem files, string path, string what)
-    {
-        return LoadCodeAssembly(files, path, what, again: true);
-    }
-
-    private static Assembly? LoadCodeAssembly(IFileSystem files, string path, string what, bool again)
-    {
         Result<Assembly> loaded = LoadAssembly(files, path, what, isCode: true, again);
         if (!loaded.Ok)
         {

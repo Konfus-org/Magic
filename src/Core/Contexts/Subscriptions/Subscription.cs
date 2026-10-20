@@ -15,4 +15,9 @@ public sealed class Subscription(Action end) : IDisposable
     {
         Interlocked.Exchange(ref _end, null)?.Invoke();
     }
+
+    /// <summary>
+    /// One with nothing to end, for whatever must hand one out and has nothing of its own to stop.
+    /// </summary>
+    public static Subscription None { get; } = new(static () => { });
 }

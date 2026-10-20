@@ -1,4 +1,4 @@
-namespace Magic.Contexts.Settings;
+namespace Magic.Attributes;
 
 /// <summary>
 /// Marks a setting its gem reads only as it starts, the GPU device opened say, so that changing it, by

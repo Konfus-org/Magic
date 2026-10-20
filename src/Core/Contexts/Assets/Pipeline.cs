@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using Magic.Contexts.Components;
 using Magic.Interfaces;
 
@@ -42,7 +43,7 @@ public sealed class PipelineEntry
     /// <summary>
     /// By the file name of a pass the entry brings in, without its extension, then by the param's name.
     /// </summary>
-    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> Params { get; set; } = new Dictionary<string, IReadOnlyDictionary<string, MaterialParam>>(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> Params { get; set; } = ReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>>.Empty;
 }
 
 /// <summary>

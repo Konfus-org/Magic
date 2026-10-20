@@ -562,11 +562,6 @@ public sealed class Assets
     }
 
     /// <summary>
-    /// The asset <paramref name="id"/> as a <typeparamref name="T"/>, read and made from its file
-    /// (<see cref="ReadFileAsync{T}"/>), then given its handle. Then the type's post-processor, when a gem provides one,
-    /// works on it, and what it returns is given the handle too.
-    /// </summary>
-    /// <summary>
     /// <see cref="ReadAndProcessAsync{T}"/>, timed by the asset type.
     /// </summary>
     private async Task<Result<T>> ReadAsync<T>(ulong id)
@@ -578,6 +573,12 @@ public sealed class Assets
         return read;
     }
 
+    /// <summary>
+    /// The asset <paramref name="id"/> as a <typeparamref name="T"/>, read and made from its file
+    /// (<see cref="ReadFileAsync{T}"/>), then given its handle. Then the type's post-processor, when a gem provides one,
+    /// works on it, and what it returns is given the handle too. The post-processor is asked for on every load, as the
+    /// loader is; a type whose gem was not made, which Core has said why, loads without it.
+    /// </summary>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "A loader that throws on a file fails that file, as content that does not load; the engine goes on.")]
     private async Task<Result<T>> ReadAndProcessAsync<T>(ulong id)
         where T : IAsset<T>
@@ -615,7 +616,7 @@ public sealed class Assets
         }
 
         indexed.Version = VersionOf(bytes.Value, indexed.Settings);
-        if (PostProcessorOf<T>() is not { } processor)
+        if (_services.Provided<ILoadPostProcessor<T>>(out _) is not { } processor)
         {
             return loaded;
         }
@@ -643,12 +644,8 @@ public sealed class Assets
     private ValueTask<Result<T>> ReadFileAsync<T>(Indexed file, byte[] bytes)
         where T : IAsset<T>
     {
-        IAssetLoader<T>? loader;
-        try
-        {
-            loader = _services.GetService(typeof(IAssetLoader<T>)) as IAssetLoader<T>;
-        }
-        catch (InvalidOperationException)
+        IAssetLoader<T>? loader = _services.Provided<IAssetLoader<T>>(out bool isMade);
+        if (!isMade)
         {
             return new(Result.Failure<T>($"the gem that reads {typeof(T).Name}s was not made."));
         }
@@ -676,23 +673,6 @@ public sealed class Assets
 
         ReadOnlySpan<byte> text = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? bytes.AsSpan(Encoding.UTF8.Preamble.Length) : bytes;
         return new(Given(Activator.CreateInstance<T>(), nameof(ITextAsset<T>.Text), Encoding.UTF8.GetString(text)));
-    }
-
-    /// <summary>
-    /// The post-processor a gem provides for <typeparamref name="T"/>, asked for on every load as the loader is; null when
-    /// none does, or the gem that does was not made, which Core has said why: the type loads without it.
-    /// </summary>
-    private ILoadPostProcessor<T>? PostProcessorOf<T>()
-        where T : IAsset<T>
-    {
-        try
-        {
-            return _services.GetService(typeof(ILoadPostProcessor<T>)) as ILoadPostProcessor<T>;
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
     }
 
     /// <summary>

@@ -9,7 +9,7 @@ namespace Magic.Services;
 /// The code loaded: Magic's own assembly, and each gem's, the project's and the bundled scripts' as it loads, by the
 /// path it was loaded from, so one loaded again, as the project's is when it is built while the engine runs, replaces
 /// its last build. What a file names from code, a script's class or a component's struct, is found here by the name
-/// of its type (<see cref="Get"/>), checked to be what the file is for (<see cref="Get{T}"/>): the assemblies are
+/// of its type, checked to be what the file is for (<see cref="Get{T}"/>): the assemblies are
 /// searched once per name, what each resolved to is kept for the run, and forgotten when an assembly is added or
 /// replaced. A gem asks for it as it asks for any service, as the one that reads <c>.cs</c> files does to find a
 /// script's class. Safe from any thread.
@@ -45,19 +45,9 @@ public sealed class Assemblies
     }
 
     /// <summary>
-    /// The one top-level type named <paramref name="name"/> in the code loaded: what a file of that name declares. Why
-    /// not, when no code loaded declares one, or more than one does.
-    /// </summary>
-    public Result<Type> Get(string name)
-    {
-        Code code = _code;
-        return code.Named.GetOrAdd(name, Search, code.All);
-    }
-
-    /// <summary>
-    /// <see cref="Get"/>, when the type is a <typeparamref name="T"/>: a component's struct for
-    /// <see cref="IComponent"/>, a script's class for <see cref="IScript"/>. Why not, when it is not one, or no one
-    /// type is named so.
+    /// The one top-level type named <paramref name="name"/> in the code loaded, what a file of that name declares, when
+    /// it is a <typeparamref name="T"/>: a component's struct for <see cref="IComponent"/>, a script's class for
+    /// <see cref="IScript"/>. Why not, when it is not one, when no code loaded declares one, or more than one does.
     /// </summary>
     public Result<Type> Get<T>(string name)
     {
@@ -92,6 +82,15 @@ public sealed class Assemblies
 
             return loaded;
         }
+    }
+
+    /// <summary>
+    /// The one top-level type named <paramref name="name"/> in the code loaded, whatever it is.
+    /// </summary>
+    private Result<Type> Get(string name)
+    {
+        Code code = _code;
+        return code.Named.GetOrAdd(name, Search, code.All);
     }
 
     private static Result<Type> Search(string name, IReadOnlyList<Assembly> all)

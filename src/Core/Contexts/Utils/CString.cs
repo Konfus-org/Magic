@@ -9,7 +9,9 @@ namespace Magic.Contexts.Utils;
 /// </summary>
 public static class CString
 {
-    /// <summary>The text at a C string, or empty for a null one.</summary>
+    /// <summary>
+    /// The text at a C string, or empty for a null one.
+    /// </summary>
     public static unsafe string Read(byte* text) => text is null ? string.Empty : Marshal.PtrToStringUTF8((nint)text) ?? string.Empty;
 
     /// <summary>

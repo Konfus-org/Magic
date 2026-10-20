@@ -11,7 +11,7 @@ namespace Magic.Contexts.Settings;
 /// <param name="Owner">The gem whose it is, as the project lists it.</param>
 /// <param name="Type">What it holds: a flag, a number, an enum, a string, or anything a preset can write as JSON.</param>
 /// <param name="Value">What it holds now, what was just set included, as a <see cref="Type"/>.</param>
-/// <param name="Attributes">The attributes on it, its own and then its class's: <see cref="RequireRestartAttribute"/>
+/// <param name="Attributes">The attributes on it, its own and then its class's: <see cref="Magic.Attributes.RequireRestartAttribute"/>
 /// marks one its gem reads only as it starts, so changing it starts the engine again;
 /// <see cref="System.ComponentModel.DataAnnotations.RangeAttribute"/> bounds a number; and
 /// <see cref="System.ComponentModel.CategoryAttribute"/> groups it with other gems' settings of its kind, a tab and,

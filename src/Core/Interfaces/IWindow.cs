@@ -35,7 +35,7 @@ public interface IWindow
 
     /// <summary>
     /// What the platform knows the window by, 0 when there is none, as in a headless run: a GPU gem that shares the
-    /// platform's native library finds the window by it (IGpu.Target).
+    /// platform's native library finds the window by it (<see cref="IGpu.WindowTarget"/>).
     /// </summary>
     uint Id { get; }
 }

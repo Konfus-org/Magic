@@ -159,7 +159,7 @@ internal sealed class GemLoader
     /// </summary>
     private void LoadCode(string path, string what)
     {
-        if (GemAssembly.LoadCode(_files, path, what) is { } assembly)
+        if (GemAssembly.LoadCode(_files, path, what, again: false) is { } assembly)
         {
             _assemblies.Add(path, assembly);
             _code.Add(new CodeFile(path, what));
@@ -174,7 +174,7 @@ internal sealed class GemLoader
     {
         int change = code.Note();
         await Task.Delay(_settle).ConfigureAwait(false);
-        if (!code.IsLatest(change) || GemAssembly.ReloadCode(_files, code.Path, code.What) is not { } assembly)
+        if (!code.IsLatest(change) || GemAssembly.LoadCode(_files, code.Path, code.What, again: true) is not { } assembly)
         {
             return;
         }

@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Magic.Attributes;
 using Magic.Contexts.Assets;
 using Magic.Contexts.CmdLine;
 using Magic.Contexts.Settings;
@@ -80,13 +81,13 @@ public sealed class Settings : IDisposable
         _args = args;
         _lifetime = lifetime;
         _docs = new SettingsDocs(files);
-        _default = assets.Find<Preset>($"{PresetFolder}/{DefaultPreset}{Contexts.Assets.Preset.Extensions[0]}");
+        _default = assets.Find<Preset>(PathOf(DefaultPreset));
         _commandLine = CommandLine(project, args.Settings);
 
-        Handle<Preset> applied = args.Preset.Length == 0 ? _default : assets.Find<Preset>($"{PresetFolder}/{args.Preset}{Contexts.Assets.Preset.Extensions[0]}");
+        Handle<Preset> applied = args.Preset.Length == 0 ? _default : assets.Find<Preset>(PathOf(args.Preset));
         if (applied == Handle<Preset>.None)
         {
-            Debugging.Error($"There is no preset {args.Preset}: no asset is {PresetFolder}/{args.Preset}{Contexts.Assets.Preset.Extensions[0]}, so only the default is applied.");
+            Debugging.Error($"There is no preset {args.Preset}: no asset is {PathOf(args.Preset)}, so only the default is applied.");
             applied = _default;
         }
 
@@ -95,6 +96,11 @@ public sealed class Settings : IDisposable
         Preset = applied;
         Debugging.Info($"Preset {NameOf(applied)}");
         _reloads = events.Watch<AssetReloaded<Preset>>(Reloaded);
+
+        static string PathOf(string preset)
+        {
+            return $"{PresetFolder}/{preset}{Contexts.Assets.Preset.Extensions[0]}";
+        }
     }
 
     public void Dispose()
@@ -219,6 +225,17 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
+    /// <see cref="Set{T}"/> from one <c>Gem.setting=value</c> line, as <c>--set</c> and a console take it: the value is
+    /// JSON when it parses as JSON (<c>1920</c>, <c>true</c>, <c>"1"</c>), and a string when it does not. Why not, when
+    /// the line is not one, or as <see cref="Set{T}"/> says.
+    /// </summary>
+    public Result Set(string line)
+    {
+        Result<(string Key, JsonNode? Value)> parsed = Parse(line);
+        return parsed.Ok ? Set(parsed.Value.Key, parsed.Value.Value) : Result.Failure(parsed.Error);
+    }
+
+    /// <summary>
     /// Applies <paramref name="preset"/> over the default one, in place of the one applied: every gem's settings are
     /// made again under it, and what was set while running is dropped. Applying the default leaves it alone. Why not,
     /// when it cannot be read or a gem's settings do not fit it; then nothing changes.
@@ -306,6 +323,11 @@ public sealed class Settings : IDisposable
         string? restart = null;
         lock (_lock)
         {
+            if (_changes.Count == 0)
+            {
+                return;
+            }
+
             foreach ((Setting setting, PropertyInfo property, ISettings held) in _all)
             {
                 if (!_changes.TryGetValue(held, out ISettings? changed))

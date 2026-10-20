@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Numerics;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -209,17 +210,7 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private static Vector3? CellOf(string file)
     {
-        string name = file;
-        foreach (string extension in Prefab.Extensions)
-        {
-            if (file.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
-            {
-                name = file[..^extension.Length];
-                break;
-            }
-        }
-
-        string[] parts = name.Split('_');
+        string[] parts = Path.GetFileNameWithoutExtension(file).Split('_');
         return parts.Length == 3
             && int.TryParse(parts[0], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int x)
             && int.TryParse(parts[1], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int y)
@@ -332,18 +323,24 @@ internal sealed class Domains : IDisposable
             }
         }
 
-        HashSet<Handle<Model>> drawn = [];
+        List<Prefab> spawning = [];
         foreach (Result<Prefab> prefab in prefabs)
         {
             if (prefab.Ok)
             {
-                AddDrawn(prefab.Value.Parts, drawn);
+                spawning.Add(prefab.Value);
             }
         }
 
         if (player is not null)
         {
-            AddDrawn(player.Parts, drawn);
+            spawning.Add(player);
+        }
+
+        HashSet<Handle<Model>> drawn = [];
+        foreach (Prefab prefab in spawning)
+        {
+            AddDrawn(prefab.Parts, drawn);
         }
 
         List<Task<Result<Model>>> loading = [];
@@ -359,20 +356,6 @@ internal sealed class Domains : IDisposable
             {
                 models.Add(model.Value);
             }
-        }
-
-        List<Prefab> spawning = [];
-        foreach (Result<Prefab> prefab in prefabs)
-        {
-            if (prefab.Ok)
-            {
-                spawning.Add(prefab.Value);
-            }
-        }
-
-        if (player is not null)
-        {
-            spawning.Add(player);
         }
 
         SubscriptionList holds = open.IsLoadingDomain ? new SubscriptionList() : await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
@@ -445,7 +428,7 @@ internal sealed class Domains : IDisposable
                 continue;
             }
 
-            Vector3? cell = CellOf(file[(slash + 1)..]);
+            Vector3? cell = CellOf(file);
             placements.Add(new Placement(prefab, cell is { } at ? at * open.Domain.CellSize : Vector3.Zero, cell.HasValue));
         }
 
@@ -873,13 +856,13 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// A prefab of a domain, and where it is spawned: <see cref="Corner"/>, a cell's, or the domain's origin.
     /// </summary>
-    internal readonly record struct Placement(Handle<Prefab> File, Vector3 Corner, bool IsCell);
+    private readonly record struct Placement(Handle<Prefab> File, Vector3 Corner, bool IsCell);
 
     /// <summary>
     /// What a domain's opening read: each of its prefabs, by placement, its player, the models they draw, and what
     /// the gems that took them in handed back, which keeps that taken in (<see cref="IPreloader"/>).
     /// </summary>
-    internal sealed record Read(List<Placement> Placements, Result<Prefab>[] Prefabs, Prefab? Player, List<Model> Models)
+    private sealed record Read(List<Placement> Placements, Result<Prefab>[] Prefabs, Prefab? Player, List<Model> Models)
     {
         /// <summary>
         /// Set by an initializer rather than the constructor, so the analyzer sees the record take ownership of it.
@@ -890,7 +873,7 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// A domain open in the world, or opening.
     /// </summary>
-    internal sealed class Open(Handle<Domain> handle, string name, Domain domain, DomainOpenMode mode, bool isLoadingDomain, bool isReplacing)
+    private sealed class Open(Handle<Domain> handle, string name, Domain domain, DomainOpenMode mode, bool isLoadingDomain, bool isReplacing)
     {
         public Handle<Domain> Handle { get; } = handle;
 
@@ -953,7 +936,7 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// A prefab of a domain where it is spawned, and what it spawned: none yet, or when it did not load.
     /// </summary>
-    internal sealed class Placed(Placement placement)
+    private sealed class Placed(Placement placement)
     {
         public Placement Placement { get; } = placement;
 

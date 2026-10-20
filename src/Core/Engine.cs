@@ -16,7 +16,7 @@ namespace Magic;
 /// <summary>
 /// Runs a project: opens it, makes its gems and its <see cref="World"/>, opens the project's entry point in the world,
 /// runs frames until something stops them, and ends the gems. That is all Core does; everything else is a gem. The
-/// frames run on two threads (<see cref="FrameLoop"/>), and are measured on the meter <c>Magic</c>, which any gem can
+/// frames run on two threads (<see cref="FrameLoop"/>), and are measured on the meter <c>Magic.Core</c>, which any gem can
 /// listen to.
 /// </summary>
 public static class Engine
@@ -40,7 +40,7 @@ public static class Engine
     public static bool Run(Args args)
     {
         FileSystem files = new();
-        Result<Project> opened = Project.Open(files, args.ProjectPath);
+        Result<Project> opened = ProjectFile.Open(files, args.ProjectPath);
         if (!opened.Ok)
         {
             Debugging.Error(opened.Error);
