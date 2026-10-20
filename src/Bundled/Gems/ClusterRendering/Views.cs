@@ -19,7 +19,7 @@ namespace Magic.ClusterRendering;
 /// G-buffer, scene colour, velocity and exposure, kept while its camera is, and its constants and transparent pieces
 /// worked out each frame from the <see cref="Snapshot"/>. Render thread.
 /// </summary>
-internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads threads, ClusterRenderingSettings settings, CancellationToken stopping) : IDisposable
+internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads threads, Scene scene, ClusterPool models, Materials materials, ClusterRenderingSettings settings, CancellationToken stopping) : IDisposable
 {
     /// <summary>
     /// Pixels a side of a light tile, which Shaders/Lights/LightTiles.comp.hlsl bins the lights into.
@@ -80,7 +80,7 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
 
             if (!_views.TryGetValue(camera.Entity, out View? view))
             {
-                view = new View(gpu);
+                view = new View(gpu, scene, models, materials);
                 _views[camera.Entity] = view;
             }
 
@@ -156,10 +156,10 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
 }
 
 /// <summary>
-/// What every view is worked out from this frame: the copy of the world, the frame, the scene and its models and
-/// materials, the sky's row, the frame's counts, where the player is, and whether views jitter.
+/// What every view is worked out from this frame: the copy of the world, the frame, the sky's row, the frame's counts,
+/// where the player is, and whether views jitter.
 /// </summary>
-internal readonly record struct ViewFrame(WorldCopy Copy, Frame Frame, Scene Scene, ClusterPool Models, Materials Materials, int SkyMaterial, Counts Counts, Vector3? Player, bool Jitters);
+internal readonly record struct ViewFrame(WorldCopy Copy, Frame Frame, int SkyMaterial, Counts Counts, Vector3? Player, bool Jitters);
 
 /// <summary>
 /// Where a view draws: a texture, the rectangle of it, its format, and whether it is a window's.
@@ -188,6 +188,9 @@ internal sealed class View : IDisposable
     /// </summary>
     private const int JitterPhases = 8;
 
+    private readonly Scene _scene;
+    private readonly ClusterPool _models;
+    private readonly Materials _materials;
     private readonly GpuArray<Vector4> _exposure;
     private readonly GpuArray<PieceEntry> _transparentPieces;
     private readonly List<(int Slot, float Distance)> _transparentOrder = [];
@@ -195,8 +198,11 @@ internal sealed class View : IDisposable
     private Vector3 _lastPosition;
     private bool _hasLast;
 
-    public View(IGpu gpu)
+    public View(IGpu gpu, Scene scene, ClusterPool models, Materials materials)
     {
+        _scene = scene;
+        _models = models;
+        _materials = materials;
         Resources = new ResourceSet(gpu);
         _exposure = new GpuArray<Vector4>(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite, 1);
         _exposure.Set(0, new Vector4(1, 0, 0, 0));
@@ -310,7 +316,7 @@ internal sealed class View : IDisposable
 
         _lastViewProj = view * still;
         _lastPosition = Position;
-        SortTransparent(frame);
+        SortTransparent();
         _exposure.Flush();
         _transparentPieces.Flush();
         Resources.Set("Exposure", BoundResource.Of(_exposure.Buffer, _exposure.Bytes));
@@ -382,21 +388,21 @@ internal sealed class View : IDisposable
     /// The scene's transparent instances, farthest first, each its finest clusters drawn with a transparent material, a
     /// piece of up to 32 triangles at a time, as runs of one surface each.
     /// </summary>
-    private void SortTransparent(in ViewFrame frame)
+    private void SortTransparent()
     {
         TransparentRuns.Clear();
         _transparentOrder.Clear();
-        foreach (int slot in frame.Scene.Transparent)
+        foreach (int slot in _scene.Transparent)
         {
-            _transparentOrder.Add((slot, -Vector3.Distance(frame.Scene.PositionOf(slot), Position)));
+            _transparentOrder.Add((slot, -Vector3.Distance(_scene.PositionOf(slot), Position)));
         }
 
         CollectionsMarshal.AsSpan(_transparentOrder).Sort(static (left, right) => left.Distance.CompareTo(right.Distance));
         int count = 0;
         foreach ((int slot, _) in _transparentOrder)
         {
-            Renderer renderer = frame.Scene.RendererOf(slot);
-            if (frame.Models.InPool(renderer.Model) is not ({ } firstCluster, { } packed) || packed.Levels.Length == 0)
+            Renderer renderer = _scene.RendererOf(slot);
+            if (_models.InPool(renderer.Model) is not ({ } firstCluster, { } packed) || packed.Levels.Length == 0)
             {
                 continue;
             }
@@ -405,7 +411,7 @@ internal sealed class View : IDisposable
             for (int i = (int)finest.FirstCluster; i < finest.FirstCluster + finest.Count; i++)
             {
                 GpuCluster cluster = packed.Clusters[i];
-                if (frame.Materials.Get(renderer.Materials[(int)((cluster.Counts >> 17) & 7)]) is not { Type: MaterialType.Transparent } drawn)
+                if (_materials.Get(renderer.Materials[(int)((cluster.Counts >> 17) & 7)]) is not { Type: MaterialType.Transparent } drawn)
                 {
                     continue;
                 }

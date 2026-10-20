@@ -301,14 +301,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 continue;
             }
 
-            SDL.GPUPresentMode present = PresentMode(window);
-            SDL.GPUSwapchainComposition composition = CompositionFor(window, id);
-            if (!SDL.SetGPUSwapchainParameters(_device, window, composition, present))
-            {
-                Debugging.Warn($"Window {id} presents as it did, not {composition} with {present}: {CString.Read(SDL.GetError())}");
-            }
-
-            _textures[target.Id] = _textures[target.Id] with { Format = SDL.GetGPUSwapchainTextureFormat(_device, window).ToMagic() };
+            _textures[target.Id] = _textures[target.Id] with { Format = ApplySwapchain(window, id) };
         }
     }
 
@@ -940,6 +933,15 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             }
         }
 
+        return ApplySwapchain(window, id);
+    }
+
+    /// <summary>
+    /// Presents <paramref name="window"/>, number <paramref name="id"/>, as the settings ask, composed and timed so, and
+    /// returns its images' format; when SDL refuses, it presents as SDL chose, which is warned about.
+    /// </summary>
+    private GpuFormat ApplySwapchain(SDL.Window* window, uint id)
+    {
         SDL.GPUPresentMode present = PresentMode(window);
         SDL.GPUSwapchainComposition composition = CompositionFor(window, id);
         if (!SDL.SetGPUSwapchainParameters(_device, window, composition, present))
@@ -948,7 +950,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         }
 
         GpuFormat format = SDL.GetGPUSwapchainTextureFormat(_device, window).ToMagic();
-        Debugging.Verbose($"Window {id} is a render target: {format}, composed {composition}, presenting with {present}.");
+        Debugging.Verbose($"Window {id} presents {format}, composed {composition}, with {present}.");
         return format;
     }
 

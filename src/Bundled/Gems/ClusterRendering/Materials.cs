@@ -263,7 +263,6 @@ internal sealed class Materials : IDisposable
                 }
             }
 
-            _textures.Changed.Clear();
             _graph.Broke.Clear();
         }
 
@@ -505,8 +504,6 @@ internal sealed class Materials : IDisposable
     {
         entry.Waiting = null;
         entry.Packed = packed;
-        entry.Failure = packed.Failure;
-        entry.Drawn = packed.Drawn;
         Records.Set(entry.Row, packed.Record);
         Gi.Set(entry.Row, packed.Gi);
         WriteBins(packed.Drawn);
@@ -570,12 +567,12 @@ internal sealed class Materials : IDisposable
 
         public Material? Asset { get; set; }
 
-        public DrawnMaterial? Drawn { get; set; }
-
         /// <summary>
         /// What it is drawn as; null until it is drawn.
         /// </summary>
         public PackedMaterial? Packed { get; set; }
+
+        public DrawnMaterial? Drawn => Packed?.Drawn;
 
         /// <summary>
         /// What it was packed as last, while it waits for its pipelines to be drawn so; null when it does not wait.
@@ -590,7 +587,7 @@ internal sealed class Materials : IDisposable
         /// <summary>
         /// Why it is drawn as the failure, in a few words; null when it is not.
         /// </summary>
-        public string? Failure { get; set; }
+        public string? Failure => Packed?.Failure;
     }
 
     /// <summary>

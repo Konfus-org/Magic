@@ -98,7 +98,7 @@ internal sealed class Listing(IGpu gpu) : IDisposable
                     continue;
                 }
 
-                ListedPass listed = new(pass);
+                ListedPass listed = new(pass, this);
                 Dictionary<string, PassCreate> made = new(StringComparer.Ordinal);
                 foreach (PassCreate create in pass.Pass.Creates)
                 {
@@ -247,7 +247,7 @@ internal sealed record CreatedResource(PassCreate Create, ResourceInfo Info)
 /// A pass as a listing runs it: its file, its packed params, the names its shaders can see and what each stage of them
 /// binds, and its pipelines.
 /// </summary>
-internal sealed class ListedPass(Loaded loaded)
+internal sealed class ListedPass(Loaded loaded, Listing listing)
 {
     private readonly StageBindings?[] _bound = new StageBindings?[3];
 
@@ -258,9 +258,15 @@ internal sealed class ListedPass(Loaded loaded)
     /// </summary>
     public string Name => loaded.Name;
 
-    public string Text => loaded.Text;
+    /// <summary>
+    /// The listing it runs in.
+    /// </summary>
+    public Listing Listing => listing;
 
-    public ParamLayout? Layout => loaded.Layout;
+    /// <summary>
+    /// Its shader's text as HLSL takes it, its params' loader in.
+    /// </summary>
+    public string Body => loaded.Body;
 
     public PassWords Params => loaded.Params;
 

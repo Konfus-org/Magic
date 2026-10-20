@@ -41,9 +41,14 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     private const float PulsePeriod = 2f;
 
     private readonly GpuArray<uint> _text = new(gpu, GpuBufferUsage.GraphicsRead, 1 + ((MaxLines + CodeCount) * LineGlyphs));
-    private readonly List<string> _lines = [];
     private readonly List<string> _rows = [];
-    private bool _isPacked;
+
+    /// <summary>
+    /// The lines last said, and how many there were: the listing's own list, which only grows, so the same list with
+    /// the same count is the same lines.
+    /// </summary>
+    private IReadOnlyList<string>? _said;
+    private int _saidCount;
 
     public void Dispose()
     {
@@ -81,15 +86,15 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     /// </summary>
     public void Say(IReadOnlyList<string> lines)
     {
-        if (_isPacked && IsSaid(lines))
+        if (ReferenceEquals(lines, _said) && lines.Count == _saidCount)
         {
             return;
         }
 
-        _lines.Clear();
-        _lines.AddRange(lines);
+        _said = lines;
+        _saidCount = lines.Count;
         _rows.Clear();
-        foreach (string line in _lines)
+        foreach (string line in lines)
         {
             Wrap(line);
         }
@@ -109,8 +114,6 @@ internal sealed class Failures(IGpu gpu) : IDisposable
         {
             Write(code < _codes.Length ? _codes[code] : string.Empty, 1 + ((_rows.Count + code) * LineGlyphs));
         }
-
-        _isPacked = true;
     }
 
     /// <summary>
@@ -121,24 +124,6 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     {
         _text.Flush();
         gpu.Commands.CopyBuffer(zeros, 0, Raised, 0, RaisedBytes);
-    }
-
-    private bool IsSaid(IReadOnlyList<string> lines)
-    {
-        if (lines.Count != _lines.Count)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < lines.Count; i++)
-        {
-            if (!string.Equals(lines[i], _lines[i], StringComparison.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     /// <summary>

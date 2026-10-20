@@ -17,9 +17,16 @@ internal sealed class SceneLights(IGpu gpu) : IDisposable
     public void Dispose()
     {
         Rows.Dispose();
+        ChangedLights.Dispose();
     }
 
     public GpuArray<GpuSceneLight> Rows { get; } = new(gpu, GpuBufferUsage.ComputeRead, 256);
+
+    /// <summary>
+    /// A bit for each slot that changed this frame (<see cref="Changed"/>), by which the shadow pages a light casts
+    /// into are drawn again; cleared the next frame.
+    /// </summary>
+    public GpuArray<uint> ChangedLights { get; } = new(gpu, GpuBufferUsage.ComputeRead, 64);
 
     /// <summary>
     /// The slots there are, a GPU thread each where the views cull them.
@@ -36,6 +43,11 @@ internal sealed class SceneLights(IGpu gpu) : IDisposable
     /// </summary>
     public void Update(WorldCopy copy)
     {
+        foreach (int slot in _changed)
+        {
+            ChangedLights.Set(slot >> 5, 0);
+        }
+
         _changed.Clear();
         Delta<LightCopy> lights = copy.Lights;
         foreach (int slot in lights.Removed)
@@ -61,7 +73,14 @@ internal sealed class SceneLights(IGpu gpu) : IDisposable
             _changed.Add(slot);
         }
 
+        ChangedLights.Grow((Capacity + 31) / 32);
+        foreach (int slot in _changed)
+        {
+            ChangedLights.Set(slot >> 5, ChangedLights.Rows[slot >> 5] | (1u << (slot & 31)));
+        }
+
         Rows.Flush();
+        ChangedLights.Flush();
     }
 }
 

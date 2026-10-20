@@ -213,6 +213,20 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 
         _moved.Clear();
         _stillMoving.Clear();
+
+        // What moved last frame stands where it was unless it moves again: its last place becomes its place, which a
+        // change this frame writes over whole, with the last place the change says.
+        foreach (int slot in _moving)
+        {
+            ref InstanceEntry entry = ref _entries[slot];
+            if (entry.IsLive)
+            {
+                GpuSceneInstance row = Instances.Rows[slot];
+                Instances.Set(slot, row with { PrevRow0 = row.Row0, PrevRow1 = row.Row1, PrevRow2 = row.Row2 });
+            }
+        }
+
+        _moving.Clear();
         foreach (int slot in instances.Removed)
         {
             Remove(slot);
@@ -224,19 +238,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         }
 
         WriteChanged();
-
-        // What moved last frame and not this one stands where it was: its last place becomes its place.
-        foreach (int slot in _moving)
-        {
-            ref InstanceEntry entry = ref _entries[slot];
-            if (entry.IsLive && entry.WrittenFor != time)
-            {
-                GpuSceneInstance row = Instances.Rows[slot];
-                Instances.Set(slot, row with { PrevRow0 = row.Row0, PrevRow1 = row.Row1, PrevRow2 = row.Row2 });
-            }
-        }
-
-        _moving.Clear();
         _moving.AddRange(_stillMoving);
         Recheck(time);
         LetGo();
@@ -264,7 +265,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         entry.Transform = transform;
         entry.Renderer = renderer;
         entry.IsLive = true;
-        entry.WrittenFor = time;
         entry.FadeStart = wasLive ? entry.FadeStart : time;
         entry.Look = isNewLook ? Take(slot, new Look(renderer.Model, renderer.Materials), time) : entry.Look;
         if (entry.Look is not { } look)
@@ -435,7 +435,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         entry.Rows = rows;
         entry.IsTransparent = isTransparent;
         entry.Failure = failure;
-        if (!entry.IsReady && areShown && models.IsDrawable(hasFailed ? models.Failed : look.Model))
+        if (!entry.IsReady && areShown && models.IsDrawable(look.Model))
         {
             entry.IsReady = true;
             entry.ReadyAt = time;
@@ -700,8 +700,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// An instance as the scene holds it: where it is and what it draws, and its look's entry, when its fade started, and
-    /// the frame's time it was last written for.
+    /// An instance as the scene holds it: where it is and what it draws, its look's entry, and when its fade started.
     /// </summary>
     private struct InstanceEntry
     {
@@ -709,7 +708,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         public Renderer Renderer;
         public LookEntry? Look;
         public float FadeStart;
-        public float WrittenFor;
         public bool IsLive;
     }
 }

@@ -54,13 +54,21 @@ internal sealed partial class ParamLayout
         ["Curve"] = ParamType.Curve,
     };
 
-    private ParamLayout(string structName, IReadOnlyList<ParamField> fields, int size, int bodyStart, int bodyEnd)
+    /// <summary>
+    /// The text the struct was read from, and where its body is in it, its braces excluded.
+    /// </summary>
+    private readonly string _hlsl;
+    private readonly int _bodyStart;
+    private readonly int _bodyEnd;
+
+    private ParamLayout(string hlsl, string structName, IReadOnlyList<ParamField> fields, int size, int bodyStart, int bodyEnd)
     {
+        _hlsl = hlsl;
         StructName = structName;
         Fields = fields;
         Size = size;
-        BodyStart = bodyStart;
-        BodyEnd = bodyEnd;
+        _bodyStart = bodyStart;
+        _bodyEnd = bodyEnd;
     }
 
     public string StructName { get; }
@@ -71,13 +79,6 @@ internal sealed partial class ParamLayout
     /// Bytes of the packed record, a multiple of 16.
     /// </summary>
     public int Size { get; }
-
-    /// <summary>
-    /// Where the struct's body is in the text it was read from, its braces excluded.
-    /// </summary>
-    public int BodyStart { get; }
-
-    public int BodyEnd { get; }
 
     /// <summary>
     /// <c>struct structName { ... };</c> in <paramref name="hlsl"/>, laid out; none when the text has no such struct, so a
@@ -149,16 +150,18 @@ internal sealed partial class ParamLayout
             return Result.Failure<ParamLayout?>($"{structName} packs to {size} bytes, past the {maxBytes} it may.");
         }
 
-        return Result.Success<ParamLayout?>(new ParamLayout(structName, fields, size, body.Index, body.Index + body.Length));
+        return Result.Success<ParamLayout?>(new ParamLayout(hlsl, structName, fields, size, body.Index, body.Index + body.Length));
     }
 
     /// <summary>
-    /// <paramref name="hlsl"/> with the struct's defaults and roles blanked out, which HLSL does not take, keeping every
-    /// line where it was so the compiler's line numbers still hold; then the loader after the struct.
+    /// The text the struct was read from as HLSL takes it: the struct's defaults and roles blanked out, keeping every
+    /// line where it was so the compiler's line numbers still hold, then, on the struct's last line, the loader that
+    /// unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows, as
+    /// <c>StructName signature { prologue ... }</c>.
     /// </summary>
-    public string Prepare(string hlsl, string loader)
+    public string Prepare(string signature, string prologue, string rows)
     {
-        string body = hlsl[BodyStart..BodyEnd];
+        string body = _hlsl[_bodyStart.._bodyEnd];
         char[] blanked = body.ToCharArray();
         foreach (Match tail in TailPattern().Matches(StripComments(body)))
         {
@@ -171,14 +174,15 @@ internal sealed partial class ParamLayout
             }
         }
 
-        int structEnd = hlsl.IndexOf(';', BodyEnd) + 1;
-        return new StringBuilder(hlsl.Length + loader.Length + 1)
-            .Append(hlsl, 0, BodyStart)
+        string loader = Loader(signature, prologue, rows);
+        int structEnd = _hlsl.IndexOf(';', _bodyEnd) + 1;
+        return new StringBuilder(_hlsl.Length + loader.Length + 1)
+            .Append(_hlsl, 0, _bodyStart)
             .Append(blanked)
-            .Append(hlsl, BodyEnd, structEnd - BodyEnd)
+            .Append(_hlsl, _bodyEnd, structEnd - _bodyEnd)
             .Append(' ')
             .Append(loader.Replace('\n', ' '))
-            .Append(hlsl, structEnd, hlsl.Length - structEnd)
+            .Append(_hlsl, structEnd, _hlsl.Length - structEnd)
             .ToString();
     }
 
@@ -186,7 +190,7 @@ internal sealed partial class ParamLayout
     /// HLSL that unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows:
     /// <c>MaterialParams LoadMaterialParams(uint material) { ... }</c>. One line, so it shifts no line after it.
     /// </summary>
-    public string Loader(string signature, string prologue, string rows)
+    private string Loader(string signature, string prologue, string rows)
     {
         StringBuilder text = new();
         text.Append(StructName).Append(' ').Append(signature).Append(" { ").Append(prologue).Append(' ').Append(StructName).Append(" loaded; ");

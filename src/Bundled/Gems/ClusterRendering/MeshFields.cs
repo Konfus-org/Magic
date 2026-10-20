@@ -50,12 +50,12 @@ internal sealed class MeshFields : IDisposable
     private readonly Dictionary<Handle<Model>, int> _byModel = [];
     private readonly Stack<int> _free = new();
 
-    public MeshFields(IGpu gpu, Assets assets, Caches caches, int capacity)
+    public MeshFields(IGpu gpu, Assets assets, Caches caches)
     {
         _gpu = gpu;
         _assets = assets;
         _caches = caches;
-        int deep = Math.Max(1, (capacity + (Across * Across) - 1) / (Across * Across));
+        int deep = Math.Max(1, (Capacity + (Across * Across) - 1) / (Across * Across));
         Atlas = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.R16Float, GpuTextureUsage.Sampled, Across * Resolution, Across * Resolution, 1, (uint)(deep * Resolution), GpuTextureKind.Texture3D));
         Table = new GpuArray<GpuMeshField>(gpu, GpuBufferUsage.ComputeRead, Across * Across * deep);
 

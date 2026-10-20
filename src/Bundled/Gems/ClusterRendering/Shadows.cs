@@ -66,7 +66,6 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
 
     private const int LevelBytes = 32;
 
-    private readonly List<int> _marked = [];
     private readonly GpuSunLevel[] _levels = new GpuSunLevel[MaxLevels];
     private Vector3 _sunDirection;
     private float _depthOrigin = float.NaN;
@@ -76,7 +75,6 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     public void Dispose()
     {
         Release();
-        ChangedLights.Dispose();
     }
 
     /// <summary>
@@ -95,11 +93,6 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// </summary>
     public GpuBuffer Clipmap { get; private set; }
 
-    /// <summary>
-    /// A bit for each light slot that changed this frame, whose pages are drawn again.
-    /// </summary>
-    public GpuArray<uint> ChangedLights { get; } = new(gpu, GpuBufferUsage.ComputeRead, 64);
-
     public int PoolSize { get; private set; }
 
     /// <summary>
@@ -107,8 +100,6 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// of.
     /// </summary>
     public int SunEntries => _levelCount * Window * Window;
-
-    public int LightEntries { get; private set; }
 
     /// <summary>
     /// Pages of the pool, the last quarter of which are split in sixteen small pages each.
@@ -130,18 +121,17 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
 
     /// <summary>
     /// Places the sun's clipmap about <paramref name="camera"/> for <paramref name="sun"/>, the way its light travels,
-    /// swaps the lights' tables, notes the lights that changed, and makes the pool and the tables again when the settings
-    /// size them otherwise.
+    /// swaps the lights' tables, and makes the pool and the tables again when the settings size them otherwise;
+    /// <paramref name="changedLightWords"/> is how many words the scene's bitmask of the lights that changed has.
     /// </summary>
-    public void Plan(Vector3 camera, Vector3 sun, IReadOnlyList<int> changedLights, int lightSlots, int moved, ulong frame, ClusterRenderingSettings settings)
+    public void Plan(Vector3 camera, Vector3 sun, int changedLightWords, int moved, ulong frame, ClusterRenderingSettings settings)
     {
-        ChangedLights.Grow((lightSlots + 31) / 32);
         int poolSize = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(settings.ShadowPool, 1024, 16384));
         int levels = Math.Clamp(settings.ShadowLevels, 1, MaxLevels);
         bool isMade = poolSize != PoolSize || levels != _levelCount;
         if (isMade)
         {
-            Make(poolSize, levels, LightTableEntries);
+            Make(poolSize, levels);
         }
 
         _isSwapped = !_isSwapped;
@@ -177,16 +167,16 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
             CameraDepth = depth - _depthOrigin,
             DepthRange = depthRange,
             Finest = finest,
-            ChangedLightWords = (uint)ChangedLights.Capacity,
+            ChangedLightWords = (uint)changedLightWords,
             PoolAcross = (uint)(PoolSize / Page),
             WholePages = (uint)WholePages,
             SmallPages = (uint)SmallPages,
             Moved = (uint)moved,
             Camera = camera,
             SunTable = (uint)Records,
-            LightTable = (uint)(_isSwapped ? lightTable + LightEntries : lightTable),
-            LightTableLast = (uint)(_isSwapped ? lightTable : lightTable + LightEntries),
-            LightEntries = (uint)LightEntries,
+            LightTable = (uint)(_isSwapped ? lightTable + LightTableEntries : lightTable),
+            LightTableLast = (uint)(_isSwapped ? lightTable : lightTable + LightTableEntries),
+            LightEntries = LightTableEntries,
         };
 
         Vector2 across = new(Vector3.Dot(camera, right), Vector3.Dot(camera, up));
@@ -206,21 +196,8 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
             };
         }
 
-        foreach (int slot in _marked)
-        {
-            ChangedLights.Set(slot >> 5, 0);
-        }
-
-        _marked.Clear();
-        foreach (int slot in changedLights)
-        {
-            ChangedLights.Set(slot >> 5, ChangedLights.Rows[slot >> 5] | (1u << (slot & 31)));
-            _marked.Add(slot);
-        }
-
         gpu.Upload(Clipmap, 0, MemoryMarshal.AsBytes(new ReadOnlySpan<GpuSunClipmap>(in clipmap)));
         gpu.Upload(Clipmap, ClipmapBytes, MemoryMarshal.AsBytes(_levels.AsSpan(0, levels)));
-        ChangedLights.Flush();
     }
 
     /// <summary>
@@ -237,20 +214,18 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
         frame.Set("ShadowPool", BoundResource.Of(Pool, (uint)PoolSize, (uint)PoolSize));
         frame.Set("ShadowTables", BoundResource.Of(Tables, (uint)(TableRows * Row)));
         frame.Set("SunClipmap", BoundResource.Of(Clipmap, ClipmapBytes + (MaxLevels * LevelBytes)));
-        frame.Set("ChangedLights", BoundResource.Of(ChangedLights.Buffer, ChangedLights.Bytes));
     }
 
-    private int TableRows => Records + SunEntries + (2 * LightEntries);
+    private int TableRows => Records + SunEntries + (2 * LightTableEntries);
 
     /// <summary>
     /// The pool and the tables made again, every page empty and every entry none.
     /// </summary>
-    private void Make(int poolSize, int levels, int lightEntries)
+    private void Make(int poolSize, int levels)
     {
         Release();
         PoolSize = poolSize;
         _levelCount = levels;
-        LightEntries = lightEntries;
         Pool = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.D32Float, GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampled, (uint)poolSize, (uint)poolSize));
         GpuBufferUsage written = GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite | GpuBufferUsage.GraphicsRead;
         int bytes = TableRows * Row;

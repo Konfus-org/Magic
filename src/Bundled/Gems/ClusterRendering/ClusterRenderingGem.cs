@@ -114,11 +114,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _assets = assets;
         CancellationToken stopping = lifetime.Stopping;
         _snapshot = new Snapshot(world);
-        _textures = new TexturePools(gpu, assets, caches, threads, settings.Anisotropy, stopping);
-        _fields = new MeshFields(gpu, assets, caches, MeshFields.Capacity);
+        _textures = new TexturePools(gpu, assets, caches, threads, settings, stopping);
+        _fields = new MeshFields(gpu, assets, caches);
         _models = new ClusterPool(gpu, assets, threads, _textures, _fields, settings, stopping);
         _defaultPipeline = assets.Default<Pipeline>();
-        _graph = new PassGraph(gpu, compiler, assets, scripts, PipelineOf(), threads, stopping);
+        _graph = new PassGraph(gpu, compiler, assets, scripts, threads, stopping);
         _materials = new Materials(gpu, assets, _textures, _graph, threads, stopping);
         _scene = new Scene(gpu, assets, _models, _materials);
         _lights = new SceneLights(gpu);
@@ -131,8 +131,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         }
 
         gpu.Upload(_pieceIndices, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
-        _recorder = new PassRecorder(gpu, _graph, _pieceIndices);
-        _views = new Views(gpu, window, assets, threads, settings, stopping);
+        _recorder = new PassRecorder(gpu, _graph, _materials, _pieceIndices);
+        _views = new Views(gpu, window, assets, threads, _scene, _models, _materials, settings, stopping);
         _output = new Output(gpu, compiler, assets, threads, stopping);
         _failures = new Failures(gpu);
         _frame = new ResourceSet(gpu);
@@ -268,7 +268,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     public void Render(in Frame frame)
     {
-        _textures.UseAnisotropy(_settings.Anisotropy);
+        _textures.FollowSettings();
         WorldCopy copy = _snapshot.Front;
         CameraCopy? main = MainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
@@ -277,7 +277,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _lights.Update(copy);
         if (main is { } camera)
         {
-            _shadows.Plan(camera.Transform.Position, copy.Sun?.Direction ?? -Vector3.UnitY, _lights.Changed, _lights.Capacity, _scene.Moved.Count, frame.Index, _settings);
+            _shadows.Plan(camera.Transform.Position, copy.Sun?.Direction ?? -Vector3.UnitY, _lights.ChangedLights.Capacity, _scene.Moved.Count, frame.Index, _settings);
         }
 
         ReportFailures();
@@ -320,11 +320,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             GiProbeThreads: _gi.ProbeThreads,
             SceneLights: (uint)_lights.Capacity,
             SunEntries: (uint)_shadows.SunEntries,
-            LightEntries: (uint)_shadows.LightEntries,
+            LightEntries: Shadows.LightTableEntries,
             ShadowViews: (uint)Math.Max(_settings.ShadowUpdates, 1),
             ShadowGroups: (uint)(Math.Max(_settings.ShadowUpdates, 1) + _settings.ShadowLevels),
             ShadowCandidates: (uint)(_shadows.WholePages + _shadows.SmallPages));
-        List<View> views = _views.Prepare(new ViewFrame(copy, frame, _scene, _models, _materials, sky?.Row ?? 0, counts, player, Jitters()));
+        List<View> views = _views.Prepare(new ViewFrame(copy, frame, sky?.Row ?? 0, counts, player, Jitters()));
         _cleared.Clear();
         if (_graph.Current is not { } listing)
         {
@@ -346,7 +346,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _failures.Say(listing.Failures);
         _failures.Begin(_zeros.Buffer);
         string debugView = _gpu.DebugView;
-        RecordScope frameScope = new(_frame, null, shown.Constants, shown.Counts, _materials.RasterBins, _materials.ResolveBins, [], GpuBuffer.None, skySurface, _gpu.Commands, frame);
+        RecordScope frameScope = new(_frame, null, shown.Constants, shown.Counts, [], GpuBuffer.None, skySurface, frame);
         for (PassStage stage = PassStage.Probes; stage < PassStage.Cull; stage++)
         {
             _recorder.Record(listing, stage, frameScope);
@@ -355,7 +355,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         foreach (View view in views)
         {
             view.Resources.Keep(listing);
-            RecordScope scope = new(_frame, view.Resources, view.Constants, view.Counts, _materials.RasterBins, _materials.ResolveBins, view.TransparentRuns, view.TransparentPieces, skySurface, _gpu.Commands, frame);
+            RecordScope scope = new(_frame, view.Resources, view.Constants, view.Counts, view.TransparentRuns, view.TransparentPieces, skySurface, frame);
             for (PassStage stage = PassStage.Cull; stage <= PassStage.Ui; stage++)
             {
                 _recorder.Record(listing, stage, scope);
@@ -432,7 +432,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             constants.TargetEncoding = (uint)target.Encoding;
             constants.Time = (float)frame.Seconds;
             constants.FrameIndex = (uint)(frame.Index % uint.MaxValue);
-            RecordScope scope = new(_frame, _target, constants, shown?.Counts ?? default, _materials.RasterBins, _materials.ResolveBins, [], GpuBuffer.None, default, _gpu.Commands, frame, target.Format, target.Encoding);
+            RecordScope scope = new(_frame, _target, constants, shown?.Counts ?? default, [], GpuBuffer.None, default, frame, target.Format, target.Encoding);
             _recorder.Record(listing, PassStage.Overlay, scope);
         }
     }
@@ -504,6 +504,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _frame.Set("MaterialGi", BoundResource.Of(_materials.Gi.Buffer, _materials.Gi.Bytes));
         _frame.Set("GiLevels", BoundResource.Of(_gi.Rows.Buffer, _gi.Rows.Bytes));
         _frame.Set("SceneLights", BoundResource.Of(_lights.Rows.Buffer, _lights.Rows.Bytes));
+        _frame.Set("ChangedLights", BoundResource.Of(_lights.ChangedLights.Buffer, _lights.ChangedLights.Bytes));
         _shadows.Bind(_frame);
     }
 
@@ -671,7 +672,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             int done = isBuilt ? 1 : 0;
             foreach (Handle<Model> model in preloaded.Models)
             {
-                if (_models.IsDrawable(_models.HasFailed(model) ? _models.Failed : model))
+                if (_models.IsDrawable(model))
                 {
                     done++;
                 }

@@ -12,7 +12,7 @@ using Magic.Services;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// The passes a frame runs: <paramref name="pipeline"/>'s, then the world's effects', then the overlay pipeline's, as
+/// The passes a frame runs: the renderer's pipeline's, then the world's effects', then the overlay pipeline's, as
 /// each loads with its passes, and a debug view's pass after them, put in their stages, checked, and compiled, as a
 /// <see cref="Listing"/>. A script pass's script is made by <paramref name="scripts"/>, without which it does not run. Whatever changes them (the world names other
 /// effects, a pass, pipeline, shader or curve is edited) builds a new listing from scratch on workers, and the frame keeps
@@ -33,7 +33,7 @@ namespace Magic.ClusterRendering;
 /// surface, with what the surface contract offers any surface, and every surface of it is bound the same.
 /// </para>
 /// </summary>
-internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets assets, IScripts? scripts, Handle<Pipeline> pipeline, Threads threads, CancellationToken stopping) : IDisposable
+internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets assets, IScripts? scripts, Threads threads, CancellationToken stopping) : IDisposable
 {
     private const string FullscreenPath = "Shaders/Passes/Fullscreen.vert.hlsl";
     private const string DepthOnlyPath = "Shaders/Passes/DepthOnly.frag.hlsl";
@@ -62,9 +62,14 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     private static readonly List<ResourceInfo> _engineVisible = [.. ResourceInfo.Engine.Values];
 
     private Listing? _next;
+
+    /// <summary>
+    /// What the latest listing, built or building, was built from, but the effects (<see cref="Effects"/>), and whether
+    /// something changed since that calls for another.
+    /// </summary>
     private Handle<Pass> _appended;
     private Handle<Pipeline> _overlay;
-    private Handle<Pipeline> _pipeline = pipeline;
+    private Handle<Pipeline> _pipeline;
     private bool _isStale = true;
 
     public void Dispose()
@@ -147,14 +152,14 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         _pipeline = pipeline;
         _overlay = overlay;
         _next = new Listing(gpu);
-        BuildAsync(_next, effects, new SceneVariants([.. variants.Raster], [.. variants.Resolve], [.. variants.Transparent], variants.Sky)).FireAndForget();
+        BuildAsync(_next, pipeline, effects, overlay, _appended, new SceneVariants([.. variants.Raster], [.. variants.Resolve], [.. variants.Transparent], variants.Sky)).FireAndForget();
     }
 
     /// <summary>
     /// A draw pass's pipeline for <paramref name="variant"/>, compiling it the first time it is asked for; none while it
     /// compiles.
     /// </summary>
-    public GpuPipeline SurfacePipeline(Listing listing, ListedPass pass, SurfaceKey variant)
+    public GpuPipeline SurfacePipeline(ListedPass pass, SurfaceKey variant)
     {
         if (pass.Surfaces.TryGetValue(variant, out GpuPipeline made))
         {
@@ -162,7 +167,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         }
 
         pass.Surfaces[variant] = GpuPipeline.None;
-        CompileSurfaceAsync(listing, pass, variant, isCounted: false).FireAndForget();
+        CompileSurfaceAsync(pass, variant, isCounted: false).FireAndForget();
         return GpuPipeline.None;
     }
 
@@ -209,7 +214,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
                 continue;
             }
 
-            isDrawable &= IsMade(listing, pass, key);
+            isDrawable &= IsMade(pass, key);
         }
 
         return isDrawable && listing == Current;
@@ -230,7 +235,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
 
             foreach (SurfaceKey variant in pass.VariantsOf(variants))
             {
-                hasEvery &= IsMade(listing, pass, variant);
+                hasEvery &= IsMade(pass, variant);
             }
         }
 
@@ -241,9 +246,9 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// Whether a draw pass's pipeline for <paramref name="variant"/> is made, or never will be, as its surface does not
     /// compile, so nothing waits for it for ever; compiling it the first time it is asked for.
     /// </summary>
-    private bool IsMade(Listing listing, ListedPass pass, SurfaceKey variant)
+    private bool IsMade(ListedPass pass, SurfaceKey variant)
     {
-        return SurfacePipeline(listing, pass, variant) != GpuPipeline.None || pass.Broken.Contains(variant);
+        return SurfacePipeline(pass, variant) != GpuPipeline.None || pass.Broken.Contains(variant);
     }
 
     /// <summary>
@@ -252,11 +257,11 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// for, then compiles every pass bound to that, and every draw's vertex stages and pipelines for the variants it
     /// draws.
     /// </summary>
-    private async Task BuildAsync(Listing listing, Handle<Pipeline> effects, SceneVariants variants)
+    private async Task BuildAsync(Listing listing, Handle<Pipeline> pipeline, Handle<Pipeline> effects, Handle<Pipeline> overlay, Handle<Pass> appended, SceneVariants variants)
     {
         List<Loaded> loaded = [];
         List<string> failures = [];
-        foreach (Handle<Pipeline> handle in (Handle<Pipeline>[])[_pipeline, effects, _overlay])
+        foreach (Handle<Pipeline> handle in (Handle<Pipeline>[])[pipeline, effects, overlay])
         {
             if (handle == Handle<Pipeline>.None)
             {
@@ -285,15 +290,15 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             Debugging.Warn("The frame runs no passes, so nothing is drawn: the renderer's pipeline and the world's effects have none.");
         }
 
-        if (_appended != Handle<Pass>.None)
+        if (appended != Handle<Pass>.None)
         {
-            Result<Pass> appended = await assets.LoadAsync(_appended, stopping).ConfigureAwait(false);
-            string name = Path.GetFileNameWithoutExtension(assets.Path(_appended) ?? string.Empty);
-            if (!appended.Ok)
+            Result<Pass> view = await assets.LoadAsync(appended, stopping).ConfigureAwait(false);
+            string name = Path.GetFileNameWithoutExtension(assets.Path(appended) ?? string.Empty);
+            if (!view.Ok)
             {
-                Debugging.Error($"Debug view {name} does not load, so it is not shown: {appended.Error}");
+                Debugging.Error($"Debug view {name} does not load, so it is not shown: {view.Error}");
             }
-            else if (await LoadPassAsync(new PipelinePass(appended.Value, name, appended.Value.Params), failures).ConfigureAwait(false) is { } ready)
+            else if (await LoadPassAsync(new PipelinePass(view.Value, name, view.Value.Params), failures).ConfigureAwait(false) is { } ready)
             {
                 loaded.Add(ready);
             }
@@ -325,8 +330,9 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     }
 
     /// <summary>
-    /// A pass with its shader's text and its params packed, those the pipeline loader merged over the shader's defaults.
-    /// Null, said once and added to <paramref name="failures"/>, when its shader does not load.
+    /// A pass with its shader's text as HLSL takes it, its params' loader in, and its params packed, those the pipeline
+    /// loader merged over the shader's defaults. Null, said once and added to <paramref name="failures"/>, when its
+    /// shader does not load.
     /// </summary>
     private async Task<Loaded?> LoadPassAsync(PipelinePass pass, List<string> failures)
     {
@@ -339,9 +345,11 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             return null;
         }
 
+        string body = text.Value;
         PassWords words = default;
         if (layout.Value is { } paramLayout)
         {
+            body = paramLayout.Prepare("LoadPassParams()", string.Empty, "PassRaw");
             foreach (string unknown in paramLayout.Unknown(pass.Params.Keys))
             {
                 Debugging.Warn($"Pass {pass.Name} is given {unknown}, which its shader's PassParams does not declare.");
@@ -351,7 +359,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             paramLayout.Write([pass.Params], _ => TexturePools.None, param => curves.GetValueOrDefault(CurveOf(param)), MemoryMarshal.AsBytes(new Span<PassWords>(ref words)));
         }
 
-        return new Loaded(pass.Pass, pass.Name, text.Value, layout.Value, words);
+        return new Loaded(pass.Pass, pass.Name, body, words);
     }
 
     /// <summary>
@@ -448,7 +456,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         }, stopping).ConfigureAwait(false);
         foreach (SurfaceKey variant in variants)
         {
-            CompileSurfaceAsync(listing, pass, variant, isCounted: true).FireAndForget();
+            CompileSurfaceAsync(pass, variant, isCounted: true).FireAndForget();
         }
     }
 
@@ -541,7 +549,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// failure material; one not loaded yet is asked for again next frame. <paramref name="isCounted"/> when the listing
     /// waits for it.
     /// </summary>
-    private async Task CompileSurfaceAsync(Listing listing, ListedPass pass, SurfaceKey variant, bool isCounted)
+    private async Task CompileSurfaceAsync(ListedPass pass, SurfaceKey variant, bool isCounted)
     {
         Result<GpuPipelineDescription> desc = await SurfaceAsync(pass, variant).ConfigureAwait(false);
         await threads.InvokeAsync(EngineThread.Render, () =>
@@ -556,7 +564,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
                 }
             }
 
-            listing.TakeSurface(pass, variant, desc.Ok ? gpu.CreatePipeline(desc.Value) : Result.Failure<GpuPipeline>(desc.Error), isCounted);
+            pass.Listing.TakeSurface(pass, variant, desc.Ok ? gpu.CreatePipeline(desc.Value) : Result.Failure<GpuPipeline>(desc.Error), isCounted);
         }, stopping).ConfigureAwait(false);
     }
 
@@ -773,12 +781,11 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     }
 
     /// <summary>
-    /// The pass's own shader's text, its params' loader put in after their struct, named as its errors name it.
+    /// The pass's own shader's text, named as its errors name it.
     /// </summary>
     private static string PassBody(ListedPass pass)
     {
-        string body = pass.Layout is { } layout ? layout.Prepare(pass.Text, layout.Loader("LoadPassParams()", string.Empty, "PassRaw")) : pass.Text;
-        return $"#line 1 \"{pass.Name}\"\n{body}";
+        return $"#line 1 \"{pass.Name}\"\n{pass.Body}";
     }
 
     private static string PiecesText(bool placeOnly)
@@ -815,6 +822,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
 }
 
 /// <summary>
-/// A pass loaded for a build: its file, its name, its shader's text and params' layout, and its params packed.
+/// A pass loaded for a build: its file, its name, its shader's text as HLSL takes it, its params' loader in, and its
+/// params packed.
 /// </summary>
-internal sealed record Loaded(Pass Pass, string Name, string Text, ParamLayout? Layout, PassWords Params);
+internal sealed record Loaded(Pass Pass, string Name, string Body, PassWords Params);

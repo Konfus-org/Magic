@@ -16,7 +16,7 @@ namespace Magic.ClusterRendering;
 /// one indirect draw per raster bin, and one of surfaces one per resolve bin, over the tiles a pass before it
 /// classified. Holds nothing of a frame between calls. Render thread.
 /// </summary>
-internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceIndices) : IDisposable
+internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials materials, GpuBuffer pieceIndices) : IDisposable
 {
     /// <summary>
     /// Groups a dispatch runs along x at most, as every API allows; more go on in y, which a shader that may run more
@@ -71,7 +71,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
                 {
                     PassKind.Compute => Compute(pass, scope, constants, iteration),
                     PassKind.Fullscreen => Fullscreen(pass, scope, constants, iteration),
-                    PassKind.Draw => Draw(listing, pass, scope, constants, iteration),
+                    PassKind.Draw => Draw(pass, scope, constants, iteration),
                     PassKind.Script => Script(pass, scope),
                     _ => false,
                 };
@@ -244,7 +244,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
     /// A script pass: its script records into the one texture it writes, the target itself in a target's stage, told
     /// the texture's format and encoding, which its pipelines are made for.
     /// </summary>
-    private static bool Script(ListedPass pass, in RecordScope scope)
+    private bool Script(ListedPass pass, in RecordScope scope)
     {
         PassBinding write = pass.TextureWrites[0];
         if (pass.Script is not { } script || !Find(scope, write.Info.Name, out BoundResource target))
@@ -255,7 +255,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
         bool isTarget = write.Info.IsTarget;
         Rectangle area = new(0, 0, (int)Math.Max(1, target.Width), (int)Math.Max(1, target.Height));
         script.Record(new PipelineScriptContext(
-            scope.Commands,
+            gpu.Commands,
             target.Texture,
             area,
             isTarget ? scope.TargetFormat : write.Info.Format,
@@ -271,7 +271,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
     /// visibility buffer's pieces, a bin at a time, the G-buffer's tiles, a resolve bin at a time, transparent pieces
     /// farthest first, depth for shadows (an iteration's arguments each), or the sky.
     /// </summary>
-    private bool Draw(Listing listing, ListedPass pass, in RecordScope scope, in FrameConstants constants, uint iteration)
+    private bool Draw(ListedPass pass, in RecordScope scope, in FrameConstants constants, uint iteration)
     {
         PassDraw draw = pass.Pass.Draw;
         uint layer = pass.Pass.Each.Length > 0 ? iteration : 0;
@@ -323,16 +323,16 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
                     .DrawIndexedFromBuffer(args.Buffer, (uint)((draw.First + iteration) * GpuArray<GpuDrawArgs>.RowBytes), 1);
                 break;
             case PassDrawn.Visibility:
-                Visibility(render, listing, pass, scope, args, instances);
+                Visibility(render, pass, args, instances);
                 break;
             case PassDrawn.Surfaces:
-                Resolve(render, listing, pass, scope, args, instances);
+                Resolve(render, pass, args, instances);
                 break;
             case PassDrawn.Transparent:
-                Transparent(render, listing, pass, scope);
+                Transparent(render, pass, scope);
                 break;
             case PassDrawn.Sky:
-                Sky(render, listing, pass, scope);
+                Sky(render, pass, scope);
                 break;
             default:
                 break;
@@ -346,7 +346,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
     /// fixed bins draw what does not clip, single and double sided; then each surface's bin of clusters and its bin of
     /// cards, which take six indices, not a piece's 96, both with its pipeline.
     /// </summary>
-    private void Visibility(GpuRenderPass render, Listing listing, ListedPass pass, in RecordScope scope, BoundResource args, BoundResource instances)
+    private void Visibility(GpuRenderPass render, ListedPass pass, BoundResource args, BoundResource instances)
     {
         BindPieces(render, instances.Buffer);
         for (int bin = 0; bin < Materials.FixedRasterBins; bin++)
@@ -354,15 +354,15 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
             DrawBin(new SurfaceKey(Handle<Shader>.None, false, bin == 1), bin);
         }
 
-        for (int surface = 0; surface < scope.RasterBins.Count; surface++)
+        for (int surface = 0; surface < materials.RasterBins.Count; surface++)
         {
-            DrawBin(scope.RasterBins[surface], Materials.FixedRasterBins + surface);
-            DrawBin(scope.RasterBins[surface], Materials.CardBins + surface);
+            DrawBin(materials.RasterBins[surface], Materials.FixedRasterBins + surface);
+            DrawBin(materials.RasterBins[surface], Materials.CardBins + surface);
         }
 
         void DrawBin(SurfaceKey key, int bin)
         {
-            GpuPipeline pipeline = graph.SurfacePipeline(listing, pass, key);
+            GpuPipeline pipeline = graph.SurfacePipeline(pass, key);
             if (pipeline == GpuPipeline.None)
             {
                 return;
@@ -375,12 +375,12 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
     /// <summary>
     /// The G-buffer: each resolve bin's tiles with its surface's pipeline, from the arguments the classifying pass counted.
     /// </summary>
-    private void Resolve(GpuRenderPass render, Listing listing, ListedPass pass, in RecordScope scope, BoundResource args, BoundResource tiles)
+    private void Resolve(GpuRenderPass render, ListedPass pass, BoundResource args, BoundResource tiles)
     {
         BindPieces(render, tiles.Buffer);
-        for (int bin = 0; bin < scope.ResolveBins.Count; bin++)
+        for (int bin = 0; bin < materials.ResolveBins.Count; bin++)
         {
-            GpuPipeline pipeline = graph.SurfacePipeline(listing, pass, scope.ResolveBins[bin]);
+            GpuPipeline pipeline = graph.SurfacePipeline(pass, materials.ResolveBins[bin]);
             if (pipeline == GpuPipeline.None)
             {
                 continue;
@@ -393,9 +393,9 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
     /// <summary>
     /// The world's sky, its material's surface or the renderer's own, over what nothing was drawn on.
     /// </summary>
-    private void Sky(GpuRenderPass render, Listing listing, ListedPass pass, in RecordScope scope)
+    private void Sky(GpuRenderPass render, ListedPass pass, in RecordScope scope)
     {
-        GpuPipeline sky = graph.SurfacePipeline(listing, pass, scope.Sky);
+        GpuPipeline sky = graph.SurfacePipeline(pass, scope.Sky);
         if (sky != GpuPipeline.None)
         {
             render.Pipeline(sky).Draw(3);
@@ -405,7 +405,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
     /// <summary>
     /// The view's transparent pieces, farthest instance first, a run of one surface at a time.
     /// </summary>
-    private void Transparent(GpuRenderPass render, Listing listing, ListedPass pass, in RecordScope scope)
+    private void Transparent(GpuRenderPass render, ListedPass pass, in RecordScope scope)
     {
         if (scope.TransparentRuns.Count == 0)
         {
@@ -416,7 +416,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
         GpuPipeline bound = GpuPipeline.None;
         foreach (TransparentRun run in scope.TransparentRuns)
         {
-            GpuPipeline pipeline = graph.SurfacePipeline(listing, pass, run.Surface);
+            GpuPipeline pipeline = graph.SurfacePipeline(pass, run.Surface);
             if (pipeline == GpuPipeline.None)
             {
                 continue;
@@ -663,21 +663,17 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, GpuBuffer pieceInd
 
 /// <summary>
 /// What a stage records against: the frame's resources and a view's, or a target's in a target's stage, the constants
-/// and counts of the frame or the view, the surfaces of the raster and resolve bins, the view's transparent pieces and
-/// their runs, the sky's surface, and what a script is told: the commands, the frame now, and the target's format and
-/// encoding.
+/// and counts of the frame or the view, the view's transparent pieces and their runs, the sky's surface, the frame now,
+/// and a target's format and encoding.
 /// </summary>
 internal readonly record struct RecordScope(
     ResourceSet Frame,
     ResourceSet? View,
     FrameConstants Constants,
     Counts Counts,
-    IReadOnlyList<SurfaceKey> RasterBins,
-    IReadOnlyList<SurfaceKey> ResolveBins,
     IReadOnlyList<TransparentRun> TransparentRuns,
     GpuBuffer TransparentPieces,
     SurfaceKey Sky,
-    GpuCommands Commands,
     Frame Now,
     GpuFormat TargetFormat = GpuFormat.Invalid,
     TargetEncoding TargetEncoding = TargetEncoding.Linear);

@@ -66,17 +66,20 @@ internal sealed class TexturePools : IDisposable
 
     private readonly GpuTexture _empty;
 
+    private readonly ClusterRenderingSettings _settings;
+
     /// <summary>
     /// The taps the sampler filters with at a grazing angle, 1 to 16.
     /// </summary>
     private float _anisotropy;
 
-    public TexturePools(IGpu gpu, Assets assets, Caches caches, Threads threads, float anisotropy, CancellationToken stopping)
+    public TexturePools(IGpu gpu, Assets assets, Caches caches, Threads threads, ClusterRenderingSettings settings, CancellationToken stopping)
     {
         _gpu = gpu;
         _assets = assets;
         _caches = caches;
         _threads = threads;
+        _settings = settings;
         _stopping = stopping;
         for (int i = 0; i < Count; i++)
         {
@@ -85,7 +88,7 @@ internal sealed class TexturePools : IDisposable
 
         _empty = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.Rgba8Unorm, GpuTextureUsage.Sampled, 1, 1, 1, 1, GpuTextureKind.Texture2DArray));
         gpu.Upload(new GpuTextureRegion(_empty), [255, 255, 255, 255]);
-        _anisotropy = Math.Clamp(anisotropy, 1, 16);
+        _anisotropy = Math.Clamp(settings.Anisotropy, 1, 16);
         Sampler = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Repeat, _anisotropy));
     }
 
@@ -103,12 +106,12 @@ internal sealed class TexturePools : IDisposable
     public GpuSampler Sampler { get; private set; }
 
     /// <summary>
-    /// Filters with <paramref name="anisotropy"/> taps at most from now on, 1 to 16: a sampler made again, the old one
-    /// released. Render thread.
+    /// Filters with as many taps as the settings now say, 1 to 16, from now on: a sampler made again when that changed,
+    /// the old one released. Render thread, each frame.
     /// </summary>
-    public void UseAnisotropy(float anisotropy)
+    public void FollowSettings()
     {
-        float clamped = Math.Clamp(anisotropy, 1, 16);
+        float clamped = Math.Clamp(_settings.Anisotropy, 1, 16);
         if (clamped == _anisotropy)
         {
             return;
@@ -120,7 +123,8 @@ internal sealed class TexturePools : IDisposable
     }
 
     /// <summary>
-    /// The textures taken in, or failed, since the materials last asked: whose materials are packed anew.
+    /// The textures taken in, or failed, this frame, until it ends: whose models' cards and materials are worked out
+    /// anew.
     /// </summary>
     public HashSet<Handle<Texture>> Changed { get; } = [];
 
@@ -185,10 +189,11 @@ internal sealed class TexturePools : IDisposable
     }
 
     /// <summary>
-    /// Ends the frame: the uploads held back from a pool's growing go in now.
+    /// Ends the frame: what changed this frame is forgotten, and the uploads held back from a pool's growing go in now.
     /// </summary>
     public void EndFrame()
     {
+        Changed.Clear();
         foreach (Pool pool in _pools)
         {
             pool.HasGrown = false;

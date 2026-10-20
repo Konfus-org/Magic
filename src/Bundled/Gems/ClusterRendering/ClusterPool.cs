@@ -139,9 +139,10 @@ internal sealed class ClusterPool : IDisposable
 
     /// <summary>
     /// Whether the model can be drawn as it should be: it is in, and its cards' atlases are in, or one failed and its
-    /// clusters stand in for its cards at every distance, so nothing about it changes once it shows.
+    /// clusters stand in for its cards at every distance, so nothing about it changes once it shows; the failure model
+    /// in its place, when the model did not load.
     /// </summary>
-    public bool IsDrawable(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && CanDraw(entry);
+    public bool IsDrawable(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && (entry.HasFailed && model != Failed ? IsDrawable(Failed) : CanDraw(entry));
 
     /// <summary>
     /// The sphere around the model at full detail, in its own space; none until it is in.
@@ -165,7 +166,6 @@ internal sealed class ClusterPool : IDisposable
             return;
         }
 
-        entry.IsReleased = true;
         _ready.Remove(entry);
         Free(entry);
         Models.Set(entry.Row, default);
@@ -256,17 +256,18 @@ internal sealed class ClusterPool : IDisposable
         PackedModel packed = await Task.Run(() => Pack(model), _stopping).ConfigureAwait(false);
         _threads.Post(EngineThread.Render, () =>
         {
-            if (entry.IsReleased)
+            if (IsReleased(entry))
             {
                 return;
             }
 
-            entry.Waiting = packed;
-            entry.HasFailed = false;
-            if (!_ready.Contains(entry))
+            if (entry.Waiting is null)
             {
                 _ready.Add(entry);
             }
+
+            entry.Waiting = packed;
+            entry.HasFailed = false;
         });
     }
 
@@ -402,7 +403,7 @@ internal sealed class ClusterPool : IDisposable
         ModelField? field = await _fields.ReadOrMakeAsync(entry.Handle, packed.Coarsest, _stopping).ConfigureAwait(false);
         _threads.Post(EngineThread.Render, () =>
         {
-            if (entry.IsReleased || entry.In != packed)
+            if (IsReleased(entry) || entry.In != packed)
             {
                 return;
             }
@@ -411,6 +412,15 @@ internal sealed class ClusterPool : IDisposable
             WriteRow(entry);
             Changed.Add(entry.Handle);
         });
+    }
+
+    /// <summary>
+    /// Whether the model was let go (<see cref="Release"/>) since <paramref name="entry"/> was its: what a worker made
+    /// for it meanwhile is dropped.
+    /// </summary>
+    private bool IsReleased(ModelEntry entry)
+    {
+        return !_models.TryGetValue(entry.Handle, out ModelEntry? now) || !ReferenceEquals(now, entry);
     }
 
     private void Free(ModelEntry entry)
@@ -788,8 +798,6 @@ internal sealed class ClusterPool : IDisposable
         public float Distance { get; set; } = float.MaxValue;
 
         public bool HasFailed { get; set; }
-
-        public bool IsReleased { get; set; }
     }
 }
 

@@ -33,7 +33,7 @@ internal sealed partial record SurfaceSource(string Name, string Text, ParamLayo
 
         if (layout.Value is { } parsed)
         {
-            return Result.Success(new SurfaceSource(name, parsed.Prepare(text, parsed.Loader("LoadMaterialParams(uint material)", "uint4 rows[8] = LOAD(Materials, GpuMaterial, material).rows;", "rows")), parsed));
+            return Result.Success(new SurfaceSource(name, parsed.Prepare("LoadMaterialParams(uint material)", "uint4 rows[8] = LOAD(Materials, GpuMaterial, material).rows;", "rows"), parsed));
         }
 
         return IncludedSurface().Match(text) is { Success: true } include && assets.Find<Shader>("Shaders/" + include.Groups["path"].Value) is var included && included != surface
