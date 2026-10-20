@@ -68,8 +68,10 @@
     </PropertyGroup>
   </Target>
 
-  <!-- Cloned and built by one build at a time: several projects may declare the same library, so each library's work
-       holds a machine-wide mutex named for it, and whoever comes second finds the marker. The source is fetched shallow
+  <!-- Cloned and built one library at a time, machine-wide: several projects, and several checkouts building at once,
+       may declare the same library, so all native library work holds one machine-wide mutex, and whoever comes second
+       finds the marker. One build at a time is also what keeps the machine usable, with the limits on the build
+       itself below: a library's build is long, and the user must be able to carry on meanwhile. The source is fetched shallow
        at the commit, with its submodules; a changed commit fetches afresh, and a changed commit or options builds afresh,
        in Release, then the shared library named as the OS names one (SDL3.dll, libSDL3.so, libSDL3.dylib) is
        copied under built/native/, where the build picks it up. -->
@@ -160,6 +162,16 @@ bool Run(string file, string arguments, string workingDirectory, string code)
     {
         using (System.Diagnostics.Process process = System.Diagnostics.Process.Start(start))
         {
+            // Everything the build runs, and everything that spawns, yields the CPU to whatever the machine's user is
+            // doing: a native library build is long, and must never make the machine unusable.
+            try
+            {
+                process.PriorityClass = System.Diagnostics.ProcessPriorityClass.BelowNormal;
+            }
+            catch (InvalidOperationException)
+            {
+            }
+
             process.OutputDataReceived += (sender, e) => { if (e.Data != null) { lock (lines) { lines.Add(e.Data); } } };
             process.ErrorDataReceived += (sender, e) => { if (e.Data != null) { lock (lines) { lines.Add(e.Data); } } };
             process.BeginOutputReadLine();
@@ -188,7 +200,7 @@ bool Run(string file, string arguments, string workingDirectory, string code)
     }
 }
 
-using (Mutex mutex = new Mutex(false, "Magic.Natives." + Name.Replace('/', '_')))
+using (Mutex mutex = new Mutex(false, "Magic.Natives"))
 {
     try
     {
@@ -260,8 +272,20 @@ using (Mutex mutex = new Mutex(false, "Magic.Natives." + Name.Replace('/', '_'))
                 Directory.CreateDirectory(build);
                 Directory.CreateDirectory(built);
                 string target = string.IsNullOrEmpty(CmakeTarget) ? "" : " --target " + CmakeTarget;
+
+                // The build takes half the cores, never all of them, so the machine stays usable; a compiler takes a
+                // few hundred MB, so this is what bounds memory too. On Windows CMake builds through MSBuild, where a
+                // bare --parallel builds one project per core and each project's compiler forks once per core again:
+                // cores-squared compilers at once. There projects run in parallel on a quarter of the cores, which
+                // also bounds the linkers, the multi-tool task compiles file by file, and the enforced count caps the
+                // compilers at half the cores across every build on the machine. MSBuild's nodes would otherwise
+                // linger for a quarter of an hour after the build.
+                int cores = Environment.ProcessorCount;
+                string parallel = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                    ? " --parallel " + Math.Max(1, cores / 4) + target + " -- /nodeReuse:false /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:CL_MPCount=" + Math.Max(1, cores / 2)
+                    : " --parallel " + Math.Max(1, cores / 2) + target;
                 ready = Run("cmake", "-S \"" + source + "\" -B \"" + build + "\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"" + built + "\" " + options, Folder, "BND015")
-                    && Run("cmake", "--build \"" + build + "\" --config Release --parallel" + target, Folder, "BND015")
+                    && Run("cmake", "--build \"" + build + "\" --config Release" + parallel, Folder, "BND015")
                     && (!string.IsNullOrEmpty(CmakeTarget) || Run("cmake", "--install \"" + build + "\" --config Release", Folder, "BND015"));
                 if (ready)
                 {

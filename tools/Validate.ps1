@@ -41,6 +41,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 # A native command's exit code is read below, never thrown (PowerShell 7.4 would otherwise throw on it).
 $PSNativeCommandUseErrorActionPreference = $false
+# The build's worker processes end with the build instead of lingering, one per core, for a quarter of an hour.
+$env:MSBUILDDISABLENODEREUSE = '1'
 
 $root = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $root 'Magic.slnx'
