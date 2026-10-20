@@ -1,5 +1,6 @@
-# The tests and the headless sample run, on Linux: tools/Validate.ps1's Test and Headless steps, which need no
-# display or GPU. The Window step does, so it stays on developer machines. The logs are kept when a run fails.
+# The tests, on Linux in Release: tools/Validate.ps1's Test step, which needs no display or GPU. The headless sample
+# run is the Build workflow's, on every OS; the Window step needs a GPU, so it stays on developer machines. The logs
+# are kept when a run fails.
 name: Test
 
 on:
@@ -18,7 +19,7 @@ concurrency:
 
 jobs:
   test:
-    name: ubuntu-latest Debug
+    name: ubuntu-latest
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
@@ -27,16 +28,16 @@ jobs:
       - id: setup
         uses: ./.github/actions/setup
 
-      - name: Build, test and run headless
+      - name: Build and test
         shell: pwsh
-        run: ./tools/Validate.ps1 -Only Build,Test,Headless
+        run: ./tools/Validate.ps1 -Configuration Release -Only Build,Test
 
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: logs
           path: |
-            Build/bin/Debug/Logs
+            Build/bin/Release/Logs
             Build/TestOutput
           if-no-files-found: ignore
 

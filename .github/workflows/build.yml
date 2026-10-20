@@ -1,6 +1,8 @@
-# The build on every OS Magic targets, in Debug, and the Release configuration on one: tools/Validate.ps1's Build
-# step, which already treats every warning as an error. The weekly run keeps main's native-library caches alive,
-# which every branch falls back to.
+# The build on every OS Magic targets, in Release: tools/Validate.ps1's Build step, which already treats every warning
+# as an error, then the headless samples against what it built. Every job packages Magic's folder, so a build is there
+# to download from any run, and a push to main publishes the three packages as one GitHub release once every build
+# passed: what ships is what was checked, built once. The weekly run keeps main's native-library caches alive, which
+# every branch falls back to.
 name: Build
 
 on:
@@ -15,35 +17,90 @@ on:
 permissions:
   contents: read
 
+# A newer push supersedes a run, except on main, where a release in progress is never cut short.
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   build:
-    name: ${{ matrix.os }} ${{ matrix.configuration }}
+    name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        configuration: [Debug]
-        include:
-          - os: ubuntu-latest
-            configuration: Release
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
 
       - id: setup
         uses: ./.github/actions/setup
 
-      - name: Build
+      # Core's VersionPrefix with this run's number as the patch, so every build is newer than the last and no one
+      # bumps a number by hand. MSBuild reads Version from the environment; a project with a Version of its own, as a
+      # gem has, keeps it.
+      - name: Name the version
+        id: version
         shell: pwsh
-        run: ./tools/Validate.ps1 -Only Build -Configuration ${{ matrix.configuration }}
+        run: |
+          $prefix = dotnet msbuild src/Core/Core.csproj -getProperty:VersionPrefix
+          $version = "$prefix.${{ github.run_number }}"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "Version=$version" >> $env:GITHUB_ENV
+
+      - name: Build and run headless
+        shell: pwsh
+        run: ./tools/Validate.ps1 -Configuration Release -Only Build,Headless
+
+      # Magic's folder without what the build and the run left in it. tar keeps the executable bit that a zip would
+      # lose, so Linux and macOS get a tarball.
+      - name: Package
+        shell: pwsh
+        run: |
+          $platform = "${{ runner.os }}-${{ runner.arch }}".ToLowerInvariant()
+          $name = "Magic-$env:Version-$platform"
+          $excluded = 'Tests', 'Tools', 'Logs', 'Cache', 'Screenshots'
+          if ($IsWindows) {
+            Get-ChildItem Build/bin/Release -Exclude $excluded | Compress-Archive -DestinationPath "$name.zip"
+          } else {
+            $options = $excluded | ForEach-Object { "--exclude=./$_" }
+            tar --create --gzip --file "$name.tar.gz" --directory Build/bin/Release @options .
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Magic-${{ matrix.os }}
+          path: Magic-*
+          if-no-files-found: error
+          retention-days: 7
 
       - if: always()
         uses: ./.github/actions/save-natives
         with:
           key: ${{ steps.setup.outputs.natives-key }}
           hit: ${{ steps.setup.outputs.natives-hit }}
+
+  publish:
+    name: Publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Magic-*
+          merge-multiple: true
+          path: release
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: gh release create "v$VERSION" --target "${{ github.sha }}" --title "Magic $VERSION" --generate-notes release/*

@@ -5,18 +5,21 @@ What GitHub runs on a change and what must hold for it to pass. The checks run t
 exception: the `Window` step and `Screenshot.ps1` need a display and a GPU, which no runner has, so those stay on
 developer machines. Everything else, including the headless sample run, runs here.
 
+Every build here is the `Release` configuration, the one that ships: a push to `main` publishes exactly what the
+checks built and ran. `Debug` is what a developer builds, with its overflow checks, and `Validate.ps1` keeps building
+it by default; its two `#if DEBUG` constants aside, the two configurations compile the same code.
+
 ## When the checks run
 
 Every workflow runs on a pull request into `dev` or `main` and on a push to either, never on another branch: a
 branch is validated when it asks to merge, and the merged result once more. A newer push to the same pull request
-or branch cancels the run it supersedes. Every job has a time limit, so a stuck step ends the job instead of holding
-a runner; the limits are generous for the jobs that may build the native libraries from source (below) and tight for
-the rest.
+or branch cancels the run it supersedes, except on `main`, where a release in progress is never cut short. Every job
+has a time limit, so a stuck step ends the job instead of holding a runner; the limits are generous for the jobs that
+may build the native libraries from source (below) and tight for the rest.
 
-The repository's rulesets, not a file here, are what make the checks required: `dev` and `main` should require every
-Build job, Test, Docs and CodeQL to pass before a merge, so that Dependabot's pull requests and everyone else's are
-held to the same bar. `main` alone publishes a release, after its own Release-configuration build, tests and headless
-run passed on every OS.
+The repository's rulesets, not a file here, are what make the checks required: `dev` and `main` should require the
+three Build jobs, Test, Docs and CodeQL to pass before a merge, so that Dependabot's pull requests and everyone else's
+are held to the same bar. That is what makes a merge into `main` a release of checked code.
 
 ## The native libraries
 
@@ -40,14 +43,17 @@ The .NET SDK `global.json` names, Python 3 with `ply`, CMake and a C++ toolchain
 ([README](../../README.md#requirements)). Windows and macOS runners come with theirs; Linux installs SDL's build
 dependencies. The setup action installs everything else.
 
-## Releases
+## Builds and releases
 
-A push to `main` builds the `Release` configuration on every OS, runs the tests and the headless samples against it,
-and packages Magic's output folder without what the build and the runs left in it: a zip on Windows, a tarball on
-Linux and macOS, so the executable bit survives. Once all three passed, one GitHub release is created at that commit,
-tagged `v<version>` with generated notes. The version is Core's `VersionPrefix` with the run number as the patch, so
-every release is newer than the one before and nothing is bumped by hand; the prefix changes when the major or minor
-version does.
+Each Build job builds on its OS, runs the headless samples against the result, and packages Magic's output folder
+without what the build and the run left in it: a zip on Windows, a tarball on Linux and macOS, so the executable bit
+survives. The package is kept with the run for a week, so a build from any pull request can be downloaded and tried.
+On a push to `main`, once all three builds passed, one GitHub release is created at that commit from those same
+packages, tagged `v<version>` with generated notes. Nothing is built twice.
+
+The version is Core's `VersionPrefix` with the run number as the patch, so every build is newer than the one before
+and nothing is bumped by hand; the prefix changes when the major or minor version does. The number is written into
+the assemblies through MSBuild's `Version` property; a project with a version of its own, as every gem has, keeps it.
 
 ## Dependabot
 
