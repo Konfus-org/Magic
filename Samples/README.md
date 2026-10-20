@@ -8,8 +8,9 @@ the files under `Assets/`, and its code is the scripts among them, which `Sample
 
 The camera flies itself until it is flown: hold the right mouse button and move the mouse to look around, WASD moves
 where it looks, E and Q go straight up and down, and Shift goes faster. On a gamepad the left stick moves, the right
-stick looks, the right and left triggers go up and down, and the left shoulder goes faster. A left click, or the
-gamepad's south button, throws a ball where the camera looks.
+stick looks, the right and left triggers go up and down, and the left shoulder goes faster. A left click throws a
+ball at whatever the pointer is over, or where the camera looks when it is over nothing; the gamepad's south button
+throws where the camera looks.
 
 ## The world
 

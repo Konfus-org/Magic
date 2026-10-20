@@ -73,6 +73,23 @@ public enum Motion : byte
 }
 
 /// <summary>
+/// Which kinds of body a query considers: any set of <see cref="Motion"/>.
+/// </summary>
+[Flags]
+public enum Motions : byte
+{
+    None = 0,
+
+    Static = 1,
+
+    Dynamic = 2,
+
+    Kinematic = 4,
+
+    All = Static | Dynamic | Kinematic,
+}
+
+/// <summary>
 /// What a <see cref="Physics"/> body collides as, fitted to the entity's model at the transform's scale: its bounds
 /// for a box, the largest extent for a sphere's diameter, the height and width for a capsule, and its triangles for a
 /// mesh, which only a static body can be. Without a model, a unit cube's.

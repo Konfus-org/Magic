@@ -4,20 +4,29 @@ using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Input;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
+using Size = System.Drawing.Size;
 
 namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
-/// Throws a ball from its entity, the player's camera, along where it looks, on a left click or the gamepad's south
-/// button: a small sphere with a dynamic <see cref="Physics"/> body sent off at <see cref="Speed"/>, which the physics
-/// gem flies from there. A prefab attaches it as
+/// Throws a ball from its entity, the player's camera, on a left click or the gamepad's south button: a small sphere
+/// with a dynamic <see cref="Physics"/> body sent off at <see cref="Speed"/>, which the physics gem flies from there.
+/// A click throws it at whatever the pointer is over, asking the physics gem what the pointer's ray hits; over
+/// nothing, or without a physics gem, or from the gamepad, it goes where the camera looks. Each ball carries a
+/// <see cref="Contacts"/>, so what it hits is there to read. A prefab attaches the script as
 /// <c>{ "id": 3317, "speed": 40, "most": 50, "model": { "id": 517 }, "material": { "id": 3322 } }</c>. Past
 /// <see cref="Most"/> balls the oldest goes, and all go when the entity does.
 /// </summary>
-internal sealed class Shoot(Entity owner, World world, IInput input) : IBehavior, IDisposable
+internal sealed class Shoot(Entity owner, World world, IInput input, IWindow window, IPhysics? physics = null) : IBehavior, IDisposable
 {
+    /// <summary>
+    /// Metres the pointer's ray reaches: farther than anything in the samples.
+    /// </summary>
+    private const float Reach = 1000;
+
     private readonly Queue<Entity> _balls = new();
 
     public void Dispose()
@@ -54,7 +63,8 @@ internal sealed class Shoot(Entity owner, World world, IInput input) : IBehavior
 
     public void Update(in Frame frame)
     {
-        if (!input[Control.MouseLeft].WasPressed && !input[Control.GamepadSouth].WasPressed)
+        bool isClick = input[Control.MouseLeft].WasPressed;
+        if (!isClick && !input[Control.GamepadSouth].WasPressed)
         {
             return;
         }
@@ -67,9 +77,20 @@ internal sealed class Shoot(Entity owner, World world, IInput input) : IBehavior
             Rotation = camera.Rotation,
             Scale = new Vector3(Radius),
         };
+        Vector3 aim = forward;
+        if (isClick && physics is not null)
+        {
+            Vector2 pointer = new(input[Control.MouseX].Value, input[Control.MouseY].Value);
+            Vector3 far = pointer.ToWorld(world.Get<Camera>(owner), camera, new Size(window.Width, window.Height), Reach);
+            if (physics.Cast(camera.Position, far) is { } hit)
+            {
+                aim = Vector3.Normalize(hit.Point - at.Position);
+            }
+        }
+
         Renderer renderer = new() { Model = Model, Materials = new MaterialSlots { Slot0 = Material } };
-        Physics body = new() { Motion = Motion.Dynamic, Shape = Shape.Sphere, Bounce = 0.4f, Velocity = forward * Speed };
-        _balls.Enqueue(world.Create([at, renderer, body]));
+        Physics body = new() { Motion = Motion.Dynamic, Shape = Shape.Sphere, Bounce = 0.4f, Velocity = aim * Speed };
+        _balls.Enqueue(world.Create([at, renderer, body, new Contacts()]));
         while (_balls.Count > Most)
         {
             Entity oldest = _balls.Dequeue();

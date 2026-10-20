@@ -4,6 +4,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
+using Magic.Contexts.Queries;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
@@ -21,10 +22,15 @@ namespace Magic.Box3DPhysics;
 /// farther from every player camera than the settings' range, so a world full of bodies is simulated only around the
 /// player; an entity past the range waits where it is, body or no body, until the player comes back.
 /// <para>
+/// It answers <see cref="IPhysics"/> from the bodies as the last step left them, and after each step writes what
+/// every body that listens, one whose entity has a <see cref="Contacts"/>, is touching, with the phase worked out
+/// against what the component held the step before.
+/// </para>
+/// <para>
 /// Box3D works in metres, kilograms and seconds with +Y up, as the engine does.
 /// </para>
 /// </summary>
-internal sealed unsafe class Box3DPhysicsGem : IGem, IDisposable
+internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IDisposable
 {
     private readonly World _world;
     private readonly Box3DPhysicsSettings _settings;
@@ -42,6 +48,12 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IDisposable
     /// every other step.
     /// </summary>
     private const float Leave = 1.25f;
+
+    /// <summary>
+    /// The most touching contacts read for one body, which bounds the stack they are read onto; a body touching more
+    /// hears the first of them.
+    /// </summary>
+    private const int MostTouching = 64;
 
     /// <summary>
     /// Which step this is, stamped on each body seen in it: a body not stamped is of an entity that is gone, or out
@@ -129,6 +141,47 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IDisposable
         {
             Moved(events.MoveEvents[i]);
         }
+
+        foreach ((ReadOnlySpan<Entity> entities, Span<Contacts> contacts) in _world.Query<Contacts>())
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                Touch(_slots.TryGetValue(entities[i], out int slot) ? slot : -1, ref contacts[i]);
+            }
+        }
+    }
+
+    public RayHit? Cast(Vector3 from, Vector3 to, Motions motions = Motions.All)
+    {
+        B3.RayResult result = B3.WorldCastRayClosest(_box3d, ToVec(from), ToVec(to - from), FilterOf(motions));
+        if (!result.Hit)
+        {
+            return null;
+        }
+
+        Entity entity = _bodies[SlotOf(result.ShapeId)].Entity;
+        return new RayHit(entity, FromVec(result.Point), FromVec(result.Normal), result.Fraction * Vector3.Distance(from, to));
+    }
+
+    public int Overlap(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
+    {
+        if (found.IsEmpty)
+        {
+            return 0;
+        }
+
+        B3.Vec3 point = default;
+        B3.ShapeProxy proxy = new() { Points = &point, Count = 1, Radius = radius };
+        OverlapQuery query = new() { Capacity = found.Length };
+        fixed (Entity* into = found)
+        fixed (Body* bodies = CollectionsMarshal.AsSpan(_bodies))
+        {
+            query.Found = into;
+            query.Bodies = bodies;
+            B3.WorldOverlapShape(_box3d, ToVec(center), &proxy, FilterOf(motions), (delegate* unmanaged<B3.ShapeId, void*, bool>)(delegate* unmanaged<B3.ShapeId, void*, byte>)&OnOverlap, &query);
+        }
+
+        return query.Count;
     }
 
     /// <summary>
@@ -265,6 +318,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IDisposable
         B3.BodyId id = B3.CreateBody(_box3d, &def);
         B3.ShapeDef shapeDef = B3.DefaultShapeDef();
         shapeDef.BaseMaterial = Surfaces.Material(physics.Surface, physics.Bounce);
+        shapeDef.Filter.CategoryBits = (ulong)MotionsOf(physics.Motion);
         Shape kind = physics.Shape;
         if (kind == Shape.Mesh && (physics.Motion != Motion.Static || shape.Mesh is null))
         {
@@ -371,6 +425,143 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes what the body in <paramref name="slot"/> touches after this step over its entity's contacts: each body
+    /// it touches now, Stay when the component already held it, else Enter; then each the component held and it no
+    /// longer touches, as Exit for this step. An entity with no body, out of range, parts from them all.
+    /// </summary>
+    private void Touch(int slot, ref Contacts contacts)
+    {
+        Contacts now = default;
+        int written = 0;
+        if (slot >= 0)
+        {
+            Body body = _bodies[slot];
+            int capacity = Math.Min(B3.BodyGetContactCapacity(body.Id), MostTouching);
+            B3.ContactData* data = stackalloc B3.ContactData[capacity];
+            int count = B3.BodyGetContactData(body.Id, data, capacity);
+            for (int i = 0; i < count && written < Contacts.Capacity; i++)
+            {
+                Contact contact = ContactOf(slot, data[i]);
+                if (contact.Phase == ContactPhase.None)
+                {
+                    continue;
+                }
+
+                contact.Phase = PhaseOf(contacts, contact.Other) is ContactPhase.Enter or ContactPhase.Stay ? ContactPhase.Stay : ContactPhase.Enter;
+                if (contact.Phase == ContactPhase.Enter)
+                {
+                    Debugging.Verbose($"Entity {body.Entity.Id} touched entity {contact.Other.Id} at ({contact.Point.X:0.###}, {contact.Point.Y:0.###}, {contact.Point.Z:0.###}), {contact.Impulse:0.###} Ns.");
+                }
+
+                now[written++] = contact;
+            }
+        }
+
+        foreach (Contact held in contacts)
+        {
+            if (held.Phase is ContactPhase.None or ContactPhase.Exit || PhaseOf(now, held.Other) != ContactPhase.None)
+            {
+                continue;
+            }
+
+            if (written == Contacts.Capacity)
+            {
+                break;
+            }
+
+            now[written++] = held with { Phase = ContactPhase.Exit, Impulse = 0 };
+            if (slot >= 0)
+            {
+                Debugging.Verbose($"Entity {_bodies[slot].Entity.Id} parted from entity {held.Other.Id}.");
+            }
+        }
+
+        contacts = now;
+    }
+
+    /// <summary>
+    /// One of Box3D's touching contacts as the body in <paramref name="slot"/> sees it: the other body's entity, the
+    /// mean of the contact points, the normal turned to point away from the other body, and the impulse along it;
+    /// a contact with no points, the two only near, is <see cref="ContactPhase.None"/>.
+    /// </summary>
+    private Contact ContactOf(int slot, in B3.ContactData data)
+    {
+        bool isA = SlotOf(data.ShapeIdA) == slot;
+        int other = isA ? SlotOf(data.ShapeIdB) : SlotOf(data.ShapeIdA);
+        Vector3 centre = FromVec(B3.BodyGetWorldCenterOfMass(B3.ShapeGetBody(data.ShapeIdA)));
+        Vector3 point = Vector3.Zero;
+        Vector3 normal = Vector3.Zero;
+        float impulse = 0;
+        int points = 0;
+        for (int i = 0; i < data.ManifoldCount; i++)
+        {
+            ref B3.Manifold manifold = ref data.Manifolds[i];
+            for (int j = 0; j < manifold.PointCount; j++)
+            {
+                point += centre + FromVec(manifold.Points[j].AnchorA);
+                impulse += manifold.Points[j].TotalNormalImpulse;
+                normal += FromVec(manifold.Normal);
+                points++;
+            }
+        }
+
+        if (points == 0)
+        {
+            return default;
+        }
+
+        normal = Vector3.Normalize(normal);
+        return new Contact
+        {
+            Other = _bodies[other].Entity,
+            Point = point / points,
+            Normal = isA ? -normal : normal,
+            Impulse = impulse,
+            Phase = ContactPhase.Stay,
+        };
+    }
+
+    private static ContactPhase PhaseOf(in Contacts contacts, Entity other)
+    {
+        foreach (Contact held in contacts)
+        {
+            if (held.Phase != ContactPhase.None && held.Other == other)
+            {
+                return held.Phase;
+            }
+        }
+
+        return ContactPhase.None;
+    }
+
+    /// <summary>
+    /// The body slot a shape belongs to, kept one up in its body's user data so that 0 is no body.
+    /// </summary>
+    private static int SlotOf(B3.ShapeId shape) => (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
+
+    /// <summary>
+    /// A query's filter: Box3D's default, accepting the shapes whose category, their body's motion, is among
+    /// <paramref name="motions"/>.
+    /// </summary>
+    private static B3.QueryFilter FilterOf(Motions motions)
+    {
+        B3.QueryFilter filter = B3.DefaultQueryFilter();
+        filter.MaskBits = (ulong)motions;
+        return filter;
+    }
+
+    private static Motions MotionsOf(Motion motion)
+    {
+        return motion switch
+        {
+            Motion.Static => Motions.Static,
+            Motion.Dynamic => Motions.Dynamic,
+            Motion.Kinematic => Motions.Kinematic,
+            _ => Motions.Static,
+        };
+    }
+
     private Handle<Model> ModelOf(Entity entity)
     {
         return _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
@@ -404,6 +595,18 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IDisposable
     }
 
     /// <summary>
+    /// Takes one shape an overlap found into the query's entities, and asks for more while there is room. A byte
+    /// rather than a bool, which cannot cross into native code from a method called only from it; C's bool is a byte.
+    /// </summary>
+    [UnmanagedCallersOnly]
+    private static byte OnOverlap(B3.ShapeId shape, void* context)
+    {
+        OverlapQuery* query = (OverlapQuery*)context;
+        query->Found[query->Count++] = query->Bodies[SlotOf(shape)].Entity;
+        return query->Count < query->Capacity ? (byte)1 : (byte)0;
+    }
+
+    /// <summary>
     /// An entity's body, with its components as the body last saw them, which the next step's are compared with.
     /// </summary>
     private struct Body
@@ -419,5 +622,20 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IDisposable
         public Physics Physics;
 
         public uint Seen;
+    }
+
+    /// <summary>
+    /// An overlap in progress, handed to <see cref="OnOverlap"/> through Box3D: where the entities go, how many fit,
+    /// how many are there, and the bodies to look them up in, pinned for the call.
+    /// </summary>
+    private struct OverlapQuery
+    {
+        public Body* Bodies;
+
+        public Entity* Found;
+
+        public int Capacity;
+
+        public int Count;
     }
 }

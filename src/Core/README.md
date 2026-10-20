@@ -455,6 +455,20 @@ what a renderer makes of them is in its README. A pipeline loads as any asset do
 pipelines, so a renderer never walks a pipeline itself. Which pipeline a renderer's frame runs is one of its
 settings, so the project or the machine picks it.
 
+## Physics
+
+What is solid is components, as what is drawn is: an entity with a `Transform` and a `Physics` is a body, and a
+physics gem simulates every one, once per fixed step on the main thread, moving the transform as the body moves and
+writing the body's velocities back to the component. A script moves a body by writing its transform and throws it by
+writing its velocity; there is no handle to hold. `Physics` says what moves the body, its shape, its surface, its
+bounce and its mass; the shape's size is the entity's model's at the transform's scale, so no size is written twice.
+
+| | |
+| --- | --- |
+| `Contacts` | What the body touched, for an entity that opts in with this beside its `Physics`: after every step, each body in contact with it as an entry, up to eight, with the other entity, the point and the normal in the world, the step's impulse and the phase, `Enter` the step they begin to touch, `Stay` while they go on touching, and `Exit` for the one step after they part. A script reads it in Update. Collisions reach the game this way, as data on the entity, never as messages. |
+| `IPhysics` | Questions about the solid world, answered from the bodies as the last step left them: `Cast`, the nearest body a segment hits, as a `RayHit` of the entity, the point, the normal and the distance, or none; `Overlap`, the bodies within a radius of a point, written into a span the caller owns. Each takes a `Motions` filter, which kinds of body to consider, static, dynamic or kinematic, all by default. The main thread's, between steps: Update, FixedUpdate or LateUpdate. |
+| `Vector2.ToWorld` | The world point under a pixel, a depth in front of a camera, which with the camera's position is the pointer's ray: `physics.Cast(camera.Position, pointer.ToWorld(camera, transform, size, 1000))` is what the pointer is over. |
+
 ## The log
 
 `Debugging` is the log: how anything says what happened, from any thread, before the first gem

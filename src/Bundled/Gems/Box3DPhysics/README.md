@@ -2,8 +2,9 @@
 
 Rigid-body physics through Box3D, built here from its source as every native library is
 ([Gems](../README.md#native-libraries)). It takes the world, to read and move entities, the assets, to shape bodies
-like their models, and the threads, to hear when a model has loaded. It provides nothing: a body is driven entirely
-through the `Physics` component in Core, so any other physics gem could stand in its place without a prefab or script
+like their models, and the threads, to hear when a model has loaded. It provides `IPhysics`, the questions a script
+asks of the bodies; a body itself is driven entirely through the `Physics` component in Core, and what it touches
+reaches the game through `Contacts`, so any other physics gem could stand in its place without a prefab or script
 changing.
 
 ## One component
@@ -45,6 +46,7 @@ in a project that lists this gem after the scripting one is seen the same step):
 2. The world steps, by the fixed step with the settings' substeps.
 3. Every body that moved writes its position and rotation to its transform, keeping the scale, and its velocities to
    its component, and keeps the copy the next step compares with.
+4. Every entity with a `Contacts` has what its body touches written over it ([Contacts](#contacts)).
 
 So data flows one way each step: the scripts' writes go in, the bodies' moves come out, and a script reading a
 transform in `Update` sees where the body was after the last step. Nothing of the body is cached in a script's hands:
@@ -59,6 +61,26 @@ say, with whatever velocity its last step left it, and gets its body back, movin
 near; one that has a body is dropped only past a quarter again as far, so the edge does not make and drop it every
 other step. With no player camera in the world everything is simulated, as there is no one to be near. Making a
 body costs microseconds, so a few hundred entering in one step, a village coming into range, is nothing to the step.
+
+## Queries
+
+`IPhysics` is answered from the Box3D world between steps, on the main thread: `Cast` is Box3D's closest ray cast,
+and `Overlap` its shape overlap with a sphere, over every shape the filter admits. A shape's category bits are its
+body's motion, static, dynamic or kinematic, and a query's mask is the `Motions` asked for, so Box3D does the
+filtering; the masks shapes collide by stay at everything, so bodies collide as they did. A shape found is mapped
+back to its entity through its body's user data, which holds the body's slot, one up so that 0 is no body. A body out
+of the player's range has no shape, so it is neither hit nor found, as it is not simulated. A cast in Update sees
+the bodies as the last step left them, which is where their transforms say they are.
+
+## Contacts
+
+After each step, every entity with a `Contacts` has its body's touching contacts read, Box3D's manifolds with points,
+and written over the component: the other shape's entity, the mean of the manifold points, the normal turned to
+point away from the other body, and the sum of the total normal impulses as how hard the hit was. The phase comes
+from what the component held before the step: a body it already held is Stay, a new one is Enter, and one it held
+that is no longer touching is kept one more step as Exit, with its last point and normal. An entity that loses its
+body, out of range, parts from them all. Reading contacts costs per listening body, which is why it is opt-in; up to
+64 touching contacts are read per body, and the first eight that have points are kept.
 
 ## What must hold
 
