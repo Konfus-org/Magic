@@ -39,6 +39,13 @@ internal sealed class ModelShapes(Assets assets, Threads threads) : IDisposable
     }
 
     /// <summary>
+    /// The farthest any shape here reaches from its model's origin at scale 1 (<see cref="ModelShape.Reach"/>), and
+    /// at least 1, which a shape still loading is taken to reach: at an entity's scale, a bound on how far its shape
+    /// could reach, whatever its model, that tells from the transform alone whether it could be near.
+    /// </summary>
+    public float Longest { get; private set; } = 1;
+
+    /// <summary>
     /// The shape of <paramref name="model"/>, or null while it loads.
     /// </summary>
     public ModelShape? Get(Handle<Model> model)
@@ -84,6 +91,7 @@ internal sealed class ModelShapes(Assets assets, Threads threads) : IDisposable
             }
 
             _shapes[model] = shape;
+            Longest = Math.Max(Longest, shape.Reach);
         });
     }
 }
@@ -97,6 +105,13 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
     public Vector3 Min { get; } = min;
 
     public Vector3 Max { get; } = max;
+
+    /// <summary>
+    /// How far the shape reaches from the model's origin at scale 1, at most: half the bounds' diagonal, plus how far
+    /// off the origin their centre is. At a scale it reaches at most this times the scale's length, as each axis is
+    /// stretched by no more than that.
+    /// </summary>
+    public float Reach { get; } = ((max - min).Length() + (max + min).Length()) * 0.5f;
 
     /// <summary>
     /// The model's triangles, shared by every mesh shape made from it; null for a model with none, and once freed.

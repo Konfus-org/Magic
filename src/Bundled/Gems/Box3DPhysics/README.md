@@ -63,6 +63,12 @@ near; one that has a body is dropped only past a quarter again as far, so the ed
 other step. With no player camera in the world everything is simulated, as there is no one to be near. Making a
 body costs microseconds, so a few hundred entering in one step, a village coming into range, is nothing to the step.
 
+The step still walks every entity with the two components, to see which have come near, so what it does for a far
+one is what bounds the step in a world of tens of thousands: a distance against the farthest any shape fitted so far
+reaches at the entity's scale, from the transform alone, and nothing else. Only an entity that could be near is looked
+up, its model, its shape and its body, and tested exactly. The bound is loose, so nothing near is missed; it only
+costs the few entities between it and the exact edge the lookups.
+
 ## Queries
 
 `IPhysics` is answered from the Box3D world between steps, on the main thread: `Cast` is Box3D's closest ray cast,
@@ -88,6 +94,11 @@ body, out of range, parts from them all. Reading contacts costs per listening bo
 - Metres, kilograms and seconds, with +Y up and gravity straight down, as the engine's transforms are.
 - The fixed step is Core's (1/60 s); Box3D substeps it, 4 times unless the settings say, and runs its solver on its
   own threads when `workers` is above 1, which only a world of thousands of bodies needs.
+- A step takes a small fraction of 1/60 s, in a Debug build too, since Core runs it 60 times a second and up to 4 in
+  one frame to catch up after a slow one. A step that takes longer than the time it simulates can never catch up:
+  Core then runs its 4 every frame, the frame is four steps long, and the world falls behind real time. So the cost of
+  a step is bounded by the bodies near the player and a few arithmetic operations per entity farther off, never by
+  a lookup per entity in the world.
 - Box3D's asserts end the process with a crash file, as the engine's do, and what it logs is a warning.
 - A Box3D build is pinned to its tag in the csproj; it is alpha software whose API changes between tags, so moving the
   tag means reading the generated names again.

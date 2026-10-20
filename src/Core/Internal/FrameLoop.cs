@@ -26,10 +26,13 @@ internal sealed class FrameLoop : IDisposable
     private const double FixedStep = 1.0 / 60;
 
     /// <summary>
-    /// The most fixed steps one frame runs. A frame further behind drops the rest, so a slow frame does not make the
-    /// next slower still.
+    /// The most fixed steps one frame runs, to catch up after a slow one: a frame further behind drops the rest, so
+    /// the world loses that time rather than the frame growing to make it up and the next falling further behind.
+    /// Four is 67 ms of catch-up, enough for an ordinary hitch, while a frame that takes it all is bounded at four
+    /// steps' cost. No cap can save a step that takes longer than the time it simulates: the loop then runs the cap's
+    /// worth every frame and the world falls behind real time, and the step is what must be fixed.
     /// </summary>
-    private const int MaxFixedSteps = 8;
+    private const int MaxFixedSteps = 4;
 
     private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram(
         Metrics.FrameDuration, "s", "Time from one frame's start to the next's.", tags: null, advice: Metrics.FrameBuckets);

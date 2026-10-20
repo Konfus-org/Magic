@@ -119,12 +119,16 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
             }
         }
 
+        float farthest = _settings.Range * Leave;
         foreach (EcsChunk<Transform, Physics> chunk in _world.Query<Transform, Physics>())
         {
             (ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Physics> physics) = chunk;
             for (int i = 0; i < entities.Length; i++)
             {
-                Follow(entities[i], ref transforms[i], ref physics[i], frame.DeltaSeconds);
+                if (MayBeNear(transforms[i], farthest))
+                {
+                    Follow(entities[i], ref transforms[i], ref physics[i], frame.DeltaSeconds);
+                }
             }
         }
 
@@ -302,6 +306,33 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
 
         body.Transform = transform;
         body.Physics = physics;
+    }
+
+    /// <summary>
+    /// Whether the entity could be within <paramref name="range"/> of a player camera, from its transform alone: its
+    /// centre's distance less the farthest any shape reaches at its scale (<see cref="ModelShapes.Longest"/>), so
+    /// whatever <see cref="IsNear"/> would call near passes, and the step never looks up the model, the shape or the
+    /// body of the many entities far from every player, which is most of a world. With no player camera, everything
+    /// could be.
+    /// </summary>
+    private bool MayBeNear(in Transform transform, float range)
+    {
+        if (_cameras.Count == 0)
+        {
+            return true;
+        }
+
+        float limit = range + (transform.Scale.Length() * _shapes.Longest);
+        float limitSquared = limit * limit;
+        foreach (Vector3 camera in _cameras)
+        {
+            if (Vector3.DistanceSquared(transform.Position, camera) < limitSquared)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

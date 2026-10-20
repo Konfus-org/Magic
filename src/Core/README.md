@@ -403,7 +403,11 @@ order the gems were made, so a gem is up to date before the gems that take it re
 in the frame's input in its `Update`, before theirs. `Render` runs in reverse, so a gem finishes what the gems that take
 it drew: the gem providing `IGpu` submits and presents in its `Render`, after every gem that records into it.
 `FixedUpdate` runs once for every 1/60 s since the last frame, none for some frames, each given that step as its
-`DeltaSeconds`; a frame more than 8 steps behind drops the rest.
+`DeltaSeconds`, and at most 4 in one frame: a frame further behind drops the rest, so the world loses that time rather
+than the frame growing to make it up and the next falling further behind. Four steps, 67 ms, catch up an ordinary
+hitch, and bound what a frame that takes them all costs. The cap cannot help a step that takes longer than the 1/60 s
+it simulates: the loop then runs four every frame, the world falls behind real time, and the step is what must be
+fixed, so a `FixedUpdate` hook has a small fraction of 1/60 s, 60 times a second.
 
 `Threads` gets work to an engine thread, from any thread:
 
