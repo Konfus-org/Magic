@@ -62,7 +62,6 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     private static readonly List<ResourceInfo> _engineVisible = [.. ResourceInfo.Engine.Values];
 
     private Listing? _next;
-    private Handle<Pipeline> _effects;
     private Handle<Pass> _appended;
     private Handle<Pipeline> _overlay;
     private Handle<Pipeline> _pipeline = pipeline;
@@ -82,7 +81,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// <summary>
     /// The effects the latest listing, built or building, runs.
     /// </summary>
-    public Handle<Pipeline> Effects => _effects;
+    public Handle<Pipeline> Effects { get; private set; }
 
     /// <summary>
     /// Whether a listing is being built, which the frame swaps in once it is compiled.
@@ -138,13 +137,13 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             _next = null;
         }
 
-        if ((!_isStale && effects == _effects && pipeline == _pipeline && overlay == _overlay) || _next is not null)
+        if ((!_isStale && effects == Effects && pipeline == _pipeline && overlay == _overlay) || _next is not null)
         {
             return;
         }
 
         _isStale = false;
-        _effects = effects;
+        Effects = effects;
         _pipeline = pipeline;
         _overlay = overlay;
         _next = new Listing(gpu);

@@ -390,7 +390,7 @@ internal sealed class Domains : IDisposable
 
         SubscriptionList holds = open.IsLoadingDomain ? new SubscriptionList() : await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
         progress?.Report(1);
-        return new Read(placements, prefabs, player, models, holds);
+        return new Read(placements, prefabs, player, models) { Holds = holds };
 
         async Task<Result<Prefab>> ReadOneAsync(Handle<Prefab> file)
         {
@@ -870,7 +870,13 @@ internal sealed class Domains : IDisposable
     /// What a domain's opening read: each of its prefabs, by placement, its player, the models they draw, and what
     /// the gems that took them in handed back, which keeps that taken in (<see cref="IPreloader"/>).
     /// </summary>
-    internal sealed record Read(List<Placement> Placements, Result<Prefab>[] Prefabs, Prefab? Player, List<Model> Models, SubscriptionList Holds);
+    internal sealed record Read(List<Placement> Placements, Result<Prefab>[] Prefabs, Prefab? Player, List<Model> Models)
+    {
+        /// <summary>
+        /// Set by an initializer rather than the constructor, so the analyzer sees the record take ownership of it.
+        /// </summary>
+        public required SubscriptionList Holds { get; init; }
+    }
 
     /// <summary>
     /// A domain open in the world, or opening.

@@ -34,7 +34,7 @@ namespace Magic.Box3DPhysics;
 /// Box3D works in metres, kilograms and seconds with +Y up, as the engine does.
 /// </para>
 /// </summary>
-internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
+internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
 {
     private readonly World _world;
     private readonly Threads _threads;
@@ -72,19 +72,21 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// </summary>
     private uint _step;
 
-    public Box3DPhysicsGem(World world, Assets assets, Threads threads, Box3DPhysicsSettings settings)
+    public unsafe Box3DPhysicsGem(World world, Assets assets, Threads threads, Box3DPhysicsSettings settings)
     {
         _world = world;
         _threads = threads;
         _settings = settings;
         _shapes = new ModelShapes(assets, threads);
+        _gravity = settings.Gravity;
+
         B3.SetAssertFcn(&OnAssert);
         B3.SetLogFcn(&OnLog);
         B3.WorldDef def = B3.DefaultWorldDef();
-        _gravity = settings.Gravity;
         def.Gravity = new B3.Vec3 { Y = -_gravity };
         def.WorkerCount = (uint)Math.Clamp(settings.Workers, 1, B3.MaxWorkers);
         _box3d = B3.CreateWorld(&def);
+
         B3.Version version = B3.GetVersion();
         Debugging.Info($"Box3D {version.Major}.{version.Minor}.{version.Revision} is simulating, on {def.WorkerCount} thread(s).");
     }
@@ -98,7 +100,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
         _shapes.Dispose();
     }
 
-    public void FixedUpdate(in Frame frame)
+    public unsafe void FixedUpdate(in Frame frame)
     {
         _step++;
         CheckPreloads();
@@ -176,7 +178,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
         return new RayHit(entity, FromVec(result.Point), FromVec(result.Normal), result.Fraction * Vector3.Distance(from, to));
     }
 
-    public int Overlap(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
+    public unsafe int Overlap(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
     {
         if (found.IsEmpty)
         {
@@ -213,6 +215,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
                 preload.Done.TrySetCanceled(cancel);
             }
         }));
+
         await _threads.InvokeAsync(EngineThread.Main, () =>
         {
             foreach (Handle<Model> model in models)
@@ -223,6 +226,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
             _preloads.Add(preload);
         }, cancel).ConfigureAwait(false);
         await preload.Done.Task.ConfigureAwait(false);
+
         return new Subscription(static () => { });
     }
 
@@ -325,7 +329,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// <summary>
     /// Makes the entity's body and shape, once its model's shape is there; until then the entity waits, unmoved.
     /// </summary>
-    private void Create(Entity entity, Handle<Model> model, in Transform transform, in Physics physics)
+    private unsafe void Create(Entity entity, Handle<Model> model, in Transform transform, in Physics physics)
     {
         ModelShape? shape = _shapes.Get(model);
         if (shape is null)
@@ -394,7 +398,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// Adds the shape to the body: the model's bounds at the entity's scale as a box, a sphere or a capsule, or its
     /// triangles at that scale. A bound with no size, a plane's thickness, is given a little, as a shape needs some.
     /// </summary>
-    private static void AddShape(B3.BodyId body, B3.ShapeDef* def, ModelShape shape, Shape kind, Vector3 scale)
+    private static unsafe void AddShape(B3.BodyId body, B3.ShapeDef* def, ModelShape shape, Shape kind, Vector3 scale)
     {
         const float Least = 0.01f;
         scale = Vector3.Abs(scale);
@@ -444,7 +448,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// Writes where a body is and how it moves back to its entity's components, and keeps the copy the next step
     /// compares them with.
     /// </summary>
-    private void Moved(in B3.BodyMoveEvent moved)
+    private unsafe void Moved(in B3.BodyMoveEvent moved)
     {
         int slot = (int)(nuint)moved.UserData - 1;
         ref Body body = ref CollectionsMarshal.AsSpan(_bodies)[slot];
@@ -472,7 +476,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// it touches now, Stay when the component already held it, else Enter; then each the component held and it no
     /// longer touches, as Exit for this step. An entity with no body, out of range, parts from them all.
     /// </summary>
-    private void Touch(int slot, ref Contacts contacts)
+    private unsafe void Touch(int slot, ref Contacts contacts)
     {
         Contacts now = default;
         int written = 0;
@@ -527,7 +531,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// mean of the contact points, the normal turned to point away from the other body, and the impulse along it;
     /// a contact with no points, the two only near, is <see cref="ContactPhase.None"/>.
     /// </summary>
-    private Contact ContactOf(int slot, in B3.ContactData data)
+    private unsafe Contact ContactOf(int slot, in B3.ContactData data)
     {
         bool isA = SlotOf(data.ShapeIdA) == slot;
         int other = isA ? SlotOf(data.ShapeIdB) : SlotOf(data.ShapeIdA);
@@ -580,7 +584,10 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// <summary>
     /// The body slot a shape belongs to, kept one up in its body's user data so that 0 is no body.
     /// </summary>
-    private static int SlotOf(B3.ShapeId shape) => (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
+    private static unsafe int SlotOf(B3.ShapeId shape)
+    {
+        return (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
+    }
 
     /// <summary>
     /// A query's filter: Box3D's default, accepting the shapes whose category, their body's motion, is among
@@ -678,29 +685,44 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
         }
     }
 
-    private static B3.Vec3 ToVec(Vector3 vector) => new() { X = vector.X, Y = vector.Y, Z = vector.Z };
+    private static B3.Vec3 ToVec(Vector3 vector)
+    {
+        return new() { X = vector.X, Y = vector.Y, Z = vector.Z };
+    }
 
-    private static Vector3 FromVec(B3.Vec3 vector) => new(vector.X, vector.Y, vector.Z);
+    private static Vector3 FromVec(B3.Vec3 vector)
+    {
+        return new(vector.X, vector.Y, vector.Z);
+    }
 
-    private static B3.Quat ToQuat(Quaternion rotation) => new() { V = new B3.Vec3 { X = rotation.X, Y = rotation.Y, Z = rotation.Z }, S = rotation.W };
+    private static B3.Quat ToQuat(Quaternion rotation)
+    {
+        return new() { V = new B3.Vec3 { X = rotation.X, Y = rotation.Y, Z = rotation.Z }, S = rotation.W };
+    }
 
-    private static Quaternion FromQuat(B3.Quat rotation) => new(rotation.V.X, rotation.V.Y, rotation.V.Z, rotation.S);
+    private static Quaternion FromQuat(B3.Quat rotation)
+    {
+        return new(rotation.V.X, rotation.V.Y, rotation.V.Z, rotation.S);
+    }
 
-    private static B3.Vec3 Scaled(B3.Vec3 vector, float scale) => new() { X = vector.X * scale, Y = vector.Y * scale, Z = vector.Z * scale };
+    private static B3.Vec3 Scaled(B3.Vec3 vector, float scale)
+    {
+        return new() { X = vector.X * scale, Y = vector.Y * scale, Z = vector.Z * scale };
+    }
 
     /// <summary>
     /// A failed Box3D assert is a bug, in the gem or in Box3D, that leaves the world in a state it cannot go on from:
     /// the process ends with a crash file, as the engine's own asserts do.
     /// </summary>
     [UnmanagedCallersOnly]
-    private static int OnAssert(byte* condition, byte* file, int line)
+    private static unsafe int OnAssert(byte* condition, byte* file, int line)
     {
         Debugging.Critical($"Box3D failed an assert, {CString.Read(condition)}, at {CString.Read(file)}:{line}.");
         return 1;
     }
 
     [UnmanagedCallersOnly]
-    private static void OnLog(byte* message)
+    private static unsafe void OnLog(byte* message)
     {
         Debugging.Warn($"Box3D: {CString.Read(message)}");
     }
@@ -710,7 +732,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// rather than a bool, which cannot cross into native code from a method called only from it; C's bool is a byte.
     /// </summary>
     [UnmanagedCallersOnly]
-    private static byte OnOverlap(B3.ShapeId shape, void* context)
+    private static unsafe byte OnOverlap(B3.ShapeId shape, void* context)
     {
         OverlapQuery* query = (OverlapQuery*)context;
         query->Found[query->Count++] = query->Bodies[SlotOf(shape)].Entity;
@@ -754,7 +776,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisp
     /// An overlap in progress, handed to <see cref="OnOverlap"/> through Box3D: where the entities go, how many fit,
     /// how many are there, and the bodies to look them up in, pinned for the call.
     /// </summary>
-    private struct OverlapQuery
+    private unsafe struct OverlapQuery
     {
         public Body* Bodies;
 

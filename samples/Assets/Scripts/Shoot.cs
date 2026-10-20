@@ -20,7 +20,7 @@ namespace Magic.Samples.Assets.Scripts;
 /// <c>{ "id": 3317, "speed": 40, "most": 50, "model": { "id": 517 }, "material": { "id": 3322 } }</c>. Past
 /// <see cref="Most"/> balls the oldest goes, and all go when the entity does.
 /// </summary>
-internal sealed class Shoot(Entity owner, World world, IInput input, IWindow window, IPhysics? physics = null) : IBehavior, IDisposable
+internal sealed class Shoot(Entity owner, World world, IInput input, IWindow window, IPhysics physics) : IBehavior, IDisposable
 {
     /// <summary>
     /// Metres the pointer's ray reaches: farther than anything in the samples.
@@ -78,7 +78,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
             Scale = new Vector3(Radius),
         };
         Vector3 aim = forward;
-        if (isClick && physics is not null)
+        if (isClick)
         {
             Vector2 pointer = new(input[Control.MouseX].Value, input[Control.MouseY].Value);
             Vector3 far = pointer.ToWorld(world.Get<Camera>(owner), camera, new Size(window.Width, window.Height), Reach);
@@ -88,7 +88,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
             }
         }
 
-        Renderer renderer = new() { Model = Model, Materials = new MaterialSlots { Slot0 = Material } };
+        Renderer renderer = new() { Model = Model, Materials = new MaterialSlots { Material } };
         Physics body = new() { Motion = Motion.Dynamic, Shape = Shape.Sphere, Bounce = 0.4f, Velocity = aim * Speed };
         _balls.Enqueue(world.Create([at, renderer, body, new Contacts()]));
         while (_balls.Count > Most)
