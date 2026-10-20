@@ -65,7 +65,7 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
                 Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, Spread(i, 3) * MathF.Tau),
                 Scale = new Vector3(scale),
             };
-            renderers[i] = new Renderer { Model = Model, Materials = new MaterialSlots { Slot0 = Material } };
+            renderers[i] = new Renderer { Model = Model, Materials = { Material } };
         }
 
         Transform[] places = new Transform[Lights];

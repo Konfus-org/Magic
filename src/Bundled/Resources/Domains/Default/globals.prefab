@@ -24,7 +24,7 @@
             "name": "Question",
             "components": {
                 "Transform": { "rotation": { "x": 0, "y": 1, "z": 0, "w": 0 } },
-                "Renderer": { "model": { "id": 1529 }, "materials": { "slot0": { "id": 714 } } }
+                "Renderer": { "model": { "id": 1529 }, "materials": [ { "id": 714 } ] }
             }
         }
     ]

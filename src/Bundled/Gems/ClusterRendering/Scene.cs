@@ -344,9 +344,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         bool isTransparent = false;
         bool areShown = true;
         MaterialRows rows = default;
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < MaterialSlots.Capacity; i++)
         {
-            Handle<Material> material = MaterialIn(look.Materials, i);
+            Handle<Material> material = look.Materials[i];
             int materialRow = materials.RowOf(hasFailed ? materials.Failure(FailureType.Mesh) : material);
             rows[i >> 1] |= (uint)materialRow << ((i & 1) * 16);
             areShown &= materials.IsShown(materialRow);
@@ -498,9 +498,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             return false;
         }
 
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < MaterialSlots.Capacity; i++)
         {
-            if (drawn.Contains(MaterialIn(look.Materials, i)))
+            if (drawn.Contains(look.Materials[i]))
             {
                 return true;
             }
@@ -534,9 +534,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         foreach (Look look in _looks.Keys)
         {
             _drawnModels.Add(look.Model);
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < MaterialSlots.Capacity; i++)
             {
-                _drawnMaterials.Add(MaterialIn(look.Materials, i));
+                _drawnMaterials.Add(look.Materials[i]);
             }
         }
 
@@ -552,9 +552,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
                 models.Release(dropped.Model);
             }
 
-            for (int i = 0; i < 8; i++)
+            for (int i = 0; i < MaterialSlots.Capacity; i++)
             {
-                Handle<Material> material = MaterialIn(dropped.Materials, i);
+                Handle<Material> material = dropped.Materials[i];
                 if (!_drawnMaterials.Contains(material))
                 {
                     materials.Release(material);
@@ -585,18 +585,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 
         entry.Look = null;
     }
-
-    public static Handle<Material> MaterialIn(in MaterialSlots slots, int slot) => slot switch
-    {
-        0 => slots.Slot0,
-        1 => slots.Slot1,
-        2 => slots.Slot2,
-        3 => slots.Slot3,
-        4 => slots.Slot4,
-        5 => slots.Slot5,
-        6 => slots.Slot6,
-        _ => slots.Slot7,
-    };
 
     /// <summary>
     /// What an instance draws, but not how it fades: the instances that share one share their rows' model and materials.

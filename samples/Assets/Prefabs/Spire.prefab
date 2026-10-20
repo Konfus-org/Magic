@@ -1,8 +1,8 @@
 {
     "entities": [
-        { "name": "Body", "components": { "Transform": { "position": { "x": 0, "y": 25, "z": 0 }, "scale": { "x": 1.2, "y": 25, "z": 1.2 } }, "Renderer": { "model": { "id": 515 }, "materials": { "slot0": { "id": 3323 } } }, "Physics": {} } },
-        { "name": "Roof", "components": { "Transform": { "position": { "x": 0, "y": 52, "z": 0 }, "scale": { "x": 1.5, "y": 2, "z": 1.5 } }, "Renderer": { "model": { "id": 513 }, "materials": { "slot0": { "id": 3322 } } }, "Physics": {} } },
-        { "name": "Beacon", "components": { "Transform": { "position": { "x": 0, "y": 54.3, "z": 0 }, "scale": { "x": 0.45, "y": 0.45, "z": 0.45 } }, "Renderer": { "model": { "id": 517 }, "materials": { "slot0": { "id": 3361 } } } } },
+        { "name": "Body", "components": { "Transform": { "position": { "x": 0, "y": 25, "z": 0 }, "scale": { "x": 1.2, "y": 25, "z": 1.2 } }, "Renderer": { "model": { "id": 515 }, "materials": [ { "id": 3323 } ] }, "Physics": {} } },
+        { "name": "Roof", "components": { "Transform": { "position": { "x": 0, "y": 52, "z": 0 }, "scale": { "x": 1.5, "y": 2, "z": 1.5 } }, "Renderer": { "model": { "id": 513 }, "materials": [ { "id": 3322 } ] }, "Physics": {} } },
+        { "name": "Beacon", "components": { "Transform": { "position": { "x": 0, "y": 54.3, "z": 0 }, "scale": { "x": 0.45, "y": 0.45, "z": 0.45 } }, "Renderer": { "model": { "id": 517 }, "materials": [ { "id": 3361 } ] } } },
         { "name": "Beacon Light", "components": { "Transform": { "position": { "x": 0, "y": 54.3, "z": 0 } }, "PointLight": { "color": { "r": 1, "g": 0.15, "b": 0.1 }, "intensity": 600, "range": 30 } } }
     ]
 }

@@ -20,11 +20,10 @@ buffers inside it.
 ## What a model is
 
 Meshes (48-byte vertices: position, normal, tangent, uv; 32-bit indices), each drawn with the material in the slot
-it names, 0 to 7: its material's place in the file's list of materials, where one past 7 is drawn with slot 7. An entity draws a model through its `Renderer` component, which names the model and a material for
-each slot:
+it names, 0 to 7: its material's place in the file's list of materials, where one past 7 is drawn with slot 7. An entity draws a model through its `Renderer` component, which names the model and its materials by slot:
 
 ```json
-"Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 710 } } }
+"Renderer": { "model": { "id": 514 }, "materials": [ { "id": 710 } ] }
 ```
 
 ## Clusters and cards

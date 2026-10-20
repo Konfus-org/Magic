@@ -405,7 +405,7 @@ internal sealed class View : IDisposable
             for (int i = (int)finest.FirstCluster; i < finest.FirstCluster + finest.Count; i++)
             {
                 GpuCluster cluster = packed.Clusters[i];
-                if (frame.Materials.Get(Scene.MaterialIn(renderer.Materials, (int)((cluster.Counts >> 17) & 7))) is not { Type: MaterialType.Transparent } drawn)
+                if (frame.Materials.Get(renderer.Materials[(int)((cluster.Counts >> 17) & 7)]) is not { Type: MaterialType.Transparent } drawn)
                 {
                     continue;
                 }
