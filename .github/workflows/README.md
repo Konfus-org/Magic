@@ -34,10 +34,13 @@ job's name alone, whatever workflow it is in, so every job here carries a name n
 
 ## The native libraries
 
-Every native library is built from source by the first build, and one of them is a whole compiler toolchain, so a
-cold build takes an hour or more while a warm one takes minutes. `Build/NativeLibs/` is therefore cached per OS and
-architecture, keyed on the files that declare the libraries. The build's own markers make a restored cache a no-op, and a cache restored
-under an older key still serves: the build sees which library's pin changed and rebuilds that one alone. CMake's
+The native libraries are fetched and built by the first build ([Natives](../../natives/README.md)); the shader
+compiler, a whole compiler toolchain, comes prebuilt on Windows and Linux and is built on macOS, so a cold build is
+short on the first two and long on the third, while a warm one does nothing. The build puts the libraries in a
+folder per machine, which the setup action pins to `Build/NativeLibs/` in the workspace, cached per OS and
+architecture and keyed on the superbuild's files under `natives/`. CMake's own stamps make a restored cache a no-op,
+and a cache restored under an older key still serves: the build sees which library's pin changed and rebuilds that
+one alone. CMake's
 working folders are dropped before the save, as nothing reads them again, and the save runs whether the job passed or
 failed, so a cold native build is never lost to a managed error after it. It never runs for a cancelled job: a key is
 saved once and never overwritten, so a snapshot cut short would be restored and rebuilt from on every run, and never
@@ -45,7 +48,7 @@ completed, until the key next changes. Both are in the two composite actions bes
 the workflows, which every building job starts and ends with.
 
 A runner has no user to keep the machine usable for, so the native builds take every core (`MagicNativeCores`,
-which the build otherwise caps at half) and use Ninja on Linux and macOS. The weekly scheduled Build run keeps
+which the build otherwise caps at half). The weekly scheduled Build run keeps
 `main`'s caches from expiring, and a branch with no cache of its own falls back to `main`'s, so a cold build happens
 once per OS per change to a library's pin. When a cold build nears its time limit, the fix is a larger runner, named
 in the matrix, not a longer limit.

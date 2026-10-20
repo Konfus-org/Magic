@@ -19,10 +19,9 @@ needs a display and a GPU. It ends with one line per step and its exit code, the
 `-Only` picks the steps when the rest already passed (`Test` alone needs a build to be there), `-Frames` how long
 each sample run lasts, `-Configuration` which build, and `-Project` another project than the samples.
 
-The build is incremental and never starts over: what is built is reused. In a linked worktree the script builds
-against the native libraries the main checkout has built, by setting `MagicNativeLibs` to that folder when nothing
-set it, since building them again takes minutes; set it yourself to build elsewhere. A build touches that folder
-only when a library's pinned commit differs from what is built there, so one checkout at a time should build.
+The build is incremental and never starts over: what is built is reused, and the native libraries are built once
+per machine, in a folder every checkout and worktree shares ([Natives](../natives/README.md)), so a fresh worktree
+builds in minutes.
 
 ## Screenshot.ps1
 

@@ -10,12 +10,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- Box3D is built here from its source, as a shared library; its samples, tests and heavy validation are left
-       out. -->
   <ItemGroup>
-    <NativeLibrary Include="box3d" Repository="https://github.com/erincatto/box3d" Commit="v0.1.0"
-                   Headers="include/box3d/box3d.h;include/box3d/collision.h" IncludePath="include"
-                   Prefixes="b3=B3" Class="B3"
-                   Cmake="-DBUILD_SHARED_LIBS=ON -DBOX3D_SAMPLES=OFF -DBOX3D_UNIT_TESTS=OFF -DBOX3D_VALIDATE=OFF" />
+    <NativeLibrary Include="box3d" Headers="include/box3d/box3d.h;include/box3d/collision.h" IncludePath="include"
+                   Prefixes="b3=B3" Class="B3" />
   </ItemGroup>
 </Project>

@@ -10,17 +10,13 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- Dear ImGui, from its own repository, through the C API that dear_bindings, the Dear ImGui team's generator, makes
-       of its headers at build time: the public API and the internal one, in their own files, built with ImGui into one
-       library by the CMake file under Native/, since dear_bindings ships none. ImGui's folder is on the include path
-       for the imconfig.h the generated header includes; the defines are the library's compile definitions. -->
+  <!-- Dear ImGui through the C API dear_bindings makes of its headers (natives/CMakeLists.txt): the public API and
+       the internal one, in their own files, which lie in dear_bindings' own checkout. ImGui's folder is on the include
+       path for the imconfig.h the generated header includes; the defines are the ones the library is compiled with. -->
   <ItemGroup>
-    <NativeLibrary Include="imgui" Repository="https://github.com/ocornut/imgui" Commit="v1.92.9b-docking" IncludePath="." />
-    <NativeLibrary Include="dcimgui" Repository="https://github.com/dearimgui/dear_bindings" Commit="v0.24"
-                   Prepare="{python} {checkout}/dear_bindings.py -o {checkout}/dcimgui {checkout:imgui}/imgui.h &amp;&amp; {python} {checkout}/dear_bindings.py -o {checkout}/dcimgui_internal --include {checkout:imgui}/imgui.h {checkout:imgui}/imgui_internal.h"
-                   Headers="dcimgui.h;dcimgui_internal.h" IncludePath="."
+    <NativeLibrary Include="imgui" IncludePath="." HeadersOnly="true" />
+    <NativeLibrary Include="dcimgui" Headers="dcimgui.h;dcimgui_internal.h" IncludePath="."
                    Defines="IMGUI_USE_WCHAR32;IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1"
-                   Prefixes="IMGUI=ImGui;cImFontAtlas=ImFontAtlas" Class="ImGui"
-                   Source="$(MSBuildProjectDirectory)/Native" Cmake="-DIMGUI_DIR={checkout:imgui} -DGENERATED_DIR={checkout}" />
+                   Prefixes="IMGUI=ImGui;cImFontAtlas=ImFontAtlas" Class="ImGui" />
   </ItemGroup>
 </Project>

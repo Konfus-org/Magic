@@ -63,7 +63,7 @@ at a size and gets the asset's, scaled from the size the asset was drawn at.
 
 ## Natives
 
-Dear ImGui is built here from its own repository at a pinned release ([Gems](../README.md#native-libraries)), with the
+Dear ImGui is built from its own repository at a pinned release ([Natives](../../../../natives/README.md)), with the
 C API that dear_bindings, the Dear ImGui team's binding generator, makes from its public and internal headers at build
 time; the two are compiled into one library with wide characters and without the obsolete API. Dear ImGui's
 constructors are not in the C API, so a font configuration is set up field by field as ImGui's own constructor would.

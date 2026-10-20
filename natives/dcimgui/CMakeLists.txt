@@ -1,6 +1,6 @@
 # Dear ImGui and its C API as one shared library: ImGui's own sources with the dcimgui sources dear_bindings generated
-# from them, which the gem's project points at (IMGUI_DIR, GENERATED_DIR). The defines are the ones the gem reads the
-# generated headers with, so what is compiled is what is bound.
+# from them, which the superbuild (../CMakeLists.txt) points at (IMGUI_DIR, GENERATED_DIR). The defines are the ones
+# the gem reads the generated headers with (its project's Defines), so what is compiled is what is bound.
 cmake_minimum_required(VERSION 3.16)
 project(dcimgui CXX)
 set(CMAKE_CXX_STANDARD 17)

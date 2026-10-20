@@ -1,7 +1,7 @@
 # Box3DPhysics
 
-Rigid-body physics through Box3D, built here from its source as every native library is
-([Gems](../README.md#native-libraries)). It takes the world, to read and move entities, the assets, to shape bodies
+Rigid-body physics through Box3D, bound as every native library is ([Gems](../README.md#native-libraries)). It
+takes the world, to read and move entities, the assets, to shape bodies
 like their models, and the threads, to hear when a model has loaded. It provides `IPhysics`, the questions a script
 asks of the bodies; the bodies themselves are driven through Core's `Physics` and `Contacts` components
 ([Core's README](../../../Core/README.md#physics)), so this README says what this gem makes of them.

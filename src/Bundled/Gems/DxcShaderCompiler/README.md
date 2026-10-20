@@ -1,9 +1,10 @@
 # DxcShaderCompiler
 
 HLSL to SPIR-V, DXIL or Metal: provides `IShaderCompiler`, with Microsoft's DirectXShaderCompiler (DXC) and
-Khronos's SPIRV-Cross, both built here from their repositories ([Gems](../README.md#native-libraries)), DXC's library
-alone (an LLVM, the one build that takes long). SPIRV-Cross is called through its generated API. DXC is a COM API,
-which the generator cannot express, so it is the one library bound by hand, in the gem, and the gem drives it directly:
+Khronos's SPIRV-Cross ([Gems](../README.md#native-libraries)), DXC's library alone: Microsoft's own build where it
+publishes one, since the library is an LLVM, and built here where it does not. SPIRV-Cross is called through its
+generated API. DXC is a COM API, which the generator cannot express, so it is the one library bound by hand, in the
+gem, and the gem drives it directly:
 a front end that fixes DXC's SPIR-V target at Vulkan 1.0 could not compile these shaders, whose wave intrinsics need
 1.1. The gem needs the assets (`Assets`), which a shader's includes are, and keeps what it compiles in the cache
 (`Caches`).
@@ -27,9 +28,9 @@ changing it while running compiles every shader again.
   shader binds is read from the SPIR-V by name: each resource it uses, what it is and the register it is at; a
   resource the shader does not use is dropped by the compiler and so not listed. The counts of each kind are what a
   GPU needs to make a pipeline; the names are what a renderer binds by.
-- DXIL is compiled from the HLSL again and signed by the gem: the validator's hash, Microsoft's published algorithm,
-  written into the container, which is all Direct3D 12 checks a shader for. Vulkan's attributes mean nothing to DXIL,
-  so its compile alone does not warn of them.
+- DXIL is compiled from the HLSL again, validated and signed by DXC's own validator, whose hash in the container is
+  all Direct3D 12 checks a shader for. Vulkan's attributes mean nothing to DXIL, so its compile alone does not warn of
+  them.
 - Metal is translated from the SPIR-V by SPIRV-Cross to the Metal Shading Language version that has the SIMD-group
   functions wave intrinsics become. Metal has no descriptor sets, so each resource gets the texture, sampler or buffer
   index the GPU gem's Metal backend expects of its set and binding, and the entry point is renamed as Metal needs.

@@ -10,15 +10,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- DXC is a COM API, bound by hand in the gem, so only its library is built, from Microsoft's repository with its
-       own predefined parameters, SPIR-V code generation and no tests: an LLVM, so the one build that takes long (and
-       Python 3). SPIRV-Cross's C API is generated and built from Khronos's repository. -->
+  <!-- DXC is a COM API, bound by hand in the gem, so its library alone is declared; SPIRV-Cross's C API is generated. -->
   <ItemGroup>
-    <NativeLibrary Include="dxcompiler" Repository="https://github.com/microsoft/DirectXShaderCompiler" Commit="v1.9.2609" CmakeTarget="dxcompiler"
-                   Cmake="-C {source}/cmake/caches/PredefinedParams.cmake -DHLSL_INCLUDE_TESTS=OFF -DSPIRV_BUILD_TESTS=OFF -DLLVM_INCLUDE_TESTS=OFF -DCLANG_INCLUDE_TESTS=OFF -DLLVM_ENABLE_ASSERTIONS=OFF -DHLSL_BUILD_DXILCONV=OFF -DLLVM_APPEND_VC_REV=OFF" />
-    <NativeLibrary Include="spirv-cross-c-shared" Repository="https://github.com/KhronosGroup/SPIRV-Cross" Commit="vulkan-sdk-1.4.363.0"
-                   Headers="spirv_cross_c.h" IncludePath="." Prefixes="spvc=Spvc;SPVC=Spvc;Spv=Spv;SPV=Spv" Class="Spvc"
-                   Cmake="-DSPIRV_CROSS_SHARED=ON -DSPIRV_CROSS_STATIC=OFF -DSPIRV_CROSS_CLI=OFF -DSPIRV_CROSS_ENABLE_TESTS=OFF" />
+    <NativeLibrary Include="dxcompiler" />
+    <NativeLibrary Include="spirv-cross-c-shared" Headers="spirv_cross_c.h" IncludePath="." Prefixes="spvc=Spvc;SPVC=Spvc;Spv=Spv;SPV=Spv" Class="Spvc" />
     <!-- XxHash3: what names a compiled shader in the cache, and the version of its source. -->
     <PackageReference Include="System.IO.Hashing" />
   </ItemGroup>

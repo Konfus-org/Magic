@@ -8,33 +8,21 @@ gem's own choices, its limits and what must hold for it.
 
 ## Native libraries
 
-A gem that calls a C library declares it to the build, in its project, and the build does the rest: it clones the
-library's repository at the commit the item pins, with its submodules, builds it with CMake for this machine,
-generates the library's C# API from its headers and compiles it in, and puts the library beside the gem. Nothing comes
-prebuilt or from a third party: every library is its own source, built here. No binding is written by hand, except
-where the generator cannot express the API, a COM interface; the gem whose library needs that says so in its own
-README.
+A gem that calls a C library declares what it binds, in its project, and the build does the rest: it has the
+library fetched and built for this machine ([Natives](../../../natives/README.md)), generates the library's C# API
+from its headers and compiles it in, and puts the library beside the gem. Every library is pinned to a tag, and comes
+from its own source, built here, or from the build its author publishes for the platform; nothing comes from a third
+party. No binding is written by hand, except where the generator cannot express the API, a COM interface; the gem
+whose library needs that says so in its own README.
 
 ### Declaring a library
 
 A library is one `NativeLibrary` item in the gem's project. Its `Include` is the library's logical name: what the
-generated `DllImport`s name, what the load context resolves and what the build looks for among what CMake made
-(`<name>.dll`, `lib<name>.so`, `lib<name>.dylib`), never a file name. `Repository` and `Commit` pin the source, a tag
-or a commit hash, fetched shallow with its submodules into `Build/NativeLibs/<name>/source/` (`MagicNativeLibs` moves
-the folder); a changed commit fetches afresh. Both are required.
-
-How it is built: `Cmake` holds the options, built in Release; `CmakeTarget` names one CMake target where the project
-builds more than the library, and `Source` the folder holding `CMakeLists.txt`, in the checkout when that is not the
-root, or an absolute folder of the gem's own (`$(MSBuildProjectDirectory)/Native`) for a library whose repository has
-none. `Prepare` is a command the machine's shell runs in the checkout after cloning and before CMake, several joined
-by `&&`, with `{python}` for the machine's Python 3: it is how a C++ library gets a C API, since the generator reads
-C, so a C++ library is declared through the C API its own project or ecosystem generates, run here against the
-pinned source. No shim is written by hand, and a C API generator is never written where a maintained one exists.
-Items are taken in order, so a library comes after what it builds on: `{built:<name>}` is another library's install
-folder (`-DCMAKE_PREFIX_PATH={built:<name>}`) and `{checkout:<name>}` its checkout; `{checkout}` is the library's
-own, `{source}` the folder CMake builds from and `{folder}` the library's folder. A library is built once per commit
-and options, by one build at a time: projects that declare the same library wait on each other rather than build
-twice. An item with no `Cmake` is cloned for its headers or source alone.
+generated `DllImport`s name, what the load context resolves, and the name of the library's block in the superbuild
+under `natives/`, which is where its repository, pin, options and anything platform-specific live, never the gem's
+project; a gem declares the same library the same way on every platform. An item with no `Headers` is bound by hand
+and declared for its binary alone; one declared `HeadersOnly` is read for its headers alone, as a generator's input
+is.
 
 How its API is generated: `Headers` are the root headers to read, relative to the checkout; `IncludePath` the folder
 their includes are found in; `Defines` what to define first. Every item's include folder serves every generation in

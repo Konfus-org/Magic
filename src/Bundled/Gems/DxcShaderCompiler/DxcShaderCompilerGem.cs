@@ -372,11 +372,9 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             output = GetOutput(result, 4);
             if (output == 0) return Result.Failure<byte[]>($"{name}: DXC compiled nothing.");
 
-            // Direct3D 12 takes DXIL only with the validator's hash in its container; the gem writes it (DxilHash).
-            byte[] code = GetBytes(output).ToArray();
-            if (!isSpirv) DxilHash.Sign(code);
-
-            return Result.Success(code);
+            // DXIL comes validated and signed: Direct3D 12 checks the container's hash, which DXC's own validator
+            // wrote.
+            return Result.Success(GetBytes(output).ToArray());
         }
         finally
         {
