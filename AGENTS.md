@@ -11,6 +11,8 @@ the `Magic` executable is built.
 - **Validate:** `tools/Validate.ps1` builds `Magic.slnx`, runs the tests, and runs the samples headless and with a
   window. It reports each step's exit code. Every step must pass before work is done.
 - **Screenshot:** `tools/Screenshot.ps1` runs the samples with a window and prints the screenshot's path.
+- **Review:** `plannotator review` opens the change in the user's browser as a diff they comment on line by line,
+  and returns when they send their comments or approve ([Finish](#finish)).
 
 What Validate runs, for when you need one step on its own:
 
@@ -49,7 +51,7 @@ Scale the process to the size of the change.
 
 | Size | What counts | Process |
 | --- | --- | --- |
-| Small | One file, roughly 20 lines or fewer, no public API change, no new dependency | In a worktree, make the change, validate, show the diff |
+| Small | One file, roughly 20 lines or fewer, no public API change, no new dependency | In a worktree, make the change, validate, open the review |
 | Normal | Anything larger | Proposal first, in plan mode; no edits until the user approves |
 | Sweeping | Multi-file architectural or data-flow changes | Proposal with before/after snippets and a data-flow diagram |
 
@@ -104,12 +106,18 @@ want to question as you make it.
 
 1. Run `tools/Validate.ps1`. A failing test is fixed at its cause, never loosened, skipped or deleted.
 2. For any visual or rendering change, run `tools/Screenshot.ps1` and look at the image.
-3. Summarize what changed and why, what you assumed, and anything you could not verify. Open the diff for review
-   and include it in full; inside your worktree, `git diff` shows only your changes.
-4. Wait for the user to reply "approved". Address feedback and repeat until they do.
-5. As soon as the user approves, ask whether to commit and merge now; don't wait for them to bring it up. On a
-   yes, follow [Worktrees](#worktrees). On a no, leave the worktree and branch in place and say that they are
-   still open.
+3. Summarize what changed and why, what you assumed, and anything you could not verify, with the fix told apart
+   from the cleanup.
+4. Open the review: from the worktree, run `plannotator review --base <merge target>` in the background. Against
+   the merge target it shows everything the merge would bring, the branch's commits and every uncommitted and
+   untracked file, so nothing needs staging. It opens the user's browser on the diff, where they or another person
+   comment on lines and then send the comments or approve, and the command returns with what they chose. Wait for
+   it rather than ask in the conversation. If it is stopped before they decide, run it again: their comments are
+   kept as a draft.
+5. Comments come back by file and line. Address each one, or say with evidence why not, validate again, and go
+   back to step 3. A review closed without comments or approval is neither: ask what the user wants.
+6. Approval is the yes to commit and merge, and so is "approved" typed in the conversation: do both at once as
+   [Worktrees](#worktrees) says, without asking again.
 
 ### When Blocked
 
@@ -172,7 +180,7 @@ Each task runs in its own worktree, so concurrent agents never see each other's 
 checkout's branch moves only by a fast-forward of finished work. The order is fixed: the worktree first, on a branch
 with a clear name; then the work; then the merge back; then the worktree and branch go. Nothing is edited in the
 main checkout, not even a one-line fix, and nothing is committed on its branch directly. A worktree lives only as
-long as its task.
+long as its task, or, when the task is dropped, until the user decides at the next session's start.
 
 - **Name:** `<type>/<feature>`, kebab-case, describing the change in a few words, for example
   `fix/material-cache-leak` or `feature/shader-hot-reload`. Types: `feature`, `fix`, `refactor`, `docs`, `test`,
@@ -180,21 +188,22 @@ long as its task.
   branch.
 - **Start:** branch from the branch checked out in the main checkout, and record that branch name. It is the merge
   target.
-- **Finish:** after the user approves the diff and says yes when asked to commit and merge:
+- **Finish:** as soon as the user approves the review:
   1. Commit on the worktree branch.
   2. Rebase onto the merge target and run `tools/Validate.ps1` again, since other work may have landed since you
      started. Resolve conflicts in your own changes only. If a conflict needs another agent's work changed, stop
      and ask.
-  3. Fast-forward the merge target to your branch, then ask before pushing.
+  3. Fast-forward the merge target to your branch, and push nothing ([Commits](#commits)).
   4. Remove the worktree (`git worktree remove`) and delete the branch with `git branch -d`, never `-D`. `-d`
      refuses to delete unmerged work, which is the point.
-- **Abandoned work:** if the user drops the task, ask whether to delete the worktree and branch or keep them.
-  Never leave one behind without saying so.
+- **Abandoned work:** if the user drops the task, leave the worktree and branch in place and say so. The next
+  session's start-of-session check reports them, and the user decides then.
 - **Start of every session:** run `git worktree list` and `git branch --no-merged <merge target>`, and report
   anything left over before starting new work.
 
 ### Commits
 
-- Commit only after the user says yes. Ask as soon as a change is approved, and ask again before every push.
+- Commit only once the user has approved the review. The approval is the yes, so do not ask for another.
+- Never push. The user pushes.
 - No co-author lines. Nothing in code, comments, commit messages or branch names may hint that the work was
   generated.

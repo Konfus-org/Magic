@@ -12,12 +12,12 @@ first.
 
 ## Validate.ps1
 
-`Validate.ps1` runs what [AGENTS.md](../AGENTS.md) asks of every change, in order, and stops at the first failure:
+`Validate.ps1` runs the checks [AGENTS.md](../AGENTS.md) asks of every change, in order, and stops at the first failure:
 builds the solution, where every warning is already an error; runs the tests against that build; runs the samples
 headless under `--fail-on-error`, which exits 2 when any error was logged; and runs them again with a window, which
-needs a display and a GPU. It ends with one line per step and its exit code, then `PASSED` or which step failed.
-`-Only` picks the steps when the rest already passed (`Test` alone needs a build to be there), `-Frames` how long
-each sample run lasts, `-Configuration` which build, and `-Project` another project than the samples.
+needs a display and a GPU. It ends with one line per step and its exit code, then `PASSED` or which step failed. `-Only`
+picks the steps when the rest already passed (`Test` alone needs a build to be there), `-Frames` how long each sample
+run lasts, `-Configuration` which build, and `-Project` another project than the samples.
 
 The build is incremental and never starts over: what is built is reused, and the native libraries are built once
 per machine, in a folder every checkout and worktree shares ([Natives](../natives/README.md)), so a fresh worktree

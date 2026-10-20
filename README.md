@@ -20,6 +20,8 @@ rules are in the [code standards](CODESTANDARDS.md).
   (the X11 and Wayland development packages); on macOS, the Xcode command line tools.
 - A GPU with a driver for Vulkan 1.1, Direct3D 12 or Metal, which the engine renders through.
 - PowerShell for the scripts under `tools/`: `pwsh` on Linux and macOS, and Windows PowerShell 5.1 serves on Windows.
+- For reviewing an agent's change ([AGENTS.md](AGENTS.md#finish)), the `plannotator` command
+  ([Plannotator](https://plannotator.ai)); building and running do not need it.
 
 ### Building
 
