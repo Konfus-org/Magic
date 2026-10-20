@@ -64,11 +64,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private Exception? _thrown;
 
     /// <summary>
-    /// Arch's job threads, which run parallel systems; made on the main thread's first frame, since Arch schedules
-    /// only from the thread that made them, and so before any system runs. Written there before the render thread
-    /// disposes the gem.
+    /// Arch's job threads, which run parallel systems; made as the main thread's first Update starts, since Arch
+    /// schedules only from the thread that made them, and so before any system runs, and ended in Stop, on that thread.
     /// </summary>
-    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "Dispose hands it to the main thread, the only one it can be disposed on.")]
+    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "Stop disposes it on the main thread, the only one it can be disposed on.")]
     private JobScheduler? _jobs;
 
     /// <summary>
@@ -88,23 +87,20 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         _threads = threads;
         _world = ArchWorld.Create();
-        threads.Post(EngineThread.Main, StartJobs);
     }
 
     public void Dispose()
     {
         _world.Dispose();
-
-        // Arch's job threads end only from the thread that made them, which runs this before it ends. Until they do, they
-        // keep the process alive.
-        if (_jobs is { } jobs)
-        {
-            _threads.Post(EngineThread.Main, jobs.Dispose);
-        }
     }
 
     public void Update(in Frame frame)
     {
+        if (_jobs is null)
+        {
+            StartJobs();
+        }
+
         _entities.Record(_world.Size);
         _archetypes.Record(_world.Archetypes.Count);
         Run(Phase.Update, frame);
@@ -113,6 +109,16 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public void FixedUpdate(in Frame frame) => Run(Phase.FixedUpdate, frame);
 
     public void LateUpdate(in Frame frame) => Run(Phase.LateUpdate, frame);
+
+    /// <summary>
+    /// Ends Arch's job threads, which end only from the thread that made them, the main one; they would otherwise keep
+    /// the process alive.
+    /// </summary>
+    public void Stop()
+    {
+        _jobs?.Dispose();
+        _jobs = null;
+    }
 
     public Entity Create()
     {
@@ -516,7 +522,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         if (!_threads.IsCurrent(EngineThread.Main))
         {
-            throw new InvalidOperationException("The world is the main thread's: hand the work to it (Threads.Post or InvokeAsync).");
+            throw new InvalidOperationException("The world is the main thread's: hand the work to it (Threads.InvokeAsync).");
         }
     }
 

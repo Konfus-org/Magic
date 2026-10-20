@@ -26,10 +26,11 @@ leaves the size settings as they were; the input settings take from the next fra
 - `Render`, on the render thread, pumps SDL's events, and writes what they change (devices, controls, typed text, the
   window's size, the clipboard) as plain data to a channel; `Update` applies it on the main thread, before the gems
   that take `IInput` or `IWindow`, so input, the window's size and the clipboard are fixed for the rest of the frame.
-  Setting `IWindow.Title` or `IWindow.Clipboard` hands the change to the render thread.
+  Setting `IWindow.Title` or `IWindow.Clipboard`, or a size in the settings, is kept for the render thread, which gives
+  it to the window as it next pumps.
 - The window's title is the project's name, and its `IWindow.Id` is SDL's id for it, which a GPU gem finds it by.
 - The window's icon is the one `IWindow.Icon` names, the default icon until it is set. Setting it loads the icon and
-  its texture through Core's `Assets` on workers, then hands the texture's first mip level to SDL on the render thread;
+  its texture through Core's `Assets` on workers, and the render thread gives the texture's first mip level to SDL;
   one that does not load is an error, and the window keeps the icon it has. The icon is read when it is set, so an edit
   to its files shows once it is set again.
 - Closing the window, or the OS asking the program to quit, stops the run. SDL's own Ctrl+C handling is off: Ctrl+C is

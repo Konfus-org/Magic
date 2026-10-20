@@ -30,7 +30,7 @@ internal sealed class Box3DPhysicsSettings : ISettings
     public int Substeps { get; set; } = 4;
 
     /// <summary>
-    /// Threads the solver runs on, its own; 1 solves on the main thread alone, which small worlds are best with.
+    /// Threads the solver runs on, its own; 1 solves on the step's thread alone, which small worlds are best with.
     /// </summary>
     [RequireRestart]
     [Range(1, B3.MaxWorkers)]

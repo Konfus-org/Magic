@@ -396,7 +396,11 @@ frame behind, and `Sync` is the one point where both hold still. A gem prepares 
 into a copy `Render` is not reading, as the render thread may still be drawing the frame before; in `Sync` it swaps the
 two, and nothing more, as every gem waits on it; and `Render` reads only that copy. Everything else is tasks on .NET's
 thread pool (`Task.Run`, async code, `.FireAndForget()`), and an ECS gem may spread a parallel system over threads of
-its own.
+its own. What a task makes for a gem reaches it as data, never as work: the gem keeps what arrived, in a
+`Channel<T>` or a reference written whole, and takes it in at the start of the hook that owns the structure it goes
+into, a loaded material as the render thread's `Render` starts, a fetched script as the main thread's `Update` starts.
+So a gem's hook reads top to bottom what came in and what it does with it, each arrival lands in the gem's own phase
+and is timed as its hook, and no thread runs code on another's behalf.
 
 Each phase calls only the gems that implement its hook, since the rest do nothing. The main thread's hooks run in the
 order the gems were made, so a gem is up to date before the gems that take it read it: the gem providing `IInput` takes
@@ -409,12 +413,12 @@ hitch, and bound what a frame that takes them all costs. The cap cannot help a s
 it simulates: the loop then runs four every frame, the world falls behind real time, and the step is what must be
 fixed, so a `FixedUpdate` hook has a small fraction of 1/60 s, 60 times a second.
 
-`Threads` gets work to an engine thread, from any thread:
+`Threads` runs a step of an async flow on an engine thread, from any thread, for the flow that must await it and what
+it returns, as opening a domain awaits its spawning on the main thread:
 
 | | |
 | --- | --- |
-| `Post(thread, work)` | Runs `work` there, in the order handed over: the main thread at the start of the next frame, before `Update`; the render thread between frames. What it throws is logged, and each piece is timed while something listens (`magic.core.thread.work.duration`), as a hook is, since it stalls the frame as a hook does. |
-| `InvokeAsync(thread, work, cancel)` | The same, as a task that ends once it has run, with what it returned or threw. |
+| `InvokeAsync(thread, work, cancel)` | Runs `work` there, in the order handed over: the main thread at the start of the next frame, before `Update`; the render thread between frames. The task ends once it has run, with what it returned or threw. Each piece is timed while something listens (`magic.core.thread.work.duration`), as a hook is, since it stalls the frame as a hook does. |
 | `RunAsync(name, work)` | `work` on a thread of its own, for work as long as the run (reading the terminal), given `Lifetime.Stopping`. |
 | `IsCurrent(thread)` | Whether the calling thread may do that thread's work now: it is that thread, or that thread is not running. |
 
@@ -427,9 +431,10 @@ Entity[] created = await _threads.InvokeAsync(EngineThread.Main, () => _ecs.Crea
 - Nothing waits for another thread but the frame loop: there is no blocking invoke, so the two engine threads never
   wait on each other.
 - Work handed to the main thread before its first frame runs then.
-- When the frame loop ends, each thread runs what it was left. The gems are then disposed on the render thread, which
-  takes no more work, while the main thread still runs what it is handed, so a gem that owns something of the main
-  thread's (an ECS gem's job threads) hands its ending there. Anything handed over after that is dropped.
+- When the frame loop ends, each gem's `Stop` runs on the main thread, in reverse order, where it ends what it owns
+  of that thread's (an ECS gem's job threads, the scripts); the main thread then runs what it was left and takes no
+  more. The render thread runs what it was left, takes no more, and the gems are disposed on it. Anything handed to
+  either after that is dropped.
 - `IGpu` and its `GpuCommands` are the render thread's; `World` (but its `OpenAsync` and `SpawnAsync`, which any thread
   may call), `IEcs`, `IInput`, `IWindow`'s size and clipboard and `IDebugUI`'s widgets the main thread's. A provider may
   throw when called from the wrong one.
@@ -472,15 +477,15 @@ settings, so the project or the machine picks it.
 ## Physics
 
 What is solid is components, as what is drawn is: an entity with a `Transform` and a `Physics` is a body, and a
-physics gem simulates every one, once per fixed step on the main thread, moving the transform as the body moves and
-writing the body's velocities back to the component. A script moves a body by writing its transform and throws it by
+physics gem simulates every one, once per fixed step on a thread of its own, moving the transform as the body moves
+and writing the body's velocities back to the component. A script moves a body by writing its transform and throws it by
 writing its velocity; there is no handle to hold. `Physics` says what moves the body, its shape, its surface, its
 bounce and its mass; the shape's size is the entity's model's at the transform's scale, so no size is written twice.
 
 | | |
 | --- | --- |
 | `Contacts` | What the body touched, for an entity that opts in with this beside its `Physics`: after every step, each body in contact with it as an entry, up to eight, with the other entity, the point and the normal in the world, the step's impulse and the phase, `Enter` the step they begin to touch, `Stay` while they go on touching, and `Exit` for the one step after they part. A script reads it in Update. Collisions reach the game this way, as data on the entity, never as messages. |
-| `IPhysics` | Questions about the solid world, answered from the bodies as the last step left them: `Cast`, the nearest body a segment hits, as a `RayHit` of the entity, the point, the normal and the distance, or none; `Overlap`, the bodies within a radius of a point, written into a span the caller owns. Each takes a `Motions` filter, which kinds of body to consider, static, dynamic or kinematic, all by default. The main thread's, between steps: Update, FixedUpdate or LateUpdate. |
+| `IPhysics` | Questions about the solid world, answered from the bodies as the last step left them: `Cast`, the nearest body a segment hits, as a `RayHit` of the entity, the point, the normal and the distance, or none; `Overlap`, the bodies within a radius of a point, written into a span the caller owns. Each takes a `Motions` filter, which kinds of body to consider, static, dynamic or kinematic, all by default. The main thread's: Update, FixedUpdate or LateUpdate, waiting for a step still running. |
 | `Vector2.ToWorld` | The world point under a pixel, a depth in front of a camera, which with the camera's position is the pointer's ray: `physics.Cast(camera.Position, pointer.ToWorld(camera, transform, size, 1000))` is what the pointer is over. |
 
 ## The log
@@ -608,7 +613,7 @@ Core records:
 | `magic.core.frame.duration` | `s` | | Time from one frame's start to the next's, on the main thread. |
 | `magic.core.frame.render_wait.duration` | `s` | | How long the main thread waited for the render thread before `Sync`: when it is most of the frame, drawing is what holds the game up. Timed only while something listens. |
 | `magic.core.gem.hook.duration` | `s` | `magic.core.gem.name`, `magic.core.frame.phase` | How long each gem's hook took: where a frame's time goes. The gem is named as the project lists it, the phase as its hook is. Only the hooks a gem implements are called, so only they are timed, and only while something listens. |
-| `magic.core.thread.work.duration` | `s` | `magic.core.thread.name` | How long each piece of work handed to an engine thread (`Threads.Post`, `InvokeAsync`) took, on `main` or `render`: what stalls a frame from outside the hooks, such as a pipeline made on the render thread or a domain arriving on the main one. Timed only while something listens. |
+| `magic.core.thread.work.duration` | `s` | `magic.core.thread.name` | How long each piece of work handed to an engine thread (`Threads.InvokeAsync`) took, on `main` or `render`: what stalls a frame from outside the hooks, such as a pipeline made on the render thread or a domain arriving on the main one. Timed only while something listens. |
 | `magic.core.asset.load.duration` | `s` | `magic.core.asset.type` | How long an asset took to read, make and post-process, by its type. |
 
 The frame timings' buckets are 0.1 ms to 1 s, with edges at the frame budgets of 240, 144, 120, 60 and 30 frames a

@@ -2,7 +2,6 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -45,19 +44,19 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     private uint _indexBytes;
 
     /// <summary>
-    /// Both stages, once compiled, handed to the render thread.
+    /// Both stages, written whole once compiled, which the render thread reads.
     /// </summary>
-    private (Result<GpuShader> Vertex, Result<GpuShader> Fragment)? _shaders;
+    private volatile Compiled? _shaders;
 
     /// <summary>
     /// Made by the renderer for each listing of the frame it builds, with the debug UI's draw lists, which the debug UI
     /// this gem provides copies each frame; another gem's debug UI has none, and the script is not made.
     /// </summary>
-    public DebugUi(IDebugUI ui, IGpu gpu, IShaderCompiler compiler, Threads threads, Lifetime lifetime)
+    public DebugUi(IDebugUI ui, IGpu gpu, IShaderCompiler compiler, Lifetime lifetime)
     {
         _gpu = gpu;
         _lists = ui is ImGuiDebugUIGem imgui ? imgui.DrawLists : throw new InvalidOperationException("The debug UI is not ImGui's, so it has no draw lists to draw.");
-        CompileAsync(compiler, threads, lifetime.Stopping).FireAndForget();
+        CompileAsync(compiler, lifetime.Stopping).FireAndForget();
     }
 
     public void Dispose()
@@ -185,10 +184,13 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     /// </summary>
     private GpuPipeline PipelineFor(GpuFormat format)
     {
-        if (_pipelines.TryGetValue(format, out GpuPipeline pipeline) || format == GpuFormat.Invalid || _shaders is not ({ } vertex, { } fragment))
+        if (_pipelines.TryGetValue(format, out GpuPipeline pipeline) || format == GpuFormat.Invalid || _shaders is not { } shaders)
         {
             return pipeline;
         }
+
+        Result<GpuShader> vertex = shaders.Vertex;
+        Result<GpuShader> fragment = shaders.Fragment;
 
         Result<GpuPipeline> made = vertex.Ok && fragment.Ok
             ? _gpu.CreatePipeline(new GpuPipelineDescription
@@ -210,12 +212,17 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
         return _pipelines[format] = made.Ok ? made.Value : GpuPipeline.None;
     }
 
-    private async Task CompileAsync(IShaderCompiler compiler, Threads threads, CancellationToken stopping)
+    private async Task CompileAsync(IShaderCompiler compiler, CancellationToken stopping)
     {
         Result<GpuShader> vertex = await compiler.CompileAsync(VertexShader, GpuStage.Vertex, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
         Result<GpuShader> fragment = await compiler.CompileAsync(FragmentShader, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
-        threads.Post(EngineThread.Render, () => _shaders = (vertex, fragment));
+        _shaders = new Compiled(vertex, fragment);
     }
+
+    /// <summary>
+    /// The two stages as compiled, or why each did not.
+    /// </summary>
+    private sealed record Compiled(Result<GpuShader> Vertex, Result<GpuShader> Fragment);
 
     /// <summary>
     /// The fragment stage's constant block, laid out as <c>Overlay.frag.hlsl</c>'s <c>cbuffer Overlay</c>: the

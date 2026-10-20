@@ -100,7 +100,7 @@ public static class Engine
         world.Preloaders = preloaders;
         using Subscription codeBuilds = loader.WatchCode(container.GetRequiredService<Assets>());
 
-        using FrameLoop frames = new(gems, lifetime, threads, events, settings, args.FrameLimit, seconds);
+        using FrameLoop frames = new(gems, world, lifetime, threads, events, settings, args.FrameLimit, seconds);
         (Args Args, Task<WorldState> Saving, double Seconds)? next = null;
         threads.Run(
             () =>
@@ -127,6 +127,10 @@ public static class Engine
                 {
                     next = (settings.RestartArgs(), world.SaveAsync(null, CancellationToken.None), frames.Seconds);
                 }
+
+                // Still on the main thread: each gem ends what it owns of this thread's, the scripts among it, after the
+                // save took them and before the gems are disposed on the render thread.
+                frames.Stop();
             },
             () =>
             {

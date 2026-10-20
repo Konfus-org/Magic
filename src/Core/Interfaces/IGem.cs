@@ -25,7 +25,12 @@ namespace Magic.Interfaces;
 /// thread; Render on the render thread, one frame behind, while the main thread runs the next frame's Update,
 /// FixedUpdate and LateUpdate. Sync is the one point where both hold still. So a gem prepares in LateUpdate what Render
 /// will read, into a buffer Render is not reading, swaps the two in Sync, and Render reads only that: never what Update,
-/// FixedUpdate and LateUpdate change. Implement the hooks the gem needs; the rest are never called.
+/// FixedUpdate and LateUpdate change. Once the frames end, Stop runs on the main thread, then Dispose on the render
+/// thread, each gem in reverse order. Implement the hooks the gem needs; the rest are never called.
+/// </para>
+/// <para>
+/// What a worker makes for a gem reaches it as data: the gem keeps what arrived and takes it in at the start of the
+/// hook that owns the structure it goes into, never as work run on its behalf by an engine thread.
 /// </para>
 /// </summary>
 public interface IGem
@@ -68,6 +73,14 @@ public interface IGem
     /// the provider, made before it, submits after it.
     /// </summary>
     void Render(in Frame frame)
+    {
+    }
+
+    /// <summary>
+    /// The run is over: end what the gem owns of the main thread's, its job threads, its scripts, what workers fitted
+    /// for it. On the main thread, once the last frame is done and before Dispose runs on the render thread.
+    /// </summary>
+    void Stop()
     {
     }
 }

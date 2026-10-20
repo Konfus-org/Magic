@@ -1,10 +1,10 @@
 using System.IO.Hashing;
 using System.Numerics;
+using System.Threading.Channels;
 using BCnEncoder.Encoder;
 using BCnEncoder.Shared;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -55,8 +55,13 @@ internal sealed class TexturePools : IDisposable
     private readonly IGpu _gpu;
     private readonly Assets _assets;
     private readonly Caches _caches;
-    private readonly Threads _threads;
     private readonly CancellationToken _stopping;
+
+    /// <summary>
+    /// Textures prepared for their pool, or that did not load (no levels), for the render thread to place as
+    /// <see cref="Flush"/> runs.
+    /// </summary>
+    private readonly Channel<Arrival> _arrived = Channel.CreateUnbounded<Arrival>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Pool[] _pools = new Pool[Count];
     private readonly Dictionary<Handle<Texture>, Resident> _textures = [];
 
@@ -74,12 +79,11 @@ internal sealed class TexturePools : IDisposable
     /// </summary>
     private float _anisotropy;
 
-    public TexturePools(IGpu gpu, Assets assets, Caches caches, Threads threads, ClusterRenderingSettings settings, CancellationToken stopping)
+    public TexturePools(IGpu gpu, Assets assets, Caches caches, ClusterRenderingSettings settings, CancellationToken stopping)
     {
         _gpu = gpu;
         _assets = assets;
         _caches = caches;
-        _threads = threads;
         _settings = settings;
         _stopping = stopping;
         for (int i = 0; i < Count; i++)
@@ -190,6 +194,25 @@ internal sealed class TexturePools : IDisposable
     }
 
     /// <summary>
+    /// Takes in what workers finished since the last frame: each texture prepared is placed in its pool, and each that
+    /// did not load is counted failed.
+    /// </summary>
+    public void Flush()
+    {
+        while (_arrived.Reader.TryRead(out Arrival arrival))
+        {
+            if (arrival.Levels is { } levels)
+            {
+                Place(arrival.Texture, arrival.Pool, levels);
+            }
+            else
+            {
+                Fail(arrival.Texture);
+            }
+        }
+    }
+
+    /// <summary>
     /// Ends the frame: what changed this frame is forgotten, and the uploads held back from a pool's growing go in now.
     /// </summary>
     public void EndFrame()
@@ -214,7 +237,7 @@ internal sealed class TexturePools : IDisposable
         if (!loaded.Ok)
         {
             Debugging.Error($"A material's texture does not load, so its material is drawn as the failure: {loaded.Error}");
-            _threads.Post(EngineThread.Render, () => Fail(handle));
+            _arrived.Writer.TryWrite(new Arrival(handle, 0, null));
             return;
         }
 
@@ -222,14 +245,14 @@ internal sealed class TexturePools : IDisposable
     }
 
     /// <summary>
-    /// The texture's levels at its pool's size, compressed, from the cache or made on a worker, handed to the render
-    /// thread.
+    /// The texture's levels at its pool's size, compressed, from the cache or made on a worker, for the render thread to
+    /// place.
     /// </summary>
     private async Task PrepareAsync(Texture texture)
     {
         int pool = PoolOf(texture);
         byte[][] levels = await Task.Run(() => ReadOrCompressAsync(texture, pool), _stopping).ConfigureAwait(false);
-        _threads.Post(EngineThread.Render, () => Place(texture.Handle, pool, levels));
+        _arrived.Writer.TryWrite(new Arrival(texture.Handle, pool, levels));
     }
 
     /// <summary>
@@ -481,6 +504,12 @@ internal sealed class TexturePools : IDisposable
             _capacity = capacity;
         }
     }
+
+    /// <summary>
+    /// What a worker finished for a texture: its levels compressed for the pool at index <see cref="Pool"/>, or none
+    /// when it did not load.
+    /// </summary>
+    private readonly record struct Arrival(Handle<Texture> Texture, int Pool, byte[][]? Levels);
 }
 
 /// <summary>

@@ -49,9 +49,9 @@ on several threads at once, a chunk each, so it writes only through its chunk. A
   the next system runs once all are done. Arch pools the jobs, so it allocates nothing. The system may read other
   entities (`IsAlive`, `Has`, `Get`) on whichever thread it runs on; what it throws is thrown on the main thread once
   the rest are done, so it is taken off as any other.
-- The job threads, one per core but the main and render threads' and at least one, are made at the start of the main
-  thread's first frame, before any system runs: Arch schedules only from the thread that made them. They end when the
-  gem is disposed, handed to the main thread for the same reason; they would otherwise keep the process alive.
+- The job threads, one per core but the main and render threads' and at least one, are made as the main thread's
+  first `Update` starts, before any system runs: Arch schedules only from the thread that made them. They end in the
+  gem's `Stop`, on the main thread for the same reason; they would otherwise keep the process alive.
 - `Create<T1>` and `Create<T1, T2>` make a batch of entities from spans of components in one go (Arch's bulk
   `Create`), rather than moving each entity once per component added: what a worker built off the main thread arrives
   in one call. The entities come back in a span the gem reuses, good until the next batch.

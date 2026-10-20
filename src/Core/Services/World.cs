@@ -506,6 +506,15 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
+    /// Takes in what workers finished for the domains since the last frame. Core calls it on the main thread at the
+    /// start of each frame.
+    /// </summary>
+    internal void TakeArrived()
+    {
+        _domains?.TakeArrived();
+    }
+
+    /// <summary>
     /// Opens the project's entry point in place of the world; the default domain when it does not open. Core calls it
     /// on the first frame, once every gem is made. Without a gem that provides the ECS, nothing opens, which is warned
     /// about.

@@ -1,9 +1,9 @@
 using System.Diagnostics.Metrics;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -45,7 +45,6 @@ internal sealed class ClusterPool : IDisposable
 
     private readonly IGpu _gpu;
     private readonly Assets _assets;
-    private readonly Threads _threads;
     private readonly TexturePools _textures;
     private readonly MeshFields _fields;
     private readonly ClusterRenderingSettings _settings;
@@ -62,13 +61,18 @@ internal sealed class ClusterPool : IDisposable
     /// How many models in the pool show each card atlas: a stand-in's cards are its sources' own.
     /// </summary>
     private readonly Dictionary<Handle<Texture>, int> _atlasUsers = [];
+
+    /// <summary>
+    /// What workers finished for the render thread to take in as <see cref="Flush"/> starts: a model packed, its field
+    /// read or made, or that it did not load.
+    /// </summary>
+    private readonly Channel<Arrival> _arrived = Channel.CreateUnbounded<Arrival>(new UnboundedChannelOptions { SingleReader = true });
     private int _wordCapacity;
 
-    public ClusterPool(IGpu gpu, Assets assets, Threads threads, TexturePools textures, MeshFields fields, ClusterRenderingSettings settings, CancellationToken stopping)
+    public ClusterPool(IGpu gpu, Assets assets, TexturePools textures, MeshFields fields, ClusterRenderingSettings settings, CancellationToken stopping)
     {
         _gpu = gpu;
         _assets = assets;
-        _threads = threads;
         _textures = textures;
         _fields = fields;
         _settings = settings;
@@ -185,13 +189,29 @@ internal sealed class ClusterPool : IDisposable
     }
 
     /// <summary>
-    /// Takes in the models packed since, the nearest to the player first, as many as the frame's budget allows (always
-    /// one, however big); writes cards whose atlases came in, and the rows of the models whose cards are all in now,
-    /// counting changed every model that can or cannot be drawn where it could not or could before; then uploads what
-    /// changed.
+    /// Takes in what workers finished since the last frame, then the models packed, the nearest to the player first, as
+    /// many as the frame's budget allows (always one, however big); writes cards whose atlases came in, and the rows of
+    /// the models whose cards are all in now, counting changed every model that can or cannot be drawn where it could
+    /// not or could before; then uploads what changed.
     /// </summary>
     public void Flush()
     {
+        while (_arrived.Reader.TryRead(out Arrival arrival))
+        {
+            if (arrival.HasFailed)
+            {
+                TakeFailed(arrival.Entry);
+            }
+            else if (arrival.Packed is { } packed)
+            {
+                TakePacked(arrival.Entry, packed);
+            }
+            else if (arrival.FieldOf is { } fieldOf)
+            {
+                TakeField(arrival.Entry, fieldOf, arrival.Field);
+            }
+        }
+
         long budget = (long)(Math.Max(_settings.UploadBudget, 0.25f) * 1024 * 1024);
         _ready.Sort(static (left, right) => left.Distance.CompareTo(right.Distance));
         int taken = 0;
@@ -237,11 +257,7 @@ internal sealed class ClusterPool : IDisposable
         if (!loaded.Ok)
         {
             Debugging.Error($"A model does not load, so what draws it is drawn as the failure: {loaded.Error}");
-            _threads.Post(EngineThread.Render, () =>
-            {
-                entry.HasFailed = true;
-                Changed.Add(entry.Handle);
-            });
+            _arrived.Writer.TryWrite(new Arrival(entry, HasFailed: true));
             return;
         }
 
@@ -249,26 +265,57 @@ internal sealed class ClusterPool : IDisposable
     }
 
     /// <summary>
-    /// Packs the model on a worker, then hands it to the render thread to be taken in in its turn.
+    /// Packs the model on a worker, for the render thread to take in in its turn.
     /// </summary>
     private async Task PackAsync(ModelEntry entry, Model model)
     {
         PackedModel packed = await Task.Run(() => Pack(model), _stopping).ConfigureAwait(false);
-        _threads.Post(EngineThread.Render, () =>
+        _arrived.Writer.TryWrite(new Arrival(entry, Packed: packed));
+    }
+
+    /// <summary>
+    /// The model did not load: what draws it is drawn as the failure.
+    /// </summary>
+    private void TakeFailed(ModelEntry entry)
+    {
+        entry.HasFailed = true;
+        Changed.Add(entry.Handle);
+    }
+
+    /// <summary>
+    /// The model was packed: it waits its turn to go in the pool, unless it was let go meanwhile.
+    /// </summary>
+    private void TakePacked(ModelEntry entry, PackedModel packed)
+    {
+        if (IsReleased(entry))
         {
-            if (IsReleased(entry))
-            {
-                return;
-            }
+            return;
+        }
 
-            if (entry.Waiting is null)
-            {
-                _ready.Add(entry);
-            }
+        if (entry.Waiting is null)
+        {
+            _ready.Add(entry);
+        }
 
-            entry.Waiting = packed;
-            entry.HasFailed = false;
-        });
+        entry.Waiting = packed;
+        entry.HasFailed = false;
+    }
+
+    /// <summary>
+    /// The model's field was read or made, for <paramref name="packed"/>: named in its row, and the model counted
+    /// changed so what is made from its instances' fields is made again; nothing when the model was let go or packed
+    /// again meanwhile.
+    /// </summary>
+    private void TakeField(ModelEntry entry, PackedModel packed, ModelField? field)
+    {
+        if (IsReleased(entry) || entry.In != packed)
+        {
+            return;
+        }
+
+        entry.Field = _fields.Take(entry.Handle, field);
+        WriteRow(entry);
+        Changed.Add(entry.Handle);
     }
 
     /// <summary>
@@ -395,23 +442,13 @@ internal sealed class ClusterPool : IDisposable
     }
 
     /// <summary>
-    /// Reads or makes the model's field on a worker, from its coarsest clusters, then names it in its row, and counts
-    /// the model changed so what is made from its instances' fields is made again.
+    /// Reads or makes the model's field on a worker, from its coarsest clusters, for the render thread to take in
+    /// (<see cref="TakeField"/>).
     /// </summary>
     private async Task MakeFieldAsync(ModelEntry entry, PackedModel packed)
     {
         ModelField? field = await _fields.ReadOrMakeAsync(entry.Handle, packed.Coarsest, _stopping).ConfigureAwait(false);
-        _threads.Post(EngineThread.Render, () =>
-        {
-            if (IsReleased(entry) || entry.In != packed)
-            {
-                return;
-            }
-
-            entry.Field = _fields.Take(entry.Handle, field);
-            WriteRow(entry);
-            Changed.Add(entry.Handle);
-        });
+        _arrived.Writer.TryWrite(new Arrival(entry, FieldOf: packed, Field: field));
     }
 
     /// <summary>
@@ -799,6 +836,13 @@ internal sealed class ClusterPool : IDisposable
 
         public bool HasFailed { get; set; }
     }
+
+    /// <summary>
+    /// What a worker finished for a model: it did not load (<see cref="HasFailed"/>), it was packed
+    /// (<see cref="Packed"/>), or its field was read or made (<see cref="Field"/>, for the packing
+    /// <see cref="FieldOf"/>).
+    /// </summary>
+    private readonly record struct Arrival(ModelEntry Entry, PackedModel? Packed = null, PackedModel? FieldOf = null, ModelField? Field = null, bool HasFailed = false);
 }
 
 /// <summary>

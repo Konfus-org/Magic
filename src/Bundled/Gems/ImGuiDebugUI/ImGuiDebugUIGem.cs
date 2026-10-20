@@ -7,7 +7,6 @@ using Magic.Contexts.Utils;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;
-using Magic.Contexts.Threading;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
@@ -61,7 +60,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private readonly ImGuiDebugUISettings _settings;
     private readonly Assets _assets;
     private readonly IWindow _window;
-    private readonly Threads _threads;
     private readonly CancellationToken _stopping;
     private readonly IInput? _input;
     private readonly unsafe ImGuiContext* _context;
@@ -127,6 +125,11 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private Handle<Font> _fontAsked;
 
     private FontSource? _font;
+
+    /// <summary>
+    /// A font loaded for the settings, for the main thread to take in as Update starts; null for none.
+    /// </summary>
+    private Font? _arrivedFont;
     private int _depth;
     private int _windowsDrawn;
     private bool _isInFrame;
@@ -139,13 +142,12 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private bool _isTableShown;
     private int _tableColumns;
 
-    public unsafe ImGuiDebugUIGem(ImGuiDebugUISettings settings, Assets assets, IWindow window, Threads threads, Lifetime lifetime, World world, IInput? input = null)
+    public unsafe ImGuiDebugUIGem(ImGuiDebugUISettings settings, Assets assets, IWindow window, Lifetime lifetime, World world, IInput? input = null)
     {
         _settings = settings;
         _window = window;
         _input = input;
         _assets = assets;
-        _threads = threads;
         _stopping = lifetime.Stopping;
         _fontAsked = settings.Font;
 
@@ -197,6 +199,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     public unsafe void Update(in Frame frame)
     {
+        if (Interlocked.Exchange(ref _arrivedFont, null) is { } arrived)
+        {
+            _font?.Remove();
+            _font?.Dispose();
+            _font = new FontSource(arrived, _settings.FontSize);
+        }
+
         if (_settings.Font != _fontAsked)
         {
             _fontAsked = _settings.Font;
@@ -843,17 +852,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             return;
         }
 
-        _threads.Post(EngineThread.Main, () =>
-        {
-            if (_stopping.IsCancellationRequested)
-            {
-                return;
-            }
-
-            _font?.Remove();
-            _font?.Dispose();
-            _font = new FontSource(font.Value, _settings.FontSize);
-        });
+        Volatile.Write(ref _arrivedFont, font.Value);
     }
 
     /// <summary>

@@ -326,7 +326,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             CompileAsync(listing, pass, fullscreen, pieces, places, tiles).FireAndForget();
         }
 
-        threads.Post(EngineThread.Render, () => listing.Pending--);
+        listing.Done();
     }
 
     /// <summary>

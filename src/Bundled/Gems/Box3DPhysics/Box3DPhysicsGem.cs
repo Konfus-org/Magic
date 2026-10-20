@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Diagnostics.Metrics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
@@ -19,22 +22,30 @@ namespace Magic.Box3DPhysics;
 /// transform, and the components move the body: once per fixed step, after the scripts' own, each entity's components
 /// are compared with the copy kept from the last step, so a transform a script moved moves the body there (a kinematic
 /// body is driven to it, pushing what is in the way), a velocity it set is applied, and a change to anything that
-/// shapes the body remakes it. Then the world steps, and every body that moved writes its position, rotation and
-/// velocities back. A body whose entity or component is gone is destroyed at the next step, as is one that has gone
+/// shapes the body remakes it. Then the step is handed to a thread of the gem's own, which steps the world while the
+/// frame goes on; what moved, and what the listening bodies touch, the main thread takes in at its next hook, each
+/// body's position, rotation and velocities written back unless a script wrote them meanwhile, whose values then stand
+/// and reach the body with the next step. A body whose entity or component is gone is destroyed at the next step, as is one that has gone
 /// farther from every player camera than the settings' range, so a world full of bodies is simulated only around the
 /// player; an entity past the range waits where it is, body or no body, until the player comes back. The models a
 /// domain's bodies are shaped like are fitted before it spawns (<see cref="IPreloader"/>), so its bodies are there from
 /// its first step.
 /// <para>
-/// It answers <see cref="IPhysics"/> from the bodies as the last step left them, and after each step writes what
-/// every body that listens, one whose entity has a <see cref="Contacts"/>, is touching, with the phase worked out
-/// against what the component held the step before.
+/// It answers <see cref="IPhysics"/> from the bodies as the last step left them, waiting for a step still running,
+/// and after each step writes what every body that listens, one whose entity has a <see cref="Contacts"/>, is
+/// touching, with the phase worked out against what the component held the step before.
+/// </para>
+/// <para>
+/// The world is one thread's at a time: the physics thread's from a step's hand-over until it has stepped and read
+/// what moved, the main thread's otherwise, which waits for the step first (<see cref="WaitForStep"/>). Several
+/// fixed steps in one frame each wait for the one before, so the frame's last overlaps the rest of the frame.
 /// </para>
 /// <para>
 /// Box3D works in metres, kilograms and seconds with +Y up, as the engine does.
 /// </para>
 /// </summary>
-internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
+[SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", Justification = "The shapes are the main thread's, the world's, and end in Stop there; Dispose would run on the render thread. The step's event and semaphore hold no OS handle and outlive the physics thread, which may still be waking as the run ends.")]
+internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 {
     /// <summary>
     /// How much farther than the range a body goes before it is dropped, so one at the edge is not made and dropped
@@ -47,6 +58,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     /// hears the first of them.
     /// </summary>
     private const int MostTouching = 64;
+
+    private static readonly Meter _meter = new("Magic.Gems.Box3DPhysics");
+
+    /// <summary>
+    /// Buckets from a tenth of a millisecond to a second, as a step is measured against the fixed step.
+    /// </summary>
+    private static readonly InstrumentAdvice<double> _buckets = new() { HistogramBucketBoundaries = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.004, 0.008, 1.0 / 60, 1.0 / 30, 0.05, 0.1, 0.25, 0.5, 1] };
+    private static readonly Histogram<double> _stepDuration = _meter.CreateHistogram("magic.gems.box3d_physics.step.duration", "s", "How long the physics thread took to step the world and read what moved.", tags: null, advice: _buckets);
+    private static readonly Histogram<double> _stepWait = _meter.CreateHistogram("magic.gems.box3d_physics.step_wait.duration", "s", "How long the main thread waited for a step still running, ahead of a fixed step, a query or the end.", tags: null, advice: _buckets);
 
     private readonly World _world;
     private readonly Threads _threads;
@@ -63,6 +83,33 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     /// (<see cref="CheckPreloads"/>). Main thread.
     /// </summary>
     private readonly List<Preload> _preloads = [];
+
+    /// <summary>
+    /// Set while no step is in flight: reset as one is handed over, set by the physics thread once it has stepped the
+    /// world and read what moved.
+    /// </summary>
+    private readonly ManualResetEventSlim _stepped = new(initialState: true);
+
+    /// <summary>
+    /// Wakes the physics thread, for a step or to end.
+    /// </summary>
+    private readonly SemaphoreSlim _kick = new(0);
+
+    /// <summary>
+    /// The bodies whose contacts the step reads, by slot: those whose entity has a <see cref="Contacts"/>, listed by
+    /// the main thread as it hands the step over.
+    /// </summary>
+    private readonly List<int> _listening = [];
+
+    /// <summary>
+    /// What the last step moved, read by the physics thread for the main thread to take in (<see cref="Apply"/>).
+    /// </summary>
+    private readonly List<Moved> _moves = [];
+
+    /// <summary>
+    /// What each listening body touches after the last step, by slot, read as the moves are.
+    /// </summary>
+    private readonly Dictionary<int, Contacts> _touched = [];
     private B3.WorldId _box3d;
 
     /// <summary>
@@ -71,12 +118,28 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     /// </summary>
     private uint _step;
 
+    /// <summary>
+    /// The time and the substeps of the step handed over, for the physics thread.
+    /// </summary>
+    private float _stepSeconds;
+    private int _substeps;
+
+    /// <summary>
+    /// The last step's results have been taken in: false from a hand-over until <see cref="Apply"/>. Main thread.
+    /// </summary>
+    private bool _isApplied = true;
+
+    /// <summary>
+    /// The run is ending: the physics thread returns when next woken.
+    /// </summary>
+    private volatile bool _isEnding;
+
     public unsafe Box3DPhysicsGem(World world, Assets assets, Threads threads, Box3DPhysicsSettings settings)
     {
         _world = world;
         _threads = threads;
         _settings = settings;
-        _shapes = new ModelShapes(assets, threads);
+        _shapes = new ModelShapes(assets);
 
         B3.SetAssertFcn(&OnAssert);
         B3.SetLogFcn(&OnLog);
@@ -86,21 +149,32 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
         _box3d = B3.CreateWorld(&def);
 
         B3.Version version = B3.GetVersion();
-        Debugging.Info($"Box3D {version.Major}.{version.Minor}.{version.Revision} is simulating, on {def.WorkerCount} thread(s).");
+        Debugging.Info($"Box3D {version.Major}.{version.Minor}.{version.Revision} is simulating, on a thread of its own, with {def.WorkerCount} solver thread(s).");
+        threads.RunAsync("Physics", RunSteps).FireAndForget();
     }
 
     /// <summary>
-    /// Destroys the world, and every body with it, then the shapes the bodies shared.
+    /// Takes in the last step's results once the step has ended, if the fixed step has not yet, so a script's Update
+    /// sees the bodies as the step left them.
     /// </summary>
-    public void Dispose()
+    public void Update(in Frame frame)
     {
-        B3.DestroyWorld(_box3d);
-        _shapes.Dispose();
+        if (!_isApplied && _stepped.IsSet)
+        {
+            Apply();
+        }
     }
 
     public unsafe void FixedUpdate(in Frame frame)
     {
+        WaitForStep();
+        if (!_isApplied)
+        {
+            Apply();
+        }
+
         _step++;
+        _shapes.TakeArrived();
         CheckPreloads();
         if (_settings.Gravity != -B3.WorldGetGravity(_box3d).Y)
         {
@@ -151,24 +225,25 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
         }
 
         _gone.Clear();
-        B3.WorldStep(_box3d, frame.DeltaSeconds, _settings.Substeps);
-        B3.BodyEvents events = B3.WorldGetBodyEvents(_box3d);
-        for (int i = 0; i < events.MoveCount; i++)
-        {
-            Moved(events.MoveEvents[i]);
-        }
+        Kick(frame.DeltaSeconds);
+    }
 
-        foreach ((ReadOnlySpan<Entity> entities, Span<Contacts> contacts) in _world.Query<Contacts>())
-        {
-            for (int i = 0; i < entities.Length; i++)
-            {
-                Touch(_slots.TryGetValue(entities[i], out int slot) ? slot : -1, ref contacts[i]);
-            }
-        }
+    /// <summary>
+    /// Waits for a step still running, ends the physics thread, then destroys the world, and every body with it, and
+    /// the shapes the bodies shared: on the main thread, the world's, as the run ends.
+    /// </summary>
+    public void Stop()
+    {
+        WaitForStep();
+        _isEnding = true;
+        _kick.Release();
+        B3.DestroyWorld(_box3d);
+        _shapes.Dispose();
     }
 
     public RayHit? Cast(Vector3 from, Vector3 to, Motions motions = Motions.All)
     {
+        WaitForStep();
         B3.RayResult result = B3.WorldCastRayClosest(_box3d, ToVec(from), ToVec(to - from), FilterOf(motions));
         if (!result.Hit)
         {
@@ -186,6 +261,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
             return 0;
         }
 
+        WaitForStep();
         B3.Vec3 point = default;
         B3.ShapeProxy proxy = new() { Points = &point, Count = 1, Radius = radius };
         OverlapQuery query = new() { Capacity = found.Length };
@@ -208,15 +284,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
     {
         HashSet<Handle<Model>> models = ModelsOf(prefabs);
-        Preload preload = new(models, progress);
-        using CancellationTokenRegistration cancelling = cancel.Register(() => _threads.Post(EngineThread.Main, () =>
-        {
-            if (_preloads.Remove(preload))
-            {
-                preload.Done.TrySetCanceled(cancel);
-            }
-        }));
-
+        Preload preload = new(models, progress, cancel);
         await _threads.InvokeAsync(EngineThread.Main, () =>
         {
             foreach (Handle<Model> model in models)
@@ -492,64 +560,207 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// Writes where a body is and how it moves back to its entity's components, and keeps the copy the next step
-    /// compares them with.
+    /// Hands the physics thread the step: which bodies' contacts to read after it, the time and the substeps, then
+    /// wakes it. The world is that thread's until the step has ended.
     /// </summary>
-    private unsafe void Moved(in B3.BodyMoveEvent moved)
+    private void Kick(float seconds)
     {
-        int slot = (int)(nuint)moved.UserData - 1;
-        ref Body body = ref CollectionsMarshal.AsSpan(_bodies)[slot];
-        if (!_world.IsAlive(body.Entity))
+        _listening.Clear();
+        foreach ((ReadOnlySpan<Entity> entities, _) in _world.Query<Contacts>())
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                if (_slots.TryGetValue(entities[i], out int slot))
+                {
+                    _listening.Add(slot);
+                }
+            }
+        }
+
+        _stepSeconds = seconds;
+        _substeps = _settings.Substeps;
+        _isApplied = false;
+        _stepped.Reset();
+        _kick.Release();
+    }
+
+    /// <summary>
+    /// Waits for a step still running, so the world is the main thread's; timed while something listens.
+    /// </summary>
+    private void WaitForStep()
+    {
+        if (_stepped.IsSet)
         {
             return;
         }
 
-        ref Transform transform = ref _world.Get<Transform>(body.Entity);
-        transform.Position = FromVec(moved.Transform.P);
-        transform.Rotation = FromQuat(moved.Transform.Q);
-        ref Physics physics = ref _world.Get<Physics>(body.Entity);
-        physics.Velocity = FromVec(B3.BodyGetLinearVelocity(body.Id));
-        physics.AngularVelocity = FromVec(B3.BodyGetAngularVelocity(body.Id));
-        body.Transform = transform;
-        body.Physics = physics;
-        if (moved.FellAsleep)
+        bool timed = _stepWait.Enabled;
+        long start = timed ? Stopwatch.GetTimestamp() : 0;
+        _stepped.Wait();
+        if (timed)
         {
-            Debugging.Verbose($"Entity {body.Entity.Id}'s body came to rest at ({transform.Position.X:0.###}, {transform.Position.Y:0.###}, {transform.Position.Z:0.###}).");
+            _stepWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
         }
     }
 
     /// <summary>
-    /// Writes what the body in <paramref name="slot"/> touches after this step over its entity's contacts: each body
-    /// it touches now, Stay when the component already held it, else Enter; then each the component held and it no
-    /// longer touches, as Exit for this step. An entity with no body, out of range, parts from them all.
+    /// The physics thread: each step it is woken for, it steps the world and reads what moved and what the listening
+    /// bodies touch, for the main thread; until the gem ends it.
     /// </summary>
-    private unsafe void Touch(int slot, ref Contacts contacts)
+    private void RunSteps(CancellationToken _)
     {
-        Span<Body> bodies = CollectionsMarshal.AsSpan(_bodies);
+        while (true)
+        {
+            _kick.Wait();
+            if (_isEnding)
+            {
+                return;
+            }
+
+            bool timed = _stepDuration.Enabled;
+            long start = timed ? Stopwatch.GetTimestamp() : 0;
+            Step();
+            if (timed)
+            {
+                _stepDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+            }
+
+            _stepped.Set();
+        }
+    }
+
+    /// <summary>
+    /// Steps the world, then reads every body that moved and what each listening body touches into the results the
+    /// main thread takes in. Physics thread.
+    /// </summary>
+    private unsafe void Step()
+    {
+        B3.WorldStep(_box3d, _stepSeconds, _substeps);
+        B3.BodyEvents events = B3.WorldGetBodyEvents(_box3d);
+        _moves.Clear();
+        for (int i = 0; i < events.MoveCount; i++)
+        {
+            ref B3.BodyMoveEvent moved = ref events.MoveEvents[i];
+            int slot = (int)(nuint)moved.UserData - 1;
+            B3.BodyId id = _bodies[slot].Id;
+            _moves.Add(new Moved(slot, FromVec(moved.Transform.P), FromQuat(moved.Transform.Q), FromVec(B3.BodyGetLinearVelocity(id)), FromVec(B3.BodyGetAngularVelocity(id)), moved.FellAsleep));
+        }
+
+        _touched.Clear();
+        foreach (int slot in _listening)
+        {
+            _touched[slot] = Touching(slot);
+        }
+    }
+
+    /// <summary>
+    /// What the body in <paramref name="slot"/> touches after the step, each as <see cref="ContactPhase.Stay"/>: the
+    /// main thread works the phase out against what the component held. Physics thread.
+    /// </summary>
+    private unsafe Contacts Touching(int slot)
+    {
         Contacts now = default;
         int written = 0;
-        if (slot >= 0)
+        B3.BodyId id = _bodies[slot].Id;
+        int capacity = Math.Min(B3.BodyGetContactCapacity(id), MostTouching);
+        B3.ContactData* data = stackalloc B3.ContactData[capacity];
+        int count = B3.BodyGetContactData(id, data, capacity);
+        for (int i = 0; i < count && written < Contacts.Capacity; i++)
         {
-            ref Body body = ref bodies[slot];
-            int capacity = Math.Min(B3.BodyGetContactCapacity(body.Id), MostTouching);
-            B3.ContactData* data = stackalloc B3.ContactData[capacity];
-            int count = B3.BodyGetContactData(body.Id, data, capacity);
-            for (int i = 0; i < count && written < Contacts.Capacity; i++)
+            Contact contact = ContactOf(slot, data[i]);
+            if (contact.Phase != ContactPhase.None)
             {
-                Contact contact = ContactOf(slot, data[i]);
-                if (contact.Phase == ContactPhase.None)
-                {
-                    continue;
-                }
-
-                contact.Phase = PhaseOf(contacts, contact.Other) is ContactPhase.Enter or ContactPhase.Stay ? ContactPhase.Stay : ContactPhase.Enter;
-                if (contact.Phase == ContactPhase.Enter)
-                {
-                    Debugging.Verbose($"Entity {body.Entity.Id} touched entity {contact.Other.Id} at ({contact.Point.X:0.###}, {contact.Point.Y:0.###}, {contact.Point.Z:0.###}), {contact.Impulse:0.###} Ns.");
-                }
-
                 now[written++] = contact;
             }
+        }
+
+        return now;
+    }
+
+    /// <summary>
+    /// Takes in what the last step moved and what the listening bodies touch. Each body that moved writes its position,
+    /// rotation and velocities to its components, unless a script wrote one since the step was handed over: the
+    /// script's value stands, and the next step carries it to the body. Then each entity's contacts are phased against
+    /// what it held (<see cref="Touch"/>). Main thread.
+    /// </summary>
+    private void Apply()
+    {
+        _isApplied = true;
+        Span<Body> bodies = CollectionsMarshal.AsSpan(_bodies);
+        foreach (ref readonly Moved moved in CollectionsMarshal.AsSpan(_moves))
+        {
+            ref Body body = ref bodies[moved.Slot];
+            if (!_world.IsAlive(body.Entity))
+            {
+                continue;
+            }
+
+            ref Transform transform = ref _world.Get<Transform>(body.Entity);
+            if (transform.Position == body.Transform.Position && transform.Rotation == body.Transform.Rotation)
+            {
+                transform.Position = moved.Position;
+                transform.Rotation = moved.Rotation;
+                body.Transform = transform;
+            }
+
+            ref Physics physics = ref _world.Get<Physics>(body.Entity);
+            if (physics.Velocity == body.Physics.Velocity)
+            {
+                physics.Velocity = moved.Velocity;
+                body.Physics.Velocity = moved.Velocity;
+            }
+
+            if (physics.AngularVelocity == body.Physics.AngularVelocity)
+            {
+                physics.AngularVelocity = moved.AngularVelocity;
+                body.Physics.AngularVelocity = moved.AngularVelocity;
+            }
+
+            if (moved.FellAsleep)
+            {
+                Debugging.Verbose($"Entity {body.Entity.Id}'s body came to rest at ({moved.Position.X:0.###}, {moved.Position.Y:0.###}, {moved.Position.Z:0.###}).");
+            }
+        }
+
+        foreach ((ReadOnlySpan<Entity> entities, Span<Contacts> contacts) in _world.Query<Contacts>())
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                Contacts read = default;
+                if (_slots.TryGetValue(entities[i], out int slot))
+                {
+                    _touched.TryGetValue(slot, out read);
+                }
+
+                Touch(entities[i], ref contacts[i], read);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Writes what <paramref name="entity"/>'s body touches after the last step, <paramref name="read"/>, over its
+    /// contacts: each Stay when the component already held it, else Enter; then each the component held and the body
+    /// no longer touches, as Exit for this step. An entity with no body, out of range, parts from them all.
+    /// </summary>
+    private static void Touch(Entity entity, ref Contacts contacts, in Contacts read)
+    {
+        Contacts now = default;
+        int written = 0;
+        foreach (Contact touching in read)
+        {
+            if (touching.Phase == ContactPhase.None)
+            {
+                continue;
+            }
+
+            Contact contact = touching;
+            contact.Phase = PhaseOf(contacts, contact.Other) is ContactPhase.Enter or ContactPhase.Stay ? ContactPhase.Stay : ContactPhase.Enter;
+            if (contact.Phase == ContactPhase.Enter)
+            {
+                Debugging.Verbose($"Entity {entity.Id} touched entity {contact.Other.Id} at ({contact.Point.X:0.###}, {contact.Point.Y:0.###}, {contact.Point.Z:0.###}), {contact.Impulse:0.###} Ns.");
+            }
+
+            now[written++] = contact;
         }
 
         foreach (Contact held in contacts)
@@ -565,10 +776,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
             }
 
             now[written++] = held with { Phase = ContactPhase.Exit, Impulse = 0 };
-            if (slot >= 0)
-            {
-                Debugging.Verbose($"Entity {bodies[slot].Entity.Id} parted from entity {held.Other.Id}.");
-            }
+            Debugging.Verbose($"Entity {entity.Id} parted from entity {held.Other.Id}.");
         }
 
         contacts = now;
@@ -722,14 +930,22 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// Checks each domain whose models are being fitted: how many shapes are there tells how far it is, and once all
-    /// are, whoever waits for it goes on and spawns it.
+    /// Checks each domain whose models are being fitted: one whose open was cancelled is let go, and whoever waited is
+    /// told; else how many shapes are there tells how far it is, and once all are, whoever waits for it goes on and
+    /// spawns it.
     /// </summary>
     private void CheckPreloads()
     {
         for (int i = _preloads.Count - 1; i >= 0; i--)
         {
             Preload preload = _preloads[i];
+            if (preload.Cancel.IsCancellationRequested)
+            {
+                _preloads.RemoveAt(i);
+                preload.Done.TrySetCanceled(preload.Cancel);
+                continue;
+            }
+
             int done = 0;
             foreach (Handle<Model> model in preload.Models)
             {
@@ -807,14 +1023,22 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// A domain whose models are being fitted before it spawns: which, how far that is as last told, and the task
-    /// whoever opens it awaits.
+    /// Where a body is and how it moves after a step, read by the physics thread for the main thread to write to the
+    /// body's components.
     /// </summary>
-    private sealed class Preload(HashSet<Handle<Model>> models, IProgress<float> progress)
+    private readonly record struct Moved(int Slot, Vector3 Position, Quaternion Rotation, Vector3 Velocity, Vector3 AngularVelocity, bool FellAsleep);
+
+    /// <summary>
+    /// A domain whose models are being fitted before it spawns: which, how far that is as last told, the task whoever
+    /// opens it awaits, and the token that cancels the open, checked each step.
+    /// </summary>
+    private sealed class Preload(HashSet<Handle<Model>> models, IProgress<float> progress, CancellationToken cancel)
     {
         public HashSet<Handle<Model>> Models { get; } = models;
 
         public IProgress<float> Progress { get; } = progress;
+
+        public CancellationToken Cancel { get; } = cancel;
 
         public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

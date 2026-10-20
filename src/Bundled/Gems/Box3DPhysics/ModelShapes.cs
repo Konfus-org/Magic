@@ -1,6 +1,6 @@
 using System.Numerics;
+using System.Threading.Channels;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Services;
@@ -12,30 +12,54 @@ namespace Magic.Box3DPhysics;
 /// sphere or a capsule is fitted to, and its triangles as Box3D mesh data, for a mesh. A model loads on a worker as
 /// any asset does and is fitted there, so a body waits for it; one that does not load, or an entity with no model,
 /// takes a unit cube's bounds, so a body always has a shape. A model made again while running keeps the shape it was
-/// first fitted with until the run restarts. Main thread, where the gem's ending is handed too, so a shape is only ever
-/// read, put in and let go there.
+/// first fitted with until the run restarts. Main thread: a worker fits a shape, and the main thread takes it in as a
+/// step starts (<see cref="TakeArrived"/>), so a shape is only ever read, put in and let go there.
 /// </summary>
-internal sealed class ModelShapes(Assets assets, Threads threads) : IDisposable
+internal sealed class ModelShapes(Assets assets) : IDisposable
 {
     /// <summary>
     /// Each model's shape once a worker has fitted it; null while its model loads.
     /// </summary>
     private readonly Dictionary<Handle<Model>, ModelShape?> _shapes = [];
     private readonly ModelShape _unitCube = new(new Vector3(-0.5f), new Vector3(0.5f));
+
+    /// <summary>
+    /// Shapes fitted on workers, for the main thread to take in as a step starts.
+    /// </summary>
+    private readonly Channel<(Handle<Model> Model, ModelShape Shape)> _fitted = Channel.CreateUnbounded<(Handle<Model> Model, ModelShape Shape)>(new UnboundedChannelOptions { SingleReader = true });
     private bool _disposed;
 
+    /// <summary>
+    /// Frees every shape, and every one still to arrive as it does. On the main thread, as the run ends.
+    /// </summary>
     public void Dispose()
     {
-        threads.Post(EngineThread.Main, () =>
+        _disposed = true;
+        foreach (ModelShape? shape in _shapes.Values)
         {
-            _disposed = true;
-            foreach (ModelShape? shape in _shapes.Values)
+            shape?.Free();
+        }
+
+        _shapes.Clear();
+        TakeArrived();
+    }
+
+    /// <summary>
+    /// Takes in the shapes workers fitted since the last step; freed instead once the shapes have been let go.
+    /// </summary>
+    public void TakeArrived()
+    {
+        while (_fitted.Reader.TryRead(out (Handle<Model> Model, ModelShape Shape) fitted))
+        {
+            if (_disposed)
             {
-                shape?.Free();
+                fitted.Shape.Free();
+                continue;
             }
 
-            _shapes.Clear();
-        });
+            _shapes[fitted.Model] = fitted.Shape;
+            Longest = Math.Max(Longest, fitted.Shape.Reach);
+        }
     }
 
     /// <summary>
@@ -65,8 +89,7 @@ internal sealed class ModelShapes(Assets assets, Threads threads) : IDisposable
     }
 
     /// <summary>
-    /// Loads and fits the model on a worker, then puts the shape in on the main thread, or frees it when the shapes
-    /// were let go meanwhile.
+    /// Loads and fits the model on a worker, for the main thread to take in.
     /// </summary>
     private async Task LoadAsync(Handle<Model> model)
     {
@@ -82,17 +105,7 @@ internal sealed class ModelShapes(Assets assets, Threads threads) : IDisposable
             shape = _unitCube;
         }
 
-        threads.Post(EngineThread.Main, () =>
-        {
-            if (_disposed)
-            {
-                shape.Free();
-                return;
-            }
-
-            _shapes[model] = shape;
-            Longest = Math.Max(Longest, shape.Reach);
-        });
+        _fitted.Writer.TryWrite((model, shape));
     }
 }
 

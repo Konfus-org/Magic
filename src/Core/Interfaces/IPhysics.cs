@@ -9,8 +9,9 @@ namespace Magic.Interfaces;
 /// Questions about the solid world, which a physics gem answers from its bodies as they stood after the last step:
 /// what a ray hits, for picking what the pointer is over and for aiming, and what is within reach of a point. A body
 /// is an entity with a <see cref="Transform"/> and a <see cref="Physics"/>; what one touched is on its
-/// <see cref="Contacts"/>, not here. The main thread's, between steps: ask in Update, FixedUpdate or LateUpdate,
-/// never in Render or on a worker, as the bodies move while the world steps.
+/// <see cref="Contacts"/>, not here. The main thread's: ask in Update, FixedUpdate or LateUpdate, never in Render or
+/// on a worker; a step still running on the physics gem's own thread is waited for first, as the bodies move while
+/// the world steps.
 /// </summary>
 public interface IPhysics
 {

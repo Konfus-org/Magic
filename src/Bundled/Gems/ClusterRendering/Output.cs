@@ -1,5 +1,4 @@
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -26,16 +25,17 @@ internal sealed class Output : IDisposable
     private readonly GpuSampler _nearest;
 
     /// <summary>
-    /// The output's vertex stage and its two fragment stages, once all are compiled, handed to the render thread.
+    /// The output's vertex stage and its two fragment stages, written whole once all are compiled, which the render
+    /// thread reads.
     /// </summary>
-    private (Result<GpuShader> Vertex, Result<GpuShader> Fragment, Result<GpuShader> Nothing)? _shaders;
+    private volatile Compiled? _shaders;
 
-    public Output(IGpu gpu, IShaderCompiler compiler, Threads threads, CancellationToken stopping)
+    public Output(IGpu gpu, IShaderCompiler compiler, CancellationToken stopping)
     {
         _gpu = gpu;
         _linear = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
         _nearest = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Nearest, GpuWrap.Clamp));
-        CompileAsync(compiler, threads, stopping).FireAndForget();
+        CompileAsync(compiler, stopping).FireAndForget();
     }
 
     public void Dispose()
@@ -129,12 +129,13 @@ internal sealed class Output : IDisposable
     /// </summary>
     private GpuPipeline PipelineFor(GpuFormat format, bool isNothing)
     {
-        if (_pipelines.TryGetValue((format, isNothing), out GpuPipeline pipeline) || _shaders is not ({ } vertex, { } finished, { } nothing))
+        if (_pipelines.TryGetValue((format, isNothing), out GpuPipeline pipeline) || _shaders is not { } shaders)
         {
             return pipeline;
         }
 
-        Result<GpuShader> fragment = isNothing ? nothing : finished;
+        Result<GpuShader> vertex = shaders.Vertex;
+        Result<GpuShader> fragment = isNothing ? shaders.Nothing : shaders.Fragment;
         Result<GpuPipeline> made = vertex.Ok && fragment.Ok
             ? _gpu.CreatePipeline(new GpuPipelineDescription { Vertex = vertex.Value, Fragment = fragment.Value, ColorFormats = [format], Cull = GpuCull.None })
             : Result.Failure<GpuPipeline>(vertex.Ok ? fragment.Error : vertex.Error);
@@ -148,11 +149,16 @@ internal sealed class Output : IDisposable
         return pipeline;
     }
 
-    private async Task CompileAsync(IShaderCompiler compiler, Threads threads, CancellationToken stopping)
+    private async Task CompileAsync(IShaderCompiler compiler, CancellationToken stopping)
     {
         Result<GpuShader> vertex = await compiler.CompileAsync(Fullscreen, GpuStage.Vertex, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
         Result<GpuShader> fragment = await compiler.CompileAsync(Fragment, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
         Result<GpuShader> nothing = await compiler.CompileAsync(Nothing, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
-        threads.Post(EngineThread.Render, () => _shaders = (vertex, fragment, nothing));
+        _shaders = new Compiled(vertex, fragment, nothing);
     }
+
+    /// <summary>
+    /// The three stages as compiled, or why each did not.
+    /// </summary>
+    private sealed record Compiled(Result<GpuShader> Vertex, Result<GpuShader> Fragment, Result<GpuShader> Nothing);
 }

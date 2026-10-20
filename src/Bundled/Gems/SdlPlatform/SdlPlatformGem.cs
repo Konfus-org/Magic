@@ -8,7 +8,6 @@ using Magic.Contexts.CmdLine;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Input;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -31,7 +30,6 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 {
     private readonly SdlPlatformSettings _settings;
     private readonly Lifetime _lifetime;
-    private readonly Threads _threads;
     private readonly Assets _assets;
     private readonly unsafe SDL.Window* _window;
 
@@ -69,6 +67,22 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     private Handle<Icon> _icon;
 
     /// <summary>
+    /// Set on the main thread for the render thread, SDL's, to give the window as it next pumps, each taken whole
+    /// (<see cref="ApplyWanted"/>): a title, the clipboard's text, a size the settings ask for, and the icon's image
+    /// once loaded; null for nothing new.
+    /// </summary>
+    private string? _wantedTitle;
+    private string? _wantedClipboard;
+    private WindowSize? _wantedSize;
+    private Texture? _wantedIcon;
+
+    /// <summary>
+    /// The icon is loaded from the first frame, once every gem is made, so the gems that read icons and images are
+    /// there; never headless, as there is no window to show it.
+    /// </summary>
+    private bool _isIconShown;
+
+    /// <summary>
     /// Window pixels per screen point, which SDL's mouse positions are in. The render thread's.
     /// </summary>
     private float _pixelDensity = 1;
@@ -79,10 +93,9 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     private int _askedWidth;
     private int _askedHeight;
 
-    public unsafe SdlPlatformGem(SdlPlatformSettings settings, Args run, Lifetime lifetime, Threads threads, Project project, Assets assets)
+    public unsafe SdlPlatformGem(SdlPlatformSettings settings, Args run, Lifetime lifetime, Project project, Assets assets)
     {
         _lifetime = lifetime;
-        _threads = threads;
         _settings = settings;
         _askedWidth = settings.Width;
         _askedHeight = settings.Height;
@@ -138,9 +151,6 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             Debugging.Warn($"Typed text is not read: {CString.Read(SDL.GetError())}");
         }
 
-        // From the first frame, once every gem is made: loaded now, it would make the gems that read it, on a worker.
-        _threads.Post(EngineThread.Main, () => ShowAsync(_icon).FireAndForget());
-
         // The main thread has not started: its state is set here, before anything reads it.
         if (ReadWindowSize(out int width, out int height))
         {
@@ -195,13 +205,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             _title = value;
             if (_window != null)
             {
-                _threads.Post(EngineThread.Render, () =>
-                {
-                    fixed (byte* title = CString.Bytes(value))
-                    {
-                        SDL.SetWindowTitle(_window, title);
-                    }
-                });
+                Volatile.Write(ref _wantedTitle, value);
             }
         }
     }
@@ -243,13 +247,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             _clipboard = value;
             if (_window != null)
             {
-                _threads.Post(EngineThread.Render, () =>
-                {
-                    fixed (byte* text = CString.Bytes(value))
-                    {
-                        SDL.SetClipboardText(text);
-                    }
-                });
+                Volatile.Write(ref _wantedClipboard, value);
             }
         }
     }
@@ -304,6 +302,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     public void Update(in Frame frame)
     {
+        if (!_isIconShown && Id != 0)
+        {
+            _isIconShown = true;
+            ShowAsync(_icon).FireAndForget();
+        }
+
         Resize();
         for (int i = 0; i < _devices.Count; i++)
         {
@@ -325,6 +329,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     [SuppressMessage("Style", "IDE0010:Add missing cases", Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose.")]
     public unsafe void Render(in Frame frame)
     {
+        ApplyWanted();
         SDL.Event sdlEvent;
         while (SDL.PollEvent(&sdlEvent))
         {
@@ -423,7 +428,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// Resizes the window when the settings ask for a size they did not before, on the window thread.
+    /// Asks the window thread to resize the window when the settings ask for a size they did not before.
     /// </summary>
     private unsafe void Resize()
     {
@@ -432,9 +437,40 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             return;
         }
 
-        (int width, int height) = (_settings.Width, _settings.Height);
-        (_askedWidth, _askedHeight) = (width, height);
-        _threads.Post(EngineThread.Render, () => SDL.SetWindowSize(_window, width, height));
+        (_askedWidth, _askedHeight) = (_settings.Width, _settings.Height);
+        Volatile.Write(ref _wantedSize, new WindowSize(_askedWidth, _askedHeight));
+    }
+
+    /// <summary>
+    /// Gives the window what the main thread set since the last frame. Render thread.
+    /// </summary>
+    private unsafe void ApplyWanted()
+    {
+        if (Interlocked.Exchange(ref _wantedTitle, null) is { } title)
+        {
+            fixed (byte* text = CString.Bytes(title))
+            {
+                SDL.SetWindowTitle(_window, text);
+            }
+        }
+
+        if (Interlocked.Exchange(ref _wantedClipboard, null) is { } clipboard)
+        {
+            fixed (byte* text = CString.Bytes(clipboard))
+            {
+                SDL.SetClipboardText(text);
+            }
+        }
+
+        if (Interlocked.Exchange(ref _wantedSize, null) is { } size)
+        {
+            SDL.SetWindowSize(_window, size.Width, size.Height);
+        }
+
+        if (Interlocked.Exchange(ref _wantedIcon, null) is { } icon)
+        {
+            SetIcon(icon);
+        }
     }
 
     /// <summary>
@@ -677,7 +713,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// Loads <paramref name="icon"/> and its image on workers, then has the render thread give the image to the window,
+    /// Loads <paramref name="icon"/> and its image on workers, for the render thread to give the image to the window,
     /// unless another icon was set meanwhile. One that does not load is logged, and the window keeps what it shows.
     /// </summary>
     private async Task ShowAsync(Handle<Icon> icon)
@@ -699,7 +735,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
         if (icon == _icon)
         {
-            _threads.Post(EngineThread.Render, () => SetIcon(image.Value));
+            Volatile.Write(ref _wantedIcon, image.Value);
         }
     }
 
@@ -770,4 +806,9 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// <see cref="Kind"/>.
     /// </summary>
     private readonly record struct Change(ChangeKind Kind, DeviceKind Device = default, uint Id = 0, Control Control = default, float Value = 0, string? Name = null, int Width = 0, int Height = 0, string? Text = null);
+
+    /// <summary>
+    /// A size the settings ask the window to be, in screen points, set whole for the render thread.
+    /// </summary>
+    private sealed record WindowSize(int Width, int Height);
 }

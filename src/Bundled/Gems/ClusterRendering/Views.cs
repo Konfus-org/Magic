@@ -1,12 +1,12 @@
 using System.Drawing;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -19,7 +19,7 @@ namespace Magic.ClusterRendering;
 /// G-buffer, scene colour, velocity and exposure, kept while its camera is, and its constants and transparent pieces
 /// worked out each frame from the <see cref="Snapshot"/>. Render thread.
 /// </summary>
-internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads threads, Scene scene, ClusterPool models, Materials materials, ClusterRenderingSettings settings, CancellationToken stopping) : IDisposable
+internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Scene scene, ClusterPool models, Materials materials, ClusterRenderingSettings settings, CancellationToken stopping) : IDisposable
 {
     /// <summary>
     /// Pixels a side of a light tile, which Shaders/Lights/LightTiles.comp.hlsl bins the lights into.
@@ -42,6 +42,11 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
     private readonly Dictionary<Handle<RenderTexture>, BoundResource> _renderTextures = [];
     private readonly HashSet<Entity> _seen = [];
     private readonly List<View> _drawn = [];
+
+    /// <summary>
+    /// Render textures loaded, with their sizes, for the render thread to make as the views are prepared.
+    /// </summary>
+    private readonly Channel<(Handle<RenderTexture> Handle, uint Width, uint Height)> _loaded = Channel.CreateUnbounded<(Handle<RenderTexture> Handle, uint Width, uint Height)>(new UnboundedChannelOptions { SingleReader = true });
     private GpuTexture _windowTarget;
 
     public void Dispose()
@@ -68,6 +73,12 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
     /// </summary>
     public List<View> Prepare(in ViewFrame frame)
     {
+        while (_loaded.Reader.TryRead(out (Handle<RenderTexture> Handle, uint Width, uint Height) loaded))
+        {
+            GpuTexture texture = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.Rgba16Float, GpuTextureUsage.Sampled | GpuTextureUsage.ColorTarget, loaded.Width, loaded.Height));
+            _renderTextures[loaded.Handle] = BoundResource.Of(texture, loaded.Width, loaded.Height);
+        }
+
         _drawn.Clear();
         _seen.Clear();
         foreach (CameraCopy camera in frame.Copy.Cameras)
@@ -145,13 +156,7 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
             return;
         }
 
-        uint width = (uint)Math.Max(1, loaded.Value.Width);
-        uint height = (uint)Math.Max(1, loaded.Value.Height);
-        threads.Post(EngineThread.Render, () =>
-        {
-            GpuTexture texture = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.Rgba16Float, GpuTextureUsage.Sampled | GpuTextureUsage.ColorTarget, width, height));
-            _renderTextures[handle] = BoundResource.Of(texture, width, height);
-        });
+        _loaded.Writer.TryWrite((handle, (uint)Math.Max(1, loaded.Value.Width), (uint)Math.Max(1, loaded.Value.Height)));
     }
 }
 

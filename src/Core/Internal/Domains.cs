@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.IO;
 using System.Numerics;
+using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
@@ -46,6 +47,12 @@ internal sealed class Domains : IDisposable
     /// The loading domain while it is shown.
     /// </summary>
     private Open? _loading;
+
+    /// <summary>
+    /// What workers finished for the main thread to take in at the start of a frame (<see cref="TakeArrived"/>): a prefab
+    /// read for a placement, or a domain whose reading failed, which closes.
+    /// </summary>
+    private readonly Channel<Arrived> _arrived = Channel.CreateUnbounded<Arrived>(new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// Domains opening in place of the world and not there yet: the loading domain is shown while there is one.
@@ -112,6 +119,25 @@ internal sealed class Domains : IDisposable
         Open open = new(domain, _assets.Path(domain) ?? "A domain", file.Value, mode, isLoadingDomain: false, isReplacing: mode == DomainOpenMode.Replace);
         Open? already = await _threads.InvokeAsync(EngineThread.Main, () => Begin(open), cancel).ConfigureAwait(false);
         return already is not null ? Result.Success(already.Domain) : await ArriveAsync(open, progress, cancel).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Takes in what workers finished since the last frame: a prefab read for a placement is spawned, and a domain whose
+    /// reading failed is closed. On the main thread, at the start of each frame.
+    /// </summary>
+    public void TakeArrived()
+    {
+        while (_arrived.Reader.TryRead(out Arrived arrived))
+        {
+            if (arrived.Placed is { } placed)
+            {
+                Add(arrived.Open, placed, arrived.Prefab);
+            }
+            else
+            {
+                Close(arrived.Open);
+            }
+        }
     }
 
     /// <summary>
@@ -284,7 +310,7 @@ internal sealed class Domains : IDisposable
         }
         catch
         {
-            _threads.Post(EngineThread.Main, () => Close(open));
+            _arrived.Writer.TryWrite(new Arrived(open, null, default));
             throw;
         }
 
@@ -835,28 +861,40 @@ internal sealed class Domains : IDisposable
     private async Task AddAsync(Open open, Placed placed)
     {
         Result<Prefab> prefab = await _assets.LoadAsync(placed.Placement.File, _lifetime.Stopping).ConfigureAwait(false);
-        _threads.Post(EngineThread.Main, () =>
-        {
-            if (open.IsClosed || !open.Prefabs.TryGetValue(placed.Placement.File, out Placed? now) || now != placed)
-            {
-                return;
-            }
+        _arrived.Writer.TryWrite(new Arrived(open, placed, prefab));
+    }
 
-            if (prefab.Ok)
-            {
-                Show(placed, prefab.Value);
-            }
-            else
-            {
-                Debugging.Error($"{_assets.Path(placed.Placement.File) ?? "A prefab"} of {open.Name} is left out: {prefab.Error}");
-            }
-        });
+    /// <summary>
+    /// Spawns <paramref name="placed"/>'s prefab, read as <paramref name="prefab"/>, unless its domain closed, or another
+    /// took its place, by then.
+    /// </summary>
+    private void Add(Open open, Placed placed, Result<Prefab> prefab)
+    {
+        if (open.IsClosed || !open.Prefabs.TryGetValue(placed.Placement.File, out Placed? now) || now != placed)
+        {
+            return;
+        }
+
+        if (prefab.Ok)
+        {
+            Show(placed, prefab.Value);
+        }
+        else
+        {
+            Debugging.Error($"{_assets.Path(placed.Placement.File) ?? "A prefab"} of {open.Name} is left out: {prefab.Error}");
+        }
     }
 
     /// <summary>
     /// A prefab of a domain, and where it is spawned: <see cref="Corner"/>, a cell's, or the domain's origin.
     /// </summary>
     private readonly record struct Placement(Handle<Prefab> File, Vector3 Corner, bool IsCell);
+
+    /// <summary>
+    /// What a worker finished for a domain: <paramref name="Placed"/>'s prefab read as <paramref name="Prefab"/>, or,
+    /// with no placement, that reading the domain failed and it closes.
+    /// </summary>
+    private readonly record struct Arrived(Open Open, Placed? Placed, Result<Prefab> Prefab);
 
     /// <summary>
     /// What a domain's opening read: each of its prefabs, by placement, its player, the models they draw, and what

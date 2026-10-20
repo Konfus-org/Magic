@@ -114,8 +114,10 @@ enum one of its properties takes, the record that goes with it); a type that sta
   nothing about what was meant.
 - Ordinary async and background work is tasks: async methods, `Task.Run`, `.FireAndForget()`. `Threads` is for the
   engine's own threads, and for work that lasts as long as the run.
-- Work handed to another thread with `Threads.Post` returns nothing, so there is no task to forget; `InvokeAsync` when
-  the caller needs it done or what it returns. Nothing blocks waiting on the main or render thread.
+- What a worker makes for an engine thread is data, never work: the gem keeps what arrived (a `Channel<T>`, or a
+  reference written whole) and takes it in at the start of the hook that owns the structure it goes into.
+  `Threads.InvokeAsync` is for a flow that must await a step on an engine thread and what it returns. Nothing blocks
+  waiting on the main or render thread.
 - Task-returning methods end in `Async` (`VSTHRD200`); no `async void` (`VSTHRD100`).
 
 ### Performance
@@ -156,9 +158,10 @@ so reading the code says what the thing is and why it is kept. Several kept for 
   starts is `[RequireRestart]`, and changing it starts the engine again.
 - A gem frees what it started (a native library, a subsystem) in `Dispose`, once nothing of its own is still running
   on a worker.
-- A gem's constructor, `Dispose` and `Render` run on the render thread; `Update`, `FixedUpdate` and `LateUpdate` on
-  the main thread. What a gem owns is used on one of them, and the other hands it work through `Threads`. `Render`
-  reads only what the gem copied in `LateUpdate`, since the main thread is changing everything else.
+- A gem's constructor, `Dispose` and `Render` run on the render thread; `Update`, `FixedUpdate`, `LateUpdate` and
+  `Stop` on the main thread. What a gem owns is used on one of them: what the other has for it is data the owner
+  takes in at the start of its hook, and what of the main thread's a gem owns ends in `Stop`, before `Dispose`.
+  `Render` reads only what the gem copied in `LateUpdate`, since the main thread is changing everything else.
 - A component is an unmanaged struct with public fields that implements `IComponent`; declaring it is all it takes
   for the ECS to hold it and a file to name it, by its type's name, which Core finds in the code loaded. A game's
   component reloads as its scripts do, since only data names it: built again, it is read again. The engine's own are

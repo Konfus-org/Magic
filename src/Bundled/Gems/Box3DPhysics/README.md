@@ -36,22 +36,29 @@ it. Nothing else is written anywhere: the shape's size is the model's.
 
 ## The step
 
-Once per fixed step, after the gems before it in the project's list have run theirs (so a script's `FixedUpdate`
-in a project that lists this gem after the scripting one is seen the same step):
+The world steps on a thread of the gem's own, as Box3D asks (its step blocks on the tasks it forks), while the frame
+goes on. Once per fixed step, on the main thread, after the gems before it in the project's list have run theirs (so a
+script's `FixedUpdate` in a project that lists this gem after the scripting one is seen the same step):
 
-1. Every entity with the two components is compared with the copy of them its body kept from the last step. A new
+1. The step before is waited for, if it is still running, and its results taken in if they have not been
+   (step 4): the world is the main thread's from here until it is handed over again.
+2. Every entity with the two components is compared with the copy of them its body kept from the last step. A new
    entity gets a body. A change to anything that shapes the body, its motion, shape, surface, bounce, mass, model or
    scale, destroys the body and makes it again. A transform a script moved moves the body there: a dynamic or static
    one at once, a kinematic one driven there over the step, pushing whatever is in the way. A velocity a script set
    is the body's. A body whose entity, or component, is gone is destroyed.
-2. The world steps, by the fixed step with the settings' substeps.
-3. Every body that moved writes its position and rotation to its transform, keeping the scale, and its velocities to
-   its component, and keeps the copy the next step compares with.
-4. Every entity with a `Contacts` has what its body touches written over it ([Contacts](#contacts)).
+3. The step is handed over: the physics thread steps the world, by the fixed step with the settings' substeps, and
+   reads what moved and what every listening body touches.
+4. In the gem's next hook once the step has ended, `Update` or the next fixed step, every body that moved writes its
+   position and rotation to its transform, keeping the scale, and its velocities to its component, and keeps the copy
+   the next step compares with. A transform or velocity a script wrote since the hand-over keeps the script's value,
+   which the next step carries to the body. Then every entity with a `Contacts` has what its body touches written
+   over it ([Contacts](#contacts)).
 
-So data flows one way each step: the scripts' writes go in, the bodies' moves come out, and a script reading a
-transform in `Update` sees where the body was after the last step. Nothing of the body is cached in a script's hands:
-there is no handle to hold, as the component is the whole interface.
+So data flows one way each step: the scripts' writes go in, the bodies' moves come out one hook later, and a script
+reading a transform in `Update` sees where the body was after the last step that ended. Nothing of the body is cached
+in a script's hands: there is no handle to hold, as the component is the whole interface. Several fixed steps in one
+frame each wait for the one before, so only the frame's last step overlaps the rest of the frame.
 
 ## Near the player
 
@@ -71,7 +78,8 @@ costs the few entities between it and the exact edge the lookups.
 
 ## Queries
 
-`IPhysics` is answered from the Box3D world between steps, on the main thread: `Cast` is Box3D's closest ray cast,
+`IPhysics` is answered from the Box3D world between steps, on the main thread, a query asked while a step runs
+waiting for it first: `Cast` is Box3D's closest ray cast,
 and `Overlap` its shape overlap with a sphere, over every shape the filter admits. A shape's category bits are its
 body's motion, static, dynamic or kinematic, and a query's mask is the `Motions` asked for, so Box3D does the
 filtering; the masks shapes collide by stay at everything, so bodies collide as they did. A shape found is mapped
@@ -99,6 +107,10 @@ body, out of range, parts from them all. Reading contacts costs per listening bo
   Core then runs its 4 every frame, the frame is four steps long, and the world falls behind real time. So the cost of
   a step is bounded by the bodies near the player and a few arithmetic operations per entity farther off, never by
   a lookup per entity in the world.
+- The world is one thread's at a time: the physics thread's from a step's hand-over until it has read the results,
+  the main thread's otherwise. Every other Box3D call, making and moving bodies, the queries, destroying the world as
+  the run ends, is the main thread's, after waiting for a step still running. The gem measures the step
+  (`magic.gems.box3d_physics.step.duration`) and how long the main thread waited (`step_wait.duration`).
 - Box3D's asserts end the process with a crash file, as the engine's do, and what it logs is a warning.
 - A Box3D build is pinned to its tag in the csproj; it is alpha software whose API changes between tags, so moving the
   tag means reading the generated names again.

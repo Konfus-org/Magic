@@ -14,16 +14,16 @@ namespace Magic.Services;
 /// not this. Safe from any thread.
 /// <para>
 /// The main thread runs what it was handed at the start of every frame, before Update; the render thread between frames.
-/// Nothing here waits for another thread: <see cref="Post"/> returns at once and
-/// <see cref="InvokeAsync(EngineThread, Action, CancellationToken)"/> hands back a task, so the two engine threads never
-/// wait on each other but where the frame loop says. Work handed to the main thread before it starts runs on its first
+/// Nothing here waits for another thread: <see cref="InvokeAsync(EngineThread, Action, CancellationToken)"/> hands
+/// back a task, so the two engine threads never wait on each other but where the frame loop says. Work handed to the main thread before it starts runs on its first
 /// frame.
 /// </para>
 /// <para>
-/// When the frame loop ends, each thread runs what it was left. The gems are then disposed on the render thread, which
-/// takes no more work, while the main thread still runs what it is handed: a gem that owns something of the main
-/// thread's hands its ending there. Once they are disposed, the main thread runs what it was left and ends, and
-/// anything handed to either after that is dropped.
+/// What a worker makes for a gem is not handed over as work: it is data the gem keeps and takes in at the start of its
+/// own hook. <see cref="InvokeAsync{T}(EngineThread, Func{T}, CancellationToken)"/> is for a flow that must await a step on an engine thread and what it returns.
+/// When the frames end, the main thread runs what it was left and takes no more, the gems having stopped on it; then
+/// the render thread runs what it was left, takes no more, and the gems are disposed on it. Anything handed to either
+/// after that is dropped.
 /// </para>
 /// </summary>
 public sealed class Threads : IDisposable
@@ -59,20 +59,8 @@ public sealed class Threads : IDisposable
     }
 
     /// <summary>
-    /// Hands <paramref name="work"/> to <paramref name="thread"/> and returns at once. What it throws is logged as an
-    /// error.
-    /// </summary>
-    public void Post(EngineThread thread, Action work)
-    {
-        if (!Queue(thread).Enqueue(work))
-        {
-            Debugging.Warn($"Work was handed to the {thread} thread after the run ended; it is dropped.");
-        }
-    }
-
-    /// <summary>
-    /// Hands the render thread a frame's Render, as <see cref="Post"/> hands it work, in its turn after the work handed
-    /// before it; not timed as work, since the frame loop times each of its hooks.
+    /// Hands the render thread a frame's Render, in its turn after the work handed before it; not timed as work, since
+    /// the frame loop times each of its hooks.
     /// </summary>
     internal void HandFrame(Action render)
     {
@@ -182,9 +170,9 @@ public sealed class Threads : IDisposable
 
     /// <summary>
     /// Runs <paramref name="frames"/> on a new thread, the main thread, and the render thread's work on the calling
-    /// thread, the render thread, until <paramref name="frames"/> returns, which hands the render thread its end. Then
-    /// <paramref name="end"/> runs here, once the render thread has run what it was left and takes no more, while the
-    /// main thread still runs what it is handed; then the main thread runs what is left and ends.
+    /// thread, the render thread, until <paramref name="frames"/> returns: the main thread then runs what it was left,
+    /// takes no more and hands the render thread its end. Then <paramref name="end"/> runs here, once the render thread
+    /// has run what it was left and takes no more.
     /// </summary>
     internal void Run(Action frames, Action end)
     {
@@ -192,8 +180,10 @@ public sealed class Threads : IDisposable
         main.Start();
         _render.RunUntilEnded();
         end();
-        _main.End();
         main.Join();
+
+        // Only now: while the gems dispose, the main thread's is still nobody else's.
+        _main.Owner = 0;
     }
 
     private void RunMain(Action frames)
@@ -202,17 +192,15 @@ public sealed class Threads : IDisposable
         try
         {
             frames();
-            _main.RunPending();
         }
         finally
         {
-            // Handed last, so everything handed to the render thread before the frames ended still runs.
+            // Nothing more is taken, then what came before that runs; the render thread's end is handed last, so
+            // everything handed to it before the frames ended still runs.
+            _main.End();
+            _main.RunPending();
             _render.Enqueue(_render.End, isTimed: false);
         }
-
-        // Until the gems are disposed: what they hand the main thread as they end runs here.
-        _main.RunUntilEnded();
-        _main.Owner = 0;
     }
 
     private WorkQueue Queue(EngineThread thread)

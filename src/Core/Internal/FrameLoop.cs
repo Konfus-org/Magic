@@ -15,8 +15,9 @@ namespace Magic.Internal;
 /// the next; so the render thread runs at most one frame behind, and Sync is the one point where both hold still: there,
 /// first, the settings changed since the last frame are copied into the gems' objects (<see cref="Settings"/>). The
 /// main thread's phases run each gem's hook in the order the gems were made, Render in reverse, and only on the gems
-/// that implement it. FixedUpdate runs once for every <see cref="FixedStep"/> since the last frame. The frames are
-/// measured on the meter <c>Magic.Core</c>.
+/// that implement it. FixedUpdate runs once for every <see cref="FixedStep"/> since the last frame. Each frame starts
+/// with what workers finished for the main thread: the work handed to it, the world's arrivals, then the events. The
+/// frames are measured on the meter <c>Magic.Core</c>.
 /// </summary>
 internal sealed class FrameLoop : IDisposable
 {
@@ -56,10 +57,17 @@ internal sealed class FrameLoop : IDisposable
     private readonly int[][] _hooked;
 
     /// <summary>
+    /// The gems that implement Stop, by index, in reverse order: every one of them, a gem that left the loop included,
+    /// since what it owns of the main thread's still ends.
+    /// </summary>
+    private readonly int[] _stops;
+
+    /// <summary>
     /// The gems that threw and left the frame loop, by index: written and read on both threads.
     /// </summary>
     private readonly bool[] _left;
 
+    private readonly World _world;
     private readonly Lifetime _lifetime;
     private readonly Threads _threads;
     private readonly Events _events;
@@ -84,7 +92,7 @@ internal sealed class FrameLoop : IDisposable
     /// </summary>
     private double _fixedSeconds;
 
-    public FrameLoop(IReadOnlyList<IGem> gems, Lifetime lifetime, Threads threads, Events events, Settings settings, ulong frameLimit, double startSeconds)
+    public FrameLoop(IReadOnlyList<IGem> gems, World world, Lifetime lifetime, Threads threads, Events events, Settings settings, ulong frameLimit, double startSeconds)
     {
         _gems = [.. gems];
         _names = new string[_gems.Length];
@@ -96,10 +104,12 @@ internal sealed class FrameLoop : IDisposable
         _hooked = new int[_phases.Length][];
         for (int phase = 0; phase < _phases.Length; phase++)
         {
-            _hooked[phase] = Hooked((Phase)phase);
+            _hooked[phase] = Hooked(_phases[phase], isReversed: phase == (int)Phase.Render);
         }
 
+        _stops = Hooked(nameof(IGem.Stop), isReversed: true);
         _left = new bool[_gems.Length];
+        _world = world;
         _lifetime = lifetime;
         _threads = threads;
         _events = events;
@@ -151,6 +161,7 @@ internal sealed class FrameLoop : IDisposable
             Debugging.Frame = index;
 
             _threads.RunMainWork();
+            _world.TakeArrived();
             _events.Deliver();
 
             RunPhase(Phase.Update, frame);
@@ -167,6 +178,34 @@ internal sealed class FrameLoop : IDisposable
         }
 
         WaitForRender();
+    }
+
+    /// <summary>
+    /// Runs Stop on every gem that implements it, in reverse order, each timed while something listens; a gem that throws
+    /// is logged, and the rest still stop. On the main thread, once the last frame is done and the world is saved.
+    /// </summary>
+    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a gem throws as it stops, it is logged and the rest still stop.")]
+    public void Stop()
+    {
+        foreach (int i in _stops)
+        {
+            bool timed = _hookDuration.Enabled;
+            long start = timed ? Stopwatch.GetTimestamp() : 0;
+            try
+            {
+                _gems[i].Stop();
+            }
+            catch (Exception ex)
+            {
+                Debugging.Error($"Gem {_names[i]} threw in Stop: {ex}");
+                continue;
+            }
+
+            if (timed)
+            {
+                _hookDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, new(Metrics.GemNameTag, _names[i]), new(Metrics.FramePhaseTag, nameof(IGem.Stop)));
+            }
+        }
     }
 
     /// <summary>
@@ -278,20 +317,20 @@ internal sealed class FrameLoop : IDisposable
     }
 
     /// <summary>
-    /// The gems that implement <paramref name="phase"/>'s hook, which is named for it, by index, in the order the phase
-    /// runs them.
+    /// The gems that implement the hook named <paramref name="name"/>, by index, in the order the gems were made, or
+    /// the reverse when <paramref name="isReversed"/>: Render and Stop, so a gem finishes what the gems that take it
+    /// drew, and ends after them.
     /// </summary>
-    private int[] Hooked(Phase phase)
+    private int[] Hooked(string name, bool isReversed)
     {
         List<int> hooked = [];
         for (int turn = 0; turn < _gems.Length; turn++)
         {
-            // Render from the last gem made to the first, so a gem finishes what the gems that take it drew.
-            int i = phase == Phase.Render ? _gems.Length - 1 - turn : turn;
+            int i = isReversed ? _gems.Length - 1 - turn : turn;
             InterfaceMapping map = _gems[i].GetType().GetInterfaceMap(typeof(IGem));
             for (int method = 0; method < map.InterfaceMethods.Length; method++)
             {
-                if (string.Equals(map.InterfaceMethods[method].Name, _phases[(int)phase], StringComparison.Ordinal) && map.TargetMethods[method].DeclaringType != typeof(IGem))
+                if (string.Equals(map.InterfaceMethods[method].Name, name, StringComparison.Ordinal) && map.TargetMethods[method].DeclaringType != typeof(IGem))
                 {
                     hooked.Add(i);
                 }

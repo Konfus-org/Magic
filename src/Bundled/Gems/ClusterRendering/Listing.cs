@@ -14,6 +14,13 @@ internal sealed class Listing(IGpu gpu) : IDisposable
 {
     private bool _isDisposed;
 
+    /// <summary>
+    /// Pipelines still to come back, and the build itself until it has asked for them all: one from the start, so a
+    /// listing is not taken for compiled before it has been fitted. Counted down from whichever thread each came back
+    /// on (<see cref="Done"/>).
+    /// </summary>
+    private int _pending = 1;
+
     public void Dispose()
     {
         _isDisposed = true;
@@ -48,12 +55,9 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     public List<string> Failures { get; } = [];
 
     /// <summary>
-    /// Pipelines still to come back, and the build itself until it has asked for them all: one from the start, so a
-    /// listing is not taken for compiled before it has been fitted.
+    /// Every pipeline asked for has come back, and the build has asked for them all.
     /// </summary>
-    public int Pending { get; set; } = 1;
-
-    public bool IsCompiled => Pending == 0;
+    public bool IsCompiled => Volatile.Read(ref _pending) == 0;
 
     /// <summary>
     /// Whether the pass that makes <paramref name="name"/> runs: it fitted and its pipeline is made.
@@ -128,7 +132,7 @@ internal sealed class Listing(IGpu gpu) : IDisposable
             }
         }
 
-        Pending = 1 + Passes.Count;
+        _pending = 1 + Passes.Count;
         foreach (ListedPass pass in Passes)
         {
             if (!pass.DrawsSurfaces)
@@ -139,7 +143,7 @@ internal sealed class Listing(IGpu gpu) : IDisposable
             foreach (SurfaceKey variant in pass.VariantsOf(variants))
             {
                 pass.Surfaces[variant] = GpuPipeline.None;
-                Pending++;
+                _pending++;
             }
         }
     }
@@ -157,12 +161,20 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     }
 
     /// <summary>
+    /// One of the pipelines still to come back has, or the build has asked for them all. Any thread.
+    /// </summary>
+    public void Done()
+    {
+        Interlocked.Decrement(ref _pending);
+    }
+
+    /// <summary>
     /// A pass's own pipeline came back, or why not, which is said once and leaves it out: it never runs, and what it
     /// would draw into is shown as the failure.
     /// </summary>
     public void Take(ListedPass pass, Result<GpuPipeline> made)
     {
-        Pending--;
+        Done();
         if (!made.Ok)
         {
             Debugging.Error($"Pass {pass.Name} does not run: {made.Error}");
@@ -188,7 +200,7 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     {
         if (isCounted)
         {
-            Pending--;
+            Done();
         }
 
         if (made.Ok && _isDisposed)

@@ -650,7 +650,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         if (!_threads.IsCurrent(EngineThread.Render))
         {
-            throw new InvalidOperationException("The GPU is the render thread's: use it in Render, or hand the work to the render thread (Threads.Post or InvokeAsync).");
+            throw new InvalidOperationException("The GPU is the render thread's: use it in Render, or hand the work to the render thread (Threads.InvokeAsync).");
         }
     }
 

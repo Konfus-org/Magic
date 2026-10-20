@@ -3,11 +3,11 @@ using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Subscriptions;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
@@ -46,7 +46,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
     private readonly IGpu _gpu;
     private readonly IDebugUI? _debug;
-    private readonly Threads _threads;
     private readonly ClusterRenderingSettings _settings;
     private readonly Assets _assets;
 
@@ -94,6 +93,13 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private readonly List<Preload> _preloads = [];
 
     /// <summary>
+    /// What the main thread and workers tell the render thread, taken in as Render starts, in the order told
+    /// (<see cref="TakeArrived"/>): an asset made again, the debug view named, a domain to take in or let go, or one
+    /// whose open was cancelled.
+    /// </summary>
+    private readonly Channel<Arrival> _arrived = Channel.CreateUnbounded<Arrival>(new UnboundedChannelOptions { SingleReader = true });
+
+    /// <summary>
     /// The effects the latest domain taken in names, which the frame is built for while the world names none, so
     /// the listing the domain needs is compiled before it spawns; none once that domain is let go.
     /// </summary>
@@ -114,23 +120,22 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     {
         _gpu = gpu;
         _debug = debug;
-        _threads = threads;
         _settings = settings;
         _assets = assets;
         CancellationToken stopping = lifetime.Stopping;
         _snapshot = new Snapshot(world);
-        _textures = new TexturePools(gpu, assets, caches, threads, settings, stopping);
+        _textures = new TexturePools(gpu, assets, caches, settings, stopping);
         _fields = new MeshFields(gpu, assets, caches);
-        _models = new ClusterPool(gpu, assets, threads, _textures, _fields, settings, stopping);
+        _models = new ClusterPool(gpu, assets, _textures, _fields, settings, stopping);
         _defaultPipeline = assets.Default<Pipeline>();
         _graph = new PassGraph(gpu, compiler, assets, scripts, threads, stopping);
-        _materials = new Materials(gpu, assets, _textures, _graph, threads, stopping);
+        _materials = new Materials(gpu, assets, _textures, _graph, stopping);
         _scene = new Scene(gpu, assets, _models, _materials);
         _lights = new SceneLights(gpu);
         _shadows = new Shadows(gpu);
         _recorder = new PassRecorder(gpu, _graph, _materials);
-        _views = new Views(gpu, window, assets, threads, _scene, _models, _materials, settings, stopping);
-        _output = new Output(gpu, compiler, threads, stopping);
+        _views = new Views(gpu, window, assets, _scene, _models, _materials, settings, stopping);
+        _output = new Output(gpu, compiler, stopping);
         _failures = new Failures(gpu);
         _frame = new ResourceSet(gpu);
         _target = new ResourceSet(gpu);
@@ -143,18 +148,14 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             _zBinsEmpty.Set(bin * 2, uint.MaxValue);
         }
 
-        _watching.Add(events.Watch<AssetReloaded<Model>>(reloaded => OnRender(() => _models.Reload(reloaded.Asset))));
-        _watching.Add(events.Watch<AssetReloaded<Texture>>(reloaded => OnRender(() => _textures.Reload(reloaded.Asset))));
-        _watching.Add(events.Watch<AssetReloaded<Material>>(reloaded => OnRender(() => _materials.Reload(reloaded.Asset))));
-        _watching.Add(events.Watch<AssetReloaded<Shader>>(reloaded => OnRender(() =>
-        {
-            _materials.Reload(reloaded.Asset);
-            _graph.Invalidate();
-        })));
-        _watching.Add(events.Watch<AssetReloaded<Pipeline>>(_ => OnRender(_graph.Invalidate)));
-        _watching.Add(events.Watch<AssetReloaded<Curve>>(_ => OnRender(_graph.Invalidate)));
-        _watching.Add(events.Watch<AssetReloaded<Script>>(_ => OnRender(_graph.Invalidate)));
-        _watching.Add(events.Watch<DebugViewChanged>(changed => OnRender(() => _debugView = changed.Name)));
+        _watching.Add(events.Watch<AssetReloaded<Model>>(reloaded => Tell(new Arrival(Model: reloaded.Asset))));
+        _watching.Add(events.Watch<AssetReloaded<Texture>>(reloaded => Tell(new Arrival(Texture: reloaded.Asset))));
+        _watching.Add(events.Watch<AssetReloaded<Material>>(reloaded => Tell(new Arrival(Material: reloaded.Asset))));
+        _watching.Add(events.Watch<AssetReloaded<Shader>>(reloaded => Tell(new Arrival(Shader: reloaded.Asset, Invalidates: true))));
+        _watching.Add(events.Watch<AssetReloaded<Pipeline>>(_ => Tell(new Arrival(Invalidates: true))));
+        _watching.Add(events.Watch<AssetReloaded<Curve>>(_ => Tell(new Arrival(Invalidates: true))));
+        _watching.Add(events.Watch<AssetReloaded<Script>>(_ => Tell(new Arrival(Invalidates: true))));
+        _watching.Add(events.Watch<DebugViewChanged>(changed => Tell(new Arrival(DebugView: changed.Name))));
     }
 
     public void Dispose()
@@ -265,6 +266,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     public void Render(in Frame frame)
     {
+        TakeArrived();
         _textures.FollowSettings();
         WorldCopy copy = _snapshot.Front;
         CameraCopy? main = MainCamera(copy);
@@ -278,6 +280,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         }
 
         ReportFailures();
+        _textures.Flush();
         _models.Flush();
         _materials.Flush();
         DrawnMaterial? sky = copy.Sky is { } material && material != Handle<Material>.None ? _materials.Get(material) : null;
@@ -387,10 +390,10 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     {
         Preloaded preloaded = Preloaded.Of(prefabs);
         Preload preload = new(preloaded, progress);
-        using CancellationTokenRegistration cancelling = cancel.Register(() => OnRender(() => Cancel(preload, cancel)));
-        OnRender(() => Begin(preload));
+        using CancellationTokenRegistration cancelling = cancel.Register(() => Tell(new Arrival(Cancelled: preload, Cancel: cancel)));
+        Tell(new Arrival(Begun: preload));
         await preload.Done.Task.ConfigureAwait(false);
-        return new Subscription(() => OnRender(() => End(preloaded)));
+        return new Subscription(() => Tell(new Arrival(Ended: preloaded)));
     }
 
     /// <summary>
@@ -583,9 +586,66 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         return copy.Cameras.Count > 0 ? copy.Cameras[0] : null;
     }
 
-    private void OnRender(Action work)
+    /// <summary>
+    /// Tells the render thread <paramref name="arrival"/>, from any thread; it is taken in as the next Render starts.
+    /// </summary>
+    private void Tell(in Arrival arrival)
     {
-        _threads.Post(EngineThread.Render, work);
+        _arrived.Writer.TryWrite(arrival);
+    }
+
+    /// <summary>
+    /// Takes in what the main thread and workers told the render thread since the last frame, in the order told.
+    /// </summary>
+    private void TakeArrived()
+    {
+        while (_arrived.Reader.TryRead(out Arrival arrival))
+        {
+            if (arrival.Model is { } model)
+            {
+                _models.Reload(model);
+            }
+
+            if (arrival.Texture is { } texture)
+            {
+                _textures.Reload(texture);
+            }
+
+            if (arrival.Material is { } material)
+            {
+                _materials.Reload(material);
+            }
+
+            if (arrival.Shader is { } shader)
+            {
+                _materials.Reload(shader);
+            }
+
+            if (arrival.Invalidates)
+            {
+                _graph.Invalidate();
+            }
+
+            if (arrival.DebugView is { } view)
+            {
+                _debugView = view;
+            }
+
+            if (arrival.Begun is { } begun)
+            {
+                Begin(begun);
+            }
+
+            if (arrival.Ended is { } ended)
+            {
+                End(ended);
+            }
+
+            if (arrival.Cancelled is { } cancelled)
+            {
+                Cancel(cancelled, arrival.Cancel);
+            }
+        }
     }
 
     /// <summary>
@@ -712,4 +772,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
         public float Reported { get; set; } = -1;
     }
+
+    /// <summary>
+    /// One thing told to the render thread: whichever of these it carries. An asset made again, to take in in place of
+    /// what it had; that the frame's listing is to be built again; the debug view named; a domain to begin taking in,
+    /// one taken in to let go, or one whose open was cancelled, with the token that cancelled it.
+    /// </summary>
+    private readonly record struct Arrival(Model? Model = null, Texture? Texture = null, Material? Material = null, Shader? Shader = null, bool Invalidates = false, string? DebugView = null, Preload? Begun = null, Preloaded? Ended = null, Preload? Cancelled = null, CancellationToken Cancel = default);
 }

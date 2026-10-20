@@ -1,9 +1,9 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -71,8 +71,17 @@ internal sealed class Materials : IDisposable
     private readonly Assets _assets;
     private readonly TexturePools _textures;
     private readonly PassGraph _graph;
-    private readonly Threads _threads;
     private readonly CancellationToken _stopping;
+
+    /// <summary>
+    /// Materials loaded, or that did not, for the render thread to take in as <see cref="Flush"/> starts.
+    /// </summary>
+    private readonly Channel<(Handle<Material> Handle, Material? Material)> _loaded = Channel.CreateUnbounded<(Handle<Material> Handle, Material? Material)>(new UnboundedChannelOptions { SingleReader = true });
+
+    /// <summary>
+    /// Surfaces read, or that could not be, for the render thread to take in as <see cref="Flush"/> starts.
+    /// </summary>
+    private readonly Channel<(Handle<Shader> Surface, SurfaceSource? Source)> _surfacesRead = Channel.CreateUnbounded<(Handle<Shader> Surface, SurfaceSource? Source)>(new UnboundedChannelOptions { SingleReader = true });
     private readonly Dictionary<Handle<Material>, MaterialEntry> _materials = [];
     private readonly Dictionary<Handle<Shader>, SurfaceEntry> _surfaces = [];
 
@@ -93,12 +102,11 @@ internal sealed class Materials : IDisposable
     /// </summary>
     private readonly Dictionary<FailureType, Handle<Material>> _failures = [];
 
-    public Materials(IGpu gpu, Assets assets, TexturePools textures, PassGraph graph, Threads threads, CancellationToken stopping)
+    public Materials(IGpu gpu, Assets assets, TexturePools textures, PassGraph graph, CancellationToken stopping)
     {
         _assets = assets;
         _textures = textures;
         _graph = graph;
-        _threads = threads;
         _stopping = stopping;
         Records = new GpuArray<GpuMaterial>(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, 64);
         Gi = new GpuArray<GpuMaterialGi>(gpu, GpuBufferUsage.ComputeRead, 64);
@@ -250,11 +258,22 @@ internal sealed class Materials : IDisposable
     }
 
     /// <summary>
-    /// Packs again the materials whose textures came in or failed or whose surface failed to compile, draws those whose
-    /// pipelines are compiled now, then uploads what changed.
+    /// Takes in the materials loaded and the surfaces read since the last frame, packs again the materials whose textures
+    /// came in or failed or whose surface failed to compile, draws those whose pipelines are compiled now, then uploads
+    /// what changed.
     /// </summary>
     public void Flush()
     {
+        while (_surfacesRead.Reader.TryRead(out (Handle<Shader> Surface, SurfaceSource? Source) read))
+        {
+            TakeSurface(read.Surface, read.Source);
+        }
+
+        while (_loaded.Reader.TryRead(out (Handle<Material> Handle, Material? Material) loaded))
+        {
+            Take(loaded.Handle, loaded.Material);
+        }
+
         if (_textures.Changed.Count > 0 || _graph.Broke.Count > 0)
         {
             foreach ((Handle<Material> handle, MaterialEntry entry) in _materials)
@@ -351,7 +370,7 @@ internal sealed class Materials : IDisposable
             Debugging.Error($"A material does not load, so it is drawn as the failure: {loaded.Error}");
         }
 
-        _threads.Post(EngineThread.Render, () => Take(handle, loaded.Ok ? loaded.Value : null));
+        _loaded.Writer.TryWrite((handle, loaded.Ok ? loaded.Value : null));
     }
 
     /// <summary>
@@ -383,7 +402,7 @@ internal sealed class Materials : IDisposable
             Debugging.Error($"A surface cannot be drawn, so its materials are drawn as the failure: {source.Error}");
         }
 
-        _threads.Post(EngineThread.Render, () => TakeSurface(surface, source.Ok ? source.Value : null));
+        _surfacesRead.Writer.TryWrite((surface, source.Ok ? source.Value : null));
     }
 
     private void TakeSurface(Handle<Shader> surface, SurfaceSource? source)

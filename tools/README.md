@@ -9,11 +9,16 @@ else failed, and the failing command's code when it has one.
 ## Validating a change
 
 `Validate.ps1` runs what [AGENTS.md](../AGENTS.md) asks of every change, in order, and stops at the first failure:
-builds the solution, where every warning is already an error; runs the tests; runs the samples headless under
-`--fail-on-error`, which exits 2 when any error was logged; and runs them again with a window, which needs a
-display and a GPU. It ends with one line per step and its exit code, then `PASSED` or which step failed. `-Only`
-picks the steps when the rest already passed, `-Frames` how long each sample run lasts, `-Configuration` which
-build, and `-Project` another project than the samples.
+builds the solution, where every warning is already an error; runs the tests against that build; runs the samples
+headless under `--fail-on-error`, which exits 2 when any error was logged; and runs them again with a window, which
+needs a display and a GPU. It ends with one line per step and its exit code, then `PASSED` or which step failed.
+`-Only` picks the steps when the rest already passed (`Test` alone needs a build to be there), `-Frames` how long
+each sample run lasts, `-Configuration` which build, and `-Project` another project than the samples.
+
+The build is incremental and never starts over: what is built is reused. In a linked worktree the script builds
+against the native libraries the main checkout has built, by setting `MagicNativeLibs` to that folder when nothing
+set it, since building them again takes minutes; set it yourself to build elsewhere. A build touches that folder
+only when a library's pinned commit differs from what is built there, so one checkout at a time should build.
 
 `Screenshot.ps1` is the visual check: it runs the project with a window, pipes `wait` and `screenshot` into the
 console, and prints the PNG's path as its only output, so `$png = tools/Screenshot.ps1` keeps it. The scene is not

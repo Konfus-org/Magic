@@ -6,13 +6,13 @@ using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Text.Json;
+using System.Threading.Channels;
 using Magic.Attributes;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -60,7 +60,6 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     private readonly Assets _assets;
     private readonly Assemblies _assemblies;
     [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "Core's, which Core ends after every gem.")]
-    private readonly Threads _threads;
     private readonly IServiceProvider _services;
     private readonly SubscriptionList _watching = new();
 
@@ -81,6 +80,12 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// is kept, so a build replaces it once (<see cref="Restart"/>). Main thread.
     /// </summary>
     private readonly Dictionary<Handle<Script>, Result<Script>?> _loaded = [];
+
+    /// <summary>
+    /// Scripts fetched on workers, loaded or not, for the main thread to take into <see cref="_loaded"/> as Update
+    /// starts.
+    /// </summary>
+    private readonly Channel<(Handle<Script> Handle, Result<Script> Loaded)> _fetched = Channel.CreateUnbounded<(Handle<Script> Handle, Result<Script> Loaded)>(new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// Scripts that could not be started, or whose asset did not load, each said once, so an entity naming one is not
@@ -111,24 +116,20 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private bool _isLoading;
 
-    public ScriptingGem(ScriptingSettings settings, IEcs ecs, Assets assets, Assemblies assemblies, Threads threads, Events events, IServiceProvider services)
+    public ScriptingGem(ScriptingSettings settings, IEcs ecs, Assets assets, Assemblies assemblies, Events events, IServiceProvider services)
     {
         _settings = settings;
         _ecs = ecs;
         _assets = assets;
         _assemblies = assemblies;
-        _threads = threads;
         _services = services;
-        _watching.Add(events.Watch<AssetReloaded<Script>>(reloaded => _threads.Post(EngineThread.Main, () => Restart(reloaded.Asset))));
+        _watching.Add(events.Watch<AssetReloaded<Script>>(reloaded => Restart(reloaded.Asset)));
         _watching.Add(events.Watch<WorldLoading>(loading => _isLoading = loading.IsLoading));
     }
 
     public void Dispose()
     {
         _watching.Dispose();
-
-        // Scripts end on the main thread, the ECS's, which still runs what it is handed while the gems end.
-        _threads.Post(EngineThread.Main, EndAll);
     }
 
     /// <summary>
@@ -223,6 +224,15 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
 
     public void Update(in Frame frame)
     {
+        while (_fetched.Reader.TryRead(out (Handle<Script> Handle, Result<Script> Loaded) fetched))
+        {
+            _loaded[fetched.Handle] = fetched.Loaded;
+            if (!fetched.Loaded.Ok)
+            {
+                Debugging.Error($"Script {NameOf(fetched.Handle)} is left off the entities naming it: {fetched.Loaded.Error}");
+            }
+        }
+
         Reconcile();
         FindCameras();
         Run(Phase.Update, frame);
@@ -236,6 +246,20 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     public void LateUpdate(in Frame frame)
     {
         Run(Phase.LateUpdate, frame);
+    }
+
+    /// <summary>
+    /// Ends every script, as the run ends. On the main thread, the ECS's.
+    /// </summary>
+    public void Stop()
+    {
+        foreach (Attached attached in _attached.Values)
+        {
+            End(attached);
+        }
+
+        _attached.Clear();
+        _pending.Clear();
     }
 
     /// <summary>
@@ -542,14 +566,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         async Task LoadAsync()
         {
             Result<Script> loaded = await _assets.LoadAsync(handle, CancellationToken.None).ConfigureAwait(false);
-            _threads.Post(EngineThread.Main, () =>
-            {
-                _loaded[handle] = loaded;
-                if (!loaded.Ok)
-                {
-                    Debugging.Error($"Script {NameOf(handle)} is left off the entities naming it: {loaded.Error}");
-                }
-            });
+            _fetched.Writer.TryWrite((handle, loaded));
         }
     }
 
@@ -908,20 +925,6 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
 
         _calls.Add(calls, new KeyValuePair<string, object?>("magic.gems.scripting.phase", _phases[(int)phase]));
         _behaviors.Record(_attached.Count);
-    }
-
-    /// <summary>
-    /// Ends every script, as the gem ends. On the main thread.
-    /// </summary>
-    private void EndAll()
-    {
-        foreach (Attached attached in _attached.Values)
-        {
-            End(attached);
-        }
-
-        _attached.Clear();
-        _pending.Clear();
     }
 
     /// <summary>

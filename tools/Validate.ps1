@@ -4,7 +4,10 @@ Runs the checks a change must pass: a clean build, the tests, and the samples he
 
 .DESCRIPTION
 The steps run in order and the first failure ends the run with that step's exit code; a run that passes exits 0.
-The build already treats every warning as an error, so a clean build is one that exits 0. The sample runs pass
+The build is incremental, so what is built already is reused, and a linked worktree builds against the native
+libraries its main checkout has built, unless MagicNativeLibs says otherwise: building those again takes far longer
+than everything else here. The build already treats every warning as an error, so a clean build is one that exits 0.
+The tests run against that build, so running them alone (-Only Test) needs one. The sample runs pass
 --fail-on-error, so an error logged during a run exits 2. The Window step needs a display and a GPU; the others do
 not. Runs from any current directory.
 
@@ -46,12 +49,25 @@ $env:MSBUILDDISABLENODEREUSE = '1'
 
 $root = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $root 'Magic.slnx'
+
+# A linked worktree reuses the native libraries its main checkout has built, in place: a build there only touches
+# them when a library's pinned commit differs, so one checkout at a time should build.
+if (-not $env:MagicNativeLibs) {
+    $common = git -C $root rev-parse --path-format=absolute --git-common-dir 2>$null
+    if ($LASTEXITCODE -eq 0 -and $common) {
+        $mainRoot = Split-Path -Parent $common
+        $natives = Join-Path (Join-Path $mainRoot 'Build') 'NativeLibs'
+        if ($mainRoot -ne $root -and (Test-Path $natives)) {
+            $env:MagicNativeLibs = Join-Path $natives ''
+        }
+    }
+}
 $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 
 $steps = @(
     @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration } }
-    @{ Name = 'Test'; Run = { dotnet test $solution --configuration $Configuration } }
+    @{ Name = 'Test'; Run = { dotnet test $solution --configuration $Configuration --no-build } }
     @{ Name = 'Headless'; Run = { & $magic --project $projectPath --frames $Frames --fail-on-error --headless } }
     @{ Name = 'Window'; Run = { & $magic --project $projectPath --frames $Frames --fail-on-error } }
 )

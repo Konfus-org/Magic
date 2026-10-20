@@ -85,9 +85,10 @@ windows and their events to and so becomes the render thread:
    The render thread then runs `Render`, in reverse order, while the main thread goes on to the next frame, so drawing
    and presenting never hold the game up. `LateUpdate` prepares what `Render` will read, into a copy `Render` is not
    reading; `Sync` is the one point where both hold still, and swaps the copies. Work on other threads is tasks, and
-   hands what it made to the main or render thread through `Threads` ([Core's README](src/Core/README.md#threads)).
-4. **Ends the gems**, in reverse order, on the render thread, once a gem stops the run (`Lifetime.Stop`), Ctrl+C is
-   pressed in a `--headless` run or the `--frames` limit is reached.
+   what they make reaches a gem as data it takes in at the start of its hook ([Core's README](src/Core/README.md#threads)).
+4. **Ends the gems**, in reverse order, once a gem stops the run (`Lifetime.Stop`), Ctrl+C is pressed in a
+   `--headless` run or the `--frames` limit is reached: each gem's `Stop` on the main thread, ending what it owns
+   there, then each gem's `Dispose` on the render thread.
 
 Gems never reference each other. They talk only through interfaces in Core, so a gem can be swapped for any other
 that implements the same ones. Failures are explicit and never stop the engine: a gem that cannot be found,
