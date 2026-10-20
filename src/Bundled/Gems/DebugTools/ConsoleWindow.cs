@@ -81,7 +81,7 @@ internal sealed class ConsoleWindow : IDisposable
 
     public void Update()
     {
-        if (!_window.Begin(scrollable: true))
+        if (!_window.Begin(scrollable: true, out bool copy))
         {
             return;
         }
@@ -105,7 +105,7 @@ internal sealed class ConsoleWindow : IDisposable
             }
         }
 
-        if (_window.IsCopyClicked)
+        if (copy)
         {
             _window.Copy(AllText());
         }

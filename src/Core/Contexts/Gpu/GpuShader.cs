@@ -3,7 +3,7 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A shader as <see cref="IShaderCompiler.CompileAsync"/> made it: bytecode in a GPU's format, and what it binds, read
+/// A shader as <see cref="IShaderCompiler.CompileAsync(string, string, GpuStage, GpuShaderFormat, System.Threading.CancellationToken)"/> made it: bytecode in a GPU's format, and what it binds, read
 /// from the code: every resource it uses, by name, at its register in the binding model of
 /// Shaders/Include/Bindings.hlsli. The counts of each kind are what a GPU needs to make a pipeline of it; the names are
 /// what a renderer binds by.

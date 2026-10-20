@@ -251,12 +251,6 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     }
 
     /// <summary>
-    /// Kept for whatever draws the frame, which reads it; the GPU itself draws nothing differently. A reference, which
-    /// any thread reads and writes whole.
-    /// </summary>
-    public string DebugView { get; set; } = string.Empty;
-
-    /// <summary>
     /// Render runs from the last gem made to the first, so every gem that takes this one has recorded by now.
     /// </summary>
     public void Render(in Frame frame)

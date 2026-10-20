@@ -362,7 +362,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
                     if (series.Tags.Length > 0 && !isNamed)
                     {
-                        lines.Add(new TelemetryLine(Tab, Meter, Area, _parts.Header, _parts.Name, string.Empty, string.Empty, string.Empty, instrument.Description));
+                        lines.Add(new TelemetryLine(Tab, _parts.Header, _parts.Name, string.Empty, string.Empty, string.Empty, instrument.Description));
                         isNamed = true;
                     }
 
@@ -445,7 +445,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
                 Summary.Running => (Amount(series.Last, unit), series.Previous is { } previous ? $"{Amount((series.Last - previous) / seconds, unit)}/s" : string.Empty, string.Empty),
                 Summary.Latest or _ => (Amount(series.Last, unit), string.Empty, string.Empty),
             };
-            return new TelemetryLine(Tab, Meter, Area, _parts.Header, name.ToString(), value, rate, max, instrument.Description);
+            return new TelemetryLine(Tab, _parts.Header, name.ToString(), value, rate, max, instrument.Description);
         }
     }
 
@@ -510,12 +510,12 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
 /// <summary>
 /// One line of the telemetry: an instrument's numbers over the last second, its name above a line per set of tags, or
-/// one of those, under its tab and its header, its meter past the tab's prefix and its area, as the cells of a row:
+/// one of those, under its tab and its header, as the cells of a row:
 /// its name, its value (a histogram's mean, a counter's total, a gauge's latest), how many or how much a second, and a
 /// histogram's most, each empty where the instrument has none. <see cref="Description"/> is the instrument's own: what
 /// it measures.
 /// </summary>
-internal readonly record struct TelemetryLine(string Tab, string Meter, string Area, string Header, string Name, string Value, string Rate, string Max, string? Description)
+internal readonly record struct TelemetryLine(string Tab, string Header, string Name, string Value, string Rate, string Max, string? Description)
 {
     /// <summary>
     /// The row as one line of text, for Copy: the name, then the cells it has.

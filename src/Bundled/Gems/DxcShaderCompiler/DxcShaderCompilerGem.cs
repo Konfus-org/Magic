@@ -131,6 +131,18 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         return shader.Code.Length == length ? Result.Success(shader) : Result.Failure<GpuShader>("its code is cut short.");
     }
 
+    public async Task<Result<GpuShader>> CompileAsync(string path, GpuStage stage, GpuShaderFormat format, CancellationToken cancel)
+    {
+        Handle<Shader> asset = _assets.Find<Shader>(path);
+        if (asset == Handle<Shader>.None)
+        {
+            return Result.Failure<GpuShader>($"{path}: no asset is there.");
+        }
+
+        Result<Shader> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
+        return loaded.Ok ? await CompileAsync(loaded.Value.Text, path, stage, format, cancel).ConfigureAwait(false) : Result.Failure<GpuShader>(loaded.Error);
+    }
+
     public async Task<Result<GpuShader>> CompileAsync(string hlsl, string name, GpuStage stage, GpuShaderFormat format, CancellationToken cancel)
     {
         (string profile, string define) = stage switch

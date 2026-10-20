@@ -24,8 +24,7 @@ followed every frame, and every window presents the new way from the next.
 
 - Everything is on the render thread, which made the window: SDL acquires a window's image only there, and uses a
   command buffer only on the thread that acquired it. A call from any other thread throws; a loader hands its work to
-  the render thread (`Threads.InvokeAsync`). `IGpu.DebugView` is the exception: a name any thread reads and sets
-  whole, which the gem only keeps for whatever draws the frame.
+  the render thread (`Threads.InvokeAsync`).
 - The device opens in the gem's constructor, which starts SDL's video subsystem for it (headless, the platform leaves
   it down) and stops it again in `Dispose`. It asks for SPIR-V, DXIL and Metal source, and takes the first the driver
   takes as `IGpu.ShaderFormat`. Vulkan is asked for 1.1, whose subgroup operations are HLSL's wave intrinsics. If no

@@ -1,4 +1,3 @@
-using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
@@ -31,12 +30,12 @@ internal sealed class Output : IDisposable
     /// </summary>
     private (Result<GpuShader> Vertex, Result<GpuShader> Fragment, Result<GpuShader> Nothing)? _shaders;
 
-    public Output(IGpu gpu, IShaderCompiler compiler, Assets assets, Threads threads, CancellationToken stopping)
+    public Output(IGpu gpu, IShaderCompiler compiler, Threads threads, CancellationToken stopping)
     {
         _gpu = gpu;
         _linear = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
         _nearest = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Nearest, GpuWrap.Clamp));
-        CompileAsync(compiler, assets, threads, stopping).FireAndForget();
+        CompileAsync(compiler, threads, stopping).FireAndForget();
     }
 
     public void Dispose()
@@ -148,17 +147,11 @@ internal sealed class Output : IDisposable
         return _pipelines[(format, isNothing)];
     }
 
-    private async Task CompileAsync(IShaderCompiler compiler, Assets assets, Threads threads, CancellationToken stopping)
+    private async Task CompileAsync(IShaderCompiler compiler, Threads threads, CancellationToken stopping)
     {
-        Result<GpuShader> vertex = await CompileAsync(Fullscreen, GpuStage.Vertex, _gpu.ShaderFormat, compiler, assets, stopping).ConfigureAwait(false);
-        Result<GpuShader> fragment = await CompileAsync(Fragment, GpuStage.Fragment, _gpu.ShaderFormat, compiler, assets, stopping).ConfigureAwait(false);
-        Result<GpuShader> nothing = await CompileAsync(Nothing, GpuStage.Fragment, _gpu.ShaderFormat, compiler, assets, stopping).ConfigureAwait(false);
+        Result<GpuShader> vertex = await compiler.CompileAsync(Fullscreen, GpuStage.Vertex, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
+        Result<GpuShader> fragment = await compiler.CompileAsync(Fragment, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
+        Result<GpuShader> nothing = await compiler.CompileAsync(Nothing, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
         threads.Post(EngineThread.Render, () => _shaders = (vertex, fragment, nothing));
-    }
-
-    private static async Task<Result<GpuShader>> CompileAsync(string path, GpuStage stage, GpuShaderFormat format, IShaderCompiler compiler, Assets assets, CancellationToken stopping)
-    {
-        Result<Shader> shader = await assets.LoadAsync(assets.Find<Shader>(path), stopping).ConfigureAwait(false);
-        return shader.Ok ? await compiler.CompileAsync(shader.Value.Text, path, stage, format, stopping).ConfigureAwait(false) : Result.Failure<GpuShader>(shader.Error);
     }
 }

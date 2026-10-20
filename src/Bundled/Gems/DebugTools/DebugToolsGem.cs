@@ -17,11 +17,11 @@ namespace Magic.DebugTools;
 /// a window Copy has no clipboard; without a commands gem the console only shows the log and adds no commands; without
 /// a GPU there is no frame to view.
 /// </summary>
-internal sealed class DebugToolsGem(DebugToolsSettings settings, IDebugUI ui, Settings gemSettings, Assets assets, Lifetime lifetime, ICommands? commands = null, IInput? input = null, IWindow? window = null, IGpu? gpu = null) : IGem, ILogSink, IDisposable
+internal sealed class DebugToolsGem(DebugToolsSettings settings, IDebugUI ui, Settings gemSettings, Assets assets, Lifetime lifetime, Events events, ICommands? commands = null, IInput? input = null, IWindow? window = null) : IGem, ILogSink, IDisposable
 {
     private readonly ConsoleWindow _console = new(new ToolWindow("Console", Control.KeyGrave, ui, input, window), ui, commands);
     private readonly TelemetryWindow _telemetry = new(new ToolWindow("Telemetry", Control.KeyF3, ui, input, window), ui, settings);
-    private readonly SettingsWindow _settings = new(new ToolWindow("Settings", Control.KeyF4, ui, input, window), ui, gemSettings, assets, commands, gpu, input, lifetime.Stopping);
+    private readonly SettingsWindow _settings = new(new ToolWindow("Settings", Control.KeyF4, ui, input, window), ui, gemSettings, assets, commands, events, input, lifetime.Stopping);
 
     /// <summary>
     /// The frames and seconds since the frame rate was last worked out, and what it read.

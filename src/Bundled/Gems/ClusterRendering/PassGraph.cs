@@ -317,10 +317,10 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
 
         // The place-only pieces use a part of what the pieces do, and are bound as the pieces are, so a draw binds once.
         Result<StageBindings> piecesBound = await piecesProbe.ConfigureAwait(false);
-        Task<Result<GpuShader>> fullscreen = CompileAssetAsync(FullscreenPath, GpuStage.Vertex);
+        Task<Result<GpuShader>> fullscreen = compiler.CompileAsync(FullscreenPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
         Task<Result<GpuShader>> pieces = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, PiecesText(placeOnly: false), "Pieces");
         Task<Result<GpuShader>> places = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, PiecesText(placeOnly: true), "Pieces (place only)");
-        Task<Result<GpuShader>> tiles = CompileAssetAsync(TilesPath, GpuStage.Vertex);
+        Task<Result<GpuShader>> tiles = compiler.CompileAsync(TilesPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
         foreach (ListedPass pass in listing.Passes)
         {
             CompileAsync(listing, pass, fullscreen, pieces, places, tiles).FireAndForget();
@@ -517,7 +517,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     private async Task<Result<GpuPipelineDescription>> DepthAsync(ListedPass pass)
     {
         Result<GpuShader> vertex = await CompileBoundAsync(pass, GpuStage.Vertex, PassBody(pass), pass.Name).ConfigureAwait(false);
-        Result<GpuShader> compiled = await CompileAssetAsync(DepthOnlyPath, GpuStage.Fragment).ConfigureAwait(false);
+        Result<GpuShader> compiled = await compiler.CompileAsync(DepthOnlyPath, GpuStage.Fragment, gpu.ShaderFormat, stopping).ConfigureAwait(false);
 
         // The fragment stage is written by hand to bind nothing, as what only writes depth needs nothing.
         Result<GpuShader> fragment = compiled.Ok ? new StageBindings().Check(compiled.Value, pass.Name) : compiled;
@@ -806,12 +806,6 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             PassDrawn.Surfaces or PassDrawn.Depth => "Resolve",
             _ => "Resolve",
         };
-    }
-
-    private async Task<Result<GpuShader>> CompileAssetAsync(string path, GpuStage stage)
-    {
-        Result<string> text = await TextOfAsync(assets.Find<Shader>(path)).ConfigureAwait(false);
-        return text.Ok ? await compiler.CompileAsync(text.Value, path, stage, gpu.ShaderFormat, stopping).ConfigureAwait(false) : Result.Failure<GpuShader>(text.Error);
     }
 
     private async Task<Result<string>> TextOfAsync(Handle<Shader> shader)

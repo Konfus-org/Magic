@@ -18,29 +18,25 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
     private bool _isOpen;
 
     /// <summary>
-    /// Whether Copy was clicked in this frame's <see cref="Begin"/>, so the window puts what it shows on the clipboard.
-    /// </summary>
-    public bool IsCopyClicked { get; private set; }
-
-    /// <summary>
     /// Opens or closes the window on its key, then, while it is open, begins it with its close button and its menu.
-    /// True while it is open: draw what is in it, then End.
+    /// True while it is open: draw what is in it, then End; <paramref name="copy"/> whether Copy was clicked in its
+    /// menu, so the window puts what it shows on the clipboard.
     /// </summary>
-    public bool Begin(bool scrollable)
+    public bool Begin(bool scrollable, out bool copy)
     {
         if (input?[key].WasPressed == true)
         {
             _isOpen = !_isOpen;
         }
 
-        IsCopyClicked = false;
+        copy = false;
         if (!_isOpen)
         {
             return false;
         }
 
         ui.Begin(_title, ref _isOpen, scrollable);
-        IsCopyClicked = ui.MenuItem("Copy");
+        copy = ui.MenuItem("Copy");
         return true;
     }
 

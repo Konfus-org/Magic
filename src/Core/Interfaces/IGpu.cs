@@ -44,14 +44,6 @@ public interface IGpu
     /// </summary>
     GpuCommands Commands { get; }
 
-    /// <summary>
-    /// The debug view shown in place of the finished image, by name: a way of looking at one thing the frame made, its
-    /// depth, its normals, which lights reach each pixel; empty shows the frame as it is. Whatever draws the frame reads
-    /// it and decides what the name shows, a pass of its own; the provider only keeps it. Unlike the rest of the GPU, any
-    /// thread may read or set it, as a debug window on the main thread does.
-    /// </summary>
-    string DebugView { get; set; }
-
     GpuBuffer CreateBuffer(GpuBufferUsage usage, uint bytes);
 
     GpuTexture CreateTexture(in GpuTextureDescription description);

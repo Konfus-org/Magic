@@ -256,6 +256,7 @@ types it uses:
 | `AssetLoaded<T>` | An asset finished loading: the message holds it, and it holds its handle. |
 | `AssetReloaded<T>` | A loaded asset's file or sidecar changed, or an asset it was made from was made again, and it was made again: the message holds the new object, with the same handle, which whoever holds the old one takes in its place. |
 | `AssetsChanged` | Files came, went, moved or were written, so what `Find`, `Paths` and `Version` answer may have changed: told once what changed has loaded again. |
+| `DebugViewChanged` | The debug view to show in place of the finished image changed, by name, or none: from whatever chooses it, a debug window or a console command, to whatever draws the frame, which decides what the name shows. |
 
 ## The cache
 
@@ -446,7 +447,7 @@ Core holds what every gem that draws shares, and no graphics API:
 
 | | |
 | --- | --- |
-| `IGpu` | The GPU one level above the API: make buffers, textures, samplers and pipelines, upload to them, and record the frame's commands into `IGpu.Commands`, all on the render thread. The provider submits and presents them in its `Render` hook; it is made before every gem that takes it, so its `Render` runs after theirs, and a gem that takes it records in `Render`. `IGpu.DebugView`, which any thread may set, names a debug view to show in place of the finished image, or none: whatever draws the frame reads it and decides what the name shows, and the provider only keeps it. |
+| `IGpu` | The GPU one level above the API: make buffers, textures, samplers and pipelines, upload to them, and record the frame's commands into `IGpu.Commands`, all on the render thread. The provider submits and presents them in its `Render` hook; it is made before every gem that takes it, so its `Render` runs after theirs, and a gem that takes it records in `Render`. |
 | Render targets | A render target is a `GpuTexture`: a texture a gem made (a render texture, which it can then sample, as an editor's viewport is), or a window's, from `IGpu.WindowTarget(window)`. Whatever draws asks `IGpu.FormatOf` and `IGpu.SizeOf` of its target and treats the two alike; a window's can be drawn into, never sampled or read, but `IGpu.CaptureAsync` reads back what it shows next, for a screenshot. |
 | `GpuCommands` | A frame's commands as plain data, `GpuCommand`s with the handles and bytes they point into. Drawing and computing happen inside a pass: `RenderPass` and `ComputePass` hand back a `GpuRenderPass` or `GpuComputePass` holding only the commands legal inside it, which chain, and end the pass when disposed, so a pass is a `using` block, as a `DebugGroup` is. Copies and mipmaps go between passes. |
 | `IShaderCompiler` | HLSL to the bytecode the GPU takes (`IGpu.ShaderFormat`), with the counts of what it binds, compiled on a worker. Each `#include "path"` is the shader asset at `Shaders/path`, which the compiler loads. What it compiled is kept in [the cache](#the-cache), so a shader compiles once. |

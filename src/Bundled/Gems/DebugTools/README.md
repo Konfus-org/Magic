@@ -70,7 +70,7 @@ In the project's `Presets/Default.preset`, by another preset, or `--set DebugToo
 - **Preset**: the preset applied over the default one, as a choice of every preset in `Presets/`, by name; choosing
   one applies it, dropping what was changed while running (`Settings.ApplyAsync`).
 - **View**: the frame as it is, or one of the debug views, the passes in `Passes/Debug/` by name, shown in place of
-  the finished image (`IGpu.DebugView`); what each shows is the renderer's to say, and its pass's `description` says
+  the finished image (told as `DebugViewChanged` on `Events`); what each shows is the renderer's to say, and its pass's `description` says
   it, as the choice's tooltip and the line on screen.
 - **Filter**: while it has text, every setting whose name, key or description contains it, in any case, shows in
   place of the tabs, under a header per tab and sub-category, so a setting is found without knowing its gem. It has

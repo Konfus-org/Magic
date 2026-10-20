@@ -27,7 +27,7 @@ namespace Magic.ClusterRendering;
 /// The world is copied in LateUpdate (<see cref="Snapshot"/>), handed over in Sync, and drawn in Render from that copy, one
 /// frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is drawn whole in
 /// its first frame.
-/// While <see cref="IGpu.DebugView"/> names a debug view, its pass (<c>Passes/Debug/Name.pass</c>) runs after the world's
+/// While a debug view is named (<see cref="DebugViewChanged"/>), its pass (<c>Passes/Debug/Name.pass</c>) runs after the world's
 /// effects and what it draws is shown in place of the finished image, or the failure's magenta saying nothing draws while
 /// it is not ready; while the debug UI shows, each instance drawn as the failure says why where it is. Once every view
 /// is shown, the overlay stage runs once for each target, the window whether or not a view draws into it, with the
@@ -101,6 +101,12 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private Handle<Pipeline> _preloadEffects;
 
     /// <summary>
+    /// The debug view shown in place of the finished image, as last told (<see cref="DebugViewChanged"/>); empty for
+    /// none. Render thread.
+    /// </summary>
+    private string _debugView = string.Empty;
+
+    /// <summary>
     /// The debug view named that has no pass, said once.
     /// </summary>
     private string _missingView = string.Empty;
@@ -133,7 +139,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         gpu.Upload(_pieceIndices, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
         _recorder = new PassRecorder(gpu, _graph, _materials, _pieceIndices);
         _views = new Views(gpu, window, assets, threads, _scene, _models, _materials, settings, stopping);
-        _output = new Output(gpu, compiler, assets, threads, stopping);
+        _output = new Output(gpu, compiler, threads, stopping);
         _failures = new Failures(gpu);
         _frame = new ResourceSet(gpu);
         _target = new ResourceSet(gpu);
@@ -157,6 +163,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _watching.Add(events.Watch<AssetReloaded<Pipeline>>(_ => OnRender(_graph.Invalidate)));
         _watching.Add(events.Watch<AssetReloaded<Curve>>(_ => OnRender(_graph.Invalidate)));
         _watching.Add(events.Watch<AssetReloaded<Script>>(_ => OnRender(_graph.Invalidate)));
+        _watching.Add(events.Watch<DebugViewChanged>(changed => OnRender(() => _debugView = changed.Name)));
     }
 
     public void Dispose()
@@ -289,7 +296,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _raster.Add(new SurfaceKey(Handle<Shader>.None, false, false));
         _raster.Add(new SurfaceKey(Handle<Shader>.None, false, true));
         _raster.AddRange(_materials.RasterBins);
-        _graph.Append(DebugViewPass(_gpu.DebugView));
+        _graph.Append(DebugViewPass(_debugView));
         _graph.Update(PipelineOf(), EffectsOf(copy), OverlayOf(), new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
         CheckPreloads(copy);
         if (_graph.Current?.Runs("GiField") == true && main is { } eye)
@@ -345,7 +352,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         SetFrame(main?.Transform.Position ?? shown.Position);
         _failures.Say(listing.Failures);
         _failures.Begin(_zeros.Buffer);
-        string debugView = _gpu.DebugView;
         RecordScope frameScope = new(_frame, null, shown.Constants, shown.Counts, [], GpuBuffer.None, skySurface, frame);
         for (PassStage stage = PassStage.Probes; stage < PassStage.Cull; stage++)
         {
@@ -361,7 +367,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
                 _recorder.Record(listing, stage, scope);
             }
 
-            BoundResource? image = debugView.Length > 0 ? DebugImage(view) : Finished(view);
+            BoundResource? image = _debugView.Length > 0 ? DebugImage(view) : Finished(view);
             bool clears = _cleared.Add(view.Target.Texture);
             if (image is { } made)
             {

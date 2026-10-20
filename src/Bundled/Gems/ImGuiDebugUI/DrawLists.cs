@@ -5,7 +5,7 @@ namespace Magic.ImGuiDebugUI;
 /// <summary>
 /// One frame of ImGui's drawing, copied on the main thread as the frame ends, for the render thread to draw a frame
 /// behind while ImGui makes the next: the vertices and indices of every draw list in one array each, the draws into
-/// them, and what changed in ImGui's textures, each known by a number of the gem's own. The main thread copies only once
+/// them, and ImGui's textures as they are, each known by a number of the gem's own. The main thread copies only once
 /// the render thread is done with the last copy, as it always is by LateUpdate.
 /// </summary>
 internal sealed unsafe class DrawLists
@@ -16,6 +16,7 @@ internal sealed unsafe class DrawLists
     private int _vertexCount;
     private int _indexCount;
     private uint _nextTexture = 1;
+    private uint _nextVersion = 1;
 
     /// <summary>
     /// In window pixels, as ImGui lays out in them.
@@ -27,13 +28,8 @@ internal sealed unsafe class DrawLists
     public IReadOnlyList<DrawCall> Calls => _calls;
 
     /// <summary>
-    /// What changed in ImGui's textures since the last copy, in order, for the render thread to take in and clear.
-    /// </summary>
-    public List<TextureChange> Textures { get; } = [];
-
-    /// <summary>
-    /// Every texture ImGui has, by its number, as it last was: what a renderer that starts drawing now takes in first,
-    /// the changes before it having been taken in and cleared by whatever drew before.
+    /// Every texture ImGui has, by its number, as it last was, each with the version of its pixels, which goes up as
+    /// ImGui changes them: what draws them uploads those whose version it has not, and lets go of those gone.
     /// </summary>
     public Dictionary<uint, TextureChange> Known { get; } = [];
 
@@ -118,8 +114,8 @@ internal sealed unsafe class DrawLists
     }
 
     /// <summary>
-    /// ImGui asks its renderer to make, update and let go of its textures: each ask becomes a change for the render
-    /// thread, with the pixels copied, and is answered at once, with a number of the gem's own for a new one.
+    /// ImGui asks its renderer to make, update and let go of its textures: each ask goes into <see cref="Known"/>, with
+    /// the pixels copied, and is answered at once, with a number of the gem's own for a new one.
     /// </summary>
     private void CopyTextures(ImDrawData* data)
     {
@@ -130,34 +126,22 @@ internal sealed unsafe class DrawLists
             if (texture->Status == ImTextureStatus.WantCreate)
             {
                 uint id = _nextTexture++;
-                Change(new TextureChange(id, texture->Width, texture->Height, Rgba(texture)));
+                Known[id] = new TextureChange(id, texture->Width, texture->Height, Rgba(texture), _nextVersion++);
                 ImTextureData.SetTexID(texture, id);
                 ImTextureData.SetStatus(texture, ImTextureStatus.Ok);
             }
             else if (texture->Status == ImTextureStatus.WantUpdates)
             {
-                Change(new TextureChange((uint)texture->TexID, texture->Width, texture->Height, Rgba(texture)));
+                uint id = (uint)texture->TexID;
+                Known[id] = new TextureChange(id, texture->Width, texture->Height, Rgba(texture), _nextVersion++);
                 ImTextureData.SetStatus(texture, ImTextureStatus.Ok);
             }
             else if (texture->Status == ImTextureStatus.WantDestroy && texture->UnusedFrames > 0)
             {
-                Change(new TextureChange((uint)texture->TexID, 0, 0, null));
+                Known.Remove((uint)texture->TexID);
                 ImTextureData.SetTexID(texture, 0);
                 ImTextureData.SetStatus(texture, ImTextureStatus.Destroyed);
             }
-        }
-    }
-
-    private void Change(TextureChange change)
-    {
-        Textures.Add(change);
-        if (change.Pixels is null)
-        {
-            Known.Remove(change.Id);
-        }
-        else
-        {
-            Known[change.Id] = change;
         }
     }
 }
@@ -169,6 +153,7 @@ internal sealed unsafe class DrawLists
 internal readonly record struct DrawCall(uint Texture, Rectangle Clip, uint Indices, uint FirstIndex, int VertexOffset);
 
 /// <summary>
-/// A texture ImGui made or changed, its RGBA8 <see cref="Pixels"/> whole, or let go of when they are null.
+/// A texture ImGui has: its RGBA8 <see cref="Pixels"/> whole, and their <see cref="Version"/>, which goes up each time
+/// ImGui changes them.
 /// </summary>
-internal readonly record struct TextureChange(uint Id, int Width, int Height, byte[]? Pixels);
+internal readonly record struct TextureChange(uint Id, int Width, int Height, byte[] Pixels, uint Version);

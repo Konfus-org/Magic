@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Gpu;
 using Magic.Contexts.Input;
 using Magic.Contexts.Settings;
 using Magic.Contexts.Subscriptions;
@@ -18,7 +19,7 @@ using Magic.Services;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// The settings: the preset applied, which can be switched, and what the frame shows (<see cref="IGpu.DebugView"/>),
+/// The settings: the preset applied, which can be switched, and what the frame shows (<see cref="DebugViewChanged"/>),
 /// which F5 and F6 step through whether or not the window is open, and which says its name and what it shows as a
 /// line on screen while it is a debug view; a filter, which while it has text shows every setting it finds in place
 /// of the tabs; then a tab per category of settings (<see cref="CategoryAttribute"/> up to its slash, else the gem's name), in it a
@@ -34,7 +35,7 @@ internal sealed class SettingsWindow : IDisposable
 {
     /// <summary>
     /// Where the debug views are: a pass each, named for what it shows, which whatever draws the frame runs by name
-    /// (<see cref="IGpu.DebugView"/>).
+    /// (<see cref="DebugViewChanged"/>).
     /// </summary>
     private const string ViewsFolder = "Passes/Debug";
 
@@ -46,7 +47,7 @@ internal sealed class SettingsWindow : IDisposable
     private readonly ToolWindow _window;
     private readonly IDebugUI _ui;
     private readonly Settings _settings;
-    private readonly IGpu? _gpu;
+    private readonly Events _events;
     private readonly IInput? _input;
     private readonly CancellationToken _stopping;
     private readonly SubscriptionList _commands = new();
@@ -77,6 +78,12 @@ internal sealed class SettingsWindow : IDisposable
     private readonly string[] _views;
 
     /// <summary>
+    /// The debug view shown in place of the finished image, as last chosen here (<see cref="DebugViewChanged"/>);
+    /// empty for the frame as it is.
+    /// </summary>
+    private string _debugView = string.Empty;
+
+    /// <summary>
     /// The line on screen for the view shown, made when the view changes.
     /// </summary>
     private string _viewLine = string.Empty;
@@ -90,12 +97,12 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private string _filter = string.Empty;
 
-    public SettingsWindow(ToolWindow window, IDebugUI ui, Settings settings, Assets assets, ICommands? commands, IGpu? gpu, IInput? input, CancellationToken stopping)
+    public SettingsWindow(ToolWindow window, IDebugUI ui, Settings settings, Assets assets, ICommands? commands, Events events, IInput? input, CancellationToken stopping)
     {
         _window = window;
         _ui = ui;
         _settings = settings;
-        _gpu = gpu;
+        _events = events;
         _input = input;
         _stopping = stopping;
         _presets = [.. settings.Presets];
@@ -134,7 +141,7 @@ internal sealed class SettingsWindow : IDisposable
     {
         StepView();
         ShowView();
-        if (!_window.Begin(scrollable: true))
+        if (!_window.Begin(scrollable: true, out bool copy))
         {
             return;
         }
@@ -154,7 +161,7 @@ internal sealed class SettingsWindow : IDisposable
         else if (_filter.Length > 0)
         {
             DrawFiltered(all);
-            if (_window.IsCopyClicked)
+            if (copy)
             {
                 _window.Copy(Lines(Matches));
             }
@@ -164,7 +171,7 @@ internal sealed class SettingsWindow : IDisposable
             _ui.Tabs("##gems", ref _tab, _tabs);
             _tab = Math.Clamp(_tab, 0, _tabs.Length - 1);
             DrawTab(_tabs[_tab], all);
-            if (_window.IsCopyClicked)
+            if (copy)
             {
                 string tab = _tabs[_tab];
                 _window.Copy(Lines(setting => string.Equals(CategoryOf(setting), tab, StringComparison.Ordinal)));
@@ -345,7 +352,6 @@ internal sealed class SettingsWindow : IDisposable
                 Index = i,
                 Tab = CategoryOf(setting),
                 Header = HeaderOf(setting),
-                Label = Words(setting.Name),
                 Id = $"{Words(setting.Name)}##{setting.Key}",
                 Tip = restarts ? $"{tip} Changed, the engine starts again at once, every setting as it is: the world is saved and put back, so the game goes on where it was." : tip,
                 Min = range is null ? 0 : Convert.ToSingle(range.Minimum, CultureInfo.InvariantCulture),
@@ -397,19 +403,14 @@ internal sealed class SettingsWindow : IDisposable
 
     /// <summary>
     /// What the frame shows, as a choice of the frame as it is or one of the debug views, with what the one chosen
-    /// shows as its tooltip; with no GPU, nothing.
+    /// shows as its tooltip.
     /// </summary>
     private void DrawView()
     {
-        if (_gpu is not { } gpu)
-        {
-            return;
-        }
-
-        int index = ViewIndex(gpu);
+        int index = ViewIndex();
         if (_ui.Choice("View", ref index, _views))
         {
-            gpu.DebugView = index == 0 ? string.Empty : _viewNames[index - 1];
+            Show(index == 0 ? string.Empty : _viewNames[index - 1]);
         }
 
         _ui.Tooltip(index == 0 || _viewDescriptions[index - 1].Length == 0 ? NormalTip : _viewDescriptions[index - 1]);
@@ -418,9 +419,19 @@ internal sealed class SettingsWindow : IDisposable
     /// <summary>
     /// Where the view shown is in the choice: 0 for the frame as it is, or a view not listed.
     /// </summary>
-    private int ViewIndex(IGpu gpu)
+    private int ViewIndex()
     {
-        return Array.FindIndex(_viewNames, name => string.Equals(name, gpu.DebugView, StringComparison.OrdinalIgnoreCase)) + 1;
+        return Array.FindIndex(_viewNames, name => string.Equals(name, _debugView, StringComparison.OrdinalIgnoreCase)) + 1;
+    }
+
+    /// <summary>
+    /// Shows the debug view <paramref name="name"/> in place of the finished image, or the frame as it is for an empty
+    /// name: told to whatever draws the frame.
+    /// </summary>
+    private void Show(string name)
+    {
+        _debugView = name;
+        _events.Publish(new DebugViewChanged(name));
     }
 
     /// <summary>
@@ -429,7 +440,7 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void StepView()
     {
-        if (_gpu is not { } gpu || _input is not { } input)
+        if (_input is not { } input)
         {
             return;
         }
@@ -440,8 +451,8 @@ internal sealed class SettingsWindow : IDisposable
             return;
         }
 
-        int index = (ViewIndex(gpu) + step + _views.Length) % _views.Length;
-        gpu.DebugView = index == 0 ? string.Empty : _viewNames[index - 1];
+        int index = (ViewIndex() + step + _views.Length) % _views.Length;
+        Show(index == 0 ? string.Empty : _viewNames[index - 1]);
     }
 
     /// <summary>
@@ -450,17 +461,17 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void ShowView()
     {
-        if (_gpu is not { } gpu || gpu.DebugView.Length == 0)
+        if (_debugView.Length == 0)
         {
             return;
         }
 
-        int index = ViewIndex(gpu);
+        int index = ViewIndex();
         string description = index == 0 ? string.Empty : _viewDescriptions[index - 1];
-        if (!string.Equals(_linedView, gpu.DebugView, StringComparison.Ordinal) || !_viewLine.EndsWith(description, StringComparison.Ordinal))
+        if (!string.Equals(_linedView, _debugView, StringComparison.Ordinal) || !_viewLine.EndsWith(description, StringComparison.Ordinal))
         {
-            _linedView = gpu.DebugView;
-            string name = index == 0 ? gpu.DebugView : _views[index];
+            _linedView = _debugView;
+            string name = index == 0 ? _debugView : _views[index];
             _viewLine = description.Length == 0 ? $"View: {name}" : $"View: {name}. {description}";
         }
 
@@ -724,15 +735,9 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void RunView(ReadOnlySpan<string> words)
     {
-        if (_gpu is not { } gpu)
-        {
-            Debugging.Warn("There is no GPU whose frame to view.");
-            return;
-        }
-
         if (words.Length == 0)
         {
-            gpu.DebugView = string.Empty;
+            Show(string.Empty);
             Debugging.Info("View: the frame as it is.");
             return;
         }
@@ -745,7 +750,7 @@ internal sealed class SettingsWindow : IDisposable
             return;
         }
 
-        gpu.DebugView = view;
+        Show(view);
         Debugging.Info($"View: {Words(view)}.");
     }
 
@@ -765,12 +770,6 @@ internal sealed class SettingsWindow : IDisposable
         public required string Tab { get; init; }
 
         public required string Header { get; init; }
-
-        /// <summary>
-        /// Whether its gem reads it while running, so it can be edited; else its value is shown alone.
-        /// </summary>
-
-        public required string Label { get; init; }
 
         public required string Id { get; init; }
 

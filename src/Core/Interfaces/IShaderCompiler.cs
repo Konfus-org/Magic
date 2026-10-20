@@ -21,4 +21,11 @@ public interface IShaderCompiler
     /// picks registers by. HLSL 2021, Shader Model 6.0 with wave intrinsics, warnings as errors.
     /// </summary>
     Task<Result<GpuShader>> CompileAsync(string hlsl, string name, GpuStage stage, GpuShaderFormat format, CancellationToken cancel);
+
+    /// <summary>
+    /// The <see cref="Shader"/> asset at <paramref name="path"/> compiled as
+    /// <see cref="CompileAsync(string, string, GpuStage, GpuShaderFormat, CancellationToken)"/> compiles its text, named
+    /// by its path; why not, when no asset is there or it does not load.
+    /// </summary>
+    Task<Result<GpuShader>> CompileAsync(string path, GpuStage stage, GpuShaderFormat format, CancellationToken cancel);
 }

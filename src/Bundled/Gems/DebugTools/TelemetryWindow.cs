@@ -23,7 +23,7 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
 
     public void Update()
     {
-        bool isOpen = window.Begin(scrollable: true);
+        bool isOpen = window.Begin(scrollable: true, out bool copy);
         _telemetry.Listen(isOpen);
         if (!isOpen)
         {
@@ -42,7 +42,7 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
             Draw(tabs[Math.Clamp(_tab, 0, tabs.Length - 1)]);
         }
 
-        if (window.IsCopyClicked)
+        if (copy)
         {
             window.Copy(_telemetry.AllText());
         }

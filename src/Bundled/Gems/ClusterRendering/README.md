@@ -264,7 +264,8 @@ The frame is two pipelines: the one the `pipeline` setting picks, and the effect
 - **Debug views.** A debug view is a pass in `Passes/Debug/`, named for the one thing it shows (the depth, the
   normals, which lights reach each pixel, the sun's shadow as the lighting reads it) with its shader in
   `Shaders/Debug/`: a fullscreen pass that reads what it needs by name, as any pass does, and draws into `DebugView`,
-  which each view then shows in place of its finished image. While `IGpu.DebugView` names one, its pass runs after the
+  which each view then shows in place of its finished image. While one is named (`DebugViewChanged` on `Events`), its
+  pass runs after the
   world's effects, in the `ui` stage unless it needs something an earlier stage overwrites (what the surfaces emit,
   before the lighting adds to it, is read in the G-buffer stage). A view draws black where nothing was drawn, flat
   teal where it reads an effect's output the world does not draw, and never magenta, which says that something
