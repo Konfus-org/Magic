@@ -25,7 +25,7 @@
 static const uint GiResolution = 64u;
 static const uint GiBrick = 8u;
 static const uint GiProbes = 16u;
-static const uint GiMaxLevels = 4u;
+static const uint GiMaxLevels = 5u;
 static const uint GiStride = GiResolution / GiProbes;
 static const float GiReach = 4.0;
 static const uint GiIrradianceSide = 8u;
@@ -394,7 +394,11 @@ GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float ma
 
 // How much of a light far metres off along toward reaches a place through the field, the sun GiFarAway: softened by how
 // near the ray passes what it misses, as seen from whichever end is nearer (Quilez 2010's soft shadows from a distance
-// field), and stopping a voxel short of the light, so what holds a lamp, its shade or bulb, does not hide it.
+// field), measured from half a voxel inside the field's surface, which stands that much and more out from the true one
+// (Probes/GiJobs.hlsli), so the penumbra is about as wide as the true caster makes it rather than a dark band round
+// everything the field holds; the ray still stops at the field's surface, which a wall thinner than a voxel is only
+// held in by that fattening. Stopping a voxel short of the light, so what holds a lamp, its shade or bulb, does not
+// hide it.
 float GiVisibility(float3 origin, float3 toward, float far, uint first, uint levels)
 {
     uint index = first;
@@ -422,7 +426,7 @@ float GiVisibility(float3 origin, float3 toward, float far, uint first, uint lev
             return 0.0;
         }
 
-        visible = min(visible, 8.0 * distance / min(t, far - t));
+        visible = min(visible, 8.0 * (distance + 0.5 * level.voxel) / min(t, far - t));
         t += max(distance, 0.25 * level.voxel);
     }
 

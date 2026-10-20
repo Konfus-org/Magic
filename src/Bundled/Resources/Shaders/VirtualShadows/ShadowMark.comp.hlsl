@@ -1,11 +1,14 @@
-// Marks the pages of shadow the view's pixels read, a thread a pixel: the sun's level as fine as the pixel, the first
-// whose window holds it, and the next SunSoftLevels coarser, which its soft shadow is searched and filtered through;
-// and, for each point or spot light that casts a shadow and reaches the pixel (its z-bin and tile, as the lighting
-// finds them), its face's page at the mip as fine as the pixel, and at the coarsest, which it is read through while its
-// own waits, put into this frame's table. A page marked is wanted this frame; the allocator gives it a page of the pool
-// when it has none. Most of a page's pixels find it marked already, and leave it be.
+// Marks the pages of shadow the view's pixels read, a thread a pixel: every sun level the lighting's lookup can read
+// for the pixel (Include/VirtualShadows.hlsli's SunVirtualShadow), from SunFinerLevels finer than the finest its
+// dither can pick to SunSoftLevels coarser than the coarsest, each at the point the lookup reads it, pushed out along
+// the pixel's normal by that level's texel; and, for each point or spot light that casts a shadow and reaches the
+// pixel (its z-bin and tile, as the lighting finds them), its face's page at the mip as fine as the pixel, and at the
+// coarsest, which it is read through while its own waits, put into this frame's table. A page marked is wanted this
+// frame; the allocator gives it a page of the pool when it has none. Most of a page's pixels find it marked already,
+// and leave it be.
 
 #include "Include/LightCulling.hlsli"
+#include "Include/Packing.hlsli"
 #include "Include/VirtualShadows.hlsli"
 #include "Lighting/Lights.hlsli"
 
@@ -18,19 +21,18 @@ void Want(uint row, uint frame)
     }
 }
 
-void MarkSun(GpuSunClipmap sun, float3 position, float viewDepth)
+void MarkSun(GpuSunClipmap sun, float3 position, float3 normal, float viewDepth)
 {
-    // From the finest level the pixel's dither can pick, so both of two levels it blends between are there.
-    uint level = SunLevelFor(sun, viewDepth, 0.0);
-    uint marked = 0u;
-    [loop] for (; level < sun.levels && marked <= SunSoftLevels; level++)
+    uint finest = SunLevelFor(sun, viewDepth, 0.0);
+    uint level = finest > SunFinerLevels ? finest - SunFinerLevels : 0u;
+    uint last = min(SunLevelFor(sun, viewDepth, 1.0) + SunSoftLevels, sun.levels - 1u);
+    [loop] for (; level <= last; level++)
     {
         int2 page;
         float2 place;
-        if (SunPageOf(sun, SunLevelOf(level), position, page, place))
+        if (SunPageOf(sun, SunLevelOf(level), SunMoved(sun, level, position, normal), page, place))
         {
             Want(sun.sunTable + SunEntryOf(level, page), sun.frame);
-            marked++;
         }
     }
 }
@@ -79,7 +81,8 @@ void main(uint3 id : SV_DispatchThreadID)
     float3 position = ViewToWorld(ViewPosition(pixel, viewDepth));
     if (any(SunIlluminance > 0.0))
     {
-        MarkSun(sun, position, viewDepth);
+        float3 normal = OctDecode(Normal.Load(int3(id.xy, 0)).xy * 2.0 - 1.0);
+        MarkSun(sun, position, normal, viewDepth);
     }
 
     // The lights reaching the pixel, as the lighting walks them (Lighting/Shade.hlsli's LocalLights).

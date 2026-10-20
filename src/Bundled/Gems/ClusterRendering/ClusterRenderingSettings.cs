@@ -120,17 +120,17 @@ internal sealed class ClusterRenderingSettings : ISettings
     public float Anisotropy { get; set; } = 8;
 
     /// <summary>
-    /// Levels of the scene's field and probes for global illumination, each twice the size of the last: 1 to 4.
+    /// Levels of the scene's field and probes for global illumination, each twice the size of the last: 1 to 5.
     /// </summary>
     [Category("Render/Global illumination")]
-    public int GiLevels { get; set; } = 4;
+    public int GiLevels { get; set; } = 5;
 
     /// <summary>
     /// Metres a voxel of the finest level: its 64 a side and each level after it twice as far reach as far as global
     /// illumination does.
     /// </summary>
     [Category("Render/Global illumination")]
-    public float GiVoxel { get; set; } = 0.5f;
+    public float GiVoxel { get; set; } = 0.25f;
 
     /// <summary>
     /// Rays each probe traces when it is traced: 8 to 256.

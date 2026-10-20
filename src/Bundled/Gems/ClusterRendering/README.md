@@ -32,8 +32,8 @@ In the project's `Presets/Default.preset`, by another preset (`--preset Toaster`
 | `shadowDepth` | `4000` | Metres along the sun a page holds either side of the camera: as far as what casts into it can be. |
 | `shadowUpdates` | `512` | Pages of shadow drawn a frame at most, the sun's coarsest levels first, then lights nearest the player; the rest wait, read coarser till then. |
 | `anisotropy` | `8` | The most taps a material's textures are filtered with at a grazing angle: 1 to 16. |
-| `giLevels` | `4` | Levels of global illumination's scene and probes, each twice as wide as the last: 1 to 4. |
-| `giVoxel` | `0.5` | Metres a voxel of the finest level. |
+| `giLevels` | `5` | Levels of global illumination's scene and probes, each twice as wide as the last: 1 to 5. |
+| `giVoxel` | `0.25` | Metres a voxel of the finest level. |
 | `giRays` | `64` | Rays a probe traces each time it is traced: 8 to 256. |
 | `giUpdateEvery` | `4` | Frames between the finest level's probes being traced, a power of two; each coarser level's half as often. |
 
@@ -102,8 +102,9 @@ time with its entries addressed round so a page that stays keeps what was drawn.
 six faces' at a mip, a texel at most two pixels wide; its coarsest mip is one small page, a sixteenth of a page, which a
 pixel is shaded through while its own waits. Each frame, on the GPU:
 
-- each pixel marks the pages it reads, the sun's level as fine as it and the next three coarser, and each shadowed light
-  that reaches it, a light's pages put into a hash table made again each frame;
+- each pixel marks the pages its lighting can read: every sun level from one finer than its own to three coarser than
+  the coarsest its dither can pick, each at the point the lookup reads it there, and each shadowed light that reaches
+  it, a light's pages put into a hash table made again each frame;
 - the sun's entries follow their window, and a light's take over the pages they had last frame, each page noting the
   rectangle of it that what moved since reaches;
 - one group gives the pages wanted the pool's: each light's small page first, so its pixels always have a drawn page to
@@ -120,14 +121,18 @@ pixel is shaded through while its own waits. Each frame, on the GPU:
   frame draws it. Depth is clamped rather than clipped, so a caster nearer the
   sun than a page holds still casts; a light's faces are clipped a few centimetres ahead of it instead.
 
-A page that waits is never read: a pixel reads the next coarser level, or mip, that is drawn. Where one sun level gives
-way to the next, a pixel picks between the two by a dither that moves each frame, which the upscale blends, so the
-levels meet without a line; it marks pages from the finer. The sun's penumbra is as wide as its disc makes it (PCSS),
-widened through the clipmap's coarser levels rather than more taps, but never past the three coarser the pixel marked,
-so a shadow sharpens as the camera nears it, and picked between two levels by the same dither, so it never steps from
-one to the next. The casters it is measured from are searched for at the widest of those levels, over all its filter
-reaches there, so every pixel the filter could darken finds them and the penumbra fades out all the way to light; a
-receiver is pushed out along its normal by a texel of whichever level it reads.
+A page is never read where it waits: a sun page waiting only where something moved is read everywhere else on it, as
+the rest still holds what it did, and a page waiting whole, or a light's, is not read at all, the pixel reading the
+next coarser level, or mip, that is drawn. Where one sun level gives way to the next, a pixel picks between the two by
+a dither that moves each frame, which the upscale blends, so the levels meet without a line. The sun's penumbra is as
+wide as its disc makes it (PCSS), widened through the clipmap's coarser levels rather than more taps, but never past
+the three coarser the pixel marked, nor finer than the one finer, so a shadow sharpens as the camera nears it, to half
+a pixel, and picked between two levels by the same dither, so it never steps from one to the next. The casters it is
+measured from are searched for at the widest of those levels, over all its filter reaches there, so every pixel the
+filter could darken finds them and the penumbra fades out all the way to light; where no level from there on holds a
+page yet, none is found, and the pixel is filtered at its own level rather than left lit. A receiver is pushed out
+along its normal by a texel of whichever level it reads, and compared a texel of depth nearer the sun, so a surface
+facing the sun does not shadow itself.
 
 **Temporal upscaling.** The view is drawn a sub-pixel off each frame (Halton 2, 3), and textures are read a little
 sharper as it is drawn smaller. An upscale (Karis 2014) gathers the view's pixels about each pixel of the target,
@@ -163,17 +168,18 @@ coefficients for light from everywhere, and prefiltered by GGX into `SkySpecular
 (filtered importance sampling, Křivánek & Colbert 2008), which every surface reflects the sky by.
 
 **Reflections** are an effect: each pixel smooth enough to show them, past `roughest` none, traces a ray from its GGX
-lobe, a new one each frame, through the view's depth for what the view shows, lit as the last frame lit it; where that
-finds nothing, through global illumination's field when the world draws it, so what is behind the camera or something
-else still shows; and past everything, the sky as rough as the surface. What the field hits is lit as the view lit it
-wherever the view shows it, so the two agree, and only what the view cannot see is lit as the field lights it,
-coarser: by its probes, the sun and the lights near it. A ray sets out through the field from the finest level that holds its surface,
-a voxel and a half of that level off it, so a far surface's ray does not start inside its own coarse copy. Every hit
-is trusted by degrees, by how near the view's edges it is, how far
-behind what was drawn the ray passed and how squarely it meets the surface, so a pixel slides from one to another as
-the view moves rather than jumping. The rays are filtered across the surface and blended over frames, last frame's
-clipped toward the neighbours' colours in YCoCg, more of it kept the rougher the surface, and the lighting takes them
-in place of the sky's reflection.
+lobe, a new one each frame, through global illumination's field when the world draws it, and what it hits is lit as
+the field lights it: by its probes, the sun and the lights near it, through the field's own shadows; past everything,
+the sky as rough as the surface. Nothing is read from the view, so a reflection shows the same whatever is on screen,
+what is behind the camera or hidden as much as what is in sight, and only as coarsely as the field holds it, a voxel
+of flat colour with no highlights of its own. A ray sets out through the field from the finest level that holds its
+surface, a voxel and a half of that level off it, so a far surface's ray does not start inside its own coarse copy;
+moved out of the field along its gradient where it starts inside another surface's fattened band, the foot of a wall
+within the floor's; and a voxel along the ray, past the field's rounding of its own corners, which a ray leaving a
+corner at a grazing angle would otherwise meet. A surface rougher than `rough` traces two rays and takes their mean,
+as its lobe is wide. The rays are filtered across the surface, over a wider patch the rougher it is, and blended over
+frames, last frame's clipped toward the neighbours' colours in YCoCg, more of it kept the rougher the surface; and the
+lighting takes them in place of the sky's reflection.
 
 **Height fog** is an effect a world adds when it wants it, tuned where its effects list it: its `color`, the share of
 the light reaching it that it scatters; its `intensity`, how much fog there is a metre at the densest; where it
@@ -264,7 +270,8 @@ The frame is two pipelines: the one the `pipeline` setting picks, and the effect
 - **Debug views.** A debug view is a pass in `Passes/Debug/`, named for the one thing it shows (the depth, the
   normals, which lights reach each pixel, the sun's shadow as the lighting reads it) with its shader in
   `Shaders/Debug/`: a fullscreen pass that reads what it needs by name, as any pass does, and draws into `DebugView`,
-  which each view then shows in place of its finished image. While one is named (`DebugViewChanged` on `Events`), its
+  which each view then shows in place of its finished image, drawn without the upscale's sub-pixel jitter meanwhile,
+  so it holds still. While one is named (`DebugViewChanged` on `Events`), its
   pass runs after the
   world's effects, in the `ui` stage unless it needs something an earlier stage overwrites (what the surfaces emit,
   before the lighting adds to it, is read in the G-buffer stage). A view draws black where nothing was drawn, flat
@@ -296,6 +303,7 @@ The frame is two pipelines: the one the `pipeline` setting picks, and the effect
 - A light that moves draws all its pages again every frame, which past `shadowUpdates` leaves them read coarse.
 - A second view runs the shadows' passes again, and takes the lights' pages over from the first.
 - Reflections are traced for opaque surfaces only: a transparent one, glass or water drawn as transparent, reflects the
-  sky. What only the field holds is reflected as coarsely as the field holds it, flat-coloured, a voxel to half a metre
-  and more.
+  sky. What is reflected is the field, flat-coloured and without highlights, a voxel to a quarter of a metre close
+  by and coarser further off; and
+  nothing where the world draws no global illumination, the sky alone.
 - A texture's mips are all resident; none is streamed by what the view reads of it.

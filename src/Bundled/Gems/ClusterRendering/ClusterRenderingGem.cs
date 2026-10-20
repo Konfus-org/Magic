@@ -302,8 +302,9 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             Instances: (uint)_scene.Capacity,
             Pieces: (uint)Math.Max(_settings.PieceCapacity, 1024),
             Clusters: (uint)Math.Max(_settings.PieceCapacity, 1024),
-            // Room for every instance twice over, so the shadow page that holds the whole world always fits.
-            Jobs: (uint)Math.Max(Math.Max(_settings.PieceCapacity / 16, 2 * _scene.Capacity), 1024),
+            // Room for every instance eight times over, so a frame drawing several of the shadow pages that hold the
+            // whole world, the sun's coarsest levels' after a turn, fits rather than drawing nothing and waiting.
+            Jobs: (uint)Math.Max(Math.Max(_settings.PieceCapacity / 16, 8 * _scene.Capacity), 1024),
             RasterBins: Materials.RasterBinRows,
             ResolveBins: (uint)Math.Max(_materials.ResolveBins.Count, 1),
             Tiles: 0,
@@ -505,9 +506,10 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
     /// <summary>
     /// Whether views are drawn a sub-pixel off each frame, which the temporal upscale resolves into detail finer than a
-    /// pixel: only while the frame runs it, as nothing else would undo the shake.
+    /// pixel: only while the frame runs it, as nothing else would undo the shake, and not while a debug view is shown,
+    /// which is drawn from the view as it is and would shake with it.
     /// </summary>
-    private bool Jitters() => _graph.Current?.Runs("Taa") == true;
+    private bool Jitters() => _graph.Current?.Runs("Taa") == true && _debugView.Length == 0;
 
     /// <summary>
     /// Says, at each instance drawn as the failure, why, with what failed while the mouse rests on it: for this frame,

@@ -4,5 +4,5 @@
     "shader": { "id": 11330 },
     "creates": [ { "name": "GiLights", "kind": "buffer", "type": "uint", "stride": 4, "rows": 262144 } ],
     "writes": [ { "name": "GiLights" } ],
-    "dispatch": { "per": "16384" }
+    "dispatch": { "per": "20480" }
 }

@@ -12,8 +12,8 @@
 struct PassParams
 {
     float sharpest = 0.6;   // of last frame's a mirror keeps
-    float steadiest = 0.95; // of last frame's a surface keeps from half as rough as can be on
-    float spread = 1.5;     // standard deviations of the neighbours last frame's is clipped within
+    float steadiest = 0.95; // of last frame's a surface keeps from a third as rough as can be on
+    float spread = 1.0;     // standard deviations of the neighbours last frame's is clipped within
 };
 
 [numthreads(8, 8, 1)]
@@ -36,16 +36,21 @@ void main(uint3 id : SV_DispatchThreadID)
     float4 stored = Normal.Load(int3(id.xy, 0));
     float3 normal = OctDecode(stored.xy * 2.0 - 1.0);
     float roughness = stored.z;
-    int radius = roughness > 0.3 ? 2 : roughness > 0.1 ? 1 : 0;
+    int radius = roughness > 0.3 ? 3 : roughness > 0.15 ? 2 : roughness > 0.05 ? 1 : 0;
     float3 sum = float3(0.0, 0.0, 0.0);
     float weights = 0.0;
     float3 moment1 = float3(0.0, 0.0, 0.0);
     float3 moment2 = float3(0.0, 0.0, 0.0);
     float counted = 0.0;
-    [loop] for (int y = -2; y <= 2; y++)
+    [loop] for (int y = -3; y <= 3; y++)
     {
-        [loop] for (int x = -2; x <= 2; x++)
+        [loop] for (int x = -3; x <= 3; x++)
         {
+            [branch] if ((abs(x) > radius && abs(x) > 2) || (abs(y) > radius && abs(y) > 2))
+            {
+                continue;
+            }
+
             int2 at = clamp(int2(id.xy) + int2(x, y), int2(0, 0), int2(ViewSize) - 1);
             float4 traced = ReflectionTraced.Load(int3(at, 0));
             [branch] if (traced.a <= 0.0)
@@ -53,8 +58,8 @@ void main(uint3 id : SV_DispatchThreadID)
                 continue;
             }
 
-            // The neighbours' spread, from the nine nearest, for the clip.
-            [branch] if (abs(x) <= 1 && abs(y) <= 1)
+            // The neighbours' spread, from the twenty-five nearest, for the clip.
+            [branch] if (abs(x) <= 2 && abs(y) <= 2)
             {
                 float3 ycocg = RgbToYCoCg(traced.rgb);
                 moment1 += ycocg;
@@ -85,7 +90,7 @@ void main(uint3 id : SV_DispatchThreadID)
     [branch] if (all(then > 0.0) && all(then < 1.0))
     {
         float4 held = ReflectionsHistory.SampleLevel(ReflectionsHistorySampler, then, 0.0);
-        float keep = held.a > 0.0 ? lerp(params.sharpest, params.steadiest, saturate(roughness * 2.0)) : 0.0;
+        float keep = held.a > 0.0 ? lerp(params.sharpest, params.steadiest, saturate(roughness * 3.0)) : 0.0;
 
         // Last frame's moved toward the neighbours' mean until it is inside the box their spread makes.
         float3 offset = RgbToYCoCg(held.rgb) - mean;

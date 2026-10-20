@@ -1,7 +1,0 @@
-{
-    // The lit scene and its sky, kept for the next frame's reflections to read what they hit by.
-    "stage": "sky",
-    "kind": "fullscreen",
-    "shader": { "id": 11250 },
-    "writes": [ { "name": "ReflectionScene" } ]
-}

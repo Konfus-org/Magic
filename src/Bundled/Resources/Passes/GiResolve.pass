@@ -3,5 +3,5 @@
     "kind": "compute",
     "shader": { "id": 11324 },
     "writes": [ { "name": "GiField" } ],
-    "dispatch": { "per": "1048576" }
+    "dispatch": { "per": "1310720" }
 }
