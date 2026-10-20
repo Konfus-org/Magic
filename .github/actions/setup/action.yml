@@ -28,12 +28,14 @@ runs:
       shell: pwsh
       run: python -m pip install --quiet ply
 
-    - name: Install SDL's build dependencies and Ninja
+    # The Linux runner has no GPU, and the headless samples still render: Mesa's software Vulkan driver (lavapipe)
+    # is the device they open.
+    - name: Install SDL's build dependencies, Ninja and a software Vulkan driver
       if: runner.os == 'Linux'
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install --yes --no-install-recommends ninja-build \
+        sudo apt-get install --yes --no-install-recommends ninja-build mesa-vulkan-drivers \
           libasound2-dev libpulse-dev libpipewire-0.3-dev libudev-dev libdbus-1-dev \
           libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
           libxkbcommon-dev libwayland-dev libdecor-0-dev \
@@ -47,6 +49,8 @@ runs:
     # A runner has no user to keep the machine usable for, so the native builds take every core; CMake takes the
     # generator from the environment where the build names none, and Ninja is the fast one on Linux and macOS (on
     # Windows the build drives Visual Studio's). The packages folder sits in the workspace so a cache can name it.
+    # The Linux runner has no display either, and the GPU opens only with the platform library's video subsystem
+    # up: its offscreen driver starts without one, and finds Vulkan through a headless surface.
     - name: Set the build's environment
       shell: pwsh
       run: |
@@ -55,6 +59,7 @@ runs:
         "DOTNET_NOLOGO=1" >> $env:GITHUB_ENV
         "DOTNET_CLI_TELEMETRY_OPTOUT=1" >> $env:GITHUB_ENV
         if (-not $IsWindows) { "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV }
+        if ($IsLinux) { "SDL_VIDEO_DRIVER=offscreen" >> $env:GITHUB_ENV }
 
     # Every package version is in Directory.Packages.props, so that and the SDK are what the packages depend on.
     - uses: actions/cache@v6

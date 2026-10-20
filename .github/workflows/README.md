@@ -3,7 +3,9 @@
 What GitHub runs on a change and what must hold for it to pass. The Build and Test workflows run the same script a
 developer runs, `tools/Validate.ps1` ([Tools](../../tools/README.md)), a step at a time: Build runs its Build and
 Headless steps on every OS Magic targets, Test its Build and Test steps on Linux. The Window step and `Screenshot.ps1`
-need a display and a GPU, which no runner has, so those stay on developer machines. Two checks have no local
+need a display, which no runner has, so those stay on developer machines. The Headless step still needs a GPU device,
+since the samples render offscreen: macOS runners have a virtual one, and Linux gets Mesa's software Vulkan driver
+and runs the platform library's offscreen video driver, both from the setup action. Two checks have no local
 equivalent: Docs follows every link in the Markdown, to files, their headings and the web, so a moved file or a renamed
 heading fails here instead of going quietly stale; CodeQL is GitHub's security analysis of the C#, which reads the
 sources and the restored packages without compiling, so it needs no native libraries and runs in minutes.
