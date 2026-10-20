@@ -1,6 +1,8 @@
-# The last step of a job that builds Magic, run whether the job passed or not, so a cold native build is kept even
-# when the managed build after it failed. CMake's working folders are dropped first: after a build only the sources,
-# what was installed and the ready markers are read, and the working folders are gigabytes.
+# The last step of a job that builds Magic, run whether the job passed or failed, so a cold native build is kept even
+# when the managed build after it failed, but never when it was cancelled: a key is saved once and never overwritten,
+# so a snapshot cut short would be restored and rebuilt from, and never completed, for as long as the key lasts.
+# CMake's working folders are dropped first: after a build only the sources, what was installed and the ready markers
+# are read, and the working folders are gigabytes.
 name: Save the native libraries
 description: Drops CMake's working folders and saves Build/NativeLibs under the key the setup restored with.
 

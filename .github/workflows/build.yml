@@ -77,7 +77,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - if: always()
+      - if: ${{ !cancelled() }}
         uses: ./.github/actions/save-natives
         with:
           key: ${{ steps.setup.outputs.natives-key }}

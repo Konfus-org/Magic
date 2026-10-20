@@ -37,7 +37,9 @@ cold build takes an hour or more while a warm one takes minutes. `Build/NativeLi
 architecture, keyed on the files that declare the libraries. The build's own markers make a restored cache a no-op, and a cache restored
 under an older key still serves: the build sees which library's pin changed and rebuilds that one alone. CMake's
 working folders are dropped before the save, as nothing reads them again, and the save runs whether the job passed or
-not, so a cold native build is never lost to a managed error after it. Both are in the two composite actions beside
+failed, so a cold native build is never lost to a managed error after it. It never runs for a cancelled job: a key is
+saved once and never overwritten, so a snapshot cut short would be restored and rebuilt from on every run, and never
+completed, until the key next changes. Both are in the two composite actions beside
 the workflows, which every building job starts and ends with.
 
 A runner has no user to keep the machine usable for, so the native builds take every core (`MagicNativeCores`,

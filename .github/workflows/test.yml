@@ -41,7 +41,7 @@ jobs:
             Build/TestOutput
           if-no-files-found: ignore
 
-      - if: always()
+      - if: ${{ !cancelled() }}
         uses: ./.github/actions/save-natives
         with:
           key: ${{ steps.setup.outputs.natives-key }}
