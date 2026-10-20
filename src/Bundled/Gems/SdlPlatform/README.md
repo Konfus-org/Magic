@@ -1,28 +1,20 @@
 # SdlPlatform
 
 The window and input, through SDL3, called through its generated API ([Gems](../README.md#native-libraries)), which the
-SDL bindings gem provides. Provides `IWindow` and `IInput`.
+SDL bindings project provides. Provides `IWindow` and `IInput`. SDL comes from the bindings project, and as this gem is
+made before every other gem built on it, the copy it loads is the one they all share
+([Sharing a library](../README.md#sharing-a-library)). As it starts, the gem checks that the SDL it got is at least
+the version the binding was generated from, the oldest that serves it; SDL keeps its ABI, so a newer one does.
 
 ## Settings
 
-In the project's `Presets/Default.preset`, by another preset, or `--set SdlPlatform.<key>=<value>`:
-
-| Key | Default | |
-| --- | --- | --- |
-| `width` | `1280` | The window's width, in screen points (pixels at 100% display scaling). |
-| `height` | `720` | The window's height, in screen points. |
-| `mouseSensitivity` | `1` | What the mouse's motion is multiplied by: above 1 turns faster, 0.1 to 10. |
-| `invertMouseY` | `false` | Mouse motion up reads as down, and down as up. |
-| `stickDeadZone` | `0.15` | How far a stick or trigger is pushed before it reads as anything but 0, 0 to 0.5 of its reach; past it, what is read grows from 0 to 1 at full deflection. |
-| `invertStickY` | `false` | Pushing a stick up reads as down, and down as up. |
-
-All are followed every frame. Changed while running, the window is resized, and dragging the window changes it and
-leaves the size settings as they were; the input settings take from the next frame.
+Each setting is documented on `SdlPlatformSettings` and shown in the settings window. All are followed every frame: a
+changed size resizes the window, while dragging the window changes it and leaves the size settings as they were; the
+input settings take from the next frame.
 
 ## Behaviour
 
 - SDL starts in the gem's constructor and stops in `Dispose`, on the render thread, which owns its windows and events.
-  Starting takes about 1.5 s, most of it finding gamepads.
 - `Render`, on the render thread, pumps SDL's events, and writes what they change (devices, controls, typed text, the
   window's size, the clipboard) as plain data to a channel; `Update` applies it on the main thread, before the gems
   that take `IInput` or `IWindow`, so input, the window's size and the clipboard are fixed for the rest of the frame.
@@ -33,8 +25,9 @@ leaves the size settings as they were; the input settings take from the next fra
   its texture through Core's `Assets` on workers, and the render thread gives the texture's first mip level to SDL;
   one that does not load is an error, and the window keeps the icon it has. The icon is read when it is set, so an edit
   to its files shows once it is set again.
-- Closing the window, or the OS asking the program to quit, stops the run. SDL's own Ctrl+C handling is off: Ctrl+C is
-  Core's (`--headless`).
+- Closing the window, or the OS asking the program to quit, stops the run. SDL's own signal handling is off, so Ctrl+C
+  is never turned into a quit event: in a `--headless` run Core catches it and stops the run cleanly, and in a run with
+  a window it ends the process at once, as it does any program ([Core's README](../../../Core/README.md#the-run)).
 - Headless, it opens no window and needs no display: `IWindow` is 0×0 with no clipboard, and only gamepads give
   input, since keyboards and mice need a window to type and point into.
 - If SDL cannot start or open the window, the gem throws with SDL's error and is not made.
@@ -52,10 +45,3 @@ leaves the size settings as they were; the input settings take from the next fra
 - Gamepads use SDL's standard layout: buttons by position, sticks -1 to 1 with up positive (SDL's y grows downward)
   unless `invertStickY`, triggers 0 to 1, each 0 inside `stickDeadZone` and growing from there to 1 at full deflection.
   Sticks and triggers are read every frame rather than added up from events.
-
-## Natives
-
-The SDL bindings gem this one references carries SDL for the machine it was built on, which the gem's load context loads.
-The SDL it loads is every gem's: a gem that binds SDL after it gets the library already loaded (`GemLoadContext`),
-which is how a GPU gem draws into this gem's window. As it starts, the gem checks that the SDL it got is at least the
-version the binding was generated from, the oldest that serves it; SDL keeps its ABI, so a newer one does.

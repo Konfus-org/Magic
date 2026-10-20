@@ -1,7 +1,8 @@
 # ArchEcs
 
-The entity world, through [Arch](https://github.com/genaray/Arch): provides `IEcs`, which Core's `World` is built on
-([Core's README](../../../Core/README.md#the-world)); gems and game code reach the entities through the world.
+The entity world, through [Arch](https://github.com/genaray/Arch), which is managed code only, with no native
+library: provides `IEcs`, which Core's `World` is built on ([Core's README](../../../Core/README.md#the-world)); gems
+and game code reach the entities through the world.
 
 ```csharp
 internal record struct Velocity : IComponent
@@ -75,7 +76,3 @@ Arch trusts its caller. The gem checks what Arch would let go wrong silently, an
 
 `Set` of a component the entity already has, and writing through a chunk's spans, change no structure and are fine
 inside a loop. Collect the rest and apply it after.
-
-## Dependencies
-
-Arch and what it needs are managed code only, with no native library.

@@ -12,4 +12,5 @@ A `.rtex` file is a texture a camera draws into, which materials sample like any
 | `height` | 512 | Texels down. |
 
 It has no image: it is black until a camera has drawn into it. A camera names one as what it draws into
-(`"target": { "texture": { "id": 740 } }`), and a material samples one as a param (`{ "renderTexture": { "id": 740 } }`).
+(`"target": { "texture": { "id": 740 } }`), and a material samples one as a param
+(`{ "renderTexture": { "id": 740 } }`).

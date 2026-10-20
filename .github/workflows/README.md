@@ -1,32 +1,38 @@
 # Continuous integration
 
-What GitHub runs on a change and what must hold for it to pass. The checks run the same script a developer runs,
-`tools/Validate.ps1` ([Tools](../../tools/README.md)), so a change that passes locally passes here, with one
-exception: the `Window` step and `Screenshot.ps1` need a display and a GPU, which no runner has, so those stay on
-developer machines. Everything else, including the headless sample run, runs here.
+What GitHub runs on a change and what must hold for it to pass. The Build and Test workflows run the same script a
+developer runs, `tools/Validate.ps1` ([Tools](../../tools/README.md)), a step at a time: Build runs its Build and
+Headless steps on every OS Magic targets, Test its Build and Test steps on Linux. The Window step and `Screenshot.ps1`
+need a display and a GPU, which no runner has, so those stay on developer machines. Two checks have no local
+equivalent: Docs follows every link in the Markdown, to files, their headings and the web, so a moved file or a renamed
+heading fails here instead of going quietly stale; CodeQL is GitHub's security analysis of the C#, which reads the
+sources and the restored packages without compiling, so it needs no native libraries and runs in minutes.
 
-Every build here is the `Release` configuration, the one that ships: a push to `main` publishes exactly what the
-checks built and ran. `Debug` is what a developer builds, with its overflow checks, and `Validate.ps1` keeps building
-it by default; its two `#if DEBUG` constants aside, the two configurations compile the same code.
+Every build here is the `Release` configuration, the one that ships: a push to `main` publishes exactly what the checks
+built and ran. `Validate.ps1` builds `Debug` unless told otherwise: the configuration a developer works in, which
+checks integer overflow and is not optimised, where `Optimize` is optimised with symbols and `Release` optimised
+without them. Beside two `#if DEBUG` blocks, all three compile the same code, so a change validated locally is checked
+again here as what ships.
 
 ## When the checks run
 
-Every workflow runs on a pull request into `dev` or `main` and on a push to either, never on another branch: a
-branch is validated when it asks to merge, and the merged result once more. A newer push to the same pull request
-or branch cancels the run it supersedes, except on `main`, where a release in progress is never cut short. Every job
-has a time limit, so a stuck step ends the job instead of holding a runner; the limits are generous for the jobs that
-may build the native libraries from source (below) and tight for the rest.
+Every workflow runs on a pull request into `dev` or `main` and on a push to either, so a branch is validated when it
+asks to merge, and the merged result once more. Each can also be started by hand from the Actions tab, and Build runs
+on a weekly schedule as well, which keeps the caches alive (below). A newer push to the same pull request or branch
+cancels the run it supersedes; Build alone finishes on `main` regardless, where a release in progress is never cut
+short. Every job has a time limit, so a stuck step ends the job instead of holding a runner; the limits are generous
+for the jobs that may build the native libraries from source (below) and tight for the rest.
 
-The repository's rulesets, not a file here, are what make the checks required: `dev` and `main` require the three
-Build jobs, Test, Docs and CodeQL to pass before a merge, so that Dependabot's pull requests and everyone else's are
+The repository's rulesets, not a file here, are what make the checks required: `dev` and `main` require the Build job
+for each OS, Test, Docs and CodeQL to pass before a merge, so that Dependabot's pull requests and everyone else's are
 held to the same bar. That is what makes a merge into `main` a release of checked code. GitHub knows a check by its
 job's name alone, whatever workflow it is in, so every job here carries a name no other job has.
 
 ## The native libraries
 
-Every native library is built from source by the first build, and one of them is an LLVM, so a cold build takes an
-hour or more while a warm one takes minutes. `Build/NativeLibs/` is therefore cached per OS and architecture, keyed on
-the files that declare the libraries. The build's own markers make a restored cache a no-op, and a cache restored
+Every native library is built from source by the first build, and one of them is a whole compiler toolchain, so a
+cold build takes an hour or more while a warm one takes minutes. `Build/NativeLibs/` is therefore cached per OS and
+architecture, keyed on the files that declare the libraries. The build's own markers make a restored cache a no-op, and a cache restored
 under an older key still serves: the build sees which library's pin changed and rebuilds that one alone. CMake's
 working folders are dropped before the save, as nothing reads them again, and the save runs whether the job passed or
 not, so a cold native build is never lost to a managed error after it. Both are in the two composite actions beside
@@ -40,9 +46,8 @@ in the matrix, not a longer limit.
 
 ## What a runner needs
 
-The .NET SDK `global.json` names, Python 3 with `ply`, CMake and a C++ toolchain, as a developer's machine does
-([README](../../README.md#requirements)). Windows and macOS runners come with theirs; Linux installs SDL's build
-dependencies. The setup action installs everything else.
+What a developer's machine does ([requirements](../../README.md#requirements)). Windows and macOS runners come with
+the toolchain; Linux installs the platform library's build dependencies, and the setup action installs the rest.
 
 ## Builds and releases
 

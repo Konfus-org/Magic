@@ -1,27 +1,13 @@
 # PipelineLoader
 
-Pipelines as they load: the `ILoadPostProcessor` that gives each loaded `Pipeline` its `Passes`. A renderer loads a
-pipeline as any asset, `assets.LoadAsync`, and runs its passes; which pipeline its frame runs is one of the renderer's
-settings.
+Pipelines as they load: the `ILoadPostProcessor` that gives each loaded `Pipeline` its `Passes`, the ordered list a
+renderer runs, so no renderer walks a pipeline itself ([Core's README](../../../Core/README.md#the-gpu)).
 
 ## Settings
 
-In the project's `Presets/Default.preset`, by another preset (`--preset Toaster`), or with
-`--set PipelineLoader.<key>=<value>`:
-
-| Key | Default | |
-| --- | --- | --- |
-| `off` | `[]` | Passes and pipelines this machine leaves out wherever they are listed, by their file name: `["AutoExposure"]`. |
-| `params` | `{}` | Pass params that win over every pipeline's and the pass's own, by the pass's file name, then the param's: `{ "Tonemap": { "exposureBias": { "x": -0.5 } } }`. |
-
-```json
-{
-    "off": [ "AutoExposure" ]
-}
-```
-
-What a pipeline runs is the project's or world's to say; `off` and `params` are how a machine changes every pipeline
-without touching either. Changed while running, every pipeline is made again, and runs the new way once it is.
+Each setting is documented on `PipelineSettings` and shown in the settings window. What a pipeline runs is the
+project's or world's to say; `off` and `params` are how a machine changes every pipeline without touching either.
+Changed while running, every pipeline is made again, and runs the new way once it is.
 
 ## A pipeline's passes
 

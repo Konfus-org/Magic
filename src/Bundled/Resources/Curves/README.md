@@ -13,6 +13,6 @@ after the last the last's, so a curve says what it is everywhere. A curve with o
 
 A pass takes a curve as a param, `{ "curve": { "id": 3363 } }`, for a `Curve` member of its `PassParams`, and reads it
 with `CurveAt` and `CurveIntegral` ([Shaders/Include/Curve.hlsli](../Shaders/Include/Curve.hlsli)). The renderer packs
-it as where its first and last keys are and its value at 14 places evenly between, so a key between those places is
-rounded off a little, and a curve keeps its shape best with its keys spread over its length. Code reads one with `At`
-(Core's `CurveExtensions`).
+it as where its first and last keys are and its value at 14 places spread evenly from the first key to the last, both
+included, so a key between those places is rounded off a little, and a curve keeps its shape best with its keys spread
+over its length. Code reads one with `At` (Core's `CurveExtensions`).

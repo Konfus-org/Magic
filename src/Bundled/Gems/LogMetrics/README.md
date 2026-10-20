@@ -1,31 +1,30 @@
 # LogMetrics
 
-Logs what the engine measures ([Core's README](../../../Core/README.md#telemetry)): every 30 seconds, a line per
-instrument and set of tags measured since the last time, then the slowest frame and where its time went, and once more
-when the run ends. It provides nothing, and does nothing until enabled:
+Logs what the engine measures ([Core's README](../../../Core/README.md#telemetry)): once an interval, 30 seconds
+unless the settings say, a line per instrument and set of tags measured since the last time, then the slowest frame
+and where its time went, and once more when the run ends. It provides nothing, and does nothing until enabled:
 
 ```
 Magic --project samples --set LogMetrics.enabled=true
 ```
 
+Each report's lines are logged as any other line is, so each carries the log's time, level, frame and thread; their
+messages read:
+
 ```
-12:00:30.001 Info     f1800 t2 magic.core.frame.duration: 1800 in 30 s, mean 16.67 ms, min 15.9 ms, max 87.2 ms (LogMetricsGem.cs:351 Report)
-12:00:30.001 Info     f1800 t2 magic.core.gem.hook.duration {magic.core.gem.name=Window, magic.core.frame.phase=Update}: 1800 in 30 s, mean 0.21 ms, min 0.05 ms, max 71.3 ms (LogMetricsGem.cs:351 Report)
-12:00:30.001 Info     f1800 t2 Slowest frame f1234 took 87.2 ms, 5.2x the mean: Ecs.Update 71.3 ms, Console.Update 0.1 ms, LogMetrics.Update 0.02 ms, outside the main thread's hooks 15.8 ms; GC paused 9.8 ms (LogMetricsGem.cs:627 Report)
+magic.core.frame.duration: 1800 in 30 s, mean 16.67 ms, min 15.9 ms, max 87.2 ms
+magic.core.gem.hook.duration {magic.core.gem.name=<gem>, magic.core.frame.phase=Update}: 1800 in 30 s, mean 0.21 ms, min 0.05 ms, max 71.3 ms
+Slowest frame f1234 took 87.2 ms, 5.2x the mean: <gem>.Update 71.3 ms, <gem>.Update 0.1 ms, LogMetrics.Update 0.02 ms, outside the main thread's hooks 15.8 ms; GC paused 9.8 ms
 ```
+
+A gem is named in a tag and in the slowest frame's hooks by its assembly's name, the name a project lists it by.
 
 ## Settings
 
-In the project's `Presets/Default.preset`, by another preset, or `--set LogMetrics.<key>=<value>`:
-
-| Key | Default | |
-| --- | --- | --- |
-| `enabled` | `false` | Whether metrics are logged. Off, the gem does not listen, so nothing is measured for it. |
-| `intervalSeconds` | `30` | How often, in seconds. 0 or less is an error, and nothing is logged. |
-| `meters` | `["Magic"]` | The meters listened to, each with the meters under it: `"Magic"` is Core's `Magic.Core` and every gem's `Magic.Gems.<Gem>`. `"System.Runtime"` is .NET's own: garbage collection, memory, the JIT and the thread pool. |
-
-All three are followed every frame: turning logging on or off, or changing the meters, takes from the next interval,
-after a report of what was measured so far.
+Each setting is documented on `LogMetricsSettings` and shown in the settings window. All three are followed every
+frame: turning logging on or off, or changing the meters, takes from the next interval, after a report of what was
+measured so far. Off, the gem does not listen, so nothing is measured for it. An interval of 0 or less is an error,
+and nothing is logged.
 
 ## Lines
 
@@ -55,6 +54,6 @@ frame the first report was made in, for the same reason.
 - Each measurement is added up on the thread that records it, under that instrument's lock, and allocates nothing
   after its series' first. Core times gem hooks only while something listens, so enabling the gem turns that on too.
 - The slowest frame keeps each hook's time in a list reused every frame, and copies it when a frame is the slowest
-  yet; reading the garbage collector's pause time once a frame costs next to nothing.
+  yet; the garbage collector's pause time is read once a frame.
 - The lines are formatted on the main thread in `Update`, once per interval. The slowest frame takes a lock, since the
   render thread's hooks are recorded on that thread.

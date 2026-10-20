@@ -1,34 +1,21 @@
 # DebugTools
 
 The debug UI's windows, drawn with `IDebugUI`'s widgets ([Core's README](../../../Core/README.md#the-debug-ui)), so it
-takes the UI gem and is made after it. It provides nothing. It takes Core's `Settings`, and the commands gem, the input,
-the window and the GPU when gems provide them: without input no key opens a window, without a window Copy has no
-clipboard, without commands the console only shows the log and the gem adds no commands, and without a GPU there is no
-frame to view.
+takes the UI gem and is made after it. It provides nothing. It takes Core's `Settings`, the assets, the lifetime and
+the events, and the commands gem, the input and the window when gems provide them: without input no key opens a
+window, without a window Copy has no clipboard, and without commands the console only shows the log and the gem adds
+no commands.
 
-| Window | Key | |
-| --- | --- | --- |
-| Console | the key left of 1 (`` ` `` on a US layout) | The log, and a line to run a command on. |
-| Telemetry | F3 | What the engine measures, over the last second. |
-| Settings | F4 | Every gem's settings, changed while running; the preset; what the frame shows. |
+Three windows, each opened and closed by its key, or closed by the close button in its header: the console, on the key
+left of 1 (`` ` `` on a US layout), the log and a line to run a command on; telemetry, on F3, what the engine measures
+over the last second; and settings, on F4, every gem's settings, changed while running, the preset and what the frame
+shows. F5 shows the next debug view and F6 the one before, round through the frame as it is, whether or not a window
+is open. A right-click anywhere in a window opens its menu, whose Copy puts what it shows on the clipboard.
 
-F5 shows the next debug view and F6 the one before, round through the frame as it is, whether or not a window is open.
-
-The frame rate and a frame's time show as the first line in the top left corner, in a Debug build or while
-`frameRate` says, worked out twice a second. While a debug view is shown, the line under it says which, and what the
-view shows, so a frame of black or a flat colour reads and a screenshot says what it is of.
-
-A window's key opens and closes it, as does the close button in its header. A right-click anywhere in a window opens
-its menu, whose Copy puts what it shows on the clipboard.
-
-## Settings
-
-In the project's `Presets/Default.preset`, by another preset, or `--set DebugTools.<key>=<value>`:
-
-| Key | Default | |
-| --- | --- | --- |
-| `frameRate` | `true` in a Debug build | The frame rate and a frame's time, averaged over half a second, as the first line in the top left corner. |
-| `tabs` | `{ "Magic.Core": "Magic.Core", "Magic.Gems": "Magic.Gems", ".NET": "System.Runtime" }` | The telemetry window's tabs, in this order: each a title, and the meters under it, by their name or a prefix of it. `Magic.Core` is Core's meter and `Magic.Gems` every gem's, `Magic.Gems.<Gem>`; `System.Runtime` is .NET's own: garbage collection, memory, the JIT and the thread pool. Changed while running, the window lists the instruments again under the new tabs. |
+The frame rate and a frame's time show as the first line in the top left corner, in a Debug build or while `frameRate`
+says, averaged over the last half second and worked out twice a second, so they can be read. While a debug view is
+shown, the line under it says which, and what the view shows, so a frame of black or a flat colour reads and a
+screenshot says what it is of.
 
 ## Console
 
@@ -70,15 +57,14 @@ In the project's `Presets/Default.preset`, by another preset, or `--set DebugToo
 - **Preset**: the preset applied over the default one, as a choice of every preset in `Presets/`, by name; choosing
   one applies it, dropping what was changed while running (`Settings.ApplyAsync`).
 - **View**: the frame as it is, or one of the debug views, the passes in `Passes/Debug/` by name, shown in place of
-  the finished image (told as `DebugViewChanged` on `Events`); what each shows is the renderer's to say, and its pass's `description` says
-  it, as the choice's tooltip and the line on screen.
+  the finished image (told as `DebugViewChanged` on `Events`); what each shows is the renderer's to say, and its pass's
+  `description` says it, as the choice's tooltip and the line on screen.
 - **Filter**: while it has text, every setting whose name, key or description contains it, in any case, shows in
   place of the tabs, under a header per tab and sub-category, so a setting is found without knowing its gem. It has
   the keyboard as the window opens, so typing filters at once.
-- A tab per category of settings (`[Category]` up to its slash, else the gem's name), Render
-  first and Debug last, the rest in the order the gems were made; in it a header per sub-category (past the slash,
-  else the gem's name), which a click folds away, unless the tab has only one; and under it a row per setting, whose
-  gem and key the tooltip names:
+- A tab per category of settings ([Core's README](../../../Core/README.md#gem-settings)), Render first and Debug
+  last, the rest in the order the gems were made; in it a header per sub-category, which a click folds away, unless
+  the tab has only one; and under it a row per setting, whose gem and key the tooltip names:
   - labelled with its name in words, and its description, its doc comment, shown while the mouse rests on it
     (`Settings.All`);
   - a checkbox for a flag, a slider for a number, kept to its `[Range]`, a choice for an enum, and a text field for
@@ -91,14 +77,13 @@ In the project's `Presets/Default.preset`, by another preset, or `--set DebugToo
 
 ## Commands
 
-Added to the commands gem's, as the console and the terminal run them:
+The gem adds to the commands gem's, for the console and the terminal alike, what the windows do: `get` logs a gem's
+settings as `Gem.setting=value` lines, those read only at start too; `set` changes one while running, as the settings
+window does, and warns why when the value does not fit; `preset` logs or applies a preset; `view` shows a debug view
+by its pass's file name, or alone the frame as it is; and `clear` empties the console's view. `help` says what each
+takes.
 
-| Command | |
-| --- | --- |
-| `get <Gem>` | Logs every setting of the gem as `Gem.setting=value` lines, those read only at start too. |
-| `set <Gem.setting=value>` | Changes a setting while running, as the settings window does; why not, when it does not fit, is a warning. |
-| `preset` | Logs the preset applied and every preset there is. |
-| `preset <Name>` | Applies the preset of that name in `Presets/`. |
-| `view <Name>` | Shows a debug view, a pass in `Passes/Debug/` by its file name (`depth`, `normals`, `lights`), in place of the finished image. |
-| `view` | Shows the frame as it is again. |
-| `clear` | Empties the console's view. |
+## Its own settings
+
+Each is documented on `DebugToolsSettings` and shown in the settings window. `frameRate` is on in a Debug build; `tabs`
+lays out the telemetry window, and changed while running makes it list the instruments again under the new tabs.

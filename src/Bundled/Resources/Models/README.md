@@ -1,29 +1,28 @@
 # Models
 
-Meshes. A `.fbx`, `.gltf`/`.glb` or `.obj` file is a `Model`, read by the model loader gem and turned into the
-engine's space and units: every node's transform is baked into its meshes' vertices, in metres, +Y up, +X right and the
-front at +Z. A model is the size it was made at: 1 m in Blender is 1 m here, whatever the export's scale and axes, and
-its front, Blender's -Y, faces the entity's forward, +Z. Its normals are the file's, so export with them. The loader is
-handed the one file, so a `.gltf` whose buffers are files beside it does not load: use a `.glb`, or a `.gltf` with its
-buffers inside it.
+Meshes. A `.fbx`, `.gltf`/`.glb` or `.obj` file is a `Model`, which the model loader turns into the engine's space and
+units: metres, +Y up, +X right and the front at +Z, so a model is the size it was made at and its front faces the
+entity's forward, whatever the export's scale and axes. Export with normals, which are the file's, and as one file: the
+loader is handed the one file, so a `.gltf` whose buffers are files beside it does not load; use a `.glb`, or a `.gltf`
+with its buffers inside it. How the loader gets from the file's axes and scale to the engine's is in
+[its README](../../Gems/AssimpModelLoader/README.md).
 
 ## The `.meta`
 
 ```json
-{ "id": 520, "origin": { "x": -1, "y": 0, "z": 0 } }
+{ "id": N, "origin": { "x": -1, "y": 0, "z": 0 } }
 ```
 
-| Key | Default | What it does |
-| --- | --- | --- |
-| `origin` | 0, 0, 0 | The point of the model that sits at the entity's position. |
+`origin` is the point of the model that sits at the entity's position, `0, 0, 0` unless it says.
 
 ## What a model is
 
-Meshes (48-byte vertices: position, normal, tangent, uv; 32-bit indices), each drawn with the material in the slot
-it names, 0 to 7: its material's place in the file's list of materials, where one past 7 is drawn with slot 7. An entity draws a model through its `Renderer` component, which names the model and its materials by slot:
+Meshes (`Vertex.Size` bytes a vertex: position, normal, tangent, uv; 32-bit indices), each drawn with the material in
+the slot it names, 0 to 7: its material's place in the file's list of materials, where one past 7 is drawn with slot 7.
+An entity draws a model through its `Renderer` component, which names the model and its materials by slot:
 
 ```json
-"Renderer": { "model": { "id": 514 }, "materials": [ { "id": 710 } ] }
+"Renderer": { "model": { "id": 515 }, "materials": [ { "id": 3323 } ] }
 ```
 
 ## Clusters and cards
@@ -36,5 +35,5 @@ when the model's file or `.meta` changes; a model that lies flat has no cards.
 
 ## Adding a model
 
-Drop the file under `Assets/` (or Core's `Resources/Models/` for an engine primitive), set `origin` if its pivot is
+Drop the file under the project's `Assets/`, or in this folder for an engine primitive, set `origin` if its pivot is
 not where the entity should stand, and name it from a `Renderer`.

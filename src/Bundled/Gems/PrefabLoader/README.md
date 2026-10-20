@@ -15,11 +15,12 @@ A file becomes a tree of parts (`PrefabPart`), one for each entity it holds:
 - **Tags.** An entity's `tags`, up to eight, become a `Tags` among its components; past eight, or an empty name, is
   warned about and left out.
 - **Scripts.** Each script entry names the `.cs` asset that declares it by its id, and every other key is a value for
-  its public property of that name, read as the property's type. A part holds its scripts with their values
-  (`PrefabScript`), and a `Scripts` component naming them among its components, so each entity spawned from it names
-  them and is given its own copy of each, made by the gem that runs scripts. One that does not load, declares no
-  script, is given a key it has no property for, is named twice, or is past the eight an entity holds, is an error,
-  and the part goes without it.
+  its public property of that name, as Core's JSON dialect names it (camelCase), read as the property's type. A part
+  holds its scripts with their values (`PrefabScript`), and a `Scripts` component naming them among its components; how
+  a script is then made for each entity spawned from the part, and given those values, is the
+  [scripting gem's](../Scripting/README.md). A script that does not load, declares no script, or is given a key it has
+  no property for is an error, and the part goes without it; one named twice, or past the eight an entity holds, is
+  warned about and left out.
 - **Children.** An entity's `children` are the parts under it. One that names a `prefab` has that prefab loaded, and
   its parts go under it, before its own children: shared, not copied, as nothing changes a prefab once it is made.
 

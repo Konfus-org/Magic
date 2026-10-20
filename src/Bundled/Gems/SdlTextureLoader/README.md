@@ -2,6 +2,8 @@
 
 Images to textures, through SDL_image, called through its generated API ([Gems](../README.md#native-libraries)):
 provides `IAssetLoader<Texture>`. What a texture's `.meta` holds is in [Textures](../../Resources/Textures/README.md).
+SDL_image and SDL come from the SDL bindings project, so SDL_image binds to the one SDL every gem shares
+([Sharing a library](../README.md#sharing-a-library)).
 
 ## Behaviour
 
@@ -10,8 +12,3 @@ provides `IAssetLoader<Texture>`. What a texture's `.meta` holds is in [Textures
 - With `mipmaps`, each level is the one above halved with SDL's linear scaling, down to one texel, and every level is
   in one array, the first at its start.
 - SDL_image needs no SDL started, so files load on any worker, several at once.
-
-## Natives
-
-The SDL bindings gem carries SDL_image and SDL for this machine, which the gem's load context loads. SDL is called before SDL_image, so SDL_image binds to the SDL every gem shares
-(`GemLoadContext`).

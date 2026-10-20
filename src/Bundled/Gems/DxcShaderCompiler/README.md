@@ -1,16 +1,18 @@
 # DxcShaderCompiler
 
-HLSL to SPIR-V, DXIL or Metal: provides `IShaderCompiler`, with Microsoft's DirectXShaderCompiler (DXC) called
-directly, by hand, as a COM API, and SPIRV-Cross, through its generated API ([Gems](../README.md#native-libraries)), for Metal. It needs the assets (`Assets`), which a shader's includes are,
-and keeps what it compiles in the cache (`Caches`).
+HLSL to SPIR-V, DXIL or Metal: provides `IShaderCompiler`, with Microsoft's DirectXShaderCompiler (DXC) and
+Khronos's SPIRV-Cross, both built here from their repositories ([Gems](../README.md#native-libraries)), DXC's library
+alone (an LLVM, the one build that takes long). SPIRV-Cross is called through its generated API. DXC is a COM API,
+which the generator cannot express, so it is the one library bound by hand, in the gem, and the gem drives it directly:
+a front end that fixes DXC's SPIR-V target at Vulkan 1.0 could not compile these shaders, whose wave intrinsics need
+1.1. The gem needs the assets (`Assets`), which a shader's includes are, and keeps what it compiles in the cache
+(`Caches`).
 
 ## Settings
 
-In the project's `Presets/Default.preset`, by another preset, or `--set DxcShaderCompiler.<key>=<value>`:
-
-| Key | Default | |
-| --- | --- | --- |
-| `debugInfo` | `false` | Embed each shader's source and symbols, so a GPU capture (RenderDoc, PIX, Xcode) steps through it. Changed while running, every shader is compiled again. |
+Its one setting is documented on `DxcShaderCompilerSettings` and shown in the settings window. `debugInfo` embeds
+each shader's source and symbols, so a GPU capture steps through it; it is part of what names a cache entry, so
+changing it while running compiles every shader again.
 
 ## Behaviour
 
@@ -30,8 +32,7 @@ In the project's `Presets/Default.preset`, by another preset, or `--set DxcShade
   Vulkan's attributes (`[[vk::image_format]]`) mean nothing to DXIL, so its compile alone does not warn of them.
 - Metal is translated from the SPIR-V by SPIRV-Cross (`Metal`) to Metal Shading Language 2.3, which has the SIMD-group
   functions wave intrinsics become. Metal has no descriptor sets, so each resource gets the texture, sampler or buffer
-  index the GPU gem's Metal backend expects of its set and binding, and the entry point is renamed `main0`. A front
-  end that fixes DXC's SPIR-V target at Vulkan 1.0 cannot compile these shaders, which is why DXC is called itself.
+  index the GPU gem's Metal backend expects of its set and binding, and the entry point is renamed `main0`.
 - DXC runs on a worker, never the caller's thread. Each call makes its own DXC compiler, so the gem is safe from any
   thread. A shader asked for while it already compiles, as when the passes are built again before the last build is
   done, waits for that compile rather than starting its own, so each compiles, and its cache entry is written, once.
@@ -48,8 +49,3 @@ uses. The gem provides `ICache<GpuShader>`, which writes a compiled shader's byt
   is deleted.
 - It is made with `debugInfo`, so changing it finds the entries dirty, and they compile again.
 - DXC's arguments are the gem's own, so changing them raises the cache's version, which makes every entry dirty.
-
-## Natives
-
-DXC and SPIRV-Cross are built here from Microsoft's and Khronos's repositories, DXC's library alone (an LLVM, the one
-build that takes long); the gem's load context loads both.

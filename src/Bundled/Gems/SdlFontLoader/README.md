@@ -1,7 +1,9 @@
 # SdlFontLoader
 
 Fonts to glyph atlases, through SDL_ttf, called through its generated API ([Gems](../README.md#native-libraries)):
-provides `IAssetLoader<Font>`. What a font's `.meta` holds is in [Fonts](../../Resources/Fonts/README.md).
+provides `IAssetLoader<Font>`. What a font's `.meta` holds is in [Fonts](../../Resources/Fonts/README.md). SDL_ttf and
+SDL come from the SDL bindings project, so SDL_ttf binds to the one SDL every gem shares
+([Sharing a library](../README.md#sharing-a-library)).
 
 ## Behaviour
 
@@ -11,8 +13,3 @@ provides `IAssetLoader<Font>`. What a font's `.meta` holds is in [Fonts](../../R
   shelf-packed left to right in rows, a pixel apart so linear sampling never bleeds a neighbour in, into the smallest
   atlas, a power of two on each side from 256, that holds them all.
 - SDL_ttf shares state between its fonts, so files load one at a time, on whichever worker asks.
-
-## Natives
-
-The SDL bindings gem carries SDL_ttf and SDL for this machine, which the gem's load context loads. SDL is called before SDL_ttf starts, so SDL_ttf binds to the SDL every gem shares
-(`GemLoadContext`).

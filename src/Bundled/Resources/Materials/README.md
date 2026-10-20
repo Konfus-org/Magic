@@ -64,10 +64,10 @@ Surface EvaluateSurface(SurfaceInputs input, MaterialParams material)
 ```
 
 Defaults and `Gi*` roles (which members are the surface's colour, how metal it is and its light, for global
-illumination) are read by the renderer and stripped before compilation. `SampleTexture(input, texture)` samples at the mesh uv; for any other uv
-pass its own derivatives to `SampleTextureGrad`, which the renderer defines. `SampleNormal(input, map, scale)` reads a
-normal map into world space, rebuilding z, so two-channel (BC5) maps serve as well as three-channel ones, through the
-vertex frame as MikkTSpace bakers expect.
+illumination) are read by the renderer and stripped before compilation. `SampleTexture(input, texture)` samples at the
+mesh uv; for any other uv pass its own derivatives to `SampleTextureGrad`, which the renderer defines.
+`SampleNormal(input, map, scale)` reads a normal map into world space, rebuilding z, so two-channel (BC5) maps serve as
+well as three-channel ones, through the vertex frame as MikkTSpace bakers expect.
 
 What a surface hands back (`Surface`):
 
@@ -80,7 +80,7 @@ What a surface hands back (`Surface`):
 | `occlusion` | Baked or authored ambient occlusion. |
 | `emissive` | Light given off, pre-exposed: 1 reads as white whatever the lighting. |
 | `alphaCutoff` | Below it, a masked material's pixel is discarded. |
-| `shadingModel`, `modelData` | `ShadingDefault`, `ShadingClearCoat` (coat, coat roughness), `ShadingCloth` (sheen, sheen roughness) or `ShadingSubsurface` (transmission, wrap): see `Include/ShadingModel.hlsli`. |
+| `shadingModel`, `modelData` | Which shading model lights it, and what that model takes ([Shaders](../Shaders/README.md#lighting-a-pixel)). |
 
 `SurfaceInputs.viewDirection` is the unit direction from the surface toward the camera. A transparent surface is
 compiled with `SURFACE_FORWARD` 1 and may read what was drawn behind it, pre-exposed (`ScenePixelOf`,
@@ -96,5 +96,5 @@ renderer adds its reflection at the reflectance its index of refraction gives.
 
 ## Adding a material
 
-Write `Name.mat` anywhere under the project's `Assets/`, or in Core's `Resources/Materials/` for the engine, and name
-it from a chunk's `Renderer`.
+Write `Name.mat` anywhere under the project's `Assets/`, or in this folder for the engine, and name it from an
+entity's `Renderer`, in the slot its model's mesh names ([Models](../Models/README.md)).

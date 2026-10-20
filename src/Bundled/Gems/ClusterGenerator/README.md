@@ -1,18 +1,9 @@
 # ClusterGenerator
 
 Models' clusters and cards: provides `ILoadPostProcessor<Model>`, giving each model its `Clusters` and its `Cards` as it
-loads, and keeps them in the cache (`Caches`), which it writes them for as `ICache<ClustersAndCards>`.
-
-## Settings
-
-In the project's `Presets/Default.preset`, by another preset, or with `--set ClusterGenerator.<key>=<value>`:
-
-| Key | Default | |
-| --- | --- | --- |
-| `cardHeight` | `0.03` | The share of the view's height a model is under when its cards are drawn in place of its meshes ([Cards](#cards)): larger draws cards nearer. Changed while running, every model is made again. |
-
-It is read as each model's clusters and cards are made, and is part of what they are kept in the cache by, so changing
-it makes every model's again as it loads.
+loads, and keeps them in the cache (`Caches`), which it writes them for as `ICache<ClustersAndCards>`. Its one setting,
+`cardHeight`, is documented on `ClusterGeneratorSettings` and shown in the settings window; what it is to the cache is
+under [Cache](#cache).
 
 ## Clusters
 
@@ -58,7 +49,8 @@ stand in for it: it has no cards, and keeps its coarsest clusters however far.
 
 A model's clusters and cards are kept under its id, its cards' atlases with them, made from its version, a hash of its
 file and its `.meta`, and from `cardHeight`: a model is made once, and again when any of them changes, on disk or while
-it runs. Changing how they are made raises the cache's version, which makes every entry dirty.
+it runs, so a changed `cardHeight` makes every model again as it loads. Changing how they are made raises the cache's
+version, which makes every entry dirty.
 
 Building the clusters and drawing the cards run on the worker the model loads on, so the first load of a large model
 takes longer, and every load after it reads the cache.
