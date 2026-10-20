@@ -17,9 +17,10 @@ or branch cancels the run it supersedes, except on `main`, where a release in pr
 has a time limit, so a stuck step ends the job instead of holding a runner; the limits are generous for the jobs that
 may build the native libraries from source (below) and tight for the rest.
 
-The repository's rulesets, not a file here, are what make the checks required: `dev` and `main` should require the
-three Build jobs, Test, Docs and CodeQL to pass before a merge, so that Dependabot's pull requests and everyone else's
-are held to the same bar. That is what makes a merge into `main` a release of checked code.
+The repository's rulesets, not a file here, are what make the checks required: `dev` and `main` require the three
+Build jobs, Test, Docs and CodeQL to pass before a merge, so that Dependabot's pull requests and everyone else's are
+held to the same bar. That is what makes a merge into `main` a release of checked code. GitHub knows a check by its
+job's name alone, whatever workflow it is in, so every job here carries a name no other job has.
 
 ## The native libraries
 
