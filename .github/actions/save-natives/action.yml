@@ -1,0 +1,31 @@
+# The last step of a job that builds Magic, run whether the job passed or not, so a cold native build is kept even
+# when the managed build after it failed. CMake's working folders are dropped first: after a build only the sources,
+# what was installed and the ready markers are read, and the working folders are gigabytes.
+name: Save the native libraries
+description: Drops CMake's working folders and saves Build/NativeLibs under the key the setup restored with.
+
+inputs:
+  key:
+    description: The cache key to save under, from the setup's natives-key output.
+    required: true
+  hit:
+    description: The setup's natives-hit output; nothing is saved when the key was restored exactly.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Drop the native libraries' build folders
+      id: trim
+      if: inputs.hit != 'true'
+      shell: pwsh
+      run: |
+        Get-ChildItem Build/NativeLibs -Directory -ErrorAction Ignore |
+          ForEach-Object { Remove-Item (Join-Path $_.FullName 'build') -Recurse -Force -ErrorAction Ignore }
+        "exists=$(Test-Path Build/NativeLibs)" >> $env:GITHUB_OUTPUT
+
+    - uses: actions/cache/save@v6
+      if: inputs.hit != 'true' && steps.trim.outputs.exists == 'True'
+      with:
+        path: Build/NativeLibs
+        key: ${{ inputs.key }}

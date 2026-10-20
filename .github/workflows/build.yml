@@ -1,0 +1,49 @@
+# The build on every OS Magic targets, in Debug, and the Release configuration on one: tools/Validate.ps1's Build
+# step, which already treats every warning as an error. The weekly run keeps main's native-library caches alive,
+# which every branch falls back to.
+name: Build
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }} ${{ matrix.configuration }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        configuration: [Debug]
+        include:
+          - os: ubuntu-latest
+            configuration: Release
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup
+        uses: ./.github/actions/setup
+
+      - name: Build
+        shell: pwsh
+        run: ./tools/Validate.ps1 -Only Build -Configuration ${{ matrix.configuration }}
+
+      - if: always()
+        uses: ./.github/actions/save-natives
+        with:
+          key: ${{ steps.setup.outputs.natives-key }}
+          hit: ${{ steps.setup.outputs.natives-hit }}

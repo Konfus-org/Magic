@@ -47,7 +47,6 @@ $env:MSBUILDDISABLENODEREUSE = '1'
 $root = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $root 'Magic.slnx'
 $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
-if (Test-Path "$magic.exe") { $magic = "$magic.exe" }
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 
 $steps = @(
@@ -62,9 +61,13 @@ $failed = $null
 $summary = @()
 foreach ($step in $steps) {
     if ($Only -notcontains $step.Name) { continue }
-    if ($step.Name -ne 'Build' -and $step.Name -ne 'Test' -and -not (Test-Path $magic)) {
-        Write-Output "There is no $magic to run: build first (tools/Validate.ps1 -Only Build)."
-        exit 1
+    if ($step.Name -ne 'Build' -and $step.Name -ne 'Test') {
+        # Named here rather than at the start: on Windows it is Magic.exe, which the Build step may have just made.
+        if (Test-Path "$magic.exe") { $magic = "$magic.exe" }
+        if (-not (Test-Path $magic)) {
+            Write-Output "There is no $magic to run: build first (tools/Validate.ps1 -Only Build)."
+            exit 1
+        }
     }
 
     Write-Output ""

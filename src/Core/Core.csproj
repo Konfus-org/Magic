@@ -4,6 +4,8 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>Magic</AssemblyName>
     <RootNamespace>Magic</RootNamespace>
+    <!-- A release's major and minor; its patch is the number of the run that built it. -->
+    <VersionPrefix>0.1</VersionPrefix>
     <!-- For the delegate* the frame loop calls gem hooks through. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>

@@ -16,3 +16,5 @@ However, AI code is used with GREAT care and scrutiny. All AI-generated code mus
 ### Merging and Approval: 
 Make a fork with your desired changes then create a pull request to merge it back into the main repo.
 A Toybox team member, will review, offer comments, and approve if all comments are addressed.
+Every check must pass before a merge: the build on every OS, the tests, the documentation's links and the
+security analysis ([CI](.github/workflows/README.md)). Merging to `main` publishes a release.

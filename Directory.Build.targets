@@ -18,8 +18,10 @@
        template (a CMake config.h) is made by Shims, as header=template, with every option off.
 
        Everything lands under Build/NativeLibs/<name>/ (MagicNativeLibs moves it): the source, the build and what it
-       built, with empty Directory.Build files beside them so Magic's own build rules stop at the folder. A library is cloned and built once per commit and options; generation reruns only when the library, the
-       item or the generator changed. The machine needs git, CMake and a C++ toolchain (README). -->
+       built, with empty Directory.Build files beside them so Magic's own build rules stop at the folder. A library is
+       cloned and built once per commit and options, on half the machine's cores unless MagicNativeCores names how
+       many; generation reruns only when the library, the item or the generator changed. The machine needs git, CMake
+       and a C++ toolchain (README). -->
   <PropertyGroup>
     <MagicNativeLibs Condition="'$(MagicNativeLibs)' == ''">$(MSBuildThisFileDirectory)Build/NativeLibs/</MagicNativeLibs>
     <MagicNativeRid>$(NETCoreSdkRuntimeIdentifier)</MagicNativeRid>
@@ -87,6 +89,7 @@
       <CmakeTarget ParameterType="System.String" />
       <Built ParameterType="System.String" />
       <Checkouts ParameterType="System.String" />
+      <Cores ParameterType="System.Int32" />
       <Produced ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
       <Marker ParameterType="Microsoft.Build.Framework.ITaskItem" Output="true" />
     </ParameterGroup>
@@ -284,17 +287,18 @@ using (Mutex mutex = new Mutex(false, "Magic.Natives"))
                 Directory.CreateDirectory(built);
                 string target = string.IsNullOrEmpty(CmakeTarget) ? "" : " --target " + CmakeTarget;
 
-                // The build takes half the cores, never all of them, so the machine stays usable; a compiler takes a
-                // few hundred MB, so this is what bounds memory too. On Windows CMake builds through MSBuild, where a
+                // The build takes half the cores, never all of them, so the machine stays usable, unless
+                // MagicNativeCores names how many, for a machine with no user to keep it usable for; a compiler takes
+                // a few hundred MB, so this is what bounds memory too. On Windows CMake builds through MSBuild, where a
                 // bare --parallel builds one project per core and each project's compiler forks once per core again:
-                // cores-squared compilers at once. There projects run in parallel on a quarter of the cores, which
+                // cores-squared compilers at once. There projects run in parallel on half the cores it may use, which
                 // also bounds the linkers, the multi-tool task compiles file by file, and the enforced count caps the
-                // compilers at half the cores across every build on the machine. MSBuild's nodes would otherwise
-                // linger for a quarter of an hour after the build.
-                int cores = Environment.ProcessorCount;
-                string parallel = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-                    ? " --parallel " + Math.Max(1, cores / 4) + target + " -- /nodeReuse:false /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:CL_MPCount=" + Math.Max(1, cores / 2)
-                    : " --parallel " + Math.Max(1, cores / 2) + target;
+                // compilers at that many across every build on the machine. MSBuild's nodes would otherwise linger
+                // for a quarter of an hour after the build.
+                int cores = Cores > 0 ? Cores : Math.Max(1, Environment.ProcessorCount / 2);
+                string parallel = windows
+                    ? " --parallel " + Math.Max(1, cores / 2) + target + " -- /nodeReuse:false /p:UseMultiToolTask=true /p:EnforceProcessCountAcrossBuilds=true /p:CL_MPCount=" + cores
+                    : " --parallel " + cores + target;
                 ready = Run("cmake", "-S \"" + source + "\" -B \"" + build + "\" -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=\"" + built + "\" " + options, Folder, "BND015")
                     && Run("cmake", "--build \"" + build + "\" --config Release" + parallel, Folder, "BND015")
                     && (!string.IsNullOrEmpty(CmakeTarget) || Run("cmake", "--install \"" + build + "\" --config Release", Folder, "BND015"));
@@ -336,7 +340,7 @@ using (Mutex mutex = new Mutex(false, "Magic.Natives"))
   <Target Name="PrepareNativeLibraries" DependsOnTargets="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != ''">
     <PrepareNativeLibrary Name="%(NativeLibrary.Identity)" Repository="%(NativeLibrary.Repository)" Commit="%(NativeLibrary.Commit)" Folder="%(NativeLibrary.Folder)"
                           Source="%(NativeLibrary.Source)" Prepare="%(NativeLibrary.Prepare)" Options="%(NativeLibrary.Cmake)" CmakeTarget="%(NativeLibrary.CmakeTarget)"
-                          Built="$(_NativeBuiltFolders)" Checkouts="$(_NativeCheckoutFolders)">
+                          Built="$(_NativeBuiltFolders)" Checkouts="$(_NativeCheckoutFolders)" Cores="$(MagicNativeCores)">
       <Output TaskParameter="Produced" ItemName="_NativeBuilt" />
       <Output TaskParameter="Marker" ItemName="_NativeReady" />
     </PrepareNativeLibrary>

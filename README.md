@@ -34,7 +34,8 @@ Build/bin/Debug/Magic --project samples
 ```
 
 The first build clones the native libraries into `Build/NativeLibs/` (`MagicNativeLibs` moves it), builds them for
-this machine and generates their C# from the headers ([Gems](src/Bundled/Gems/README.md#native-libraries)); after
+this machine, on half its cores unless `MagicNativeCores` says how many, and generates their C# from the headers
+([Gems](src/Bundled/Gems/README.md#native-libraries)); after
 that a build touches them only when one's commit changes. Building `src/Core` alone builds the bundled gems and resources with it, so `dotnet run --project src/Core` or a run
 from an IDE never loads a gem left stale against a new Magic; the solution build adds the samples' own code. Run from
 an IDE or with `dotnet run --project src/Core`, Magic opens the Samples project. Only a `Release`

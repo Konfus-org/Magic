@@ -1,0 +1,73 @@
+# What a job needs before it builds Magic: the SDK global.json names, Python with ply for the C API the build generates
+# for Dear ImGui, SDL's build dependencies on Linux, Ninja where CMake may use it, and the two caches. The native
+# libraries' cache is only restored here: the job saves it with save-natives as its last step, so a cold native build
+# survives a failure later in the job. README.md beside the workflows explains the whole.
+name: Set up Magic's build
+description: Installs what a build needs and restores the NuGet and native-library caches.
+
+outputs:
+  natives-key:
+    description: The cache key the native libraries are saved under after the build.
+    value: ${{ steps.natives.outputs.cache-primary-key }}
+  natives-hit:
+    description: Whether the native libraries were restored under exactly that key, so there is nothing to save.
+    value: ${{ steps.natives.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-dotnet@v6
+      with:
+        global-json-file: global.json
+
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.x'
+
+    - name: Install ply
+      shell: pwsh
+      run: python -m pip install --quiet ply
+
+    - name: Install SDL's build dependencies and Ninja
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends ninja-build \
+          libasound2-dev libpulse-dev libpipewire-0.3-dev libudev-dev libdbus-1-dev \
+          libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+          libxkbcommon-dev libwayland-dev libdecor-0-dev \
+          libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev
+
+    - name: Install Ninja
+      if: runner.os == 'macOS'
+      shell: bash
+      run: command -v ninja || brew install ninja
+
+    # A runner has no user to keep the machine usable for, so the native builds take every core; CMake takes the
+    # generator from the environment where the build names none, and Ninja is the fast one on Linux and macOS (on
+    # Windows the build drives Visual Studio's). The packages folder sits in the workspace so a cache can name it.
+    - name: Set the build's environment
+      shell: pwsh
+      run: |
+        "MagicNativeCores=$([Environment]::ProcessorCount)" >> $env:GITHUB_ENV
+        "NUGET_PACKAGES=${{ github.workspace }}/.nuget/packages" >> $env:GITHUB_ENV
+        "DOTNET_NOLOGO=1" >> $env:GITHUB_ENV
+        "DOTNET_CLI_TELEMETRY_OPTOUT=1" >> $env:GITHUB_ENV
+        if (-not $IsWindows) { "CMAKE_GENERATOR=Ninja" >> $env:GITHUB_ENV }
+
+    # Every package version is in Directory.Packages.props, so that and the SDK are what the packages depend on.
+    - uses: actions/cache@v6
+      with:
+        path: ${{ github.workspace }}/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
+        restore-keys: nuget-${{ runner.os }}-
+
+    # Keyed on what declares the libraries. A cache from an older key still serves: the build's own markers tell it
+    # which libraries match and which one changed, and it rebuilds that one alone.
+    - id: natives
+      uses: actions/cache/restore@v6
+      with:
+        path: Build/NativeLibs
+        key: natives-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Directory.Build.targets', 'src/Bundled/Gems/*/*.csproj') }}
+        restore-keys: natives-${{ runner.os }}-${{ runner.arch }}-

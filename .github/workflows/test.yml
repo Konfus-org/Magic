@@ -1,0 +1,47 @@
+# The tests and the headless sample run, on Linux: tools/Validate.ps1's Test and Headless steps, which need no
+# display or GPU. The Window step does, so it stays on developer machines. The logs are kept when a run fails.
+name: Test
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ubuntu-latest Debug
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup
+        uses: ./.github/actions/setup
+
+      - name: Build, test and run headless
+        shell: pwsh
+        run: ./tools/Validate.ps1 -Only Build,Test,Headless
+
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs
+          path: |
+            Build/bin/Debug/Logs
+            Build/TestOutput
+          if-no-files-found: ignore
+
+      - if: always()
+        uses: ./.github/actions/save-natives
+        with:
+          key: ${{ steps.setup.outputs.natives-key }}
+          hit: ${{ steps.setup.outputs.natives-hit }}

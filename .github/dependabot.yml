@@ -1,0 +1,24 @@
+# Pull requests into dev for package and action updates, one per ecosystem per week. The build fails the restore on
+# any package advisory, so an update that fixes one arrives as a pull request the same checks then validate.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: dev
+    groups:
+      nuget:
+        patterns: ['*']
+
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+      - /.github/actions/save-natives
+    schedule:
+      interval: weekly
+    target-branch: dev
+    groups:
+      actions:
+        patterns: ['*']
