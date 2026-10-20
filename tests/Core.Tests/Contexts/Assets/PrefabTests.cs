@@ -1,7 +1,7 @@
+using System.Numerics;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
-using Magic.Contexts.Utils;
 
 namespace Magic.Tests.Contexts.Assets;
 
@@ -18,7 +18,7 @@ public sealed class PrefabTests
 
         Transform? place = prefab.PlaceOf(spawn);
 
-        Assert.Equal<Vector3D?>(new Vector3D(1, 2, 3), place?.Position);
+        Assert.Equal<Vector3?>(new Vector3(1, 2, 3), place?.Position);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public sealed class PrefabTests
 
         Transform? place = prefab.PlaceOf(spawn);
 
-        Assert.Equal<Vector3D?>(new Vector3D(11, 0, 0), place?.Position);
+        Assert.Equal<Vector3?>(new Vector3(11, 0, 0), place?.Position);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class PrefabTests
 
         Transform? place = prefab.PlaceOf(spawn);
 
-        Assert.Equal<Vector3D?>(new Vector3D(10, 0, 0), place?.Position);
+        Assert.Equal<Vector3?>(new Vector3(10, 0, 0), place?.Position);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class PrefabTests
 
         Transform? place = prefab.PlaceOf(spawn);
 
-        Assert.Equal<Vector3D?>(new Vector3D(10, 0, 0), place?.Position);
+        Assert.Equal<Vector3?>(new Vector3(10, 0, 0), place?.Position);
     }
 
     [Fact]
@@ -97,9 +97,9 @@ public sealed class PrefabTests
         Assert.Null(place);
     }
 
-    private static Transform At(double x, double y, double z)
+    private static Transform At(float x, float y, float z)
     {
-        return new Transform { Position = new Vector3D(x, y, z) };
+        return new Transform { Position = new Vector3(x, y, z) };
     }
 
     private static Tags Tagged(Tag tag)

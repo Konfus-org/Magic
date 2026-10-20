@@ -49,9 +49,8 @@ copy what Render reads into the copy it is not reading: each instance's transfor
 sun, sky and post-processing. Each instance and light is kept at its entity's slot and compared with what was there, so
 only what changed is passed on. Sync swaps the two copies, and Render reads the one just finished.
 
-**Positions far from the origin.** Core's positions are doubles. Every table on the GPU keeps a position as a float and
-what the float misses, and every shader works relative to the camera, both halves taken from the camera's, so what is
-near the camera is exact however far it is from the origin.
+**Camera-relative.** Every shader works with positions relative to the camera, the frame's `CameraPosition` taken
+from each, so what is near the camera is as exact as floats are near zero, wherever the camera stands.
 
 **The scene on the GPU.** Instances, lights and materials are tables kept by slot and row, uploaded a run of changed
 rows at a time. An instance's row holds its transform and the last frame's, its model's row, its material slots' rows,

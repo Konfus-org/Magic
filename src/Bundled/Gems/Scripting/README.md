@@ -21,7 +21,7 @@ A script is a `.cs` file with a `.meta` beside it, as any asset has, whose class
 ```csharp
 internal sealed class Hover(Entity owner, World world) : IBehavior
 {
-    private double _restY;
+    private float _restY;
 
     public float Height { get; set; }
 

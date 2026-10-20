@@ -47,12 +47,10 @@ internal sealed class SceneLights(IGpu gpu) : IDisposable
         foreach (ref readonly Delta<LightCopy>.Change change in lights.Changed)
         {
             (int slot, LightCopy light) = change;
-            Vector3 high = light.Position.ToVector3();
             Rows.Set(slot, new GpuSceneLight
             {
-                High = high,
+                Position = light.Position,
                 Range = light.Range,
-                Low = (light.Position - high).ToVector3(),
                 Radius = light.Radius,
                 Intensity = light.Intensity,
                 SpotScale = light.SpotScale,
@@ -68,26 +66,23 @@ internal sealed class SceneLights(IGpu gpu) : IDisposable
 }
 
 /// <summary>
-/// A point or spot light in the world's table (Shaders/Include/Structs.hlsli's GpuSceneLight): where it is, as a float
-/// and what it is past that, so it is exact relative to the camera however far from the origin; how far it reaches and
-/// the size of its bulb; its intensity in candela times its colour; for a spot its axis and the scale and offset of its
-/// cone's falloff; and <see cref="GpuSceneLightFlags"/>.
+/// A point or spot light in the world's table (Shaders/Include/Structs.hlsli's GpuSceneLight): where it is; how far it
+/// reaches; its intensity in candela times its colour; the size of its bulb; for a spot its axis and the scale and
+/// offset of its cone's falloff; and <see cref="GpuSceneLightFlags"/>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuSceneLight
 {
-    public Vector3 High;
+    public Vector3 Position;
     public float Range;
-    public Vector3 Low;
-    public float Radius;
     public Vector3 Intensity;
-    public float SpotScale;
+    public float Radius;
     public Vector3 Forward;
+    public float SpotScale;
     public float SpotOffset;
     public uint Flags;
     public uint Padding0;
     public uint Padding1;
-    public uint Padding2;
 }
 
 /// <summary>

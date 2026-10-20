@@ -1,6 +1,6 @@
 {
     "entities": [
-        { "name": "Rock", "components": { "Transform": { "position": { "x": 0, "y": 0.5, "z": 0 }, "scale": { "x": 1, "y": 0.5, "z": 1 } }, "Renderer": { "model": { "id": 513 }, "materials": { "slot0": { "id": 3329 } } } } },
+        { "name": "Rock", "components": { "Transform": { "position": { "x": 0, "y": 0.5, "z": 0 }, "scale": { "x": 1, "y": 0.5, "z": 1 } }, "Renderer": { "model": { "id": 513 }, "materials": { "slot0": { "id": 3329 } } }, "Physics": { "shape": "mesh" } } },
         { "name": "Snow", "components": { "Transform": { "position": { "x": 0, "y": 0.853, "z": 0 }, "scale": { "x": 0.31, "y": 0.155, "z": 0.31 } }, "Renderer": { "model": { "id": 513 }, "materials": { "slot0": { "id": 3330 } } } } }
     ]
 }

@@ -25,11 +25,18 @@ written by hand and nothing comes prebuilt or from a third party: every library 
 - `Repository` and `Commit` pin the source: a tag or a commit hash, fetched shallow with its submodules into
   `Build/NativeLibs/<name>/source/` (`MagicNativeLibs` moves the folder). A changed commit fetches afresh.
 - `Cmake` holds the options to build with, in Release; `CmakeTarget` names one CMake target where the project builds
-  more than the library, and `Source` the folder of the checkout holding `CMakeLists.txt` when that is not the
-  root. Items are taken in order, so a library comes after what it builds on, whose build is written
-  `{built:<name>}` in the options (`-DCMAKE_PREFIX_PATH={built:SDL3}`); `{source}` is the library's own source. A
-  library is built once per commit and options, by one build at a time: projects that declare the same library
-  wait on each other rather than build twice. An item with no `Cmake` is cloned for its headers alone.
+  more than the library, and `Source` the folder holding `CMakeLists.txt`: in the checkout when that is not the
+  root, or an absolute folder of the gem's own (`$(MSBuildProjectDirectory)/Native`) for a library whose repository
+  has none. Items are taken in order, so a library comes after what it builds on: `{built:<name>}` is another
+  library's install folder (`-DCMAKE_PREFIX_PATH={built:SDL3}`) and `{checkout:<name>}` its checkout; `{checkout}`
+  is the library's own, `{source}` the folder CMake builds from and `{folder}` the library's folder. A library is
+  built once per commit and options, by one build at a time: projects that declare the same library wait on each
+  other rather than build twice. An item with no `Cmake` is cloned for its headers or source alone.
+- `Prepare` is a command the machine's shell runs in the checkout after cloning and before CMake, several joined by
+  `&&`, with `{python}` for the machine's Python 3. It is how a C++ library gets a C API: the generator needs C, so
+  a C++ library is declared through the C API its own project or ecosystem generates, run here against the pinned
+  source, as Dear ImGui is through dear_bindings. No shim is written by hand, and a C API generator is never
+  written where a maintained one exists.
 - `Headers` are the root headers to read, relative to the checkout; `IncludePath` the folder their includes are
   found in; `Defines` what to define first. Every item's include folder serves every generation in the project, so
   a library whose headers include another's declares that one too. An item with no `Headers` is built for its

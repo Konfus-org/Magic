@@ -33,7 +33,7 @@ struct GiJob
 // Where an instance stands in the world, from the origin the scene's field is placed about.
 float3 GiTranslation(GpuSceneInstance instance)
 {
-    return float3(instance.row0.w, instance.row1.w, instance.row2.w) + instance.low;
+    return float3(instance.row0.w, instance.row1.w, instance.row2.w);
 }
 
 // The box a model's field covers where its instance stands: its middle and half its size along each axis.

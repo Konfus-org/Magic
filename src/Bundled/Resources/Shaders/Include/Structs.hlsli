@@ -78,27 +78,26 @@ struct GpuGiLevel
 static const uint SceneMirrored = 1u;
 static const uint SceneFadeIn = 2u;
 
-// A scene instance, by its entity's slot: the rows of transpose(world) (xyz its turn and scale, w its position's high
-// float, which low adds to, so a far position is still exact relative to the camera), and the last frame's the same way;
-// its largest scale, its model's row, when its fade started (in Time) and its eight material slots' rows, two to a word,
-// 0xFFFF for one not in yet.
+// A scene instance, by its entity's slot: the rows of transpose(world) (xyz its turn and scale, w its position), and
+// the last frame's the same way; its largest scale, its model's row, when its fade started (in Time) and its eight
+// material slots' rows, two to a word, 0xFFFF for one not in yet.
 struct GpuSceneInstance
 {
     float4 row0;
     float4 row1;
     float4 row2;
-    float3 low;
-    float maxScale;
     float4 prevRow0;
     float4 prevRow1;
     float4 prevRow2;
-    float3 prevLow;
+    float maxScale;
     uint flags;
     uint model;
     float fadeStart;
-    uint2 padding;
     uint4 materials;
 };
+
+// Its size in bytes, what a pass counts the Instances buffer's rows by.
+static const uint GpuSceneInstanceBytes = 128u;
 
 // A model in the cluster pool: its sphere about its origin, its clusters, its levels (GpuLevel) and its cards
 // (GpuCard), the unit-scale distance its cards are drawn from (0 for none), its grid's step, its distance field's slot,
@@ -162,31 +161,33 @@ struct GpuCard
     uint3 padding;
 };
 
-// A point or spot light in the world's table (the renderer's SceneLights.cs), by its entity's slot: where it is, as
-// a float and what it is past that; how far it reaches, its bulb's radius, its intensity in candela times its colour,
-// for a spot its axis and the scale and offset of its cone's falloff, and its flags.
+// A point or spot light in the world's table (the renderer's SceneLights.cs), by its entity's slot: where it is, how
+// far it reaches, its intensity in candela times its colour, its bulb's radius, for a spot its axis and the scale and
+// offset of its cone's falloff, and its flags.
 static const uint SceneLightLive = 1u;
 static const uint SceneLightSpot = 2u;
 static const uint SceneLightShadowless = 4u;
 
 struct GpuSceneLight
 {
-    float3 high;
+    float3 position;
     float range;
-    float3 low;
-    float radius;
     float3 intensity;
-    float spotScale;
+    float radius;
     float3 forward;
+    float spotScale;
     float spotOffset;
     uint flags;
-    uint3 padding;
+    uint2 padding;
 };
+
+// Its size in bytes, what a pass counts the SceneLights buffer's rows by.
+static const uint GpuSceneLightBytes = 64u;
 
 // Where a light is relative to the camera.
 float3 SceneLightPosition(GpuSceneLight light)
 {
-    return (light.high - CameraPosition) + (light.low - CameraLow);
+    return light.position - CameraPosition;
 }
 
 // Where a scene instance's model-space point is relative to the camera, and was relative to the last frame's.
@@ -194,14 +195,14 @@ float3 ScenePosition(GpuSceneInstance instance, float3 position)
 {
     float3 turned = float3(dot(instance.row0.xyz, position), dot(instance.row1.xyz, position), dot(instance.row2.xyz, position));
     float3 moved = float3(instance.row0.w, instance.row1.w, instance.row2.w) - CameraPosition;
-    return turned + moved + (instance.low - CameraLow);
+    return turned + moved;
 }
 
 float3 ScenePrevPosition(GpuSceneInstance instance, float3 position)
 {
     float3 turned = float3(dot(instance.prevRow0.xyz, position), dot(instance.prevRow1.xyz, position), dot(instance.prevRow2.xyz, position));
     float3 moved = float3(instance.prevRow0.w, instance.prevRow1.w, instance.prevRow2.w) - CameraPosition;
-    return turned + moved + (instance.prevLow - CameraLow) + CameraMotion;
+    return turned + moved + CameraMotion;
 }
 
 float3 SceneDirection(GpuSceneInstance instance, float3 direction)

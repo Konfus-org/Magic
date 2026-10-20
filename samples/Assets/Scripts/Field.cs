@@ -2,7 +2,6 @@ using System.Numerics;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
-using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -12,7 +11,8 @@ namespace Magic.Samples.Assets.Scripts;
 /// Fills a square of ground around its entity with instances of a model and with point lights, spread evenly and the
 /// same way every run (the R2 sequence, Roberts 2018): a script a prefab attaches as
 /// <c>{ "id": 3314, "instances": 2000, "lights": 500, "model": { "id": 517 }, "material": { "id": 3322 } }</c>, to see many
-/// of each at once and measure what they cost. They are its own, so they go when its entity does.
+/// of each at once and measure what they cost. Each instance is a dynamic ball, resting on the ground at its size
+/// until something knocks it. They are its own, so they go when its entity does.
 /// </summary>
 internal sealed class Field(Entity owner, World world) : IScript, IDisposable
 {
@@ -53,7 +53,7 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
     /// </summary>
     public void Start()
     {
-        Vector3D centre = world.Get<Transform>(owner).Position;
+        Vector3 centre = world.Get<Transform>(owner).Position;
         Transform[] transforms = new Transform[Instances];
         Renderer[] renderers = new Renderer[Instances];
         for (int i = 0; i < Instances; i++)
@@ -77,6 +77,12 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
         }
 
         _spawned.AddRange(world.Create<Transform, Renderer>(transforms, renderers));
+        Physics body = new() { Motion = Motion.Dynamic, Shape = Shape.Sphere, Bounce = 0.3f };
+        foreach (Entity instance in _spawned)
+        {
+            world.Set(instance, body);
+        }
+
         _spawned.AddRange(world.Create<Transform, PointLight>(places, lights));
     }
 

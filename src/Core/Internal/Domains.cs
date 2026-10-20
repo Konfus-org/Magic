@@ -126,7 +126,7 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Each open domain as a saved world holds it (<see cref="World.Save"/>): which, how it was opened, and the
+    /// Each open domain as a saved world holds it (<see cref="World.SaveAsync"/>): which, how it was opened, and the
     /// entities each of its prefabs spawned and its player, those alive, by id. Never the loading domain.
     /// </summary>
     public List<DomainState> Save()

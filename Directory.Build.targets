@@ -9,10 +9,13 @@
        with no Headers is built for its binary alone, and one with no Cmake is cloned for its headers alone.
 
        Items are taken in order, so a library comes after what it builds on, whose build folder is written
-       {built:<name>} in its options; {source} is the library's own source. CmakeTarget names one CMake target to build
-       where the whole project is more than the library. Source is the folder of the checkout holding CMakeLists.txt
-       when that is not the root. A header the library's own build would generate from a template (a CMake config.h) is
-       made by Shims, as header=template, with every option off.
+       {built:<name>} in its options and whose checkout {checkout:<name>}; {checkout} is the library's own, {source}
+       the folder CMake builds from and {folder} the library's folder. Prepare is a command run in the checkout after
+       cloning and before CMake, for a C++ library whose C API its own generator makes ({python} is the machine's
+       Python 3). CmakeTarget names one CMake target to build where the whole project is more than the library. Source
+       is the folder holding CMakeLists.txt: in the checkout when that is not the root, or an absolute folder of the
+       project's own, for a library whose repository has none. A header the library's own build would generate from a
+       template (a CMake config.h) is made by Shims, as header=template, with every option off.
 
        Everything lands under Build/NativeLibs/<name>/ (MagicNativeLibs moves it): the source, the build and what it
        built, with empty Directory.Build files beside them so Magic's own build rules stop at the folder. A library is cloned and built once per commit and options; generation reruns only when the library, the
@@ -35,6 +38,7 @@
       <Class />
       <Shims />
       <Source />
+      <Prepare />
       <Cmake />
       <CmakeTarget />
     </NativeLibrary>
@@ -59,6 +63,7 @@
     </ItemGroup>
     <PropertyGroup>
       <_NativeBuiltFolders>@(NativeLibrary->'%(Identity)=%(Built)', ';')</_NativeBuiltFolders>
+      <_NativeCheckoutFolders>@(NativeLibrary->'%(Identity)=%(Checkout)', ';')</_NativeCheckoutFolders>
       <_NativeIncludeFolders>@(_NativeInclude->'%(Checkout)%(IncludePath)', ',')</_NativeIncludeFolders>
     </PropertyGroup>
   </Target>
@@ -66,7 +71,7 @@
   <!-- Cloned and built by one build at a time: several projects may declare the same library, so each library's work
        holds a machine-wide mutex named for it, and whoever comes second finds the marker. The source is fetched shallow
        at the commit, with its submodules; a changed commit fetches afresh, and a changed commit or options builds afresh,
-       in Release, then the shared library named as the OS names one (cimgui.dll, libcimgui.so, libcimgui.dylib) is
+       in Release, then the shared library named as the OS names one (SDL3.dll, libSDL3.so, libSDL3.dylib) is
        copied under built/native/, where the build picks it up. -->
   <UsingTask TaskName="PrepareNativeLibrary" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>
@@ -75,9 +80,11 @@
       <Commit ParameterType="System.String" Required="true" />
       <Folder ParameterType="System.String" Required="true" />
       <Source ParameterType="System.String" />
+      <Prepare ParameterType="System.String" />
       <Options ParameterType="System.String" />
       <CmakeTarget ParameterType="System.String" />
       <Built ParameterType="System.String" />
+      <Checkouts ParameterType="System.String" />
       <Produced ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
       <Marker ParameterType="Microsoft.Build.Framework.ITaskItem" Output="true" />
     </ParameterGroup>
@@ -88,24 +95,59 @@
       <Using Namespace="System.Runtime.InteropServices" />
       <Code Type="Fragment" Language="cs"><![CDATA[
 string checkout = Path.Combine(Folder, "source");
-string source = string.IsNullOrEmpty(Source) ? checkout : Path.Combine(checkout, Source);
+string source = string.IsNullOrEmpty(Source) ? checkout : Path.IsPathRooted(Source) ? Source : Path.Combine(checkout, Source);
 string build = Path.Combine(Folder, "build");
 string built = Path.Combine(Folder, "built");
 string native = Path.Combine(built, "native");
-string options = (Options ?? "").Replace("{source}", source.TrimEnd('/', '\\'));
-foreach (string pair in (Built ?? "").Split(';'))
+bool windows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+string Expand(string text)
 {
-    int equals = pair.IndexOf('=');
-    if (equals > 0)
+    text = (text ?? "").Replace("{checkout}", checkout.TrimEnd('/', '\\')).Replace("{source}", source.TrimEnd('/', '\\')).Replace("{folder}", Folder.TrimEnd('/', '\\')).Replace("{python}", windows ? "python" : "python3");
+    foreach (string pair in (Built ?? "").Split(';'))
     {
-        options = options.Replace("{built:" + pair.Substring(0, equals) + "}", pair.Substring(equals + 1).TrimEnd('/', '\\'));
+        int equals = pair.IndexOf('=');
+        if (equals > 0)
+        {
+            text = text.Replace("{built:" + pair.Substring(0, equals) + "}", pair.Substring(equals + 1).TrimEnd('/', '\\'));
+        }
     }
+
+    foreach (string pair in (Checkouts ?? "").Split(';'))
+    {
+        int equals = pair.IndexOf('=');
+        if (equals > 0)
+        {
+            text = text.Replace("{checkout:" + pair.Substring(0, equals) + "}", pair.Substring(equals + 1).TrimEnd('/', '\\'));
+        }
+    }
+
+    return text;
+}
+
+string options = Expand(Options);
+string prepare = Expand(Prepare);
+
+// A clone's pack files are read-only, which Directory.Delete refuses on Windows.
+void DeleteFolder(string path)
+{
+    if (!Directory.Exists(path))
+    {
+        return;
+    }
+
+    foreach (string file in Directory.GetFiles(path, "*", SearchOption.AllDirectories))
+    {
+        File.SetAttributes(file, FileAttributes.Normal);
+    }
+
+    Directory.Delete(path, true);
 }
 
 string optionsHash;
 using (System.Security.Cryptography.SHA256 sha256 = System.Security.Cryptography.SHA256.Create())
 {
-    optionsHash = BitConverter.ToString(sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(options + "\n" + (CmakeTarget ?? "")))).Replace("-", "").Substring(0, 16);
+    optionsHash = BitConverter.ToString(sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(prepare + "\n" + options + "\n" + (CmakeTarget ?? "")))).Replace("-", "").Substring(0, 16);
 }
 
 string marker = Path.Combine(Folder, string.Concat(Commit.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)) + "." + optionsHash + ".ready");
@@ -167,10 +209,7 @@ using (Mutex mutex = new Mutex(false, "Magic.Natives." + Name.Replace('/', '_'))
                 Log.LogMessage(MessageImportance.High, "Fetching {0} at {1} from {2}", Name, Commit, Repository);
                 foreach (string folder in new[] { checkout, build, built })
                 {
-                    if (Directory.Exists(folder))
-                    {
-                        Directory.Delete(folder, true);
-                    }
+                    DeleteFolder(folder);
                 }
 
                 Directory.CreateDirectory(checkout);
@@ -183,6 +222,16 @@ using (Mutex mutex = new Mutex(false, "Magic.Natives." + Name.Replace('/', '_'))
                 if (ready)
                 {
                     File.WriteAllText(stamp, Commit);
+                }
+            }
+
+            // What the library's own tools make of the source before it is built, as the machine's shell runs it.
+            foreach (string command in prepare.Split(new[] { " && " }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (ready)
+                {
+                    Log.LogMessage(MessageImportance.High, "Preparing {0}: {1}", Name, command);
+                    ready = windows ? Run("cmd.exe", "/c \"" + command + "\"", checkout, "BND020") : Run("/bin/sh", "-c \"" + command.Replace("\"", "\\\"") + "\"", checkout, "BND020");
                 }
             }
 
@@ -205,10 +254,7 @@ using (Mutex mutex = new Mutex(false, "Magic.Natives." + Name.Replace('/', '_'))
 
                 foreach (string folder in new[] { build, built })
                 {
-                    if (Directory.Exists(folder))
-                    {
-                        Directory.Delete(folder, true);
-                    }
+                    DeleteFolder(folder);
                 }
 
                 Directory.CreateDirectory(build);
@@ -259,7 +305,8 @@ using (Mutex mutex = new Mutex(false, "Magic.Natives." + Name.Replace('/', '_'))
 
   <Target Name="PrepareNativeLibraries" DependsOnTargets="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != ''">
     <PrepareNativeLibrary Name="%(NativeLibrary.Identity)" Repository="%(NativeLibrary.Repository)" Commit="%(NativeLibrary.Commit)" Folder="%(NativeLibrary.Folder)"
-                          Source="%(NativeLibrary.Source)" Options="%(NativeLibrary.Cmake)" CmakeTarget="%(NativeLibrary.CmakeTarget)" Built="$(_NativeBuiltFolders)">
+                          Source="%(NativeLibrary.Source)" Prepare="%(NativeLibrary.Prepare)" Options="%(NativeLibrary.Cmake)" CmakeTarget="%(NativeLibrary.CmakeTarget)"
+                          Built="$(_NativeBuiltFolders)" Checkouts="$(_NativeCheckoutFolders)">
       <Output TaskParameter="Produced" ItemName="_NativeBuilt" />
       <Output TaskParameter="Marker" ItemName="_NativeReady" />
     </PrepareNativeLibrary>

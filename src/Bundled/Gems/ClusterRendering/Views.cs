@@ -159,7 +159,7 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
 /// What every view is worked out from this frame: the copy of the world, the frame, the scene and its models and
 /// materials, the sky's row, the frame's counts, where the player is, and whether views jitter.
 /// </summary>
-internal readonly record struct ViewFrame(WorldCopy Copy, Frame Frame, Scene Scene, ClusterPool Models, Materials Materials, int SkyMaterial, Counts Counts, Vector3D? Player, bool Jitters);
+internal readonly record struct ViewFrame(WorldCopy Copy, Frame Frame, Scene Scene, ClusterPool Models, Materials Materials, int SkyMaterial, Counts Counts, Vector3? Player, bool Jitters);
 
 /// <summary>
 /// Where a view draws: a texture, the rectangle of it, its format, and whether it is a window's.
@@ -192,7 +192,7 @@ internal sealed class View : IDisposable
     private readonly GpuArray<PieceEntry> _transparentPieces;
     private readonly List<(int Slot, float Distance)> _transparentOrder = [];
     private Matrix4x4 _lastViewProj;
-    private Vector3D _lastPosition;
+    private Vector3 _lastPosition;
     private bool _hasLast;
 
     public View(IGpu gpu)
@@ -221,9 +221,9 @@ internal sealed class View : IDisposable
     public Counts Counts { get; private set; }
 
     /// <summary>
-    /// Where the camera is, in doubles.
+    /// Where the camera is.
     /// </summary>
-    public Vector3D Position { get; private set; }
+    public Vector3 Position { get; private set; }
 
     /// <summary>
     /// The view's transparent pieces, farthest instance first, as runs of one surface each.
@@ -253,7 +253,6 @@ internal sealed class View : IDisposable
 
         Camera lens = camera.Camera;
         Position = camera.Transform.Position;
-        Vector3 high = Position.ToVector3();
         float tanY = MathF.Tan(lens.FieldOfView * (MathF.PI / 360));
         float tanX = tanY * width / height;
         Vector2 jitter = frame.Jitters ? JitterOf(frame.Frame.Index, width, height) : Vector2.Zero;
@@ -279,7 +278,7 @@ internal sealed class View : IDisposable
         {
             ViewProj = viewProj,
             View = view,
-            CameraPosition = high,
+            CameraPosition = Position,
             Time = (float)frame.Frame.Seconds,
             ViewSize = new Vector2(width, height),
             ViewTexel = new Vector2(1f / width, 1f / height),
@@ -300,11 +299,10 @@ internal sealed class View : IDisposable
             TargetEncoding = (uint)target.Encoding,
             SkyMaterial = (uint)frame.SkyMaterial,
             PrevViewProj = _lastViewProj,
-            CameraLow = (Position - high).ToVector3(),
             ClusterError = Math.Clamp(settings.ClusterError, 0.25f, 16),
-            CameraMotion = (Position - _lastPosition).ToVector3(),
+            CameraMotion = Position - _lastPosition,
             PixelScale = height * 0.5f / tanY,
-            PriorityPosition = ((frame.Player ?? Position) - Position).ToVector3(),
+            PriorityPosition = (frame.Player ?? Position) - Position,
             TextureMipScale = frame.Jitters ? MathF.Min(1, height / MathF.Max(1, output.Y)) : 1,
             Jitter = jitter,
             OutputSize = output,
@@ -390,7 +388,7 @@ internal sealed class View : IDisposable
         _transparentOrder.Clear();
         foreach (int slot in frame.Scene.Transparent)
         {
-            _transparentOrder.Add((slot, -(float)Vector3D.Distance(frame.Scene.PositionOf(slot), Position)));
+            _transparentOrder.Add((slot, -Vector3.Distance(frame.Scene.PositionOf(slot), Position)));
         }
 
         CollectionsMarshal.AsSpan(_transparentOrder).Sort(static (left, right) => left.Distance.CompareTo(right.Distance));

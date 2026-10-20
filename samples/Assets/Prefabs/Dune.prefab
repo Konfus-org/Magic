@@ -1,5 +1,5 @@
 {
     "entities": [
-        { "name": "Dune", "components": { "Transform": { "position": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1, "y": 0.25, "z": 1.6 } }, "Renderer": { "model": { "id": 517 }, "materials": { "slot0": { "id": 3328 } } } } }
+        { "name": "Dune", "components": { "Transform": { "position": { "x": 0, "y": 0, "z": 0 }, "scale": { "x": 1, "y": 0.25, "z": 1.6 } }, "Renderer": { "model": { "id": 517 }, "materials": { "slot0": { "id": 3328 } } }, "Physics": { "shape": "mesh" } } }
     ]
 }

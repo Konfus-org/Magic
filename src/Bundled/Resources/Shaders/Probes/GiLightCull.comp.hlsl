@@ -8,7 +8,7 @@
 [numthreads(64, 1, 1)]
 void main(uint3 thread : SV_DispatchThreadID)
 {
-    if (thread.x >= CountOf(SceneLights, 80u))
+    if (thread.x >= CountOf(SceneLights, GpuSceneLightBytes))
     {
         return;
     }
@@ -22,7 +22,7 @@ void main(uint3 thread : SV_DispatchThreadID)
     GpuGiLevel coarsest = GiLevel(GiHeader().levels - 1u);
     float3 low = float3(coarsest.origin) * coarsest.voxel;
     float3 high = low + (float)GiResolution * coarsest.voxel;
-    float3 position = light.high + light.low;
+    float3 position = light.position;
     float3 toField = position - clamp(position, low, high);
     if (dot(toField, toField) >= Pow2(light.range))
     {

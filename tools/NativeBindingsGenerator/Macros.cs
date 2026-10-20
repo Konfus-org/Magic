@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using CppAst;
 
@@ -449,6 +450,23 @@ internal sealed class Macros
 
         bool isUnsigned = suffix.Contains('U', StringComparison.Ordinal);
         bool isLong = suffix.Contains('L', StringComparison.Ordinal);
+
+        // As C types a literal with no suffix by its value: past int, a hexadecimal or octal one is unsigned, a decimal
+        // one is long; past that, long or unsigned long.
+        bool octal = !hex && digits.Length > 1 && digits[0] == '0';
+        if (ulong.TryParse(hex ? digits[2..] : digits, hex ? NumberStyles.AllowHexSpecifier : NumberStyles.None, CultureInfo.InvariantCulture, out ulong value) && value > int.MaxValue)
+        {
+            if ((hex || octal) && value <= uint.MaxValue)
+            {
+                isUnsigned = true;
+            }
+            else
+            {
+                isLong = true;
+                isUnsigned |= value > long.MaxValue;
+            }
+        }
+
         return (digits + (isUnsigned ? "u" : "") + (isLong ? "L" : ""), isUnsigned, isLong, false, false);
     }
 }

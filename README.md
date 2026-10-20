@@ -2,7 +2,7 @@
 
 A modern, cross platform, plugin-driven game engine in C# where nothing is glued in, in the spirit of Our Machinery and Bevy.
 `Magic` is the engine: a host that loads a project and its gems (plugin dlls) and runs the frame loop, a
-standalone program that works with or without the editor. The ECS, windows and input, and rendering all live in
+standalone program that works with or without the editor. The ECS, windows and input, rendering and physics all live in
 gems (`src/Bundled/Gems`), the engine's plugins.
 
 Everything is cross-platform (Windows, Linux, macOS planned), modern .NET, and written for performance; the rules
@@ -13,16 +13,15 @@ are in the [code standards](CODESTANDARDS.md).
 ### Requirements
 
 - The .NET 10 SDK; `global.json` names the version, and a later feature band of it serves.
-- git, CMake, Python 3 and a C++ toolchain: every native library is built from its own repository by the first
-  build ([Gems](src/Bundled/Gems/README.md#native-libraries)). On Windows the toolchain is Visual Studio with its
+- git, CMake, Python 3 with the `ply` package (`pip install ply`) and a C++ toolchain: every native library is built
+  from its own repository by the first build ([Gems](src/Bundled/Gems/README.md#native-libraries)). On Windows the toolchain is Visual Studio with its
   "Desktop development with C++" workload, which brings the Windows SDK and the DIA SDK that DirectXShaderCompiler
   needs; on Linux, gcc or clang with SDL's build dependencies (the X11 and Wayland development packages); on macOS,
-  the Xcode command line tools. The first build takes half an hour to an hour, almost all of it DirectXShaderCompiler, an LLVM, and leaves
-  about 6 GB of sources and build files under `Build/NativeLibs/`; after that nothing is built again until a
-  library's commit changes.
-- An internet connection for the first build, which clones the libraries.
+  the Xcode command line tools.
 - A GPU with a driver for Vulkan 1.1, Direct3D 12 or Metal, which the engine renders through.
 - PowerShell for the scripts under `tools/`: `pwsh` on Linux and macOS, and Windows PowerShell 5.1 serves on Windows.
+
+### Building
 
 Configurations: `Debug` (integer overflow checked), `Optimize` (optimised, full symbols),
 `Release` (optimised, no symbols). Only a release presents on the display's refresh by default; the others draw
@@ -42,6 +41,12 @@ an IDE or with `dotnet run --project src/Core`, Magic opens the Samples project.
 build copies the engine's and the gems' assets beside Magic; the others read them where they are in the repository, so
 building stays fast and an edit to one reaches a running engine at once.
 
+The build is strict: every compiler, analyzer, MSBuild and NuGet warning is an error. `.editorconfig` holds the
+rules, `BannedSymbols.txt` the APIs the build refuses, each with what to use instead, and `Directory.Build.props`
+checks that every namespace matches its folder.
+
+### Command line
+
 `Magic --help` lists the options. `--project` takes a `.magic` file or the folder holding one, `--frames <n>` stops
 after n frames, and type `quit` in the terminal or close the window to stop sooner. `--headless` is for runs without
 a window: gems open none, and Ctrl+C stops the run cleanly, ending its gems, where otherwise it ends the process at
@@ -53,10 +58,6 @@ under `--fail-on-error`. A
 crash ends the process with the OS's crash code and leaves a `.crash` file in `Logs/` beside Magic. What is slow to
 make, such as a compiled shader or a model's clusters, is kept in `Cache/` beside Magic, and made again when
 what it was made from changes; deleting the folder is always safe.
-
-The build is strict: every compiler, analyzer, MSBuild and NuGet warning is an error. `.editorconfig` holds the
-rules, `BannedSymbols.txt` the APIs the build refuses, each with what to use instead, and `Directory.Build.props`
-checks that every namespace matches its folder.
 
 ## How it works
 

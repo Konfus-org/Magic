@@ -34,8 +34,9 @@ OS has one, so the platform default is right everywhere, and 32-bit x86 is not a
   one, is an empty struct named by the typedef, so a handle is a typed pointer (`IPL.Context*`) at no cost.
 - An enum keeps its values; it is an `int` unless they need more (what a C compiler picks for one that fits differs
   by ABI, so it is decided from the values alone), and `[Flags]` when every value is a bit or bits already named.
-- A function pointer is a `delegate* unmanaged<…>`, written out at each use; the typedef's name survives only in the
-  comment.
+- A function pointer is a `delegate* unmanaged<…>`, written out at each use, whether the header declares it as a
+  pointer or as a function type taken by pointer (`typedef int b3AssertFcn(const char*)`, then `b3AssertFcn*`); the
+  typedef's name survives only in the comment.
 - An object-like macro is a `const` when, after the macros it uses are expanded (function-like ones applied, `##`
   pasted), it is a literal, or arithmetic over literals, casts to integer types and constants already made, which it
   takes its type from; a string macro is a `byte*` to its UTF-8 bytes in the assembly's static data, handed to C as
@@ -46,7 +47,7 @@ OS has one, so the platform default is right everywhere, and 32-bit x86 is not a
 - A run of bit fields shares one backing field, and each is a property over its bits, read and written as C does. A
   run whose fields differ in size has a layout MSVC and GCC disagree on, so its struct is emitted opaque (a pointer
   target only) and listed. An unnamed union or struct member is a field named `Union` or `Struct`, of a nested type
-  named `UnionType` or `StructType`.
+  named `UnionType` or `StructType`; a second in the same struct is `Union_` of `Union_Type`.
 - Dear ImGui's and Vulkan's flags idiom, a typedef to an integer named `X` beside an enum `X_` holding its values,
   types `X` as that enum.
 
@@ -63,7 +64,7 @@ lose the enum's own name where they carry it (`ImGuiWindowFlags_NoTitleBar` → 
 share, and are title-cased (`IPL_STATUS_SUCCESS` → `Success`, `IPL_SIMDLEVEL_AVX2` → `Avx2`); one that would start
 with a digit is led by the enum's last word (`ImGuiKey_0` → `Key0`). A name
 that would be a C# keyword gets a trailing underscore, as does a function named like the struct it attaches to
-(cimgui's `ImDrawCmd_ImDrawCmd` is `ImDrawCmd.ImDrawCmd_`); a parameter gets `@`. Two C names that would become one C#
+(a constructor named for its struct, `ImDrawCmd_ImDrawCmd`, is `ImDrawCmd.ImDrawCmd_`); a parameter gets `@`. Two C names that would become one C#
 name are an error, never silently told apart.
 
 ## Running it by hand

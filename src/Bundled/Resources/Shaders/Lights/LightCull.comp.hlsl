@@ -7,7 +7,7 @@
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= CountOf(SceneLights, 80u))
+    if (id.x >= CountOf(SceneLights, GpuSceneLightBytes))
     {
         return;
     }

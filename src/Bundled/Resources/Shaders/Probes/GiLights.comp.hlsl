@@ -15,7 +15,7 @@ groupshared uint ReachingCount;
 // How strongly a light reaches a box, as the lighting weighs it at the box's nearest point; 0 where it does not reach.
 float Strength(GpuSceneLight light, float3 low, float3 high)
 {
-    float3 position = light.high + light.low;
+    float3 position = light.position;
     return Luminance(light.intensity) * DistanceAttenuation(position - clamp(position, low, high), 1.0 / Pow2(light.range));
 }
 

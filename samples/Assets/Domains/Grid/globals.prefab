@@ -29,7 +29,56 @@
             "name": "Ground",
             "components": {
                 "Transform": { "scale": { "x": 1024, "y": 1, "z": 1024 } },
-                "Renderer": { "model": { "id": 519 }, "materials": { "slot0": { "id": 3321 } } }
+                "Renderer": { "model": { "id": 519 }, "materials": { "slot0": { "id": 3321 } } },
+                "Physics": { "shape": "mesh" }
+            }
+        },
+        {
+            "name": "Stack",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 1, "z": -52 } },
+                "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 3322 } } },
+                "Physics": { "motion": "dynamic" }
+            }
+        },
+        {
+            "name": "Stack",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 3.2, "z": -52 } },
+                "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 3322 } } },
+                "Physics": { "motion": "dynamic", "surface": "grippy" }
+            }
+        },
+        {
+            "name": "Stack",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 5.4, "z": -52 } },
+                "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 3322 } } },
+                "Physics": { "motion": "dynamic" }
+            }
+        },
+        {
+            "name": "Ball",
+            "components": {
+                "Transform": { "position": { "x": 3, "y": 7, "z": -52 } },
+                "Renderer": { "model": { "id": 517 }, "materials": { "slot0": { "id": 3322 } } },
+                "Physics": { "motion": "dynamic", "shape": "sphere", "bounce": 0.7 }
+            }
+        },
+        {
+            "name": "Slide",
+            "components": {
+                "Transform": { "position": { "x": -8, "y": 1, "z": -52 }, "rotation": { "x": 0, "y": 0, "z": 0.17365, "w": 0.98481 }, "scale": { "x": 4, "y": 0.2, "z": 3 } },
+                "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 3320 } } },
+                "Physics": { "surface": "slippery" }
+            }
+        },
+        {
+            "name": "Slider",
+            "components": {
+                "Transform": { "position": { "x": -8, "y": 5, "z": -52 } },
+                "Renderer": { "model": { "id": 514 }, "materials": { "slot0": { "id": 3322 } } },
+                "Physics": { "motion": "dynamic", "surface": "slippery" }
             }
         },
         {

@@ -109,13 +109,13 @@ struct GpuSunClipmap
     uint wholePages;
     uint smallPages;
     uint moved;
-    float3 cameraHigh;
+    float3 camera;
     uint sunTable;
-    float3 cameraLow;
     uint lightTable;
     uint lightTableLast;
     uint lightEntries;
-    uint2 padding;
+    uint padding0;
+    uint4 padding1;
 };
 
 static const uint SunLevelsAt = 128u;
@@ -175,7 +175,7 @@ struct GpuShadowGroup
 // A point relative to this view's camera, relative to the main camera instead, which the clipmap is placed about.
 float3 MainRelative(GpuSunClipmap sun, float3 position)
 {
-    return position + (CameraPosition - sun.cameraHigh) + (CameraLow - sun.cameraLow);
+    return position + (CameraPosition - sun.camera);
 }
 
 #if defined(HAS_SunClipmap)

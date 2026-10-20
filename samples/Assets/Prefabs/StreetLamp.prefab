@@ -1,6 +1,6 @@
 {
     "entities": [
-        { "name": "Post", "components": { "Transform": { "position": { "x": 0, "y": 2.5, "z": 0 }, "scale": { "x": 0.08, "y": 2.5, "z": 0.08 } }, "Renderer": { "model": { "id": 515 }, "materials": { "slot0": { "id": 3322 } } } } },
+        { "name": "Post", "components": { "Transform": { "position": { "x": 0, "y": 2.5, "z": 0 }, "scale": { "x": 0.08, "y": 2.5, "z": 0.08 } }, "Renderer": { "model": { "id": 515 }, "materials": { "slot0": { "id": 3322 } } }, "Physics": {} } },
         { "name": "Bulb", "components": { "Transform": { "position": { "x": 0, "y": 5.15, "z": 0 }, "scale": { "x": 0.22, "y": 0.22, "z": 0.22 } }, "Renderer": { "model": { "id": 517 }, "materials": { "slot0": { "id": 3360 } } } } },
         { "name": "Light", "components": { "Transform": { "position": { "x": 0, "y": 5, "z": 0 } }, "PointLight": { "color": { "r": 1, "g": 0.8, "b": 0.55 }, "intensity": 150, "range": 14 } } }
     ]

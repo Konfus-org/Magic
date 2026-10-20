@@ -6,7 +6,7 @@
 [numthreads(64, 1, 1)]
 void main(uint3 thread : SV_DispatchThreadID)
 {
-    if (thread.x >= CountOf(Instances, 160u))
+    if (thread.x >= CountOf(Instances, GpuSceneInstanceBytes))
     {
         return;
     }

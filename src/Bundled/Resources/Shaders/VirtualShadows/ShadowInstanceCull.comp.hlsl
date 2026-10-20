@@ -70,7 +70,7 @@ void Cull(uint slot, GpuSceneInstance instance, GpuModel model, float3 centre, f
 [numthreads(64, 1, 1)]
 void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 {
-    uint instances = CountOf(Instances, 160u);
+    uint instances = CountOf(Instances, GpuSceneInstanceBytes);
     uint shadowGroups = min(ShadowCounts.Load(ShadowCountGroups), CountOf(ShadowGroups, 32u));
 
     // A row runs MaxGroupsX groups at most; past them, each thread takes the next instance a row's width on.

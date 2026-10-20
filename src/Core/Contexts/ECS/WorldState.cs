@@ -6,7 +6,7 @@ using Magic.Services;
 namespace Magic.Contexts.ECS;
 
 /// <summary>
-/// The world as data (<see cref="World.Save"/>), which outlives the run that made it: the domains open, every entity
+/// The world as data (<see cref="World.SaveAsync"/>), which outlives the run that made it: the domains open, every entity
 /// with its components and its scripts, and the frame clock, which <see cref="World.RestoreAsync"/> puts back. The
 /// engine carries one across a restart (<see cref="Lifetime.Restart"/>). It names a component by its type's name
 /// and a script by its asset, and holds their values as JSON, so it keeps nothing of the code that made it: it

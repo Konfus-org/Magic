@@ -8,7 +8,8 @@ the files under `Assets/`, and its code is the scripts among them, which `Sample
 
 The camera flies itself until it is flown: hold the right mouse button and move the mouse to look around, WASD moves
 where it looks, E and Q go straight up and down, and Shift goes faster. On a gamepad the left stick moves, the right
-stick looks, the right and left triggers go up and down, and the left shoulder goes faster.
+stick looks, the right and left triggers go up and down, and the left shoulder goes faster. A left click, or the
+gamepad's south button, throws a ball where the camera looks.
 
 ## The world
 
@@ -34,6 +35,12 @@ engine runs: the cells are data, made once.
   world to its edge is drawn. The first run makes every model's clusters and cards, which takes a while; every later
   run reads them from `Cache/`.
 - **One ground**, in `globals.prefab`, lies under the whole world, which each region's tiles cover.
+- **It is solid.** The ground, the towers, the houses, the trunks of the trees, the rocks, the hills and the mountains
+  carry a `Physics` component, so a thrown ball bounces off them, and a crate lies beside every house; the field's
+  metal spheres are balls to knock about. In front of the spawn, `globals.prefab` drops a stack of crates, a
+  bouncing ball and a crate onto a tilted slab of ice. The physics gem simulates only what is within its range of the
+  player, so a world of twenty thousand props costs a few hundred bodies around the camera; its README says how the
+  component drives a body.
 
 ## Scripts
 

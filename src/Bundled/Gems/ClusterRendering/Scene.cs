@@ -2,7 +2,6 @@ using System.Numerics;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -121,7 +120,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// <summary>
     /// Where the instance at <paramref name="slot"/> is, as the last frame copied it.
     /// </summary>
-    public Vector3D PositionOf(int slot) => _entries[slot].Transform.Position;
+    public Vector3 PositionOf(int slot) => _entries[slot].Transform.Position;
 
     /// <summary>
     /// The model and materials an instance draws.
@@ -132,7 +131,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// Takes in what changed since the last frame, then uploads it. <paramref name="time"/> is the frame's, which a fade
     /// starts at; <paramref name="player"/> where detail is wanted first.
     /// </summary>
-    public void Update(WorldCopy copy, float time, Vector3D player)
+    public void Update(WorldCopy copy, float time, Vector3 player)
     {
         Delta<InstanceCopy> instances = copy.Instances;
         if (_entries.Length < instances.Length)
@@ -161,7 +160,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             if (entry.IsLive && entry.WrittenFor != time)
             {
                 GpuSceneInstance row = Instances.Rows[slot];
-                Instances.Set(slot, row with { PrevRow0 = row.Row0, PrevRow1 = row.Row1, PrevRow2 = row.Row2, PrevLow = row.Low });
+                Instances.Set(slot, row with { PrevRow0 = row.Row0, PrevRow1 = row.Row1, PrevRow2 = row.Row2 });
             }
         }
 
@@ -172,7 +171,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         Instances.Flush();
     }
 
-    private void Change(int slot, in InstanceCopy instance, float time, Vector3D player)
+    private void Change(int slot, in InstanceCopy instance, float time, Vector3 player)
     {
         ref InstanceEntry entry = ref _entries[slot];
         Transform transform = instance.Transform;
@@ -201,7 +200,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             return;
         }
 
-        float distance = (float)(transform.Position - player).Length;
+        float distance = Vector3.Distance(transform.Position, player);
         if (distance < look.Nearest)
         {
             if (look.Nearest == float.MaxValue)
@@ -276,7 +275,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// An instance's row: its transform, split into high and low floats; where it was, the old row's place when it
+    /// An instance's row: its transform; where it was, the old row's place when it
     /// moved, else its own; its model's row and its material slots', its look's; and how it fades, in from when its look
     /// could be drawn when it waited for that. Empty while its look cannot be drawn yet.
     /// </summary>
@@ -288,19 +287,16 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         }
 
         Transform transform = entry.Transform;
-        Matrix4x4 linear = transform.RelativeTo(transform.Position);
-        Vector3D position = transform.Position;
-        Vector3 high = position.ToVector3();
-        Vector3 low = (position - high).ToVector3();
+        Matrix4x4 linear = transform.Matrix;
+        Vector3 position = transform.Position;
         Vector3 scale = Vector3.Abs(transform.Scale);
         bool isMirrored = transform.Scale.X * transform.Scale.Y * transform.Scale.Z < 0;
         bool hasWaited = look.ReadyAt > entry.FadeStart;
         GpuSceneInstance row = new()
         {
-            Row0 = new Vector4(linear.M11, linear.M21, linear.M31, high.X),
-            Row1 = new Vector4(linear.M12, linear.M22, linear.M32, high.Y),
-            Row2 = new Vector4(linear.M13, linear.M23, linear.M33, high.Z),
-            Low = low,
+            Row0 = new Vector4(linear.M11, linear.M21, linear.M31, position.X),
+            Row1 = new Vector4(linear.M12, linear.M22, linear.M32, position.Y),
+            Row2 = new Vector4(linear.M13, linear.M23, linear.M33, position.Z),
             MaxScale = MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z)),
             Flags = (uint)((isMirrored ? GpuSceneFlags.Mirrored : GpuSceneFlags.None)
                 | (hasWaited ? GpuSceneFlags.FadeIn : GpuSceneFlags.None)),
@@ -311,7 +307,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         row.PrevRow0 = last.Row0;
         row.PrevRow1 = last.Row1;
         row.PrevRow2 = last.Row2;
-        row.PrevLow = last.Low;
         row.Model = (uint)look.ModelRow;
         row.Materials = look.Rows;
         return row;
@@ -430,7 +425,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             return null;
         }
 
-        Vector3D centre = transform.Position + Vector3D.Transform(new Vector3D(bounds.X, bounds.Y, bounds.Z) * transform.Scale, transform.Rotation);
+        Vector3 centre = transform.Position + Vector3.Transform(new Vector3(bounds.X, bounds.Y, bounds.Z) * transform.Scale, transform.Rotation);
         Vector3 scale = Vector3.Abs(transform.Scale);
         return new MovedSphere(centre, bounds.W * MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z)));
     }
@@ -656,4 +651,4 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 /// <summary>
 /// A sphere around an instance where it was or is, where what is made from the scene and kept is made again.
 /// </summary>
-internal readonly record struct MovedSphere(Vector3D Centre, float Radius);
+internal readonly record struct MovedSphere(Vector3 Centre, float Radius);

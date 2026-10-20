@@ -33,17 +33,21 @@ internal sealed unsafe class FontSource : IDisposable
         // own, but only once it first reads the font, so the original must outlive this call.
         _handle = (nint*)ImGui.MemAlloc((ulong)sizeof(nint));
         *_handle = GCHandle.ToIntPtr(_font);
-        ImFontConfig* config = ImFontConfig.ImFontConfig_();
-        config->FontLoader = _loader;
-        config->FontData = _handle;
-        config->FontDataSize = sizeof(nint);
-        config->FontDataOwnedByAtlas = false;
-        config->SizePixels = size;
+        // The C API has no constructor for a config, so the defaults ImGui's sets are set here, and the atlas copies it.
+        ImFontConfig config = default;
+        config.ExtraSizeScale = 1f;
+        config.GlyphMaxAdvanceX = float.MaxValue;
+        config.RasterizerMultiply = 1f;
+        config.RasterizerDensity = 1f;
+        config.FontLoader = _loader;
+        config.FontData = _handle;
+        config.FontDataSize = sizeof(nint);
+        config.FontDataOwnedByAtlas = false;
+        config.SizePixels = size;
 
-        ImGuiIO* io = ImGui.GetIONil();
-        _added = ImFontAtlas.AddFont(io->Fonts, config);
+        ImGuiIO* io = ImGui.GetIO();
+        _added = ImFontAtlas.AddFont(io->Fonts, &config);
         io->FontDefault = _added;
-        ImFontConfig.Destroy(config);
     }
 
     public void Dispose()
@@ -59,7 +63,7 @@ internal sealed unsafe class FontSource : IDisposable
     /// </summary>
     public void Remove()
     {
-        ImFontAtlas.RemoveFont(ImGui.GetIONil()->Fonts, _added);
+        ImFontAtlas.RemoveFont(ImGui.GetIO()->Fonts, _added);
     }
 
     private static Font? FontOf(ImFontConfig* source)
@@ -116,7 +120,7 @@ internal sealed unsafe class FontSource : IDisposable
             return true;
         }
 
-        int rectangle = ImGui.ImFontAtlasPackAddRect(atlas, loaded.Width, loaded.Height, null);
+        int rectangle = ImFontAtlas.PackAddRect(atlas, loaded.Width, loaded.Height);
         if (rectangle < 0)
         {
             return false;
@@ -132,7 +136,7 @@ internal sealed unsafe class FontSource : IDisposable
         ReadOnlySpan<byte> pixels = font.Pixels.Span[(((loaded.Y * font.Width) + loaded.X) * 4)..];
         fixed (byte* first = pixels)
         {
-            ImGui.ImFontAtlasBakedSetFontGlyphBitmap(atlas, baked, source, glyph, ImGui.ImFontAtlasPackGetRect(atlas, rectangle), first, ImTextureFormat.Rgba32, font.Width * 4);
+            ImFontAtlas.BakedSetFontGlyphBitmap(atlas, baked, source, glyph, ImFontAtlas.PackGetRect(atlas, rectangle), first, ImTextureFormat.Rgba32, font.Width * 4);
         }
 
         return true;

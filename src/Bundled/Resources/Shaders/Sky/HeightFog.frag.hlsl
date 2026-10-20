@@ -39,7 +39,7 @@ float4 main(PassVaryings input) : SV_Target0
         return float4(0.0, 0.0, 0.0, 0.0);
     }
 
-    float eye = CameraPosition.y + CameraLow.y;
+    float eye = CameraPosition.y;
     float rise = direction.y;
     float crossed = abs(rise) > 1e-3
         ? CurveIntegral(params.falloff, eye + params.start * rise, eye + distance * rise) / rise

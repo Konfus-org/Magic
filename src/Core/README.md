@@ -131,9 +131,8 @@ internal record struct Spin : IComponent
 }
 ```
 
-Where an entity is, its `Transform.Position`, is in doubles (`Vector3D`), so a world has no edge where precision runs
-out: what works near something else takes the difference, which is small, and only then goes to floats, as a renderer
-does with the camera's position (`Transform.RelativeTo`).
+Where an entity is, its `Transform.Position`, is floats in metres, as every position and size in the engine is; its
+`Matrix` is what takes its model into the world.
 
 A tag is a label with no data that a file names without any code declaring it: `"tags": [ "spawn" ]` on an entity,
 beside its components, gives it a `Tags` component holding up to eight `Tag`s, each a stable hash of its name
@@ -155,7 +154,7 @@ each, made for it.
 ```csharp
 internal sealed class Hover(Entity owner, World world) : IBehavior   // keeps its entity and services, nothing more
 {
-    private double _restY;
+    private float _restY;
 
     public float Height { get; set; }                 // a value: its initialiser the default, a prefab sets it
 
@@ -311,12 +310,12 @@ throws saying so, and `End` still works.
 | `Spawn`, `SpawnAsync` | Puts an asset in the world at a transform, as the asset says (`ISpawnable`), and hands back the entities made, the caller's to destroy: a `Prefab` its parts, each placed under its parent, a `Model` one entity that draws it. `SpawnAsync` loads it first. |
 | `Attach` | Gives an entity its own copy of a script ([Scripts](#scripts)). |
 | `OpenAsync`, `Close`, `Opened`, `IsLoading` | The domains open in it (below). |
-| `Save`, `RestoreAsync` | The world as data (`WorldState`), and the world put back from it (below). |
+| `SaveAsync`, `RestoreAsync` | The world as data (`WorldState`), and the world put back from it (below). |
 | `End` | Ends the game: the frames stop, and the gems end. |
 
-It is the main thread's, but `OpenAsync` and `SpawnAsync`, which any thread may call. It does nothing each frame:
-opening a domain reads on workers and spawns on the main thread, and what changes on disk is told on
-[`Events`](#events).
+It is the main thread's, but `OpenAsync`, `SpawnAsync`, `SaveAsync` and `RestoreAsync`, which any thread may call. It
+does nothing each frame: opening a domain reads on workers and spawns on the main thread, and what changes on disk
+is told on [`Events`](#events).
 
 An asset type that can be put in the world implements `ISpawnable`, saying how it becomes entities, as an `IJsonAsset`
 says how it is read.
@@ -338,9 +337,11 @@ distance, so the whole world is there at once.
   where it is; prefabs added to its folder spawn, and those removed go. The player is not spawned again: what the
   player has done is the game's.
 
-`Save` writes the whole world as data, a `WorldState`: the domains open, with the entities each of their prefabs
+`SaveAsync` writes the whole world as data, a `WorldState`: the domains open, with the entities each of their prefabs
 spawned, every entity with its components as JSON by their types' names and its scripts by their assets with their
-values as JSON ([Scripts](#scripts)), and the frame clock. It holds nothing of the code that made it, so it outlives the run, and
+values as JSON ([Scripts](#scripts)), and the frame clock. It takes the world in one frame on the main thread, each
+entity's components copied out and its scripts' values read, so the save is of one moment, then writes the JSON on a
+worker, reporting its progress. It holds nothing of the code that made it, so it outlives the run, and
 restores into whatever code is loaded then, as a file read would. `RestoreAsync` puts the world back from one, in
 place of whatever is open, all in one frame: it reads each domain's folder on workers first, as opening one does, so a
 prefab added since spawns and one gone has its entities destroyed, then makes every entity anew, gives each its

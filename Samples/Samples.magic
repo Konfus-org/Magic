@@ -9,6 +9,7 @@
         "ConsoleCommands",
         "ArchEcs",
         "Scripting",
+        "Box3DPhysics",
         "SdlTextureLoader",
         "SdlFontLoader",
         "AssimpModelLoader",

@@ -43,13 +43,11 @@ cbuffer Frame : UNIFORM(0)
     uint SkyMaterial;
 
     float DeltaSeconds;
-    float3 Padding;
+    float ClusterError;      // pixels a cluster's error may cover on screen before a finer one is drawn
+    float2 Padding;
 
     // The last frame's ViewProj without its jitter, for a position relative to the last frame's camera.
     float4x4 PrevViewProj;
-
-    float3 CameraLow;        // what the camera's position is past CameraPosition, which holds it as a float
-    float ClusterError;      // pixels a cluster's error may cover on screen before a finer one is drawn
 
     float3 CameraMotion;     // the camera's position less the last frame's: a still point's relative position plus
                              // this is where it was relative to the last frame's camera

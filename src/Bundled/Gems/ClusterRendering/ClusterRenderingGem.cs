@@ -258,7 +258,7 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
         _textures.UseAnisotropy(_settings.Anisotropy);
         WorldCopy copy = _snapshot.Front;
         CameraCopy? main = MainCamera(copy);
-        Vector3D? player = copy.Player ?? main?.Transform.Position;
+        Vector3? player = copy.Player ?? main?.Transform.Position;
         _scene.Update(copy, (float)frame.Seconds, player ?? default);
         _movedInstances.Add(_scene.Moved.Count);
         _lights.Update(copy);
@@ -441,12 +441,12 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     /// moved relative to the main camera, which the shadows are placed about, the templates binning and counting start
     /// from, and the shadows' pool and tables.
     /// </summary>
-    private void SetFrame(Vector3D main)
+    private void SetFrame(Vector3 main)
     {
         for (int i = 0; i < _scene.Moved.Count; i++)
         {
             MovedSphere sphere = _scene.Moved[i];
-            _moved.Set(i, new Vector4((sphere.Centre - main).ToVector3(), sphere.Radius));
+            _moved.Set(i, new Vector4(sphere.Centre - main, sphere.Radius));
         }
 
         _moved.Flush();
@@ -496,7 +496,7 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
 
         foreach ((int slot, (string why, string what)) in _scene.Failures)
         {
-            debug.Error(why, _scene.PositionOf(slot).ToVector3(), 0, what);
+            debug.Error(why, _scene.PositionOf(slot), 0, what);
         }
     }
 

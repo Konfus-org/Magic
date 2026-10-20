@@ -11,6 +11,7 @@
   <Folder Name="/Gems/">
     <Project Path="src/Bundled/Gems/ArchEcs/ArchEcs.csproj" />
     <Project Path="src/Bundled/Gems/AssimpModelLoader/AssimpModelLoader.csproj" />
+    <Project Path="src/Bundled/Gems/Box3DPhysics/Box3DPhysics.csproj" />
     <Project Path="src/Bundled/Gems/ClusterGenerator/ClusterGenerator.csproj" />
     <Project Path="src/Bundled/Gems/ClusterRendering/ClusterRendering.csproj" />
     <Project Path="src/Bundled/Gems/ConsoleCommands/ConsoleCommands.csproj" />

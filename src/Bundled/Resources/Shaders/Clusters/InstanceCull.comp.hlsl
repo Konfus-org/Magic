@@ -57,7 +57,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         slot = HiddenInstances.Load(slot * 4u);
     }
 
-    if (slot >= CountOf(Instances, 160u))
+    if (slot >= CountOf(Instances, GpuSceneInstanceBytes))
     {
         return;
     }

@@ -105,7 +105,7 @@ uint TakeRect(GpuSunClipmap sun, uint page)
 // What takes a camera-relative point onto a sun page as clip, its 128 texels across -1 to 1, depth reverse-Z.
 GpuShadowView SunView(GpuSunClipmap sun, GpuSunLevel row, uint level, int2 page)
 {
-    float3 offset = (CameraPosition - sun.cameraHigh) + (CameraLow - sun.cameraLow);
+    float3 offset = CameraPosition - sun.camera;
     float content = (float)PageContent / (float)PageTexels;
     float2 local = (float2)(page - row.origin);
     float scale = 2.0 * content / row.pageSize;
@@ -484,7 +484,7 @@ void main(uint thread : SV_GroupIndex)
     if (thread == 0u)
     {
         uint groups = min(Groups, groupRoom);
-        uint instanceGroups = (CountOf(Instances, 160u) + 63u) / 64u;
+        uint instanceGroups = (CountOf(Instances, GpuSceneInstanceBytes) + 63u) / 64u;
         ShadowCounts.Store(ShadowCountGroups, groups);
         ShadowArgs.Store3(ShadowArgsInstanceCull, uint3(groups > 0u ? clamp(instanceGroups, 1u, MaxGroupsX) : 0u, 1u, 1u));
         ShadowArgs.Store4(ShadowArgsClear, uint4(6u, ShadowCounts.Load(ShadowCountViews), 0u, 0u));

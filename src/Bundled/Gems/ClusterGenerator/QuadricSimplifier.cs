@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Utils;
 
 namespace Magic.ClusterGenerator;
 
@@ -169,7 +168,7 @@ internal static class QuadricSimplifier
                             continue;
                         }
 
-                        CollapseError(keptId, goneId, out Vector3D place);
+                        CollapseError(keptId, goneId, out Vector3 place);
                         if (keptDeleted.Length < kept.Count)
                         {
                             Array.Resize(ref keptDeleted, kept.Count * 2);
@@ -240,7 +239,7 @@ internal static class QuadricSimplifier
             List<int> madeFrom = [];
             List<(int Point, int Set)> madeAt = [];
             List<uint> indices = [];
-            Dictionary<(int Point, int Set), (Vector3D Normal, bool Moved)> sets = [];
+            Dictionary<(int Point, int Set), (Vector3 Normal, bool Moved)> sets = [];
             foreach (Triangle triangle in _triangles)
             {
                 if (triangle.Deleted)
@@ -248,8 +247,8 @@ internal static class QuadricSimplifier
                     continue;
                 }
 
-                Vector3D first = _points[triangle.Points[0]].Position;
-                Vector3D area = Vector3D.Cross(_points[triangle.Points[1]].Position - first, _points[triangle.Points[2]].Position - first);
+                Vector3 first = _points[triangle.Points[0]].Position;
+                Vector3 area = Vector3.Cross(_points[triangle.Points[1]].Position - first, _points[triangle.Points[2]].Position - first);
                 for (int corner = 0; corner < 3; corner++)
                 {
                     (int point, int source) = (triangle.Points[corner], triangle.Source[corner]);
@@ -257,13 +256,13 @@ internal static class QuadricSimplifier
                     if (!made.TryGetValue((point, source), out uint index))
                     {
                         index = (uint)vertices.Count;
-                        vertices.Add(sourceVertices[source] with { Position = _points[point].Position.ToVector3() });
+                        vertices.Add(sourceVertices[source] with { Position = _points[point].Position });
                         madeFrom.Add(source);
                         madeAt.Add(key);
                         made[(point, source)] = index;
                     }
 
-                    (Vector3D normal, bool moved) = sets.GetValueOrDefault(key);
+                    (Vector3 normal, bool moved) = sets.GetValueOrDefault(key);
                     sets[key] = (normal + area, moved || sourceVertices[source].Position != _points[point].Position);
                     indices.Add(index);
                 }
@@ -271,13 +270,13 @@ internal static class QuadricSimplifier
 
             for (int i = 0; i < vertices.Count; i++)
             {
-                (Vector3D sum, bool moved) = sets[madeAt[i]];
-                if (!moved || _points[madeAt[i].Point].Locked || sum.Length <= 0)
+                (Vector3 sum, bool moved) = sets[madeAt[i]];
+                if (!moved || _points[madeAt[i].Point].Locked || sum.Length() <= 0)
                 {
                     continue;
                 }
 
-                Vector3 normal = sum.Normalized().ToVector3();
+                Vector3 normal = Vector3.Normalize(sum);
                 Vertex vertex = vertices[i];
                 Vector3 along = new(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z);
                 along -= normal * Vector3.Dot(normal, along);
@@ -334,7 +333,7 @@ internal static class QuadricSimplifier
         /// turn one of <paramref name="point"/>'s triangles over (or make it a sliver); marks those that would lose the
         /// edge, which the collapse deletes.
         /// </summary>
-        private bool Flipped(Vector3D place, int other, Point point, bool[] deleted)
+        private bool Flipped(Vector3 place, int other, Point point, bool[] deleted)
         {
             for (int r = 0; r < point.Count; r++)
             {
@@ -353,16 +352,16 @@ internal static class QuadricSimplifier
                     continue;
                 }
 
-                Vector3D toNext = (_points[next].Position - place).Normalized();
-                Vector3D toLast = (_points[last].Position - place).Normalized();
-                if (Math.Abs(Vector3D.Dot(toNext, toLast)) > 0.999)
+                Vector3 toNext = Normalized(_points[next].Position - place);
+                Vector3 toLast = Normalized(_points[last].Position - place);
+                if (MathF.Abs(Vector3.Dot(toNext, toLast)) > 0.999f)
                 {
                     return true;
                 }
 
-                Vector3D normal = Vector3D.Cross(toNext, toLast).Normalized();
+                Vector3 normal = Normalized(Vector3.Cross(toNext, toLast));
                 deleted[r] = false;
-                if (Vector3D.Dot(normal, triangle.Normal) < 0.2)
+                if (Vector3.Dot(normal, triangle.Normal) < 0.2f)
                 {
                     return true;
                 }
@@ -518,10 +517,10 @@ internal static class QuadricSimplifier
             Dictionary<(int, int), int> edgeUses = [];
             foreach (Triangle triangle in _triangles)
             {
-                Vector3D firstCorner = _points[triangle.Points[0]].Position;
-                Vector3D normal = Vector3D.Cross(_points[triangle.Points[1]].Position - firstCorner, _points[triangle.Points[2]].Position - firstCorner).Normalized();
+                Vector3 firstCorner = _points[triangle.Points[0]].Position;
+                Vector3 normal = Normalized(Vector3.Cross(_points[triangle.Points[1]].Position - firstCorner, _points[triangle.Points[2]].Position - firstCorner));
                 triangle.Normal = normal;
-                SymmetricMatrix plane = new(normal.X, normal.Y, normal.Z, -Vector3D.Dot(normal, firstCorner));
+                SymmetricMatrix plane = new(normal.X, normal.Y, normal.Z, -Vector3.Dot(normal, firstCorner));
                 _points[triangle.Points[0]].Quadric += plane;
                 _points[triangle.Points[1]].Quadric += plane;
                 _points[triangle.Points[2]].Quadric += plane;
@@ -546,9 +545,9 @@ internal static class QuadricSimplifier
                         continue;
                     }
 
-                    Vector3D edgeStart = _points[from].Position;
-                    Vector3D normal = Vector3D.Cross(_points[to].Position - edgeStart, triangle.Normal).Normalized();
-                    SymmetricMatrix plane = new(normal.X, normal.Y, normal.Z, -Vector3D.Dot(normal, edgeStart));
+                    Vector3 edgeStart = _points[from].Position;
+                    Vector3 normal = Normalized(Vector3.Cross(_points[to].Position - edgeStart, triangle.Normal));
+                    SymmetricMatrix plane = new(normal.X, normal.Y, normal.Z, -Vector3.Dot(normal, edgeStart));
                     _points[from].Quadric += plane;
                     _points[to].Quadric += plane;
                 }
@@ -579,7 +578,7 @@ internal static class QuadricSimplifier
         /// The error of collapsing the edge, and the place the point goes: where the summed quadric is least, or the best
         /// of the two ends and their middle when that cannot be solved (or an end is on a border).
         /// </summary>
-        private double CollapseError(int firstId, int secondId, out Vector3D place)
+        private double CollapseError(int firstId, int secondId, out Vector3 place)
         {
             Point first = _points[firstId];
             Point second = _points[secondId];
@@ -595,20 +594,30 @@ internal static class QuadricSimplifier
             double det = quadric.Det(0, 1, 2, 1, 4, 5, 2, 5, 7);
             if (det != 0 && !border)
             {
-                place = new Vector3D(
-                    -1 / det * quadric.Det(1, 2, 3, 4, 5, 6, 5, 7, 8),
-                    1 / det * quadric.Det(0, 2, 3, 1, 5, 6, 2, 7, 8),
-                    -1 / det * quadric.Det(0, 1, 3, 1, 4, 6, 2, 5, 8));
+                place = new Vector3(
+                    (float)(-1 / det * quadric.Det(1, 2, 3, 4, 5, 6, 5, 7, 8)),
+                    (float)(1 / det * quadric.Det(0, 2, 3, 1, 5, 6, 2, 7, 8)),
+                    (float)(-1 / det * quadric.Det(0, 1, 3, 1, 4, 6, 2, 5, 8)));
                 return quadric.VertexError(place);
             }
 
-            Vector3D middle = (first.Position + second.Position) * 0.5;
+            Vector3 middle = (first.Position + second.Position) * 0.5f;
             double atFirst = quadric.VertexError(first.Position);
             double atSecond = quadric.VertexError(second.Position);
             double atMiddle = quadric.VertexError(middle);
             double least = Math.Min(atFirst, Math.Min(atSecond, atMiddle));
             place = least == atFirst ? first.Position : least == atSecond ? second.Position : middle;
             return least;
+        }
+
+        /// <summary>
+        /// A unit vector along <paramref name="vector"/>, or zero for a zero one: a degenerate triangle's normal, whose
+        /// plane then adds nothing to a quadric.
+        /// </summary>
+        private static Vector3 Normalized(Vector3 vector)
+        {
+            float length = vector.Length();
+            return length > 0 ? vector / length : Vector3.Zero;
         }
     }
 
@@ -639,7 +648,7 @@ internal static class QuadricSimplifier
         /// </summary>
         public bool Dirty { get; set; }
 
-        public Vector3D Normal { get; set; }
+        public Vector3 Normal { get; set; }
     }
 
     /// <summary>
@@ -648,7 +657,7 @@ internal static class QuadricSimplifier
     /// </summary>
     private sealed class Point
     {
-        public Vector3D Position { get; set; }
+        public Vector3 Position { get; set; }
 
         public SymmetricMatrix Quadric { get; set; }
 
@@ -708,7 +717,7 @@ internal static class QuadricSimplifier
         /// <summary>
         /// The squared distance of the point from the planes summed into the matrix.
         /// </summary>
-        public double VertexError(Vector3D point)
+        public double VertexError(Vector3 point)
         {
             double x = point.X;
             double y = point.Y;

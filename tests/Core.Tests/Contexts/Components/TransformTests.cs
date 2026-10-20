@@ -1,6 +1,5 @@
 using System.Numerics;
 using Magic.Contexts.Components;
-using Magic.Contexts.Utils;
 
 namespace Magic.Tests.Contexts.Components;
 
@@ -9,27 +8,27 @@ public sealed class TransformTests
     private const int Places = 5;
 
     [Fact]
-    public void RelativeTo_moves_the_position_by_the_origin()
+    public void Matrix_moves_by_the_position()
     {
-        Transform transform = new() { Position = new Vector3D(10, 20, 30) };
+        Transform transform = new() { Position = new Vector3(10, 20, 30) };
 
-        Matrix4x4 matrix = transform.RelativeTo(new Vector3D(4, 5, 6));
+        Matrix4x4 matrix = transform.Matrix;
 
-        Assert.Equal(new Vector3(6, 15, 24), matrix.Translation);
+        Assert.Equal(new Vector3(10, 20, 30), matrix.Translation);
     }
 
     [Fact]
-    public void RelativeTo_scales_then_turns_then_moves_a_point()
+    public void Matrix_scales_then_turns_then_moves_a_point()
     {
         // The scale is along X only, so scaling before the turn and after it give different points.
         Transform transform = new()
         {
-            Position = new Vector3D(0, 0, 10),
+            Position = new Vector3(0, 0, 10),
             Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2),
             Scale = new Vector3(2, 1, 1),
         };
 
-        Vector3 placed = Vector3.Transform(Vector3.UnitZ, transform.RelativeTo(default));
+        Vector3 placed = Vector3.Transform(Vector3.UnitZ, transform.Matrix);
 
         Assert.Equal(1, placed.X, Places);
         Assert.Equal(0, placed.Y, Places);
@@ -42,11 +41,11 @@ public sealed class TransformTests
         // The scale is along X only, so scaling before the turn and after it give different points.
         Transform parent = new()
         {
-            Position = new Vector3D(0, 0, 10),
+            Position = new Vector3(0, 0, 10),
             Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, MathF.PI / 2),
             Scale = new Vector3(2, 1, 1),
         };
-        Transform child = new() { Position = new Vector3D(0, 0, 1) };
+        Transform child = new() { Position = new Vector3(0, 0, 1) };
 
         Transform placed = child.Under(parent);
 

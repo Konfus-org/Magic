@@ -10,13 +10,17 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- Dear ImGui through cimgui, its C API, built here from cimgui's repository with the Dear ImGui it was generated
-       from, with 32-bit characters, as the header is read with, and without the obsolete API. -->
+  <!-- Dear ImGui, from its own repository, through the C API that dear_bindings, the Dear ImGui team's generator, makes
+       of its headers at build time: the public API and the internal one, in their own files, built with ImGui into one
+       library by the CMake file under Native/, since dear_bindings ships none. ImGui's folder is on the include path
+       for the imconfig.h the generated header includes; the defines are the library's compile definitions. -->
   <ItemGroup>
-    <NativeLibrary Include="cimgui" Repository="https://github.com/cimgui/cimgui" Commit="1.92.9dock"
-                   Headers="cimgui.h" IncludePath="."
-                   Defines="CIMGUI_DEFINE_ENUMS_AND_STRUCTS;IMGUI_USE_WCHAR32;IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1"
-                   Prefixes="ig=ImGui;IMGUI=ImGui" Class="ImGui"
-                   Cmake="-DIMGUI_WCHAR32=ON" />
+    <NativeLibrary Include="imgui" Repository="https://github.com/ocornut/imgui" Commit="v1.92.9b-docking" IncludePath="." />
+    <NativeLibrary Include="dcimgui" Repository="https://github.com/dearimgui/dear_bindings" Commit="v0.24"
+                   Prepare="{python} {checkout}/dear_bindings.py -o {checkout}/dcimgui {checkout:imgui}/imgui.h &amp;&amp; {python} {checkout}/dear_bindings.py -o {checkout}/dcimgui_internal --include {checkout:imgui}/imgui.h {checkout:imgui}/imgui_internal.h"
+                   Headers="dcimgui.h;dcimgui_internal.h" IncludePath="."
+                   Defines="IMGUI_USE_WCHAR32;IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1"
+                   Prefixes="IMGUI=ImGui;cImFontAtlas=ImFontAtlas" Class="ImGui"
+                   Source="$(MSBuildProjectDirectory)/Native" Cmake="-DIMGUI_DIR={checkout:imgui} -DGENERATED_DIR={checkout}" />
   </ItemGroup>
 </Project>

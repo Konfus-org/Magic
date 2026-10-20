@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Globalization;
@@ -97,7 +98,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// <summary>
     /// Where the player's cameras are, as of this frame's Update. Main thread.
     /// </summary>
-    private readonly List<Vector3D> _cameras = [];
+    private readonly List<Vector3> _cameras = [];
 
     /// <summary>
     /// The members of scripts that could not be saved or put back, as <c>Class.member</c>, each warned about once.
@@ -788,11 +789,11 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             return true;
         }
 
-        Vector3D position = _ecs.Get<Transform>(entity).Position;
+        Vector3 position = _ecs.Get<Transform>(entity).Position;
         float nearest = float.PositiveInfinity;
-        foreach (Vector3D camera in _cameras)
+        foreach (Vector3 camera in _cameras)
         {
-            nearest = MathF.Min(nearest, (position - camera).ToVector3().LengthSquared());
+            nearest = MathF.Min(nearest, (position - camera).LengthSquared());
         }
 
         // Not a number when there is no distance to divide (a camera's own script, with a full-rate distance of 0).

@@ -6,7 +6,6 @@ using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;
-using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -267,7 +266,7 @@ internal sealed class WorldCopy
     /// <summary>
     /// Where the first camera tagged player is, which detail is kept nearest to when there is too much; none without one.
     /// </summary>
-    public Vector3D? Player { get; set; }
+    public Vector3? Player { get; set; }
 
     /// <summary>
     /// The first directional light, or none.
@@ -499,7 +498,7 @@ internal readonly record struct CameraCopy(Entity Entity, Transform Transform, C
 /// A point or spot light: where it is, its intensity in candela times its colour, and for a spot its axis and the scale
 /// and offset of its cone's falloff; whether it casts shadows.
 /// </summary>
-internal readonly record struct LightCopy(Vector3D Position, Vector3 Forward, Vector3 Intensity, float Range, float Radius, float SpotScale, float SpotOffset, bool IsSpot, bool Shadowless);
+internal readonly record struct LightCopy(Vector3 Position, Vector3 Forward, Vector3 Intensity, float Range, float Radius, float SpotScale, float SpotOffset, bool IsSpot, bool Shadowless);
 
 /// <summary>
 /// The sun: the way its light travels, and its illuminance in lux times its colour.

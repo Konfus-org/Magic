@@ -24,7 +24,7 @@ internal struct FrameConstants
     public Matrix4x4 View;
 
     /// <summary>
-    /// The camera's position as a float; <see cref="CameraLow"/> is what it is past that.
+    /// Where the camera is, which every position a shader works with is relative to.
     /// </summary>
     public Vector3 CameraPosition;
     public float Time;
@@ -81,22 +81,17 @@ internal struct FrameConstants
     public uint SkyMaterial;
 
     public float DeltaSeconds;
-    public Vector3 Padding;
-
-    /// <summary>
-    /// The last frame's <see cref="ViewProj"/> without its jitter.
-    /// </summary>
-    public Matrix4x4 PrevViewProj;
-
-    /// <summary>
-    /// What the camera's position is past <see cref="CameraPosition"/>.
-    /// </summary>
-    public Vector3 CameraLow;
 
     /// <summary>
     /// Pixels a cluster's error may cover before a finer one is drawn.
     /// </summary>
     public float ClusterError;
+    public Vector2 Padding;
+
+    /// <summary>
+    /// The last frame's <see cref="ViewProj"/> without its jitter.
+    /// </summary>
+    public Matrix4x4 PrevViewProj;
 
     /// <summary>
     /// The camera's position less the last frame's, in metres.
@@ -145,10 +140,9 @@ internal struct PassWords
 
 /// <summary>
 /// One instance in the scene's table, at its entity's slot (Shaders/Include/Structs.hlsli's GpuSceneInstance): the rows
-/// of its transpose(world), xyz its turn and scale and w its position's high float, which <see cref="Low"/> adds to, so
-/// a position far from the origin is still exact relative to the camera; the last frame's the same way, which velocity
-/// is worked out from; its largest scale, flags, model row, when its fade started, and its eight material slots' rows,
-/// two to a word, <see cref="NoMaterial"/> for one not in yet.
+/// of its transpose(world), xyz its turn and scale and w its position; the last frame's the same way, which velocity is
+/// worked out from; its largest scale, flags, model row, when its fade started, and its eight material slots' rows, two
+/// to a word, <see cref="NoMaterial"/> for one not in yet.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuSceneInstance
@@ -158,12 +152,10 @@ internal struct GpuSceneInstance
     public Vector4 Row0;
     public Vector4 Row1;
     public Vector4 Row2;
-    public Vector3 Low;
-    public float MaxScale;
     public Vector4 PrevRow0;
     public Vector4 PrevRow1;
     public Vector4 PrevRow2;
-    public Vector3 PrevLow;
+    public float MaxScale;
 
     /// <summary>
     /// <see cref="GpuSceneFlags"/>.
@@ -177,7 +169,6 @@ internal struct GpuSceneInstance
     /// </summary>
     public float FadeStart;
 
-    public Vector2 Padding;
     public MaterialRows Materials;
 }
 

@@ -16,7 +16,7 @@ internal sealed class Hover(Entity owner, World world) : IBehavior
     /// <summary>
     /// Its height as it spawned, which it rises from.
     /// </summary>
-    private double _restY;
+    private float _restY;
 
     /// <summary>
     /// How far it rises, in metres: none unless a chunk says.

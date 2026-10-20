@@ -3,7 +3,6 @@ using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Input;
-using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -102,16 +101,16 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
         // Out from the middle, then around it, turning to look at it no faster than TurnToMiddle.
         ref Transform transform = ref _world.Get<Transform>(owner);
         _isFlyingItself &= turn == Vector2.Zero && right == 0 && forward == 0 && up == 0;
-        Vector3D at = transform.Position;
-        double fromMiddle = Math.Sqrt((at.X * at.X) + (at.Z * at.Z));
+        Vector3 at = transform.Position;
+        float fromMiddle = MathF.Sqrt((at.X * at.X) + (at.Z * at.Z));
         bool isOrbiting = _isFlyingItself && Orbit != 0 && fromMiddle >= Radius;
         float cruise = _isFlyingItself && fromMiddle < Radius ? Cruise * frame.DeltaSeconds : 0;
         if (isOrbiting)
         {
-            at = Vector3D.Transform(at, Quaternion.CreateFromAxisAngle(Vector3.UnitY, Orbit * frame.DeltaSeconds * (MathF.PI / 180)));
+            at = Vector3.Transform(at, Quaternion.CreateFromAxisAngle(Vector3.UnitY, Orbit * frame.DeltaSeconds * (MathF.PI / 180)));
             float most = TurnToMiddle * frame.DeltaSeconds;
-            turn.X = Math.Clamp(MathF.IEEERemainder(MathF.Atan2((float)-at.X, (float)-at.Z) - _yaw, MathF.Tau), -most, most);
-            turn.Y = Math.Clamp(MathF.Atan2((float)at.Y, (float)fromMiddle) - _pitch, -most, most);
+            turn.X = Math.Clamp(MathF.IEEERemainder(MathF.Atan2(-at.X, -at.Z) - _yaw, MathF.Tau), -most, most);
+            turn.Y = Math.Clamp(MathF.Atan2(at.Y, fromMiddle) - _pitch, -most, most);
         }
 
         _yaw += turn.X;

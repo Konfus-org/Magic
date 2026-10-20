@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Utils;
 using Magic.Interfaces;
 
 namespace Magic.ClusterRendering;
@@ -10,7 +9,7 @@ namespace Magic.ClusterRendering;
 /// Virtual shadow maps: every shadow is drawn into pages of one pool (<see cref="Pool"/>), only the pages the views'
 /// pixels read, kept from frame to frame and drawn again only where what casts into them moved, so a shadow costs what
 /// is on screen, however far it reaches and however many lights cast it. The GPU marks, allocates and draws the pages
-/// (Shaders/VirtualShadows/); this keeps what only the CPU can, in doubles: where the sun's clipmap stands.
+/// (Shaders/VirtualShadows/); this keeps what only the CPU can: where the sun's clipmap stands.
 /// <para>
 /// The sun's shadow is a clipmap: <see cref="ClusterRenderingSettings.ShadowLevels"/> levels about the camera, each
 /// twice as wide as the last, the finest <see cref="ClusterRenderingSettings.ShadowFinest"/> metres, each 64 pages a
@@ -70,7 +69,7 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     private readonly List<int> _marked = [];
     private readonly GpuSunLevel[] _levels = new GpuSunLevel[MaxLevels];
     private Vector3 _sunDirection;
-    private double _depthOrigin = double.NaN;
+    private float _depthOrigin = float.NaN;
     private int _levelCount;
     private bool _isSwapped;
 
@@ -134,7 +133,7 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// swaps the lights' tables, notes the lights that changed, and makes the pool and the tables again when the settings
     /// size them otherwise.
     /// </summary>
-    public void Plan(Vector3D camera, Vector3 sun, IReadOnlyList<int> changedLights, int lightSlots, int moved, ulong frame, ClusterRenderingSettings settings)
+    public void Plan(Vector3 camera, Vector3 sun, IReadOnlyList<int> changedLights, int lightSlots, int moved, ulong frame, ClusterRenderingSettings settings)
     {
         ChangedLights.Grow((lightSlots + 31) / 32);
         int poolSize = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(settings.ShadowPool, 1024, 16384));
@@ -153,18 +152,17 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
         Vector3 right = Vector3.Normalize(Vector3.Cross(reference, direction));
         Vector3 up = Vector3.Cross(direction, right);
         float depthRange = Math.Max(settings.ShadowDepth, 10);
-        double depth = Dot(camera, direction);
-        double depthStep = depthRange / 4;
+        float depth = Vector3.Dot(camera, direction);
+        float depthStep = depthRange / 4;
         bool isTurned = Vector3.Dot(direction, _sunDirection) < 0.999999f;
-        bool isMoved = double.IsNaN(_depthOrigin) || Math.Abs(depth - _depthOrigin) > depthStep;
+        bool isMoved = float.IsNaN(_depthOrigin) || MathF.Abs(depth - _depthOrigin) > depthStep;
         if (isMoved || isTurned)
         {
-            _depthOrigin = Math.Round(depth / depthStep) * depthStep;
+            _depthOrigin = MathF.Round(depth / depthStep) * depthStep;
         }
 
         _sunDirection = direction;
         float finest = Math.Max(settings.ShadowFinest, 0.5f);
-        Vector3 cameraHigh = camera.ToVector3();
         int lightTable = Records + SunEntries;
         GpuSunClipmap clipmap = new()
         {
@@ -176,7 +174,7 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
             Frame = (uint)(frame % (uint.MaxValue - 1)) + 1,
             Direction = direction,
             AllDirty = isMade || isMoved || isTurned ? 1u : 0u,
-            CameraDepth = (float)(depth - _depthOrigin),
+            CameraDepth = depth - _depthOrigin,
             DepthRange = depthRange,
             Finest = finest,
             ChangedLightWords = (uint)ChangedLights.Capacity,
@@ -184,28 +182,27 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
             WholePages = (uint)WholePages,
             SmallPages = (uint)SmallPages,
             Moved = (uint)moved,
-            CameraHigh = cameraHigh,
+            Camera = camera,
             SunTable = (uint)Records,
-            CameraLow = (camera - cameraHigh).ToVector3(),
             LightTable = (uint)(_isSwapped ? lightTable + LightEntries : lightTable),
             LightTableLast = (uint)(_isSwapped ? lightTable : lightTable + LightEntries),
             LightEntries = (uint)LightEntries,
         };
 
-        Vector2D across = new(Dot(camera, right), Dot(camera, up));
+        Vector2 across = new(Vector3.Dot(camera, right), Vector3.Dot(camera, up));
         for (int level = 0; level < levels; level++)
         {
-            double pageSize = finest * Math.Pow(2, level) / Window;
-            long originX = (long)Math.Floor(across.X / pageSize) - (Window / 2);
-            long originY = (long)Math.Floor(across.Y / pageSize) - (Window / 2);
+            float pageSize = finest * (1 << level) / Window;
+            int originX = (int)MathF.Floor(across.X / pageSize) - (Window / 2);
+            int originY = (int)MathF.Floor(across.Y / pageSize) - (Window / 2);
             _levels[level] = new GpuSunLevel
             {
-                OriginX = (int)originX,
-                OriginY = (int)originY,
-                PageSize = (float)pageSize,
-                Texel = (float)(pageSize / (Page - (2 * Border))),
-                CameraX = (float)(across.X - (originX * pageSize)),
-                CameraY = (float)(across.Y - (originY * pageSize)),
+                OriginX = originX,
+                OriginY = originY,
+                PageSize = pageSize,
+                Texel = pageSize / (Page - (2 * Border)),
+                CameraX = across.X - (originX * pageSize),
+                CameraY = across.Y - (originY * pageSize),
             };
         }
 
@@ -245,8 +242,6 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
 
     private int TableRows => Records + SunEntries + (2 * LightEntries);
 
-    private static double Dot(Vector3D point, Vector3 axis) => (point.X * axis.X) + (point.Y * axis.Y) + (point.Z * axis.Z);
-
     /// <summary>
     /// The pool and the tables made again, every page empty and every entry none.
     /// </summary>
@@ -276,8 +271,6 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
         gpu.Release(Clipmap);
         PoolSize = 0;
     }
-
-    private readonly record struct Vector2D(double X, double Y);
 }
 
 /// <summary>
@@ -306,14 +299,16 @@ internal struct GpuSunClipmap
     public uint WholePages;
     public uint SmallPages;
     public uint Moved;
-    public Vector3 CameraHigh;
+    public Vector3 Camera;
     public uint SunTable;
-    public Vector3 CameraLow;
     public uint LightTable;
     public uint LightTableLast;
     public uint LightEntries;
     public uint Padding0;
     public uint Padding1;
+    public uint Padding2;
+    public uint Padding3;
+    public uint Padding4;
 }
 
 /// <summary>

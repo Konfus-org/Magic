@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Utils;
 using Magic.Interfaces;
 
 namespace Magic.ClusterRendering;
@@ -111,7 +110,7 @@ internal sealed class GiVolume : IDisposable
     /// <paramref name="moved"/>, and uploads them with which probes are traced this frame and how much of what they held
     /// they keep, from the frame's <paramref name="seconds"/>.
     /// </summary>
-    public void Plan(Vector3D camera, IReadOnlyList<MovedSphere> moved, float seconds, ClusterRenderingSettings settings)
+    public void Plan(Vector3 camera, IReadOnlyList<MovedSphere> moved, float seconds, ClusterRenderingSettings settings)
     {
         int levels = Math.Clamp(settings.GiLevels, 1, MaxLevels);
         float finest = Math.Clamp(settings.GiVoxel, 0.05f, 4);
@@ -138,8 +137,7 @@ internal sealed class GiVolume : IDisposable
             level.IsHeld = true;
             foreach (MovedSphere sphere in moved)
             {
-                // A voxel is metres wide, so floats hold where it is far further out than a world goes.
-                Vector3 centre = sphere.Centre.ToVector3();
+                Vector3 centre = sphere.Centre;
                 float reach = sphere.Radius + (Reach * voxel);
                 level.Mark(centre - new Vector3(reach), centre + new Vector3(reach));
             }
@@ -155,7 +153,7 @@ internal sealed class GiVolume : IDisposable
             Levels = (uint)levels,
             Rays = rays,
             Seed = _frame,
-            Camera = camera.ToVector3(),
+            Camera = camera,
         };
         Rows.Set(0, Unsafe.As<GpuGi, GpuGiLevel>(ref header));
         for (int index = 0; index < MaxLevels; index++)

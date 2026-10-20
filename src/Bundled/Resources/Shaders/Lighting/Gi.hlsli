@@ -560,7 +560,7 @@ float3 GiHitRadiance(GiHit hit, uint levels, float3 sh[9])
         }
 
         GpuSceneLight light = LOAD(SceneLights, GpuSceneLight, slot);
-        float3 position = light.high + light.low;
+        float3 position = light.position;
         float3 toLight = position - hit.position;
         float3 l = toLight * rsqrt(max(dot(toLight, toLight), 1e-8));
         float reaching = DistanceAttenuation(toLight, 1.0 / Pow2(light.range)) * SpotAttenuation(l, light.forward, float2(light.spotScale, light.spotOffset)) * saturate(dot(normal, l));

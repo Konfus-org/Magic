@@ -196,7 +196,7 @@ internal sealed class Reader
             {
                 _opaqueNames.TryAdd(opaque, typedef);
             }
-            else if (element is CppClass { Name: "" } anonymousClass)
+            else if (element is CppClass anonymousClass && !IsNamed(anonymousClass.Name))
             {
                 _classNames.TryAdd(anonymousClass, typedef.Name);
             }
@@ -206,7 +206,7 @@ internal sealed class Reader
                 // goes by the plain name, which is what the header's functions are named after.
                 _classNames.TryAdd(named, typedef.Name);
             }
-            else if (element is CppEnum { Name: "" } anonymousEnum)
+            else if (element is CppEnum anonymousEnum && !IsNamed(anonymousEnum.Name))
             {
                 _enumNames.TryAdd(anonymousEnum, typedef.Name);
             }
@@ -335,7 +335,7 @@ internal sealed class Reader
 
         try
         {
-            _names.Add((typedef.Name, Type(typedef, true)));
+            _names.Add((typedef.Name, FunctionTypeOf(element) is { } functionType ? FunctionPointer(functionType) : Type(typedef, true)));
         }
         catch (UnsupportedException)
         {
@@ -401,14 +401,27 @@ internal sealed class Reader
             Declaration declaration = _declarations[i];
             if (declaration.Kind == DeclarationKind.Constant && types.Contains((declaration.Owner, declaration.Name)))
             {
-                string name = Names.Split(declaration.CName, _options.Prefixes).Name;
-                (string type, string expression) = _constantParts[declaration.CName];
-                _declarations[i] = declaration with { Name = name, Text = ConstantText(type, name, expression) };
-                _constants[declaration.CName] = declaration.Owner.Length == 0 ? name : Container(declaration.Owner) + "." + name;
-                int recorded = _names.FindIndex(pair => string.Equals(pair.CName, declaration.CName, StringComparison.Ordinal));
-                _names[recorded] = (declaration.CName, _constants[declaration.CName]);
+                Rename(i, declaration.Owner, Names.Split(declaration.CName, _options.Prefixes).Name);
+            }
+            else if (declaration.Kind == DeclarationKind.Constant && declaration.Owner.Length > 0 && !_structs.Contains(declaration.Owner) && types.Contains(("", Names.Pascal(declaration.Owner))))
+            {
+                // A constant whose owner is a type with no members of its own to join (ImGuiKey_LegacyNativeKey_BEGIN
+                // beside the enum ImGuiKey) would need a class of that name beside the type: it keeps its whole name in
+                // the library's class instead.
+                Rename(i, "", Names.Pascal(declaration.CName));
             }
         }
+    }
+
+    /// <summary>Gives the constant at <paramref name="index"/> another owner and name, in all the places it is recorded.</summary>
+    private void Rename(int index, string owner, string name)
+    {
+        Declaration declaration = _declarations[index];
+        (string type, string expression) = _constantParts[declaration.CName];
+        _declarations[index] = declaration with { Owner = owner, Name = name, Text = ConstantText(type, name, expression) };
+        _constants[declaration.CName] = owner.Length == 0 ? name : Container(owner) + "." + name;
+        int recorded = _names.FindIndex(pair => string.Equals(pair.CName, declaration.CName, StringComparison.Ordinal));
+        _names[recorded] = (declaration.CName, _constants[declaration.CName]);
     }
 
     private void Enum(CppEnum cppEnum)
@@ -624,12 +637,11 @@ internal sealed class Reader
 
             bits = null;
             string fieldName = field.Name.Length == 0 ? "" : Names.Pascal(field.Name);
-            string fieldType = "";
-            if (Unqualified(field.Type) is CppClass { Name: "" } anonymous && !_classNames.ContainsKey(anonymous))
+            string kind = "";
+            if (Unqualified(field.Type) is CppClass anonymous && !IsNamed(anonymous.Name) && !_classNames.ContainsKey(anonymous))
             {
                 // An unnamed union or struct member is a field named Union or Struct, of a nested type of that name.
-                string kind = anonymous.ClassKind == CppClassKind.Union ? "Union" : "Struct";
-                fieldType = fieldName.Length == 0 ? kind + "Type" : fieldName + kind;
+                kind = anonymous.ClassKind == CppClassKind.Union ? "Union" : "Struct";
                 if (fieldName.Length == 0)
                 {
                     fieldName = kind;
@@ -645,6 +657,9 @@ internal sealed class Reader
             {
                 fieldName += "_";
             }
+
+            // The nested type is named from the field as it ends up, so a struct's second unnamed union, Union_, is a Union_Type.
+            string fieldType = kind.Length == 0 ? "" : field.Name.Length == 0 ? fieldName + "Type" : fieldName + kind;
 
             _names.Add(($"{cName}.{(field.Name.Length == 0 ? fieldName : field.Name)}", fieldName));
             if (!first)
@@ -832,7 +847,7 @@ internal sealed class Reader
         bool attaches = _structs.Contains(owner);
         if (attaches && string.Equals(name, Names.Pascal(Names.Split(owner, _options.Prefixes).Name), StringComparison.Ordinal))
         {
-            // A C# member cannot be named like its type: cimgui's ImDrawCmd_ImDrawCmd is ImDrawCmd.ImDrawCmd_.
+            // A C# member cannot be named like its type: a constructor named for its struct, ImDrawCmd_ImDrawCmd, is ImDrawCmd.ImDrawCmd_.
             name += "_";
         }
 
@@ -898,7 +913,7 @@ internal sealed class Reader
                 return text;
             case CppPointerType pointer:
                 CppType element = Unqualified(pointer.ElementType);
-                return element is CppFunctionType functionType ? FunctionPointer(functionType) : Type(element, true) + "*";
+                return FunctionTypeOf(element) is { } functionType ? FunctionPointer(functionType) : Type(element, true) + "*";
             case CppTypedef typedef:
                 if (_flagEnums.TryGetValue(typedef.Name, out string? flagEnum))
                 {
@@ -986,11 +1001,82 @@ internal sealed class Reader
         return type;
     }
 
-    private string? NameOf(CppClass cppClass)
-        => _classNames.TryGetValue(cppClass, out string? name) ? name : cppClass.Name.Length > 0 ? cppClass.Name : null;
+    /// <summary>
+    /// The function type under any qualifiers and typedefs, or null: a header may name a function type
+    /// (<c>typedef int b3AssertFcn(const char*)</c>) and take a pointer to it (<c>b3AssertFcn*</c>), which is a function
+    /// pointer as much as a pointer typedef is.
+    /// </summary>
+    private static CppFunctionType? FunctionTypeOf(CppType type)
+    {
+        type = Unqualified(type);
+        while (type is CppTypedef typedef)
+        {
+            type = Unqualified(typedef.ElementType);
+        }
 
+        return type as CppFunctionType;
+    }
+
+    private string? NameOf(CppClass cppClass)
+        => _classNames.TryGetValue(cppClass, out string? name) ? name : IsNamed(cppClass.Name) ? cppClass.Name : null;
+
+    /// <summary>
+    /// An enum's C name: its own, the typedef's that names it, or, for one with neither whose members share a prefix
+    /// that is a typedef to an integer (Dear ImGui's forward-declared enums: <c>typedef int ImGuiDir;</c> beside
+    /// <c>enum { ImGuiDir_None, … }</c>), that prefix with the underscore the flags idiom expects, so the typedef takes
+    /// the enum.
+    /// </summary>
     private string? NameOf(CppEnum cppEnum)
-        => cppEnum.Name.Length > 0 ? cppEnum.Name : _enumNames.TryGetValue(cppEnum, out string? name) ? name : null;
+    {
+        if (IsNamed(cppEnum.Name))
+        {
+            return cppEnum.Name;
+        }
+
+        if (_enumNames.TryGetValue(cppEnum, out string? name))
+        {
+            return name;
+        }
+
+        // The prefix most members share: an enum may hold a few of another's (ImGuiKey holds the ImGuiMod_ values).
+        Dictionary<string, int> prefixes = new(StringComparer.Ordinal);
+        foreach (CppEnumItem item in cppEnum.Items)
+        {
+            int underscore = item.Name.IndexOf('_', StringComparison.Ordinal);
+            if (underscore > 0)
+            {
+                string own = item.Name[..underscore];
+                prefixes[own] = prefixes.GetValueOrDefault(own) + 1;
+            }
+        }
+
+        string? prefix = null;
+        foreach ((string own, int count) in prefixes)
+        {
+            if (prefix is null || count > prefixes[prefix])
+            {
+                prefix = own;
+            }
+        }
+
+        return prefix is not null && _typedefs.TryGetValue(prefix, out CppTypedef? typedef) && IsInteger(typedef) ? prefix + "_" : null;
+    }
+
+    /// <summary>Whether a typedef is, through any typedefs between, an integer.</summary>
+    private static bool IsInteger(CppTypedef typedef)
+    {
+        CppType type = Unqualified(typedef.ElementType);
+        while (type is CppTypedef inner)
+        {
+            type = Unqualified(inner.ElementType);
+        }
+
+        return type is CppPrimitiveType { Kind: not (CppPrimitiveKind.Float or CppPrimitiveKind.Double or CppPrimitiveKind.Void or CppPrimitiveKind.Bool) };
+    }
+
+    /// <summary>Whether a name is one the header gave, not the placeholder libclang gives an anonymous type.</summary>
+    private static bool IsNamed(string name)
+        => name.Length > 0 && !name.Contains("(unnamed", StringComparison.Ordinal) && !name.Contains("(anonymous", StringComparison.Ordinal);
 
     /// <summary>A type's C# name as written from anywhere in the namespace: owner-qualified when it has one.</summary>
     private string Qualified(string cName)

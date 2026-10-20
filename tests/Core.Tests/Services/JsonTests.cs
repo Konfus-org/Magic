@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text;
 using System.Text.Json;
 using Magic.Contexts.Assets;
@@ -72,7 +73,7 @@ public sealed class JsonTests
     {
         Result<Transform> read = Json.Read<Transform>("{ \"position\": { \"x\": 1, \"y\": 2, \"z\": 3 } }"u8);
 
-        Assert.Equal(new Vector3D(1, 2, 3), read.Value.Position);
+        Assert.Equal(new Vector3(1, 2, 3), read.Value.Position);
     }
 
     [Fact]

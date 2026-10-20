@@ -2,7 +2,6 @@ using System.Numerics;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
-using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Rectangle = System.Drawing.Rectangle;
@@ -48,16 +47,16 @@ internal sealed class CameraViews(IWindow window) : ISystem<Transform, Camera>
 /// into its frame, the tangents of half its field of view across and up, how near it sees, and its area of the window
 /// in pixels.
 /// </summary>
-internal readonly record struct CameraView(Vector3D Position, Quaternion Inverse, Vector2 Tangents, float Near, Rectangle Area)
+internal readonly record struct CameraView(Vector3 Position, Quaternion Inverse, Vector2 Tangents, float Near, Rectangle Area)
 {
     /// <summary>
     /// The pixel <paramref name="point"/> shows at; false when it is behind the camera, outside the view or farther than
     /// <paramref name="distance"/> metres from the camera.
     /// </summary>
-    public bool Project(Vector3D point, float distance, out Vector2 pixel)
+    public bool Project(Vector3 point, float distance, out Vector2 pixel)
     {
         pixel = default;
-        Vector3 relative = (point - Position).ToVector3();
+        Vector3 relative = point - Position;
         if (relative.LengthSquared() > distance * distance)
         {
             return false;
