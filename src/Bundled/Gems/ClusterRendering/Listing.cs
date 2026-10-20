@@ -153,7 +153,6 @@ internal sealed class Listing(IGpu gpu) : IDisposable
         foreach (ListedPass pass in Passes)
         {
             pass.Use(Created);
-            pass.UseDispatch(Created);
         }
     }
 
@@ -301,6 +300,17 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     public bool DrawsSurfaces => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn != PassDrawn.Depth;
 
     /// <summary>
+    /// A draw through the pieces' vertex stage: the visibility buffer's, or transparent surfaces forward.
+    /// </summary>
+    public bool DrawsPieces => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn is PassDrawn.Visibility or PassDrawn.Transparent;
+
+    /// <summary>
+    /// A draw from the arguments and instances a pass before it made: the visibility buffer's pieces or depth's, or the
+    /// G-buffer's tiles.
+    /// </summary>
+    public bool DrawsIndirect => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn is PassDrawn.Visibility or PassDrawn.Surfaces or PassDrawn.Depth;
+
+    /// <summary>
     /// A draw into a cube: the sky captured, a face an iteration.
     /// </summary>
     public bool DrawsCube { get; private set; }
@@ -432,7 +442,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
             PassKind.Script when Pass.Script == Handle<Script>.None => "a script pass names its script.",
             PassKind.Script when TextureWrites.Count != 1 || BufferWrites.Count > 0 => "a script pass writes one texture, its target.",
             PassKind.Draw when Pass.Draw.Drawn == PassDrawn.Depth && Pass.Shader == Handle<Shader>.None => "a depth draw names its vertex shader.",
-            PassKind.Draw when Pass.Draw.Drawn is PassDrawn.Visibility or PassDrawn.Surfaces or PassDrawn.Depth && (Pass.Draw.Args.Length == 0 || Pass.Draw.Instances.Length == 0) => "a draw of pieces or tiles names the arguments and instances a pass before it made.",
+            PassKind.Draw when DrawsIndirect && (Pass.Draw.Args.Length == 0 || Pass.Draw.Instances.Length == 0) => "a draw of pieces or tiles names the arguments and instances a pass before it made.",
             PassKind.Draw when TextureWrites.Count + BufferWrites.Count > 0 => "a draw pass draws into its colours and depth, and writes nothing else.",
             _ => null,
         };
@@ -457,7 +467,8 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     }
 
     /// <summary>
-    /// Adds what this pass's shaders use each thing they name that a pass makes for to what that thing is made with.
+    /// Adds what this pass's shaders use each thing they name that a pass makes for to what that thing is made with, and
+    /// what a compute pass that dispatches by a buffer uses it for: indirect arguments.
     /// </summary>
     public void Use(Dictionary<string, CreatedResource> created)
     {
@@ -497,6 +508,11 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
             Add(created, binding.Info.Name, GpuTextureUsage.None, GpuBufferUsage.ComputeWrite);
         }
 
+        if (Pass.Kind == PassKind.Compute && Pass.Dispatch.Args.Length > 0)
+        {
+            Add(created, Pass.Dispatch.Args, GpuTextureUsage.None, GpuBufferUsage.Arguments);
+        }
+
         if (Pass.Kind != PassKind.Draw)
         {
             return;
@@ -510,27 +526,6 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
         Add(created, Pass.Draw.Depth, GpuTextureUsage.DepthTarget, GpuBufferUsage.None);
         Add(created, Pass.Draw.Args, GpuTextureUsage.None, GpuBufferUsage.Arguments);
         Add(created, Pass.Draw.Instances, GpuTextureUsage.None, GpuBufferUsage.Vertex);
-    }
-
-    /// <summary>
-    /// Adds what a compute pass that dispatches by a buffer uses it for: indirect arguments.
-    /// </summary>
-    public void UseDispatch(Dictionary<string, CreatedResource> created)
-    {
-        if (Pass.Kind == PassKind.Compute && Pass.Dispatch.Args.Length > 0)
-        {
-            Add(created, Pass.Dispatch.Args, GpuTextureUsage.None, GpuBufferUsage.Arguments);
-        }
-    }
-
-    /// <summary>
-    /// The declarations a shader of <paramref name="stage"/> of this pass is given (<see cref="StageBindings.Header"/>):
-    /// every name it can see, and for compute every name it writes; at the slots of <paramref name="bound"/> when it is
-    /// known what the shader uses.
-    /// </summary>
-    public string Header(GpuStage stage, StageBindings? bound)
-    {
-        return StageBindings.Header(stage, Visible, WritesOf(stage), bound);
     }
 
     /// <summary>

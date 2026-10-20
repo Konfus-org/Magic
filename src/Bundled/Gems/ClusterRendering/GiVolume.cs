@@ -31,12 +31,12 @@ internal sealed class GiVolume : IDisposable
     /// <summary>
     /// Probes a side of a level; the shaders' GiProbes.
     /// </summary>
-    public const int Probes = 16;
+    private const int Probes = 16;
 
     /// <summary>
     /// The most levels, which the volumes the passes make hold.
     /// </summary>
-    public const int MaxLevels = 4;
+    private const int MaxLevels = 4;
 
     /// <summary>
     /// Voxels a distance reaches past a surface, beyond which the field says no more: what a voxel near something that

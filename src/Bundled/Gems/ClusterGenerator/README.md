@@ -1,6 +1,6 @@
 # ClusterGenerator
 
-Models' levels of detail: provides `ILoadPostProcessor<Model>`, giving each model its `Clusters` and its `Cards` as it
+Models' clusters and cards: provides `ILoadPostProcessor<Model>`, giving each model its `Clusters` and its `Cards` as it
 loads, and keeps them in the cache (`Caches`), which it writes them for as `ICache<ClustersAndCards>`.
 
 ## Settings

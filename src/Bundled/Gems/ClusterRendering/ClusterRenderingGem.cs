@@ -83,7 +83,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private readonly GpuArray<uint> _zBinsEmpty;
     private readonly GpuArray<uint> _zeros;
     private readonly GpuArray<Vector4> _moved;
-    private readonly GpuBuffer _pieceIndices;
     private readonly List<Subscription> _watching = [];
     private readonly List<SurfaceKey> _raster = [];
     private readonly HashSet<GpuTexture> _cleared = [];
@@ -129,15 +128,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _scene = new Scene(gpu, assets, _models, _materials);
         _lights = new SceneLights(gpu);
         _shadows = new Shadows(gpu);
-        _pieceIndices = gpu.CreateBuffer(GpuBufferUsage.Index, PassRecorder.PieceIndexCount * sizeof(ushort));
-        ushort[] indices = new ushort[PassRecorder.PieceIndexCount];
-        for (int i = 0; i < indices.Length; i++)
-        {
-            indices[i] = (ushort)i;
-        }
-
-        gpu.Upload(_pieceIndices, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
-        _recorder = new PassRecorder(gpu, _graph, _materials, _pieceIndices);
+        _recorder = new PassRecorder(gpu, _graph, _materials);
         _views = new Views(gpu, window, assets, threads, _scene, _models, _materials, settings, stopping);
         _output = new Output(gpu, compiler, threads, stopping);
         _failures = new Failures(gpu);
@@ -192,7 +183,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _zBinsEmpty.Dispose();
         _zeros.Dispose();
         _moved.Dispose();
-        _gpu.Release(_pieceIndices);
     }
 
     public int Version => MeshFields.CacheVersion;
@@ -293,8 +283,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         DrawnMaterial? sky = copy.Sky is { } material && material != Handle<Material>.None ? _materials.Get(material) : null;
         SurfaceKey skySurface = sky is { } drawnSky ? drawnSky.Surface : default;
         _raster.Clear();
-        _raster.Add(new SurfaceKey(Handle<Shader>.None, false, false));
-        _raster.Add(new SurfaceKey(Handle<Shader>.None, false, true));
+        _raster.AddRange(Materials.FixedRasterKeys);
         _raster.AddRange(_materials.RasterBins);
         _graph.Append(DebugViewPass(_debugView));
         _graph.Update(PipelineOf(), EffectsOf(copy), OverlayOf(), new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
@@ -348,7 +337,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             return;
         }
 
-        View shown = views.Find(view => view.TargetIsWindow) ?? views[0];
+        View shown = views.Find(view => view.Target.IsWindow) ?? views[0];
         SetFrame(main?.Transform.Position ?? shown.Position);
         _failures.Say(listing.Failures);
         _failures.Begin(_zeros.Buffer);
@@ -395,7 +384,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
     {
-        Preloaded preloaded = await Task.Run(() => Preloaded.Of(prefabs), cancel).ConfigureAwait(false);
+        Preloaded preloaded = Preloaded.Of(prefabs);
         Preload preload = new(preloaded, progress);
         using CancellationTokenRegistration cancelling = cancel.Register(() => OnRender(() => Cancel(preload, cancel)));
         OnRender(() => Begin(preload));
@@ -422,7 +411,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
         foreach (View view in views)
         {
-            if (!view.TargetIsWindow)
+            if (!view.Target.IsWindow)
             {
                 _targets.TryAdd(view.Target.Texture, view.Target);
             }

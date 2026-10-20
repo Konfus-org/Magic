@@ -285,7 +285,7 @@ internal static class QuadricSimplifier
             }
 
             sources = [.. madeFrom];
-            return new Mesh { Vertices = vertices.ToArray(), Indices = indices.ToArray(), MaterialSlot = _source.MaterialSlot };
+            return new Mesh { Vertices = vertices.ToArray(), Indices = indices.ToArray() };
         }
 
         /// <summary>
@@ -446,14 +446,9 @@ internal static class QuadricSimplifier
         /// </summary>
         private void Update(int pass)
         {
-            if (pass > 0)
-            {
-                _triangles.RemoveAll(static triangle => triangle.Deleted);
-            }
-
+            _triangles.RemoveAll(static triangle => triangle.Deleted);
             foreach (Point point in _points)
             {
-                point.Start = 0;
                 point.Count = 0;
             }
 

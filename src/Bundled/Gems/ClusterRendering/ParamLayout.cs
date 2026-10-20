@@ -187,34 +187,6 @@ internal sealed partial class ParamLayout
     }
 
     /// <summary>
-    /// HLSL that unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows:
-    /// <c>MaterialParams LoadMaterialParams(uint material) { ... }</c>. One line, so it shifts no line after it.
-    /// </summary>
-    private string Loader(string signature, string prologue, string rows)
-    {
-        StringBuilder text = new();
-        text.Append(StructName).Append(' ').Append(signature).Append(" { ").Append(prologue).Append(' ').Append(StructName).Append(" loaded; ");
-        foreach (ParamField field in Fields)
-        {
-            if (field.Type == ParamType.Curve)
-            {
-                for (int row = 0; row < field.Size / 16; row++)
-                {
-                    text.Append(CultureInfo.InvariantCulture, $"loaded.{field.Name}.rows[{row}] = asfloat({rows}[{(field.Offset / 16) + row}]); ");
-                }
-
-                continue;
-            }
-
-            string raw = $"{rows}[{field.Offset / 16}].{"xyzw".Substring(field.Offset % 16 / 4, field.Components)}";
-            string value = field.Type == ParamType.Bool ? $"{raw} != 0u" : field.IsFloat ? $"asfloat({raw})" : field.IsInt ? $"asint({raw})" : raw;
-            text.Append("loaded.").Append(field.Name).Append(" = ").Append(value).Append("; ");
-        }
-
-        return text.Append("return loaded; }").ToString();
-    }
-
-    /// <summary>
     /// The names in <paramref name="values"/> the struct does not declare, for the caller to warn of.
     /// </summary>
     public List<string> Unknown(IEnumerable<string> values)
@@ -229,22 +201,6 @@ internal sealed partial class ParamLayout
         }
 
         return unknown;
-    }
-
-    /// <summary>
-    /// The member called <paramref name="name"/>, or null.
-    /// </summary>
-    public ParamField? Named(string name)
-    {
-        foreach (ParamField field in Fields)
-        {
-            if (string.Equals(field.Name, name, StringComparison.Ordinal))
-            {
-                return field;
-            }
-        }
-
-        return null;
     }
 
     /// <summary>
@@ -323,6 +279,50 @@ internal sealed partial class ParamLayout
                 WriteComponents(field, value, destination);
             }
         }
+    }
+
+    /// <summary>
+    /// HLSL that unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows:
+    /// <c>MaterialParams LoadMaterialParams(uint material) { ... }</c>. One line, so it shifts no line after it.
+    /// </summary>
+    private string Loader(string signature, string prologue, string rows)
+    {
+        StringBuilder text = new();
+        text.Append(StructName).Append(' ').Append(signature).Append(" { ").Append(prologue).Append(' ').Append(StructName).Append(" loaded; ");
+        foreach (ParamField field in Fields)
+        {
+            if (field.Type == ParamType.Curve)
+            {
+                for (int row = 0; row < field.Size / 16; row++)
+                {
+                    text.Append(CultureInfo.InvariantCulture, $"loaded.{field.Name}.rows[{row}] = asfloat({rows}[{(field.Offset / 16) + row}]); ");
+                }
+
+                continue;
+            }
+
+            string raw = $"{rows}[{field.Offset / 16}].{"xyzw".Substring(field.Offset % 16 / 4, field.Components)}";
+            string value = field.Type == ParamType.Bool ? $"{raw} != 0u" : field.IsFloat ? $"asfloat({raw})" : field.IsInt ? $"asint({raw})" : raw;
+            text.Append("loaded.").Append(field.Name).Append(" = ").Append(value).Append("; ");
+        }
+
+        return text.Append("return loaded; }").ToString();
+    }
+
+    /// <summary>
+    /// The member called <paramref name="name"/>, or null.
+    /// </summary>
+    private ParamField? Named(string name)
+    {
+        foreach (ParamField field in Fields)
+        {
+            if (string.Equals(field.Name, name, StringComparison.Ordinal))
+            {
+                return field;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

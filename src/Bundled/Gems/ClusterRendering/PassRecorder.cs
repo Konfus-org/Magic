@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
@@ -12,11 +13,11 @@ namespace Magic.ClusterRendering;
 /// iterations its constants pushed, every name each of its stages binds bound at its slot (<see cref="StageBindings"/>),
 /// each looked up by name in the frame's or the view's resources, and its dispatch or draws, under a debug group of its
 /// name. A draw of pieces (the visibility buffer, transparent surfaces, depth) steps through the pieces a pass before
-/// it made with the static run of indices <paramref name="pieceIndices"/> holds; a draw of the visibility buffer is
-/// one indirect draw per raster bin, and one of surfaces one per resolve bin, over the tiles a pass before it
-/// classified. Holds nothing of a frame between calls. Render thread.
+/// it made with the one run of indices it holds; a draw of the visibility buffer is one indirect draw per raster bin,
+/// and one of surfaces one per resolve bin, over the tiles a pass before it classified. Holds nothing of a frame between
+/// calls. Render thread.
 /// </summary>
-internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials materials, GpuBuffer pieceIndices) : IDisposable
+internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials materials) : IDisposable
 {
     /// <summary>
     /// Groups a dispatch runs along x at most, as every API allows; more go on in y, which a shader that may run more
@@ -27,8 +28,13 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials material
     /// <summary>
     /// Indices a piece is drawn with, up to 32 triangles; a tile's quad, or a card, takes the first six.
     /// </summary>
-    public const uint PieceIndexCount = 96;
+    private const uint PieceIndexCount = 96;
 
+    /// <summary>
+    /// The indices every piece is drawn with, 0 to <see cref="PieceIndexCount"/>, which a draw of pieces or tiles steps
+    /// through an instance at a time.
+    /// </summary>
+    private readonly GpuBuffer _pieceIndices = PieceIndicesOf(gpu);
     private readonly GpuSampler _nearest = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Nearest, GpuWrap.Clamp));
     private readonly GpuSampler _linear = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
     private readonly GpuSampler _comparison = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp, Compare: GpuCompare.GreaterOrEqual));
@@ -38,6 +44,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials material
         gpu.Release(_nearest);
         gpu.Release(_linear);
         gpu.Release(_comparison);
+        gpu.Release(_pieceIndices);
     }
 
     /// <summary>
@@ -296,7 +303,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials material
 
         BoundResource args = default;
         BoundResource instances = default;
-        if (draw.Drawn is PassDrawn.Visibility or PassDrawn.Surfaces or PassDrawn.Depth && (!Find(scope, draw.Args, out args) || !Find(scope, draw.Instances, out instances)))
+        if (pass.DrawsIndirect && (!Find(scope, draw.Args, out args) || !Find(scope, draw.Instances, out instances)))
         {
             return false;
         }
@@ -349,9 +356,9 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials material
     private void Visibility(GpuRenderPass render, ListedPass pass, BoundResource args, BoundResource instances)
     {
         BindPieces(render, instances.Buffer);
-        for (int bin = 0; bin < Materials.FixedRasterBins; bin++)
+        for (int bin = 0; bin < Materials.FixedRasterKeys.Count; bin++)
         {
-            DrawBin(new SurfaceKey(Handle<Shader>.None, false, bin == 1), bin);
+            DrawBin(Materials.FixedRasterKeys[bin], bin);
         }
 
         for (int surface = 0; surface < materials.RasterBins.Count; surface++)
@@ -436,7 +443,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials material
     /// Binds pieces to draw: their instance-rate buffer and the indices. The scene's tables their vertex stage reads are
     /// bound as any stage's reads are.
     /// </summary>
-    private GpuRenderPass BindPieces(GpuRenderPass render, GpuBuffer pieces) => render.VertexBuffers([pieces]).IndexBuffer(pieceIndices, GpuIndexSize.Bits16);
+    private GpuRenderPass BindPieces(GpuRenderPass render, GpuBuffer pieces) => render.VertexBuffers([pieces]).IndexBuffer(_pieceIndices, GpuIndexSize.Bits16);
 
     private void Mipmaps(ListedPass pass, in RecordScope scope)
     {
@@ -565,6 +572,22 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials material
     }
 
     private static uint Ceiling(uint count, uint per) => (Math.Max(1, count) + Math.Max(1, per) - 1) / Math.Max(1, per);
+
+    /// <summary>
+    /// A buffer of the indices 0 to <see cref="PieceIndexCount"/>, uploaded once.
+    /// </summary>
+    private static GpuBuffer PieceIndicesOf(IGpu gpu)
+    {
+        GpuBuffer buffer = gpu.CreateBuffer(GpuBufferUsage.Index, PieceIndexCount * sizeof(ushort));
+        ushort[] indices = new ushort[PieceIndexCount];
+        for (int i = 0; i < indices.Length; i++)
+        {
+            indices[i] = (ushort)i;
+        }
+
+        gpu.Upload(buffer, 0, MemoryMarshal.AsBytes(indices.AsSpan()));
+        return buffer;
+    }
 
     /// <summary>
     /// What a stage reads this frame, gathered from what it binds, each at its slot: sampled textures with the sampler
@@ -702,14 +725,14 @@ internal readonly record struct Counts(
     uint Lights,
     uint ZBins,
     uint LightTileWords,
-    uint GiRays = 0,
-    uint GiProbeThreads = 0,
-    uint SceneLights = 0,
-    uint SunEntries = 0,
-    uint LightEntries = 0,
-    uint ShadowViews = 0,
-    uint ShadowGroups = 0,
-    uint ShadowCandidates = 0)
+    uint GiRays,
+    uint GiProbeThreads,
+    uint SceneLights,
+    uint SunEntries,
+    uint LightEntries,
+    uint ShadowViews,
+    uint ShadowGroups,
+    uint ShadowCandidates)
 {
     public uint Of(string name) => name switch
     {

@@ -31,7 +31,7 @@ internal sealed class MeshFields : IDisposable
     /// <summary>
     /// Models whose distance fields are held at once, 64 KB each.
     /// </summary>
-    public const int Capacity = 1024;
+    private const int Capacity = 1024;
 
     /// <summary>
     /// Bricks along the atlas's width and height; it is as many bricks deep as its capacity needs.
@@ -161,18 +161,10 @@ internal sealed class MeshFields : IDisposable
     }
 
     /// <summary>
-    /// Uploads what was set since the last frame.
-    /// </summary>
-    public void Flush()
-    {
-        Table.Flush();
-    }
-
-    /// <summary>
     /// A model's field from <paramref name="meshes"/>, its least detail: exact distances near each triangle, then which texels are inside, those a flood from the box's faces cannot
     /// reach past the surface; none for no triangles.
     /// </summary>
-    public static ModelField? Make(IReadOnlyList<Mesh> meshes)
+    private static ModelField? Make(IReadOnlyList<Mesh> meshes)
     {
         Vector3[] corners = Corners(meshes);
         if (corners.Length == 0)

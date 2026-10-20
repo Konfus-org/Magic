@@ -1,4 +1,5 @@
 using System.IO.Hashing;
+using System.Numerics;
 using BCnEncoder.Encoder;
 using BCnEncoder.Shared;
 using Magic.Contexts.Assets;
@@ -106,6 +107,12 @@ internal sealed class TexturePools : IDisposable
     public GpuSampler Sampler { get; private set; }
 
     /// <summary>
+    /// The textures taken in, or failed, this frame, until it ends: whose models' cards and materials are worked out
+    /// anew.
+    /// </summary>
+    public HashSet<Handle<Texture>> Changed { get; } = [];
+
+    /// <summary>
     /// Filters with as many taps as the settings now say, 1 to 16, from now on: a sampler made again when that changed,
     /// the old one released. Render thread, each frame.
     /// </summary>
@@ -121,12 +128,6 @@ internal sealed class TexturePools : IDisposable
         _gpu.Release(Sampler);
         Sampler = _gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Repeat, clamped));
     }
-
-    /// <summary>
-    /// The textures taken in, or failed, this frame, until it ends: whose models' cards and materials are worked out
-    /// anew.
-    /// </summary>
-    public HashSet<Handle<Texture>> Changed { get; } = [];
 
     /// <summary>
     /// <paramref name="texture"/> as a surface names it, once it is in; starts loading it the first time it is asked for,
@@ -371,7 +372,7 @@ internal sealed class TexturePools : IDisposable
     /// <summary>
     /// Mips of a pool of <paramref name="size"/> texels a side, down to <see cref="SmallestMip"/>.
     /// </summary>
-    private static int LevelsOf(uint size) => System.Numerics.BitOperations.Log2(size) - System.Numerics.BitOperations.Log2(SmallestMip) + 1;
+    private static int LevelsOf(uint size) => BitOperations.Log2(size) - BitOperations.Log2(SmallestMip) + 1;
 
     private static byte[] ResampleLevel(ReadOnlySpan<byte> pixels, int width, int height, int side)
     {

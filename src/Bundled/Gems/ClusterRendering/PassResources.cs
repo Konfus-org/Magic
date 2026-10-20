@@ -68,6 +68,12 @@ internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, Gp
     /// </summary>
     public const string TargetName = "Target";
 
+    /// <summary>
+    /// What ends the name a texture kept from frame to frame is read by as it was the frame before
+    /// (<see cref="HistoryOf"/>).
+    /// </summary>
+    public const string HistorySuffix = "History";
+
     public bool IsDepth => Format == GpuFormat.D32Float;
 
     /// <summary>
@@ -124,12 +130,12 @@ internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, Gp
     /// The name a texture kept from frame to frame (<see cref="PassCreate.History"/>) is read by as it was the frame
     /// before.
     /// </summary>
-    public static string HistoryOf(string name) => name + "History";
+    public static string HistoryOf(string name) => name + HistorySuffix;
 
     /// <summary>
     /// What a pass makes, as it declares it: for the frame when it is made in a stage that runs once a frame.
     /// </summary>
-    public static ResourceInfo Of(PassCreate create, bool isFrame, bool isTarget = false) => new(
+    public static ResourceInfo Of(PassCreate create, bool isFrame, bool isTarget) => new(
         create.Name,
         create.Kind == PassResource.Buffer,
         isFrame,
@@ -282,8 +288,7 @@ internal sealed class ResourceSet(IGpu gpu) : IDisposable
 
     private static bool IsHistoryOf(Listing listing, string name)
     {
-        const string Suffix = "History";
-        return name.EndsWith(Suffix, StringComparison.Ordinal) && listing.Created.TryGetValue(name[..^Suffix.Length], out CreatedResource? created) && created.Create.History;
+        return name.EndsWith(ResourceInfo.HistorySuffix, StringComparison.Ordinal) && listing.Created.TryGetValue(name[..^ResourceInfo.HistorySuffix.Length], out CreatedResource? created) && created.Create.History;
     }
 
     private void Keep(string name, in ResourceKey key)

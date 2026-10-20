@@ -14,8 +14,8 @@ using Magic.Services;
 namespace Magic.ClusterGenerator;
 
 /// <summary>
-/// Makes a <see cref="Model"/>'s levels of detail as it loads (<see cref="ILoadPostProcessor{T}"/>): its clusters at
-/// every level of detail (<see cref="ClusterBuilder"/>), then a card for each mesh (<see cref="Card"/>, drawn by
+/// Makes a <see cref="Model"/>'s clusters and cards as it loads (<see cref="ILoadPostProcessor{T}"/>): its clusters at
+/// every level (<see cref="ClusterBuilder"/>), then a card for each mesh (<see cref="Card"/>, drawn by
 /// <see cref="CardBaker"/>), drawn from a distance that grows with the model's size. They are kept in the cache
 /// (<see cref="Caches"/>, which it writes them for as <see cref="ICache{T}"/> of <see cref="ClustersAndCards"/>)
 /// under the model's id, made from its version and where its cards start, so a model is made once, and again only when
@@ -73,11 +73,13 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
                 writer.Write(mesh.Indices.Length);
                 writer.Write(MemoryMarshal.AsBytes(mesh.Vertices.Span));
                 writer.Write(MemoryMarshal.AsBytes(mesh.Indices.Span));
-                if (mesh.Card is { } card)
+                if (mesh.Card is not { } card)
                 {
-                    WriteAtlas(card.Surface);
-                    WriteAtlas(card.Normals);
+                    throw new InvalidOperationException("A card mesh has no card.");
                 }
+
+                WriteAtlas(card.Surface);
+                WriteAtlas(card.Normals);
             }
         }
 
@@ -166,27 +168,21 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         ulong key = asset.Handle.Id;
         float cardHeight = _settings.CardHeight;
         ulong madeFrom = MadeFrom(version, cardHeight);
+        ClustersAndCards made;
         if (await _caches.ReadAsync<ClustersAndCards>(key, madeFrom, cancel).ConfigureAwait(false) is { Ok: true } cached)
         {
             Debugging.Verbose($"Read the clusters and cards of model {key} from the cache.");
-            HandOut(cached.Value.Cards);
-            return Result.Success(WithClustersAndCards(asset, cached.Value));
+            made = cached.Value;
+        }
+        else
+        {
+            made = new(CardsOf(asset, cardHeight), ClusterBuilder.Build(asset, cancel));
+            Debugging.Verbose($"Made {made.Clusters?.Clusters.Length ?? 0} clusters and {made.Cards?.Meshes.Count ?? 0} cards of model {key}.");
+            await _caches.WriteAsync(key, madeFrom, made, cancel).ConfigureAwait(false);
         }
 
-        ClustersAndCards made = new(CardsOf(asset, cardHeight), ClusterBuilder.Build(asset, cancel));
-        Debugging.Verbose($"Made {made.Clusters?.Clusters.Length ?? 0} clusters and {made.Cards?.Meshes.Count ?? 0} cards of model {key}.");
-        await _caches.WriteAsync(key, madeFrom, made, cancel).ConfigureAwait(false);
-
         HandOut(made.Cards);
-        return Result.Success(WithClustersAndCards(asset, made));
-    }
-
-    /// <summary>
-    /// <paramref name="model"/> with its clusters and its cards.
-    /// </summary>
-    private static Model WithClustersAndCards(Model model, ClustersAndCards made)
-    {
-        return new Model { Handle = model.Handle, Meshes = model.Meshes, Clusters = made.Clusters, Cards = made.Cards };
+        return Result.Success(new Model { Handle = asset.Handle, Meshes = asset.Meshes, Clusters = made.Clusters, Cards = made.Cards });
     }
 
     /// <summary>
@@ -203,12 +199,15 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
 
     /// <summary>
     /// <paramref name="model"/>'s cards, one for each of its meshes, drawn from where it is <paramref name="cardHeight"/>
-    /// of the view tall; none for a model that lies flat.
+    /// of the view tall; none for a model that lies flat. How big it is, which its height on screen is measured by, is
+    /// half the largest side of the box around its vertices.
     /// </summary>
     private static ModelCards? CardsOf(Model model, float cardHeight)
     {
-        float radius = RadiusOf(model);
-        if (radius <= 0 || HeightOf(model) < radius * 2 * FlatShare)
+        (Vector3 min, Vector3 max) = BoundsOf(model);
+        Vector3 size = max - min;
+        float radius = min.X > max.X ? 0 : MathF.Max(size.X, MathF.Max(size.Y, size.Z)) / 2;
+        if (radius <= 0 || size.Y < radius * 2 * FlatShare)
         {
             return null;
         }
@@ -279,25 +278,8 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     }
 
     /// <summary>
-    /// Half the largest side of the box around <paramref name="model"/>'s vertices: how big it is, which its height on
-    /// screen is measured by; 0 when it has none.
+    /// The box around <paramref name="model"/>'s vertices; min past max when it has none.
     /// </summary>
-    private static float RadiusOf(Model model)
-    {
-        (Vector3 min, Vector3 max) = BoundsOf(model);
-        Vector3 size = max - min;
-        return min.X > max.X ? 0 : MathF.Max(size.X, MathF.Max(size.Y, size.Z)) / 2;
-    }
-
-    /// <summary>
-    /// How tall <paramref name="model"/> stands, along +Y.
-    /// </summary>
-    private static float HeightOf(Model model)
-    {
-        (Vector3 min, Vector3 max) = BoundsOf(model);
-        return min.Y > max.Y ? 0 : max.Y - min.Y;
-    }
-
     private static (Vector3 Min, Vector3 Max) BoundsOf(Model model)
     {
         Vector3 min = new(float.MaxValue);
@@ -320,7 +302,12 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// </summary>
     private void HandOut(ModelCards? cards)
     {
-        foreach (Mesh mesh in cards?.Meshes ?? [])
+        if (cards is null)
+        {
+            return;
+        }
+
+        foreach (Mesh mesh in cards.Meshes)
         {
             if (mesh.Card is { } card)
             {

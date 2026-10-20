@@ -34,19 +34,19 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// Texels a side of a page of the pool, its border of <see cref="Border"/> each side included, which a filter reads
     /// past the page's edge so it never reads its neighbour.
     /// </summary>
-    public const int Page = 128;
+    private const int Page = 128;
 
-    public const int Border = 4;
+    private const int Border = 4;
 
     /// <summary>
     /// Pages a side of a level of the sun's clipmap.
     /// </summary>
-    public const int Window = 64;
+    private const int Window = 64;
 
     /// <summary>
     /// Levels the clipmap has at most, which <see cref="Clipmap"/> has room for after its own row.
     /// </summary>
-    public const int MaxLevels = 24;
+    private const int MaxLevels = 24;
 
     /// <summary>
     /// Entries of the table point and spot lights' pages are found in: at least twice the pages the views read of them a
@@ -118,6 +118,8 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// pages' as many as the pool has pages.
     /// </summary>
     private int Records => PoolPages * 5;
+
+    private int TableRows => Records + SunEntries + (2 * LightTableEntries);
 
     /// <summary>
     /// Places the sun's clipmap about <paramref name="camera"/> for <paramref name="sun"/>, the way its light travels,
@@ -215,8 +217,6 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
         frame.Set("ShadowTables", BoundResource.Of(Tables, (uint)(TableRows * Row)));
         frame.Set("SunClipmap", BoundResource.Of(Clipmap, ClipmapBytes + (MaxLevels * LevelBytes)));
     }
-
-    private int TableRows => Records + SunEntries + (2 * LightTableEntries);
 
     /// <summary>
     /// The pool and the tables made again, every page empty and every entry none.

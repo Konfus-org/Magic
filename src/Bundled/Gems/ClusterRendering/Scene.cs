@@ -339,14 +339,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// Writes an instance's row again as it stands, keeping no last place.
-    /// </summary>
-    private void Write(int slot, in InstanceEntry entry)
-    {
-        Instances.Set(slot, RowOf(slot, entry, keepsLast: false));
-    }
-
-    /// <summary>
     /// An instance's row: its transform; where it was, the old row's place when it
     /// moved, else its own; its model's row and its material slots', its look's; and how it fades, in from when its look
     /// could be drawn when it waited for that. Empty while its look cannot be drawn yet.
@@ -546,7 +538,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
                 Classify(slot, entry);
                 if (isRowChanged)
                 {
-                    Write(slot, _entries[slot]);
+                    Instances.Set(slot, RowOf(slot, _entries[slot], keepsLast: false));
                 }
 
                 if (isRemade && SphereOf(_entries[slot].Transform, entry.Look.Model) is { } sphere)
@@ -658,7 +650,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         look.Slots.Remove(slot);
         if (look.Slots.Count == 0)
         {
-            _droppedLooks.Add(new Look(entry.Renderer.Model, entry.Renderer.Materials));
+            _droppedLooks.Add(look.Look);
         }
 
         entry.Look = null;

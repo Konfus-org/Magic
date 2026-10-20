@@ -12,14 +12,10 @@ namespace Magic.ClusterGenerator;
 /// </summary>
 internal static class CardBaker
 {
-    private const int Views = Card.Views;
-    private const int Columns = Card.Columns;
-    private const int AtlasSize = Card.Size;
-
     /// <summary>
     /// Texels a side of each view's cell.
     /// </summary>
-    private const int CellSize = AtlasSize / Columns;
+    private const int CellSize = Card.Size / Card.Columns;
 
     /// <summary>
     /// Samples a side of each texel.
@@ -40,97 +36,85 @@ internal static class CardBaker
     {
         ReadOnlySpan<Vertex> vertices = mesh.Vertices.Span;
         ReadOnlySpan<uint> indices = mesh.Indices.Span;
-        Vector3 min = new(float.MaxValue);
-        Vector3 max = new(float.MinValue);
-        foreach (Vertex vertex in vertices)
-        {
-            min = Vector3.Min(min, vertex.Position);
-            max = Vector3.Max(max, vertex.Position);
-        }
-
-        Vector3 centre = (min + max) / 2;
-        float half = 0;
-        foreach (Vertex vertex in vertices)
-        {
-            half = MathF.Max(half, Vector3.Distance(vertex.Position, centre));
-        }
-
-        half = MathF.Max(half, 1e-4f);
-        byte[] surface = new byte[AtlasSize * AtlasSize * 4];
-        byte[] normals = new byte[AtlasSize * AtlasSize * 4];
+        Vector4 sphere = ClusterBuilder.SphereAround(vertices);
+        Vector3 centre = new(sphere.X, sphere.Y, sphere.Z);
+        float half = MathF.Max(sphere.W, 1e-4f);
+        byte[] surface = new byte[Card.Size * Card.Size * 4];
+        byte[] normals = new byte[Card.Size * Card.Size * 4];
         int size = CellSize * Samples;
         float[] depths = new float[size * size];
         Vector2[] uvs = new Vector2[size * size];
         Vector3[] faces = new Vector3[size * size];
-        for (int view = 0; view < Views; view++)
+        for (int view = 0; view < Card.Views; view++)
         {
             // Seen from this side, looking back at the centre: right is +X when it looks along +Z, and up is +Y.
-            float turn = view * MathF.Tau / Views;
+            float turn = view * MathF.Tau / Card.Views;
             Vector3 side = new(MathF.Sin(turn), 0, MathF.Cos(turn));
             Vector3 forward = -side;
             Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, forward));
             Array.Fill(depths, float.PositiveInfinity);
             for (int t = 0; t + 2 < indices.Length; t += 3)
             {
-                Draw(vertices[(int)indices[t]], vertices[(int)indices[t + 1]], vertices[(int)indices[t + 2]]);
+                Draw(vertices[(int)indices[t]], vertices[(int)indices[t + 1]], vertices[(int)indices[t + 2]], right, forward);
             }
 
-            Resolve(view % Columns * CellSize, view / Columns * CellSize);
-
-            void Draw(in Vertex a, in Vertex b, in Vertex c)
-            {
-                Vector3 pa = Project(a.Position);
-                Vector3 pb = Project(b.Position);
-                Vector3 pc = Project(c.Position);
-                float area = Edge(pa, pb, pc);
-                if (MathF.Abs(area) < 1e-12f)
-                {
-                    return;
-                }
-
-                int fromX = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.X, MathF.Min(pb.X, pc.X))));
-                int toX = Math.Min(size - 1, (int)MathF.Ceiling(MathF.Max(pa.X, MathF.Max(pb.X, pc.X))));
-                int fromY = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.Y, MathF.Min(pb.Y, pc.Y))));
-                int toY = Math.Min(size - 1, (int)MathF.Ceiling(MathF.Max(pa.Y, MathF.Max(pb.Y, pc.Y))));
-                for (int y = fromY; y <= toY; y++)
-                {
-                    for (int x = fromX; x <= toX; x++)
-                    {
-                        Vector3 point = new(x + 0.5f, y + 0.5f, 0);
-                        float wa = Edge(pb, pc, point) / area;
-                        float wb = Edge(pc, pa, point) / area;
-                        float wc = 1 - wa - wb;
-                        if (wa < 0 || wb < 0 || wc < 0)
-                        {
-                            continue;
-                        }
-
-                        float depth = (wa * pa.Z) + (wb * pb.Z) + (wc * pc.Z);
-                        int at = (y * size) + x;
-                        if (depth >= depths[at])
-                        {
-                            continue;
-                        }
-
-                        depths[at] = depth;
-                        uvs[at] = (wa * a.Uv) + (wb * b.Uv) + (wc * c.Uv);
-                        faces[at] = (wa * a.Normal) + (wb * b.Normal) + (wc * c.Normal);
-                    }
-                }
-            }
-
-            Vector3 Project(Vector3 position)
-            {
-                Vector3 local = position - centre;
-                float x = Vector3.Dot(local, right) / half;
-                float y = local.Y / half;
-                return new Vector3(((x * 0.5f) + 0.5f) * size, (0.5f - (y * 0.5f)) * size, Vector3.Dot(local, forward));
-            }
+            Resolve(view % Card.Columns * CellSize, view / Card.Columns * CellSize);
         }
 
         Dilate(surface);
         Dilate(normals);
         return (centre, half, surface, normals);
+
+        // The triangle, seen from the side right and forward give, into the samples it covers where it is the nearest.
+        void Draw(in Vertex a, in Vertex b, in Vertex c, Vector3 right, Vector3 forward)
+        {
+            Vector3 pa = Project(a.Position, right, forward);
+            Vector3 pb = Project(b.Position, right, forward);
+            Vector3 pc = Project(c.Position, right, forward);
+            float area = Edge(pa, pb, pc);
+            if (MathF.Abs(area) < 1e-12f)
+            {
+                return;
+            }
+
+            int fromX = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.X, MathF.Min(pb.X, pc.X))));
+            int toX = Math.Min(size - 1, (int)MathF.Ceiling(MathF.Max(pa.X, MathF.Max(pb.X, pc.X))));
+            int fromY = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.Y, MathF.Min(pb.Y, pc.Y))));
+            int toY = Math.Min(size - 1, (int)MathF.Ceiling(MathF.Max(pa.Y, MathF.Max(pb.Y, pc.Y))));
+            for (int y = fromY; y <= toY; y++)
+            {
+                for (int x = fromX; x <= toX; x++)
+                {
+                    Vector3 point = new(x + 0.5f, y + 0.5f, 0);
+                    float wa = Edge(pb, pc, point) / area;
+                    float wb = Edge(pc, pa, point) / area;
+                    float wc = 1 - wa - wb;
+                    if (wa < 0 || wb < 0 || wc < 0)
+                    {
+                        continue;
+                    }
+
+                    float depth = (wa * pa.Z) + (wb * pb.Z) + (wc * pc.Z);
+                    int at = (y * size) + x;
+                    if (depth >= depths[at])
+                    {
+                        continue;
+                    }
+
+                    depths[at] = depth;
+                    uvs[at] = (wa * a.Uv) + (wb * b.Uv) + (wc * c.Uv);
+                    faces[at] = (wa * a.Normal) + (wb * b.Normal) + (wc * c.Normal);
+                }
+            }
+        }
+
+        Vector3 Project(Vector3 position, Vector3 right, Vector3 forward)
+        {
+            Vector3 local = position - centre;
+            float x = Vector3.Dot(local, right) / half;
+            float y = local.Y / half;
+            return new Vector3(((x * 0.5f) + 0.5f) * size, (0.5f - (y * 0.5f)) * size, Vector3.Dot(local, forward));
+        }
 
         // Each texel of the view's cell from its samples: the cover is the share of them the mesh is in, the uv, the
         // normal and the depth their mean over those, the depth in half sides behind the middle, -1 to 1.
@@ -169,7 +153,7 @@ internal static class CardBaker
                     uv /= covered;
                     normal = normal.LengthSquared() > 1e-12f ? Vector3.Normalize(normal) : Vector3.UnitY;
                     byte cover = (byte)(255 * covered / (Samples * Samples));
-                    int texel = (((cellY + y) * AtlasSize) + cellX + x) * 4;
+                    int texel = (((cellY + y) * Card.Size) + cellX + x) * 4;
                     surface[texel] = Unit(uv.X - MathF.Floor(uv.X));
                     surface[texel + 1] = Unit(uv.Y - MathF.Floor(uv.Y));
                     surface[texel + 2] = Unit((depth / covered / half * 0.5f) + 0.5f);
@@ -196,7 +180,7 @@ internal static class CardBaker
     /// </summary>
     private static void Dilate(byte[] atlas)
     {
-        bool[] filled = new bool[AtlasSize * AtlasSize];
+        bool[] filled = new bool[Card.Size * Card.Size];
         for (int i = 0; i < filled.Length; i++)
         {
             filled[i] = atlas[(i * 4) + 3] > 0;
@@ -205,11 +189,11 @@ internal static class CardBaker
         for (int pass = 0; pass < Spread; pass++)
         {
             bool[] next = (bool[])filled.Clone();
-            for (int y = 0; y < AtlasSize; y++)
+            for (int y = 0; y < Card.Size; y++)
             {
-                for (int x = 0; x < AtlasSize; x++)
+                for (int x = 0; x < Card.Size; x++)
                 {
-                    int at = (y * AtlasSize) + x;
+                    int at = (y * Card.Size) + x;
                     if (filled[at])
                     {
                         continue;
@@ -223,12 +207,12 @@ internal static class CardBaker
                         {
                             int nx = x + dx;
                             int ny = y + dy;
-                            if (nx < 0 || ny < 0 || nx >= AtlasSize || ny >= AtlasSize || nx / CellSize != x / CellSize || ny / CellSize != y / CellSize || !filled[(ny * AtlasSize) + nx])
+                            if (nx < 0 || ny < 0 || nx >= Card.Size || ny >= Card.Size || nx / CellSize != x / CellSize || ny / CellSize != y / CellSize || !filled[(ny * Card.Size) + nx])
                             {
                                 continue;
                             }
 
-                            int texel = ((ny * AtlasSize) + nx) * 4;
+                            int texel = ((ny * Card.Size) + nx) * 4;
                             sum += new Vector3(atlas[texel], atlas[texel + 1], atlas[texel + 2]);
                             count++;
                         }

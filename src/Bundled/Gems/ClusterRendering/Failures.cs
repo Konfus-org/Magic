@@ -17,8 +17,13 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     /// Codes a shader can raise, and glyphs a row holds, as Include/Failure.hlsli and Include/FailureBanner.hlsli
     /// number them.
     /// </summary>
-    public const int CodeCount = 8;
-    public const int LineGlyphs = 96;
+    private const int CodeCount = 8;
+    private const int LineGlyphs = 96;
+
+    /// <summary>
+    /// Bytes of <see cref="Raised"/>, a word per code.
+    /// </summary>
+    public const uint RaisedBytes = CodeCount * sizeof(uint);
 
     /// <summary>
     /// Rows the listing's failures fill at most, each wrapped over as many as it takes: the rest are in the log.
@@ -60,8 +65,6 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     /// A word per code, 1 once a shader raised it this frame: the frame's <c>Failures</c>.
     /// </summary>
     public GpuBuffer Raised { get; } = gpu.CreateBuffer(GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite | GpuBufferUsage.GraphicsRead, RaisedBytes);
-
-    public static uint RaisedBytes => CodeCount * sizeof(uint);
 
     /// <summary>
     /// The lines and the codes' words as glyphs: the frame's <c>FailureText</c>.

@@ -101,6 +101,19 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
     }
 
     /// <summary>
+    /// The window's image, which a camera draws into its section of; none without a window.
+    /// </summary>
+    public GpuTexture Window()
+    {
+        if (window is not null && _windowTarget == GpuTexture.None)
+        {
+            _windowTarget = gpu.WindowTarget(window);
+        }
+
+        return _windowTarget;
+    }
+
+    /// <summary>
     /// Where a camera draws this frame: its section of the window, or its render texture, whole; none while the window
     /// has no image or the texture loads.
     /// </summary>
@@ -121,19 +134,6 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Threads th
         GpuTexture image = Window();
         Size size = image == GpuTexture.None ? Size.Empty : gpu.SizeOf(image);
         return size.IsEmpty ? null : new ViewTarget(image, target.Section.AreaIn(size), gpu.FormatOf(image), true);
-    }
-
-    /// <summary>
-    /// The window's image, which a camera draws into its section of; none without a window.
-    /// </summary>
-    public GpuTexture Window()
-    {
-        if (window is not null && _windowTarget == GpuTexture.None)
-        {
-            _windowTarget = gpu.WindowTarget(window);
-        }
-
-        return _windowTarget;
     }
 
     private async Task LoadAsync(Handle<RenderTexture> handle)
@@ -220,8 +220,6 @@ internal sealed class View : IDisposable
 
     public ViewTarget Target { get; private set; }
 
-    public bool TargetIsWindow => Target.IsWindow;
-
     public FrameConstants Constants { get; private set; }
 
     public Counts Counts { get; private set; }
@@ -229,7 +227,7 @@ internal sealed class View : IDisposable
     /// <summary>
     /// Where the camera is.
     /// </summary>
-    public Vector3 Position { get; private set; }
+    public Vector3 Position => Constants.CameraPosition;
 
     /// <summary>
     /// The view's transparent pieces, farthest instance first, as runs of one surface each.
@@ -258,7 +256,7 @@ internal sealed class View : IDisposable
         Make("Velocity", GpuFormat.Rg16Float, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
 
         Camera lens = camera.Camera;
-        Position = camera.Transform.Position;
+        Vector3 position = camera.Transform.Position;
         float tanY = MathF.Tan(lens.FieldOfView * (MathF.PI / 360));
         float tanX = tanY * width / height;
         Vector2 jitter = frame.Jitters ? JitterOf(frame.Frame.Index, width, height) : Vector2.Zero;
@@ -269,7 +267,7 @@ internal sealed class View : IDisposable
         if (!_hasLast)
         {
             _lastViewProj = view * still;
-            _lastPosition = Position;
+            _lastPosition = position;
             _hasLast = true;
         }
 
@@ -284,7 +282,7 @@ internal sealed class View : IDisposable
         {
             ViewProj = viewProj,
             View = view,
-            CameraPosition = Position,
+            CameraPosition = position,
             Time = (float)frame.Frame.Seconds,
             ViewSize = new Vector2(width, height),
             ViewTexel = new Vector2(1f / width, 1f / height),
@@ -306,26 +304,22 @@ internal sealed class View : IDisposable
             SkyMaterial = (uint)frame.SkyMaterial,
             PrevViewProj = _lastViewProj,
             ClusterError = Math.Clamp(settings.ClusterError, 0.25f, 16),
-            CameraMotion = Position - _lastPosition,
+            CameraMotion = position - _lastPosition,
             PixelScale = height * 0.5f / tanY,
-            PriorityPosition = (frame.Player ?? Position) - Position,
+            PriorityPosition = (frame.Player ?? position) - position,
             TextureMipScale = frame.Jitters ? MathF.Min(1, height / MathF.Max(1, output.Y)) : 1,
             Jitter = jitter,
             OutputSize = output,
         };
 
         _lastViewProj = view * still;
-        _lastPosition = Position;
+        _lastPosition = position;
         SortTransparent();
         _exposure.Flush();
         _transparentPieces.Flush();
         Resources.Set("Exposure", BoundResource.Of(_exposure.Buffer, _exposure.Bytes));
     }
 
-    /// <summary>
-    /// The texels of a view's depth pyramid, the depth halved again and again down to one texel, the farthest of each
-    /// four kept, and how many levels it has.
-    /// </summary>
     /// <summary>
     /// The size a view is drawn at: its target's, or the width and height the settings ask for, one of them alone
     /// keeping the target's proportions; a pixel at least, and four times the target each way at most.
@@ -338,6 +332,10 @@ internal sealed class View : IDisposable
         return ((uint)Math.Clamp(MathF.Ceiling(width), 1, Math.Max(1, MathF.Ceiling(targetWidth * 4))), (uint)Math.Clamp(MathF.Ceiling(height), 1, Math.Max(1, MathF.Ceiling(targetHeight * 4))));
     }
 
+    /// <summary>
+    /// The texels of a view's depth pyramid, the depth halved again and again down to one texel, the farthest of each
+    /// four kept, and how many levels it has.
+    /// </summary>
     private static (uint Texels, uint Levels) HiZOf(uint width, uint height)
     {
         uint texels = 0;
@@ -392,9 +390,10 @@ internal sealed class View : IDisposable
     {
         TransparentRuns.Clear();
         _transparentOrder.Clear();
+        Vector3 position = Position;
         foreach (int slot in _scene.Transparent)
         {
-            _transparentOrder.Add((slot, -Vector3.Distance(_scene.PositionOf(slot), Position)));
+            _transparentOrder.Add((slot, -Vector3.Distance(_scene.PositionOf(slot), position)));
         }
 
         CollectionsMarshal.AsSpan(_transparentOrder).Sort(static (left, right) => left.Distance.CompareTo(right.Distance));

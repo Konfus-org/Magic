@@ -417,7 +417,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         }
         else if (pass.Pass.Kind == PassKind.Compute)
         {
-            Result<GpuShader> shader = await ComputeAsync(pass).ConfigureAwait(false);
+            Result<GpuShader> shader = await CompileBoundAsync(pass, GpuStage.Compute, PassBody(pass), pass.Name).ConfigureAwait(false);
             make = () =>
             {
                 if (!shader.Ok)
@@ -491,11 +491,6 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         }
 
         return Result.Success(script);
-    }
-
-    private Task<Result<GpuShader>> ComputeAsync(ListedPass pass)
-    {
-        return CompileBoundAsync(pass, GpuStage.Compute, PassBody(pass), pass.Name);
     }
 
     private async Task<Result<GpuPipelineDescription>> FullscreenAsync(ListedPass pass, Result<GpuShader> vertex)
@@ -590,18 +585,17 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             return Result.Failure<GpuPipelineDescription>(fragment.Error);
         }
 
-        bool isPieces = drawn is PassDrawn.Visibility or PassDrawn.Transparent;
         return Result.Success(new GpuPipelineDescription
         {
             Vertex = vertex,
             Fragment = fragment.Value,
             ColorFormats = pass.ColorFormats,
             Blends = drawn == PassDrawn.Transparent ? [GpuBlend.Premultiplied] : [],
-            VertexBuffers = drawn == PassDrawn.Sky ? [] : [new GpuVertexBuffer(0, isPieces ? PieceBytes : sizeof(uint), PerInstance: true)],
-            VertexInputs = drawn == PassDrawn.Sky ? [] : isPieces ? _pieceInputs : [new GpuVertexInput(0, 0, GpuVertexFormat.Uint1, 0)],
+            VertexBuffers = drawn == PassDrawn.Sky ? [] : [new GpuVertexBuffer(0, pass.DrawsPieces ? PieceBytes : sizeof(uint), PerInstance: true)],
+            VertexInputs = drawn == PassDrawn.Sky ? [] : pass.DrawsPieces ? _pieceInputs : [new GpuVertexInput(0, 0, GpuVertexFormat.Uint1, 0)],
             DepthFormat = pass.Pass.Draw.Depth.Length > 0 ? GpuFormat.D32Float : GpuFormat.Invalid,
             DepthWrite = drawn == PassDrawn.Visibility,
-            Cull = variant.DoubleSided || !isPieces ? GpuCull.None : GpuCull.Back,
+            Cull = variant.DoubleSided || !pass.DrawsPieces ? GpuCull.None : GpuCull.Back,
         });
     }
 
@@ -676,8 +670,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             return;
         }
 
-        bool isPieces = pass.Pass.Draw.Drawn is PassDrawn.Visibility or PassDrawn.Transparent;
-        Keep(pass, GpuStage.Vertex, isPieces ? await pieces.ConfigureAwait(false) : Result.Success(none));
+        Keep(pass, GpuStage.Vertex, pass.DrawsPieces ? await pieces.ConfigureAwait(false) : Result.Success(none));
         Keep(pass, GpuStage.Fragment, await ProbeTemplatesAsync(pass).ConfigureAwait(false));
     }
 

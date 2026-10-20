@@ -48,7 +48,7 @@ internal static class ClusterBuilder
         List<Part> current = [];
         foreach (Mesh mesh in model.Meshes)
         {
-            if (mesh.Card is not null || mesh.Indices.Length < 3)
+            if (mesh.Indices.Length < 3)
             {
                 continue;
             }
@@ -67,7 +67,9 @@ internal static class ClusterBuilder
                 (int a, int b, int c) = ((int)source[t], (int)source[t + 1], (int)source[t + 2]);
                 if (vertices[a].Position != vertices[b].Position && vertices[b].Position != vertices[c].Position && vertices[a].Position != vertices[c].Position)
                 {
-                    indices.AddRange([a, b, c]);
+                    indices.Add(a);
+                    indices.Add(b);
+                    indices.Add(c);
                 }
             }
 
@@ -142,11 +144,6 @@ internal static class ClusterBuilder
         bool any = false;
         foreach (Mesh mesh in model.Meshes)
         {
-            if (mesh.Card is not null)
-            {
-                continue;
-            }
-
             foreach (Vertex vertex in mesh.Vertices.Span)
             {
                 Vector3 size = Vector3.Abs(vertex.Position);
@@ -316,6 +313,7 @@ internal static class ClusterBuilder
         }
 
         Vector4 bounds = SphereAround(own);
+        Vector4 errorSphere = errorBounds ?? bounds;
         return new Part
         {
             Vertices = own,
@@ -323,7 +321,8 @@ internal static class ClusterBuilder
             Slot = slot,
             Level = level,
             Bounds = bounds,
-            ErrorBounds = errorBounds ?? bounds,
+            ErrorBounds = errorSphere,
+            ParentErrorBounds = errorSphere,
             Error = error,
         };
     }
@@ -553,7 +552,9 @@ internal static class ClusterBuilder
                 continue;
             }
 
-            madeIndices.AddRange([a, b, c]);
+            madeIndices.Add(a);
+            madeIndices.Add(b);
+            madeIndices.Add(c);
             slots.Add(slotOf[reduced.Sources[a]]);
         }
 
@@ -572,7 +573,6 @@ internal static class ClusterBuilder
         for (int i = 0; i < parts.Count; i++)
         {
             Part part = parts[i];
-            bool isRoot = float.IsPositiveInfinity(part.ParentError);
             clusters[i] = new Cluster
             {
                 FirstVertex = vertices.Count,
@@ -584,7 +584,7 @@ internal static class ClusterBuilder
                 Bounds = part.Bounds,
                 ErrorBounds = part.ErrorBounds,
                 Error = part.Error,
-                ParentErrorBounds = isRoot ? part.ErrorBounds : part.ParentErrorBounds,
+                ParentErrorBounds = part.ParentErrorBounds,
                 ParentError = part.ParentError,
             };
             vertices.AddRange(part.Vertices);
@@ -597,7 +597,7 @@ internal static class ClusterBuilder
     /// <summary>
     /// The sphere around <paramref name="vertices"/>: the middle of their box, out to the farthest.
     /// </summary>
-    private static Vector4 SphereAround(Vertex[] vertices)
+    internal static Vector4 SphereAround(ReadOnlySpan<Vertex> vertices)
     {
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -697,7 +697,10 @@ internal static class ClusterBuilder
 
         public required float Error { get; init; }
 
-        public Vector4 ParentErrorBounds { get; set; }
+        /// <summary>
+        /// The error bounds of what it was simplified into; its own until it is.
+        /// </summary>
+        public required Vector4 ParentErrorBounds { get; set; }
 
         public float ParentError { get; set; } = float.PositiveInfinity;
     }

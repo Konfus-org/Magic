@@ -71,25 +71,6 @@ internal sealed class GpuArray<T> : IDisposable
     }
 
     /// <summary>
-    /// Sets a run of rows from <paramref name="first"/>; named apart from <see cref="Set(int, in T)"/>, so a
-    /// <c>default</c> row never reads as an empty run.
-    /// </summary>
-    public void SetRange(int first, ReadOnlySpan<T> rows)
-    {
-        if (rows.IsEmpty)
-        {
-            return;
-        }
-
-        Grow(first + rows.Length);
-        rows.CopyTo(_rows.AsSpan(first));
-        for (int row = first; row < first + rows.Length; row++)
-        {
-            Mark(row);
-        }
-    }
-
-    /// <summary>
     /// Uploads the rows set since the last flush, a run of neighbours at a time; they reach the buffer at the start of
     /// the next submit.
     /// </summary>

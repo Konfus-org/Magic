@@ -63,6 +63,11 @@ internal sealed class Materials : IDisposable
     /// </summary>
     private static readonly GpuMaterialGi _failureGi = new() { Color = new Vector4(0.5f, 0.5f, 0.5f, 1) };
 
+    /// <summary>
+    /// The surfaces of the <see cref="FixedRasterBins"/>, in bin order: no surface, single-sided then double-sided.
+    /// </summary>
+    public static IReadOnlyList<SurfaceKey> FixedRasterKeys { get; } = [new SurfaceKey(Handle<Shader>.None, false, false), new SurfaceKey(Handle<Shader>.None, false, true)];
+
     private readonly Assets _assets;
     private readonly TexturePools _textures;
     private readonly PassGraph _graph;
@@ -193,7 +198,7 @@ internal sealed class Materials : IDisposable
     /// </summary>
     public void Release(Handle<Material> material)
     {
-        if (material == Handle<Material>.None || material == _default || _failures.ContainsValue(material) || !_materials.Remove(material, out MaterialEntry? entry))
+        if (material == _default || _failures.ContainsValue(material) || !_materials.Remove(material, out MaterialEntry? entry))
         {
             return;
         }
@@ -220,10 +225,7 @@ internal sealed class Materials : IDisposable
     /// </summary>
     public void Reload(Material material)
     {
-        if (_materials.ContainsKey(material.Handle))
-        {
-            Take(material.Handle, material);
-        }
+        Take(material.Handle, material);
     }
 
     /// <summary>

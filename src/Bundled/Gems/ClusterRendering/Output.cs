@@ -143,8 +143,9 @@ internal sealed class Output : IDisposable
             Debugging.Error($"Views are not shown: {(isNothing ? Nothing : Fragment)} does not compile: {made.Error}");
         }
 
-        _pipelines[(format, isNothing)] = made.Ok ? made.Value : GpuPipeline.None;
-        return _pipelines[(format, isNothing)];
+        pipeline = made.Ok ? made.Value : GpuPipeline.None;
+        _pipelines[(format, isNothing)] = pipeline;
+        return pipeline;
     }
 
     private async Task CompileAsync(IShaderCompiler compiler, Threads threads, CancellationToken stopping)

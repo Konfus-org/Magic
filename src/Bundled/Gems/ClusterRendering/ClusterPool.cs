@@ -33,12 +33,15 @@ internal sealed class ClusterPool : IDisposable
     /// <summary>
     /// Words a vertex takes in <see cref="Geometry"/>.
     /// </summary>
-    public const int VertexWords = 5;
+    private const int VertexWords = 5;
 
     /// <summary>
     /// A grid step from the model's origin to its farthest vertex along an axis, as Core's clusters are made on.
     /// </summary>
     private const int PositionSteps = (1 << 19) - 1;
+
+    private static readonly Counter<long> _uploaded = ClusterRenderingGem.Meter.CreateCounter<long>("magic.gems.cluster_rendering.pool.upload.size", "By", "Bytes of models taken into the pool.");
+    private static readonly Gauge<int> _heldModels = ClusterRenderingGem.Meter.CreateGauge<int>("magic.gems.cluster_rendering.pool.models", "{model}", "Models held in the pool.");
 
     private readonly IGpu _gpu;
     private readonly Assets _assets;
@@ -47,9 +50,6 @@ internal sealed class ClusterPool : IDisposable
     private readonly MeshFields _fields;
     private readonly ClusterRenderingSettings _settings;
     private readonly CancellationToken _stopping;
-    private static readonly Counter<long> _uploaded = ClusterRenderingGem.Meter.CreateCounter<long>("magic.gems.cluster_rendering.pool.upload.size", "By", "Bytes of models taken into the pool.");
-    private static readonly Gauge<int> _heldModels = ClusterRenderingGem.Meter.CreateGauge<int>("magic.gems.cluster_rendering.pool.models", "{model}", "Models held in the pool.");
-
     private readonly Dictionary<Handle<Model>, ModelEntry> _models = [];
     private readonly List<ModelEntry> _ready = [];
     private readonly RangeAllocator _words = new();
@@ -228,7 +228,7 @@ internal sealed class ClusterPool : IDisposable
         Levels.Flush();
         Clusters.Flush();
         Cards.Flush();
-        _fields.Flush();
+        _fields.Table.Flush();
     }
 
     private async Task LoadAsync(ModelEntry entry)

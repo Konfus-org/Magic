@@ -309,7 +309,7 @@ internal sealed class Delta<T>
     /// <summary>
     /// The slots there are, live or not: how many a table of them needs.
     /// </summary>
-    public int Length { get; set; }
+    public int Length { get; private set; }
 
     public ReadOnlySpan<Change> Changed => _changed.AsSpan(0, _changedCount);
 
