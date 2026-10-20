@@ -74,8 +74,9 @@
        may declare the same library, so all native library work holds one machine-wide mutex, and whoever comes second
        finds the marker. One build at a time is also what keeps the machine usable, with the limits on the build
        itself below: a library's build is long, and the user must be able to carry on meanwhile. The source is fetched shallow
-       at the commit, with its submodules; a changed commit fetches afresh, and a changed commit or options builds afresh,
-       as does a build that was cut short, in Release, then the shared library named as the OS names one (SDL3.dll,
+       at the commit, with its submodules; a changed commit fetches afresh, and a changed commit or options (as declared,
+       so a folder moved elsewhere is not built again) builds afresh, as does a build that was cut short, in Release,
+       then the shared library named as the OS names one (SDL3.dll,
        libSDL3.so, libSDL3.dylib) is copied under built/native/, where the build picks it up. -->
   <UsingTask TaskName="PrepareNativeLibrary" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>
@@ -149,10 +150,13 @@ void DeleteFolder(string path)
     Directory.Delete(path, true);
 }
 
+// The marker is named by the options as the item declares them, before the placeholders are expanded: the folder's
+// own path is in the expansion, and a library built once must count as built wherever its folder is moved or restored
+// to (another checkout, a runner, a renamed workspace).
 string optionsHash;
 using (System.Security.Cryptography.SHA256 sha256 = System.Security.Cryptography.SHA256.Create())
 {
-    optionsHash = BitConverter.ToString(sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(prepare + "\n" + options + "\n" + (CmakeTarget ?? "")))).Replace("-", "").Substring(0, 16);
+    optionsHash = BitConverter.ToString(sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes((Prepare ?? "") + "\n" + (Options ?? "") + "\n" + (CmakeTarget ?? "")))).Replace("-", "").Substring(0, 16);
 }
 
 string marker = Path.Combine(Folder, string.Concat(Commit.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)) + "." + optionsHash + ".ready");
