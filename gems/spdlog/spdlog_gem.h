@@ -46,13 +46,17 @@ typedef enum mg_spdlog_level {
 /* ========================================================================== */
 
 /**
- * @brief Stands the sink up: one colored stdout logger, held by this gem
- * rather than put in spdlog's global registry, which is keyed by name and
- * would refuse the second load of a hot-reloaded image. Safe to call again;
- * a sink that fails to come up leaves the gem writing nowhere, and the
- * engine's own default keeps talking.
+ * @brief Stands the sink up: one logger over two sinks, colored stdout and a
+ * rotating file, held by this gem rather than put in spdlog's global
+ * registry, which is keyed by name and would refuse the second load of a
+ * hot-reloaded image. Safe to call again; a sink that fails to come up
+ * leaves the gem writing nowhere, and the engine's own default keeps talking.
+ * @param log_file Where the rotating file goes, missing folders and all;
+ * NULL or empty asks for the console alone. A file that cannot be opened
+ * costs the file half only -- the console keeps the log either way. The path
+ * is read here and not kept, so the caller's buffer is free afterwards.
  */
-void mg_spdlog_open_sink(void);
+void mg_spdlog_open_sink(const char* log_file);
 
 /**
  * @brief Writes one line the engine has already formatted.

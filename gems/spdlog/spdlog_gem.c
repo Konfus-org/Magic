@@ -2,8 +2,11 @@
  * @file spdlog_gem.c
  * @author Jeremy Hummel (konfusdev@gmail.com)
  * @brief The spdlog gem's identity: the logger it puts on the engine's log,
- * and the lifecycle hooks that put it there and take it away again. The sink
- * behind it is C++ and lives in spdlog_sink.cpp, declared in spdlog_gem.h.
+ * and the lifecycle hooks that put it there and take it away again. The sinks
+ * behind it -- a colored console and a rotating file -- are C++ and live in
+ * spdlog_sink.cpp, declared in spdlog_gem.h; naming the file is this half's
+ * job, because the app's directories are engine vocabulary the C++ side
+ * deliberately cannot see.
  *
  * Fills no slot. Logging is not the platform's to provide -- there is no
  * console slot to fill -- so a backend joins the log the way any other would,
@@ -14,10 +17,22 @@
  * @copyright MagicGameEngine is Copyright (c) Jeremy Hummel
  */
 
+#include "magic/app.h"
 #include "magic/debug/asserts.h"
 #include "magic/debug/logging.h"
 #include "magic/gems/state.h"
 #include "spdlog_gem.h"
+#include <stdio.h>
+
+/** @brief The folder under the app's root that the log files go in. */
+#define MG_SPDLOG_LOG_FOLDER "logs"
+
+/**
+ * @brief Room for the path of the log file. A path is built once, at load, in
+ * a frame that is gone before the sink writes a line, so the stack is where
+ * it belongs and a ceiling is cheaper than an allocation to free.
+ */
+#define MG_SPDLOG_MAX_PATH 512
 
 /* ========================================================================== */
 /* The logger                                                                 */
@@ -71,12 +86,39 @@ static void mg_spdlog_logger(
 /**
  * @brief Prepares the gem when the engine loads it: the sink first, so the
  * registration that follows never points at one that is not standing.
- * @param owner The app the gem was loaded into.
+ * @param owner The app the gem was loaded into, and where the log file's
+ * folder and name are read from.
  */
 static void spdlog_on_load(mg_app* owner) {
-    MG_UNUSED(owner);
+    /* Where the file goes is the C half's to work out: the sink includes no
+     * Magic header, so an app's root and its name are things it cannot ask
+     * for and has to be handed. A gem loaded without an owner, or before the
+     * defaults are in, gets the console alone rather than a file somewhere
+     * nobody asked for. */
+    char path[MG_SPDLOG_MAX_PATH];
+    const char* log_file = NULL;
 
-    mg_spdlog_open_sink();
+    if (owner != NULL && owner->dirs.root != NULL && owner->name != NULL) {
+        const int needed = snprintf(
+            path,
+            sizeof(path),
+            "%s/%s/%s.log",
+            owner->dirs.root,
+            MG_SPDLOG_LOG_FOLDER,
+            owner->name);
+
+        /* A truncated path names a different file than the one meant, and
+         * quietly: better the console alone and a line saying why. */
+        if (needed > 0 && (size_t)needed < sizeof(path)) {
+            log_file = path;
+        } else {
+            MG_WARN("The spdlog gem's log file path did not fit; logging to the console only.");
+        }
+    }
+
+    /* The sink reads the path and does not keep it, so path going out of
+     * scope below takes nothing with it. */
+    mg_spdlog_open_sink(log_file);
     mg_register_logger(mg_spdlog_logger);
 }
 
