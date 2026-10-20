@@ -11,13 +11,19 @@
   </PropertyGroup>
 
   <!-- Assimp's C API, built here from its repository: the importers of the formats Model lists, no exporters, tools
-       or tests, its own zlib, and the library named plainly rather than by compiler. Its config.h, which the build
-       generates, is made from the template with every option off. -->
+       or tests, and the library named plainly rather than by compiler. Its config.h, which the build generates, is
+       made from the template with every option off. It builds its own zlib, so the library stands alone, except on
+       macOS, where it links the OS's: the bundled copy's zutil.h defines fdopen away on Apple platforms, which breaks
+       the declaration in the current SDK's stdio.h, so it does not compile there. -->
+  <PropertyGroup>
+    <AssimpOwnZlib>ON</AssimpOwnZlib>
+    <AssimpOwnZlib Condition="$([MSBuild]::IsOSPlatform('OSX'))">OFF</AssimpOwnZlib>
+  </PropertyGroup>
   <ItemGroup>
     <NativeLibrary Include="assimp" Repository="https://github.com/assimp/assimp" Commit="v6.0.5"
                    Headers="include/assimp/cimport.h;include/assimp/scene.h;include/assimp/postprocess.h;assimp/config.h"
                    IncludePath="include" Shims="assimp/config.h=include/assimp/config.h.in"
                    Prefixes="ai=Assimp;AI=Assimp;ASSIMP=Assimp" Class="Assimp" CmakeTarget="assimp"
-                   Cmake="-DASSIMP_BUILD_TESTS=OFF -DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DASSIMP_INSTALL=OFF -DASSIMP_BUILD_ZLIB=ON -DASSIMP_WARNINGS_AS_ERRORS=OFF -DASSIMP_INJECT_DEBUG_POSTFIX=OFF -DLIBRARY_SUFFIX= -DASSIMP_NO_EXPORT=ON -DASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT=OFF -DASSIMP_BUILD_FBX_IMPORTER=ON -DASSIMP_BUILD_GLTF_IMPORTER=ON -DASSIMP_BUILD_OBJ_IMPORTER=ON" />
+                   Cmake="-DASSIMP_BUILD_TESTS=OFF -DASSIMP_BUILD_ASSIMP_TOOLS=OFF -DASSIMP_INSTALL=OFF -DASSIMP_BUILD_ZLIB=$(AssimpOwnZlib) -DASSIMP_WARNINGS_AS_ERRORS=OFF -DASSIMP_INJECT_DEBUG_POSTFIX=OFF -DLIBRARY_SUFFIX= -DASSIMP_NO_EXPORT=ON -DASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT=OFF -DASSIMP_BUILD_FBX_IMPORTER=ON -DASSIMP_BUILD_GLTF_IMPORTER=ON -DASSIMP_BUILD_OBJ_IMPORTER=ON" />
   </ItemGroup>
 </Project>
