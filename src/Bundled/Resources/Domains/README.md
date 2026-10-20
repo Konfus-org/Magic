@@ -33,9 +33,11 @@ Through the world ([Core's README](../../../Core/README.md#the-world)).
 
 - **Opening.** The project's `"entryPoint"` opens on the first frame, else the default domain. `World.OpenAsync` opens
   another in place of the open ones (`Replace`) or beside them (`Additive`).
-- **Loading.** Every prefab of the domain is read, with the models it draws, then all of it is spawned in one frame,
-  with the player at the spawn. A `Replace` closes the open domains and shows the loading domain until then, and the
-  loading domain closes in that frame, so no frame shows both.
+- **Loading.** Every prefab of the domain is read, with the models it draws, then every gem that needs time to take
+  in what spawns (a renderer, a physics gem) takes all of it in, then all of it is spawned in one frame, with the
+  player at the spawn, so the domain is there whole: nothing dissolves in or waits for its body. A `Replace` closes
+  the open domains and shows the loading domain until then, and the loading domain closes in that frame, so no frame
+  shows both. The loading domain is not taken in first, so it shows as soon as it can.
 - **Nothing is streamed.** The whole domain is there while it is open; whatever draws it picks each thing's detail by
   its distance, so far cells cost little.
 - **Editing.** A prefab that changes on disk is spawned again as it is now; prefabs that come or go appear or

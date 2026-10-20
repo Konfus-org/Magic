@@ -88,6 +88,16 @@ public static class Engine
         Settings settings = container.GetRequiredService<Settings>();
         List<IGem> gems = loader.Make(container);
         World world = container.GetRequiredService<World>();
+        List<IPreloader> preloaders = [];
+        foreach (IGem gem in gems)
+        {
+            if (gem is IPreloader preloader)
+            {
+                preloaders.Add(preloader);
+            }
+        }
+
+        world.Preloaders = preloaders;
         using Subscription codeBuilds = loader.WatchCode(container.GetRequiredService<Assets>());
 
         // On the first frame, once every gem is made, so every gem's loaders are there to read the domain: the world

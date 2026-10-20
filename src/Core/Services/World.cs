@@ -95,6 +95,12 @@ public sealed class World : IDisposable
     public bool IsLoading => _domains?.IsLoading ?? false;
 
     /// <summary>
+    /// The gems that take in what a domain spawns before it does (<see cref="IPreloader"/>), set by whoever made the
+    /// gems once every one is, since the world is made while they are; none until then.
+    /// </summary>
+    internal IReadOnlyList<IPreloader> Preloaders { get; set; } = [];
+
+    /// <summary>
     /// Opens <paramref name="domain"/> as <paramref name="mode"/> says, telling <paramref name="progress"/> how far it
     /// is, 0 to 1. The task ends once the domain is there, with it; with why not when its file does not load, before
     /// anything else is closed, or when it is closed before it is there. A prefab of it that does not load is an error,

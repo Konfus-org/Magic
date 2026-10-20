@@ -80,6 +80,16 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     public Listing? Current { get; private set; }
 
     /// <summary>
+    /// The effects the latest listing, built or building, runs.
+    /// </summary>
+    public Handle<Pipeline> Effects => _effects;
+
+    /// <summary>
+    /// Whether a listing is being built, which the frame swaps in once it is compiled.
+    /// </summary>
+    public bool IsBuilding => _next is not null;
+
+    /// <summary>
     /// The surfaces that do not compile for some pass, whose materials are drawn as the failure
     /// (<see cref="Materials"/>), until the shader changes.
     /// </summary>

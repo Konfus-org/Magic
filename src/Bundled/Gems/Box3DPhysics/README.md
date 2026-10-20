@@ -26,7 +26,8 @@ it. Nothing else is written anywhere: the shape's size is the model's.
   as Box3D moves only convex shapes; a moving body asking for one is an error, and gets a box.
 - **The body waits for its model.** A model loads on a worker as every asset does, and the body is made in the first
   step after it has, until when the entity stays where it is. A model that does not load is an error, and the body is
-  a unit cube.
+  a unit cube. The models a domain's bodies are shaped like are fitted before the domain spawns (Core's `IPreloader`),
+  so its bodies are there from its first step; only a body a script spawns later waits.
 - **Mass** is the volume's at the density of water unless the component says, when the body's mass and inertia are
   scaled to it, so a hollow crate is a light one of the same size.
 - **Surface** is one of five frictions, with Box3D's default, 0.6, as normal, and the stickiest a little rolling

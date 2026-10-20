@@ -21,8 +21,9 @@ namespace Magic.Internal;
 /// again when they are built while the engine runs (<see cref="WatchCode"/>). The provider makes each gem after
 /// whatever its constructor asks for, so <see cref="Make"/> returns the gems in dependency order. A constructor
 /// parameter that is an <see cref="ISettings"/> is the gem's settings object, made by <see cref="Settings"/> as the
-/// gem is. A gem that is an <see cref="ILogSink"/> is added to the log once it is made, instead of provided. Whatever
-/// goes wrong with one gem is logged, and the others are made without it.
+/// gem is. A gem that is an <see cref="ILogSink"/> is added to the log once it is made, instead of provided, and one
+/// that is an <see cref="IPreloader"/> is given to the world by whoever made the gems. Whatever goes wrong with one gem
+/// is logged, and the others are made without it.
 /// </summary>
 internal sealed class GemLoader
 {

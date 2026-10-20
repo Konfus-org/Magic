@@ -19,7 +19,8 @@ namespace Magic.Internal;
 /// <param name="Type">Its one <see cref="IGem"/> class.</param>
 /// <param name="Settings">The settings type its constructor takes, if any.</param>
 /// <param name="Provides">What it provides: every interface its class implements but <see cref="IGem"/>,
-/// <see cref="IDisposable"/> and <see cref="ILogSink"/>, which Core takes itself, so any number of gems can be sinks.</param>
+/// <see cref="IDisposable"/>, <see cref="ILogSink"/> and <see cref="IPreloader"/>, which Core takes itself, so any
+/// number of gems can be sinks or preloaders.</param>
 /// <param name="Assembly">Its assembly, which holds the components and scripts it declares.</param>
 /// <param name="Resources">The folder of its own assets (<see cref="ResourcesOf"/>).</param>
 internal readonly record struct GemAssembly(string Name, string Path, string Author, string Description, Version Version, Type Type, Type? Settings, List<Type> Provides, Assembly Assembly, string Resources)
@@ -97,7 +98,7 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
         List<Type> provides = [];
         foreach (Type contract in gem.GetInterfaces())
         {
-            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink))
+            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink) && contract != typeof(IPreloader))
             {
                 provides.Add(contract);
             }

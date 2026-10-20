@@ -14,11 +14,11 @@ namespace Magic.Internal;
 
 /// <summary>
 /// The domains open in the world, and all that takes: opening one (<see cref="OpenAsync"/>), its prefabs read on
-/// workers and spawned on the main thread, the loading domain shown while one replaces the world, closing one, each
-/// kept as its files change, and the domains' part of a saved world (<see cref="Save"/>, <see cref="Restore"/>). The
-/// world makes one when a gem provides the ECS, and is the one place to act on it: nothing else holds this; a gem
-/// below the world hears that one is loading on <see cref="Events"/> (<see cref="WorldLoading"/>). Main thread, but
-/// where a member says otherwise.
+/// workers, taken in by the gems that need time to (<see cref="IPreloader"/>) and spawned on the main thread, the
+/// loading domain shown while one replaces the world, closing one, each kept as its files change, and the domains'
+/// part of a saved world (<see cref="Save"/>, <see cref="Restore"/>). The world makes one when a gem provides the ECS,
+/// and is the one place to act on it: nothing else holds this; a gem below the world hears that one is loading on
+/// <see cref="Events"/> (<see cref="WorldLoading"/>). Main thread, but where a member says otherwise.
 /// </summary>
 internal sealed class Domains : IDisposable
 {
@@ -315,7 +315,10 @@ internal sealed class Domains : IDisposable
 
     /// <summary>
     /// Every prefab in <paramref name="open"/>'s folder, each read on a worker, with the player when it replaces the
-    /// world, and the models they draw loaded, so whatever draws them has them the frame they spawn. On a worker.
+    /// world, and the models they draw loaded, then all of it taken in by the gems that need time to
+    /// (<see cref="IPreloader"/>), so whatever draws or simulates them has them the frame they spawn. The loading
+    /// domain is not taken in first, so it shows as soon as it can. The reads are the first half of the progress, the
+    /// gems' taking in the second. On a worker.
     /// </summary>
     private async Task<Read> ReadAsync(Open open, IProgress<float>? progress, CancellationToken cancel)
     {
@@ -371,15 +374,70 @@ internal sealed class Domains : IDisposable
             }
         }
 
+        List<Prefab> spawning = [];
+        foreach (Result<Prefab> prefab in prefabs)
+        {
+            if (prefab.Ok)
+            {
+                spawning.Add(prefab.Value);
+            }
+        }
+
+        if (player is not null)
+        {
+            spawning.Add(player);
+        }
+
+        SubscriptionList holds = open.IsLoadingDomain ? new SubscriptionList() : await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
         progress?.Report(1);
-        return new Read(placements, prefabs, player, models);
+        return new Read(placements, prefabs, player, models, holds);
 
         async Task<Result<Prefab>> ReadOneAsync(Handle<Prefab> file)
         {
             Result<Prefab> prefab = await _assets.LoadAsync(file, cancel).ConfigureAwait(false);
-            progress?.Report(0.9f * Interlocked.Increment(ref read) / reading.Length);
+            progress?.Report(0.5f * Interlocked.Increment(ref read) / reading.Length);
             return prefab;
         }
+    }
+
+    /// <summary>
+    /// Every gem that needs time to take in what spawns (<see cref="World.Preloaders"/>) takes in
+    /// <paramref name="spawning"/>, all at once, each telling its share of the second half of
+    /// <paramref name="progress"/>; what they hand back, which keeps it taken in, is let go together when one of them
+    /// fails or the open is cancelled. On a worker.
+    /// </summary>
+    private async Task<SubscriptionList> PreloadAsync(List<Prefab> spawning, IProgress<float>? progress, CancellationToken cancel)
+    {
+        IReadOnlyList<IPreloader> preloaders = _world.Preloaders;
+        float[] shares = new float[preloaders.Count];
+        Task<Subscription>[] preloading = new Task<Subscription>[preloaders.Count];
+        for (int i = 0; i < preloaders.Count; i++)
+        {
+            preloading[i] = preloaders[i].PreloadAsync(spawning, new Share(shares, i, progress), cancel);
+        }
+
+        SubscriptionList holds = new();
+        try
+        {
+            foreach (Subscription hold in await Task.WhenAll(preloading).ConfigureAwait(false))
+            {
+                holds.Add(hold);
+            }
+        }
+        catch
+        {
+            foreach (Task<Subscription> preload in preloading)
+            {
+                if (preload.IsCompletedSuccessfully)
+                {
+                    (await preload.ConfigureAwait(false)).Dispose();
+                }
+            }
+
+            throw;
+        }
+
+        return holds;
     }
 
     /// <summary>
@@ -415,9 +473,11 @@ internal sealed class Domains : IDisposable
     {
         if (open.IsClosed)
         {
+            read.Holds.Dispose();
             return Result.Failure<Domain>("It was closed before it was there.");
         }
 
+        open.Holds = read.Holds;
         int entities = 0;
         for (int i = 0; i < read.Placements.Count; i++)
         {
@@ -530,6 +590,7 @@ internal sealed class Domains : IDisposable
     {
         _domains.Add(open);
         _opened.Add(open.Handle);
+        open.Holds = read.Holds;
         int entities = 0;
         for (int i = 0; i < read.Placements.Count; i++)
         {
@@ -600,6 +661,7 @@ internal sealed class Domains : IDisposable
 
         open.Prefabs.Clear();
         open.Models = [];
+        open.Holds.Dispose();
         Destroy(open.Player);
         if (!open.IsThere && open.Mode == DomainOpenMode.Replace && !open.IsLoadingDomain)
         {
@@ -805,9 +867,10 @@ internal sealed class Domains : IDisposable
     internal readonly record struct Placement(Handle<Prefab> File, Vector3 Corner, bool IsCell);
 
     /// <summary>
-    /// What a domain's opening read: each of its prefabs, by placement, its player, and the models they draw.
+    /// What a domain's opening read: each of its prefabs, by placement, its player, the models they draw, and what
+    /// the gems that took them in handed back, which keeps that taken in (<see cref="IPreloader"/>).
     /// </summary>
-    internal sealed record Read(List<Placement> Placements, Result<Prefab>[] Prefabs, Prefab? Player, List<Model> Models);
+    internal sealed record Read(List<Placement> Placements, Result<Prefab>[] Prefabs, Prefab? Player, List<Model> Models, SubscriptionList Holds);
 
     /// <summary>
     /// A domain open in the world, or opening.
@@ -854,6 +917,12 @@ internal sealed class Domains : IDisposable
         public List<Model> Models { get; set; } = [];
 
         /// <summary>
+        /// What the gems that took in its prefabs before they spawned handed back, held while it is open so they keep
+        /// that taken in (<see cref="IPreloader"/>).
+        /// </summary>
+        public SubscriptionList Holds { get; set; } = new();
+
+        /// <summary>
         /// The project's player, when it replaced the world.
         /// </summary>
         public Entity[]? Player { get; set; }
@@ -876,4 +945,23 @@ internal sealed class Domains : IDisposable
     /// for one that had spawned nothing, which opens again from the start.
     /// </summary>
     internal sealed record Restoring(DomainState Saved, Open Open, Read? Read);
+
+    /// <summary>
+    /// One gem's share of the second half of a domain's progress, the gems taking in what it spawns: each report sets
+    /// its share and tells the domain's the mean of them all. Any thread.
+    /// </summary>
+    private sealed class Share(float[] shares, int index, IProgress<float>? whole) : IProgress<float>
+    {
+        public void Report(float value)
+        {
+            shares[index] = value;
+            float sum = 0;
+            foreach (float share in shares)
+            {
+                sum += share;
+            }
+
+            whole?.Report(0.5f + (0.5f * sum / shares.Length));
+        }
+    }
 }

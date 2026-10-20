@@ -83,10 +83,17 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     private readonly List<LookEntry> _nearer = [];
 
     /// <summary>
-    /// The models and materials some look still draws, gathered once a frame that drops a look (<see cref="LetGo"/>).
+    /// The models and materials some look still draws, gathered when one may be let go (<see cref="GatherDrawn"/>).
     /// </summary>
     private readonly HashSet<Handle<Model>> _drawnModels = [];
     private readonly HashSet<Handle<Material>> _drawnMaterials = [];
+
+    /// <summary>
+    /// The models and materials taken in for a domain before it spawned, by how many such holds keep each
+    /// (<see cref="Hold"/>): kept though no look draws them yet.
+    /// </summary>
+    private readonly Dictionary<Handle<Model>, int> _heldModels = [];
+    private readonly Dictionary<Handle<Material>, int> _heldMaterials = [];
 
     public void Dispose()
     {
@@ -121,6 +128,71 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// Where the instance at <paramref name="slot"/> is, as the last frame copied it.
     /// </summary>
     public Vector3 PositionOf(int slot) => _entries[slot].Transform.Position;
+
+    /// <summary>
+    /// Keeps the models and materials of <paramref name="preloaded"/>, taken in for a domain before it spawns, though
+    /// no look draws them yet, until <see cref="Release"/> lets them go as many times.
+    /// </summary>
+    public void Hold(Preloaded preloaded)
+    {
+        foreach (Handle<Model> model in preloaded.Models)
+        {
+            _heldModels[model] = _heldModels.GetValueOrDefault(model) + 1;
+        }
+
+        foreach (Handle<Material> material in preloaded.Materials)
+        {
+            _heldMaterials[material] = _heldMaterials.GetValueOrDefault(material) + 1;
+        }
+    }
+
+    /// <summary>
+    /// Lets go one hold of <paramref name="preloaded"/>'s models and materials: what no hold keeps and no look draws
+    /// leaves the pool and the materials, as a dropped look's does.
+    /// </summary>
+    public void Release(Preloaded preloaded)
+    {
+        GatherDrawn();
+        foreach (Handle<Model> model in preloaded.Models)
+        {
+            if (!_heldModels.TryGetValue(model, out int holds))
+            {
+                continue;
+            }
+
+            if (holds > 1)
+            {
+                _heldModels[model] = holds - 1;
+                continue;
+            }
+
+            _heldModels.Remove(model);
+            if (!_drawnModels.Contains(model))
+            {
+                models.Release(model);
+            }
+        }
+
+        foreach (Handle<Material> material in preloaded.Materials)
+        {
+            if (!_heldMaterials.TryGetValue(material, out int holds))
+            {
+                continue;
+            }
+
+            if (holds > 1)
+            {
+                _heldMaterials[material] = holds - 1;
+                continue;
+            }
+
+            _heldMaterials.Remove(material);
+            if (!_drawnMaterials.Contains(material))
+            {
+                materials.Release(material);
+            }
+        }
+    }
 
     /// <summary>
     /// The model and materials an instance draws.
@@ -528,7 +600,37 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             }
         }
 
-        // What the looks left draw, gathered once: a domain going away drops thousands of looks in one frame.
+        GatherDrawn();
+        foreach (Look dropped in _droppedLooks)
+        {
+            if (_looks.ContainsKey(dropped))
+            {
+                continue;
+            }
+
+            if (!_drawnModels.Contains(dropped.Model) && !_heldModels.ContainsKey(dropped.Model))
+            {
+                models.Release(dropped.Model);
+            }
+
+            for (int i = 0; i < MaterialSlots.Capacity; i++)
+            {
+                Handle<Material> material = dropped.Materials[i];
+                if (!_drawnMaterials.Contains(material) && !_heldMaterials.ContainsKey(material))
+                {
+                    materials.Release(material);
+                }
+            }
+        }
+
+        _droppedLooks.Clear();
+    }
+
+    /// <summary>
+    /// What the looks left draw, gathered once: a domain going away drops thousands of looks in one frame.
+    /// </summary>
+    private void GatherDrawn()
+    {
         _drawnModels.Clear();
         _drawnMaterials.Clear();
         foreach (Look look in _looks.Keys)
@@ -539,30 +641,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
                 _drawnMaterials.Add(look.Materials[i]);
             }
         }
-
-        foreach (Look dropped in _droppedLooks)
-        {
-            if (_looks.ContainsKey(dropped))
-            {
-                continue;
-            }
-
-            if (!_drawnModels.Contains(dropped.Model))
-            {
-                models.Release(dropped.Model);
-            }
-
-            for (int i = 0; i < MaterialSlots.Capacity; i++)
-            {
-                Handle<Material> material = dropped.Materials[i];
-                if (!_drawnMaterials.Contains(material))
-                {
-                    materials.Release(material);
-                }
-            }
-        }
-
-        _droppedLooks.Clear();
     }
 
     /// <summary>
@@ -640,3 +718,65 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 /// A sphere around an instance where it was or is, where what is made from the scene and kept is made again.
 /// </summary>
 internal readonly record struct MovedSphere(Vector3 Centre, float Radius);
+
+/// <summary>
+/// What the renderer takes in for a domain before it spawns (<see cref="IPreloader"/>): the models and materials its
+/// prefabs draw, the sky's among them, and the effects they name, none when they name none.
+/// </summary>
+internal sealed record Preloaded(HashSet<Handle<Model>> Models, HashSet<Handle<Material>> Materials, Handle<Pipeline> Effects)
+{
+    /// <summary>
+    /// What <paramref name="prefabs"/> draw, from their parts and the parts under them. Any thread.
+    /// </summary>
+    public static Preloaded Of(IReadOnlyList<Prefab> prefabs)
+    {
+        HashSet<Handle<Model>> models = [];
+        HashSet<Handle<Material>> materials = [];
+        Handle<Pipeline> effects = Handle<Pipeline>.None;
+        foreach (Prefab prefab in prefabs)
+        {
+            Add(prefab.Parts);
+        }
+
+        return new Preloaded(models, materials, effects);
+
+        void Add(IReadOnlyList<PrefabPart> parts)
+        {
+            foreach (PrefabPart part in parts)
+            {
+                foreach (IComponent component in part.Components)
+                {
+                    switch (component)
+                    {
+                        case Renderer renderer:
+                            if (renderer.Model != Handle<Model>.None)
+                            {
+                                models.Add(renderer.Model);
+                            }
+
+                            for (int i = 0; i < MaterialSlots.Capacity; i++)
+                            {
+                                Handle<Material> material = renderer.Materials[i];
+                                if (material != Handle<Material>.None)
+                                {
+                                    materials.Add(material);
+                                }
+                            }
+
+                            break;
+                        case Sky { Material: var sky } when sky != Handle<Material>.None:
+                            materials.Add(sky);
+                            break;
+                        case PostProcessing { Effects: var named } when named != Handle<Pipeline>.None:
+                            effects = named;
+                            break;
+                        default:
+                            break;
+                    }
+                }
+
+                Add(part.Children);
+            }
+        }
+    }
+}

@@ -75,7 +75,8 @@ windows and their events to and so becomes the render thread:
    parameters are what it needs: Core's services, the assets among them, interfaces other gems implement, and its own
    settings object, filled from its defaults, then the project's own preset, the preset applied over it, then `--set`,
    and changed while running through Core's `Settings` ([Core's README](src/Core/README.md#gem-settings)). Every other
-   interface it implements is what it provides, but `ILogSink`, which makes it somewhere the log goes. Gems are made in
+   interface it implements is what it provides, but `ILogSink`, which makes it somewhere the log goes, and `IPreloader`,
+   which makes it one of the gems the world waits for before a domain spawns. Gems are made in
    dependency order, and in the project's order where dependencies do not decide.
 3. **Runs frames, on two threads.** A frame runs five phases, and each phase calls that hook on every gem that has one,
    so data flows one way from the start of a frame to its end. A main thread started beside the render thread runs the

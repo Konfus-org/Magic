@@ -5,6 +5,8 @@ using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Queries;
+using Magic.Contexts.Subscriptions;
+using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
@@ -20,7 +22,9 @@ namespace Magic.Box3DPhysics;
 /// shapes the body remakes it. Then the world steps, and every body that moved writes its position, rotation and
 /// velocities back. A body whose entity or component is gone is destroyed at the next step, as is one that has gone
 /// farther from every player camera than the settings' range, so a world full of bodies is simulated only around the
-/// player; an entity past the range waits where it is, body or no body, until the player comes back.
+/// player; an entity past the range waits where it is, body or no body, until the player comes back. The models a
+/// domain's bodies are shaped like are fitted before it spawns (<see cref="IPreloader"/>), so its bodies are there from
+/// its first step.
 /// <para>
 /// It answers <see cref="IPhysics"/> from the bodies as the last step left them, and after each step writes what
 /// every body that listens, one whose entity has a <see cref="Contacts"/>, is touching, with the phase worked out
@@ -30,9 +34,10 @@ namespace Magic.Box3DPhysics;
 /// Box3D works in metres, kilograms and seconds with +Y up, as the engine does.
 /// </para>
 /// </summary>
-internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IDisposable
+internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
 {
     private readonly World _world;
+    private readonly Threads _threads;
     private readonly Box3DPhysicsSettings _settings;
     private readonly ModelShapes _shapes;
     private readonly List<Body> _bodies = [];
@@ -40,6 +45,12 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IDisposable
     private readonly Stack<int> _free = [];
     private readonly List<Entity> _gone = [];
     private readonly List<Vector3> _cameras = [];
+
+    /// <summary>
+    /// The domains whose models are being fitted before they spawn, each checked every step until all are
+    /// (<see cref="CheckPreloads"/>). Main thread.
+    /// </summary>
+    private readonly List<Preload> _preloads = [];
     private B3.WorldId _box3d;
     private float _gravity;
 
@@ -64,6 +75,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IDisposable
     public Box3DPhysicsGem(World world, Assets assets, Threads threads, Box3DPhysicsSettings settings)
     {
         _world = world;
+        _threads = threads;
         _settings = settings;
         _shapes = new ModelShapes(assets, threads);
         B3.SetAssertFcn(&OnAssert);
@@ -89,6 +101,7 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IDisposable
     public void FixedUpdate(in Frame frame)
     {
         _step++;
+        CheckPreloads();
         if (_settings.Gravity != _gravity)
         {
             _gravity = _settings.Gravity;
@@ -182,6 +195,35 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IDisposable
         }
 
         return query.Count;
+    }
+
+    /// <summary>
+    /// Fits the shape of every model a body among <paramref name="prefabs"/> is shaped like, before they spawn, so
+    /// each gets its body in its first step rather than waiting for its model. Done once every shape is there; the
+    /// shapes are kept for the run, so what it hands back holds nothing.
+    /// </summary>
+    public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
+    {
+        HashSet<Handle<Model>> models = await Task.Run(() => ModelsOf(prefabs), cancel).ConfigureAwait(false);
+        Preload preload = new(models, progress);
+        using CancellationTokenRegistration cancelling = cancel.Register(() => _threads.Post(EngineThread.Main, () =>
+        {
+            if (_preloads.Remove(preload))
+            {
+                preload.Done.TrySetCanceled(cancel);
+            }
+        }));
+        await _threads.InvokeAsync(EngineThread.Main, () =>
+        {
+            foreach (Handle<Model> model in models)
+            {
+                _shapes.Get(model);
+            }
+
+            _preloads.Add(preload);
+        }, cancel).ConfigureAwait(false);
+        await preload.Done.Task.ConfigureAwait(false);
+        return new Subscription(static () => { });
     }
 
     /// <summary>
@@ -567,6 +609,75 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IDisposable
         return _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
     }
 
+    /// <summary>
+    /// The models the bodies among <paramref name="prefabs"/> are shaped like: each part with a <see cref="Physics"/>
+    /// and a <see cref="Renderer"/> naming a model, and the parts under them. Any thread.
+    /// </summary>
+    private static HashSet<Handle<Model>> ModelsOf(IReadOnlyList<Prefab> prefabs)
+    {
+        HashSet<Handle<Model>> models = [];
+        foreach (Prefab prefab in prefabs)
+        {
+            Add(prefab.Parts);
+        }
+
+        return models;
+
+        void Add(IReadOnlyList<PrefabPart> parts)
+        {
+            foreach (PrefabPart part in parts)
+            {
+                Handle<Model> model = Handle<Model>.None;
+                bool isBody = false;
+                foreach (IComponent component in part.Components)
+                {
+                    isBody |= component is Physics;
+                    model = component is Renderer renderer ? renderer.Model : model;
+                }
+
+                if (isBody && model != Handle<Model>.None)
+                {
+                    models.Add(model);
+                }
+
+                Add(part.Children);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks each domain whose models are being fitted: how many shapes are there tells how far it is, and once all
+    /// are, whoever waits for it goes on and spawns it.
+    /// </summary>
+    private void CheckPreloads()
+    {
+        for (int i = _preloads.Count - 1; i >= 0; i--)
+        {
+            Preload preload = _preloads[i];
+            int done = 0;
+            foreach (Handle<Model> model in preload.Models)
+            {
+                if (_shapes.Get(model) is not null)
+                {
+                    done++;
+                }
+            }
+
+            float share = preload.Models.Count == 0 ? 1 : (float)done / preload.Models.Count;
+            if (share != preload.Reported)
+            {
+                preload.Reported = share;
+                preload.Progress.Report(share);
+            }
+
+            if (done == preload.Models.Count)
+            {
+                _preloads.RemoveAt(i);
+                preload.Done.TrySetResult();
+            }
+        }
+    }
+
     private static B3.Vec3 ToVec(Vector3 vector) => new() { X = vector.X, Y = vector.Y, Z = vector.Z };
 
     private static Vector3 FromVec(B3.Vec3 vector) => new(vector.X, vector.Y, vector.Z);
@@ -622,6 +733,21 @@ internal sealed unsafe class Box3DPhysicsGem : IGem, IPhysics, IDisposable
         public Physics Physics;
 
         public uint Seen;
+    }
+
+    /// <summary>
+    /// A domain whose models are being fitted before it spawns: which, how far that is as last told, and the task
+    /// whoever opens it awaits.
+    /// </summary>
+    private sealed class Preload(HashSet<Handle<Model>> models, IProgress<float> progress)
+    {
+        public HashSet<Handle<Model>> Models { get; } = models;
+
+        public IProgress<float> Progress { get; } = progress;
+
+        public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public float Reported { get; set; } = -1;
     }
 
     /// <summary>

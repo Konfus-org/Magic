@@ -323,14 +323,22 @@ says how it is read.
 A domain is a folder holding a `.domain` file beside the prefabs it spawns: every one in the folder, cells named
 `x_y_z.prefab` at their corners and any other, such as `globals.prefab`, at the domain's origin
 ([Domains](../Bundled/Resources/Domains/README.md)). Opening one reads them all on workers, with the models they draw,
-then spawns them all in one frame. Nothing is streamed: whatever draws the world picks each thing's detail by its
-distance, so the whole world is there at once.
+hands them to every gem that needs time to take in what spawns before it can draw or simulate it (`IPreloader`: a
+renderer uploading models and compiling pipelines, a physics gem fitting shapes), and spawns them all in one frame once
+every such gem is done, so the domain is there whole in its first frame: nothing dissolves in, stands still or starts
+late. Nothing is streamed: whatever draws the world picks each thing's detail by its distance, so the whole world is
+there at once.
 
 - The project's `entryPoint` opens at start-up, or the default domain when it does not.
 - Opening a domain in place of the open ones (`Replace`) closes them and shows the project's `loading` domain until the
-  new one is there. It appears in the frame the loading domain closes, with the project's `player` put at its spawn:
-  the first entity tagged `spawn` in its prefabs that are not cells, else in its cells. `IsLoading` is true from when
-  the open domains close until then.
+  new one is there, which is once every gem has taken it in. It appears in the frame the loading domain closes, with
+  the project's `player` put at its spawn: the first entity tagged `spawn` in its prefabs that are not cells, else in
+  its cells. `IsLoading` is true from when the open domains close until then. The loading domain itself is not taken
+  in first, so it shows as soon as it can.
+- A gem is a preloader by implementing `IPreloader`; like `ILogSink`, it is not provided to other gems, so any number
+  of gems can be one. It is handed the prefabs about to spawn, the player among them, and the task it returns ends
+  once everything they name is taken in, or cannot be, and hands back what keeps that taken in, which the domain holds
+  while it is open. The reads are the first half of an open's progress, the gems' taking in the second.
 - Opening one beside them (`Additive`) shows no loading domain and puts no player.
 - Closing a domain destroys what it spawned.
 - While a domain is open, a prefab of it that is read again, as its file or a prefab it places changed, is spawned again
@@ -532,7 +540,7 @@ internal sealed class FileLogGem(FileLogSettings settings) : IGem, ILogSink, IDi
   whole run; the log keeps them only until then.
 - A sink that throws is dropped, and what it threw is logged as an error.
 - Unlike the other interfaces a gem implements, `ILogSink` is not provided to other gems, so any number of gems can be
-  sinks.
+  sinks; `IPreloader` ([the world](#the-world)) is the other such interface.
 
 ### Crashes
 

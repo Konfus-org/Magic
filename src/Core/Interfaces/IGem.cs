@@ -13,7 +13,8 @@ namespace Magic.Interfaces;
 /// <see cref="Threads"/>, <see cref="Events"/>, <see cref="Project"/>, <see cref="Args"/>, <see cref="Settings"/>, and
 /// <see cref="IServiceProvider"/> to find a service by its type as it runs) or interfaces other gems implement. Every
 /// other interface the class implements is what it provides to the gems made after it, an
-/// <see cref="IAssetLoader{T}"/> as any other, but <see cref="ILogSink"/>, which Core adds to the log instead. Core
+/// <see cref="IAssetLoader{T}"/> as any other, but <see cref="ILogSink"/>, which Core adds to the log instead, and
+/// <see cref="IPreloader"/>, which Core gives the world. Core
 /// makes gems in that dependency order and disposes those that are
 /// <see cref="IDisposable"/> in reverse. Every frame it calls the main thread's hooks below in the order the gems were
 /// made, so a gem is up to date before the gems that take it read it, and Render in reverse, so a gem finishes what the

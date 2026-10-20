@@ -4,6 +4,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Subscriptions;
@@ -25,7 +26,8 @@ namespace Magic.ClusterRendering;
 /// reach which pixels, all of it the GPU works out each frame.
 /// <para>
 /// The world is copied in LateUpdate (<see cref="Snapshot"/>), handed over in Sync, and drawn in Render from that copy, one
-/// frame behind.
+/// frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is drawn whole in
+/// its first frame.
 /// While <see cref="IGpu.DebugView"/> names a debug view, its pass (<c>Passes/Debug/Name.pass</c>) runs after the world's
 /// effects and what it draws is shown in place of the finished image, or the failure's magenta saying nothing draws while
 /// it is not ready; while the debug UI shows, each instance drawn as the failure says why where it is. Once every view
@@ -33,7 +35,7 @@ namespace Magic.ClusterRendering;
 /// overlay pipeline's passes, the debug UI's among them.
 /// </para>
 /// </summary>
-internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<CompressedTexture>, IDisposable
+internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>, ICache<CompressedTexture>, IDisposable
 {
     /// <summary>
     /// The gem's meter, which its parts record on (Core's README, Telemetry).
@@ -86,6 +88,18 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     private readonly List<Subscription> _watching = [];
     private readonly List<SurfaceKey> _raster = [];
     private readonly HashSet<GpuTexture> _cleared = [];
+
+    /// <summary>
+    /// The domains being taken in before they spawn, each checked every frame until all it draws is in
+    /// (<see cref="CheckPreloads"/>). Render thread.
+    /// </summary>
+    private readonly List<Preload> _preloads = [];
+
+    /// <summary>
+    /// The effects the latest domain taken in names, which the frame is built for while the world names none, so
+    /// the listing the domain needs is compiled before it spawns; none once that domain is let go.
+    /// </summary>
+    private Handle<Pipeline> _preloadEffects;
 
     /// <summary>
     /// The debug view named that has no pass, said once.
@@ -277,7 +291,8 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
         _raster.Add(new SurfaceKey(Handle<Shader>.None, false, true));
         _raster.AddRange(_materials.RasterBins);
         _graph.Append(DebugViewPass(_gpu.DebugView));
-        _graph.Update(PipelineOf(), copy.Effects, OverlayOf(), new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
+        _graph.Update(PipelineOf(), EffectsOf(copy), OverlayOf(), new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
+        CheckPreloads(copy);
         if (_graph.Current?.Runs("GiField") == true && main is { } eye)
         {
             _gi.Plan(eye.Transform.Position, _scene.Moved, frame.DeltaSeconds, _settings);
@@ -365,6 +380,22 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
         ClearWindow();
         RecordOverlays(listing, views, shown, frame);
         _textures.EndFrame();
+    }
+
+    /// <summary>
+    /// Takes in what <paramref name="prefabs"/> draw before they spawn, so they are drawn whole in their first frame:
+    /// their models into the pool, their materials packed with their textures in and every surface's pipelines
+    /// compiled, and the frame built for the effects they name. Done once all of it is in, or failed, and so drawn as
+    /// the failure; what it hands back keeps it in the pool until it is disposed.
+    /// </summary>
+    public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
+    {
+        Preloaded preloaded = await Task.Run(() => Preloaded.Of(prefabs), cancel).ConfigureAwait(false);
+        Preload preload = new(preloaded, progress);
+        using CancellationTokenRegistration cancelling = cancel.Register(() => OnRender(() => Cancel(preload, cancel)));
+        OnRender(() => Begin(preload));
+        await preload.Done.Task.ConfigureAwait(false);
+        return new Subscription(() => OnRender(() => End(preloaded)));
     }
 
     /// <summary>
@@ -558,5 +589,130 @@ internal sealed class ClusterRenderingGem : IGem, ICache<ModelField>, ICache<Com
     private void OnRender(Action work)
     {
         _threads.Post(EngineThread.Render, work);
+    }
+
+    /// <summary>
+    /// The effects the frame is built for: the world's, else those of the latest domain being taken in, so its
+    /// listing is compiled under the loading domain, which names none of its own.
+    /// </summary>
+    private Handle<Pipeline> EffectsOf(WorldCopy copy)
+    {
+        return copy.Effects == Handle<Pipeline>.None ? _preloadEffects : copy.Effects;
+    }
+
+    /// <summary>
+    /// Starts taking in what a domain draws: its models and materials are held, then asked for as the nearest, which
+    /// starts their loads, and the frame is built for its effects.
+    /// </summary>
+    private void Begin(Preload preload)
+    {
+        Preloaded preloaded = preload.Preloaded;
+        _scene.Hold(preloaded);
+        foreach (Handle<Model> model in preloaded.Models)
+        {
+            _models.RowOf(model, 0);
+        }
+
+        foreach (Handle<Material> material in preloaded.Materials)
+        {
+            _materials.RowOf(material);
+        }
+
+        if (preloaded.Effects != Handle<Pipeline>.None)
+        {
+            _preloadEffects = preloaded.Effects;
+        }
+
+        _preloads.Add(preload);
+    }
+
+    /// <summary>
+    /// A domain that was taken in is let go: what no look draws leaves, and the frame no longer builds for its effects.
+    /// </summary>
+    private void End(Preloaded preloaded)
+    {
+        _scene.Release(preloaded);
+        if (preloaded.Effects == _preloadEffects)
+        {
+            _preloadEffects = Handle<Pipeline>.None;
+        }
+    }
+
+    /// <summary>
+    /// The open of a domain being taken in was cancelled before all it draws was in: it is let go now, and whoever
+    /// waited is told; one already in is let go by whoever holds it.
+    /// </summary>
+    private void Cancel(Preload preload, CancellationToken cancel)
+    {
+        if (_preloads.Remove(preload))
+        {
+            End(preload.Preloaded);
+            preload.Done.TrySetCanceled(cancel);
+        }
+    }
+
+    /// <summary>
+    /// Checks each domain being taken in: each model that can be drawn, or failed and is drawn as the failure cube,
+    /// each material shown, and the frame built for the effects, tell how far it is; once all are in, whoever waits
+    /// for it goes on and spawns it.
+    /// </summary>
+    private void CheckPreloads(WorldCopy copy)
+    {
+        if (_preloads.Count == 0)
+        {
+            return;
+        }
+
+        bool isBuilt = _graph.Current is not null && !_graph.IsBuilding && _graph.Effects == EffectsOf(copy);
+        for (int i = _preloads.Count - 1; i >= 0; i--)
+        {
+            Preload preload = _preloads[i];
+            Preloaded preloaded = preload.Preloaded;
+            int total = 1 + preloaded.Models.Count + preloaded.Materials.Count;
+            int done = isBuilt ? 1 : 0;
+            foreach (Handle<Model> model in preloaded.Models)
+            {
+                if (_models.IsDrawable(_models.HasFailed(model) ? _models.Failed : model))
+                {
+                    done++;
+                }
+            }
+
+            foreach (Handle<Material> material in preloaded.Materials)
+            {
+                if (_materials.IsShown(_materials.RowOf(material)))
+                {
+                    done++;
+                }
+            }
+
+            float share = (float)done / total;
+            if (share != preload.Reported)
+            {
+                preload.Reported = share;
+                preload.Progress.Report(share);
+            }
+
+            if (done == total)
+            {
+                _preloads.RemoveAt(i);
+                preload.Done.TrySetResult();
+            }
+        }
+    }
+
+    /// <summary>
+    /// A domain being taken in before it spawns: what it draws, how far that is as last told, and the task whoever
+    /// opens it awaits.
+    /// </summary>
+    private sealed class Preload(Preloaded preloaded, IProgress<float> progress)
+    {
+        public Preloaded Preloaded { get; } = preloaded;
+
+        public IProgress<float> Progress { get; } = progress;
+
+        public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public float Reported { get; set; } = -1;
     }
 }

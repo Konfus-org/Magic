@@ -204,6 +204,11 @@ compressed once and take a quarter of the memory and of the reads.
   and the field are made again where it stands; one whose model and materials are drawn already appears at once, as a
   script spawning it means it to.
 - A dissolve is a dither that moves each frame, so the upscale blends it.
+- A domain is taken in before it spawns (Core's `IPreloader`): its models into the pool, its materials with their
+  textures and every surface's pipelines, and the frame built for the effects it names while the world names none,
+  so the loading domain is drawn with them and nothing is built again at the switch. The world spawns it once all of
+  that is in, so a domain appears whole in its first frame, and only what a script spawns later dissolves in. What was
+  taken in is held while the domain is open, so nothing of it is let go between coming in and being drawn.
 
 ## Passes and pipelines
 
