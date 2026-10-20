@@ -36,6 +36,18 @@ namespace Magic.Box3DPhysics;
 /// </summary>
 internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
 {
+    /// <summary>
+    /// How much farther than the range a body goes before it is dropped, so one at the edge is not made and dropped
+    /// every other step.
+    /// </summary>
+    private const float Leave = 1.25f;
+
+    /// <summary>
+    /// The most touching contacts read for one body, which bounds the stack they are read onto; a body touching more
+    /// hears the first of them.
+    /// </summary>
+    private const int MostTouching = 64;
+
     private readonly World _world;
     private readonly Threads _threads;
     private readonly Box3DPhysicsSettings _settings;
@@ -52,19 +64,6 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     /// </summary>
     private readonly List<Preload> _preloads = [];
     private B3.WorldId _box3d;
-    private float _gravity;
-
-    /// <summary>
-    /// How much farther than the range a body goes before it is dropped, so one at the edge is not made and dropped
-    /// every other step.
-    /// </summary>
-    private const float Leave = 1.25f;
-
-    /// <summary>
-    /// The most touching contacts read for one body, which bounds the stack they are read onto; a body touching more
-    /// hears the first of them.
-    /// </summary>
-    private const int MostTouching = 64;
 
     /// <summary>
     /// Which step this is, stamped on each body seen in it: a body not stamped is of an entity that is gone, or out
@@ -78,12 +77,11 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
         _threads = threads;
         _settings = settings;
         _shapes = new ModelShapes(assets, threads);
-        _gravity = settings.Gravity;
 
         B3.SetAssertFcn(&OnAssert);
         B3.SetLogFcn(&OnLog);
         B3.WorldDef def = B3.DefaultWorldDef();
-        def.Gravity = new B3.Vec3 { Y = -_gravity };
+        def.Gravity = new B3.Vec3 { Y = -settings.Gravity };
         def.WorkerCount = (uint)Math.Clamp(settings.Workers, 1, B3.MaxWorkers);
         _box3d = B3.CreateWorld(&def);
 
@@ -104,10 +102,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     {
         _step++;
         CheckPreloads();
-        if (_settings.Gravity != _gravity)
+        if (_settings.Gravity != -B3.WorldGetGravity(_box3d).Y)
         {
-            _gravity = _settings.Gravity;
-            B3.WorldSetGravity(_box3d, new B3.Vec3 { Y = -_gravity });
+            B3.WorldSetGravity(_box3d, new B3.Vec3 { Y = -_settings.Gravity });
         }
 
         _cameras.Clear();
@@ -206,7 +203,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     /// </summary>
     public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
     {
-        HashSet<Handle<Model>> models = await Task.Run(() => ModelsOf(prefabs), cancel).ConfigureAwait(false);
+        HashSet<Handle<Model>> models = ModelsOf(prefabs);
         Preload preload = new(models, progress);
         using CancellationTokenRegistration cancelling = cancel.Register(() => _threads.Post(EngineThread.Main, () =>
         {
@@ -227,7 +224,27 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
         }, cancel).ConfigureAwait(false);
         await preload.Done.Task.ConfigureAwait(false);
 
-        return new Subscription(static () => { });
+        return Subscription.None;
+    }
+
+    internal static B3.Vec3 ToVec(Vector3 vector)
+    {
+        return new() { X = vector.X, Y = vector.Y, Z = vector.Z };
+    }
+
+    private static Vector3 FromVec(B3.Vec3 vector)
+    {
+        return new(vector.X, vector.Y, vector.Z);
+    }
+
+    private static B3.Quat ToQuat(Quaternion rotation)
+    {
+        return new() { V = new B3.Vec3 { X = rotation.X, Y = rotation.Y, Z = rotation.Z }, S = rotation.W };
+    }
+
+    private static Quaternion FromQuat(B3.Quat rotation)
+    {
+        return new(rotation.V.X, rotation.V.Y, rotation.V.Z, rotation.S);
     }
 
     /// <summary>
@@ -237,15 +254,16 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     private void Follow(Entity entity, ref Transform transform, ref Physics physics, float step)
     {
         Handle<Model> model = ModelOf(entity);
+        ModelShape? shape = _shapes.Get(model);
         bool hasBody = _slots.TryGetValue(entity, out int slot);
-        if (!IsNear(transform, model, hasBody ? _settings.Range * Leave : _settings.Range))
+        if (!IsNear(transform, shape, hasBody ? _settings.Range * Leave : _settings.Range))
         {
             return;
         }
 
         if (!hasBody)
         {
-            Create(entity, model, transform, physics);
+            Create(entity, model, shape, transform, physics);
             return;
         }
 
@@ -254,7 +272,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
         if (IsRemade(body, model, transform, physics))
         {
             Destroy(entity);
-            Create(entity, model, transform, physics);
+            Create(entity, model, shape, transform, physics);
             return;
         }
 
@@ -291,7 +309,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     /// less how far the shape reaches from it, so the ground is near from anywhere on it. With no player camera,
     /// everything is near.
     /// </summary>
-    private bool IsNear(in Transform transform, Handle<Model> model, float range)
+    private bool IsNear(in Transform transform, ModelShape? shape, float range)
     {
         if (_cameras.Count == 0)
         {
@@ -299,7 +317,6 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
         }
 
         Vector3 scale = Vector3.Abs(transform.Scale);
-        ModelShape? shape = _shapes.Get(model);
         float reach = shape is null ? scale.Length() : (((shape.Max - shape.Min) * scale).Length() + ((shape.Max + shape.Min) * scale).Length()) * 0.5f;
         foreach (Vector3 camera in _cameras)
         {
@@ -329,9 +346,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     /// <summary>
     /// Makes the entity's body and shape, once its model's shape is there; until then the entity waits, unmoved.
     /// </summary>
-    private unsafe void Create(Entity entity, Handle<Model> model, in Transform transform, in Physics physics)
+    private unsafe void Create(Entity entity, Handle<Model> model, ModelShape? shape, in Transform transform, in Physics physics)
     {
-        ModelShape? shape = _shapes.Get(model);
         if (shape is null)
         {
             return;
@@ -363,7 +379,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
         def.UserData = (void*)(nuint)(slot + 1);
         B3.BodyId id = B3.CreateBody(_box3d, &def);
         B3.ShapeDef shapeDef = B3.DefaultShapeDef();
-        shapeDef.BaseMaterial = Surfaces.Material(physics.Surface, physics.Bounce);
+        shapeDef.BaseMaterial = MaterialOf(physics.Surface, physics.Bounce);
         shapeDef.Filter.CategoryBits = (ulong)MotionsOf(physics.Motion);
         Shape kind = physics.Shape;
         if (kind == Shape.Mesh && (physics.Motion != Motion.Static || shape.Mesh is null))
@@ -478,11 +494,12 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
     /// </summary>
     private unsafe void Touch(int slot, ref Contacts contacts)
     {
+        Span<Body> bodies = CollectionsMarshal.AsSpan(_bodies);
         Contacts now = default;
         int written = 0;
         if (slot >= 0)
         {
-            Body body = _bodies[slot];
+            ref Body body = ref bodies[slot];
             int capacity = Math.Min(B3.BodyGetContactCapacity(body.Id), MostTouching);
             B3.ContactData* data = stackalloc B3.ContactData[capacity];
             int count = B3.BodyGetContactData(body.Id, data, capacity);
@@ -519,7 +536,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
             now[written++] = held with { Phase = ContactPhase.Exit, Impulse = 0 };
             if (slot >= 0)
             {
-                Debugging.Verbose($"Entity {_bodies[slot].Entity.Id} parted from entity {held.Other.Id}.");
+                Debugging.Verbose($"Entity {bodies[slot].Entity.Id} parted from entity {held.Other.Id}.");
             }
         }
 
@@ -611,6 +628,27 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
         };
     }
 
+    /// <summary>
+    /// What a <see cref="Surface"/> is to Box3D: a friction coefficient, from ice's to glue's, and for the stickiest a
+    /// little rolling resistance, so a sticky ball stops rolling. Two surfaces that touch take the geometric mean of
+    /// their frictions and the larger of their bounces, so a sticky box on ice still slides, a little.
+    /// </summary>
+    private static B3.SurfaceMaterial MaterialOf(Surface surface, float bounce)
+    {
+        B3.SurfaceMaterial material = B3.DefaultSurfaceMaterial();
+        (material.Friction, material.RollingResistance) = surface switch
+        {
+            Surface.Slippery => (0.05f, 0f),
+            Surface.Slick => (0.2f, 0f),
+            Surface.Grippy => (0.9f, 0.01f),
+            Surface.Sticky => (1.5f, 0.05f),
+            Surface.Normal => (0.6f, 0f),
+            _ => (0.6f, 0f),
+        };
+        material.Restitution = Math.Clamp(bounce, 0, 1);
+        return material;
+    }
+
     private Handle<Model> ModelOf(Entity entity)
     {
         return _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
@@ -683,26 +721,6 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader, IDisposable
                 preload.Done.TrySetResult();
             }
         }
-    }
-
-    private static B3.Vec3 ToVec(Vector3 vector)
-    {
-        return new() { X = vector.X, Y = vector.Y, Z = vector.Z };
-    }
-
-    private static Vector3 FromVec(B3.Vec3 vector)
-    {
-        return new(vector.X, vector.Y, vector.Z);
-    }
-
-    private static B3.Quat ToQuat(Quaternion rotation)
-    {
-        return new() { V = new B3.Vec3 { X = rotation.X, Y = rotation.Y, Z = rotation.Z }, S = rotation.W };
-    }
-
-    private static Quaternion FromQuat(B3.Quat rotation)
-    {
-        return new(rotation.V.X, rotation.V.Y, rotation.V.Z, rotation.S);
     }
 
     private static B3.Vec3 Scaled(B3.Vec3 vector, float scale)

@@ -1,8 +1,7 @@
 # SdlTextureLoader
 
-Images to textures, through SDL_image, called through its generated API ([Gems](../README.md#native-libraries)), which the SDL bindings gem provides:
-provides
-`IAssetLoader<Texture>`. What a texture's `.meta` holds is in [Textures](../../Resources/Textures/README.md).
+Images to textures, through SDL_image, called through its generated API ([Gems](../README.md#native-libraries)):
+provides `IAssetLoader<Texture>`. What a texture's `.meta` holds is in [Textures](../../Resources/Textures/README.md).
 
 ## Behaviour
 

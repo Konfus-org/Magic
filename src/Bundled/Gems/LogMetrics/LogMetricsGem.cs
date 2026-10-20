@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
-using System.Linq;
 using System.Numerics;
 using System.Text;
 using Magic.Contexts.Frames;
@@ -77,7 +76,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     private void Follow()
     {
         bool isWanted = _settings.Enabled && _settings.IntervalSeconds > 0;
-        if (_listener is not null && (!isWanted || !_meters.SequenceEqual(_settings.Meters, StringComparer.Ordinal)))
+        if (_listener is not null && (!isWanted || !SameMeters()))
         {
             Stop();
         }
@@ -86,6 +85,29 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         {
             Start();
         }
+    }
+
+    /// <summary>
+    /// Whether the settings' meters are still the ones listened to, by contents: a settings change hands the gem a new
+    /// list even when nothing in it changed.
+    /// </summary>
+    private bool SameMeters()
+    {
+        IReadOnlyList<string> meters = _settings.Meters;
+        if (meters.Count != _meters.Count)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < meters.Count; i++)
+        {
+            if (!string.Equals(meters[i], _meters[i], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void Start()
@@ -98,7 +120,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         listener.SetMeasurementEventCallback<float>(Add);
         listener.SetMeasurementEventCallback<double>(Add);
         listener.SetMeasurementEventCallback<decimal>(Add);
-        _meters = [.. _settings.Meters];
+        _meters = _settings.Meters;
         _listener = listener;
         _windowStart = Stopwatch.GetTimestamp();
         listener.Start();
@@ -208,7 +230,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
     /// <summary>
     /// Whether <paramref name="meter"/> is one of the settings' meters or under one: "Magic" takes "Magic.Core" and
-    /// "Magic.Gems.ClusterRendering", not "Magical".
+    /// every "Magic.Gems.&lt;Gem&gt;", not "Magical".
     /// </summary>
     private bool Listens(string meter)
     {
@@ -578,7 +600,8 @@ internal sealed class LogMetricsGem : IGem, IDisposable
                 for (int i = 0; i < _slowestHooks.Count; i++)
                 {
                     Hook hook = _slowestHooks[i];
-                    if (!IsRenderThread(hook.Phase))
+                    // A render-thread hook ran beside the main thread's frame rather than inside it.
+                    if (hook.Phase is not nameof(Phase.Render))
                     {
                         hooked += hook.Seconds;
                     }
@@ -606,11 +629,6 @@ internal sealed class LogMetricsGem : IGem, IDisposable
                 _sum = 0;
             }
         }
-
-        /// <summary>
-        /// Whether a hook ran on the render thread, beside the main thread's frame rather than inside it.
-        /// </summary>
-        private static bool IsRenderThread(object? phase) => phase is nameof(Phase.Render);
 
         private static object? Tag(ReadOnlySpan<KeyValuePair<string, object?>> tags, string key)
         {

@@ -31,8 +31,8 @@ it. Nothing else is written anywhere: the shape's size is the model's.
 - **Mass** is the volume's at the density of water unless the component says, when the body's mass and inertia are
   scaled to it, so a hollow crate is a light one of the same size.
 - **Surface** is one of five frictions, with Box3D's default, 0.6, as normal, and the stickiest a little rolling
-  resistance (`Surfaces`). Bodies that touch mix frictions by their geometric mean and bounce by the larger, so a
-  sticky crate on ice slides a little, and anything on a trampoline bounces.
+  resistance. Bodies that touch mix frictions by their geometric mean and bounce by the larger, so a sticky crate on
+  ice slides a little, and anything on a trampoline bounces.
 
 ## The step
 

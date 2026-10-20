@@ -56,11 +56,11 @@ on several threads at once, a chunk each, so it writes only through its chunk. A
   `Create`), rather than moving each entity once per component added: what a worker built off the main thread arrives
   in one call. The entities come back in a span the gem reuses, good until the next batch.
 - `Create(components)` makes one entity with components whose types are known only as the program runs, a prefab's
-  part's, all at once (Arch's untyped `Create` and `SetRange`), boxed. Each type is found through its typed
-  registration, so a struct is measured as the typed calls measure it. `Set(entity, components)` gives an entity such
-  components, adding the types it lacks in one move (`AddRange`) and setting them all (`SetRange`), and
-  `Components(entity)` hands back every component it has, boxed (`GetAllComponents`): a saved world is put back and
-  saved through those, never a frame.
+  part's, all at once (Arch's untyped `Create` and `SetRange`), boxed. Each type is found in Arch's registry, or through
+  its typed registration the first time, so a struct is measured as the typed calls measure it.
+  `Set(entity, components)` gives an entity such components, adding the types it lacks in one move (`AddRange`) and
+  setting them all (`SetRange`), and `Components(entity)` hands back every component it has, boxed
+  (`GetAllComponents`): a saved world is put back and saved through those, never a frame.
 
 ## Guards
 

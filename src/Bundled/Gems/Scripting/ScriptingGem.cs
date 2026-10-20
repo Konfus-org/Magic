@@ -43,15 +43,16 @@ namespace Magic.Scripting;
 internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisposable
 {
     /// <summary>
-    /// Each of the <see cref="IEcs"/>'s Adds, one per kind of system: a class that implements the interface one takes
-    /// is a system of that kind.
+    /// Each of the <see cref="IEcs"/>'s Adds, one per kind of system, with the type it takes: a class that implements
+    /// that interface is a system of that kind.
     /// </summary>
-    private static readonly MethodInfo[] _adds = Array.FindAll(typeof(IEcs).GetMethods(),
-        method => string.Equals(method.Name, nameof(IEcs.Add), StringComparison.Ordinal) && method.GetParameters().Length == 1);
+    private static readonly (MethodInfo Add, Type Taken)[] _adds = Array.ConvertAll(
+        Array.FindAll(typeof(IEcs).GetMethods(), method => string.Equals(method.Name, nameof(IEcs.Add), StringComparison.Ordinal) && method.GetParameters().Length == 1),
+        method => (method, method.GetParameters()[0].ParameterType));
 
     private static readonly Meter _meter = new("Magic.Gems.Scripting");
     private static readonly Counter<int> _calls = _meter.CreateCounter<int>("magic.gems.scripting.behavior.calls", "{call}", "Behaviour hooks called, tagged with the phase.");
-    private static readonly Gauge<int> _behaviors = _meter.CreateGauge<int>("magic.gems.scripting.behaviors", "{behavior}", "Behaviours attached to live entities.");
+    private static readonly Gauge<int> _behaviors = _meter.CreateGauge<int>("magic.gems.scripting.behaviors", "{behavior}", "Scripts attached to live entities, behaviours or not.");
     private static readonly string[] _phases = Enum.GetNames<Phase>();
 
     private readonly ScriptingSettings _settings;
@@ -143,8 +144,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             return new(Result.Failure<Script>($"its .meta holds settings, {settings.GetRawText()}, which a script file does not take."));
         }
 
-        Result<Type> type = _assemblies.Get<IScript>(Path.GetFileNameWithoutExtension(path));
-        return new(type.Ok ? Result.Success(new Script { Type = type.Value }) : Result.Failure<Script>(type.Error));
+        return new(ClassOf(path, Handle<Script>.None));
     }
 
     public Result<IScript> Make(Script script)
@@ -204,12 +204,12 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         // The asset is loaded as any named one is, so it is held and told of when the code is built again; its class is
         // found now, as a load reads no file, since the world is put back in this call.
         Handle<Script> handle = state.Script;
-        if (!_loaded.ContainsKey(handle))
+        if (!_loaded.TryGetValue(handle, out Result<Script>? known))
         {
             Fetch(handle);
         }
 
-        Result<Script> script = _loaded[handle] ?? Find(handle);
+        Result<Script> script = known ?? Find(handle);
         if (script.Ok)
         {
             Keep(entity, script.Value, Put(entity, script.Value, state));
@@ -247,9 +247,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         List<MethodInfo> adds = [];
         foreach (Type contract in type.GetInterfaces())
         {
-            foreach (MethodInfo add in _adds)
+            foreach ((MethodInfo add, Type taken) in _adds)
             {
-                Type taken = add.GetParameters()[0].ParameterType;
                 if (taken == contract)
                 {
                     adds.Add(add);
@@ -344,7 +343,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         }
         catch (Exception ex)
         {
-            return Result.Failure<IScript>($"it threw as it was made: {(ex is TargetInvocationException { InnerException: { } inner } ? inner : ex)}");
+            return Result.Failure<IScript>($"it threw as it was made: {Thrown(ex)}");
         }
     }
 
@@ -406,7 +405,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private static string NameOf(PropertyInfo property)
     {
-        return Json.Options.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
+        return JsonNamingPolicy.CamelCase.ConvertName(property.Name);
     }
 
     /// <summary>
@@ -428,6 +427,17 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     }
 
     /// <summary>
+    /// The <c>.cs</c> file at <paramref name="path"/> as the <see cref="Script"/> with <paramref name="handle"/>: the
+    /// class named like the file, an <see cref="IScript"/>, found in the code loaded (<see cref="Assemblies"/>); why
+    /// not, when no code loaded declares it, or two classes have the name.
+    /// </summary>
+    private Result<Script> ClassOf(string path, Handle<Script> handle)
+    {
+        Result<Type> type = _assemblies.Get<IScript>(Path.GetFileNameWithoutExtension(path));
+        return type.Ok ? Result.Success(new Script { Handle = handle, Type = type.Value }) : Result.Failure<Script>(type.Error);
+    }
+
+    /// <summary>
     /// The script asset <paramref name="handle"/> found now, its class in the code loaded as <see cref="LoadAsync"/>
     /// finds it, for a world put back, which does not wait for a load; why not, when no asset has its id or no code
     /// loaded declares the class.
@@ -440,8 +450,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             return Result.Failure<Script>("no asset has its id.");
         }
 
-        Result<Type> type = _assemblies.Get<IScript>(Path.GetFileNameWithoutExtension(path));
-        return type.Ok ? Result.Success(new Script { Handle = handle, Type = type.Value }) : Result.Failure<Script>(type.Error);
+        return ClassOf(path, handle);
     }
 
     /// <summary>
@@ -638,9 +647,9 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
                     field.SetValue(made.Value, value);
                 }
             }
-            else if (_unkept.Add($"{type.Name}.{name}"))
+            else
             {
-                Debugging.Warn($"Script {type.Name}'s saved {name} is not put back, as its class no longer has it.");
+                WarnOnce(type, name, $"Script {type.Name}'s saved {name} is not put back, as its class no longer has it.");
             }
         }
 
@@ -680,7 +689,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// (<see cref="ValuesOf"/>) as a file names them, and its other fields by name, but those that are no data of its
     /// own (<see cref="IsHanded"/>) and those JSON cannot hold, warned about once.
     /// </summary>
-    private Dictionary<string, JsonElement> StateOf(object script)
+    private Dictionary<string, JsonElement> StateOf(IScript script)
     {
         Type type = script.GetType();
         Dictionary<string, JsonElement> values = new(StringComparer.Ordinal);
@@ -714,9 +723,9 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         {
             values[name] = json.Value;
         }
-        else if (_unkept.Add($"{type.Name}.{name}"))
+        else
         {
-            Debugging.Warn($"Script {type.Name}'s {name} is not saved, so a copy put back starts over without it: {json.Error}");
+            WarnOnce(type, name, $"Script {type.Name}'s {name} is not saved, so a copy put back starts over without it: {json.Error}");
         }
     }
 
@@ -740,13 +749,21 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             return true;
         }
 
-        if (_unkept.Add($"{type.Name}.{name}"))
-        {
-            Debugging.Warn($"Script {type.Name}'s saved {name} is not put back, as it no longer fits: {read.Error}");
-        }
-
+        WarnOnce(type, name, $"Script {type.Name}'s saved {name} is not put back, as it no longer fits: {read.Error}");
         value = null;
         return false;
+    }
+
+    /// <summary>
+    /// Warns <paramref name="message"/> once for <paramref name="type"/>'s member <paramref name="name"/>, which could
+    /// not be saved or put back, so a world saved or put back again says it no more.
+    /// </summary>
+    private void WarnOnce(Type type, string name, string message)
+    {
+        if (_unkept.Add($"{type.Name}.{name}"))
+        {
+            Debugging.Warn(message);
+        }
     }
 
     /// <summary>
@@ -911,7 +928,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// A script made for <see cref="Entity"/>: which script asset, the values it was given, which a copy started in its
     /// place on a build is given too, the copy itself, and its places on the ECS, one for each kind of system it is.
     /// </summary>
-    private sealed record Attached(Entity Entity, Handle<Script> Script, IReadOnlyDictionary<string, object?> Values, object Instance, SubscriptionList Systems)
+    private sealed record Attached(Entity Entity, Handle<Script> Script, IReadOnlyDictionary<string, object?> Values, IScript Instance, SubscriptionList Systems)
     {
         /// <summary>
         /// The script as a behaviour, when it is one: the one kind whose hooks this gem calls.

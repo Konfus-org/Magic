@@ -93,22 +93,23 @@ internal static unsafe class Metal
         List<(uint Set, uint Binding)> buffers = [];
         Spvc.ResourceType samplers = Spvc.ResourceType.SampledImage;
         ulong separateSamplers = 0;
-        if (Count(resources, samplers) == 0)
+        ListOf(resources, samplers, out ulong sampledImages);
+        if (sampledImages == 0)
         {
             samplers = Spvc.ResourceType.SeparateSamplers;
-            separateSamplers = Count(resources, samplers);
+            ListOf(resources, samplers, out separateSamplers);
         }
 
-        uint[] textureSets = compute ? [0u, 1u] : [0u, 2u];
+        uint[] storageSets = compute ? [0u, 1u] : [0u, 2u];
         Result collected = Collect(compiler, resources, samplers, 0, textures, compute ? [0u] : [0u, 2u], "texture-sampler");
         if (collected.Ok)
         {
-            collected = Collect(compiler, resources, Spvc.ResourceType.StorageImage, 0, textures, textureSets, "storage texture");
+            collected = Collect(compiler, resources, Spvc.ResourceType.StorageImage, 0, textures, storageSets, "storage texture");
         }
 
         if (collected.Ok)
         {
-            collected = Collect(compiler, resources, Spvc.ResourceType.SeparateImage, separateSamplers, textures, textureSets, "storage texture");
+            collected = Collect(compiler, resources, Spvc.ResourceType.SeparateImage, separateSamplers, textures, storageSets, "storage texture");
         }
 
         if (collected.Ok)
@@ -118,7 +119,7 @@ internal static unsafe class Metal
 
         if (collected.Ok)
         {
-            collected = Collect(compiler, resources, Spvc.ResourceType.StorageBuffer, 0, buffers, textureSets, "storage buffer");
+            collected = Collect(compiler, resources, Spvc.ResourceType.StorageBuffer, 0, buffers, storageSets, "storage buffer");
         }
 
         if (!collected.Ok)
@@ -201,12 +202,6 @@ internal static unsafe class Metal
 
         count = found;
         return list;
-    }
-
-    private static ulong Count(Spvc.Resources* resources, Spvc.ResourceType type)
-    {
-        ListOf(resources, type, out ulong count);
-        return count;
     }
 
     /// <summary>

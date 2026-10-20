@@ -9,9 +9,9 @@ Magic --project samples --set LogMetrics.enabled=true
 ```
 
 ```
-12:00:30.001 Info     f1800 t2 magic.core.frame.duration: 1800 in 30 s, mean 16.67 ms, min 15.9 ms, max 87.2 ms (LogMetricsGem.cs:267 Report)
-12:00:30.001 Info     f1800 t2 magic.core.gem.hook.duration {magic.core.gem.name=Window, magic.core.frame.phase=Update}: 1800 in 30 s, mean 0.21 ms, min 0.05 ms, max 71.3 ms (LogMetricsGem.cs:267 Report)
-12:00:30.001 Info     f1800 t2 Slowest frame f1234 took 87.2 ms, 5.2x the mean: Ecs.Update 71.3 ms, Console.Update 0.1 ms, LogMetrics.Update 0.02 ms, outside the main thread's hooks 15.8 ms; GC paused 9.8 ms (LogMetricsGem.cs:479 Report)
+12:00:30.001 Info     f1800 t2 magic.core.frame.duration: 1800 in 30 s, mean 16.67 ms, min 15.9 ms, max 87.2 ms (LogMetricsGem.cs:351 Report)
+12:00:30.001 Info     f1800 t2 magic.core.gem.hook.duration {magic.core.gem.name=Window, magic.core.frame.phase=Update}: 1800 in 30 s, mean 0.21 ms, min 0.05 ms, max 71.3 ms (LogMetricsGem.cs:351 Report)
+12:00:30.001 Info     f1800 t2 Slowest frame f1234 took 87.2 ms, 5.2x the mean: Ecs.Update 71.3 ms, Console.Update 0.1 ms, LogMetrics.Update 0.02 ms, outside the main thread's hooks 15.8 ms; GC paused 9.8 ms (LogMetricsGem.cs:627 Report)
 ```
 
 ## Settings

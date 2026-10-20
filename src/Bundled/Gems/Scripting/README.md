@@ -51,6 +51,8 @@ and starts a new one of its class as it is now, made for the same entity with th
 components stay while what the script kept in its own fields starts over; an entity a domain placed from a prefab is
 spawned again anyway, as the prefab is read again too. A script in a gem takes a restart, as the gem does.
 
+The default `.cs` asset, `Scripts/Default.cs`, is a behaviour that does nothing.
+
 ## In a prefab
 
 ```json
@@ -136,5 +138,3 @@ a mirror or a minimap.
 
 A behaviour that must see every frame, such as one reading a key the frame it is pressed, sees it on a near entity or
 one without a `Transform`; `maxInterval` 1 turns pacing off.
-
-The default `.cs` asset, `Scripts/Default.cs`, is a behaviour that does nothing.

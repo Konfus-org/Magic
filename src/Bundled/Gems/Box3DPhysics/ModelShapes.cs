@@ -67,7 +67,7 @@ internal sealed class ModelShapes(Assets assets, Threads threads) : IDisposable
         ModelShape shape;
         if (loaded.Ok)
         {
-            shape = ModelShape.Of(loaded.Value);
+            shape = ModelShape.Of(loaded.Value) ?? _unitCube;
         }
         else
         {
@@ -106,10 +106,10 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
     /// <summary>
     /// The shape fitted to <paramref name="model"/>: its bounds to every mesh's vertices, and one Box3D mesh of all their
     /// triangles, in the model's own space, unscaled: a shape scales it as its entity is scaled, with the triangles as
-    /// the model winds them, which Box3D takes as their front, the side things rest on. A unit cube for a model with no
-    /// triangles.
+    /// the model winds them, which Box3D takes as their front, the side things rest on. Null for a model with no
+    /// triangles, which takes the unit cube's.
     /// </summary>
-    public static ModelShape Of(Model model)
+    public static ModelShape? Of(Model model)
     {
         int vertexCount = 0;
         int indexCount = 0;
@@ -121,7 +121,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
 
         if (vertexCount == 0 || indexCount < 3)
         {
-            return new ModelShape(new Vector3(-0.5f), new Vector3(0.5f));
+            return null;
         }
 
         B3.Vec3[] vertices = new B3.Vec3[vertexCount];
@@ -138,7 +138,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
                 Vector3 position = meshVertices[i].Position;
                 min = Vector3.Min(min, position);
                 max = Vector3.Max(max, position);
-                vertices[vertexAt + i] = new B3.Vec3 { X = position.X, Y = position.Y, Z = position.Z };
+                vertices[vertexAt + i] = Box3DPhysicsGem.ToVec(position);
             }
 
             ReadOnlySpan<uint> meshIndices = mesh.Indices.Span;

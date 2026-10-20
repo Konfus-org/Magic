@@ -11,10 +11,14 @@ namespace Magic.DxcShaderCompiler;
 /// </summary>
 internal static class DxilHash
 {
-    /// <summary>The hash field follows the four-character code.</summary>
+    /// <summary>
+    /// The hash field follows the four-character code.
+    /// </summary>
     private const int HashOffset = 4;
 
-    /// <summary>What is hashed: from the version field, after the hash, to the end.</summary>
+    /// <summary>
+    /// What is hashed: from the version field, after the hash, to the end.
+    /// </summary>
     private const int HashedFrom = 20;
 
     public static void Sign(Span<byte> container)
@@ -88,7 +92,9 @@ internal static class DxilHash
         }
     }
 
-    /// <summary>One MD5 block: the four rounds, in RFC 1321's order and constants.</summary>
+    /// <summary>
+    /// One MD5 block: the four rounds, in RFC 1321's order and constants.
+    /// </summary>
     private static void Round(Span<uint> state, ReadOnlySpan<uint> x)
     {
         uint a = state[0];

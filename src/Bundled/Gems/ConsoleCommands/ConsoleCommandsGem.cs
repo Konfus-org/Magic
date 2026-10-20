@@ -30,7 +30,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     /// <summary>
     /// Whether the thread reading the terminal has been started, which the first gem made does.
     /// </summary>
-    private static int _isReading;
+    private static bool _isReading;
 
     /// <summary>
     /// Frames left before the lines after a <c>wait</c> run: the process's, as the lines are, so a wait goes on across a
@@ -38,7 +38,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     /// </summary>
     private static int _waiting;
 
-    private readonly Dictionary<string, Command> _commands = new(StringComparer.OrdinalIgnoreCase);
+    private readonly SortedDictionary<string, Command> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly IFileSystem _files;
     private readonly Threads _threads;
     private readonly CancellationToken _stopping;
@@ -59,8 +59,9 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
 
         // A thread of its own rather than a task, and a background one: a terminal read cannot be cancelled on every OS,
         // so the thread waits in it until a line comes or the process ends, through every run of the process.
-        if (Interlocked.Exchange(ref _isReading, 1) == 0)
+        if (!_isReading)
         {
+            _isReading = true;
             new Thread(ReadLines) { IsBackground = true, Name = "Terminal input" }.Start();
         }
     }
@@ -172,18 +173,16 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     /// </summary>
     private void Help()
     {
-        string[] names = [.. _commands.Keys];
-        Array.Sort(names, StringComparer.OrdinalIgnoreCase);
         int width = 0;
-        foreach (string name in names)
+        foreach (string name in _commands.Keys)
         {
             width = Math.Max(width, name.Length);
         }
 
         StringBuilder text = new("Commands:");
-        foreach (string name in names)
+        foreach ((string name, Command command) in _commands)
         {
-            text.Append("\n  ").Append(name.PadRight(width)).Append("  ").Append(_commands[name].Description);
+            text.Append("\n  ").Append(name.PadRight(width)).Append("  ").Append(command.Description);
         }
 
         Debugging.Info(text.ToString());
@@ -245,7 +244,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         while (Console.ReadLine() is { } line)
         {
             // Input piped from some shells starts with a byte order mark.
-            _lines.Writer.TryWrite(line.TrimStart('﻿'));
+            _lines.Writer.TryWrite(line.TrimStart('\uFEFF'));
         }
     }
 

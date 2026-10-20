@@ -23,12 +23,8 @@ namespace Magic.ArchEcs;
 /// The entity world, in one Arch world, on the main thread. Entities are Arch's, bit for bit, and components live in
 /// Arch's chunks, so a query hands out spans straight over them and allocates nothing. Systems run in this gem's hook
 /// for their phase, in the order they were added; a parallel system's chunks are spread over Arch's own job threads.
-/// <para>
-/// Arch trusts its caller, so this gem checks what Arch would let go wrong silently, and throws instead: a call from a
-/// thread other than the main one, a structural change during a query's loop or a parallel system (Arch leaves their
-/// spans stale), any call on an entity that is not alive (Arch applies it to whatever entity has the slot now) and a
-/// <see cref="Get{T}"/> of a component the entity lacks (Arch hands back a reference to nothing).
-/// </para>
+/// Arch trusts its caller, so this gem checks what Arch would let go wrong silently, and throws instead; the README's
+/// Guards table says which.
 /// </summary>
 internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 {
@@ -50,12 +46,6 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// and reused.
     /// </summary>
     private readonly Dictionary<Type, object> _walks = [];
-
-    /// <summary>
-    /// The ECS's type of each component an untyped create has named, found through its typed registration, so a struct
-    /// is measured as the typed calls measure it. Main thread.
-    /// </summary>
-    private readonly Dictionary<Type, ComponentType> _componentTypes = [];
 
     /// <summary>
     /// How many query loops and parallel systems are running. A structural change now would move entities out from
@@ -190,7 +180,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public bool IsAlive(Entity entity)
     {
         ThrowIfCannotRead();
-        return _world.IsAlive(ToArch(entity));
+        return _world.IsAlive(Unsafe.BitCast<Entity, ArchEntity>(entity));
     }
 
     public void Set<T>(Entity entity, in T component)
@@ -264,7 +254,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
     public bool Has<T>(Entity entity)
         where T : unmanaged, IComponent
-        => IsAlive(entity) && _world.Has<T>(ToArch(entity));
+        => IsAlive(entity) && _world.Has<T>(Unsafe.BitCast<Entity, ArchEntity>(entity));
 
     public void Remove<T>(Entity entity)
         where T : unmanaged, IComponent
@@ -352,8 +342,6 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent
         => AddParallel(system, system.Phase, All<T1, T2, T3, T4>.Description, (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2, T3, T4>.Cut(chunk)));
-
-    private static ArchEntity ToArch(Entity entity) => Unsafe.BitCast<Entity, ArchEntity>(entity);
 
     /// <summary>
     /// A chunk's live entities as Magic's: Arch's arrays run to the chunk's capacity, past its last entity.
@@ -450,21 +438,19 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     }
 
     /// <summary>
-    /// The ECS's type of <paramref name="type"/>, a component known only as the program runs, read from its typed
-    /// registration the first time.
+    /// The ECS's type of <paramref name="type"/>, a component known only as the program runs, from Arch's registry, or
+    /// from its typed registration the first time, so a struct is measured as the typed calls measure it.
     /// </summary>
-    private ComponentType ComponentTypeOf(Type type)
+    private static ComponentType ComponentTypeOf(Type type)
     {
-        if (_componentTypes.TryGetValue(type, out ComponentType known))
+        if (ComponentRegistry.TryGet(type, out ComponentType registered))
         {
-            return known;
+            return registered;
         }
 
-        ComponentType registered = typeof(Component<>).MakeGenericType(type).GetField(nameof(Component<int>.ComponentType))?.GetValue(null) is ComponentType found
+        return typeof(Component<>).MakeGenericType(type).GetField(nameof(Component<int>.ComponentType))?.GetValue(null) is ComponentType found
             ? found
             : throw new InvalidOperationException($"The ECS has no type for {type.Name}.");
-        _componentTypes[type] = registered;
-        return registered;
     }
 
     /// <summary>
@@ -517,7 +503,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// </summary>
     private ArchEntity Alive(Entity entity)
     {
-        ArchEntity arch = ToArch(entity);
+        ArchEntity arch = Unsafe.BitCast<Entity, ArchEntity>(entity);
         if (!_world.IsAlive(arch))
         {
             throw new InvalidOperationException($"{entity} is not alive.");

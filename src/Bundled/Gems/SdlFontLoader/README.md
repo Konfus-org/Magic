@@ -1,8 +1,7 @@
 # SdlFontLoader
 
-Fonts to glyph atlases, through SDL_ttf, called through its generated API ([Gems](../README.md#native-libraries)), which the SDL bindings gem provides:
-provides
-`IAssetLoader<Font>`. What a font's `.meta` holds is in [Fonts](../../Resources/Fonts/README.md).
+Fonts to glyph atlases, through SDL_ttf, called through its generated API ([Gems](../README.md#native-libraries)):
+provides `IAssetLoader<Font>`. What a font's `.meta` holds is in [Fonts](../../Resources/Fonts/README.md).
 
 ## Behaviour
 

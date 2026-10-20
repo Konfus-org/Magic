@@ -111,7 +111,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
             Result<PrefabScript> script = await ScriptAsync(handle, entry, cancel).ConfigureAwait(false);
             if (!script.Ok)
             {
-                Debugging.Error($"{path}'s {name} goes without script {NameOf(handle)}: {script.Error}");
+                Debugging.Error($"{path}'s {name} goes without script {_assets.Path(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture)}: {script.Error}");
                 continue;
             }
 
@@ -204,7 +204,8 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         Tags tags = default;
         foreach (string tag in entity.Tags)
         {
-            if (string.IsNullOrEmpty(tag) || (!tags.Add(Tag.Of(tag)) && !tags.Has(Tag.Of(tag))))
+            Tag named = string.IsNullOrEmpty(tag) ? default : Tag.Of(tag);
+            if (!tags.Add(named) && !tags.Has(named))
             {
                 Debugging.Warn($"{path}'s {name} is tagged \"{tag}\", which is left out: a tag needs a name, and an entity has at most {Tags.Capacity}.");
             }
@@ -246,7 +247,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (property.SetMethod is { IsPublic: true } && property.GetIndexParameters().Length == 0
-                && string.Equals(Json.Options.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name, key, StringComparison.Ordinal))
+                && string.Equals(JsonNamingPolicy.CamelCase.ConvertName(property.Name), key, StringComparison.Ordinal))
             {
                 return property;
             }
@@ -263,10 +264,5 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         return entry.TryGetValue(Id, out JsonElement id) && id.ValueKind == JsonValueKind.Number && id.TryGetUInt64(out ulong value) && value != 0
             ? new Handle<Script>(value)
             : null;
-    }
-
-    private string NameOf(Handle<Script> handle)
-    {
-        return _assets.Path(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture);
     }
 }

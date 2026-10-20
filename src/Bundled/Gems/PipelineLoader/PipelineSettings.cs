@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using Magic.Contexts.Assets;
 using Magic.Interfaces;
@@ -22,5 +23,5 @@ internal sealed class PipelineSettings : ISettings
     /// Pass params that win over every pipeline's and the pass's own, by the pass's file name, then the param's:
     /// <c>{ "Tonemap": { "exposureBias": { "x": -0.5 } } }</c>.
     /// </summary>
-    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> Params { get; set; } = new Dictionary<string, IReadOnlyDictionary<string, MaterialParam>>(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> Params { get; set; } = ReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>>.Empty;
 }

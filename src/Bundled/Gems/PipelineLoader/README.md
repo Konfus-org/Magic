@@ -14,8 +14,6 @@ In the project's `Presets/Default.preset`, by another preset (`--preset Toaster`
 | `off` | `[]` | Passes and pipelines this machine leaves out wherever they are listed, by their file name: `["AutoExposure"]`. |
 | `params` | `{}` | Pass params that win over every pipeline's and the pass's own, by the pass's file name, then the param's: `{ "Tonemap": { "exposureBias": { "x": -0.5 } } }`. |
 
-Both are read as a pipeline loads, so a change while running shows only once the pipeline loads again.
-
 ```json
 {
     "off": [ "AutoExposure" ]

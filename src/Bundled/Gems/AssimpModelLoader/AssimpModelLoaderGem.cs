@@ -26,11 +26,6 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         | Assimp.PostProcessSteps.ImproveCacheLocality;
 
     /// <summary>
-    /// The last of a <see cref="Renderer"/>'s material slots: a mesh naming one past it is drawn with it.
-    /// </summary>
-    private const int LastSlot = 7;
-
-    /// <summary>
     /// Held while an import starts or ends, and while the loader stops.
     /// </summary>
     private readonly Lock _importing = new();
@@ -232,7 +227,8 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
             indices[(face * 3) + 2] = corners[mirrored ? 1 : 2];
         }
 
-        return new Mesh { Vertices = vertices, Indices = indices, MaterialSlot = Math.Min((int)source->MMaterialIndex, LastSlot) };
+        // A mesh naming a slot past the renderer's last is drawn with the last.
+        return new Mesh { Vertices = vertices, Indices = indices, MaterialSlot = Math.Min((int)source->MMaterialIndex, MaterialSlots.Capacity - 1) };
     }
 
     private static Vector3 Vector(Assimp.Vector3D vector) => Unsafe.BitCast<Assimp.Vector3D, Vector3>(vector);

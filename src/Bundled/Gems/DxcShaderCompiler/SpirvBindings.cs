@@ -49,15 +49,15 @@ internal static class SpirvBindings
     }
 
     /// <summary>
-    /// What <paramref name="spirv"/>, compiled for <paramref name="stage"/>, binds; why not, when it binds something
-    /// the binding model has no place for.
+    /// The shader <paramref name="spirv"/> is, compiled for <paramref name="stage"/>, with what it binds; why not, when
+    /// it binds something the binding model has no place for.
     /// </summary>
-    public static Result<SpirvReflection> Read(ReadOnlySpan<byte> spirv, GpuStage stage)
+    public static Result<GpuShader> Read(ReadOnlyMemory<byte> spirv, GpuStage stage)
     {
-        ReadOnlySpan<uint> words = MemoryMarshal.Cast<byte, uint>(spirv);
+        ReadOnlySpan<uint> words = MemoryMarshal.Cast<byte, uint>(spirv.Span);
         if (words.Length < HeaderWords || words[0] != MagicNumber)
         {
-            return Result.Failure<SpirvReflection>("it is not SPIR-V.");
+            return Result.Failure<GpuShader>("it is not SPIR-V.");
         }
 
         Dictionary<uint, string> names = [];
@@ -78,7 +78,7 @@ internal static class SpirvBindings
             uint opcode = words[at] & 0xFFFF;
             if (count == 0 || at + count > words.Length)
             {
-                return Result.Failure<SpirvReflection>("its words are cut short.");
+                return Result.Failure<GpuShader>("its words are cut short.");
             }
 
             ReadOnlySpan<uint> operands = words.Slice(at + 1, (int)count - 1);
@@ -134,17 +134,17 @@ internal static class SpirvBindings
             string name = names.GetValueOrDefault(id, string.Empty);
             if (name.Length == 0)
             {
-                return Result.Failure<SpirvReflection>("a resource has no name.");
+                return Result.Failure<GpuShader>("a resource has no name.");
             }
 
             if (arrays.Contains(pointee.Type))
             {
-                return Result.Failure<SpirvReflection>($"{name} is an array of resources, which the binding model does not bind.");
+                return Result.Failure<GpuShader>($"{name} is an array of resources, which the binding model does not bind.");
             }
 
             if (!types.TryGetValue(pointee.Type, out Resource resource))
             {
-                return Result.Failure<SpirvReflection>($"{name} is of a type the binding model does not bind.");
+                return Result.Failure<GpuShader>($"{name} is of a type the binding model does not bind.");
             }
 
             uint binding = bindings.GetValueOrDefault(id, 0u);
@@ -160,13 +160,13 @@ internal static class SpirvBindings
             bool isUniform = resource == Resource.Block && pointee.Class == ClassUniform && blocks.Contains(pointee.Type);
             if (resource == Resource.Block && !isBuffer && !isUniform)
             {
-                return Result.Failure<SpirvReflection>($"{name} is a struct that is neither a buffer nor a constant block.");
+                return Result.Failure<GpuShader>($"{name} is a struct that is neither a buffer nor a constant block.");
             }
 
             Result<GpuBindingKind> kind = KindOf(stage, set, isBuffer ? Resource.Buffer : resource, name);
             if (!kind.Ok)
             {
-                return Result.Failure<SpirvReflection>(kind.Error);
+                return Result.Failure<GpuShader>(kind.Error);
             }
 
             found.Add(new GpuShaderBinding(name, kind.Value, binding));
@@ -174,13 +174,22 @@ internal static class SpirvBindings
 
         foreach (uint binding in samplers)
         {
-            if (!found.Exists(b => b.Kind == GpuBindingKind.Sampled && b.Register == binding))
+            if (!found.Exists(texture => texture.Kind == GpuBindingKind.Sampled && texture.Register == binding))
             {
-                return Result.Failure<SpirvReflection>($"a sampler at {binding} has no sampled texture at {binding}, whose it would be.");
+                return Result.Failure<GpuShader>($"a sampler at {binding} has no sampled texture at {binding}, whose it would be.");
             }
         }
 
-        return Result.Success(new SpirvReflection(found, threads.X, threads.Y, threads.Z));
+        return Result.Success(new GpuShader
+        {
+            Code = spirv,
+            EntryPoint = "main",
+            Stage = stage,
+            Bindings = found,
+            ThreadCountX = threads.X,
+            ThreadCountY = threads.Y,
+            ThreadCountZ = threads.Z,
+        });
     }
 
     private static void Decorate(ReadOnlySpan<uint> operands, Dictionary<uint, uint> bindings, Dictionary<uint, uint> sets, HashSet<uint> blocks, HashSet<uint> bufferBlocks)
@@ -260,8 +269,3 @@ internal static class SpirvBindings
         return Encoding.UTF8.GetString(end < 0 ? bytes : bytes[..end]);
     }
 }
-
-/// <summary>
-/// What a SPIR-V module binds, and for compute its group's threads.
-/// </summary>
-internal sealed record SpirvReflection(IReadOnlyList<GpuShaderBinding> Bindings, uint ThreadsX, uint ThreadsY, uint ThreadsZ);

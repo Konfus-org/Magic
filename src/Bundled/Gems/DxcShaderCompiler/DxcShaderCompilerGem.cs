@@ -32,12 +32,6 @@ namespace Magic.DxcShaderCompiler;
 internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches, DxcShaderCompilerSettings settings) : IGem, IShaderCompiler, ICache<GpuShader>
 {
     /// <summary>
-    /// Raised whenever DXC's arguments change, or how a shader is written to the cache, so what was compiled before is
-    /// compiled again.
-    /// </summary>
-    private const int CacheVersion = 4;
-
-    /// <summary>
     /// The text encoding DXC is told the source is in.
     /// </summary>
     private const uint Utf8CodePage = 65001;
@@ -47,18 +41,24 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     private static readonly Guid _resultInterface = new("58346cda-dde7-4497-9461-6f87af5e0659");
 
     private readonly Assets _assets = assets;
+    private readonly Caches _caches = caches;
     private readonly DxcShaderCompilerSettings _settings = settings;
 
     /// <summary>
     /// Whether the shaders were last compiled with debug info, so a change while running compiles them again.
     /// </summary>
     private bool _debugInfo = settings.DebugInfo;
-    private readonly Caches _caches = caches;
 
     /// <summary>
     /// The compiles on their way, by cache key, for a shader asked for again while it compiles to wait for.
     /// </summary>
     private readonly ConcurrentDictionary<ulong, Task<Result<GpuShader>>> _compiling = new();
+
+    /// <summary>
+    /// Raised whenever DXC's arguments change, or how a shader is written to the cache, so what was compiled before is
+    /// compiled again.
+    /// </summary>
+    public int Version => 4;
 
     /// <summary>
     /// Compiles every shader again when debug info was turned on or off while running.
@@ -73,8 +73,6 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         _debugInfo = _settings.DebugInfo;
         _assets.RemakeAsync<Shader>().FireAndForget();
     }
-
-    public int Version => CacheVersion;
 
     /// <summary>
     /// The code's length, then what <see cref="GpuShader"/> declares in its order, its bindings each as name, kind and
@@ -161,7 +159,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         }
 
         string source = $"#define {define} 1\n#line 1 \"{name}\"\n{spliced.Value}";
-        ulong key = Hash($"{name}\n{stage}\n{format}\n{source}");
+        ulong key = XxHash3.HashToUInt64(Encoding.UTF8.GetBytes($"{name}\n{stage}\n{format}\n{source}"));
         TaskCompletionSource<Result<GpuShader>> own = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<Result<GpuShader>> compiling = _compiling.GetOrAdd(key, own.Task);
         if (compiling != own.Task)
@@ -257,7 +255,8 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
     /// <summary>
     /// <paramref name="source"/>, its includes spliced in and its stage defined, compiled by DXC for
-    /// <paramref name="profile"/> into <paramref name="format"/>, with the counts of what it binds.
+    /// <paramref name="profile"/> into <paramref name="format"/>, with what it binds, by name, read from its SPIR-V
+    /// (<see cref="SpirvBindings"/>).
     /// </summary>
     private Result<GpuShader> Compile(string source, string name, string profile, GpuStage stage, GpuShaderFormat format)
     {
@@ -267,10 +266,10 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             return Result.Failure<GpuShader>(spirv.Error);
         }
 
-        Result<GpuShader> reflected = Reflect(spirv.Value, name, stage);
+        Result<GpuShader> reflected = SpirvBindings.Read(spirv.Value, stage);
         if (!reflected.Ok)
         {
-            return reflected;
+            return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {reflected.Error}");
         }
 
         Result<byte[]> code = format switch
@@ -283,29 +282,6 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         return code.Ok
             ? Result.Success(reflected.Value with { Code = code.Value, EntryPoint = format == GpuShaderFormat.Msl ? "main0" : "main" })
             : Result.Failure<GpuShader>(code.Error);
-    }
-
-    /// <summary>
-    /// What a SPIR-V shader binds, by name, in the engine's binding model (<see cref="SpirvBindings"/>).
-    /// </summary>
-    private static Result<GpuShader> Reflect(byte[] spirv, string name, GpuStage stage)
-    {
-        Result<SpirvReflection> read = SpirvBindings.Read(spirv, stage);
-        if (!read.Ok)
-        {
-            return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {read.Error}");
-        }
-
-        return Result.Success(new GpuShader
-        {
-            Code = spirv,
-            EntryPoint = "main",
-            Stage = stage,
-            Bindings = read.Value.Bindings,
-            ThreadCountX = read.Value.ThreadsX,
-            ThreadCountY = read.Value.ThreadsY,
-            ThreadCountZ = read.Value.ThreadsZ,
-        });
     }
 
     [GeneratedRegex("""^\s*#\s*include\s+"(?<path>[^"]+)"\s*(//.*)?$""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
@@ -449,14 +425,6 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
                 NativeMemory.Free((void*)argument);
             }
         }
-    }
-
-    /// <summary>
-    /// A hash of <paramref name="text"/>: what names a compiled shader in the cache, and what it was compiled from.
-    /// </summary>
-    private static ulong Hash(string text)
-    {
-        return XxHash3.HashToUInt64(Encoding.UTF8.GetBytes(text));
     }
 
     /// <summary>
