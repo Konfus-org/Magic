@@ -31,7 +31,6 @@ public sealed class Threads : IDisposable
     private readonly Lifetime _lifetime;
     private readonly WorkQueue _main = new("main");
     private readonly WorkQueue _render = new("render");
-    private volatile bool _framesEnded;
 
     /// <summary>
     /// Makes the calling thread, the process's first, the render thread.
@@ -183,21 +182,14 @@ public sealed class Threads : IDisposable
 
     /// <summary>
     /// Runs <paramref name="frames"/> on a new thread, the main thread, and the render thread's work on the calling
-    /// thread, the render thread, until <paramref name="frames"/> returns. Then <paramref name="end"/> runs here, once
-    /// the render thread has run what it was left and takes no more, while the main thread still runs what it is handed;
-    /// then the main thread runs what is left and ends.
+    /// thread, the render thread, until <paramref name="frames"/> returns, which hands the render thread its end. Then
+    /// <paramref name="end"/> runs here, once the render thread has run what it was left and takes no more, while the
+    /// main thread still runs what it is handed; then the main thread runs what is left and ends.
     /// </summary>
     internal void Run(Action frames, Action end)
     {
         Thread main = new(() => RunMain(frames)) { Name = "Main" };
         main.Start();
-        while (!_framesEnded)
-        {
-            _render.Wait();
-            _render.RunPending();
-        }
-
-        _render.End();
         _render.RunUntilEnded();
         end();
         _main.End();
@@ -214,8 +206,8 @@ public sealed class Threads : IDisposable
         }
         finally
         {
-            _framesEnded = true;
-            _render.Wake();
+            // Handed last, so everything handed to the render thread before the frames ended still runs.
+            _render.Enqueue(_render.End, isTimed: false);
         }
 
         // Until the gems are disposed: what they hand the main thread as they end runs here.
@@ -277,7 +269,7 @@ public sealed class Threads : IDisposable
         }
 
         /// <summary>
-        /// Blocks until work arrives or <see cref="Wake"/> is called.
+        /// Blocks until work arrives or the queue ends (<see cref="End"/>).
         /// </summary>
         public void Wait()
         {
@@ -285,11 +277,6 @@ public sealed class Threads : IDisposable
 
             // Before running what came: work added from here on sets it again.
             _arrived.Reset();
-        }
-
-        public void Wake()
-        {
-            _arrived.Set();
         }
 
         public void RunPending()

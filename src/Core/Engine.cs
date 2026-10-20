@@ -81,6 +81,7 @@ public static class Engine
         Assemblies assemblies = new();
         ServiceCollection services = CreateCoreServices(files, lifetime, threads, events, project, args, assemblies);
         GemLoader loader = new(services, files, project, assemblies);
+        services.AddSingleton(provider => new Assets(files, project, loader.Resources, lifetime, events, provider));
 
         // Not disposed: the gems are ended below one at a time, so one that throws cannot stop the rest ending.
         ServiceProvider container = services.BuildServiceProvider();
@@ -140,9 +141,10 @@ public static class Engine
     }
 
     /// <summary>
-    /// What a gem's constructor can ask for of Core, before what the gems provide: the assets, the settings and the
-    /// cache are made once every gem's assembly, and so where its assets are, has been loaded. The world is made once
-    /// a gem asks for it, or once every gem is, over the ECS and the scripts the gems provide, when they do. The code
+    /// What a gem's constructor can ask for of Core, before what the gems provide, but the assets, added once the gems
+    /// have loaded over where each one's are: the settings and the cache are made once every gem's assembly has been
+    /// loaded. The world is made once a gem asks for it, or once every gem is, over the ECS and the scripts the gems
+    /// provide, when they do. The code
     /// loaded, <paramref name="assemblies"/>, is a service too: the gem that reads <c>.cs</c> files finds a script's
     /// class in it.
     /// </summary>
@@ -156,7 +158,6 @@ public static class Engine
         services.AddSingleton(events);
         services.AddSingleton(project);
         services.AddSingleton(args);
-        services.AddSingleton(provider => new Assets(files, project, lifetime, events, provider));
         services.AddSingleton(provider => new Settings(provider.GetRequiredService<Assets>(), files, events, project, args, lifetime));
         services.AddSingleton(provider => new Caches(files, provider));
         services.AddSingleton(provider => new World(

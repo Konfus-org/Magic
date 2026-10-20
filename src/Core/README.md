@@ -203,16 +203,15 @@ the `.cs` assets among the bundled resources, are built the same way by the proj
 
 Both are loaded from their bytes, so a build can write them while the engine runs, and Core watches their folders:
 once a build there has settled, it loads the code again beside the last build, whose types stay for whatever still
-holds them, and the new assembly replaces the old. Every script and every prefab is then made again, as a script is
-the class named like its file and a prefab names its components by their types, and what is made from those after
-them,
-so the world spawns again what a domain placed and the scripts run as they are now
+holds them, and the new assembly replaces the old. Every script is then made again, as a script is
+the class named like its file, and every prefab after them, as a prefab names its components by their types and its
+scripts, so the world spawns again what a domain placed and the scripts run as they are now
 ([hot reload](../Bundled/Resources/README.md#hot-reload)). A gem is never loaded again: a gem takes a restart.
 
-`Project.Resources`, the folders of the engine's own assets and each gem's, is set as the gems load. A part's own
-assets are its `Resources/` folder (the engine's, Core's and its bundled gems', are `src/Bundled/Resources/`), which a
-release copies beside its assembly. Any other build copies nothing: it records the folder in the assembly
-(`Magic.Resources`), so assets are read where they are written, and building stays fast.
+The folders of the engine's own assets and each gem's are known once the gems have loaded, and the assets are made
+over them. A part's own assets are its `Resources/` folder (the engine's, Core's and its bundled gems', are
+`src/Bundled/Resources/`), which a release copies beside its assembly. Any other build copies nothing: it records the
+folder in the assembly (`Magic.Resources`), so assets are read where they are written, and building stays fast.
 
 ## Assets
 

@@ -42,13 +42,6 @@ public sealed class Project
     public string Root { get; internal set; } = string.Empty;
 
     /// <summary>
-    /// The folders the engine's own assets and each loaded gem's are in, the engine's first and the gems' in the order
-    /// listed: in a release, the copies the build made beside each assembly; in any other build, the source folders the
-    /// build recorded, so assets are read where they are written. Set as the gems load, so it is never part of the file.
-    /// </summary>
-    public IReadOnlyList<string> Resources { get; internal set; } = [];
-
-    /// <summary>
     /// Reads the project at <paramref name="path"/>: a .magic file, or the folder holding exactly one.
     /// </summary>
     internal static Result<Project> Open(IFileSystem files, string path)

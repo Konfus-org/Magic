@@ -19,7 +19,7 @@ namespace Magic.Services;
 
 /// <summary>
 /// The assets: what the files under the asset roots describe, the project's <c>Assets/</c> folder, then the engine's
-/// and each gem's <c>Resources/</c> (<see cref="Project.Resources"/>), the first winning a path two of them have. A file
+/// and each gem's <c>Resources/</c>, as the gems loaded say, the first winning a path two of them have. A file
 /// is an asset when a <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a <see cref="Handle{T}"/>
 /// holds, so a file can move and whatever names it still finds it, and the import settings its loader reads. An asset
 /// path is relative to its root, with <c>/</c> between folders on every OS; a type's files are those with its
@@ -60,7 +60,7 @@ public sealed class Assets
     private readonly string[] _roots;
 
     /// <summary>
-    /// The engine's own <c>Resources/</c>, the first of <see cref="Project.Resources"/>: where the default and failure assets
+    /// The engine's own <c>Resources/</c>, the first of the gems': where the default and failure assets
     /// are, and only there.
     /// </summary>
     private readonly string _engine;
@@ -91,24 +91,18 @@ public sealed class Assets
     private readonly Dictionary<ulong, List<AssetRef>> _madeFrom = [];
 
     /// <summary>
-    /// Where the roots' changes are reported, by the path of each file, for <see cref="WatchAsync"/> to take in once
-    /// they settle.
-    /// </summary>
-    private readonly ChannelWriter<string> _changes;
-
-    /// <summary>
     /// What is under the roots, made again whenever they change. Never changed once made, so it is read without a lock.
     /// </summary>
     private Index _index;
 
-    internal Assets(IFileSystem files, Project project, Lifetime lifetime, Events events, IServiceProvider services)
+    internal Assets(IFileSystem files, Project project, IReadOnlyList<string> resources, Lifetime lifetime, Events events, IServiceProvider services)
     {
         _files = files;
         _events = events;
         _services = services;
         _stopping = lifetime.Stopping;
 
-        string[] folders = [files.Combine(project.Root, "Assets"), .. project.Resources];
+        string[] folders = [files.Combine(project.Root, "Assets"), .. resources];
         List<string> roots = [];
         foreach (string folder in folders)
         {
@@ -119,11 +113,10 @@ public sealed class Assets
         }
 
         _roots = [.. roots];
-        _engine = project.Resources.Count > 0 ? project.Resources[0] : string.Empty;
+        _engine = resources.Count > 0 ? resources[0] : string.Empty;
         _index = Build(files, _roots, _engine);
 
         Channel<string> changes = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
-        _changes = changes.Writer;
         SubscriptionList watches = new();
         foreach (string root in _roots)
         {
@@ -252,7 +245,7 @@ public sealed class Assets
 
             if (!_slots.TryGetValue(asset.Id, out Slot? found))
             {
-                found = new Slot<T>(this, asset.Id);
+                found = new Slot<T>();
                 _slots.Add(asset.Id, found);
             }
 
@@ -296,7 +289,7 @@ public sealed class Assets
         {
             if (!_slots.TryGetValue(id, out Slot? found) || found is not Slot<T> slot)
             {
-                slot = new Slot<T>(this, id);
+                slot = new Slot<T>();
                 _slots[id] = slot;
             }
 
@@ -435,7 +428,7 @@ public sealed class Assets
             {
                 if (_slots.TryGetValue(id, out Slot? slot))
                 {
-                    remaking.Add(slot.RemakeAsync());
+                    remaking.Add(slot.RemakeAsync(this, id));
                 }
             }
         }
@@ -448,26 +441,10 @@ public sealed class Assets
     }
 
     /// <summary>
-    /// Takes every <typeparamref name="T"/>'s file in as written, once the roots' changes settle: each asked for so far
-    /// is made again, then what was made from it, and so on out, each told as <see cref="AssetReloaded{T}"/>. For code
-    /// loaded again, which a script is the class of and a prefab names components from.
-    /// </summary>
-    internal void Touch<T>()
-        where T : IAsset<T>
-    {
-        foreach (Indexed file in _index.ById.Values)
-        {
-            if (IsOf<T>(file.Path))
-            {
-                _changes.TryWrite(file.Path);
-            }
-        }
-    }
-
-    /// <summary>
     /// Makes every <typeparamref name="T"/> asked for so far again, as when their files change: for a gem that makes
-    /// them, a post-processor, whose settings changed how. Each that had loaded is told as
-    /// <see cref="AssetReloaded{T}"/> once made; done once every one is.
+    /// them, a post-processor, whose settings changed how, and for code loaded again, which a script is the class of
+    /// and a prefab names components from. Each that had loaded is told as <see cref="AssetReloaded{T}"/> once made;
+    /// done once every one is.
     /// </summary>
     public Task RemakeAsync<T>()
         where T : IAsset<T>
@@ -475,11 +452,11 @@ public sealed class Assets
         List<Task> remaking = [];
         lock (_lock)
         {
-            foreach (Slot slot in _slots.Values)
+            foreach ((ulong id, Slot slot) in _slots)
             {
                 if (slot is Slot<T>)
                 {
-                    remaking.Add(slot.RemakeAsync());
+                    remaking.Add(slot.RemakeAsync(this, id));
                 }
             }
         }
@@ -966,18 +943,16 @@ public sealed class Assets
         public abstract Type Type { get; }
 
         /// <summary>
-        /// Makes it again (<see cref="Assets.RemakeAsync{T}(Slot{T}, ulong)"/>). Under <see cref="_lock"/>.
+        /// Makes it again, as asset <paramref name="id"/> of <paramref name="assets"/>
+        /// (<see cref="Assets.RemakeAsync{T}(Slot{T}, ulong)"/>). Under <see cref="_lock"/>.
         /// </summary>
-        public abstract Task RemakeAsync();
+        public abstract Task RemakeAsync(Assets assets, ulong id);
     }
 
     /// <inheritdoc cref="Slot"/>
-    private sealed class Slot<T>(Assets assets, ulong id) : Slot
+    private sealed class Slot<T> : Slot
         where T : IAsset<T>
     {
-        private readonly Assets _assets = assets;
-        private readonly ulong _id = id;
-
         public override Type Type => typeof(T);
 
         /// <summary>
@@ -998,9 +973,9 @@ public sealed class Assets
         /// </summary>
         public int Started { get; set; }
 
-        public override Task RemakeAsync()
+        public override Task RemakeAsync(Assets assets, ulong id)
         {
-            return _assets.RemakeAsync(this, _id);
+            return assets.RemakeAsync(this, id);
         }
     }
 }

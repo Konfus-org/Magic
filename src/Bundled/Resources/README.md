@@ -16,7 +16,7 @@ must agree with the assets it names.
 | Each gem the project lists | The gem's own `Resources/`, when it has one (a bundled gem's are here); in a release, `Gems/<Gem>/Resources/` beside Magic, where the build copies it |
 
 Only a release copies the engine's and the gems' folders, which ships them with Magic; any other build reads them where
-they are, so building stays fast (`Project.Resources`, in [Core's README](../../Core/README.md#the-project-file)). A
+they are, so building stays fast ([Core's README](../../Core/README.md#the-project-file)). A
 file is an asset when a `.meta` sidecar is beside it; the READMEs are not copied. A path two roots have is the first's,
 so a project's file wins over the engine's.
 
@@ -110,7 +110,7 @@ old. A change to a `.meta` counts as a change to its asset. What it tells, on `E
 | A loaded asset's file or sidecar was written | `AssetReloaded<T>`, with the asset as it is now, even when nothing holds it any more, so whoever kept only what it made from it hears of it. One that no longer loads is an error, and what loaded before stays. |
 | An asset something was made from was made again, or is gone | That is made again after it, then what was made from that, and so on out, each an `AssetReloaded<T>`: editing a pass makes again every pipeline it is in. |
 | Files came, went, moved or were written | `AssetsChanged`, once what changed has loaded again. A moved file keeps its id. |
-| The project's code, or Magic's scripts, were built | Core loads the code again ([Core's README](../../Core/README.md#the-project-file)), then every script and every prefab is made again as if its file were written, and what is made from them after them, each an `AssetReloaded<T>`. |
+| The project's code, or Magic's scripts, were built | Core loads the code again ([Core's README](../../Core/README.md#the-project-file)), then every script is made again as if its file were written, and every prefab after them, each an `AssetReloaded<T>`. |
 
 Every sidecar is read again each time, so a broken one, or a duplicate id, is logged again after each change until it
 is fixed.

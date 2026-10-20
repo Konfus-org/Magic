@@ -20,36 +20,27 @@ public sealed class Assemblies
     private readonly Dictionary<string, Assembly> _loaded = new(StringComparer.OrdinalIgnoreCase) { ["Magic"] = typeof(Assemblies).Assembly };
 
     /// <summary>
-    /// Replaced whole as assemblies are added, so a reader on another thread sees one set.
+    /// The assemblies loaded and what each name resolved to among them, replaced whole as assemblies are added, so a
+    /// reader on another thread sees one set, and a search that ends after one is added lands in the set it searched,
+    /// which nothing reads any more.
     /// </summary>
-    private volatile Assembly[] _all;
-
-    /// <summary>
-    /// What each name asked for resolved to, so a world of entities naming the same few types searches once each.
-    /// </summary>
-    private readonly ConcurrentDictionary<string, Result<Type>> _named = new(StringComparer.Ordinal);
+    private volatile Code _code;
 
     public Assemblies()
     {
-        _all = [.. _loaded.Values];
+        _code = new Code([.. _loaded.Values]);
     }
 
     /// <summary>
     /// Takes in <paramref name="assembly"/>, loaded from <paramref name="path"/>, in place of the one last loaded from
-    /// there; nothing when it is that one, as a run started again hands it over once more.
+    /// there.
     /// </summary>
     internal void Add(string path, Assembly assembly)
     {
         lock (_adding)
         {
-            if (_loaded.TryGetValue(path, out Assembly? had) && had == assembly)
-            {
-                return;
-            }
-
             _loaded[path] = assembly;
-            _all = [.. _loaded.Values];
-            _named.Clear();
+            _code = new Code([.. _loaded.Values]);
         }
     }
 
@@ -59,7 +50,8 @@ public sealed class Assemblies
     /// </summary>
     public Result<Type> Get(string name)
     {
-        return _named.GetOrAdd(name, Search);
+        Code code = _code;
+        return code.Named.GetOrAdd(name, Search, code.All);
     }
 
     /// <summary>
@@ -102,10 +94,10 @@ public sealed class Assemblies
         }
     }
 
-    private Result<Type> Search(string name)
+    private static Result<Type> Search(string name, IReadOnlyList<Assembly> all)
     {
         List<Type> found = [];
-        foreach (Assembly assembly in _all)
+        foreach (Assembly assembly in all)
         {
             foreach (Type type in From(assembly))
             {
@@ -122,5 +114,16 @@ public sealed class Assemblies
             1 => Result.Success(found[0]),
             _ => Result.Failure<Type>($"{found.Count} types are named {name} ({string.Join(", ", found.ConvertAll(type => type.FullName))}); a type a file names has a name of its own."),
         };
+    }
+
+    /// <summary>
+    /// The assemblies loaded as of one add, and what each name asked for resolved to among them, so a world of entities
+    /// naming the same few types searches once each.
+    /// </summary>
+    private sealed class Code(Assembly[] all)
+    {
+        public IReadOnlyList<Assembly> All { get; } = all;
+
+        public ConcurrentDictionary<string, Result<Type>> Named { get; } = new(StringComparer.Ordinal);
     }
 }

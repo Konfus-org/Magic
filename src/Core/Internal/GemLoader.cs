@@ -16,7 +16,7 @@ namespace Magic.Internal;
 /// that provides what Core or a gem listed before it provides is refused, as is a name listed twice, and one that is
 /// not the version the project asks for (<see cref="Project.Gems"/>). The types a gem's
 /// assembly is taken in as it loads (<see cref="Assemblies"/>), so files can name its components and scripts before
-/// any gem is made, and where each assembly's assets are into <see cref="Project.Resources"/>. Magic's own scripts and the
+/// any gem is made, and where each assembly's assets are (<see cref="Resources"/>). Magic's own scripts and the
 /// project's own code, its scripts and components, are loaded first the same way, though neither is a gem, and loaded
 /// again when they are built while the engine runs (<see cref="WatchCode"/>). The provider makes each gem after
 /// whatever its constructor asks for, so <see cref="Make"/> returns the gems in dependency order. A constructor
@@ -51,7 +51,7 @@ internal sealed class GemLoader
 
     /// <summary>
     /// Loads the project's code and the gems it lists, and registers the gems with <paramref name="services"/>, which
-    /// already holds what Core provides.
+    /// already holds what Core provides but the assets, made over where the gems' are once they have loaded.
     /// </summary>
     public GemLoader(ServiceCollection services, IFileSystem files, Project project, Assemblies assemblies)
     {
@@ -104,8 +104,15 @@ internal sealed class GemLoader
             _assemblies.Add(gem.Path, gem.Assembly);
         }
 
-        project.Resources = resources;
+        Resources = resources;
     }
+
+    /// <summary>
+    /// The folders the engine's own assets and each loaded gem's are in, the engine's first and the gems' in the order
+    /// listed: in a release, the copies the build made beside each assembly; in any other build, the source folders the
+    /// build recorded, so assets are read where they are written.
+    /// </summary>
+    public IReadOnlyList<string> Resources { get; }
 
     /// <summary>
     /// Watches where the code that is no gem was loaded from, until the subscription is disposed, and loads what is
@@ -161,7 +168,7 @@ internal sealed class GemLoader
 
     /// <summary>
     /// Something in <paramref name="code"/>'s folder changed: once it has settled, the last change to come loads the
-    /// code again and has the scripts and prefabs made again.
+    /// code again and has the scripts made again, then the prefabs, so each names the scripts' classes as they are now.
     /// </summary>
     private async Task ReloadCodeAsync(CodeFile code, Assets assets)
     {
@@ -173,8 +180,8 @@ internal sealed class GemLoader
         }
 
         _assemblies.Add(code.Path, assembly);
-        assets.Touch<Script>();
-        assets.Touch<Prefab>();
+        await assets.RemakeAsync<Script>().ConfigureAwait(false);
+        await assets.RemakeAsync<Prefab>().ConfigureAwait(false);
     }
 
     /// <summary>
