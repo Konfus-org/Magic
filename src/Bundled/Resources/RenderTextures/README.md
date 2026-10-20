@@ -1,16 +1,8 @@
 # Render textures
 
-A `.rtex` file is a texture a camera draws into, which materials sample like any other (`RenderTexture`):
+A `.rtex` file is a texture a camera draws into, which materials sample like any other (`RenderTexture`): it says its
+size in texels, across and down, which is what the camera draws at. The keys and their defaults are the
+`RenderTexture` type's properties, documented on it, and the files beside this README are the examples.
 
-```json
-{ "width": 1024, "height": 512 }
-```
-
-| Field | Default | What it is |
-| --- | --- | --- |
-| `width` | 512 | Texels across: what the camera draws at. |
-| `height` | 512 | Texels down. |
-
-It has no image: it is black until a camera has drawn into it. A camera names one as what it draws into
-(`"target": { "texture": { "id": 740 } }`), and a material samples one as a param
-(`{ "renderTexture": { "id": 740 } }`).
+It has no image: it is black until a camera has drawn into it. A camera names one as the target it draws into, and a
+material samples one as a render-texture param ([Materials](../Materials/README.md)).

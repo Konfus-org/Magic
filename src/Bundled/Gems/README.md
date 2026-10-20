@@ -45,7 +45,7 @@ makes a header the library's build would generate from a template, as `header=te
 off.
 
 The generated API is C with Magic's names, in the gem's own namespace: nothing is wrapped, so the gem encodes its
-strings (`CString`), frees what it allocates and reads errors as the library reports them, and the generated doc
+strings, frees what it allocates and reads errors as the library reports them, and the generated doc
 comments are the header's. A gem that hands the library callbacks of its own (`[UnmanagedCallersOnly]` methods) finds
 them blittable, as runtime marshalling is off for every project that declares a library. How C names become C# ones,
 how the headers are read, and what the generator refuses and why, is in the
@@ -56,10 +56,11 @@ and each refusal gets a rule in the generator, never a hand edit. The machine ne
 ### Sharing a library
 
 A native library loads once in the process, from the folder of the first gem that binds it, and every gem that binds
-the same name after that gets the one copy (`GemLoadContext`): two copies would each keep state of their own, so a
-window one copy opened would mean nothing to the other. So one project declares each library, and the gems that bind
-it reference that project, which copies the API and the binary beside each of them. Where several gems share a
-library that none of them owns, a bindings project holds it: a gem named `<X>Bindings` is one other gems build on
-rather than one a project lists, with no `IGem` of its own, holding only a library's generated API and binaries. The
-gems built on the platform's library share it this way, and the first of them to bind it loads the copy they all use:
+the same name after that gets the one copy, through the gem's load context: two copies would each keep state of
+their own, so a window one copy opened would mean nothing to the other. So one project declares each library, and
+the gems that bind it reference that project, which copies the API and the binary beside each of them. Where several
+gems share a library that none of them owns, a bindings project holds it: a gem named `<X>Bindings` is one other gems
+build on rather than one a project lists, with no `IGem` of its own, holding only a library's generated API and
+binaries. The gems built on the platform's library share it this way, and the first of them to bind it loads the copy
+they all use:
 the platform gem, as a GPU provider is made after it.

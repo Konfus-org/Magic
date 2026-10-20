@@ -1,36 +1,25 @@
 # Prefabs
 
 A prefab is a bundle of entities spawned together wherever it is put: a `.prefab` file. Game code puts one in the world
-with `World.Spawn`; a domain spawns every prefab in its folder, a cell at its corner and any other at the domain's
-origin ([Domains](../Domains/README.md)); the project's player is one, named by `"player"` in the `.magic` file and put
-at a domain's spawn. Its positions are relative to where it is put, and its rotations turn with it.
+through the world service; a domain spawns every prefab in its folder, a cell at its corner and any other at the
+domain's origin ([Domains](../Domains/README.md)); the project's player is one, named as the player in the `.magic`
+file and put at a domain's spawn. Its positions are relative to where it is put, and its rotations turn with it.
 
-```json
-{
-    "entities": [
-        {
-            "name": "Camera",
-            "tags": [ "player" ],
-            "components": {
-                "Transform": { "position": { "x": 0, "y": 1.7, "z": 0 } },
-                "Camera": {}
-            },
-            "scripts": [
-                { "id": 3315, "speed": 30 }
-            ]
-        }
-    ]
-}
-```
+A file is a list of entities, and each entity says:
 
-| Entity field | What it is |
-| --- | --- |
-| `name` | What messages call it. |
-| `tags` | Labels by name, up to eight, given to it as a `Tags` component: `spawn` marks where a domain puts the player, `player` the player's camera, and any other is the game's. |
-| `components` | By type name, any component Core, the project's code or a loaded gem declares, each as its own JSON. |
-| `scripts` | Scripts (`.cs` assets) by id, up to eight, named in the entity's `Scripts` component and each one's copy run by every entity spawned from it: `[ { "id": N, "height": 1 } ]`. Every key beside `id` sets the script's public property of that name. |
-| `children` | The entities under it, their transforms relative to its own. |
-| `prefab` | Another prefab, whose entities go under this one, before its own `children`: a forest's cell places trees, `{ "prefab": { "id": 3344 }, "components": { "Transform": { "position": { "x": 12, "y": 0, "z": 40 }, "scale": { "x": 1.2, "y": 1.2, "z": 1.2 } } } }`. |
+- **Its name**, what messages call it.
+- **Its tags**, labels by name, up to eight, given to it as a `Tags` component: `spawn` marks where a domain puts the
+  player, `player` the player's camera, and any other is the game's.
+- **Its components**, by type name, any component Core, the project's code or a loaded gem declares, each as its own
+  JSON.
+- **Its scripts**, `.cs` assets by id, up to eight, named in the entity's `Scripts` component, each one's copy run by
+  every entity spawned from it. Every other key of a script entry sets the script's public property of that name.
+- **Its children**, the entities under it, their transforms relative to its own.
+- **A prefab it places**, whose entities go under this one, before its own children: a forest's cell places trees, each
+  at a transform of its own.
+
+The keys are the prefab loader's file type's properties, documented on it, and the files beside this README are the
+examples.
 
 Every entity is spawned as one, with its transform put under its parent's: scaled, turned, then moved by it. A prefab
 can place prefabs of its own, but never itself, which fails rather than waits for ever; a prefab it places is what it is
@@ -41,10 +30,10 @@ its scripts, which start once the whole prefab is there
 
 ## What must agree
 
-- Component names match a struct in Core, the project's code or a loaded gem, and their JSON its fields (camelCase;
-  handles as `{ "id" }`).
-- `Renderer` model and material ids exist.
-- Script ids exist, each a `.cs` asset declaring a class named like the file, and each key beside `id` matches a
-  public `{ get; set; }` property of that class, which is set before its `Start` runs. The class's constructor takes its
+- Component names match a struct in Core, the project's code or a loaded gem, and their JSON its fields, in Core's
+  dialect ([Assets](../README.md#reading-an-asset)).
+- A `Renderer`'s model and material ids exist.
+- Script ids exist, each a `.cs` asset declaring a class named like the file, and each other key of the entry matches
+  a public settable property of that class, which is set before the script starts. The class's constructor takes its
   entity first, then the services it uses ([Scripts](../../../Core/README.md#scripts)).
 - Placed prefab ids exist, and no prefab places itself, directly or through others.

@@ -49,8 +49,8 @@ stops after n frames; closing the window stops sooner, as does a console gem's `
 `--headless` is for runs without a window: gems open none, and Ctrl+C stops the run cleanly, ending its gems, where
 otherwise it ends the process at once. `--set Gem.setting=value`, as many times as needed, overrides a gem's setting
 from the presets, and `--preset Name` applies a preset, an asset of such settings for a kind of machine, over the
-project's own and under `--set` ([Gem settings](src/Core/README.md#gem-settings)). `--verbose` also logs
-`Debugging.Verbose` lines, detail that is usually noise.
+project's own and under `--set` ([Gem settings](src/Core/README.md#gem-settings)). `--verbose` also logs the
+verbose lines, detail that is usually noise.
 
 Exit codes: 0 clean, 1 bad arguments or a project that cannot be opened, 2 an error was logged under
 `--fail-on-error`. A crash ends the process with the OS's crash code and leaves a `.crash` file in `Logs/` beside

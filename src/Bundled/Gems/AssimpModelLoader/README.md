@@ -18,6 +18,6 @@ nothing else.
   takes the right-handed frame to the engine's: a model's front, Blender's -Y, faces +Z, and Blender's +X is -X.
 - A transform that mirrors turns a triangle's winding over, so its corners are swapped back: triangles are clockwise
   seen from outside. Then the `.meta`'s `origin` is moved to (0, 0, 0).
-- A mesh's material slot is its material's place in the file's list, and one past 7 is 7.
+- A mesh's material slot is its material's place in the file's list, and one past the last slot is the last.
 - Each file is an import of its own, read from where it lies in memory and released once its meshes are baked, so
   files load on workers, several at once. `Dispose` waits for the imports running; a file asked for after that fails.

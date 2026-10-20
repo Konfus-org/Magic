@@ -6,8 +6,9 @@ renderer runs, so no renderer walks a pipeline itself ([Core's README](../../../
 ## Settings
 
 Each setting is documented on `PipelineSettings` and shown in the settings window. What a pipeline runs is the
-project's or world's to say; `off` and `params` are how a machine changes every pipeline without touching either.
-Changed while running, every pipeline is made again, and runs the new way once it is.
+project's or world's to say; the settings, which turn entries off and set params, are how a machine changes every
+pipeline without touching either. Changed while running, every pipeline is made again, and runs the new way once
+it is.
 
 ## A pipeline's passes
 
@@ -19,4 +20,4 @@ Changed while running, every pipeline is made again, and runs the new way once i
 - A pass or nested pipeline that does not load is an error, and the rest run; a pipeline that brings itself in fails
   that load where it does.
 - It keeps nothing: the passes and pipelines it loads are what the assets make the pipeline from, so editing one makes
-  every pipeline it is in again, each an `AssetReloaded<Pipeline>`.
+  every pipeline it is in again, each told on `Events` as a reload.

@@ -3,8 +3,8 @@
 Commands typed in the terminal Magic was started from, or piped into it: provides `ICommands`, which any gem adds its
 own commands to, each with a line saying what it does and the words it takes, which `help` shows along with the
 commands built in here. A thread of its own reads the lines, and they run on the main thread, in Update, one after
-another. A console of another kind, such as a window, hands its lines to `ICommands.Run`, which runs one at once. It
-has no settings.
+another. A console of another kind, such as a window, hands its lines to `ICommands`, which runs one at once. It has
+no settings.
 
 A line's first word names the command, and the rest are its words. Spaces part words, but not inside double quotes,
 braces or brackets, so `"two words"` is one word and `{"a": [1, 2]}` one that keeps its JSON. Quotes around a whole

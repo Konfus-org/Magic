@@ -18,13 +18,14 @@ input settings take from the next frame.
 - `Render`, on the render thread, pumps SDL's events, and writes what they change (devices, controls, typed text, the
   window's size, the clipboard) as plain data to a channel; `Update` applies it on the main thread, before the gems
   that take `IInput` or `IWindow`, so input, the window's size and the clipboard are fixed for the rest of the frame.
-  Setting `IWindow.Title` or `IWindow.Clipboard`, or a size in the settings, is kept for the render thread, which gives
-  it to the window as it next pumps.
-- The window's title is the project's name, and its `IWindow.Id` is SDL's id for it, which a GPU gem finds it by.
-- The window's icon is the one `IWindow.Icon` names, the default icon until it is set. Setting it loads the icon and
-  its texture through Core's `Assets` on workers, and the render thread gives the texture's first mip level to SDL;
-  one that does not load is an error, and the window keeps the icon it has. The icon is read when it is set, so an edit
-  to its files shows once it is set again.
+  Setting the window's title or clipboard through `IWindow`, or a size in the settings, is kept for the render thread,
+  which gives it to the window as it next pumps.
+- The window's title is the project's name, and the id `IWindow` gives it is SDL's id for it, which a GPU gem finds it
+  by.
+- The window's icon is the one `IWindow` names, the default icon until it is set. Setting it loads the icon and its
+  texture through Core's `Assets` on workers, and the render thread gives the texture's first mip level to SDL; one
+  that does not load is an error, and the window keeps the icon it has. The icon is read when it is set, so an edit to
+  its files shows once it is set again.
 - Closing the window, or the OS asking the program to quit, stops the run. SDL's own signal handling is off, so Ctrl+C
   is never turned into a quit event: in a `--headless` run Core catches it and stops the run cleanly, and in a run with
   a window it ends the process at once, as it does any program ([Core's README](../../../Core/README.md#the-run)).
@@ -36,12 +37,12 @@ input settings take from the next frame.
 
 - Keyboards, mice and gamepads are devices as SDL reports them, plugged in and out while running. One physical device
   can show up as several (a keyboard with media keys, one receiver for a keyboard and a mouse).
-- Keys are physical (SDL scancodes), so `KeyW` is the same key on every layout. What they type is `IInput.Text`, as
-  the layout and input method make it: SDL's text input is on for as long as the window is open.
-- The mouse's position and motion are in window pixels, converted from SDL's points, the motion multiplied by
-  `mouseSensitivity` and flipped by `invertMouseY`; the wheel is in notches, away from the player positive whatever the
-  OS's scrolling direction.
+- Keys are physical (SDL scancodes), so a key is the same key on every layout. What they type is the text `IInput`
+  gives, as the layout and input method make it: SDL's text input is on for as long as the window is open.
+- The mouse's position and motion are in window pixels, converted from SDL's points, the motion scaled by the
+  sensitivity setting and flipped when the settings say; the wheel is in notches, away from the player positive
+  whatever the OS's scrolling direction.
 - A gamepad is a device once SDL has opened it; input from one it could not open is ignored.
 - Gamepads use SDL's standard layout: buttons by position, sticks -1 to 1 with up positive (SDL's y grows downward)
-  unless `invertStickY`, triggers 0 to 1, each 0 inside `stickDeadZone` and growing from there to 1 at full deflection.
-  Sticks and triggers are read every frame rather than added up from events.
+  unless the settings invert them, triggers 0 to 1, each 0 inside the settings' dead zone and growing from there to 1
+  at full deflection. Sticks and triggers are read every frame rather than added up from events.

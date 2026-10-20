@@ -1,24 +1,21 @@
 # Domains
 
 A domain is a piece of the world that opens as one: a folder holding a `.domain` file and the prefabs it spawns beside
-it. The `.domain` file holds the domain's own settings, one today: `cellSize`, the metres a cell covers on each axis,
-64 unless it says.
+it. The `.domain` file holds the domain's own settings, today only the cell size, the metres a cell covers on each
+axis; the keys and their defaults are the `Domain` type's properties, documented on it, and the domains beside this
+README are the examples.
 
-```json
-{ "cellSize": 64 }
-```
-
-A project's domain is a folder under its `Assets/` with `<Name>.domain` and its prefabs, named as the project's
-`entryPoint` in the `.magic` file, which opens on the first frame, or opened by game code with `World.OpenAsync`. The
-engine's own open when a project names none: the default domain (`Default<Domain>`) in place of an entry point, and the
-loading domain while another domain replaces the world, which a project makes its own by naming one as `loading`.
+A project's domain is a folder under its `Assets/` with `<Name>.domain` and its prefabs, named as the project's entry
+point in the `.magic` file, which opens on the first frame, or opened by game code through the world service. The
+engine's own open when a project names none: the default domain in place of an entry point, and the loading domain
+while another domain replaces the world, which a project makes its own by naming one as its loading domain.
 
 ## Its prefabs
 
 Every [prefab](../Prefabs/README.md) in the domain's folder is spawned while it is open. Where depends on its name:
 
-- **Cells**, named `x_y_z.prefab` (`0_0_0`, `-1_0_3`): a cell covers `[x * cellSize, (x + 1) * cellSize)` on each
-  axis, and its positions are relative to its corner, `(x, y, z) * cellSize`. A cell file can be copied or moved to
+- **Cells**, named `x_y_z.prefab` (`0_0_0`, `-1_0_3`): a cell covers one cell size from its corner on each axis, and
+  its positions are relative to its corner, its coordinates times the cell size. A cell file can be copied or moved to
   another cell as it is. Cells are how a large world is split into files a person can work on, one piece at a time.
 - **Any other**, such as `globals.prefab`, at the domain's origin: what belongs to the whole world, such as the sky,
   the sun, the world's post-processing and the spawn.

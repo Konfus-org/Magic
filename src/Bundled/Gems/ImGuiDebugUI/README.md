@@ -10,8 +10,8 @@ the gem, so the UI is drawn only where a renderer runs the script.
 ## Settings
 
 Each setting is documented on `ImGuiDebugUISettings` and shown in the settings window. Each is read whenever it is
-used, so all change while it runs. ImGui lays out in window pixels, so `fontSize` says how big the whole UI is, and a
-font whose `.meta` size is near it is the sharpest, as the glyphs are stretched from the size the asset was drawn at.
+used, so all change while it runs. ImGui lays out in window pixels, so the font size says how big the whole UI is, and
+a font whose `.meta` size is near it is the sharpest, as the glyphs are stretched from the size the asset was drawn at.
 
 ## Frames
 
@@ -23,14 +23,13 @@ ImGui's frame is the main thread's, and drawing it the render thread's:
    background draw list, so the windows stay readable over the reports.
 3. **Sync**, while both threads hold still, ends ImGui's frame and copies what it drew: vertices, indices, the draws
    into them, and its textures as they are. The copy is small, so it is made there rather than kept twice over.
-4. **Render**, a frame behind, is the renderer's: the gem ships a pipeline script (`Resources/Scripts/DebugUi.cs`), a
-   pass of the overlay stage (`Resources/Passes/DebugUi.pass`, in `Resources/Pipelines/Overlay.pipeline`), which the
-   renderer runs once for the window after every view in it is composed
-   ([Core's README](../../../Core/README.md#the-gpu)), so the UI is on top of the scene whatever order the project
-   lists its gems in. The script takes in the textures, uploads the vertices and indices, and records the draws into
-   the window's image. Its pipeline is made for the window's format once the shaders, `Shaders/Overlay/`, are
-   compiled; until then, and for good when they do not compile, which is an error, nothing is drawn. The renderer
-   makes the script anew with each listing of the frame it builds, so the UI is away while the first compiles.
+4. **Render**, a frame behind, is the renderer's: the gem ships a pipeline script among its resources, run by a pass
+   of the overlay stage in its overlay pipeline, which the renderer runs once for the window after every view in it
+   is composed ([Core's README](../../../Core/README.md#the-gpu)), so the UI is on top of the scene whatever order
+   the project lists its gems in. The script takes in the textures, uploads the vertices and indices, and records the
+   draws into the window's image. Its pipeline is made for the window's format once its overlay shaders are compiled;
+   until then, and for good when they do not compile, which is an error, nothing is drawn. The renderer makes the
+   script anew with each listing of the frame it builds, so the UI is away while the first compiles.
 
 ImGui's colours, the engine's look among them, are sRGB code as an 8-bit window's image takes them; a `Color` a gem
 gives is linear, and is encoded to sRGB first. The window's image may be of another format, as the GPU provider's
@@ -44,14 +43,16 @@ lighter. Copy and paste go through the window's clipboard.
 - A report is kept, from any thread, until it has shown: text at a place in the world for the frame it is reported in,
   a line or a warning or error for its seconds after it was last reported. The same text at the same place again keeps
   it up rather than adding another, and a line reported again shows how often.
-- `Info`, `Warn` and `Error` are logged too: an `Info` every time, a warning or error when it first shows, not again
-  while it stays up. Warnings are orange and errors red, between `!!!`s.
-- What is reported shows, and `Enabled` is true, while the window has an image: always in a Debug build, and in any
-  other only while a window drawn with the widgets is open. Reports made meanwhile are kept as ever, and logged.
+- An info, a warning or an error is logged too: an info every time, a warning or error when it first shows, not
+  again while it stays up. Warnings are orange and errors red, between `!!!`s.
+- What is reported shows, and the UI says it is enabled, while the window has an image: always in a Debug build, and
+  in any other only while a window drawn with the widgets is open. Reports made meanwhile are kept as ever, and
+  logged.
 - Lines go down the left of the window, those reported every frame first, then the rest oldest first, as many of the
   last as fit, each on a dark plate. Text in the world is centred on its place on a dark plate, in every view of a
-  camera that draws into the window, has it in front, and is within `textDistance` of it: projected as the renderer
-  frames that camera's part of the window. Both are drawn under the windows, so a window stays readable over them.
+  camera that draws into the window, has it in front, and is within the distance the settings set: projected as the
+  renderer frames that camera's part of the window. Both are drawn under the windows, so a window stays readable over
+  them.
 - A report's tooltip shows while the mouse rests on its text and on no window.
 
 ## Fonts
@@ -64,7 +65,7 @@ at a size and gets the asset's, scaled from the size the asset was drawn at.
 
 Dear ImGui is built here from its own repository at a pinned release ([Gems](../README.md#native-libraries)), with the
 C API that dear_bindings, the Dear ImGui team's binding generator, makes from its public and internal headers at build
-time; the two are compiled into one library with 32-bit characters and without the obsolete API. Dear ImGui's
+time; the two are compiled into one library with wide characters and without the obsolete API. Dear ImGui's
 constructors are not in the C API, so a font configuration is set up field by field as ImGui's own constructor would.
 The gem hands ImGui its text as the C strings it reads: every label and line goes into a per-frame arena of unmanaged
-memory (`TextArena`), good until the next frame starts, and a literal is read straight from the assembly's data.
+memory, good until the next frame starts, and a literal is read straight from the assembly's data.

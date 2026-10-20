@@ -122,8 +122,8 @@ of enums converted the same way) share one class, one block each.
 - What a gem tells others has happened is a message, a struct, on `Events`; whoever listens watches it and keeps the
   `Subscription`.
 - A script is a `.cs` asset under a project's `Assets/`, a gem's `Resources/` or `src/Bundled/Resources/`, its class
-  named like the file and an `IScript`: an `IBehavior` for what one entity does each frame, and a system script
-  (`ISystemScript<T1>`, `IParallelSystemScript<T1, T2>`, …) when it works over many. A game is its assets and that
+  named like the file and an `IScript`: an `IBehavior` for what one entity does each frame, and a system script, of
+  any kind of system the world takes, when it works over many. A game is its assets and that
   code, never a gem of its own. A script's constructor takes the `Entity` it is attached to first, then what it asks
   for as a gem's does, and only keeps them: no work in a constructor, as its values are not set yet. Its values are its
   public `{ get; set; }` properties, and `Start()` is where it begins, with them set. A pipeline script runs on no
@@ -132,9 +132,9 @@ of enums converted the same way) share one class, one block each.
 ### Assets
 
 - An asset type is a sealed class implementing `IAsset<T>` of itself: what its users read, never how its file was
-  read. It states its file extensions as a static, so no code names them, and has a `Handle { get; init; }`, the one
-  thing on it Core's `Assets` sets rather than its file. A type gems share is Core's; one only its gem reads is that
-  gem's.
+  read. It states its file extensions as a static, so no code names them, and has a handle that is set once as it is
+  made, the one thing on it Core's `Assets` sets rather than its file. A type gems share is Core's; one only its gem
+  reads is that gem's.
 - A type whose file is itself as JSON implements `IJsonAsset<T>`, and one whose file is its text `ITextAsset<T>`:
   Core reads both. Any other format is an `IAssetLoader<T>` a gem provides by implementing it, returning `Result`, and
   what the `.meta` sidecar holds beside the id is its import settings.
@@ -148,11 +148,11 @@ of enums converted the same way) share one class, one block each.
 - One JSON dialect: everything is read and written in [Core's](src/Core/README.md#assets), which reaches any type by
   reflection, so nothing is declared for a type to be read or written and no other options object is made.
 - A default is stated once: a setting's is its property initialiser; a file's, its type's initialisers; a script's,
-  its properties' initialisers; a component's, its getters (`Camera`). No static `Default` instances or constants
+  its properties' initialisers; a component's, its getters. No static `Default` instances or constants
   beside them. Every asset type has a default asset, `<Type>s/Default.<ext>` (`<Type>s/Default/Default.<ext>` for a
   folder asset, a domain), and an asset setting is a path, empty for that default. A value an implementation falls
   back to on its own (the renderer's background with no sky) is defined once in it, where it is easy to find and
-  change, never on a Core type. The few "nothing" values are `.None` (`GpuTexture.None`, `GpuBuffer.None`).
+  change, never on a Core type. The few "nothing" values are a static `None` on the type, as a handle's is.
 
 ### Disposables
 
@@ -171,7 +171,7 @@ so reading the code says what the thing is and why it is kept. Several kept for 
   together into one optional object.
 - What may be missing is handled where it is read: a guard clause, `is not { } value`, `??` with a fallback or a
   `throw` that says what was expected. `[MemberNotNullWhen]` and `[MaybeNullWhen]` tell the compiler what a
-  check proves (`Result<T>.Ok`).
+  check proves, as a result's success flag proves its value is there.
 - A guard that throws uses the helper that names the check, rather than an `if` and a `throw` written out:
   `ArgumentNullException.ThrowIfNull(x)` and its `ThrowIf*` siblings (`ThrowIfNullOrEmpty`, `ThrowIfNegative`) for
   a parameter, `ObjectDisposedException.ThrowIf` for a disposed owner, `string.IsNullOrWhiteSpace` for a string that
@@ -188,14 +188,14 @@ so reading the code says what the thing is and why it is kept. Several kept for 
   engine's own threads, and for work that lasts as long as the run.
 - What a worker makes for an engine thread is data, never work: the gem keeps what arrived (a `Channel<T>`, or a
   reference written whole) and takes it in at the start of the hook that owns the structure it goes into, so no thread
-  runs code on another's behalf and nothing locks a collection two threads read and write. `Threads.InvokeAsync` is
-  for a flow that must await a step on an engine thread and what it returns. Nothing blocks waiting on the main or
-  render thread.
+  runs code on another's behalf and nothing locks a collection two threads read and write. `Threads` is for a flow
+  that must await a step on an engine thread and what it returns. Nothing blocks waiting on the main or render
+  thread.
 - Async all the way up: nothing on the main or render thread, or in the frame loop, blocks on a task (`.Result`,
   `.Wait()`, `.GetAwaiter().GetResult()`), since a thread that waits on work queued behind it deadlocks. A
-  synchronous API (`IFileSystem.Read`) is a synchronous implementation, not a wait on its async twin. The one wait
-  allowed is at a boundary where every thread that could be held up has already ended, with a comment saying so
-  (`Engine.Run` collecting the save after both engine threads are gone).
+  synchronous API (a file system's synchronous read) is a synchronous implementation, not a wait on its async twin.
+  The one wait allowed is at a boundary where every thread that could be held up has already ended, with a comment
+  saying so (the engine collecting the saved world after both engine threads are gone).
 - Task-returning methods end in `Async` (`VSTHRD200`); no `async void` (`VSTHRD100`).
 
 ### Failures
@@ -304,12 +304,12 @@ build requires braces around any multi-line body (`IDE0011`).
 ### Naming
 
 - Read a name as `Class.Member(arguments)`. If that says what happens or what is held, the name is good, however
-  short: `Assets.Find<Texture>(path)`, `Caches.ReadAsync<GpuShader>(key, version)`, `Lifetime.Stop(reason)`. If it
+  short: `Assets.Find<Texture>(path)`, `Caches.ReadAsync<Shader>(key, version)`, `Lifetime.Stop(reason)`. If it
   does not (a `Pump()` on a system, a `_scratch` buffer), name the object: what is pumped, what the buffer holds.
 - A method's prefix says what kind of thing it does. `Get` returns what the object holds or looks up and never
-  fails (`ClusterPool.GetRow(model)`, `Assets.GetPath(handle)`); `Is`, `Has` or `Can` returns a bool that answers a
-  question (`IsDrawable`, `HasPass`, `CanSee`); `Try` returns a bool that says whether it worked, with the result
-  in an `out` parameter, or a `Result` (`TryGetResource(scope, name, out resource)`, `TryRecordDraw(pass)`); and
+  fails (`GetRow(model)`, `GetPath(handle)`); `Is`, `Has` or `Can` returns a bool that answers a question
+  (`IsDrawable`, `HasPass`, `CanSee`); `Try` returns a bool that says whether it worked, with the result in an
+  `out` parameter, or a `Result` (`TryGetResource(scope, name, out resource)`, `TryRecord(pass)`); and
   the two combine as `TryGet` for a lookup that can fail. Other verbs say what else happens: `Make`, `Parse`,
   `Format`, `Find` (which may find nothing, and says so with a `?`), `To` for a conversion. A method returning a
   value is never a bare noun (`Amount`, `Shown`, `RowOf`): the verb is what tells the reader whether it computes,
@@ -322,7 +322,7 @@ build requires braces around any multi-line body (`IDE0011`).
 - A local does not change meaning within a method, and does not shadow a type.
 - Every method that returns a `Task` or `ValueTask` ends in `Async`, private helpers included
   (`LoadAsync`, `GenerateAsync`, `LoadFileAsync`). A method that waits for the same work on the calling thread has
-  the name without it (`IFileSystem.Read` beside `ReadAsync`). Test methods are the exception: their name is the
+  the name without it (`Read` beside `ReadAsync`). Test methods are the exception: their name is the
   sentence they check.
 - An async method takes a `CancellationToken cancel` as its last parameter and passes it to everything it awaits,
   unless nothing in it could stop. Long work whose share done can be measured (opening a domain, generating a model's
@@ -348,15 +348,15 @@ build requires braces around any multi-line body (`IDE0011`).
 
 - Shaders are HLSL only, compiled by whichever gem provides `IShaderCompiler`, which loads their `#include`s from
   the assets: HLSL 2021, Shader Model 6.0 with wave intrinsics, warnings are errors.
-- Resources bind through `Include/Bindings.hlsli`'s macros (`READ`, `SAMPLER`, `WRITE`, `UNIFORM`), never a register
-  by hand. Its header holds the conventions every shader is written against: frame, winding, reverse-Z, matrices,
-  physical light units and pre-exposure, colour.
+- Resources bind through the binding header's macros, `Include/Bindings.hlsli`, never a register by hand. Its header
+  holds the conventions every shader is written against: frame, winding, reverse-Z, matrices, physical light units
+  and pre-exposure, colour.
 - Wave intrinsics only where the result cannot depend on the wave's size, 32 or 64 by GPU, or where it hands out the
-  places of a count the atomics' order already made arbitrary (`WaveAllocate`). No 16-bit types and no runtime-indexed
-  resource arrays.
-- A value that can go wrong is kept from it where it arises: roughness clamped (`RoughnessToAlpha`), n·v kept above 0,
-  `NormalizeOrZero` where a vector can be zero, explicit gradients or levels (`SampleGrad`, `SampleLevel`) inside a
-  branch.
+  places of a count the atomics' order already made arbitrary (the library's wave allocation). No 16-bit types and
+  no runtime-indexed resource arrays.
+- A value that can go wrong is kept from it where it arises: roughness clamped by the library's helper, n·v kept
+  above 0, a vector that can be zero normalised by the helper that allows it, explicit gradients or levels
+  (`SampleGrad`, `SampleLevel`) inside a branch.
 - Few variants: a define for what changes the pipeline (which surface, forward or not), a `[branch]` on a value the
   whole draw shares for what does not.
 - One copy of each piece: the BRDF, the lights and their units, and the shading models live once, in the shared
@@ -414,8 +414,8 @@ on my machine": the other machines are the point.
 
 ### Graphics
 
-- Drawing goes through `IGpu`: a gem makes GPU objects and records a frame's commands as plain data
-  (`GpuCommands`), which the GPU provider turns into its API's calls. Backend-specific code lives only in that gem.
-- What is drawn into is a render target, a `GpuTexture`: a render texture, or a window's (`IGpu.GetWindowTarget`).
+- Drawing goes through `IGpu`: a gem makes GPU objects and records a frame's commands as plain data, which the GPU
+  provider turns into its API's calls. Backend-specific code lives only in that gem.
+- What is drawn into is a render target, a `GpuTexture`: a render texture, or a window's, which `IGpu` hands out.
   Drawing code takes a target and asks its format and size; it never assumes a window.
 - A GPU feature is used only if Vulkan, D3D12 and Metal all have it.

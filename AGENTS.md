@@ -147,6 +147,18 @@ want to question as you make it.
   work, not which materials exist. The folder already shows what is in it, and a list is one more thing to keep in
   step that quietly goes out of date. Name a specific file only as the example that teaches a rule, or where the
   behaviour being explained depends on that path.
+- **Concepts, not code.** A doc explains the architecture, the purpose and the workflow: what a thing is for, how
+  it works and what must hold for it to work. It does not list members, signatures, parameters, keys, options or
+  defaults: the code is the reference, and a doc that copies it is a second copy to keep in step. No snippet that
+  shows calling an API, and no payload written out.
+- **Write for longevity.** Assume the code changes tomorrow. A doc stays accurate when a member is renamed, a
+  parameter added or a value tuned, so it names a thing only where the name is the concept being explained (the
+  service a gem takes, a hook, an asset type, a file extension), never as a pointer into today's code. A number
+  appears only where the reasoning in the sentence is about that number, never as a budget, a limit or a default.
+- **Placeholders for what the code states.** Where a reader needs the exact shape, say where it lives rather than
+  copying it: a type's doc comments, which the build writes beside every assembly, document its members and a
+  setting's default; `--help` lists the command line; a shader's header lists its macros; the assets beside a
+  README are its examples. "The keys are the `Material` type's properties" outlives any table of them.
 - **Gems by role, never by name.** Gems can be swapped at any time, so comments, summaries, docs and user-facing
   messages describe another gem only by what it does ("a platform gem", "the GPU provider", "a shader compiler"),
   never by its name or the library it wraps. A gem names itself only inside its own folder. Configuration that

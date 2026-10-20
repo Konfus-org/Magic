@@ -7,8 +7,8 @@ SDL_image and SDL come from the SDL bindings project, so SDL_image binds to the 
 
 ## Behaviour
 
-- Whatever SDL_image decodes is converted to RGBA8, rows top first: sRGB for a `usage` of `color`, linear for `normal`
-  and `mask`. An `.svg` is drawn at the `size` its `.meta` asks for.
-- With `mipmaps`, each level is the one above halved with SDL's linear scaling, down to one texel, and every level is
-  in one array, the first at its start.
+- Whatever SDL_image decodes is converted to RGBA8, rows top first: sRGB for a colour image, linear for a normal map
+  or a mask, as the `.meta`'s usage says. An `.svg` is drawn at the size its `.meta` asks for.
+- When the `.meta` asks for mipmaps, each level is the one above halved with SDL's linear scaling, down to one texel,
+  and every level is in one array, the first at its start.
 - SDL_image needs no SDL started, so files load on any worker, several at once.
