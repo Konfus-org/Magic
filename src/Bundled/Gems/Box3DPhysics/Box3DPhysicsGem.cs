@@ -163,7 +163,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         if (!_isApplied && _stepped.IsSet) Apply();
     }
 
-    public unsafe void FixedUpdate(in Frame frame)
+    public void FixedUpdate(in Frame frame)
     {
         WaitForStep();
         if (!_isApplied) Apply();
