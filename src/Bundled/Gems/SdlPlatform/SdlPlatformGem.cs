@@ -29,6 +29,7 @@ namespace Magic.SdlPlatform;
 /// </summary>
 internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 {
+    private readonly SdlPlatformSettings _settings;
     private readonly Lifetime _lifetime;
     private readonly Threads _threads;
     private readonly Assets _assets;
@@ -59,7 +60,6 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// <summary>
     /// What was typed this frame, put together on the main thread from the pump's pieces.
     /// </summary>
-    private readonly SdlPlatformSettings _settings;
     private readonly StringBuilder _typed = new();
 
     private string _title;
@@ -124,7 +124,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
         if (_window == null)
         {
-            string? error = CString.Read(SDL.GetError());
+            string error = CString.Read(SDL.GetError());
             SDL.Quit();
             throw new InvalidOperationException($"SDL could not open a window: {error}");
         }
@@ -171,7 +171,6 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
     public unsafe void Dispose()
     {
-        _changes.Writer.TryComplete();
         foreach (nint gamepad in _gamepads.Values)
         {
             SDL.CloseGamepad((SDL.Gamepad*)gamepad);
@@ -295,24 +294,9 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         get
         {
-            int index = device.Kind == control.DeviceKind ? _devices.IndexOf(device) : -1;
+            int index = device.Kind == control.DeviceKind ? IndexOf(device.Kind, device.Id) : -1;
             return index < 0 ? default : _controls[index][control.Index];
         }
-    }
-
-    /// <summary>
-    /// Resizes the window when the settings ask for a size they did not before, on the window thread.
-    /// </summary>
-    private unsafe void Resize()
-    {
-        if (_window == null || (_settings.Width == _askedWidth && _settings.Height == _askedHeight))
-        {
-            return;
-        }
-
-        (_askedWidth, _askedHeight) = (_settings.Width, _settings.Height);
-        (int width, int height) = (_askedWidth, _askedHeight);
-        _threads.Post(EngineThread.Render, () => SDL.SetWindowSize(_window, width, height));
     }
 
     /// <summary>
@@ -439,6 +423,21 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
+    /// Resizes the window when the settings ask for a size they did not before, on the window thread.
+    /// </summary>
+    private unsafe void Resize()
+    {
+        if (_window == null || (_settings.Width == _askedWidth && _settings.Height == _askedHeight))
+        {
+            return;
+        }
+
+        (int width, int height) = (_settings.Width, _settings.Height);
+        (_askedWidth, _askedHeight) = (width, height);
+        _threads.Post(EngineThread.Render, () => SDL.SetWindowSize(_window, width, height));
+    }
+
+    /// <summary>
     /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
     /// </summary>
     private static void StartFrame(DeviceKind kind, ControlState[] states)
@@ -487,18 +486,21 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     private void Apply(in Change change)
     {
-        int index = IndexOf(change.Device, change.Id);
+        int index;
         switch (change.Kind)
         {
             case ChangeKind.Added:
+                index = IndexOf(change.Device, change.Id);
                 if (index < 0)
                 {
-                    _devices.Add(new InputDevice(change.Device, change.Id, change.Name ?? change.Device.ToString()));
+                    // A device that gives no name is shown as what it is.
+                    _devices.Add(new InputDevice(change.Device, change.Id, string.IsNullOrEmpty(change.Name) ? change.Device.ToString() : change.Name));
                     _controls.Add(new ControlState[256]);
                 }
 
                 break;
             case ChangeKind.Removed:
+                index = IndexOf(change.Device, change.Id);
                 if (index >= 0)
                 {
                     _devices.RemoveAt(index);
@@ -507,6 +509,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
                 break;
             case ChangeKind.Set:
+                index = IndexOf(change.Device, change.Id);
                 if (index >= 0)
                 {
                     SetState(_controls[index], change.Control, change.Value);
@@ -514,6 +517,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
                 break;
             case ChangeKind.Add:
+                index = IndexOf(change.Device, change.Id);
                 if (index >= 0)
                 {
                     ControlState[] states = _controls[index];
@@ -550,7 +554,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// Hands a change to the main thread. Render thread, like everything below.
+    /// Hands a change to the main thread. Render thread, like everything below but <see cref="ShowAsync"/>.
     /// </summary>
     private void Write(in Change change)
     {
@@ -558,8 +562,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// A keyboard or mouse control's new value, its device announced first if this is the first the main thread hears
-    /// of it.
+    /// A control's new value. A keyboard or mouse is announced first if this is the first the main thread hears of it; a
+    /// gamepad was as it opened.
     /// </summary>
     private void Set(DeviceKind kind, uint id, Control control, float value)
     {
@@ -590,11 +594,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             return;
         }
 
-        string name = CString.Read(kind == DeviceKind.Keyboard ? SDL.GetKeyboardNameForID(id) : SDL.GetMouseNameForID(id));
-        Write(new Change(ChangeKind.Added, kind, id, Name: name.Length == 0 ? kind.ToString() : name));
+        Write(new Change(ChangeKind.Added, kind, id, Name: CString.Read(kind == DeviceKind.Keyboard ? SDL.GetKeyboardNameForID(id) : SDL.GetMouseNameForID(id))));
     }
 
-    /// <summary>The clipboard's text, which SDL hands out as a copy that is freed once read.</summary>
+    /// <summary>
+    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
+    /// </summary>
     private static unsafe string ClipboardText()
     {
         byte* text = SDL.GetClipboardText();
@@ -627,9 +632,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
         _gamepads[id] = (nint)gamepad;
         string name = CString.Read(SDL.GetGamepadName(gamepad));
-        string shown = name.Length == 0 ? "Gamepad" : name;
-        Write(new Change(ChangeKind.Added, DeviceKind.Gamepad, id, Name: shown));
-        Debugging.Info($"Gamepad connected: {shown}");
+        Write(new Change(ChangeKind.Added, DeviceKind.Gamepad, id, Name: name));
+        Debugging.Info($"Gamepad connected: {name}");
     }
 
     private unsafe void CloseGamepad(uint id)

@@ -19,10 +19,11 @@ namespace Magic.ImGuiDebugUI;
 /// the world, and the windows gems draw with its widgets (<see cref="IDebugUI"/>).
 /// <para>
 /// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
-/// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported,
-/// ends the frame and copies what ImGui drew (<see cref="DrawLists"/>); the renderer draws that copy over the window
-/// with the gem's pipeline script (<see cref="Resources.Scripts.DebugUi"/>), a pass of its overlay stage, once every view in the window
-/// is composed. Reports come from any thread and are kept until they have shown (<see cref="Reports"/>).
+/// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported;
+/// <see cref="Sync"/>, while both threads hold still, ends the frame and copies what ImGui drew (<see cref="DrawLists"/>);
+/// the renderer draws that copy over the window with the gem's pipeline script (<see cref="Resources.Scripts.DebugUi"/>),
+/// a pass of its overlay stage, once every view in the window is composed. Reports come from any thread and are kept
+/// until they have shown (<see cref="Reports"/>).
 /// </para>
 /// </summary>
 internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
@@ -58,7 +59,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 #endif
 
     private readonly ImGuiDebugUISettings _settings;
+    private readonly Assets _assets;
     private readonly IWindow _window;
+    private readonly Threads _threads;
+    private readonly CancellationToken _stopping;
     private readonly IInput? _input;
     private readonly unsafe ImGuiContext* _context;
     private readonly Reports _reports = new();
@@ -117,10 +121,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private GCHandle _pasted;
 
-    private readonly Assets _assets;
-    private readonly Threads _threads;
-    private readonly CancellationToken _stopping;
-
     /// <summary>
     /// The font the settings last named, so a change while running loads the new one.
     /// </summary>
@@ -154,6 +154,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ImGuiIO* io = ImGui.GetIO();
         io->IniFilename = null;
         io->BackendFlags |= ImGuiBackendFlags.RendererHasTextures | ImGuiBackendFlags.RendererHasVtxOffset;
+        io->DisplayFramebufferScale = Vector2.One.Im;
         ImGuiStyle* style = ImGui.GetStyle();
         Look.Apply(style);
         style->FontSizeBase = settings.FontSize;
@@ -211,7 +212,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         // Laid out in window pixels: the font size says how big the UI is.
         io->DisplaySize = new Vector2(_window.Width, _window.Height).Im;
-        io->DisplayFramebufferScale = Vector2.One.Im;
         io->DeltaTime = Math.Max(frame.DeltaSeconds, 1e-4f);
         ImGui.GetStyle()->FontSizeBase = _settings.FontSize;
         ImGui.NewFrame();
@@ -318,7 +318,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             _reserved[id] = end - closedAt;
         }
 
-        if (!level.IsNested)
+        if (_depth == 0)
         {
             ImGui.End();
             return;
@@ -664,12 +664,11 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// The gem ImGui's clipboard callbacks are for: the one the platform's user data names.
+    /// The gem ImGui's clipboard callbacks are for: the one the platform's user data names, set as the context is made.
     /// </summary>
     private static unsafe ImGuiDebugUIGem? Self()
     {
-        void* user = ImGui.GetPlatformIO()->PlatformClipboardUserData;
-        return user == null ? null : GCHandle.FromIntPtr((nint)user).Target as ImGuiDebugUIGem;
+        return GCHandle.FromIntPtr((nint)ImGui.GetPlatformIO()->PlatformClipboardUserData).Target as ImGuiDebugUIGem;
     }
 
     [UnmanagedCallersOnly]
@@ -715,8 +714,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         Level level = _levels[depth];
         level.Closed.Clear();
         level.IsScrollable = scrollable;
-        level.IsNested = depth > 0;
-        if (!level.IsNested)
+        if (depth == 0)
         {
             _windowsDrawn++;
 
@@ -782,7 +780,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
                 }
 
                 byte* label = _text.Of(report.Label);
-                Vector2 size = TextSize(label);
+                Vector2 size = ImGui.CalcTextSize(label).Vector;
                 Vector2 corner = center - (size * 0.5f);
                 Vector2 min = corner - _platePadding;
                 Vector2 max = corner + size + _platePadding;
@@ -817,7 +815,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         {
             ShownReport line = _lines[i];
             byte* label = _text.Of(line.Label);
-            Vector2 size = TextSize(label);
+            Vector2 size = ImGui.CalcTextSize(label).Vector;
             ImDrawList.AddRectFilledEx(under, (at - _platePadding).Im, (at + size + _platePadding).Im, Plate, 3f, ImDrawFlags.None);
             ImDrawList.AddText(under, at.Im, Packed(line.Color), label);
             if (line.Tooltip is { } tooltip && canHover && ImGui.IsMouseHoveringRect(at.Im, (at + size).Im))
@@ -828,14 +826,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
             at.Y += lineHeight;
         }
-    }
-
-    /// <summary>
-    /// How big a C string draws in the current font, unwrapped.
-    /// </summary>
-    private static unsafe Vector2 TextSize(byte* text)
-    {
-        return ImGui.CalcTextSize(text).Vector;
     }
 
     /// <summary>
@@ -876,8 +866,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         /// A nested view's ImGui id; a window needs none.
         /// </summary>
         public uint Id { get; set; }
-
-        public bool IsNested { get; set; }
 
         public bool IsScrollable { get; set; }
 

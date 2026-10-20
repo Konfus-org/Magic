@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Magic.Attributes;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Input;
@@ -58,7 +59,6 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private readonly Dictionary<string, int> _headerCounts = new(StringComparer.Ordinal);
 
-    private readonly Dictionary<Type, (string[] Names, string[] Labels)> _enums = [];
     /// <summary>
     /// The debug views there are, by name: the passes in <c>Passes/Debug</c>, each named for what it shows, and what
     /// each says it shows, filled as the passes load.
@@ -141,7 +141,7 @@ internal sealed class SettingsWindow : IDisposable
     {
         StepView();
         ShowView();
-        if (!_window.Begin(scrollable: true, out bool copy))
+        if (!_window.Begin(out bool copy))
         {
             return;
         }
@@ -160,21 +160,21 @@ internal sealed class SettingsWindow : IDisposable
         }
         else if (_filter.Length > 0)
         {
-            DrawFiltered(all);
+            DrawRows(all);
             if (copy)
             {
-                _window.Copy(Lines(Matches));
+                _window.Copy(Lines(setting => Matches(setting, Words(setting.Name))));
             }
         }
         else
         {
             _ui.Tabs("##gems", ref _tab, _tabs);
             _tab = Math.Clamp(_tab, 0, _tabs.Length - 1);
-            DrawTab(_tabs[_tab], all);
+            DrawRows(all, _tabs[_tab]);
             if (copy)
             {
                 string tab = _tabs[_tab];
-                _window.Copy(Lines(setting => string.Equals(CategoryOf(setting), tab, StringComparison.Ordinal)));
+                _window.Copy(Lines(setting => string.Equals(PlaceOf(setting).Tab, tab, StringComparison.Ordinal)));
             }
         }
 
@@ -182,34 +182,36 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
-    /// Whether the filter finds <paramref name="setting"/>: in its name in words, its key or its description, in any
-    /// case.
+    /// Whether the filter finds <paramref name="setting"/>: in its name in words, <paramref name="label"/>, its key or
+    /// its description, in any case.
     /// </summary>
-    private bool Matches(Setting setting)
+    private bool Matches(Setting setting, string label)
     {
-        return Words(setting.Name).Contains(_filter, StringComparison.OrdinalIgnoreCase)
+        return label.Contains(_filter, StringComparison.OrdinalIgnoreCase)
             || setting.Key.Contains(_filter, StringComparison.OrdinalIgnoreCase)
             || setting.Description.Contains(_filter, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
-    /// The rows of every tab the filter finds, under a header per tab and sub-category, which a click folds away, in
-    /// place of the tabs.
+    /// <paramref name="tab"/>'s rows, under a header per sub-category or gem, none when the tab has only one; without
+    /// a tab, the rows of every tab the filter finds, under a header per tab and sub-category, in place of the tabs. A
+    /// click on a header folds it away.
     /// </summary>
-    private void DrawFiltered(IReadOnlyList<Setting> all)
+    private void DrawRows(IReadOnlyList<Setting> all, string? tab = null)
     {
+        bool hasHeaders = tab is null || _headerCounts.GetValueOrDefault(tab) > 1;
         string header = string.Empty;
         bool isUnfolded = true;
         foreach (Row row in _rows)
         {
             Setting setting = all[row.Index];
-            if (!Matches(setting))
+            if (tab is null ? !Matches(setting, row.Label) : !string.Equals(row.Tab, tab, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            string under = string.Equals(row.Tab, row.Header, StringComparison.Ordinal) ? row.Tab : $"{row.Tab}: {row.Header}";
-            if (!string.Equals(under, header, StringComparison.Ordinal))
+            string under = tab is null ? row.Heading : row.Header;
+            if (hasHeaders && !string.Equals(under, header, StringComparison.Ordinal))
             {
                 header = under;
                 isUnfolded = _ui.Header(header);
@@ -255,36 +257,16 @@ internal sealed class SettingsWindow : IDisposable
         return words.ToString();
     }
 
-    private static bool IsOwnedBy(Setting setting, string gem)
-    {
-        return string.Equals(setting.Owner, gem, StringComparison.OrdinalIgnoreCase);
-    }
-
     /// <summary>
-    /// The tab a setting is under: its category up to its slash, <c>Render</c> of <c>Render/Shadows</c>, or its gem's
-    /// name without one.
+    /// Where a setting sits: its tab, its category up to its slash, <c>Render</c> of <c>Render/Shadows</c>, and its
+    /// header in the tab, the category past the slash, <c>Shadows</c>; its gem's name stands in for whichever the
+    /// category does not say.
     /// </summary>
-    private static string CategoryOf(Setting setting)
+    private static (string Tab, string Header) PlaceOf(Setting setting)
     {
         string? category = setting.Attributes.OfType<CategoryAttribute>().FirstOrDefault()?.Category;
         int slash = category?.IndexOf('/', StringComparison.Ordinal) ?? -1;
-        return category is null ? setting.Owner : slash < 0 ? category : category[..slash];
-    }
-
-    /// <summary>
-    /// The header a setting is under in its tab: its category past its slash, <c>Shadows</c> of <c>Render/Shadows</c>,
-    /// or its gem's name without one.
-    /// </summary>
-    private static string HeaderOf(Setting setting)
-    {
-        string? category = setting.Attributes.OfType<CategoryAttribute>().FirstOrDefault()?.Category;
-        int slash = category?.IndexOf('/', StringComparison.Ordinal) ?? -1;
-        return category is null || slash < 0 ? setting.Owner : category[(slash + 1)..];
-    }
-
-    private static string JsonOf(object? value, Type type)
-    {
-        return JsonSerializer.Serialize(value, type, Json.Options);
+        return category is null ? (setting.Owner, setting.Owner) : slash < 0 ? (category, setting.Owner) : (category[..slash], category[(slash + 1)..]);
     }
 
     /// <summary>
@@ -313,16 +295,11 @@ internal sealed class SettingsWindow : IDisposable
         {
             if (includes(setting))
             {
-                text.Append(setting.Key).Append('=').Append(JsonOf(setting.Value, setting.Type)).Append('\n');
+                text.Append(setting.Key).Append('=').Append(JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options)).Append('\n');
             }
         }
 
         return text.ToString();
-    }
-
-    private bool HasGem(string gem)
-    {
-        return _settings.All.Any(setting => IsOwnedBy(setting, gem));
     }
 
     /// <summary>
@@ -344,18 +321,24 @@ internal sealed class SettingsWindow : IDisposable
         for (int i = 0; i < all.Count; i++)
         {
             Setting setting = all[i];
+            (string tab, string header) = PlaceOf(setting);
             RangeAttribute? range = setting.Attributes.OfType<RangeAttribute>().FirstOrDefault();
             bool restarts = setting.Attributes.OfType<RequireRestartAttribute>().Any();
+            string label = Words(setting.Name);
             string tip = setting.Description.Length > 0 ? $"{setting.Key}: {setting.Description}" : setting.Key;
             Row row = new()
             {
                 Index = i,
-                Tab = CategoryOf(setting),
-                Header = HeaderOf(setting),
-                Id = $"{Words(setting.Name)}##{setting.Key}",
+                Tab = tab,
+                Header = header,
+                Heading = string.Equals(tab, header, StringComparison.Ordinal) ? tab : $"{tab}: {header}",
+                Label = label,
+                Id = $"{label}##{setting.Key}",
                 Tip = restarts ? $"{tip} Changed, the engine starts again at once, every setting as it is: the world is saved and put back, so the game goes on where it was." : tip,
                 Min = range is null ? 0 : Convert.ToSingle(range.Minimum, CultureInfo.InvariantCulture),
                 Max = range is null ? 0 : Convert.ToSingle(range.Maximum, CultureInfo.InvariantCulture),
+                Choices = setting.Type.IsEnum ? [.. Enum.GetValues(setting.Type).Cast<object>()] : [],
+                Labels = setting.Type.IsEnum ? Array.ConvertAll(Enum.GetNames(setting.Type), Words) : [],
             };
             rows.Add(row);
             if (!tabs.Contains(row.Tab, StringComparer.Ordinal))
@@ -495,38 +478,6 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="tab"/>'s rows, under a header per sub-category or gem, which a click folds away; no header
-    /// when the tab has only one.
-    /// </summary>
-    private void DrawTab(string tab, IReadOnlyList<Setting> all)
-    {
-        bool hasHeaders = _headerCounts.GetValueOrDefault(tab) > 1;
-        string header = string.Empty;
-        bool isUnfolded = true;
-        foreach (Row row in _rows)
-        {
-            if (!string.Equals(row.Tab, tab, StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            if (hasHeaders && !string.Equals(row.Header, header, StringComparison.Ordinal))
-            {
-                header = row.Header;
-                isUnfolded = _ui.Header(header);
-            }
-
-            if (!isUnfolded)
-            {
-                continue;
-            }
-
-            DrawRow(row, all[row.Index]);
-            _ui.Tooltip(row.Tip);
-        }
-    }
-
-    /// <summary>
     /// A row's widget for what its setting holds: a checkbox, a slider, a choice, or a text field, which is a string's
     /// text or anything else's JSON and is set when Enter is pressed in it. A setting read only as its gem starts is
     /// its value alone.
@@ -566,11 +517,10 @@ internal sealed class SettingsWindow : IDisposable
 
                 break;
             case Enum choice:
-                (string[] names, string[] labels) = EnumNames(setting.Type);
-                int index = Array.IndexOf(names, choice.ToString());
-                if (_ui.Choice(row.Id, ref index, labels) && index >= 0)
+                int index = Array.IndexOf(row.Choices, choice);
+                if (_ui.Choice(row.Id, ref index, row.Labels) && index >= 0)
                 {
-                    Change(setting, Enum.Parse(setting.Type, names[index]));
+                    Change(setting, row.Choices[index]);
                 }
 
                 break;
@@ -588,7 +538,7 @@ internal sealed class SettingsWindow : IDisposable
     {
         if (!Equals(setting.Value, row.Value) || row.Shown is null)
         {
-            string shown = setting.Value as string ?? JsonOf(setting.Value, setting.Type);
+            string shown = setting.Value as string ?? JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options);
             if (row.Draft is null || string.Equals(row.Draft, row.Shown, StringComparison.Ordinal))
             {
                 row.Draft = shown;
@@ -629,10 +579,7 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private bool SetLine(string line)
     {
-        int equals = line.IndexOf('=', StringComparison.Ordinal);
-        Result set = equals < 0
-            ? Result.Failure($"A setting is Gem.setting=value; '{line}' is not one.")
-            : _settings.Set(line[..equals], ValueOf(line[(equals + 1)..]));
+        Result set = _settings.Set(line);
         if (!set.Ok)
         {
             Debugging.Warn(set.Error);
@@ -654,39 +601,20 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
-    /// The enum's names, and the same in words for its choice to show.
-    /// </summary>
-    private (string[] Names, string[] Labels) EnumNames(Type type)
-    {
-        if (!_enums.TryGetValue(type, out (string[] Names, string[] Labels) names))
-        {
-            string[] raw = Enum.GetNames(type);
-            string[] labels = new string[raw.Length];
-            for (int i = 0; i < raw.Length; i++)
-            {
-                labels[i] = Words(raw[i]);
-            }
-
-            names = (raw, labels);
-            _enums[type] = names;
-        }
-
-        return names;
-    }
-
-    /// <summary>
-    /// <c>get Gem</c>: every setting of the gem, as <c>Gem.setting=value</c> lines, the form <c>set</c> takes.
+    /// <c>get Gem</c>: every setting of the gem, as <c>Gem.setting=value</c> lines, the form <c>set</c> takes; a gem
+    /// with none is no gem.
     /// </summary>
     private void RunGet(ReadOnlySpan<string> words)
     {
-        if (words.Length != 1 || !HasGem(words[0]))
+        string gem = words.Length == 1 ? words[0] : string.Empty;
+        string lines = Lines(setting => string.Equals(setting.Owner, gem, StringComparison.OrdinalIgnoreCase));
+        if (lines.Length == 0)
         {
-            Debugging.Warn($"get takes a gem with settings: {GemNames()}.");
+            Debugging.Warn($"get takes a gem with settings: {string.Join(", ", _settings.All.Select(setting => setting.Owner).Distinct(StringComparer.Ordinal))}.");
             return;
         }
 
-        string gem = words[0];
-        Debugging.Info(Lines(setting => IsOwnedBy(setting, gem)).TrimEnd('\n'));
+        Debugging.Info(lines.TrimEnd('\n'));
     }
 
     /// <summary>
@@ -696,7 +624,7 @@ internal sealed class SettingsWindow : IDisposable
     {
         if (words.Length != 1)
         {
-            Debugging.Warn("set takes one Gem.setting=value, the value JSON: set ImGuiDebugUI.fontSize=24.");
+            Debugging.Warn("set takes one Gem.setting=value, the value JSON: set DebugTools.frameRate=false.");
             return;
         }
 
@@ -754,14 +682,11 @@ internal sealed class SettingsWindow : IDisposable
         Debugging.Info($"View: {Words(view)}.");
     }
 
-    private string GemNames()
-    {
-        return string.Join(", ", _settings.All.Select(setting => setting.Owner).Distinct(StringComparer.Ordinal));
-    }
-
     /// <summary>
-    /// One setting the window offers: where it sits in <see cref="Settings.All"/>, its tab and header, its widget's
-    /// id, its tooltip, its range, and a text field's text while it is being edited.
+    /// One setting the window offers, with everything about it that stays the same made once: where it sits in
+    /// <see cref="Settings.All"/>, its tab and header and the heading of both the filter shows, its name in words, its
+    /// widget's id, its tooltip, its range, an enum's values and their names in words, and a text field's text while
+    /// it is being edited.
     /// </summary>
     private sealed class Row
     {
@@ -771,6 +696,10 @@ internal sealed class SettingsWindow : IDisposable
 
         public required string Header { get; init; }
 
+        public required string Heading { get; init; }
+
+        public required string Label { get; init; }
+
         public required string Id { get; init; }
 
         public required string Tip { get; init; }
@@ -778,6 +707,10 @@ internal sealed class SettingsWindow : IDisposable
         public float Min { get; init; }
 
         public float Max { get; init; }
+
+        public object[] Choices { get; init; } = [];
+
+        public string[] Labels { get; init; } = [];
 
         /// <summary>
         /// The value a text field last showed, and the text it showed it as.

@@ -17,7 +17,7 @@ In the project's `Presets/Default.preset`, by another preset, or `--set SdlGpu.<
 | `composition` | `sdr` | How a window's image is composed onto the display, which decides the image's format, and so how the last pass of a frame encodes its colour: `sdr` (8-bit UNORM, encoded to sRGB by the frame), `sdr_linear` (8-bit sRGB-typed, encoded by the GPU), `hdr10` (10-bit, ST 2084 on Rec. 2020) or `hdr_linear` (half floats, linear scRGB). A window that does not support the one asked for, as no display without HDR does the two `hdr` ones, is composed `sdr`, and a warning says so. Changed while running, every window is composed the new way, its image in the new format, from the next frame. |
 | `validation` | `false` | The API's own validation (Vulkan's layers, Direct3D 12's debug layer): slow, and loud about misuse. The layers must be installed. Changed while running, the engine starts again. |
 
-All but `vsync` are read as the device opens or a window is claimed, so they change nothing while running; `vsync` is
+All but `vsync` and `composition` are read as the device opens, so they change nothing while running; those two are
 followed every frame, and every window presents the new way from the next.
 
 ## Behaviour

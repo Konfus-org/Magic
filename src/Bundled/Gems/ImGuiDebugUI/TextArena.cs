@@ -15,7 +15,20 @@ internal sealed unsafe class TextArena : IDisposable
     private int _block = -1;
     private int _used;
 
-    /// <summary>The text as a C string, good until <see cref="Reset"/>.</summary>
+    public void Dispose()
+    {
+        foreach ((nint start, _) in _blocks)
+        {
+            NativeMemory.Free((void*)start);
+        }
+
+        _blocks.Clear();
+        Reset();
+    }
+
+    /// <summary>
+    /// The text as a C string, good until <see cref="Reset"/>.
+    /// </summary>
     public byte* Of(string text)
     {
         int most = Encoding.UTF8.GetMaxByteCount(text.Length) + 1;
@@ -45,21 +58,12 @@ internal sealed unsafe class TextArena : IDisposable
         return at;
     }
 
-    /// <summary>Lets every string go, for the next frame's; the blocks stay for it.</summary>
+    /// <summary>
+    /// Lets every string go, for the next frame's; the blocks stay for it.
+    /// </summary>
     public void Reset()
     {
         _block = -1;
         _used = 0;
-    }
-
-    public void Dispose()
-    {
-        foreach ((nint start, _) in _blocks)
-        {
-            NativeMemory.Free((void*)start);
-        }
-
-        _blocks.Clear();
-        Reset();
     }
 }

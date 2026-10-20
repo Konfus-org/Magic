@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
-using System.Linq;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
@@ -161,7 +160,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
     /// <summary>
     /// Whether <paramref name="meter"/> is <paramref name="prefix"/> or under it: "Magic" takes "Magic.Core" and
-    /// "Magic.Gems.ClusterRendering", not "Magical".
+    /// "Magic.Gems.&lt;Gem&gt;", not "Magical".
     /// </summary>
     private static bool IsUnder(string meter, string prefix)
     {
@@ -217,7 +216,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     {
         string meter = instrument.Meter.Name;
         int order = 0;
-        foreach ((string tab, string prefix) in settings.Tabs)
+        foreach ((string tab, string prefix) in _tabsListened)
         {
             if (IsUnder(meter, prefix))
             {
@@ -374,7 +373,8 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
         private static Summary SummaryOf(Instrument instrument)
         {
-            Type kind = instrument.GetType().IsGenericType ? instrument.GetType().GetGenericTypeDefinition() : instrument.GetType();
+            Type type = instrument.GetType();
+            Type kind = type.IsGenericType ? type.GetGenericTypeDefinition() : type;
             if (kind == typeof(Histogram<>))
             {
                 return Summary.Distribution;
@@ -399,7 +399,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         {
             string meter = instrument.Meter.Name;
             string name = instrument.Name;
-            string own = string.Join('.', meter.Split('.').Select(JsonNamingPolicy.SnakeCaseLower.ConvertName)) + ".";
+            string own = string.Join('.', Array.ConvertAll(meter.Split('.'), JsonNamingPolicy.SnakeCaseLower.ConvertName)) + ".";
             string rest = name.StartsWith(own, StringComparison.Ordinal) ? name[own.Length..] : name[(name.IndexOf('.', StringComparison.Ordinal) + 1)..];
             int dot = rest.IndexOf('.', StringComparison.Ordinal);
             string area = dot < 0 ? rest : rest[..dot];

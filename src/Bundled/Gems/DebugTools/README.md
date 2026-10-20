@@ -46,15 +46,15 @@ In the project's `Presets/Default.preset`, by another preset, or `--set DebugToo
 
 - Laid out as the instruments are named, as an exporter shows them: a tab per entry of `tabs`, in their order, holding
   the meters under its prefix, and in it a header per meter and area, which a click folds away: the meter past the
-  prefix, so `ClusterRendering` in the `Magic.Gems` tab and nothing in `Magic.Core`, then the area, the part of a name
-  after its meter's. So `magic.core.frame.duration` is `duration` under `frame`, `magic.gems.sdl_gpu.upload.size` is
-  `size` under `SdlGpu upload`, and .NET's `dotnet.gc.collections`, not named after its meter, loses its first part to
-  be `collections` under `gc`; a name with nothing after its area is its own area. Under each header is a table of
-  rows, a column each for the name, the value, how many or how much a second, and the most, so the numbers line up
-  and the slow row is found by eye; a column is resized by dragging its edge. Resting the mouse on a row shows what
-  its instrument measures.
+  prefix, so a gem's name in the `Magic.Gems` tab and nothing in `Magic.Core`, then the area, the part of a name
+  after its meter's. So `magic.core.frame.duration` is `duration` under `frame`, a GPU provider's
+  `magic.gems.<gem>.upload.size` is `size` under `<Gem> upload`, and .NET's `dotnet.gc.collections`, not named after
+  its meter, loses its first part to be `collections` under `gc`; a name with nothing after its area is its own area.
+  Under each header is a table of rows, a column each for the name, the value, how many or how much a second, and the
+  most, so the numbers line up and the slow row is found by eye; a column is resized by dragging its edge. Resting the
+  mouse on a row shows what its instrument measures.
 - An instrument measured over the last second without tags is one row; with tags, a row of its name, then one per
-  set of tags, showing their values: `hook.duration` under `gem`, then `Ecs Update`. The rows keep the order the
+  set of tags, showing their values: `hook.duration` under `gem`, then a gem and its hook. The rows keep the order the
   instruments were made in, and a series the order it was first measured in, so they stay put from one second to the
   next.
 - A histogram's row is its mean, how many a second and its most, so `magic.core.frame.duration` is the frame time,

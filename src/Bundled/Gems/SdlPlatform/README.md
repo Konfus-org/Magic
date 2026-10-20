@@ -1,7 +1,7 @@
 # SdlPlatform
 
-The window and input, through SDL3, called through its generated API ([Gems](../README.md#native-libraries)), which the SDL bindings gem provides:
-provides `IWindow` and `IInput`.
+The window and input, through SDL3, called through its generated API ([Gems](../README.md#native-libraries)), which the
+SDL bindings gem provides. Provides `IWindow` and `IInput`.
 
 ## Settings
 

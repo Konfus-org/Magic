@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using Magic.Contexts.Settings;
+using Magic.Attributes;
 using Magic.Interfaces;
 
 namespace Magic.SdlGpu;

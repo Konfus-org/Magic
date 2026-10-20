@@ -6,15 +6,21 @@ namespace Magic.SdlPlatform;
 
 /// <summary>
 /// The window SdlPlatform opens, and how it reads the mouse and gamepads. Set in the project's
-/// <c>Presets/Default.preset</c>, by another preset, or with <c>--set SdlPlatform.Width=...</c>. Sizes are in screen
+/// <c>Presets/Default.preset</c>, by another preset, or with <c>--set SdlPlatform.width=...</c>. Sizes are in screen
 /// points, which are pixels at 100% display scaling. Changed while running, the window is resized; dragging the window
 /// changes it and leaves them as they were. The input settings take from the next frame.
 /// </summary>
 [Category("Window")]
 internal sealed class SdlPlatformSettings : ISettings
 {
+    /// <summary>
+    /// The window's width, in screen points (pixels at 100% display scaling).
+    /// </summary>
     public int Width { get; set; } = 1280;
 
+    /// <summary>
+    /// The window's height, in screen points.
+    /// </summary>
     public int Height { get; set; } = 720;
 
     /// <summary>

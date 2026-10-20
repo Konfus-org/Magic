@@ -23,7 +23,7 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
 
     public void Update()
     {
-        bool isOpen = window.Begin(scrollable: true, out bool copy);
+        bool isOpen = window.Begin(out bool copy);
         _telemetry.Listen(isOpen);
         if (!isOpen)
         {

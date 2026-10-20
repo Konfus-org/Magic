@@ -1,12 +1,13 @@
+using System.Runtime.InteropServices;
 using Rectangle = System.Drawing.Rectangle;
 
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
-/// One frame of ImGui's drawing, copied on the main thread as the frame ends, for the render thread to draw a frame
+/// One frame of ImGui's drawing, copied at Sync while both threads hold still, for the render thread to draw a frame
 /// behind while ImGui makes the next: the vertices and indices of every draw list in one array each, the draws into
-/// them, and ImGui's textures as they are, each known by a number of the gem's own. The main thread copies only once
-/// the render thread is done with the last copy, as it always is by LateUpdate.
+/// them, and ImGui's textures as they are, each known by a number of the gem's own. At Sync the render thread is done
+/// with the last copy and has not begun on this one, so the copy is made in place rather than kept twice over.
 /// </summary>
 internal sealed unsafe class DrawLists
 {
@@ -25,7 +26,7 @@ internal sealed unsafe class DrawLists
 
     public ReadOnlySpan<ushort> Indices => _indices.AsSpan(0, _indexCount);
 
-    public IReadOnlyList<DrawCall> Calls => _calls;
+    public ReadOnlySpan<DrawCall> Calls => CollectionsMarshal.AsSpan(_calls);
 
     /// <summary>
     /// Every texture ImGui has, by its number, as it last was, each with the version of its pixels, which goes up as
@@ -125,15 +126,12 @@ internal sealed unsafe class DrawLists
             ImTextureData* texture = textures->Data[i];
             if (texture->Status == ImTextureStatus.WantCreate)
             {
-                uint id = _nextTexture++;
-                Known[id] = new TextureChange(id, texture->Width, texture->Height, Rgba(texture), _nextVersion++);
-                ImTextureData.SetTexID(texture, id);
-                ImTextureData.SetStatus(texture, ImTextureStatus.Ok);
+                ImTextureData.SetTexID(texture, _nextTexture++);
             }
-            else if (texture->Status == ImTextureStatus.WantUpdates)
+
+            if (texture->Status is ImTextureStatus.WantCreate or ImTextureStatus.WantUpdates)
             {
-                uint id = (uint)texture->TexID;
-                Known[id] = new TextureChange(id, texture->Width, texture->Height, Rgba(texture), _nextVersion++);
+                Known[(uint)texture->TexID] = new TextureChange(texture->Width, texture->Height, Rgba(texture), _nextVersion++);
                 ImTextureData.SetStatus(texture, ImTextureStatus.Ok);
             }
             else if (texture->Status == ImTextureStatus.WantDestroy && texture->UnusedFrames > 0)
@@ -156,4 +154,4 @@ internal readonly record struct DrawCall(uint Texture, Rectangle Clip, uint Indi
 /// A texture ImGui has: its RGBA8 <see cref="Pixels"/> whole, and their <see cref="Version"/>, which goes up each time
 /// ImGui changes them.
 /// </summary>
-internal readonly record struct TextureChange(uint Id, int Width, int Height, byte[] Pixels, uint Version);
+internal readonly record struct TextureChange(int Width, int Height, byte[] Pixels, uint Version);

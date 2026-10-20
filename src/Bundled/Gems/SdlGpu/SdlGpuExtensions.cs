@@ -5,11 +5,40 @@ using Magic.Contexts.Gpu;
 namespace Magic.SdlGpu;
 
 /// <summary>
-/// Magic's GPU types as SDL's, and the one way back: the format of the window's images.
+/// Magic's GPU types and this gem's settings as SDL's, and the one way back: the format of the window's images.
 /// </summary>
 [SuppressMessage("Style", "IDE0072:Add missing cases", Justification = "SDL has far more texture formats than Magic renders with; the rest are no format of Magic's.")]
 internal static class SdlGpuExtensions
 {
+    extension(GpuDriver driver)
+    {
+        /// <summary>
+        /// SDL's name for the driver, what it is asked for by name; empty for <see cref="GpuDriver.Auto"/>, its own
+        /// choice.
+        /// </summary>
+        public string ToSdl() => driver switch
+        {
+            GpuDriver.Vulkan => "vulkan",
+            GpuDriver.Direct3d12 => "direct3d12",
+            GpuDriver.Metal => "metal",
+            GpuDriver.Auto or _ => string.Empty,
+        };
+    }
+
+    extension(Composition composition)
+    {
+        /// <summary>
+        /// The composition as SDL names it, whether or not the window supports it.
+        /// </summary>
+        public SDL.GPUSwapchainComposition ToSdl() => composition switch
+        {
+            Composition.SdrLinear => SDL.GPUSwapchainComposition.SdrLinear,
+            Composition.Hdr10 => SDL.GPUSwapchainComposition.Hdr10St2084,
+            Composition.HdrLinear => SDL.GPUSwapchainComposition.HdrExtendedLinear,
+            Composition.Sdr or _ => SDL.GPUSwapchainComposition.Sdr,
+        };
+    }
+
     extension(GpuFormat format)
     {
         public SDL.GPUTextureFormat ToSdl() => format switch

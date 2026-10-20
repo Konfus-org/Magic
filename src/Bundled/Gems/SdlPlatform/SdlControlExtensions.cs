@@ -137,17 +137,6 @@ internal static class SdlControlExtensions
         };
     }
 
-    /// <summary>The control a mouse button event's button, SDL's button number, is.</summary>
-    public static Control? MouseControl(byte button) => button switch
-    {
-        SDL.ButtonLeft => Control.MouseLeft,
-        SDL.ButtonMiddle => Control.MouseMiddle,
-        SDL.ButtonRight => Control.MouseRight,
-        SDL.ButtonX1 => Control.MouseBack,
-        SDL.ButtonX2 => Control.MouseForward,
-        _ => null,
-    };
-
     extension(SDL.GamepadButton button)
     {
         public Control? Control => button switch
@@ -181,4 +170,17 @@ internal static class SdlControlExtensions
             _ => null,
         };
     }
+
+    /// <summary>
+    /// The control a mouse button event's button, SDL's button number, is.
+    /// </summary>
+    public static Control? MouseControl(byte button) => button switch
+    {
+        SDL.ButtonLeft => Control.MouseLeft,
+        SDL.ButtonMiddle => Control.MouseMiddle,
+        SDL.ButtonRight => Control.MouseRight,
+        SDL.ButtonX1 => Control.MouseBack,
+        SDL.ButtonX2 => Control.MouseForward,
+        _ => null,
+    };
 }

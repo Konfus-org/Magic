@@ -81,7 +81,7 @@ internal sealed class ConsoleWindow : IDisposable
 
     public void Update()
     {
-        if (!_window.Begin(scrollable: true, out bool copy))
+        if (!_window.Begin(out bool copy))
         {
             return;
         }

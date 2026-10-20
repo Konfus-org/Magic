@@ -22,7 +22,7 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
     /// True while it is open: draw what is in it, then End; <paramref name="copy"/> whether Copy was clicked in its
     /// menu, so the window puts what it shows on the clipboard.
     /// </summary>
-    public bool Begin(bool scrollable, out bool copy)
+    public bool Begin(out bool copy)
     {
         if (input?[key].WasPressed == true)
         {
@@ -35,7 +35,7 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
             return false;
         }
 
-        ui.Begin(_title, ref _isOpen, scrollable);
+        ui.Begin(_title, ref _isOpen, scrollable: true);
         copy = ui.MenuItem("Copy");
         return true;
     }

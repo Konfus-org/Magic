@@ -91,7 +91,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
         Follow();
 
         GpuPipeline pipeline = PipelineFor(context.Format);
-        if (_lists.Calls.Count == 0 || context.Area.IsEmpty || pipeline == GpuPipeline.None)
+        if (_lists.Calls.Length == 0 || context.Area.IsEmpty || pipeline == GpuPipeline.None)
         {
             return;
         }
@@ -180,20 +180,6 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     }
 
     /// <summary>
-    /// The fragment stage's constant block, laid out as <c>Overlay.frag.hlsl</c>'s <c>cbuffer Overlay</c>: the
-    /// target's <see cref="TargetEncoding"/>, which the shader encodes ImGui's sRGB colours for, padded to one 16-byte
-    /// row.
-    /// </summary>
-    [StructLayout(LayoutKind.Sequential)]
-    private readonly struct ImGuiConstants(uint encoding)
-    {
-        public readonly uint Encoding = encoding;
-        public readonly uint Pad0;
-        public readonly uint Pad1;
-        public readonly uint Pad2;
-    }
-
-    /// <summary>
     /// The pipeline for <paramref name="format"/>, made the first time; none until the shaders are compiled, and for
     /// good once one does not compile, which is logged.
     /// </summary>
@@ -221,8 +207,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
             Debugging.Error($"The debug UI is not drawn: {made.Error}");
         }
 
-        _pipelines[format] = made.Ok ? made.Value : GpuPipeline.None;
-        return _pipelines[format];
+        return _pipelines[format] = made.Ok ? made.Value : GpuPipeline.None;
     }
 
     private async Task CompileAsync(IShaderCompiler compiler, Threads threads, CancellationToken stopping)
@@ -230,5 +215,19 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
         Result<GpuShader> vertex = await compiler.CompileAsync(VertexShader, GpuStage.Vertex, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
         Result<GpuShader> fragment = await compiler.CompileAsync(FragmentShader, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
         threads.Post(EngineThread.Render, () => _shaders = (vertex, fragment));
+    }
+
+    /// <summary>
+    /// The fragment stage's constant block, laid out as <c>Overlay.frag.hlsl</c>'s <c>cbuffer Overlay</c>: the
+    /// target's <see cref="TargetEncoding"/>, which the shader encodes ImGui's sRGB colours for, padded to one 16-byte
+    /// row.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly struct ImGuiConstants(uint encoding)
+    {
+        public readonly uint Encoding = encoding;
+        public readonly uint Pad0;
+        public readonly uint Pad1;
+        public readonly uint Pad2;
     }
 }
