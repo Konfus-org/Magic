@@ -24,7 +24,9 @@ string(REGEX REPLACE ".*-" "" MAGIC_ARCH "${MAGIC_RID}")
 #               [FETCH_ONLY] [SHALLOW_SUBMODULES])
 # The library is configured and installed unless TARGET names the one target to build instead, or FETCH_ONLY says it
 # is fetched for its source alone. The shared library is found by its name under built/ then build/, or at LIBRARY,
-# relative to source/, where an archive holds several. SOURCE builds from a CMake folder of this repository's own. A
+# relative to source/, where an archive holds several. SOURCE builds from a CMake folder of this repository's own,
+# copied first to project/ in the library's folder: the build folder is shared by every checkout on the machine, and
+# CMake ties a build folder to one source path, so that path must be the shared folder's, never a checkout's. A
 # repository's submodules come with it, and theirs in turn unless SHALLOW_SUBMODULES stops there.
 function(magic_library name)
   cmake_parse_arguments(ARG "FETCH_ONLY;SHALLOW_SUBMODULES" "TARGET;LIBRARY;SOURCE" "GIT;URL;OPTIONS;DEPENDS" ${ARGN})
@@ -43,7 +45,8 @@ function(magic_library name)
     set(fetch URL "${url}" URL_HASH "SHA256=${sha256}")
   endif()
   if(ARG_SOURCE)
-    set(fetch SOURCE_DIR "${ARG_SOURCE}")
+    file(COPY "${ARG_SOURCE}/" DESTINATION "${folder}/project")
+    set(fetch SOURCE_DIR "${folder}/project")
   else()
     list(APPEND fetch SOURCE_DIR "${folder}/source")
   endif()
@@ -69,7 +72,7 @@ function(magic_library name)
     ExternalProject_Add_Step(${name} take
       COMMENT "Taking ${file} from ${name}"
       COMMAND ${CMAKE_COMMAND} "-DFOLDER=${folder}" "-DFILE=${file}" "-DPATH=${ARG_LIBRARY}" -P "${CMAKE_CURRENT_SOURCE_DIR}/take.cmake"
-      DEPENDEES install)
+      DEPENDEES install DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/take.cmake")
   endif()
 endfunction()
 

@@ -1,7 +1,8 @@
 # The last step of a library's build (CMakeLists.txt): finds the shared library it made and copies it to
 # built/native/, the one place the gem's build takes it from. The file is at PATH under source/ where the library came
 # as an archive holding several, else found by name under built/ (what was installed) then build/ (a target built
-# alone). Run as cmake -P with FOLDER, FILE and PATH.
+# alone). On Linux and macOS the plain name is a link to the versioned file, so the link is followed and the file
+# itself copied under the plain name. Run as cmake -P with FOLDER, FILE and PATH.
 if(PATH)
   set(found "${FOLDER}/source/${PATH}")
   if(NOT EXISTS "${found}")
@@ -15,4 +16,6 @@ else()
   endif()
   list(GET candidates 0 found)
 endif()
-file(COPY "${found}" DESTINATION "${FOLDER}/built/native")
+file(REAL_PATH "${found}" real)
+file(MAKE_DIRECTORY "${FOLDER}/built/native")
+file(COPY_FILE "${real}" "${FOLDER}/built/native/${FILE}")

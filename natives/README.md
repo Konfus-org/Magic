@@ -12,7 +12,9 @@ changes a file here and no gem.
   (`Magic/NativeLibs/` under it) unless the variable says otherwise, shared by every checkout and worktree, since a
   library built once serves them all. Under it each library has `source/` (what was fetched), `build/` (CMake's
   working folder), `built/` (what it installed) and `built/native/<file>`, the one shared library the build copies
-  beside each gem that binds it. The superbuild's own working folder is the checkout's `Build/natives/`.
+  beside each gem that binds it, followed through the links Linux and macOS install it as. A library built from a
+  CMake folder of this repository's own is copied to `project/` first, since CMake ties a build folder to one source
+  path and that path must not be a checkout's. The superbuild's own working folder is the checkout's `Build/natives/`.
 - **Pinned, then fetched or downloaded.** A library is fetched from its repository at a tag, shallow and with its
   submodules, or downloaded as the release archive its author publishes, whose SHA-256 is pinned beside the URL. A
   published build serves where one exists for the platform, the source build everywhere else, as the shader compiler
