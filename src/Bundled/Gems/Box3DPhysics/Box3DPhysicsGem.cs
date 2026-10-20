@@ -11,6 +11,7 @@ using Magic.Contexts.Queries;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -611,7 +612,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         while (true)
         {
-            _kick.Wait();
+            // Not the run's stopping token: the thread ends through Stop() alone, after the last step is waited for
+            // and before the world is destroyed. Were it to leave on the token, a kick between the run starting to end
+            // and Stop() would reset the step event with no thread left to set it, and WaitForStep would wait forever.
+            _kick.Wait(CancellationToken.None);
             if (_isEnding)
             {
                 return;
