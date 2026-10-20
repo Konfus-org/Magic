@@ -49,7 +49,7 @@ Scale the process to the size of the change.
 
 | Size | What counts | Process |
 | --- | --- | --- |
-| Small | One file, roughly 20 lines or fewer, no public API change, no new dependency | Make the change, validate, show the diff |
+| Small | One file, roughly 20 lines or fewer, no public API change, no new dependency | In a worktree, make the change, validate, show the diff |
 | Normal | Anything larger | Proposal first, in plan mode; no edits until the user approves |
 | Sweeping | Multi-file architectural or data-flow changes | Proposal with before/after snippets and a data-flow diagram |
 
@@ -74,15 +74,16 @@ For normal and sweeping changes, present:
 
 ### Implement
 
-Work in your own worktree (see [Worktrees](#worktrees)). State assumptions and any decision a reviewer would want
-to question as you make it.
+Make your worktree before the first edit (see [Worktrees](#worktrees)), even when the task began as a check, a
+validation run or a question that turned up something to fix. State assumptions and any decision a reviewer would
+want to question as you make it.
 
 ### Finish
 
 1. Run `tools/Validate.ps1`. A failing test is fixed at its cause, never loosened, skipped or deleted.
 2. For any visual or rendering change, run `tools/Screenshot.ps1` and look at the image.
-3. Summarize what changed and why, what you assumed, and anything you could not verify. Include the full diff;
-   inside your worktree, `git diff` shows only your changes.
+3. Summarize what changed and why, what you assumed, and anything you could not verify. Open the diff for review
+   and include it in full; inside your worktree, `git diff` shows only your changes.
 4. Wait for the user to reply "approved". Address feedback and repeat until they do.
 5. As soon as the user approves, ask whether to commit and merge now; don't wait for them to bring it up. On a
    yes, follow [Worktrees](#worktrees). On a no, leave the worktree and branch in place and say that they are
@@ -124,8 +125,11 @@ to question as you make it.
 
 ### Worktrees
 
-Each task runs in its own worktree, so concurrent agents never see each other's uncommitted changes. A worktree
-lives only as long as its task.
+Each task runs in its own worktree, so concurrent agents never see each other's uncommitted changes, and the main
+checkout's branch moves only by a fast-forward of finished work. The order is fixed: the worktree first, on a branch
+with a clear name; then the work; then the merge back; then the worktree and branch go. Nothing is edited in the
+main checkout, not even a one-line fix, and nothing is committed on its branch directly. A worktree lives only as
+long as its task.
 
 - **Name:** `<type>/<feature>`, kebab-case, describing the change in a few words, for example
   `fix/material-cache-leak` or `feature/shader-hot-reload`. Types: `feature`, `fix`, `refactor`, `docs`, `test`,
