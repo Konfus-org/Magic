@@ -511,19 +511,12 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             Keep(entity, script, Start(entity, script, values));
         }
 
-        if (_pending.Count > 0)
+        // Values given for an entity that is gone are dropped; those for a script held back above stay for its start.
+        foreach ((Entity Entity, Handle<Script> Script) waiting in _pending.Keys)
         {
-            foreach ((Entity Entity, Handle<Script> Script) waiting in _pending.Keys)
+            if (!_ecs.IsAlive(waiting.Entity))
             {
-                if (!_ecs.IsAlive(waiting.Entity))
-                {
-                    _starting.Add(waiting);
-                }
-            }
-
-            foreach ((Entity Entity, Handle<Script> Script) dead in _starting)
-            {
-                _pending.Remove(dead);
+                _pending.Remove(waiting);
             }
         }
     }
