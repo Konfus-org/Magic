@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Magic.Contexts.Assets;
@@ -39,7 +38,7 @@ namespace Magic.Services;
 /// <see cref="Attributes.ImpatientAttribute">[Impatient]</see>.
 /// </para>
 /// <para>
-/// The whole world can be saved as data (<see cref="SaveAsync"/>) and put back from it (<see cref="RestoreAsync"/>): the
+/// The whole world can be saved as data (<see cref="SaveAsync"/>) and put back from it (<see cref="Restore"/>): the
 /// domains open, every entity with its components and its scripts as they are. The engine does so across a restart
 /// (<see cref="Lifetime.Restart"/>), so the world goes on as it was.
 /// </para>
@@ -59,12 +58,6 @@ public sealed class World : IDisposable
     /// provides the ECS, as no domain opens then.
     /// </summary>
     private readonly Domains? _domains;
-
-    /// <summary>
-    /// What <see cref="RestoreAsync"/> is putting back, until it has: what a save meanwhile hands on, as none of it is
-    /// in the world yet. Written on workers and the main thread.
-    /// </summary>
-    private volatile WorldState? _restoring;
 
     internal World(IEcs? ecs, IScripts? scripts, Assemblies assemblies, Assets assets, Threads threads, Events events, Project project, Lifetime lifetime)
     {
@@ -130,28 +123,20 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
-    /// The world as data (<see cref="WorldState"/>), to put back with <see cref="RestoreAsync"/>: the domains open,
-    /// every entity with its components and its scripts (<see cref="IScripts.Save"/>), and <paramref name="seconds"/>,
-    /// the frame clock. It is taken on the main thread in one go, so it is the world as of one moment: now, on the main
-    /// thread, else when the main thread next runs what it is handed; each entity's components copied out and its
-    /// scripts' values read. The components are then written as JSON on a worker, which tells
-    /// <paramref name="progress"/> how far it is, 0 to 1. The loading domain's entities are left out, as it is shown
-    /// again as a domain opens anew. A component JSON cannot hold is an error, logged once per type, and left out.
-    /// While a restore is still coming (<see cref="RestoreAsync"/>), what it will put back is what is saved, as none of
-    /// it is in the world yet. Any thread. Without a gem that provides the ECS, an empty one.
+    /// The world as data (<see cref="WorldState"/>), to put back with <see cref="Restore"/>: the domains open, and every
+    /// entity with its components and its scripts (<see cref="IScripts.Save"/>). It is taken on the main thread in one
+    /// go, so it is the world as of one moment: now, on the main thread, else when the main thread next runs what it is
+    /// handed; each entity's components copied out and its scripts' values read. The components are then written as
+    /// JSON on a worker, which tells <paramref name="progress"/> how far it is, 0 to 1. The loading domain's entities
+    /// are left out, as it is shown again as a domain opens anew. A component JSON cannot hold is an error, logged once
+    /// per type, and left out. Any thread. Without a gem that provides the ECS, an empty one.
     /// </summary>
-    public async Task<WorldState> SaveAsync(double seconds, IProgress<float>? progress = null, CancellationToken cancel = default)
+    public async Task<WorldState> SaveAsync(IProgress<float>? progress = null, CancellationToken cancel = default)
     {
-        if (_restoring is { } pending)
-        {
-            progress?.Report(1);
-            return pending with { Seconds = seconds };
-        }
-
         if (_ecs is null || _domains is null)
         {
             progress?.Report(1);
-            return new WorldState { Seconds = seconds, Domains = [], Entities = [] };
+            return new WorldState { Domains = [], Entities = [] };
         }
 
         IEcs ecs = _ecs;
@@ -160,7 +145,7 @@ public sealed class World : IDisposable
             ? Take(ecs, domains)
             : await _threads.InvokeAsync(EngineThread.Main, () => Take(ecs, domains), cancel).ConfigureAwait(false);
         List<EntityState> entities = await Task.Run(() => Write(taken.Entities, progress, cancel), cancel).ConfigureAwait(false);
-        return new WorldState { Seconds = seconds, Domains = taken.Domains, Entities = entities };
+        return new WorldState { Domains = taken.Domains, Entities = entities };
     }
 
     /// <summary>
@@ -181,11 +166,7 @@ public sealed class World : IDisposable
                     continue;
                 }
 
-                if (ecs.Has<Scripts>(entity))
-                {
-                    _scripts?.Save(entity, scripts);
-                }
-
+                _scripts?.Save(entity, scripts);
                 entities.Add(new Saving(entity.Id, ecs.Components(entity), scripts.Count == 0 ? [] : [.. scripts]));
                 scripts.Clear();
             }
@@ -229,17 +210,19 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
-    /// Puts the world back as <paramref name="state"/> holds it (<see cref="SaveAsync"/>), in place of whatever is open,
-    /// all in one frame: every entity, made anew with its components and its scripts put back
-    /// (<see cref="IScripts.Restore"/>), not started, and each domain with the entities its prefabs spawned, so closing
-    /// one and a prefab read again still find them. What a domain opens with is read on workers first, as when it
-    /// opens, so a prefab added to its folder since is spawned and one gone has its entities destroyed, and the models
-    /// its prefabs draw are held as they would be; no player is put, as the one saved is among the entities. A domain
-    /// that had spawned nothing, as one still opening, opens again from the start. A component or a script no code
-    /// loaded declares, or whose saved values no longer fit it, is an error, and the entity goes without it. Any thread;
-    /// without a gem that provides the ECS, nothing is restored, which is warned about.
+    /// Puts the world back as <paramref name="state"/> holds it (<see cref="SaveAsync"/>), in place of whatever is open:
+    /// closes what is open, makes every entity empty first, so that whichever is made earlier, a reference to one in a
+    /// component or a script maps to it, then gives each its components and its scripts, put back as they were and not
+    /// started (<see cref="IScripts.Restore"/>), and opens each domain again around the entities its prefabs had
+    /// spawned, so closing one and a prefab read again still find them. Each domain's folder is read on workers after,
+    /// as when it opens, so a prefab added since is spawned and one gone has its entities destroyed, and the models its
+    /// prefabs draw are held as they would be; until then they come in as anything spawned at run time does. No player
+    /// is put, as the one saved is among the entities. A domain that had spawned nothing, as one still opening, opens
+    /// again from the start. A component or a script no code loaded declares, or whose saved values no longer fit it,
+    /// is an error, and the entity goes without it. Main thread; without a gem that provides the ECS, nothing is
+    /// restored, which is warned about.
     /// </summary>
-    public async Task RestoreAsync(WorldState state, CancellationToken cancel = default)
+    public void Restore(WorldState state)
     {
         if (_domains is null)
         {
@@ -247,19 +230,47 @@ public sealed class World : IDisposable
             return;
         }
 
-        _restoring = state;
-        Domains domains = _domains;
-        List<Domains.Restoring> restoring = await domains.ReadAsync(state.Domains, cancel).ConfigureAwait(false);
-        Dictionary<Handle<Script>, Script> scripts = [];
-        foreach (EntityState entity in state.Entities)
+        _domains.CloseAll();
+        Dictionary<int, Entity> made = new(state.Entities.Count);
+        foreach (EntityState saved in state.Entities)
         {
-            foreach (ScriptState script in entity.Scripts)
-            {
-                await LoadScriptAsync(script.Script, scripts, cancel).ConfigureAwait(false);
-            }
+            made[saved.Id] = Ecs().Create();
         }
 
-        await _threads.InvokeAsync(EngineThread.Main, () => Restore(state, domains, restoring, scripts), cancel).ConfigureAwait(false);
+        EntityJsonConverter.Remap = made;
+        try
+        {
+            HashSet<string> failed = new(StringComparer.Ordinal);
+            List<IComponent> components = [];
+            foreach (EntityState saved in state.Entities)
+            {
+                components.Clear();
+                foreach (ComponentState entry in saved.Components)
+                {
+                    if (ComponentOf(entry, failed) is { } component)
+                    {
+                        components.Add(component);
+                    }
+                }
+
+                Ecs().Set(made[saved.Id], CollectionsMarshal.AsSpan(components));
+            }
+
+            foreach (EntityState saved in state.Entities)
+            {
+                foreach (ScriptState script in saved.Scripts)
+                {
+                    _scripts?.Restore(made[saved.Id], script);
+                }
+            }
+        }
+        finally
+        {
+            EntityJsonConverter.Remap = null;
+        }
+
+        _domains.Restore(state.Domains, made);
+        Debugging.Info($"Restored the world: {state.Entities.Count} entities in {state.Domains.Count} domains.");
     }
 
     /// <summary>
@@ -522,28 +533,6 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
-    /// Loads <paramref name="script"/> into <paramref name="into"/> unless it is there; one that does not load is an
-    /// error, and what it declared is left off the entities it was on.
-    /// </summary>
-    private async Task LoadScriptAsync(Handle<Script> script, Dictionary<Handle<Script>, Script> into, CancellationToken cancel)
-    {
-        if (into.ContainsKey(script))
-        {
-            return;
-        }
-
-        Result<Script> loaded = await _assets.LoadAsync(script, cancel).ConfigureAwait(false);
-        if (loaded.Ok)
-        {
-            into[script] = loaded.Value;
-        }
-        else
-        {
-            Debugging.Error($"{NameOf(script)} is left off the entities it was on: {loaded.Error}");
-        }
-    }
-
-    /// <summary>
     /// A saved component read back as the type its name names (<see cref="Assemblies.Get{T}"/>); null, and an error logged once
     /// per name in <paramref name="failed"/>, when no code loaded declares it or its values no longer fit it.
     /// </summary>
@@ -562,71 +551,6 @@ public sealed class World : IDisposable
         }
 
         return null;
-    }
-
-    private string NameOf(Handle<Script> script)
-    {
-        return _assets.Path(script) ?? script.Id.ToString(CultureInfo.InvariantCulture);
-    }
-
-    /// <summary>
-    /// Puts the world back from <paramref name="state"/> (<see cref="RestoreAsync"/>), its domains' files and prefabs
-    /// read: closes what is open, makes every entity empty first, so that whichever is made earlier, a reference to one
-    /// in a component or a script maps to it, then gives each its components, places the domains, and puts the scripts
-    /// back once every entity is whole. A domain read anew opens as <see cref="OpenAsync"/> opens one, in its turn.
-    /// </summary>
-    private void Restore(WorldState state, Domains domains, List<Domains.Restoring> restoring, Dictionary<Handle<Script>, Script> scripts)
-    {
-        domains.CloseAll();
-
-        Dictionary<int, Entity> made = new(state.Entities.Count);
-        foreach (EntityState saved in state.Entities)
-        {
-            made[saved.Id] = Ecs().Create();
-        }
-
-        EntityJsonConverter.Remap = made;
-        try
-        {
-            HashSet<string> failed = new(StringComparer.Ordinal);
-            List<IComponent> components = [];
-            foreach (EntityState saved in state.Entities)
-            {
-                components.Clear();
-                foreach (ComponentState entry in saved.Components)
-                {
-                    if (ComponentOf(entry, failed) is { } component)
-                    {
-                        components.Add(component);
-                    }
-                }
-
-                Ecs().Set(made[saved.Id], CollectionsMarshal.AsSpan(components));
-            }
-
-            domains.Restore(restoring, made);
-
-            foreach (EntityState saved in state.Entities)
-            {
-                foreach (ScriptState script in saved.Scripts)
-                {
-                    if (scripts.TryGetValue(script.Script, out Script? loaded))
-                    {
-                        _scripts?.Restore(made[saved.Id], loaded, script);
-                    }
-                }
-            }
-        }
-        finally
-        {
-            EntityJsonConverter.Remap = null;
-            if (_restoring == state)
-            {
-                _restoring = null;
-            }
-        }
-
-        Debugging.Info($"Restored the world: {state.Entities.Count} entities in {restoring.Count} domains.");
     }
 
     /// <summary>

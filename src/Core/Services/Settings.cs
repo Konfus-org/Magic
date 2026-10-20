@@ -38,6 +38,7 @@ public sealed class Settings : IDisposable
     private const string DefaultPreset = "Default";
 
     private readonly Assets _assets;
+    private readonly Args _args;
     private readonly SettingsDocs _docs;
     private readonly Handle<Preset> _default;
     private readonly JsonObject _commandLine;
@@ -76,6 +77,7 @@ public sealed class Settings : IDisposable
     internal Settings(Assets assets, IFileSystem files, Events events, Project project, Args args, Lifetime lifetime)
     {
         _assets = assets;
+        _args = args;
         _lifetime = lifetime;
         _docs = new SettingsDocs(files);
         _default = assets.Find<Preset>($"{PresetFolder}/{DefaultPreset}{Contexts.Assets.Preset.Extensions[0]}");
@@ -330,21 +332,21 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
-    /// The command line that runs the engine again with every setting as it is now: <paramref name="args"/> with the
-    /// preset applied, and what was set while running as <c>--set</c> lines after its own, so each still wins.
+    /// The command line that runs the engine again with every setting as it is now: the one this run was given, with
+    /// the preset applied, and what was set while running as <c>--set</c> lines after its own, so each still wins.
     /// </summary>
-    internal Args RestartArgs(Args args)
+    internal Args RestartArgs()
     {
         lock (_lock)
         {
-            List<string> lines = [.. args.Settings];
+            List<string> lines = [.. _args.Settings];
             foreach ((string key, JsonNode? value) in _layers.Live)
             {
                 lines.Add($"{key}={value?.ToJsonString() ?? "null"}");
             }
 
             string preset = Preset == _default ? string.Empty : Path.GetFileNameWithoutExtension(NameOf(Preset));
-            return new Args { ProjectPath = args.ProjectPath, FrameLimit = args.FrameLimit, Headless = args.Headless, Settings = lines, Preset = preset };
+            return new Args { ProjectPath = _args.ProjectPath, FrameLimit = _args.FrameLimit, Headless = _args.Headless, Settings = lines, Preset = preset };
         }
     }
 

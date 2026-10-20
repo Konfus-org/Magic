@@ -41,8 +41,6 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private readonly List<Open> _domains = [];
 
-    private readonly List<Handle<Domain>> _opened = [];
-
     /// <summary>
     /// The loading domain while it is shown.
     /// </summary>
@@ -75,7 +73,19 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// The open domains, in the order they were opened, those still loading among them; never the loading domain.
     /// </summary>
-    public IReadOnlyList<Handle<Domain>> Opened => _opened;
+    public IReadOnlyList<Handle<Domain>> Opened
+    {
+        get
+        {
+            List<Handle<Domain>> opened = new(_domains.Count);
+            foreach (Open open in _domains)
+            {
+                opened.Add(open.Handle);
+            }
+
+            return opened;
+        }
+    }
 
     /// <summary>
     /// Whether a domain is opening in place of the world (<see cref="DomainOpenMode.Replace"/>): from when the open
@@ -98,7 +108,7 @@ internal sealed class Domains : IDisposable
             return Result.Failure<Domain>($"The domain does not open: {file.Error}");
         }
 
-        Open open = new(domain, _assets.Path(domain) ?? "A domain", file.Value, mode, isLoadingDomain: false);
+        Open open = new(domain, _assets.Path(domain) ?? "A domain", file.Value, mode, isLoadingDomain: false, isReplacing: mode == DomainOpenMode.Replace);
         Open? already = await _threads.InvokeAsync(EngineThread.Main, () => Begin(open), cancel).ConfigureAwait(false);
         return already is not null ? Result.Success(already.Domain) : await ArriveAsync(open, progress, cancel).ConfigureAwait(false);
     }
@@ -167,52 +177,30 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Each of the saved domains <paramref name="saved"/> read for <see cref="Restore"/>: its file loaded, and the
-    /// prefabs of its folder read on workers as when it opens, so a prefab added since spawns and one gone has its
-    /// entities destroyed; one that had spawned nothing is not read, and opens again from the start. A domain whose
-    /// file does not load is an error, and is left out. Any thread.
+    /// Puts the saved domains <paramref name="saved"/> back, once every entity of the saved world is made,
+    /// <paramref name="made"/> by its saved id: each opens again around the entities its prefabs had spawned and its
+    /// player, its folder read on workers as when it opens, so a prefab added since is spawned, one gone has its
+    /// entities destroyed, and the models its prefabs draw are held as they would be. The world is not replaced: no
+    /// loading domain is shown, and no player is put. One that had spawned nothing, as one still opening, opens again
+    /// from the start. A domain whose file does not load is an error, and is left out.
     /// </summary>
-    public async Task<List<Restoring>> ReadAsync(IReadOnlyList<DomainState> saved, CancellationToken cancel)
+    public void Restore(IReadOnlyList<DomainState> saved, Dictionary<int, Entity> made)
     {
-        List<Restoring> domains = [];
         foreach (DomainState state in saved)
         {
-            Result<Domain> file = await _assets.LoadAsync(state.Domain, cancel).ConfigureAwait(false);
-            if (!file.Ok)
+            if (state.Prefabs.Count == 0 && state.Player.Count == 0)
             {
-                Debugging.Error($"{_assets.Path(state.Domain) ?? "A domain"} is not restored: {file.Error}");
+                RestoreAsync(state, null, null).FireAndForget();
                 continue;
             }
 
-            Open open = new(state.Domain, _assets.Path(state.Domain) ?? "A domain", file.Value, state.Mode, isLoadingDomain: false);
-            bool isAnew = state.Prefabs.Count == 0 && state.Player.Count == 0;
-            domains.Add(new Restoring(state, open, isAnew ? null : await ReadAsync(open, null, cancel).ConfigureAwait(false)));
-        }
-
-        return domains;
-    }
-
-    /// <summary>
-    /// Puts the saved domains <paramref name="domains"/> back, read first
-    /// (<see cref="ReadAsync(IReadOnlyList{DomainState}, CancellationToken)"/>), once every entity of the saved world
-    /// is made, <paramref name="made"/> by its saved id: each with the entities its prefabs had spawned, or opening
-    /// anew as <see cref="OpenAsync"/> opens one, in its turn.
-    /// </summary>
-    public void Restore(List<Restoring> domains, Dictionary<int, Entity> made)
-    {
-        foreach ((DomainState saved, Open open, Read? read) in domains)
-        {
-            if (read is null)
+            Dictionary<Handle<Prefab>, Entity[]> kept = new(state.Prefabs.Count);
+            foreach ((Handle<Prefab> file, IReadOnlyList<int> ids) in state.Prefabs)
             {
-                if (Begin(open) is null)
-                {
-                    ArriveAsync(open, null, _lifetime.Stopping).FireAndForget();
-                }
+                kept[file] = EntitiesOf(ids, made);
             }
-            else
-            {
-                Place(saved, open, read, made);
-            }
+
+            RestoreAsync(state, kept, state.Player.Count > 0 ? EntitiesOf(state.Player, made) : null).FireAndForget();
         }
     }
 
@@ -266,7 +254,7 @@ internal sealed class Domains : IDisposable
     private Open? Begin(Open open)
     {
         Open? already = _domains.Find(other => other.Handle == open.Handle);
-        if (open.Mode == DomainOpenMode.Replace)
+        if (open.IsReplacing)
         {
             for (int i = _domains.Count - 1; i >= 0; i--)
             {
@@ -282,14 +270,13 @@ internal sealed class Domains : IDisposable
             return already;
         }
 
-        if (open.Mode == DomainOpenMode.Replace && _replacing++ == 0)
+        if (open.IsReplacing && _replacing++ == 0)
         {
             _events.Publish(new WorldLoading(true));
             ShowLoading();
         }
 
         _domains.Add(open);
-        _opened.Add(open.Handle);
         return null;
     }
 
@@ -332,7 +319,7 @@ internal sealed class Domains : IDisposable
 
         Result<Prefab>[] prefabs = await Task.WhenAll(reading).ConfigureAwait(false);
         Prefab? player = null;
-        if (open.Mode == DomainOpenMode.Replace && !open.IsLoadingDomain && _project.Player != Handle<Prefab>.None)
+        if (open.IsReplacing && _project.Player != Handle<Prefab>.None)
         {
             Result<Prefab> loaded = await _assets.LoadAsync(_project.Player, cancel).ConfigureAwait(false);
             if (loaded.Ok)
@@ -466,8 +453,10 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// What <paramref name="open"/> spawns is read: spawned now, all of it as one spawn, the player at its spawn,
-    /// unless it was closed meanwhile; a domain that replaces the world takes the loading domain's place in this frame.
+    /// What <paramref name="open"/> spawns is read: spawned now, all of it as one spawn, but what a domain put back
+    /// kept (<see cref="Reopen"/>), which only takes its prefab as it is now; the player at its spawn when it replaces
+    /// the world; unless it was closed meanwhile. A domain that replaces the world takes the loading domain's place in
+    /// this frame.
     /// </summary>
     private Result<Domain> Arrive(Open open, Read read)
     {
@@ -482,11 +471,23 @@ internal sealed class Domains : IDisposable
         for (int i = 0; i < read.Placements.Count; i++)
         {
             Placement placement = read.Placements[i];
-            Placed placed = new(placement);
-            open.Prefabs[placement.File] = placed;
+            if (!open.Prefabs.TryGetValue(placement.File, out Placed? placed))
+            {
+                placed = new Placed(placement);
+                open.Prefabs[placement.File] = placed;
+            }
+
             if (read.Prefabs[i] is { Ok: true, Value: { } prefab })
             {
-                Show(placed, prefab);
+                if (placed.Entities is null)
+                {
+                    Show(placed, prefab);
+                }
+                else
+                {
+                    placed.Prefab = prefab;
+                }
+
                 entities += placed.Entities?.Length ?? 0;
             }
             else
@@ -507,7 +508,7 @@ internal sealed class Domains : IDisposable
             Debugging.Info($"Opened {open.Name}: {entities} entities in {open.Prefabs.Count} prefabs.");
         }
 
-        if (open.Mode == DomainOpenMode.Replace && !open.IsLoadingDomain)
+        if (open.IsReplacing)
         {
             Replaced();
         }
@@ -582,55 +583,64 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Opens <paramref name="open"/> as the saved <paramref name="saved"/> had it, its prefabs <paramref name="read"/>:
-    /// each prefab of its folder with the entities made for the ones it had spawned, or spawned now when it had none,
-    /// as one added since; the entities of a prefab gone since are destroyed.
+    /// Puts the saved domain <paramref name="saved"/> back (<see cref="Restore"/>): its file loaded, it opens around
+    /// <paramref name="kept"/>, the entities made for the ones each of its prefabs had spawned, by file, and
+    /// <paramref name="player"/>, the player's, then is read and arrives as a domain opening does. One that had
+    /// spawned nothing, <paramref name="kept"/> null, opens again from the start.
     /// </summary>
-    private void Place(DomainState saved, Open open, Read read, Dictionary<int, Entity> made)
+    private async Task RestoreAsync(DomainState saved, Dictionary<Handle<Prefab>, Entity[]>? kept, Entity[]? player)
+    {
+        Result<Domain> file = await _assets.LoadAsync(saved.Domain, _lifetime.Stopping).ConfigureAwait(false);
+        if (!file.Ok)
+        {
+            Debugging.Error($"{_assets.Path(saved.Domain) ?? "A domain"} is not restored: {file.Error}");
+            return;
+        }
+
+        Open open = new(saved.Domain, _assets.Path(saved.Domain) ?? "A domain", file.Value, saved.Mode, isLoadingDomain: false, isReplacing: kept is null && saved.Mode == DomainOpenMode.Replace);
+        bool isOpening = await _threads.InvokeAsync(EngineThread.Main, () =>
+        {
+            if (kept is null)
+            {
+                return Begin(open) is null;
+            }
+
+            Reopen(open, kept, player);
+            return true;
+        }, _lifetime.Stopping).ConfigureAwait(false);
+
+        if (isOpening)
+        {
+            await ArriveAsync(open, null, _lifetime.Stopping).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Opens <paramref name="open"/> around what it had spawned when the world was saved: <paramref name="kept"/>, the
+    /// entities made for each of its prefabs', by file, and <paramref name="player"/>, the player's. Each prefab now in
+    /// its folder takes its entities; one with none, added since, is read and spawned as the domain arrives; the
+    /// entities of a prefab gone since are destroyed. Nothing closes and no loading domain is shown: the world is not
+    /// replaced.
+    /// </summary>
+    private void Reopen(Open open, Dictionary<Handle<Prefab>, Entity[]> kept, Entity[]? player)
     {
         _domains.Add(open);
-        _opened.Add(open.Handle);
-        open.Holds = read.Holds;
-        int entities = 0;
-        for (int i = 0; i < read.Placements.Count; i++)
+        open.Player = player;
+        foreach (Placement placement in PlacementsOf(open))
         {
-            Placement placement = read.Placements[i];
             Placed placed = new(placement);
+            if (kept.Remove(placement.File, out Entity[]? entities))
+            {
+                placed.Entities = entities;
+            }
+
             open.Prefabs[placement.File] = placed;
-            Result<Prefab> prefab = read.Prefabs[i];
-            if (saved.Prefabs.TryGetValue(placement.File, out IReadOnlyList<int>? ids))
-            {
-                placed.Prefab = prefab.Ok ? prefab.Value : null;
-                placed.Entities = EntitiesOf(ids, made);
-            }
-            else if (prefab.Ok)
-            {
-                Show(placed, prefab.Value);
-            }
-            else
-            {
-                Debugging.Error($"{_assets.Path(placement.File) ?? "A prefab"} of {open.Name} is left out: {prefab.Error}");
-            }
-
-            entities += placed.Entities?.Length ?? 0;
         }
 
-        foreach ((Handle<Prefab> file, IReadOnlyList<int> ids) in saved.Prefabs)
+        foreach (Entity[] gone in kept.Values)
         {
-            if (!open.Prefabs.ContainsKey(file))
-            {
-                Destroy(EntitiesOf(ids, made));
-            }
+            Destroy(gone);
         }
-
-        open.Models = read.Models;
-        if (saved.Player.Count > 0)
-        {
-            open.Player = EntitiesOf(saved.Player, made);
-        }
-
-        open.IsThere = true;
-        Debugging.Info($"Restored {open.Name}: {entities} entities in {open.Prefabs.Count} prefabs.");
     }
 
     /// <summary>
@@ -651,7 +661,6 @@ internal sealed class Domains : IDisposable
         else
         {
             _domains.Remove(open);
-            _opened.Remove(open.Handle);
         }
 
         foreach (Placed placed in open.Prefabs.Values)
@@ -663,7 +672,7 @@ internal sealed class Domains : IDisposable
         open.Models = [];
         open.Holds.Dispose();
         Destroy(open.Player);
-        if (!open.IsThere && open.Mode == DomainOpenMode.Replace && !open.IsLoadingDomain)
+        if (!open.IsThere && open.IsReplacing)
         {
             Replaced();
         }
@@ -695,7 +704,7 @@ internal sealed class Domains : IDisposable
             return;
         }
 
-        Open loading = new(handle, _assets.Path(handle) ?? "The loading domain", file.Value, DomainOpenMode.Additive, isLoadingDomain: true);
+        Open loading = new(handle, _assets.Path(handle) ?? "The loading domain", file.Value, DomainOpenMode.Additive, isLoadingDomain: true, isReplacing: false);
         bool isShown = await _threads.InvokeAsync(EngineThread.Main, () =>
         {
             if (!IsLoading || _loading is not null)
@@ -881,7 +890,7 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// A domain open in the world, or opening.
     /// </summary>
-    internal sealed class Open(Handle<Domain> handle, string name, Domain domain, DomainOpenMode mode, bool isLoadingDomain)
+    internal sealed class Open(Handle<Domain> handle, string name, Domain domain, DomainOpenMode mode, bool isLoadingDomain, bool isReplacing)
     {
         public Handle<Domain> Handle { get; } = handle;
 
@@ -901,6 +910,13 @@ internal sealed class Domains : IDisposable
         /// It is the loading domain, which is never among the domains open.
         /// </summary>
         public bool IsLoadingDomain { get; } = isLoadingDomain;
+
+        /// <summary>
+        /// It replaces the world: the open domains close as it begins, the loading domain shows until it is there, and
+        /// the player is put at its spawn. Never the loading domain, nor a domain put back from a saved world, whose
+        /// player is among the entities put back.
+        /// </summary>
+        public bool IsReplacing { get; } = isReplacing;
 
         /// <summary>
         /// Everything it spawns is spawned.
@@ -929,7 +945,7 @@ internal sealed class Domains : IDisposable
         public SubscriptionList Holds { get; set; } = new();
 
         /// <summary>
-        /// The project's player, when it replaced the world.
+        /// The project's player, when it replaced the world, or the one kept as it was put back.
         /// </summary>
         public Entity[]? Player { get; set; }
     }
@@ -945,12 +961,6 @@ internal sealed class Domains : IDisposable
 
         public Entity[]? Entities { get; set; }
     }
-
-    /// <summary>
-    /// A saved domain being put back (<see cref="Restore"/>): as it was saved, opening, and its prefabs read, or null
-    /// for one that had spawned nothing, which opens again from the start.
-    /// </summary>
-    internal sealed record Restoring(DomainState Saved, Open Open, Read? Read);
 
     /// <summary>
     /// One gem's share of the second half of a domain's progress, the gems taking in what it spawns: each report sets

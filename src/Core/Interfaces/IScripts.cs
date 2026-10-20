@@ -43,11 +43,12 @@ public interface IScripts
     void Save(Entity entity, ICollection<ScriptState> into);
 
     /// <summary>
-    /// Puts the script <paramref name="script"/> declares back on <paramref name="entity"/> as <paramref name="state"/> saved it
-    /// (<see cref="Save"/>): made for the entity as <see cref="Attach"/> makes one, its values and fields set back, and
-    /// run until the entity is destroyed, but not started, as it is as it was. A value its class no longer has, or
-    /// that no longer fits, is warned about and left. One that cannot be made is an error, and the entity goes without
-    /// it. Main thread.
+    /// Puts the script <paramref name="state"/> names back on <paramref name="entity"/> as it saved it (<see cref="Save"/>):
+    /// its class found in the code loaded now, as reading its file finds it, a copy made for the entity as
+    /// <see cref="Attach"/> makes one, its values and fields set back, and run until the entity is destroyed, but not
+    /// started, as it is as it was. A value its class no longer has, or that no longer fits, is warned about and left.
+    /// One whose class is not found, or that cannot be made, is an error, and the entity goes without it. Main thread,
+    /// in the frame the world is put back.
     /// </summary>
-    void Restore(Entity entity, Script script, ScriptState state);
+    void Restore(Entity entity, ScriptState state);
 }

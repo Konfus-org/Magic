@@ -310,10 +310,10 @@ throws saying so, and `End` still works.
 | `Spawn`, `SpawnAsync` | Puts an asset in the world at a transform, as the asset says (`ISpawnable`), and hands back the entities made, the caller's to destroy: a `Prefab` its parts, each placed under its parent, a `Model` one entity that draws it. `SpawnAsync` loads it first. |
 | `Attach` | Gives an entity its own copy of a script ([Scripts](#scripts)). |
 | `OpenAsync`, `Close`, `Opened`, `IsLoading` | The domains open in it (below). |
-| `SaveAsync`, `RestoreAsync` | The world as data (`WorldState`), and the world put back from it (below). |
+| `SaveAsync`, `Restore` | The world as data (`WorldState`), and the world put back from it (below). |
 | `End` | Ends the game: the frames stop, and the gems end. |
 
-It is the main thread's, but `OpenAsync`, `SpawnAsync`, `SaveAsync` and `RestoreAsync`, which any thread may call. It
+It is the main thread's, but `OpenAsync`, `SpawnAsync` and `SaveAsync`, which any thread may call. It
 does nothing each frame: opening a domain reads on workers and spawns on the main thread, and what changes on disk
 is told on [`Events`](#events).
 
@@ -346,19 +346,21 @@ there at once.
   player has done is the game's.
 
 `SaveAsync` writes the whole world as data, a `WorldState`: the domains open, with the entities each of their prefabs
-spawned, every entity with its components as JSON by their types' names and its scripts by their assets with their
-values as JSON ([Scripts](#scripts)), and the frame clock. It takes the world in one frame on the main thread, each
-entity's components copied out and its scripts' values read, so the save is of one moment, then writes the JSON on a
-worker, reporting its progress. It holds nothing of the code that made it, so it outlives the run, and
-restores into whatever code is loaded then, as a file read would. `RestoreAsync` puts the world back from one, in
-place of whatever is open, all in one frame: it reads each domain's folder on workers first, as opening one does, so a
-prefab added since spawns and one gone has its entities destroyed, then makes every entity anew, gives each its
-components, and puts its scripts back without starting them. An `Entity` is saved as its id and read back as the
-entity made for it, so what refers to another entity, in a component or a script, still does; the id of one destroyed
-before the save reads as none. The engine saves the world as a run ends to restart (`Lifetime.Restart`) and restores
-it on the first frame of the next, so the game goes on where it was, the frames going on from the saved clock. A
-component no code loaded declares, a script whose asset does not load, or one whose saved values no longer fit it,
-is an error, and the entity goes without it.
+spawned, and every entity with its components as JSON by their types' names and its scripts by their assets with their
+values as JSON ([Scripts](#scripts)). It takes the world in one frame on the main thread, each entity's components
+copied out and its scripts' values read, so the save is of one moment, then writes the JSON on a worker, reporting its
+progress. It holds nothing of the code that made it, so it outlives the run, and restores into whatever code is loaded
+then, as a file read would. `Restore` puts the world back from one on the main thread, in the frame it is called: it
+closes what is open, makes every entity anew, gives each its components and puts its scripts back without starting
+them, their classes found in the code loaded now, and opens each domain again around the entities its prefabs had
+spawned, so closing one and a prefab read again still find them. Each domain's folder is then read on workers as
+opening one does, so a prefab added since spawns and one gone has its entities destroyed, and the models its prefabs
+draw are held; until then they come in as anything spawned at run time does. An `Entity` is saved as its id and read
+back as the entity made for it, so what refers to another entity, in a component or a script, still does; the id of
+one destroyed before the save reads as none. The engine saves the world as a run ends to restart (`Lifetime.Restart`)
+and restores it before the first frame of the next, so the game goes on where it was, the frames going on from the
+saved clock. A component no code loaded declares, a script whose class is not found, or one whose saved values no
+longer fit it, is an error, and the entity goes without it.
 
 ## Events
 

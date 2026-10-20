@@ -4,7 +4,6 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.CmdLine;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Subscriptions;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -49,10 +48,10 @@ public static class Engine
         }
 
         Project project = opened.Value;
-        (Args Args, WorldState? State)? next = (args, null);
+        (Args Args, WorldState? State, double Seconds)? next = (args, null, 0);
         while (next is { } run)
         {
-            next = RunOnce(files, project, run.Args, run.State);
+            next = RunOnce(files, project, run.Args, run.State, run.Seconds);
         }
 
         return true;
@@ -60,12 +59,12 @@ public static class Engine
 
     /// <summary>
     /// Runs <paramref name="project"/> once, until the run ends, going on from <paramref name="state"/>, the world as
-    /// the run before left it, when there is one: what to run it again with at once when the run restarts
-    /// (<see cref="Lifetime.Restart"/>), the command line with every setting as it is now and the world as it is, else
-    /// null.
+    /// the run before left it, and <paramref name="seconds"/>, its frame clock, when there is one: what to run it
+    /// again with at once when the run restarts (<see cref="Lifetime.Restart"/>), the command line with every setting
+    /// as it is now, the world as it is and its frame clock, else null.
     /// </summary>
     [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "The saved world is waited for once the run's threads have both ended: its main-thread part ran before they did, and the rest is written on a worker, which needs neither, so the wait cannot deadlock.")]
-    private static (Args Args, WorldState? State)? RunOnce(FileSystem files, Project project, Args args, WorldState? state)
+    private static (Args Args, WorldState? State, double Seconds)? RunOnce(FileSystem files, Project project, Args args, WorldState? state, double seconds)
     {
         using Lifetime lifetime = new();
         using Threads threads = new(lifetime);
@@ -100,15 +99,22 @@ public static class Engine
         world.Preloaders = preloaders;
         using Subscription codeBuilds = loader.WatchCode(container.GetRequiredService<Assets>());
 
-        // On the first frame, once every gem is made, so every gem's loaders are there to read the domain: the world
-        // as the run before left it, or the project's entry point.
-        threads.Post(EngineThread.Main, () => (state is null ? world.OpenEntryPointAsync() : world.RestoreAsync(state, lifetime.Stopping)).FireAndForget());
-
-        using FrameLoop frames = new(gems, lifetime, threads, events, settings, args.FrameLimit, state?.Seconds ?? 0);
-        (Args Args, Task<WorldState> Saving)? next = null;
+        using FrameLoop frames = new(gems, lifetime, threads, events, settings, args.FrameLimit, seconds);
+        (Args Args, Task<WorldState> Saving, double Seconds)? next = null;
         threads.Run(
             () =>
             {
+                // On the main thread before the first frame, once every gem is made, so every gem's loaders are there
+                // to read the domain: the world as the run before left it, else the project's entry point.
+                if (state is { } saved)
+                {
+                    world.Restore(saved);
+                }
+                else
+                {
+                    world.OpenEntryPointAsync().FireAndForget();
+                }
+
                 frames.Run();
 
                 // On the main thread, the world's, once the last frame is done: the save takes the world here and now,
@@ -118,7 +124,7 @@ public static class Engine
                 // save runs on no token.
                 if (lifetime.IsRestarting)
                 {
-                    next = (settings.RestartArgs(args), world.SaveAsync(frames.Seconds, null, CancellationToken.None));
+                    next = (settings.RestartArgs(), world.SaveAsync(null, CancellationToken.None), frames.Seconds);
                 }
             },
             () =>
@@ -130,7 +136,7 @@ public static class Engine
             });
 
         // Both engine threads have ended, so waiting here holds up no work of theirs.
-        return next is { } restart ? (restart.Args, restart.Saving.GetAwaiter().GetResult()) : null;
+        return next is { } restart ? (restart.Args, restart.Saving.GetAwaiter().GetResult(), restart.Seconds) : null;
     }
 
     /// <summary>

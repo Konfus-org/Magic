@@ -46,7 +46,7 @@ public sealed class Lifetime : IDisposable
 
     /// <summary>
     /// Ends the run to start it again at once, every setting as it is now and the world as it is, saved as the last
-    /// frame ends and put back on the first (<see cref="World.SaveAsync"/>, <see cref="World.RestoreAsync"/>), so the game
+    /// frame ends and put back on the first (<see cref="World.SaveAsync"/>, <see cref="World.Restore"/>), so the game
     /// goes on where it was: for a setting read only as the engine starts, or for whatever else wants the gems made
     /// again. Nothing, when the run is ending already.
     /// </summary>
