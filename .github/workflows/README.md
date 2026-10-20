@@ -22,7 +22,9 @@ Every workflow runs on a pull request into `dev` or `main` and on a push to eith
 asks to merge, and the merged result once more. Each can also be started by hand from the Actions tab, and Build runs
 on a weekly schedule as well, which keeps the caches alive (below). A newer push to the same pull request or branch
 cancels the run it supersedes; Build alone finishes on `main` regardless, where a release in progress is never cut
-short. Every job has a time limit, so a stuck step ends the job instead of holding a runner; the limits are generous
+short. On a push to `dev` or `main`, Build fails fast: the first OS to fail cancels the other two, since the push has
+one verdict and a runner's hour is not spent confirming it. A pull request's three builds run to the end, so its author
+sees every OS's result at once. Every job has a time limit, so a stuck step ends the job instead of holding a runner; the limits are generous
 for the jobs that may build the native libraries from source (below) and tight for the rest.
 
 The repository's rulesets, not a file here, are what make the checks required: `dev` and `main` require the Build job

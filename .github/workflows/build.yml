@@ -27,8 +27,10 @@ jobs:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 180
+    # A push to dev or main is one result, so the first OS to fail ends the others; a pull request's author wants
+    # every OS's verdict, and the weekly and manual runs are there to finish.
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name == 'push' }}
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     outputs:
