@@ -51,7 +51,7 @@ public static class Engine
         (Args Args, WorldState? State, double Seconds)? next = (args, null, 0);
         while (next is { } run)
         {
-            next = RunOnce(files, project, run.Args, run.State, run.Seconds);
+            next = Run(files, project, run.Args, run.State, run.Seconds);
         }
 
         return true;
@@ -64,7 +64,7 @@ public static class Engine
     /// as it is now, the world as it is and its frame clock, else null.
     /// </summary>
     [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "The saved world is waited for once the run's threads have both ended: its main-thread part ran before they did, and the rest is written on a worker, which needs neither, so the wait cannot deadlock.")]
-    private static (Args Args, WorldState? State, double Seconds)? RunOnce(FileSystem files, Project project, Args args, WorldState? state, double seconds)
+    private static (Args Args, WorldState? State, double Seconds)? Run(FileSystem files, Project project, Args args, WorldState? state, double seconds)
     {
         using Lifetime lifetime = new();
         using Threads threads = new(lifetime);
