@@ -12,32 +12,23 @@ internal sealed class RangeAllocator
     /// </summary>
     private readonly SortedList<int, int> _free = [];
 
-    public int End { get; private set; }
+    internal int End { get; private set; }
 
     /// <summary>
     /// The start of a run of <paramref name="count"/> rows.
     /// </summary>
-    public int Allocate(int count)
+    internal int Allocate(int count)
     {
-        if (count <= 0)
-        {
-            return 0;
-        }
+        if (count <= 0) return 0;
 
         for (int i = 0; i < _free.Count; i++)
         {
             int start = _free.Keys[i];
             int length = _free.Values[i];
-            if (length < count)
-            {
-                continue;
-            }
+            if (length < count) continue;
 
             _free.RemoveAt(i);
-            if (length > count)
-            {
-                _free.Add(start + count, length - count);
-            }
+            if (length > count) _free.Add(start + count, length - count);
 
             return start;
         }
@@ -50,12 +41,9 @@ internal sealed class RangeAllocator
     /// <summary>
     /// Gives back the run of <paramref name="count"/> rows at <paramref name="start"/>.
     /// </summary>
-    public void Free(int start, int count)
+    internal void Free(int start, int count)
     {
-        if (count <= 0)
-        {
-            return;
-        }
+        if (count <= 0) return;
 
         int index = 0;
         while (index < _free.Count && _free.Keys[index] < start)

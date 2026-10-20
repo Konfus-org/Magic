@@ -48,6 +48,11 @@ uses lives in that gem, internal; Core holds the types gems share. Tests see onl
 `InternalsVisibleTo`): nothing is public for their sake, a member only its own type uses is private, and what is not
 public is not tested ([Tests](tests/README.md)).
 
+The same holds member by member, from the bottom up: a member is private until another type in its project needs
+it, then internal, and public only on a public type's contract or to implement an interface. A member of an
+internal type is never public except where an interface it implements requires it, so `public` always means "part
+of a contract", and a reader can tell a type's surface from its workings at a glance.
+
 An interface exists so that a gem can be swapped (Core's contract between gems) or for what reaches outside the
 process (the disk, the GPU, a window); nothing gets one so that a test can fake it. No type wraps another that already
 does the job to forward to it: a layer whose members each call one member of the next is a layer with no reason.
@@ -284,13 +289,33 @@ A method should read from top to bottom:
 4. The result.
 5. Local functions last, after the final `return`.
 
-Separate these steps with a blank line. Long methods are fine as long as they read in order.
+Separate these steps with a blank line.
+
+A method is one step of its caller's story, small enough to take in at a glance. A long method that is a sequence
+of steps becomes those steps as methods, called in order from the original, so the original reads as its outline;
+each step gets a summary saying why, where that is not obvious. A table-shaped method (one `switch` over many cases)
+stays whole. A loop body nested three deep or more is an early `continue`, or a method named for the step.
+
+An `if` whose body is one short statement is one line, with no braces: `if (count == 0) return;`,
+`if (!TryGetResource(name, out resource)) continue;`. Anything longer, an `else`, and every loop (`for`, `foreach`,
+`while`) has braces on their own lines, however short the body, so that what repeats always reads as a block. The
+build requires braces around any multi-line body (`IDE0011`).
 
 ### Naming
 
 - Read a name as `Class.Member(arguments)`. If that says what happens or what is held, the name is good, however
   short: `Assets.Find<Texture>(path)`, `Caches.ReadAsync<GpuShader>(key, version)`, `Lifetime.Stop(reason)`. If it
   does not (a `Pump()` on a system, a `_scratch` buffer), name the object: what is pumped, what the buffer holds.
+- A method's prefix says what kind of thing it does. `Get` returns what the object holds or looks up and never
+  fails (`ClusterPool.GetRow(model)`, `Assets.GetPath(handle)`); `Is`, `Has` or `Can` returns a bool that answers a
+  question (`IsDrawable`, `HasPass`, `CanSee`); `Try` returns a bool that says whether it worked, with the result
+  in an `out` parameter, or a `Result` (`TryGetResource(scope, name, out resource)`, `TryRecordDraw(pass)`); and
+  the two combine as `TryGet` for a lookup that can fail. Other verbs say what else happens: `Make`, `Parse`,
+  `Format`, `Find` (which may find nothing, and says so with a `?`), `To` for a conversion. A method returning a
+  value is never a bare noun (`Amount`, `Shown`, `RowOf`): the verb is what tells the reader whether it computes,
+  looks up, converts or can fail. A static factory (`Result.Success`, `Tag.Of`), a fluent builder step
+  (`render.Viewport(area).Pipeline(pipeline)`), an immediate-mode widget whose bool means "used this frame"
+  (`IDebugUI.Button`) and a collection's `Add`/`Remove` keep .NET's own idioms.
 - A reusable buffer is named for its one purpose, and has only one.
 - No single-letter locals or lambda parameters, except loop counters, `x`/`y`/`z`, and the coefficients of a
   published formula. Established short words (`ctx`, `cls`, `sb`, `dt`, `ex`) stay.
@@ -347,7 +372,7 @@ on my machine": the other machines are the point.
 ### Paths
 
 - Never write a separator, split on one, or compare path prefixes as strings. Build a path with
-  `IFileSystem.Combine`, and take one apart with `IFileSystem.Parent`. `FileSystem` is the one place that knows what a
+  `IFileSystem.Combine`, and take one apart with `IFileSystem.GetParent`. `FileSystem` is the one place that knows what a
   separator is.
 - `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine: they know every OS's rules.
 - No drive letters, no absolute paths, no checking a string for `..`.
@@ -391,6 +416,6 @@ on my machine": the other machines are the point.
 
 - Drawing goes through `IGpu`: a gem makes GPU objects and records a frame's commands as plain data
   (`GpuCommands`), which the GPU provider turns into its API's calls. Backend-specific code lives only in that gem.
-- What is drawn into is a render target, a `GpuTexture`: a render texture, or a window's (`IGpu.WindowTarget`).
+- What is drawn into is a render target, a `GpuTexture`: a render texture, or a window's (`IGpu.GetWindowTarget`).
   Drawing code takes a target and asks its format and size; it never assumes a window.
 - A GPU feature is used only if Vulkan, D3D12 and Metal all have it.

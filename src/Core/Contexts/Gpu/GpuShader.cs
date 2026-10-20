@@ -27,29 +27,29 @@ public sealed record GpuShader
     /// <summary>
     /// Sampled textures, each with its sampler.
     /// </summary>
-    public uint Samplers => Past(GpuBindingKind.Sampled);
+    public uint Samplers => CountPast(GpuBindingKind.Sampled);
 
     /// <summary>
     /// Read-only storage textures.
     /// </summary>
-    public uint StorageTextures => Past(GpuBindingKind.StorageTexture) - Samplers;
+    public uint StorageTextures => CountPast(GpuBindingKind.StorageTexture) - Samplers;
 
     /// <summary>
     /// Read-only storage buffers.
     /// </summary>
-    public uint StorageBuffers => Past(GpuBindingKind.StorageBuffer) - Samplers - StorageTextures;
+    public uint StorageBuffers => CountPast(GpuBindingKind.StorageBuffer) - Samplers - StorageTextures;
 
-    public uint UniformBuffers => Past(GpuBindingKind.Uniform);
+    public uint UniformBuffers => CountPast(GpuBindingKind.Uniform);
 
     /// <summary>
     /// Compute only: storage textures it writes.
     /// </summary>
-    public uint ReadWriteStorageTextures => Past(GpuBindingKind.ReadWriteStorageTexture);
+    public uint ReadWriteStorageTextures => CountPast(GpuBindingKind.ReadWriteStorageTexture);
 
     /// <summary>
     /// Compute only: storage buffers it writes.
     /// </summary>
-    public uint ReadWriteStorageBuffers => Past(GpuBindingKind.ReadWriteStorageBuffer) - ReadWriteStorageTextures;
+    public uint ReadWriteStorageBuffers => CountPast(GpuBindingKind.ReadWriteStorageBuffer) - ReadWriteStorageTextures;
 
     /// <summary>
     /// Compute only: the threads of one group, from <c>[numthreads]</c>.
@@ -66,13 +66,13 @@ public sealed record GpuShader
     /// written buffers), so a kind's count is this less the counts of those before it, and a GPU binds every register
     /// up to it.
     /// </summary>
-    private uint Past(GpuBindingKind kind)
+    private uint CountPast(GpuBindingKind kind)
     {
         uint past = kind switch
         {
-            GpuBindingKind.StorageTexture => Past(GpuBindingKind.Sampled),
-            GpuBindingKind.StorageBuffer => Past(GpuBindingKind.StorageTexture),
-            GpuBindingKind.ReadWriteStorageBuffer => Past(GpuBindingKind.ReadWriteStorageTexture),
+            GpuBindingKind.StorageTexture => CountPast(GpuBindingKind.Sampled),
+            GpuBindingKind.StorageBuffer => CountPast(GpuBindingKind.StorageTexture),
+            GpuBindingKind.ReadWriteStorageBuffer => CountPast(GpuBindingKind.ReadWriteStorageTexture),
             GpuBindingKind.Sampled or GpuBindingKind.Uniform or GpuBindingKind.ReadWriteStorageTexture => 0,
             _ => 0,
         };

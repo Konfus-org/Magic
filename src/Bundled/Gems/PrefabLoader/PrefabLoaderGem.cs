@@ -42,10 +42,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         }
 
         Result<PrefabFile> read = Json.Read<PrefabFile>(bytes.Span);
-        if (!read.Ok)
-        {
-            return Result.Failure<Prefab>(read.Error);
-        }
+        if (!read.Ok) return Result.Failure<Prefab>(read.Error);
 
         Result<List<PrefabPart>> parts = await PartsOfAsync(read.Value.Entities, path, cancel).ConfigureAwait(false);
         return parts.Ok ? Result.Success(new Prefab { Parts = parts.Value }) : Result.Failure<Prefab>(parts.Error);
@@ -57,10 +54,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         foreach (PrefabFileEntity entity in entities)
         {
             Result<PrefabPart> part = await PartOfAsync(entity, path, cancel).ConfigureAwait(false);
-            if (!part.Ok)
-            {
-                return Result.Failure<List<PrefabPart>>(part.Error);
-            }
+            if (!part.Ok) return Result.Failure<List<PrefabPart>>(part.Error);
 
             parts.Add(part.Value);
         }
@@ -95,10 +89,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
             components.Add((IComponent)read.Value);
         }
 
-        if (TagsOf(entity, name, path) is { } tags)
-        {
-            components.Add(tags);
-        }
+        if (ParseTags(entity, name, path) is { } tags) components.Add(tags);
 
         List<PrefabScript> scripts = [];
         foreach (IReadOnlyDictionary<string, JsonElement> entry in entity.Scripts)
@@ -111,17 +102,14 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
             Result<PrefabScript> script = await ScriptAsync(handle, entry, cancel).ConfigureAwait(false);
             if (!script.Ok)
             {
-                Debugging.Error($"{path}'s {name} goes without script {_assets.Path(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture)}: {script.Error}");
+                Debugging.Error($"{path}'s {name} goes without script {_assets.GetPath(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture)}: {script.Error}");
                 continue;
             }
 
             scripts.Add(script.Value);
         }
 
-        if (ScriptsOf(scripts, name, path) is { } held)
-        {
-            components.Add(held);
-        }
+        if (ParseScripts(scripts, name, path) is { } held) components.Add(held);
 
         List<PrefabPart> children = [];
         if (entity.Prefab != Handle<Prefab>.None)
@@ -136,10 +124,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         }
 
         Result<List<PrefabPart>> under = await PartsOfAsync(entity.Children, path, cancel).ConfigureAwait(false);
-        if (!under.Ok)
-        {
-            return Result.Failure<PrefabPart>(under.Error);
-        }
+        if (!under.Ok) return Result.Failure<PrefabPart>(under.Error);
 
         children.AddRange(under.Value);
         return Result.Success(new PrefabPart { Name = entity.Name, Components = components, Scripts = scripts, Children = children });
@@ -153,10 +138,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     private async Task<Result<PrefabScript>> ScriptAsync(Handle<Script> handle, IReadOnlyDictionary<string, JsonElement> entry, CancellationToken cancel)
     {
         Result<Script> loaded = await _assets.LoadAsync(handle, cancel).ConfigureAwait(false);
-        if (!loaded.Ok)
-        {
-            return Result.Failure<PrefabScript>(loaded.Error);
-        }
+        if (!loaded.Ok) return Result.Failure<PrefabScript>(loaded.Error);
 
         Type type = loaded.Value.Type;
         if (!type.IsAssignableTo(typeof(IScript)))
@@ -167,12 +149,9 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         Dictionary<string, object?> values = new(StringComparer.Ordinal);
         foreach ((string key, JsonElement json) in entry)
         {
-            if (string.Equals(key, Id, StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (string.Equals(key, Id, StringComparison.Ordinal)) continue;
 
-            if (PropertyOf(type, key) is not { } property)
+            if (FindProperty(type, key) is not { } property)
             {
                 return Result.Failure<PrefabScript>($"it is given {key}, which it has no public property with a setter for.");
             }
@@ -194,12 +173,9 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     /// The entity's tags, or null when it has none. Past <see cref="Tags.Capacity"/>, and an empty name, are warned
     /// about and left out.
     /// </summary>
-    private static Tags? TagsOf(PrefabFileEntity entity, string name, string path)
+    private static Tags? ParseTags(PrefabFileEntity entity, string name, string path)
     {
-        if (entity.Tags.Count == 0)
-        {
-            return null;
-        }
+        if (entity.Tags.Count == 0) return null;
 
         Tags tags = default;
         foreach (string tag in entity.Tags)
@@ -218,12 +194,9 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     /// The entity's <see cref="Scripts"/>, naming each of its part's <paramref name="scripts"/>, or null when it has
     /// none. One named twice, or past <see cref="Scripts.Capacity"/>, is warned about and left out of the part.
     /// </summary>
-    private static Scripts? ScriptsOf(List<PrefabScript> scripts, string name, string path)
+    private static Scripts? ParseScripts(List<PrefabScript> scripts, string name, string path)
     {
-        if (scripts.Count == 0)
-        {
-            return null;
-        }
+        if (scripts.Count == 0) return null;
 
         Scripts held = default;
         for (int i = 0; i < scripts.Count; i++)
@@ -242,7 +215,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     /// <paramref name="type"/>'s public property with a setter that a file names <paramref name="key"/>, in Core's
     /// dialect; null when it has none.
     /// </summary>
-    private static PropertyInfo? PropertyOf(Type type, string key)
+    private static PropertyInfo? FindProperty(Type type, string key)
     {
         foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {

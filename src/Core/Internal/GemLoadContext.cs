@@ -34,12 +34,9 @@ internal sealed class GemLoadContext(string gemPath, IFileSystem files) : Assemb
     {
         lock (_loadingNative)
         {
-            if (_natives.TryGetValue(unmanagedDllName, out nint loaded))
-            {
-                return loaded;
-            }
+            if (_natives.TryGetValue(unmanagedDllName, out nint loaded)) return loaded;
 
-            if ((_resolver.ResolveUnmanagedDllToPath(unmanagedDllName) ?? Carried(unmanagedDllName)) is not { } path)
+            if ((_resolver.ResolveUnmanagedDllToPath(unmanagedDllName) ?? FindCarried(unmanagedDllName)) is not { } path)
             {
                 return 0;
             }
@@ -55,13 +52,10 @@ internal sealed class GemLoadContext(string gemPath, IFileSystem files) : Assemb
     /// The binary for this machine the gem carries under <c>runtimes/&lt;rid&gt;/native/</c>: the file named like
     /// the library, with or without the <c>lib</c> Unix puts in front. Null when the gem carries none.
     /// </summary>
-    private string? Carried(string name)
+    private string? FindCarried(string name)
     {
-        string folder = files.Combine(files.Parent(gemPath), "runtimes", RuntimeInformation.RuntimeIdentifier, "native");
-        if (!files.FolderExists(folder))
-        {
-            return null;
-        }
+        string folder = files.Combine(files.GetParent(gemPath), "runtimes", RuntimeInformation.RuntimeIdentifier, "native");
+        if (!files.FolderExists(folder)) return null;
 
         foreach (string file in files.Find(folder, ""))
         {

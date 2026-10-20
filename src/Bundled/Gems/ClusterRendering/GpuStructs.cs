@@ -16,117 +16,117 @@ internal struct FrameConstants
     /// Camera-relative: positions minus the camera's, through the view and a reverse-Z projection with no far plane,
     /// moved by <see cref="Jitter"/>.
     /// </summary>
-    public Matrix4x4 ViewProj;
+    internal Matrix4x4 ViewProj;
 
     /// <summary>
     /// The view's rotation alone, world to view.
     /// </summary>
-    public Matrix4x4 View;
+    internal Matrix4x4 View;
 
     /// <summary>
     /// Where the camera is, which every position a shader works with is relative to.
     /// </summary>
-    public Vector3 CameraPosition;
-    public float Time;
+    internal Vector3 CameraPosition;
+    internal float Time;
 
     /// <summary>
     /// The view's size in pixels as it is drawn, and one over it.
     /// </summary>
-    public Vector2 ViewSize;
-    public Vector2 ViewTexel;
+    internal Vector2 ViewSize;
+    internal Vector2 ViewTexel;
 
     /// <summary>
     /// The projection's x and y scales, which turn a view position into the screen and back.
     /// </summary>
-    public Vector2 ProjScale;
-    public float Near;
-    public float Far;
+    internal Vector2 ProjScale;
+    internal float Near;
+    internal float Far;
 
     /// <summary>
     /// The way the sun's light travels, and its disc's half-angle in radians.
     /// </summary>
-    public Vector3 SunDirection;
-    public float SunAngularRadius;
+    internal Vector3 SunDirection;
+    internal float SunAngularRadius;
 
     /// <summary>
     /// The sun's illuminance in lux, times its colour; zero with no sun.
     /// </summary>
-    public Vector3 SunIlluminance;
-    public uint LightCount;
+    internal Vector3 SunIlluminance;
+    internal uint LightCount;
 
-    public uint FrameIndex;
+    internal uint FrameIndex;
 
     /// <summary>
     /// Light tiles across the view, and the 32-bit words of lights each tile's mask holds.
     /// </summary>
-    public uint TileCountX;
-    public uint TileWords;
+    internal uint TileCountX;
+    internal uint TileWords;
 
     /// <summary>
     /// How the view's image is encoded as it is shown, a <see cref="Magic.Contexts.Gpu.TargetEncoding"/>: what the
     /// target's image expects, decided by its format.
     /// </summary>
-    public uint TargetEncoding;
+    internal uint TargetEncoding;
 
     /// <summary>
     /// A view depth's z-bin is <c>log2(depth) * ZBinScale + ZBinBias</c>, of <see cref="ZBinCount"/>.
     /// </summary>
-    public float ZBinScale;
-    public float ZBinBias;
-    public uint ZBinCount;
+    internal float ZBinScale;
+    internal float ZBinBias;
+    internal uint ZBinCount;
 
     /// <summary>
     /// The sky's material's row, which a sky draw of a surface loads its params from.
     /// </summary>
-    public uint SkyMaterial;
+    internal uint SkyMaterial;
 
-    public float DeltaSeconds;
+    internal float DeltaSeconds;
 
     /// <summary>
     /// Pixels a cluster's error may cover before a finer one is drawn.
     /// </summary>
-    public float ClusterError;
-    public Vector2 Padding;
+    internal float ClusterError;
+    internal Vector2 Padding;
 
     /// <summary>
     /// The last frame's <see cref="ViewProj"/> without its jitter.
     /// </summary>
-    public Matrix4x4 PrevViewProj;
+    internal Matrix4x4 PrevViewProj;
 
     /// <summary>
     /// The camera's position less the last frame's, in metres.
     /// </summary>
-    public Vector3 CameraMotion;
+    internal Vector3 CameraMotion;
 
     /// <summary>
     /// Pixels a metre covers a metre in front of the camera, along the view's height.
     /// </summary>
-    public float PixelScale;
+    internal float PixelScale;
 
     /// <summary>
     /// The player's camera relative to this view's, which detail is kept nearest to when there is too much.
     /// </summary>
-    public Vector3 PriorityPosition;
+    internal Vector3 PriorityPosition;
 
     /// <summary>
     /// What uv gradients are scaled by: below 1 while a temporal upscale resolves the finer texels it reads.
     /// </summary>
-    public float TextureMipScale;
+    internal float TextureMipScale;
 
     /// <summary>
     /// This frame's sub-pixel offset of <see cref="ViewProj"/>, in clip space.
     /// </summary>
-    public Vector2 Jitter;
+    internal Vector2 Jitter;
 
     /// <summary>
     /// The view's size in pixels as it is shown.
     /// </summary>
-    public Vector2 OutputSize;
+    internal Vector2 OutputSize;
 
     /// <summary>
     /// The pass's params, packed by its <see cref="ParamLayout"/>, in the first seven rows; its iteration in the last.
     /// </summary>
-    public PassWords Pass;
+    internal PassWords Pass;
 }
 
 /// <summary>
@@ -147,29 +147,29 @@ internal struct PassWords
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuSceneInstance
 {
-    public const uint NoMaterial = 0xFFFF;
+    internal const uint NoMaterial = 0xFFFF;
 
-    public Vector4 Row0;
-    public Vector4 Row1;
-    public Vector4 Row2;
-    public Vector4 PrevRow0;
-    public Vector4 PrevRow1;
-    public Vector4 PrevRow2;
-    public float MaxScale;
+    internal Vector4 Row0;
+    internal Vector4 Row1;
+    internal Vector4 Row2;
+    internal Vector4 PrevRow0;
+    internal Vector4 PrevRow1;
+    internal Vector4 PrevRow2;
+    internal float MaxScale;
 
     /// <summary>
     /// <see cref="GpuSceneFlags"/>.
     /// </summary>
-    public uint Flags;
+    internal uint Flags;
 
-    public uint Model;
+    internal uint Model;
 
     /// <summary>
     /// When its fade started, in the frame's <c>Time</c>, while <see cref="Flags"/> says it fades.
     /// </summary>
-    public float FadeStart;
+    internal float FadeStart;
 
-    public MaterialRows Materials;
+    internal MaterialRows Materials;
 }
 
 /// <summary>
@@ -208,25 +208,25 @@ internal enum GpuSceneFlags : uint
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuModel
 {
-    public Vector4 Bounds;
-    public uint FirstCluster;
-    public uint ClusterCount;
-    public uint FirstLevel;
-    public uint LevelCount;
-    public uint FirstCard;
-    public uint CardCount;
-    public float CardDistance;
-    public float PositionStep;
-    public uint Field;
+    internal Vector4 Bounds;
+    internal uint FirstCluster;
+    internal uint ClusterCount;
+    internal uint FirstLevel;
+    internal uint LevelCount;
+    internal uint FirstCard;
+    internal uint CardCount;
+    internal float CardDistance;
+    internal float PositionStep;
+    internal uint Field;
 
     /// <summary>
     /// How far from <see cref="Bounds"/>' middle, in the model's space, any cluster's error sphere or its parent's
     /// reaches: past the bounds, as each group's sphere encloses its clusters'. An instance picks the levels of clusters
     /// it hands on by how near and far this reaches, so it never passes over the level a cluster's own test wants.
     /// </summary>
-    public float ClusterReach;
-    public uint Padding0;
-    public uint Padding1;
+    internal float ClusterReach;
+    internal uint Padding0;
+    internal uint Padding1;
 }
 
 /// <summary>
@@ -236,36 +236,36 @@ internal struct GpuModel
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuLevel
 {
-    public uint FirstCluster;
-    public uint Count;
-    public float MinError;
-    public float MaxParentError;
+    internal uint FirstCluster;
+    internal uint Count;
+    internal float MinError;
+    internal float MaxParentError;
 }
 
 /// <summary>
 /// One cluster of a model (Core's <c>Cluster</c>): its sphere, its group's sphere and error and its parent's, where its
-/// vertices and triangles start in the geometry's words, its counts, packed by <see cref="CountsOf"/>, and its model's
+/// vertices and triangles start in the geometry's words, its counts, packed by <see cref="PackCounts"/>, and its model's
 /// grid step, which its vertices' positions are in.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuCluster
 {
-    public Vector4 Bounds;
-    public Vector4 ErrorBounds;
-    public Vector4 ParentErrorBounds;
-    public float Error;
-    public float ParentError;
-    public uint Vertices;
-    public uint Triangles;
-    public uint Counts;
-    public float Step;
-    public uint Padding0;
-    public uint Padding1;
+    internal Vector4 Bounds;
+    internal Vector4 ErrorBounds;
+    internal Vector4 ParentErrorBounds;
+    internal float Error;
+    internal float ParentError;
+    internal uint Vertices;
+    internal uint Triangles;
+    internal uint Counts;
+    internal float Step;
+    internal uint Padding0;
+    internal uint Padding1;
 
     /// <summary>
     /// Triangles in the low 8 bits, vertices in the next 9, the material slot in the 3 after, the level in the 5 after.
     /// </summary>
-    public static uint CountsOf(int triangles, int vertices, int slot, int level) => (uint)triangles | ((uint)vertices << 8) | ((uint)slot << 17) | ((uint)level << 20);
+    internal static uint PackCounts(int triangles, int vertices, int slot, int level) => (uint)triangles | ((uint)vertices << 8) | ((uint)slot << 17) | ((uint)level << 20);
 }
 
 /// <summary>
@@ -276,16 +276,16 @@ internal struct GpuCluster
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuCard
 {
-    public Vector3 Centre;
-    public float HalfWidth;
-    public float HalfHeight;
-    public float Turn;
-    public uint Slot;
-    public uint Surface;
-    public uint Normals;
-    public uint Padding0;
-    public uint Padding1;
-    public uint Padding2;
+    internal Vector3 Centre;
+    internal float HalfWidth;
+    internal float HalfHeight;
+    internal float Turn;
+    internal uint Slot;
+    internal uint Surface;
+    internal uint Normals;
+    internal uint Padding0;
+    internal uint Padding1;
+    internal uint Padding2;
 }
 
 /// <summary>
@@ -295,12 +295,12 @@ internal struct GpuCard
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuMeshField
 {
-    public Vector3 Min;
-    public float Padding0;
-    public Vector3 Size;
-    public float Padding1;
-    public Vector3 Corner;
-    public float Padding2;
+    internal Vector3 Min;
+    internal float Padding0;
+    internal Vector3 Size;
+    internal float Padding1;
+    internal Vector3 Corner;
+    internal float Padding2;
 }
 
 /// <summary>
@@ -309,8 +309,8 @@ internal struct GpuMeshField
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuMaterialGi
 {
-    public Vector4 Color;
-    public Vector4 Emission;
+    internal Vector4 Color;
+    internal Vector4 Emission;
 }
 
 /// <summary>
@@ -320,22 +320,22 @@ internal struct GpuMaterialGi
 [StructLayout(LayoutKind.Sequential, Size = GpuGiLevel.Bytes)]
 internal struct GpuGi
 {
-    public uint Levels;
-    public uint Rays;
+    internal uint Levels;
+    internal uint Rays;
 
     /// <summary>
     /// The frame's number: it turns the rays, so a probe's rays go a new way each time it is traced, and picks which of
     /// each level's probes are traced.
     /// </summary>
-    public uint Seed;
+    internal uint Seed;
 
-    public uint Padding0;
+    internal uint Padding0;
 
     /// <summary>
     /// Where the camera the levels are placed about is, from the world's origin: a place is lit by each level by how far
     /// from it it is, so where one level gives way to the next moves with the camera, never in a level's steps.
     /// </summary>
-    public Vector3 Camera;
+    internal Vector3 Camera;
 }
 
 /// <summary>
@@ -349,21 +349,21 @@ internal struct GpuGi
 [StructLayout(LayoutKind.Sequential, Size = Bytes)]
 internal struct GpuGiLevel
 {
-    public const int Bytes = 112;
+    internal const int Bytes = 112;
 
-    public int OriginX;
-    public int OriginY;
-    public int OriginZ;
-    public float Voxel;
-    public int DirtyMinX;
-    public int DirtyMinY;
-    public int DirtyMinZ;
-    public float Hysteresis;
-    public int DirtyMaxX;
-    public int DirtyMaxY;
-    public int DirtyMaxZ;
-    public uint Period;
-    public BrickMask Dirty;
+    internal int OriginX;
+    internal int OriginY;
+    internal int OriginZ;
+    internal float Voxel;
+    internal int DirtyMinX;
+    internal int DirtyMinY;
+    internal int DirtyMinZ;
+    internal float Hysteresis;
+    internal int DirtyMaxX;
+    internal int DirtyMaxY;
+    internal int DirtyMaxZ;
+    internal uint Period;
+    internal BrickMask Dirty;
 }
 
 /// <summary>
@@ -381,9 +381,9 @@ internal struct BrickMask
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuDrawArgs
 {
-    public uint IndexCount;
-    public uint InstanceCount;
-    public uint FirstIndex;
-    public int VertexOffset;
-    public uint FirstInstance;
+    internal uint IndexCount;
+    internal uint InstanceCount;
+    internal uint FirstIndex;
+    internal int VertexOffset;
+    internal uint FirstInstance;
 }

@@ -55,10 +55,7 @@ internal sealed class DebugToolsGem(DebugToolsSettings settings, IDebugUI ui, Se
     /// </summary>
     private void ShowFrameRate(in Frame frame)
     {
-        if (!settings.FrameRate)
-        {
-            return;
-        }
+        if (!settings.FrameRate) return;
 
         _frames++;
         _seconds += frame.DeltaSeconds;
@@ -69,9 +66,6 @@ internal sealed class DebugToolsGem(DebugToolsSettings settings, IDebugUI ui, Se
             _seconds = 0;
         }
 
-        if (_frameRate.Length > 0)
-        {
-            ui.Text(_frameRate);
-        }
+        if (_frameRate.Length > 0) ui.Text(_frameRate);
     }
 }

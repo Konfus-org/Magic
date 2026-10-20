@@ -16,7 +16,7 @@ public interface IFileSystem
     /// <summary>
     /// The folder <paramref name="path"/> is in.
     /// </summary>
-    string Parent(string path);
+    string GetParent(string path);
 
     bool FileExists(string path);
 

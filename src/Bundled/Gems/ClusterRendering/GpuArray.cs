@@ -36,7 +36,7 @@ internal sealed class GpuArray<T> : IDisposable
     private bool[] _isDirty;
     private bool _isAllDirty = true;
 
-    public GpuArray(IGpu gpu, GpuBufferUsage usage, int rows)
+    internal GpuArray(IGpu gpu, GpuBufferUsage usage, int rows)
     {
         _gpu = gpu;
         _usage = usage;
@@ -50,20 +50,20 @@ internal sealed class GpuArray<T> : IDisposable
         _gpu.Release(Buffer);
     }
 
-    public static int RowBytes => Unsafe.SizeOf<T>();
+    internal static int RowBytes => Unsafe.SizeOf<T>();
 
-    public GpuBuffer Buffer { get; private set; }
+    internal GpuBuffer Buffer { get; private set; }
 
-    public int Capacity => _rows.Length;
+    internal int Capacity => _rows.Length;
 
     /// <summary>
     /// The rows as last set.
     /// </summary>
-    public ReadOnlySpan<T> Rows => _rows;
+    internal ReadOnlySpan<T> Rows => _rows;
 
-    public uint Bytes => (uint)(_rows.Length * RowBytes);
+    internal uint Bytes => (uint)(_rows.Length * RowBytes);
 
-    public void Set(int row, in T value)
+    internal void Set(int row, in T value)
     {
         Grow(row + 1);
         _rows[row] = value;
@@ -74,7 +74,7 @@ internal sealed class GpuArray<T> : IDisposable
     /// Uploads the rows set since the last flush, a run of neighbours at a time; they reach the buffer at the start of
     /// the next submit.
     /// </summary>
-    public void Flush()
+    internal void Flush()
     {
         if (_isAllDirty)
         {
@@ -83,10 +83,7 @@ internal sealed class GpuArray<T> : IDisposable
             return;
         }
 
-        if (_dirty.Count == 0)
-        {
-            return;
-        }
+        if (_dirty.Count == 0) return;
 
         _dirty.Sort();
         int runs = 1;
@@ -118,12 +115,9 @@ internal sealed class GpuArray<T> : IDisposable
     /// <summary>
     /// Makes room for <paramref name="rows"/>: a new buffer, all of whose rows the next flush uploads.
     /// </summary>
-    public void Grow(int rows)
+    internal void Grow(int rows)
     {
-        if (rows <= _rows.Length)
-        {
-            return;
-        }
+        if (rows <= _rows.Length) return;
 
         int capacity = (int)BitOperations.RoundUpToPowerOf2((uint)rows);
         Array.Resize(ref _rows, capacity);

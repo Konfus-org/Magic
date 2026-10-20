@@ -28,10 +28,7 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
     /// </summary>
     public void Update(in Frame frame)
     {
-        if (ReferenceEquals(_off, settings.Off) && ReferenceEquals(_params, settings.Params))
-        {
-            return;
-        }
+        if (ReferenceEquals(_off, settings.Off) && ReferenceEquals(_params, settings.Params)) return;
 
         _off = settings.Off;
         _params = settings.Params;
@@ -44,11 +41,8 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
         foreach (PipelineEntry entry in asset.Entries)
         {
             bool isPass = entry.Pass != Handle<Pass>.None;
-            string name = Path.GetFileNameWithoutExtension((isPass ? assets.Path(entry.Pass) : assets.Path(entry.Pipeline)) ?? string.Empty);
-            if (IsOff(name))
-            {
-                continue;
-            }
+            string name = Path.GetFileNameWithoutExtension((isPass ? assets.GetPath(entry.Pass) : assets.GetPath(entry.Pipeline)) ?? string.Empty);
+            if (IsOff(name)) continue;
 
             if (isPass)
             {
@@ -98,10 +92,7 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
     {
         foreach (string off in settings.Off)
         {
-            if (string.Equals(off, name, StringComparison.Ordinal))
-            {
-                return true;
-            }
+            if (string.Equals(off, name, StringComparison.Ordinal)) return true;
         }
 
         return false;
@@ -109,10 +100,7 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
 
     private static void Add(Dictionary<string, MaterialParam> merged, IReadOnlyDictionary<string, MaterialParam>? layer)
     {
-        if (layer is null)
-        {
-            return;
-        }
+        if (layer is null) return;
 
         foreach ((string param, MaterialParam value) in layer)
         {

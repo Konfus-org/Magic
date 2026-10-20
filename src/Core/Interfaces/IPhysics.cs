@@ -26,5 +26,5 @@ public interface IPhysics
     /// <paramref name="center"/>, written into <paramref name="found"/> in no order, as many as fit: how many were
     /// written.
     /// </summary>
-    int Overlap(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All);
+    int FindOverlapping(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All);
 }

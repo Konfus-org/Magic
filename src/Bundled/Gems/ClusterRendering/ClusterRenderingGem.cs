@@ -1,4 +1,4 @@
-﻿using System.Diagnostics.Metrics;
+using System.Diagnostics.Metrics;
 using System.IO;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -269,62 +269,14 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         TakeArrived();
         _textures.FollowSettings();
         WorldCopy copy = _snapshot.Front;
-        CameraCopy? main = MainCamera(copy);
+        CameraCopy? main = GetMainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
-        _scene.Update(copy, (float)frame.Seconds, player ?? default);
-        _movedInstances.Add(_scene.Moved.Count);
-        _lights.Update(copy);
-        if (main is { } camera)
-        {
-            _shadows.Plan(camera.Transform.Position, copy.Sun?.Direction ?? -Vector3.UnitY, _lights.ChangedLights.Capacity, _scene.Moved.Count, frame.Index, _settings);
-        }
-
-        ReportFailures();
-        _textures.Flush();
-        _models.Flush();
-        _materials.Flush();
+        UpdateScene(copy, main, player, frame);
         DrawnMaterial? sky = copy.Sky is { } material && material != Handle<Material>.None ? _materials.Get(material) : null;
         SurfaceKey skySurface = sky is { } drawnSky ? drawnSky.Surface : default;
-        _raster.Clear();
-        _raster.AddRange(Materials.FixedRasterKeys);
-        _raster.AddRange(_materials.RasterBins);
-        _graph.Append(DebugViewPass(_debugView));
-        _graph.Update(PipelineOf(), EffectsOf(copy), OverlayOf(), new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
-        CheckPreloads(copy);
-        if (_graph.Current?.Runs("GiField") == true && main is { } eye)
-        {
-            _gi.Plan(eye.Transform.Position, _scene.Moved, frame.DeltaSeconds, _settings);
-            _giRays.Add(_gi.Rays);
-        }
-        else
-        {
-            _gi.Clear();
-        }
-
-        Counts counts = new(
-            Instances: (uint)_scene.Capacity,
-            Pieces: (uint)Math.Max(_settings.PieceCapacity, 1024),
-            Clusters: (uint)Math.Max(_settings.PieceCapacity, 1024),
-            // Room for every instance eight times over, so a frame drawing several of the shadow pages that hold the
-            // whole world, the sun's coarsest levels' after a turn, fits rather than drawing nothing and waiting.
-            Jobs: (uint)Math.Max(Math.Max(_settings.PieceCapacity / 16, 8 * _scene.Capacity), 1024),
-            RasterBins: Materials.RasterBinRows,
-            ResolveBins: (uint)Math.Max(_materials.ResolveBins.Count, 1),
-            Tiles: 0,
-            HizTexels: 0,
-            HizLevels: 0,
-            Lights: BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(_settings.LightCapacity, 32, 1 << 20)),
-            ZBins: Views.ZBinCount,
-            LightTileWords: 0,
-            GiRays: _gi.Rays,
-            GiProbeThreads: _gi.ProbeThreads,
-            SceneLights: (uint)_lights.Capacity,
-            SunEntries: (uint)_shadows.SunEntries,
-            LightEntries: Shadows.LightTableEntries,
-            ShadowViews: (uint)Math.Max(_settings.ShadowUpdates, 1),
-            ShadowGroups: (uint)(Math.Max(_settings.ShadowUpdates, 1) + _settings.ShadowLevels),
-            ShadowCandidates: (uint)(_shadows.WholePages + _shadows.SmallPages));
-        List<View> views = _views.Prepare(new ViewFrame(copy, frame, sky?.Row ?? 0, counts, player, Jitters()));
+        UpdateGraph(copy, skySurface);
+        PlanGi(main, frame);
+        List<View> views = _views.Prepare(new ViewFrame(copy, frame, sky?.Row ?? 0, MakeCounts(), player, HasJitter()));
         _cleared.Clear();
         if (_graph.Current is not { } listing)
         {
@@ -353,31 +305,117 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
         foreach (View view in views)
         {
-            view.Resources.Keep(listing);
-            RecordScope scope = new(_frame, view.Resources, view.Constants, view.Counts, view.TransparentRuns, view.TransparentPieces, skySurface, frame);
-            for (PassStage stage = PassStage.Cull; stage <= PassStage.Ui; stage++)
-            {
-                _recorder.Record(listing, stage, scope);
-            }
-
-            BoundResource? image = _debugView.Length > 0 ? DebugImage(view) : Finished(view);
-            bool clears = _cleared.Add(view.Target.Texture);
-            if (image is { } made)
-            {
-                _output.Draw(view.Target, view.Constants, made, _settings.OutputFilter, clears, _failures);
-            }
-            else
-            {
-                _output.DrawNothing(view.Target, view.Constants, clears);
-            }
-
-            view.Resources.Swap();
+            RenderView(view, listing, skySurface, frame);
         }
 
         _frame.Keep(listing);
         ClearWindow();
         RecordOverlays(listing, views, shown, frame);
         _textures.EndFrame();
+    }
+
+    /// <summary>
+    /// The scene, its lights and the shadow plan from this frame's copy of the world, then what the pools took in since
+    /// the last frame, so the materials the frame draws with are the ones in.
+    /// </summary>
+    private void UpdateScene(WorldCopy copy, CameraCopy? main, Vector3? player, in Frame frame)
+    {
+        _scene.Update(copy, (float)frame.Seconds, player ?? default);
+        _movedInstances.Add(_scene.Moved.Count);
+        _lights.Update(copy);
+        if (main is { } camera)
+        {
+            _shadows.Plan(camera.Transform.Position, copy.Sun?.Direction ?? -Vector3.UnitY, _lights.ChangedLights.Capacity, _scene.Moved.Count, frame.Index, _settings);
+        }
+
+        ReportFailures();
+        _textures.Flush();
+        _models.Flush();
+        _materials.Flush();
+    }
+
+    /// <summary>
+    /// The pass graph for this frame's pipelines and the surface variants the scene draws, the debug view's pass
+    /// appended, and the preloads checked against what came in.
+    /// </summary>
+    private void UpdateGraph(WorldCopy copy, SurfaceKey skySurface)
+    {
+        _raster.Clear();
+        _raster.AddRange(Materials.FixedRasterKeys);
+        _raster.AddRange(_materials.RasterBins);
+        _graph.Append(DebugViewPass(_debugView));
+        _graph.Update(GetPipeline(), GetEffects(copy), GetOverlay(), new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
+        CheckPreloads(copy);
+    }
+
+    /// <summary>
+    /// The global illumination's plan around the main camera when the pipeline traces it; cleared otherwise, so a
+    /// pipeline without it carries no stale field.
+    /// </summary>
+    private void PlanGi(CameraCopy? main, in Frame frame)
+    {
+        if (_graph.Current?.HasPass("GiField") == true && main is { } eye)
+        {
+            _gi.Plan(eye.Transform.Position, _scene.Moved, frame.DeltaSeconds, _settings);
+            _giRays.Add(_gi.Rays);
+            return;
+        }
+
+        _gi.Clear();
+    }
+
+    /// <summary>
+    /// How much of everything the frame's buffers hold, from the settings and what the scene has.
+    /// </summary>
+    private Counts MakeCounts() => new(
+        Instances: (uint)_scene.Capacity,
+        Pieces: (uint)Math.Max(_settings.PieceCapacity, 1024),
+        Clusters: (uint)Math.Max(_settings.PieceCapacity, 1024),
+        // Room for every instance eight times over, so a frame drawing several of the shadow pages that hold the
+        // whole world, the sun's coarsest levels' after a turn, fits rather than drawing nothing and waiting.
+        Jobs: (uint)Math.Max(Math.Max(_settings.PieceCapacity / 16, 8 * _scene.Capacity), 1024),
+        RasterBins: Materials.RasterBinRows,
+        ResolveBins: (uint)Math.Max(_materials.ResolveBins.Count, 1),
+        Tiles: 0,
+        HizTexels: 0,
+        HizLevels: 0,
+        Lights: BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(_settings.LightCapacity, 32, 1 << 20)),
+        ZBins: Views.ZBinCount,
+        LightTileWords: 0,
+        GiRays: _gi.Rays,
+        GiProbeThreads: _gi.ProbeThreads,
+        SceneLights: (uint)_lights.Capacity,
+        SunEntries: (uint)_shadows.SunEntries,
+        LightEntries: Shadows.LightTableEntries,
+        ShadowViews: (uint)Math.Max(_settings.ShadowUpdates, 1),
+        ShadowGroups: (uint)(Math.Max(_settings.ShadowUpdates, 1) + _settings.ShadowLevels),
+        ShadowCandidates: (uint)(_shadows.WholePages + _shadows.SmallPages));
+
+    /// <summary>
+    /// One view's passes, from culling to its UI, then its finished image, or the debug view's, drawn to its target;
+    /// nothing drawn, and the target cleared, when the frame has no image for it.
+    /// </summary>
+    private void RenderView(View view, Listing listing, SurfaceKey skySurface, in Frame frame)
+    {
+        view.Resources.Keep(listing);
+        RecordScope scope = new(_frame, view.Resources, view.Constants, view.Counts, view.TransparentRuns, view.TransparentPieces, skySurface, frame);
+        for (PassStage stage = PassStage.Cull; stage <= PassStage.Ui; stage++)
+        {
+            _recorder.Record(listing, stage, scope);
+        }
+
+        BoundResource? image = _debugView.Length > 0 ? DebugImage(view) : GetFinished(view);
+        bool clears = _cleared.Add(view.Target.Texture);
+        if (image is { } made)
+        {
+            _output.Draw(view.Target, view.Constants, made, _settings.OutputFilter, clears, _failures);
+        }
+        else
+        {
+            _output.DrawNothing(view.Target, view.Constants, clears);
+        }
+
+        view.Resources.Swap();
     }
 
     /// <summary>
@@ -406,19 +444,16 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     {
         _target.Keep(listing);
         _targets.Clear();
-        GpuTexture window = _views.Window();
-        System.Drawing.Size size = window == GpuTexture.None ? System.Drawing.Size.Empty : _gpu.SizeOf(window);
+        GpuTexture window = _views.GetWindow();
+        System.Drawing.Size size = window == GpuTexture.None ? System.Drawing.Size.Empty : _gpu.GetSize(window);
         if (!size.IsEmpty)
         {
-            _targets[window] = new ViewTarget(window, new System.Drawing.Rectangle(System.Drawing.Point.Empty, size), _gpu.FormatOf(window), true);
+            _targets[window] = new ViewTarget(window, new System.Drawing.Rectangle(System.Drawing.Point.Empty, size), _gpu.GetFormat(window), true);
         }
 
         foreach (View view in views)
         {
-            if (!view.Target.IsWindow)
-            {
-                _targets.TryAdd(view.Target.Texture, view.Target);
-            }
+            if (!view.Target.IsWindow) _targets.TryAdd(view.Target.Texture, view.Target);
         }
 
         foreach (ViewTarget target in _targets.Values)
@@ -440,7 +475,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// The overlay pipeline the settings name, else the one at <see cref="OverlayPath"/>, else none; changed while
     /// running, the next listing built runs it.
     /// </summary>
-    private Handle<Pipeline> OverlayOf()
+    private Handle<Pipeline> GetOverlay()
     {
         return _settings.Overlay == Handle<Pipeline>.None ? _assets.Find<Pipeline>(OverlayPath) : _settings.Overlay;
     }
@@ -448,7 +483,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// <summary>
     /// The pipeline the settings name, or the default one; changed while running, the next listing built runs it.
     /// </summary>
-    private Handle<Pipeline> PipelineOf()
+    private Handle<Pipeline> GetPipeline()
     {
         return _settings.Pipeline == Handle<Pipeline>.None ? _defaultPipeline : _settings.Pipeline;
     }
@@ -458,11 +493,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private void ClearWindow()
     {
-        GpuTexture window = _views.Window();
-        if (window != GpuTexture.None && _cleared.Add(window))
-        {
-            _output.Clear(window);
-        }
+        GpuTexture window = _views.GetWindow();
+        if (window != GpuTexture.None && _cleared.Add(window)) _output.Clear(window);
     }
 
     /// <summary>
@@ -491,7 +523,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _frame.Set("MaterialBins", BoundResource.Of(_materials.Bins.Buffer, _materials.Bins.Bytes));
         for (int pool = 0; pool < TexturePools.Count; pool++)
         {
-            _frame.Set(TexturePools.Names[pool], BoundResource.Of(_textures.TextureOf(pool), 0, 0, _textures.Sampler));
+            _frame.Set(TexturePools.Names[pool], BoundResource.Of(_textures.GetTexture(pool), 0, 0, _textures.Sampler));
         }
 
         _frame.Set("Moved", BoundResource.Of(_moved.Buffer, _moved.Bytes));
@@ -512,7 +544,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// pixel: only while the frame runs it, as nothing else would undo the shake, and not while a debug view is shown,
     /// which is drawn from the view as it is and would shake with it.
     /// </summary>
-    private bool Jitters() => _graph.Current?.Runs("Taa") == true && _debugView.Length == 0;
+    private bool HasJitter() => _graph.Current?.HasPass("Taa") == true && _debugView.Length == 0;
 
     /// <summary>
     /// Says, at each instance drawn as the failure, why, with what failed while the mouse rests on it: for this frame,
@@ -520,14 +552,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private void ReportFailures()
     {
-        if (_debug is not { Enabled: true } debug)
-        {
-            return;
-        }
+        if (_debug is not { Enabled: true } debug) return;
 
         foreach ((int slot, (string why, string what)) in _scene.Failures)
         {
-            debug.Error(why, _scene.PositionOf(slot), 0, what);
+            debug.Error(why, _scene.GetPosition(slot), 0, what);
         }
     }
 
@@ -537,10 +566,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private Handle<Pass> DebugViewPass(string name)
     {
-        if (name.Length == 0)
-        {
-            return Handle<Pass>.None;
-        }
+        if (name.Length == 0) return Handle<Pass>.None;
 
         Handle<Pass> pass = _assets.Find<Pass>($"Passes/Debug/{name}.pass");
         if (pass == Handle<Pass>.None && !string.Equals(name, _missingView, StringComparison.Ordinal))
@@ -555,7 +581,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// <summary>
     /// The view's finished image: what the post stage made, else the lit scene as it is; none until either is made.
     /// </summary>
-    private static BoundResource Finished(View view)
+    private static BoundResource GetFinished(View view)
     {
         return view.Resources.TryGet("Ldr", out BoundResource ldr) ? ldr : view.Resources.TryGet("Hdr", out BoundResource hdr) ? hdr : default;
     }
@@ -573,14 +599,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// <summary>
     /// The camera drawing into the window, else the first; none without a camera.
     /// </summary>
-    private static CameraCopy? MainCamera(WorldCopy copy)
+    private static CameraCopy? GetMainCamera(WorldCopy copy)
     {
         foreach (CameraCopy camera in copy.Cameras)
         {
-            if (camera.Camera.Target.IsWindow)
-            {
-                return camera;
-            }
+            if (camera.Camera.Target.IsWindow) return camera;
         }
 
         return copy.Cameras.Count > 0 ? copy.Cameras[0] : null;
@@ -601,50 +624,23 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     {
         while (_arrived.Reader.TryRead(out Arrival arrival))
         {
-            if (arrival.Model is { } model)
-            {
-                _models.Reload(model);
-            }
+            if (arrival.Model is { } model) _models.Reload(model);
 
-            if (arrival.Texture is { } texture)
-            {
-                _textures.Reload(texture);
-            }
+            if (arrival.Texture is { } texture) _textures.Reload(texture);
 
-            if (arrival.Material is { } material)
-            {
-                _materials.Reload(material);
-            }
+            if (arrival.Material is { } material) _materials.Reload(material);
 
-            if (arrival.Shader is { } shader)
-            {
-                _materials.Reload(shader);
-            }
+            if (arrival.Shader is { } shader) _materials.Reload(shader);
 
-            if (arrival.Invalidates)
-            {
-                _graph.Invalidate();
-            }
+            if (arrival.Invalidates) _graph.Invalidate();
 
-            if (arrival.DebugView is { } view)
-            {
-                _debugView = view;
-            }
+            if (arrival.DebugView is { } view) _debugView = view;
 
-            if (arrival.Begun is { } begun)
-            {
-                Begin(begun);
-            }
+            if (arrival.Begun is { } begun) Begin(begun);
 
-            if (arrival.Ended is { } ended)
-            {
-                End(ended);
-            }
+            if (arrival.Ended is { } ended) End(ended);
 
-            if (arrival.Cancelled is { } cancelled)
-            {
-                Cancel(cancelled, arrival.Cancel);
-            }
+            if (arrival.Cancelled is { } cancelled) Cancel(cancelled, arrival.Cancel);
         }
     }
 
@@ -652,7 +648,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// The effects the frame is built for: the world's, else those of the latest domain being taken in, so its
     /// listing is compiled under the loading domain, which names none of its own.
     /// </summary>
-    private Handle<Pipeline> EffectsOf(WorldCopy copy)
+    private Handle<Pipeline> GetEffects(WorldCopy copy)
     {
         return copy.Effects == Handle<Pipeline>.None ? _preloadEffects : copy.Effects;
     }
@@ -667,18 +663,15 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _scene.Hold(preloaded);
         foreach (Handle<Model> model in preloaded.Models)
         {
-            _models.RowOf(model, 0);
+            _models.GetRow(model, 0);
         }
 
         foreach (Handle<Material> material in preloaded.Materials)
         {
-            _materials.RowOf(material);
+            _materials.GetRow(material);
         }
 
-        if (preloaded.Effects != Handle<Pipeline>.None)
-        {
-            _preloadEffects = preloaded.Effects;
-        }
+        if (preloaded.Effects != Handle<Pipeline>.None) _preloadEffects = preloaded.Effects;
 
         _preloads.Add(preload);
     }
@@ -689,10 +682,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private void End(Preloaded preloaded)
     {
         _scene.Release(preloaded);
-        if (preloaded.Effects == _preloadEffects)
-        {
-            _preloadEffects = Handle<Pipeline>.None;
-        }
+        if (preloaded.Effects == _preloadEffects) _preloadEffects = Handle<Pipeline>.None;
     }
 
     /// <summary>
@@ -715,12 +705,9 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private void CheckPreloads(WorldCopy copy)
     {
-        if (_preloads.Count == 0)
-        {
-            return;
-        }
+        if (_preloads.Count == 0) return;
 
-        bool isBuilt = _graph.Current is not null && !_graph.IsBuilding && _graph.Effects == EffectsOf(copy);
+        bool isBuilt = _graph.Current is not null && !_graph.IsBuilding && _graph.Effects == GetEffects(copy);
         for (int i = _preloads.Count - 1; i >= 0; i--)
         {
             Preload preload = _preloads[i];
@@ -729,18 +716,12 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             int done = isBuilt ? 1 : 0;
             foreach (Handle<Model> model in preloaded.Models)
             {
-                if (_models.IsDrawable(model))
-                {
-                    done++;
-                }
+                if (_models.IsDrawable(model)) done++;
             }
 
             foreach (Handle<Material> material in preloaded.Materials)
             {
-                if (_materials.IsShown(_materials.RowOf(material)))
-                {
-                    done++;
-                }
+                if (_materials.IsShown(_materials.GetRow(material))) done++;
             }
 
             float share = (float)done / total;
@@ -764,13 +745,13 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private sealed class Preload(Preloaded preloaded, IProgress<float> progress)
     {
-        public Preloaded Preloaded { get; } = preloaded;
+        internal Preloaded Preloaded { get; } = preloaded;
 
-        public IProgress<float> Progress { get; } = progress;
+        internal IProgress<float> Progress { get; } = progress;
 
-        public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public float Reported { get; set; } = -1;
+        internal float Reported { get; set; } = -1;
     }
 
     /// <summary>

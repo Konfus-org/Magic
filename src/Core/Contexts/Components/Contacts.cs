@@ -32,10 +32,7 @@ public struct Contacts : IComponent, IEquatable<Contacts>
     {
         for (int i = 0; i < Capacity; i++)
         {
-            if (this[i] != other[i])
-            {
-                return false;
-            }
+            if (this[i] != other[i]) return false;
         }
 
         return true;

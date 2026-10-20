@@ -60,7 +60,7 @@ on several threads at once, a chunk each, so it writes only through its chunk. A
   part's, all at once (Arch's untyped `Create` and `SetRange`), boxed. Each type is found in Arch's registry, or through
   its typed registration the first time, so a struct is measured as the typed calls measure it.
   `Set(entity, components)` gives an entity such components, adding the types it lacks in one move (`AddRange`) and
-  setting them all (`SetRange`), and `Components(entity)` hands back every component it has, boxed
+  setting them all (`SetRange`), and `GetComponents(entity)` hands back every component it has, boxed
   (`GetAllComponents`): a saved world is put back and saved through those, never a frame.
 
 ## Guards

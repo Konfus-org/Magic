@@ -79,10 +79,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     public void Run(string line)
     {
         string[] words = Split(line);
-        if (words.Length == 0)
-        {
-            return;
-        }
+        if (words.Length == 0) return;
 
         if (!_commands.TryGetValue(words[0], out Command? command))
         {
@@ -140,10 +137,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
 
             if (char.IsWhiteSpace(character) && !isQuoted && depth == 0)
             {
-                if (hasAny)
-                {
-                    words.Add(word.ToString());
-                }
+                if (hasAny) words.Add(word.ToString());
 
                 word.Clear();
                 hasAny = false;
@@ -160,10 +154,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
             hasAny = true;
         }
 
-        if (hasAny)
-        {
-            words.Add(word.ToString());
-        }
+        if (hasAny) words.Add(word.ToString());
 
         return [.. words];
     }
@@ -220,7 +211,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
 
     private async Task SaveAsync(IGpu gpu, IWindow window, string path)
     {
-        Task<Result<GpuImage>> capture = await _threads.InvokeAsync(EngineThread.Render, () => gpu.CaptureAsync(gpu.WindowTarget(window)), _stopping).ConfigureAwait(false);
+        Task<Result<GpuImage>> capture = await _threads.InvokeAsync(EngineThread.Render, () => gpu.CaptureAsync(gpu.GetWindowTarget(window)), _stopping).ConfigureAwait(false);
         Result<GpuImage> image = await capture.ConfigureAwait(false);
         if (!image.Ok)
         {

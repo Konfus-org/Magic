@@ -165,7 +165,7 @@ public sealed class Assets
     /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them: a domain's
     /// prefabs.
     /// </summary>
-    public IReadOnlyList<string> Paths(string folder)
+    public IReadOnlyList<string> GetPaths(string folder)
     {
         return _index.ByFolder.TryGetValue(folder, out List<string>? paths) ? paths : [];
     }
@@ -173,7 +173,7 @@ public sealed class Assets
     /// <summary>
     /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file has its id.
     /// </summary>
-    public string? Path<T>(Handle<T> asset)
+    public string? GetPath<T>(Handle<T> asset)
         where T : IAsset<T>
     {
         return _index.ById.TryGetValue(asset.Id, out Indexed? found) ? found.Path : null;
@@ -184,26 +184,17 @@ public sealed class Assets
     /// (<see cref="ILoadPostProcessor{T}"/>), and what something made from it is checked against without loading it. Read
     /// from the file the first time it is asked for, and kept with the index. 0 when no file has it.
     /// </summary>
-    public ulong Version<T>(Handle<T> asset)
+    public ulong GetVersion<T>(Handle<T> asset)
         where T : IAsset<T>
     {
-        if (!_index.ById.TryGetValue(asset.Id, out Indexed? indexed))
-        {
-            return 0;
-        }
+        if (!_index.ById.TryGetValue(asset.Id, out Indexed? indexed)) return 0;
 
-        if (indexed.Version != 0)
-        {
-            return indexed.Version;
-        }
+        if (indexed.Version != 0) return indexed.Version;
 
         Result<byte[]> bytes = _files.Read(indexed.File);
-        if (!bytes.Ok)
-        {
-            return 0;
-        }
+        if (!bytes.Ok) return 0;
 
-        indexed.Version = VersionOf(bytes.Value, indexed.Settings);
+        indexed.Version = ComputeVersion(bytes.Value, indexed.Settings);
         return indexed.Version;
     }
 
@@ -212,7 +203,7 @@ public sealed class Assets
     /// as it was made last. When one of them is made again, so is it, after it. None for an asset made from its file
     /// alone, and for one not loaded.
     /// </summary>
-    public IReadOnlyList<AssetRef> Dependencies<T>(Handle<T> asset)
+    public IReadOnlyList<AssetRef> GetDependencies<T>(Handle<T> asset)
         where T : IAsset<T>
     {
         lock (_lock)
@@ -238,9 +229,9 @@ public sealed class Assets
         ulong maker = _maker.Value;
         lock (_lock)
         {
-            if (maker != 0 && !Records(maker, new AssetRef(typeof(T), asset.Id)))
+            if (maker != 0 && !HasRecorded(maker, new AssetRef(typeof(T), asset.Id)))
             {
-                return new(Result.Failure<T>($"{NameOf(asset.Id)} is made from itself: something it loads as it is made loads it."));
+                return new(Result.Failure<T>($"{GetName(asset.Id)} is made from itself: something it loads as it is made loads it."));
             }
 
             if (!_slots.TryGetValue(asset.Id, out Slot? found))
@@ -251,13 +242,10 @@ public sealed class Assets
 
             if (found is not Slot<T> slot)
             {
-                return new(Result.Failure<T>($"{NameOf(asset.Id)} is loaded as a {found.Type.Name}, so it is not a {typeof(T).Name}."));
+                return new(Result.Failure<T>($"{GetName(asset.Id)} is loaded as a {found.Type.Name}, so it is not a {typeof(T).Name}."));
             }
 
-            if (slot.Loading is null && slot.Loaded?.Target is T held)
-            {
-                return new(Result.Success(held));
-            }
+            if (slot.Loading is null && slot.Loaded?.Target is T held) return new(Result.Success(held));
 
             return new((slot.Loading ?? MakeAsync(slot, asset.Id, isRemake: false)).WaitAsync(cancel));
         }
@@ -293,10 +281,7 @@ public sealed class Assets
                 _slots[id] = slot;
             }
 
-            if (ReferenceEquals(slot.Loaded?.Target, asset))
-            {
-                return;
-            }
+            if (ReferenceEquals(slot.Loaded?.Target, asset)) return;
 
             hadLoaded = slot.Loaded is not null;
             slot.Loaded = new WeakReference(asset);
@@ -406,16 +391,13 @@ public sealed class Assets
             before.ById.TryGetValue(file.Id, out Indexed? old);
             bool written = !string.Equals(old?.File, file.File, StringComparison.Ordinal) || touched.Contains(file.Path);
             filesChanged |= written || !string.Equals(old?.Path, file.Path, StringComparison.OrdinalIgnoreCase);
-            if (written)
-            {
-                changed.Add(file.Id);
-            }
+            if (written) changed.Add(file.Id);
         }
 
         List<Task> remaking = [];
         lock (_lock)
         {
-            HashSet<ulong> remake = AndMadeFrom(changed, _madeFrom);
+            HashSet<ulong> remake = AddMadeFrom(changed, _madeFrom);
             foreach (ulong id in gone)
             {
                 _slots.Remove(id);
@@ -426,18 +408,12 @@ public sealed class Assets
             // being made again waits for what it is made into: each is made after what it is made from.
             foreach (ulong id in remake)
             {
-                if (_slots.TryGetValue(id, out Slot? slot))
-                {
-                    remaking.Add(slot.RemakeAsync(this, id));
-                }
+                if (_slots.TryGetValue(id, out Slot? slot)) remaking.Add(slot.RemakeAsync(this, id));
             }
         }
 
         await Task.WhenAll(remaking).ConfigureAwait(false);
-        if (filesChanged)
-        {
-            _events.Publish(new AssetsChanged());
-        }
+        if (filesChanged) _events.Publish(new AssetsChanged());
     }
 
     /// <summary>
@@ -454,10 +430,7 @@ public sealed class Assets
         {
             foreach ((ulong id, Slot slot) in _slots)
             {
-                if (slot is Slot<T>)
-                {
-                    remaking.Add(slot.RemakeAsync(this, id));
-                }
+                if (slot is Slot<T>) remaking.Add(slot.RemakeAsync(this, id));
             }
         }
 
@@ -472,10 +445,7 @@ public sealed class Assets
         where T : IAsset<T>
     {
         Result<T> made = await MakeAsync(slot, id, isRemake: true).ConfigureAwait(false);
-        if (!made.Ok)
-        {
-            Debugging.Error(made.Error);
-        }
+        if (!made.Ok) Debugging.Error(made.Error);
     }
 
     /// <summary>
@@ -505,10 +475,7 @@ public sealed class Assets
     private async Task<Result<T>> MakeAfterAsync<T>(Slot<T> slot, ulong id, int make, Task<Result<T>>? before, bool isRemake)
         where T : IAsset<T>
     {
-        if (before is not null)
-        {
-            await before.ConfigureAwait(false);
-        }
+        if (before is not null) await before.ConfigureAwait(false);
 
         lock (_lock)
         {
@@ -532,10 +499,7 @@ public sealed class Assets
             }
 
             // A failure with nothing held stays, as this make, until the file changes.
-            if (slot.Started == make && (made.Ok || kept is not null))
-            {
-                slot.Loading = null;
-            }
+            if (slot.Started == make && (made.Ok || kept is not null)) slot.Loading = null;
         }
 
         if (kept is not null)
@@ -544,10 +508,7 @@ public sealed class Assets
             return Result.Success(kept);
         }
 
-        if (!made.Ok)
-        {
-            return made;
-        }
+        if (!made.Ok) return made;
 
         if (isReload)
         {
@@ -583,10 +544,7 @@ public sealed class Assets
     private async Task<Result<T>> ReadAndProcessAsync<T>(ulong id)
         where T : IAsset<T>
     {
-        if (!_index.ById.TryGetValue(id, out Indexed? indexed))
-        {
-            return Result.Failure<T>($"No asset has the id {id}.");
-        }
+        if (!_index.ById.TryGetValue(id, out Indexed? indexed)) return Result.Failure<T>($"No asset has the id {id}.");
 
         if (!IsOf<T>(indexed.Path))
         {
@@ -594,10 +552,7 @@ public sealed class Assets
         }
 
         Result<byte[]> bytes = await _files.ReadAsync(indexed.File, _stopping).ConfigureAwait(false);
-        if (!bytes.Ok)
-        {
-            return Result.Failure<T>($"{indexed.Path} could not be read: {bytes.Error}");
-        }
+        if (!bytes.Ok) return Result.Failure<T>($"{indexed.Path} could not be read: {bytes.Error}");
 
         Result<T> loaded;
         try
@@ -609,17 +564,11 @@ public sealed class Assets
             loaded = Result.Failure<T>($"its loader threw: {ex}");
         }
 
-        loaded = loaded.Ok ? Given(loaded.Value, nameof(IAsset<T>.Handle), new Handle<T>(id)) : loaded;
-        if (!loaded.Ok)
-        {
-            return Result.Failure<T>($"{indexed.Path} is not a {typeof(T).Name}: {loaded.Error}");
-        }
+        loaded = loaded.Ok ? TryGive(loaded.Value, nameof(IAsset<T>.Handle), new Handle<T>(id)) : loaded;
+        if (!loaded.Ok) return Result.Failure<T>($"{indexed.Path} is not a {typeof(T).Name}: {loaded.Error}");
 
-        indexed.Version = VersionOf(bytes.Value, indexed.Settings);
-        if (_services.Provided<ILoadPostProcessor<T>>(out _) is not { } processor)
-        {
-            return loaded;
-        }
+        indexed.Version = ComputeVersion(bytes.Value, indexed.Settings);
+        if (_services.GetProvided<ILoadPostProcessor<T>>(out _) is not { } processor) return loaded;
 
         try
         {
@@ -631,7 +580,7 @@ public sealed class Assets
         }
 
         return loaded.Ok
-            ? Given(loaded.Value, nameof(IAsset<T>.Handle), new Handle<T>(id))
+            ? TryGive(loaded.Value, nameof(IAsset<T>.Handle), new Handle<T>(id))
             : Result.Failure<T>($"{indexed.Path} was read, but could not be post-processed: {loaded.Error}");
     }
 
@@ -644,16 +593,10 @@ public sealed class Assets
     private ValueTask<Result<T>> ReadFileAsync<T>(Indexed file, byte[] bytes)
         where T : IAsset<T>
     {
-        IAssetLoader<T>? loader = _services.Provided<IAssetLoader<T>>(out bool isMade);
-        if (!isMade)
-        {
-            return new(Result.Failure<T>($"the gem that reads {typeof(T).Name}s was not made."));
-        }
+        IAssetLoader<T>? loader = _services.GetProvided<IAssetLoader<T>>(out bool isMade);
+        if (!isMade) return new(Result.Failure<T>($"the gem that reads {typeof(T).Name}s was not made."));
 
-        if (loader is not null)
-        {
-            return loader.LoadAsync(file.Path, bytes, file.Settings, _stopping);
-        }
+        if (loader is not null) return loader.LoadAsync(file.Path, bytes, file.Settings, _stopping);
 
         bool isJson = typeof(T).IsAssignableTo(typeof(IJsonAsset<T>));
         if (!isJson && !typeof(T).IsAssignableTo(typeof(ITextAsset<T>)))
@@ -666,13 +609,10 @@ public sealed class Assets
             return new(Result.Failure<T>($"its .meta holds settings, {file.Settings.GetRawText()}, which a {typeof(T).Name} read as {(isJson ? "JSON" : "text")} does not take."));
         }
 
-        if (isJson)
-        {
-            return new(Json.Read<T>(bytes));
-        }
+        if (isJson) return new(Json.Read<T>(bytes));
 
         ReadOnlySpan<byte> text = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble) ? bytes.AsSpan(Encoding.UTF8.Preamble.Length) : bytes;
-        return new(Given(Activator.CreateInstance<T>(), nameof(ITextAsset<T>.Text), Encoding.UTF8.GetString(text)));
+        return new(TryGive(Activator.CreateInstance<T>(), nameof(ITextAsset<T>.Text), Encoding.UTF8.GetString(text)));
     }
 
     /// <summary>
@@ -680,7 +620,7 @@ public sealed class Assets
     /// <paramref name="source"/> is <paramref name="maker"/> or is made from it, so waiting for it would wait for ever.
     /// Under <see cref="_lock"/>.
     /// </summary>
-    private bool Records(ulong maker, AssetRef source)
+    private bool HasRecorded(ulong maker, AssetRef source)
     {
         if (!_madeFrom.TryGetValue(maker, out List<AssetRef>? sources))
         {
@@ -688,10 +628,7 @@ public sealed class Assets
             _madeFrom.Add(maker, sources);
         }
 
-        if (!sources.Contains(source))
-        {
-            sources.Add(source);
-        }
+        if (!sources.Contains(source)) sources.Add(source);
 
         return !IsMadeFrom(source.Id, maker, _madeFrom);
     }
@@ -699,7 +636,7 @@ public sealed class Assets
     /// <summary>
     /// Where asset <paramref name="id"/> is, for a message, or its id when no file has it.
     /// </summary>
-    private string NameOf(ulong id)
+    private string GetName(ulong id)
     {
         return _index.ById.TryGetValue(id, out Indexed? found) ? found.Path : id.ToString(CultureInfo.InvariantCulture);
     }
@@ -714,10 +651,7 @@ public sealed class Assets
         Stack<ulong> waiting = new([asset]);
         while (waiting.TryPop(out ulong next))
         {
-            if (next == source)
-            {
-                return true;
-            }
+            if (next == source) return true;
 
             if (seen.Add(next) && madeFrom.TryGetValue(next, out List<AssetRef>? sources))
             {
@@ -735,7 +669,7 @@ public sealed class Assets
     /// <paramref name="changed"/>, and every asset made from one of them, or from one of those, and so on out, as
     /// <paramref name="madeFrom"/> says.
     /// </summary>
-    private static HashSet<ulong> AndMadeFrom(HashSet<ulong> changed, Dictionary<ulong, List<AssetRef>> madeFrom)
+    private static HashSet<ulong> AddMadeFrom(HashSet<ulong> changed, Dictionary<ulong, List<AssetRef>> madeFrom)
     {
         HashSet<ulong> found = [.. changed];
         bool grew = true;
@@ -759,7 +693,7 @@ public sealed class Assets
     /// <paramref name="asset"/> with <paramref name="value"/> given to its <paramref name="property"/> through the
     /// <c>init</c> accessor the asset type has for it, as its handle, and a text asset's text, are set rather than read.
     /// </summary>
-    private static Result<T> Given<T>(T asset, string property, object value)
+    private static Result<T> TryGive<T>(T asset, string property, object value)
     {
         if (typeof(T).GetProperty(property)?.SetMethod is not { } init)
         {
@@ -815,10 +749,7 @@ public sealed class Assets
 
                 Indexed indexed = new(read.Value.Id, path, file, read.Value.Settings);
                 index.ById.Add(indexed.Id, indexed);
-                if (isEngine)
-                {
-                    index.Engine.TryAdd(path, indexed);
-                }
+                if (isEngine) index.Engine.TryAdd(path, indexed);
 
                 if (index.ByPath.TryAdd(path, indexed))
                 {
@@ -846,10 +777,7 @@ public sealed class Assets
     {
         Result<byte[]> bytes = files.Read(sidecar);
         Result<Dictionary<string, JsonElement>> read = bytes.Ok ? Json.Read<Dictionary<string, JsonElement>>(bytes.Value) : Result.Failure<Dictionary<string, JsonElement>>(bytes.Error);
-        if (!read.Ok)
-        {
-            return Result.Failure<(ulong, JsonElement)>(read.Error);
-        }
+        if (!read.Ok) return Result.Failure<(ulong, JsonElement)>(read.Error);
 
         if (!read.Value.Remove("id", out JsonElement id) || id.ValueKind != JsonValueKind.Number || !id.TryGetUInt64(out ulong value) || value == 0)
         {
@@ -863,7 +791,7 @@ public sealed class Assets
     /// A hash of <paramref name="file"/> and its sidecar's <paramref name="settings"/>, which changes when either does:
     /// the version of the asset they make, which a post-processor checks what it cached against.
     /// </summary>
-    private static ulong VersionOf(byte[] file, JsonElement settings)
+    private static ulong ComputeVersion(byte[] file, JsonElement settings)
     {
         XxHash3 hash = new();
         hash.Append(file);
@@ -880,10 +808,7 @@ public sealed class Assets
         IReadOnlyList<string> extensions = T.Extensions;
         for (int i = 0; i < extensions.Count; i++)
         {
-            if (path.EndsWith(extensions[i], StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
+            if (path.EndsWith(extensions[i], StringComparison.OrdinalIgnoreCase)) return true;
         }
 
         return false;
@@ -910,7 +835,7 @@ public sealed class Assets
     private sealed record Indexed(ulong Id, string Path, string File, JsonElement Settings)
     {
         /// <summary>
-        /// A hash of the file and the settings once one is read (<see cref="Assets.Version{T}"/>), 0 until then.
+        /// A hash of the file and the settings once one is read (<see cref="Assets.GetVersion{T}"/>), 0 until then.
         /// </summary>
         public ulong Version { get; set; }
     }

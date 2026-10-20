@@ -44,22 +44,16 @@ public sealed class Caches
     /// </summary>
     public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, CancellationToken cancel)
     {
-        if (_services.Provided<ICache<T>>(out _) is not { } cache)
+        if (_services.GetProvided<ICache<T>>(out _) is not { } cache)
         {
             return Result.Failure<T>($"no gem the project lists caches {typeof(T).Name}s.");
         }
 
-        string file = FileOf<T>(key);
-        if (!_files.FileExists(file))
-        {
-            return Result.Failure<T>($"nothing is cached at {file}.");
-        }
+        string file = GetFile<T>(key);
+        if (!_files.FileExists(file)) return Result.Failure<T>($"nothing is cached at {file}.");
 
         Result<byte[]> bytes = await _files.ReadAsync(file, cancel).ConfigureAwait(false);
-        if (!bytes.Ok)
-        {
-            return Result.Failure<T>($"{file} could not be read: {bytes.Error}");
-        }
+        if (!bytes.Ok) return Result.Failure<T>($"{file} could not be read: {bytes.Error}");
 
         // A dirty entry is left for the write that follows to replace: deleting it here would collide with another
         // reader of the same entry, and it is never read as valid anyway.
@@ -75,24 +69,21 @@ public sealed class Caches
     /// </summary>
     public async Task WriteAsync<T>(ulong key, ulong version, T value, CancellationToken cancel)
     {
-        if (_services.Provided<ICache<T>>(out _) is not { } cache)
+        if (_services.GetProvided<ICache<T>>(out _) is not { } cache)
         {
             Debugging.Warn($"No gem the project lists caches {typeof(T).Name}s, so one is not kept.");
             return;
         }
 
-        string file = FileOf<T>(key);
-        Result written = await _files.WriteAsync(file, Bytes(cache, version, value), cancel).ConfigureAwait(false);
-        if (!written.Ok)
-        {
-            Debugging.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
-        }
+        string file = GetFile<T>(key);
+        Result written = await _files.WriteAsync(file, ToBytes(cache, version, value), cancel).ConfigureAwait(false);
+        if (!written.Ok) Debugging.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
     }
 
     /// <summary>
     /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is: beside Magic, in <c>Cache/</c>.
     /// </summary>
-    private string FileOf<T>(ulong key)
+    private string GetFile<T>(ulong key)
     {
         return _files.Combine(AppContext.BaseDirectory, "Cache", typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
     }
@@ -100,7 +91,7 @@ public sealed class Caches
     /// <summary>
     /// <paramref name="value"/> as an entry: the versions, then what <paramref name="cache"/> writes of it.
     /// </summary>
-    private static ReadOnlyMemory<byte> Bytes<T>(ICache<T> cache, ulong version, T value)
+    private static ReadOnlyMemory<byte> ToBytes<T>(ICache<T> cache, ulong version, T value)
     {
         using MemoryStream stream = new();
         Span<byte> header = stackalloc byte[HeaderSize];

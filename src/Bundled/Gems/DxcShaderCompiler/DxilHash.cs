@@ -21,12 +21,9 @@ internal static class DxilHash
     /// </summary>
     private const int HashedFrom = 20;
 
-    public static void Sign(Span<byte> container)
+    internal static void Sign(Span<byte> container)
     {
-        if (container.Length < HashedFrom + 8)
-        {
-            return;
-        }
+        if (container.Length < HashedFrom + 8) return;
 
         Span<byte> digest = stackalloc byte[16];
         Hash(container[HashedFrom..], digest);

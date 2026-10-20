@@ -45,10 +45,7 @@ public struct MaterialSlots : IEquatable<MaterialSlots>, IEnumerable<Handle<Mate
     {
         for (int i = 0; i < Capacity; i++)
         {
-            if (this[i] != other[i])
-            {
-                return false;
-            }
+            if (this[i] != other[i]) return false;
         }
 
         return true;
@@ -72,10 +69,7 @@ public struct MaterialSlots : IEquatable<MaterialSlots>, IEnumerable<Handle<Mate
     /// </summary>
     public bool Add(Handle<Material> material)
     {
-        if (material == Handle<Material>.None)
-        {
-            return false;
-        }
+        if (material == Handle<Material>.None) return false;
 
         for (int i = 0; i < Capacity; i++)
         {

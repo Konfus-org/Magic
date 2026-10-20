@@ -77,16 +77,10 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
             Transform placed = part.PlaceUnder(parent);
             foreach (IComponent component in part.Components)
             {
-                if (component is Tags tags && tags.Has(tag))
-                {
-                    return placed;
-                }
+                if (component is Tags tags && tags.Has(tag)) return placed;
             }
 
-            if (PlaceIn(part.Children, placed, tag) is { } under)
-            {
-                return under;
-            }
+            if (PlaceIn(part.Children, placed, tag) is { } under) return under;
         }
 
         return null;
@@ -133,10 +127,7 @@ public sealed class PrefabPart
     {
         foreach (IComponent component in Components)
         {
-            if (component is Transform local)
-            {
-                return local.Under(parent);
-            }
+            if (component is Transform local) return local.Under(parent);
         }
 
         return parent;

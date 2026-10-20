@@ -46,7 +46,7 @@ internal sealed class ConsoleWindow : IDisposable
     private string _shownFilter = string.Empty;
     private bool _isChanged;
 
-    public ConsoleWindow(ToolWindow window, IDebugUI ui, ICommands? commands)
+    internal ConsoleWindow(ToolWindow window, IDebugUI ui, ICommands? commands)
     {
         _window = window;
         _ui = ui;
@@ -62,7 +62,7 @@ internal sealed class ConsoleWindow : IDisposable
     /// <summary>
     /// A line of the log, on the log's thread: its time and its message, after its level when it is a warning or worse.
     /// </summary>
-    public void Add(in LogLine line)
+    internal void Add(in LogLine line)
     {
         string shown = line.Level >= LogLevel.Warn
             ? string.Create(CultureInfo.InvariantCulture, $"{line.Time:HH:mm:ss.fff} {line.Level}: {line.Message}")
@@ -79,16 +79,13 @@ internal sealed class ConsoleWindow : IDisposable
         }
     }
 
-    public void Update()
+    internal void Update()
     {
-        if (!_window.Begin(out bool copy))
-        {
-            return;
-        }
+        if (!_window.Begin(out bool copy)) return;
 
         _ui.Input("##filter", ref _filter, hint: "Filter");
         _ui.Begin("Log", scrollable: true);
-        foreach (Line line in Shown())
+        foreach (Line line in GetShown())
         {
             _ui.Label(line.Text, line.Level >= LogLevel.Error ? _error : line.Level == LogLevel.Warn ? _warning : null);
         }
@@ -105,10 +102,7 @@ internal sealed class ConsoleWindow : IDisposable
             }
         }
 
-        if (copy)
-        {
-            _window.Copy(AllText());
-        }
+        if (copy) _window.Copy(GetAllText());
 
         _window.End();
     }
@@ -117,14 +111,11 @@ internal sealed class ConsoleWindow : IDisposable
     /// The lines drawn: the newest <see cref="ShownLines"/> that contain the filter, in any case, gathered again only
     /// when a line came or the filter changed since.
     /// </summary>
-    private List<Line> Shown()
+    private List<Line> GetShown()
     {
         lock (_lock)
         {
-            if (!_isChanged && string.Equals(_filter, _shownFilter, StringComparison.Ordinal))
-            {
-                return _shown;
-            }
+            if (!_isChanged && string.Equals(_filter, _shownFilter, StringComparison.Ordinal)) return _shown;
 
             _isChanged = false;
             _shownFilter = _filter;
@@ -137,10 +128,7 @@ internal sealed class ConsoleWindow : IDisposable
                 }
             }
 
-            if (_shown.Count > ShownLines)
-            {
-                _shown.RemoveRange(0, _shown.Count - ShownLines);
-            }
+            if (_shown.Count > ShownLines) _shown.RemoveRange(0, _shown.Count - ShownLines);
 
             return _shown;
         }
@@ -149,7 +137,7 @@ internal sealed class ConsoleWindow : IDisposable
     /// <summary>
     /// Every kept line as one text, each ended, whatever the filter.
     /// </summary>
-    private string AllText()
+    private string GetAllText()
     {
         lock (_lock)
         {

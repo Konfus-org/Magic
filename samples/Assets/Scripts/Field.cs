@@ -22,10 +22,7 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
     {
         foreach (Entity spawned in _spawned)
         {
-            if (world.IsAlive(spawned))
-            {
-                world.Destroy(spawned);
-            }
+            if (world.IsAlive(spawned)) world.Destroy(spawned);
         }
     }
 
@@ -58,11 +55,11 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
         Renderer[] renderers = new Renderer[Instances];
         for (int i = 0; i < Instances; i++)
         {
-            float scale = 0.5f + Spread(i, 2);
+            float scale = 0.5f + GetSpread(i, 2);
             transforms[i] = new Transform
             {
-                Position = centre + new Vector3((Spread(i, 0) - 0.5f) * Size, scale, (Spread(i, 1) - 0.5f) * Size),
-                Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, Spread(i, 3) * MathF.Tau),
+                Position = centre + new Vector3((GetSpread(i, 0) - 0.5f) * Size, scale, (GetSpread(i, 1) - 0.5f) * Size),
+                Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, GetSpread(i, 3) * MathF.Tau),
                 Scale = new Vector3(scale),
             };
             renderers[i] = new Renderer { Model = Model, Materials = { Material } };
@@ -72,8 +69,8 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
         PointLight[] lights = new PointLight[Lights];
         for (int i = 0; i < Lights; i++)
         {
-            places[i] = new Transform { Position = centre + new Vector3((Spread(i + Instances, 0) - 0.5f) * Size, 1.5f + (Spread(i, 4) * 2), (Spread(i + Instances, 1) - 0.5f) * Size) };
-            lights[i] = new PointLight { Color = Hue(Spread(i, 5)), Intensity = 50 + (Spread(i, 6) * 150), Range = 8 + (Spread(i, 7) * 6) };
+            places[i] = new Transform { Position = centre + new Vector3((GetSpread(i + Instances, 0) - 0.5f) * Size, 1.5f + (GetSpread(i, 4) * 2), (GetSpread(i + Instances, 1) - 0.5f) * Size) };
+            lights[i] = new PointLight { Color = GetHueColor(GetSpread(i, 5)), Intensity = 50 + (GetSpread(i, 6) * 150), Range = 8 + (GetSpread(i, 7) * 6) };
         }
 
         _spawned.AddRange(world.Create<Transform, Renderer>(transforms, renderers));
@@ -89,7 +86,7 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
     /// <summary>
     /// The <paramref name="index"/>th value of an even sequence in 0 to 1, one of several that do not line up.
     /// </summary>
-    private static float Spread(int index, int sequence)
+    private static float GetSpread(int index, int sequence)
     {
         float step = sequence switch
         {
@@ -103,7 +100,7 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
     /// <summary>
     /// A fully saturated colour at a hue from 0 to 1.
     /// </summary>
-    private static Color Hue(float hue)
+    private static Color GetHueColor(float hue)
     {
         float r = Math.Clamp(MathF.Abs((hue * 6) - 3) - 1, 0, 1);
         float g = Math.Clamp(2 - MathF.Abs((hue * 6) - 2), 0, 1);

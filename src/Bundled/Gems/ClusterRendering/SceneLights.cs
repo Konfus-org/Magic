@@ -20,28 +20,28 @@ internal sealed class SceneLights(IGpu gpu) : IDisposable
         ChangedLights.Dispose();
     }
 
-    public GpuArray<GpuSceneLight> Rows { get; } = new(gpu, GpuBufferUsage.ComputeRead, 256);
+    internal GpuArray<GpuSceneLight> Rows { get; } = new(gpu, GpuBufferUsage.ComputeRead, 256);
 
     /// <summary>
     /// A bit for each slot that changed this frame (<see cref="Changed"/>), by which the shadow pages a light casts
     /// into are drawn again; cleared the next frame.
     /// </summary>
-    public GpuArray<uint> ChangedLights { get; } = new(gpu, GpuBufferUsage.ComputeRead, 64);
+    internal GpuArray<uint> ChangedLights { get; } = new(gpu, GpuBufferUsage.ComputeRead, 64);
 
     /// <summary>
     /// The slots there are, a GPU thread each where the views cull them.
     /// </summary>
-    public int Capacity => Rows.Capacity;
+    internal int Capacity => Rows.Capacity;
 
     /// <summary>
     /// The slots of the lights that came, went, moved or changed this frame, whose shadows are drawn again.
     /// </summary>
-    public IReadOnlyList<int> Changed => _changed;
+    internal IReadOnlyList<int> Changed => _changed;
 
     /// <summary>
     /// Takes in the lights that changed since the last frame, then uploads them.
     /// </summary>
-    public void Update(WorldCopy copy)
+    internal void Update(WorldCopy copy)
     {
         foreach (int slot in _changed)
         {
@@ -92,16 +92,16 @@ internal sealed class SceneLights(IGpu gpu) : IDisposable
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuSceneLight
 {
-    public Vector3 Position;
-    public float Range;
-    public Vector3 Intensity;
-    public float Radius;
-    public Vector3 Forward;
-    public float SpotScale;
-    public float SpotOffset;
-    public uint Flags;
-    public uint Padding0;
-    public uint Padding1;
+    internal Vector3 Position;
+    internal float Range;
+    internal Vector3 Intensity;
+    internal float Radius;
+    internal Vector3 Forward;
+    internal float SpotScale;
+    internal float SpotOffset;
+    internal uint Flags;
+    internal uint Padding0;
+    internal uint Padding1;
 }
 
 /// <summary>

@@ -25,7 +25,7 @@ A file becomes a tree of parts (`PrefabPart`), one for each entity it holds:
   its parts go under it, before its own children: shared, not copied, as nothing changes a prefab once it is made.
 
 What a file places and attaches is loaded as it is read, so it is what the prefab is made from
-(`Assets.Dependencies`): when a placed prefab changes, every prefab placing it is read again, and whatever spawned
+(`Assets.GetDependencies`): when a placed prefab changes, every prefab placing it is read again, and whatever spawned
 it hears so (`AssetReloaded<Prefab>`). A prefab that places itself, directly or through others, fails rather than waits
 for ever. A script not named by its id, or a placed prefab that does not load, fails the file. Its
 `.meta` holds only its id.

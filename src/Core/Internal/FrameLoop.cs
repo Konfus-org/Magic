@@ -92,7 +92,7 @@ internal sealed class FrameLoop : IDisposable
     /// </summary>
     private double _fixedSeconds;
 
-    public FrameLoop(IReadOnlyList<IGem> gems, World world, Lifetime lifetime, Threads threads, Events events, Settings settings, ulong frameLimit, double startSeconds)
+    internal FrameLoop(IReadOnlyList<IGem> gems, World world, Lifetime lifetime, Threads threads, Events events, Settings settings, ulong frameLimit, double startSeconds)
     {
         _gems = [.. gems];
         _names = new string[_gems.Length];
@@ -104,10 +104,10 @@ internal sealed class FrameLoop : IDisposable
         _hooked = new int[_phases.Length][];
         for (int phase = 0; phase < _phases.Length; phase++)
         {
-            _hooked[phase] = Hooked(_phases[phase], isReversed: phase == (int)Phase.Render);
+            _hooked[phase] = GetHooked(_phases[phase], isReversed: phase == (int)Phase.Render);
         }
 
-        _stops = Hooked(nameof(IGem.Stop), isReversed: true);
+        _stops = GetHooked(nameof(IGem.Stop), isReversed: true);
         _left = new bool[_gems.Length];
         _world = world;
         _lifetime = lifetime;
@@ -130,13 +130,13 @@ internal sealed class FrameLoop : IDisposable
     /// The frame clock (<see cref="Frame.Seconds"/>) as of the last frame started, from where the run before left
     /// it when this one goes on from it, else 0: what a run started again goes on from. Main thread.
     /// </summary>
-    public double Seconds { get; private set; }
+    internal double Seconds { get; private set; }
 
     /// <summary>
     /// Runs frames until the run stops or the frame limit is reached, then waits for the last to be rendered. On the main
     /// thread.
     /// </summary>
-    public void Run()
+    internal void Run()
     {
         long start = Stopwatch.GetTimestamp();
         double began = Seconds;
@@ -151,10 +151,7 @@ internal sealed class FrameLoop : IDisposable
 
             double seconds = began + Stopwatch.GetElapsedTime(start).TotalSeconds;
             Frame frame = new(index, (float)(seconds - previousSeconds), seconds);
-            if (index > 0)
-            {
-                _frameDuration.Record(seconds - previousSeconds);
-            }
+            if (index > 0) _frameDuration.Record(seconds - previousSeconds);
 
             previousSeconds = seconds;
             Seconds = seconds;
@@ -185,7 +182,7 @@ internal sealed class FrameLoop : IDisposable
     /// is logged, and the rest still stop. On the main thread, once the last frame is done and the world is saved.
     /// </summary>
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a gem throws as it stops, it is logged and the rest still stop.")]
-    public void Stop()
+    internal void Stop()
     {
         foreach (int i in _stops)
         {
@@ -274,10 +271,7 @@ internal sealed class FrameLoop : IDisposable
         bool timed = _renderWait.Enabled;
         long start = timed ? Stopwatch.GetTimestamp() : 0;
         _rendered.Wait();
-        if (timed)
-        {
-            _renderWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
-        }
+        if (timed) _renderWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
     }
 
     /// <summary>
@@ -290,10 +284,7 @@ internal sealed class FrameLoop : IDisposable
     {
         foreach (int i in _hooked[(int)phase])
         {
-            if (Volatile.Read(ref _left[i]))
-            {
-                continue;
-            }
+            if (Volatile.Read(ref _left[i])) continue;
 
             bool timed = _hookDuration.Enabled;
             long start = timed ? Stopwatch.GetTimestamp() : 0;
@@ -321,7 +312,7 @@ internal sealed class FrameLoop : IDisposable
     /// the reverse when <paramref name="isReversed"/>: Render and Stop, so a gem finishes what the gems that take it
     /// drew, and ends after them.
     /// </summary>
-    private int[] Hooked(string name, bool isReversed)
+    private int[] GetHooked(string name, bool isReversed)
     {
         List<int> hooked = [];
         for (int turn = 0; turn < _gems.Length; turn++)

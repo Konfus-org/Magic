@@ -64,7 +64,7 @@ public sealed class Threads : IDisposable
     /// </summary>
     internal void HandFrame(Action render)
     {
-        if (!_render.Enqueue(render, isTimed: false))
+        if (!_render.TryEnqueue(render, isTimed: false))
         {
             Debugging.Warn("A frame was handed to the render thread after the run ended; it is dropped.");
         }
@@ -88,13 +88,10 @@ public sealed class Threads : IDisposable
     [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "What the work throws ends the task, for whoever awaits it.")]
     public Task<T> InvokeAsync<T>(EngineThread thread, Func<T> work, CancellationToken cancel = default)
     {
-        if (cancel.IsCancellationRequested)
-        {
-            return Task.FromCanceled<T>(cancel);
-        }
+        if (cancel.IsCancellationRequested) return Task.FromCanceled<T>(cancel);
 
         TaskCompletionSource<T> done = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        bool queued = Queue(thread).Enqueue(() =>
+        bool queued = Queue(thread).TryEnqueue(() =>
         {
             if (cancel.IsCancellationRequested)
             {
@@ -116,10 +113,7 @@ public sealed class Threads : IDisposable
             }
         });
 
-        if (!queued)
-        {
-            done.SetCanceled(CancellationToken.None);
-        }
+        if (!queued) done.SetCanceled(CancellationToken.None);
 
         return done.Task;
     }
@@ -199,7 +193,7 @@ public sealed class Threads : IDisposable
             // everything handed to it before the frames ended still runs.
             _main.End();
             _main.RunPending();
-            _render.Enqueue(_render.End, isTimed: false);
+            _render.TryEnqueue(_render.End, isTimed: false);
         }
     }
 
@@ -245,12 +239,9 @@ public sealed class Threads : IDisposable
         /// Adds <paramref name="work"/>, timed unless <paramref name="isTimed"/> says not; false once the thread has
         /// ended.
         /// </summary>
-        public bool Enqueue(Action work, bool isTimed = true)
+        public bool TryEnqueue(Action work, bool isTimed = true)
         {
-            if (!_work.Writer.TryWrite(new Pending(work, isTimed)))
-            {
-                return false;
-            }
+            if (!_work.Writer.TryWrite(new Pending(work, isTimed))) return false;
 
             _arrived.Set();
             return true;

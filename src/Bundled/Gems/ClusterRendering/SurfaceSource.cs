@@ -15,21 +15,15 @@ internal sealed partial record SurfaceSource(string Name, string Text, ParamLayo
     /// <summary>
     /// Reads <paramref name="surface"/>, or says why it cannot be drawn.
     /// </summary>
-    public static async Task<Result<SurfaceSource>> ReadAsync(Assets assets, Handle<Shader> surface, CancellationToken cancel)
+    internal static async Task<Result<SurfaceSource>> ReadAsync(Assets assets, Handle<Shader> surface, CancellationToken cancel)
     {
         Result<Shader> loaded = await assets.LoadAsync(surface, cancel).ConfigureAwait(false);
-        if (!loaded.Ok)
-        {
-            return Result.Failure<SurfaceSource>(loaded.Error);
-        }
+        if (!loaded.Ok) return Result.Failure<SurfaceSource>(loaded.Error);
 
-        string name = assets.Path(surface) ?? $"surface {surface.Id}";
+        string name = assets.GetPath(surface) ?? $"surface {surface.Id}";
         string text = loaded.Value.Text;
         Result<ParamLayout?> layout = ParamLayout.Parse(text, "MaterialParams", allowTextures: true, allowCurves: false, ParamLayout.RecordBytes);
-        if (!layout.Ok)
-        {
-            return Result.Failure<SurfaceSource>($"{name}: {layout.Error}");
-        }
+        if (!layout.Ok) return Result.Failure<SurfaceSource>($"{name}: {layout.Error}");
 
         if (layout.Value is { } parsed)
         {

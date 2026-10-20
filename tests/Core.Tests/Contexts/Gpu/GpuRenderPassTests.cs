@@ -83,7 +83,7 @@ public sealed class GpuRenderPassTests
 
         pass.VertexBuffers(buffers);
 
-        Assert.Equal(buffers, commands.BuffersOf(commands.Commands[^1]).ToArray());
+        Assert.Equal(buffers, commands.GetBuffers(commands.Commands[^1]).ToArray());
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public sealed class GpuRenderPassTests
 
         pass.Buffers(GpuStage.Fragment, buffers);
 
-        Assert.Equal(buffers, commands.BuffersOf(commands.Commands[^1]).ToArray());
+        Assert.Equal(buffers, commands.GetBuffers(commands.Commands[^1]).ToArray());
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public sealed class GpuRenderPassTests
 
         pass.Textures(GpuStage.Fragment, textures);
 
-        Assert.Equal(textures, commands.SampledOf(commands.Commands[^1]).ToArray());
+        Assert.Equal(textures, commands.GetSampled(commands.Commands[^1]).ToArray());
     }
 
     [Fact]
@@ -143,7 +143,7 @@ public sealed class GpuRenderPassTests
 
         pass.RawTextures(GpuStage.Vertex, textures);
 
-        Assert.Equal(textures, commands.TexturesOf(commands.Commands[^1]).ToArray());
+        Assert.Equal(textures, commands.GetTextures(commands.Commands[^1]).ToArray());
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public sealed class GpuRenderPassTests
 
         pass.Constants(GpuStage.Vertex, 0x01020304u);
 
-        Assert.Equal(BitConverter.GetBytes(0x01020304u), commands.BytesOf(commands.Commands[^1]).ToArray());
+        Assert.Equal(BitConverter.GetBytes(0x01020304u), commands.GetBytes(commands.Commands[^1]).ToArray());
     }
 
     [Fact]

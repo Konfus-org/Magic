@@ -21,14 +21,11 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
         _telemetry.Dispose();
     }
 
-    public void Update()
+    internal void Update()
     {
         bool isOpen = window.Begin(out bool copy);
         _telemetry.Listen(isOpen);
-        if (!isOpen)
-        {
-            return;
-        }
+        if (!isOpen) return;
 
         _telemetry.Refresh();
         ReadOnlySpan<string> tabs = _telemetry.Tabs;
@@ -42,10 +39,7 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
             Draw(tabs[Math.Clamp(_tab, 0, tabs.Length - 1)]);
         }
 
-        if (copy)
-        {
-            window.Copy(_telemetry.AllText());
-        }
+        if (copy) window.Copy(_telemetry.GetAllText());
 
         window.End();
     }
@@ -61,41 +55,23 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
         for (int i = 0; i < lines.Count; i++)
         {
             TelemetryLine line = lines[i];
-            if (!string.Equals(line.Tab, tab, StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!string.Equals(line.Tab, tab, StringComparison.Ordinal)) continue;
 
             if (!string.Equals(line.Header, header, StringComparison.Ordinal))
             {
-                if (isUnfolded)
-                {
-                    ui.EndTable();
-                }
+                if (isUnfolded) ui.EndTable();
 
                 header = line.Header;
                 isUnfolded = ui.Header(header);
-                if (isUnfolded)
-                {
-                    ui.Table(header, _columns);
-                }
+                if (isUnfolded) ui.Table(header, _columns);
             }
 
-            if (!isUnfolded)
-            {
-                continue;
-            }
+            if (!isUnfolded) continue;
 
             ui.Row([line.Name, line.Value, line.Rate, line.Max]);
-            if (line.Description is { Length: > 0 } description)
-            {
-                ui.Tooltip(description);
-            }
+            if (line.Description is { Length: > 0 } description) ui.Tooltip(description);
         }
 
-        if (isUnfolded)
-        {
-            ui.EndTable();
-        }
+        if (isUnfolded) ui.EndTable();
     }
 }

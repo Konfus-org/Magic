@@ -17,7 +17,7 @@ public static class CString
     /// <summary>
     /// The text as a zero-terminated UTF-8 string, to pin (<c>fixed</c>) for as long as the C call reads it.
     /// </summary>
-    public static byte[] Bytes(string text)
+    public static byte[] ToBytes(string text)
     {
         byte[] bytes = new byte[Encoding.UTF8.GetByteCount(text) + 1];
         Encoding.UTF8.GetBytes(text, bytes);

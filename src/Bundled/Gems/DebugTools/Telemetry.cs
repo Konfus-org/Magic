@@ -52,12 +52,12 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// <summary>
     /// The last second's lines, in the order they show.
     /// </summary>
-    public IReadOnlyList<TelemetryLine> Lines => _lines;
+    internal IReadOnlyList<TelemetryLine> Lines => _lines;
 
     /// <summary>
     /// The tabs of the last second's lines, in their order.
     /// </summary>
-    public ReadOnlySpan<string> Tabs => _tabs;
+    internal ReadOnlySpan<string> Tabs => _tabs;
 
     public void Dispose()
     {
@@ -68,12 +68,9 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// <summary>
     /// Starts or stops listening. Stopped, it forgets what it measured.
     /// </summary>
-    public void Listen(bool listening)
+    internal void Listen(bool listening)
     {
-        if (listening == (_listener is not null))
-        {
-            return;
-        }
+        if (listening == (_listener is not null)) return;
 
         if (_listener is { } listener)
         {
@@ -101,7 +98,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// Once a second has gone by since the last time: the lines made from what it measured, and the next second
     /// started.
     /// </summary>
-    public void Refresh()
+    internal void Refresh()
     {
         if (_listener is not null && !ReferenceEquals(_tabsListened, settings.Tabs))
         {
@@ -110,10 +107,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         }
 
         double seconds = Stopwatch.GetElapsedTime(_secondStart).TotalSeconds;
-        if (_listener is not { } listener || seconds < 1)
-        {
-            return;
-        }
+        if (_listener is not { } listener || seconds < 1) return;
 
         _secondStart = Stopwatch.GetTimestamp();
         listener.RecordObservableInstruments();
@@ -126,13 +120,13 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             }
         }
 
-        _tabs = TabsOf(_lines);
+        _tabs = GetTabs(_lines);
     }
 
     /// <summary>
     /// Every line as one text, under its tab's name and its header's.
     /// </summary>
-    public string AllText()
+    internal string GetAllText()
     {
         StringBuilder text = new();
         string tab = string.Empty;
@@ -170,15 +164,12 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// <summary>
     /// The tabs of <paramref name="lines"/>, which keep each tab's together, in their order.
     /// </summary>
-    private static string[] TabsOf(List<TelemetryLine> lines)
+    private static string[] GetTabs(List<TelemetryLine> lines)
     {
         List<string> tabs = [];
         foreach (TelemetryLine line in lines)
         {
-            if (tabs.Count == 0 || !string.Equals(tabs[^1], line.Tab, StringComparison.Ordinal))
-            {
-                tabs.Add(line.Tab);
-            }
+            if (tabs.Count == 0 || !string.Equals(tabs[^1], line.Tab, StringComparison.Ordinal)) tabs.Add(line.Tab);
         }
 
         return [.. tabs];
@@ -188,7 +179,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// <paramref name="value"/> in <paramref name="unit"/>, with seconds shown as milliseconds, as most of what is timed
     /// in a frame takes far less than one, bytes as megabytes, and a count's unit, in braces, left out.
     /// </summary>
-    private static string Amount(double value, string? unit) => unit switch
+    private static string FormatAmount(double value, string? unit) => unit switch
     {
         "s" => string.Create(CultureInfo.InvariantCulture, $"{value * 1000:0.###} ms"),
         "By" => string.Create(CultureInfo.InvariantCulture, $"{value / (1024 * 1024):0.#} MB"),
@@ -202,10 +193,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     private static void Add<T>(Instrument instrument, T measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
         where T : struct, INumber<T>
     {
-        if (state is Measured measured)
-        {
-            measured.Add(double.CreateTruncating(measurement), tags);
-        }
+        if (state is Measured measured) measured.Add(double.CreateTruncating(measurement), tags);
     }
 
     /// <summary>
@@ -251,15 +239,9 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
                 continue;
             }
 
-            if (!string.Equals(listed.Meter, added.Meter, StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!string.Equals(listed.Meter, added.Meter, StringComparison.Ordinal)) continue;
 
-            if (string.Equals(listed.Area, added.Area, StringComparison.Ordinal))
-            {
-                return i + 1;
-            }
+            if (string.Equals(listed.Area, added.Area, StringComparison.Ordinal)) return i + 1;
 
             meterEnd = Math.Max(meterEnd, i + 1);
         }
@@ -272,10 +254,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// </summary>
     private void Complete(Instrument instrument, object? state)
     {
-        if (state is not Measured measured)
-        {
-            return;
-        }
+        if (state is not Measured measured) return;
 
         lock (_lock)
         {
@@ -318,7 +297,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     {
         private readonly Lock _lock = new();
         private readonly List<Series> _series = [];
-        private readonly Summary _summary = SummaryOf(instrument);
+        private readonly Summary _summary = GetSummary(instrument);
 
         /// <summary>
         /// The instrument's name split as its lines show it: its area, its name in the area, and the header its lines
@@ -327,15 +306,15 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         /// </summary>
         private readonly (string Area, string Name, string Header) _parts = PartsOf(instrument, prefix);
 
-        public string Tab => tab;
+        internal string Tab => tab;
 
-        public string Meter => instrument.Meter.Name;
+        internal string Meter => instrument.Meter.Name;
 
-        public string Area => _parts.Area;
+        internal string Area => _parts.Area;
 
-        public int Order => order;
+        internal int Order => order;
 
-        public void Add(double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        internal void Add(double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
             lock (_lock)
             {
@@ -347,17 +326,14 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         /// Adds a line for each series measured over the last <paramref name="seconds"/> to <paramref name="lines"/>,
         /// after one of the instrument's name when they have tags, and starts each over.
         /// </summary>
-        public void Describe(List<TelemetryLine> lines, double seconds)
+        internal void Describe(List<TelemetryLine> lines, double seconds)
         {
             lock (_lock)
             {
                 bool isNamed = false;
                 foreach (Series series in _series)
                 {
-                    if (series.Count == 0)
-                    {
-                        continue;
-                    }
+                    if (series.Count == 0) continue;
 
                     if (series.Tags.Length > 0 && !isNamed)
                     {
@@ -371,19 +347,13 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             }
         }
 
-        private static Summary SummaryOf(Instrument instrument)
+        private static Summary GetSummary(Instrument instrument)
         {
             Type type = instrument.GetType();
             Type kind = type.IsGenericType ? type.GetGenericTypeDefinition() : type;
-            if (kind == typeof(Histogram<>))
-            {
-                return Summary.Distribution;
-            }
+            if (kind == typeof(Histogram<>)) return Summary.Distribution;
 
-            if (kind == typeof(Counter<>) || kind == typeof(UpDownCounter<>))
-            {
-                return Summary.Total;
-            }
+            if (kind == typeof(Counter<>) || kind == typeof(UpDownCounter<>)) return Summary.Total;
 
             return kind == typeof(ObservableCounter<>) || kind == typeof(ObservableUpDownCounter<>) ? Summary.Running : Summary.Latest;
         }
@@ -413,10 +383,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         {
             foreach (Series series in _series)
             {
-                if (series.Matches(tags))
-                {
-                    return series;
-                }
+                if (series.Matches(tags)) return series;
             }
 
             Series added = new(tags.ToArray());
@@ -440,10 +407,10 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
             (string value, string rate, string max) = _summary switch
             {
-                Summary.Distribution => (Amount(series.Sum / series.Count, unit), string.Create(CultureInfo.InvariantCulture, $"{series.Count / seconds:0.#}/s"), Amount(series.Max, unit)),
-                Summary.Total => (Amount(series.Sum, unit), $"{Amount(series.Sum / seconds, unit)}/s", string.Empty),
-                Summary.Running => (Amount(series.Last, unit), series.Previous is { } previous ? $"{Amount((series.Last - previous) / seconds, unit)}/s" : string.Empty, string.Empty),
-                Summary.Latest or _ => (Amount(series.Last, unit), string.Empty, string.Empty),
+                Summary.Distribution => (FormatAmount(series.Sum / series.Count, unit), string.Create(CultureInfo.InvariantCulture, $"{series.Count / seconds:0.#}/s"), FormatAmount(series.Max, unit)),
+                Summary.Total => (FormatAmount(series.Sum, unit), $"{FormatAmount(series.Sum / seconds, unit)}/s", string.Empty),
+                Summary.Running => (FormatAmount(series.Last, unit), series.Previous is { } previous ? $"{FormatAmount((series.Last - previous) / seconds, unit)}/s" : string.Empty, string.Empty),
+                Summary.Latest or _ => (FormatAmount(series.Last, unit), string.Empty, string.Empty),
             };
             return new TelemetryLine(Tab, _parts.Header, name.ToString(), value, rate, max, instrument.Description);
         }
@@ -454,22 +421,22 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// </summary>
     private sealed class Series(KeyValuePair<string, object?>[] tags)
     {
-        public ReadOnlySpan<KeyValuePair<string, object?>> Tags => tags;
+        internal ReadOnlySpan<KeyValuePair<string, object?>> Tags => tags;
 
-        public long Count { get; private set; }
+        internal long Count { get; private set; }
 
-        public double Sum { get; private set; }
+        internal double Sum { get; private set; }
 
-        public double Max { get; private set; }
+        internal double Max { get; private set; }
 
-        public double Last { get; private set; }
+        internal double Last { get; private set; }
 
         /// <summary>
         /// The last value of the second before, for a running total's rate; none in the first.
         /// </summary>
-        public double? Previous { get; private set; }
+        internal double? Previous { get; private set; }
 
-        public void Add(double value)
+        internal void Add(double value)
         {
             Max = Count == 0 ? value : Math.Max(Max, value);
             Last = value;
@@ -477,7 +444,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             Count++;
         }
 
-        public void Clear()
+        internal void Clear()
         {
             Previous = Last;
             Count = 0;
@@ -488,12 +455,9 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         /// Whether <paramref name="other"/> are this series' tags, in the same order: an instrument is recorded with its
         /// tags in one order.
         /// </summary>
-        public bool Matches(ReadOnlySpan<KeyValuePair<string, object?>> other)
+        internal bool Matches(ReadOnlySpan<KeyValuePair<string, object?>> other)
         {
-            if (other.Length != tags.Length)
-            {
-                return false;
-            }
+            if (other.Length != tags.Length) return false;
 
             for (int i = 0; i < other.Length; i++)
             {
@@ -520,7 +484,7 @@ internal readonly record struct TelemetryLine(string Tab, string Header, string 
     /// <summary>
     /// The row as one line of text, for Copy: the name, then the cells it has.
     /// </summary>
-    public string Text
+    internal string Text
     {
         get
         {

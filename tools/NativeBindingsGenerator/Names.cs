@@ -28,25 +28,19 @@ internal static class Names
     /// <c>CreateWindow</c>; with <c>ipl=IPL</c> configured, <c>iplContextCreate</c> is <c>IPL</c> and
     /// <c>ContextCreate</c>. A name with neither has no owner and is declared at the namespace.
     /// </summary>
-    public static (string Owner, string Name) Split(string name, IReadOnlyList<(string Prefix, string Owner)> prefixes)
+    internal static (string Owner, string Name) Split(string name, IReadOnlyList<(string Prefix, string Owner)> prefixes)
     {
         foreach ((string prefix, string owner) in prefixes)
         {
             if (name.StartsWith(prefix, StringComparison.Ordinal))
             {
                 string rest = name[prefix.Length..].TrimStart('_');
-                if (rest.Length > 0)
-                {
-                    return (owner, rest);
-                }
+                if (rest.Length > 0) return (owner, rest);
             }
         }
 
         int underscore = name.IndexOf('_', StringComparison.Ordinal);
-        if (underscore > 0 && underscore < name.Length - 1)
-        {
-            return (name[..underscore], name[(underscore + 1)..]);
-        }
+        if (underscore > 0 && underscore < name.Length - 1) return (name[..underscore], name[(underscore + 1)..]);
 
         return ("", name);
     }
@@ -56,22 +50,19 @@ internal static class Names
     /// title-cased word by word (<c>NUM_BANDS</c> to <c>NumBands</c>); a name without underscores keeps its capitals
     /// and gets a first one (<c>error</c> to <c>Error</c>; <c>HRTFSettings</c> and <c>HRTF</c> stay).
     /// </summary>
-    public static string Pascal(string name)
+    internal static string ToPascal(string name)
     {
         name = name.Trim('_');
-        if (name.Length == 0)
-        {
-            return "_";
-        }
+        if (name.Length == 0) return "_";
 
-        string text = name.Contains('_', StringComparison.Ordinal) ? Title(name) : char.ToUpperInvariant(name[0]) + name[1..];
-        return Legal(text);
+        string text = name.Contains('_', StringComparison.Ordinal) ? ToTitle(name) : char.ToUpperInvariant(name[0]) + name[1..];
+        return ToLegal(text);
     }
 
     /// <summary>The camelCase form of a C name, a C# parameter name.</summary>
-    public static string Camel(string name)
+    internal static string ToCamel(string name)
     {
-        string pascal = Pascal(name).TrimEnd('_');
+        string pascal = ToPascal(name).TrimEnd('_');
         string text = char.ToLowerInvariant(pascal[0]) + pascal[1..];
         return _keywords.Contains(text) ? "@" + text : text;
     }
@@ -84,15 +75,12 @@ internal static class Names
     /// <c>Success</c>, <c>Failure</c>), and a lone member only its owner's. A member that would start with a digit
     /// is led by the enum's last word (<c>ImGuiKey_0</c> to <c>Key0</c>).
     /// </summary>
-    private static int Owned(IReadOnlyList<string> names, string own)
+    private static int CountOwned(IReadOnlyList<string> names, string own)
     {
         int owned = 0;
         foreach (string name in names)
         {
-            if (IsOwned(name, own))
-            {
-                owned++;
-            }
+            if (IsOwned(name, own)) owned++;
         }
 
         return owned;
@@ -101,24 +89,24 @@ internal static class Names
     private static bool IsOwned(string name, string own)
         => name.StartsWith(own, StringComparison.Ordinal) && name.Length > own.Length && (own.EndsWith('_') || char.IsUpper(name[own.Length]) || char.IsDigit(name[own.Length]));
 
-    public static string[] EnumMembers(string enumName, IReadOnlyList<string> names, IReadOnlyList<(string Prefix, string Owner)> prefixes)
+    internal static string[] MakeEnumMembers(string enumName, IReadOnlyList<string> names, IReadOnlyList<(string Prefix, string Owner)> prefixes)
     {
         // Members named after the enum lose its name: ImGuiKey_A, or SpvDecorationBinding where the next letter
         // starts a word.
         string own = enumName.TrimEnd('_') + "_";
         string[] result = new string[names.Count];
-        int owned = Owned(names, own);
+        int owned = CountOwned(names, own);
         if (owned == 0)
         {
             own = enumName.TrimEnd('_');
-            owned = Owned(names, own);
+            owned = CountOwned(names, own);
         }
 
         if (owned > 0)
         {
             for (int i = 0; i < names.Count; i++)
             {
-                result[i] = Member(enumName, IsOwned(names[i], own) ? names[i][own.Length..] : names[i]);
+                result[i] = MakeMember(enumName, IsOwned(names[i], own) ? names[i][own.Length..] : names[i]);
             }
 
             return result;
@@ -152,77 +140,62 @@ internal static class Names
 
             foreach (string[] member in pieces)
             {
-                if (member.Length <= shared)
-                {
-                    shared = member.Length - 1;
-                }
+                if (member.Length <= shared) shared = member.Length - 1;
             }
         }
 
         for (int i = 0; i < names.Count; i++)
         {
-            result[i] = Member(enumName, string.Join('_', pieces[i], shared, pieces[i].Length - shared));
+            result[i] = MakeMember(enumName, string.Join('_', pieces[i], shared, pieces[i].Length - shared));
         }
 
         return result;
     }
 
     /// <summary>A member's name from what is left of it: title-cased, led by the enum's last word when it would start with a digit.</summary>
-    private static string Member(string enumName, string rest)
+    private static string MakeMember(string enumName, string rest)
     {
-        if (rest.Length == 0 || char.IsAsciiDigit(rest[0]))
-        {
-            rest = LastWord(enumName) + "_" + rest;
-        }
+        if (rest.Length == 0 || char.IsAsciiDigit(rest[0])) rest = GetLastWord(enumName) + "_" + rest;
 
-        return Legal(Title(rest));
+        return ToLegal(ToTitle(rest));
     }
 
     /// <summary>The last word of a name: of <c>ImGuiKey</c>, <c>Key</c>; of <c>SDL_EventType</c>, <c>Type</c>.</summary>
-    private static string LastWord(string name)
+    private static string GetLastWord(string name)
     {
         name = name.Trim('_');
         int underscore = name.LastIndexOf('_');
-        if (underscore >= 0)
-        {
-            name = name[(underscore + 1)..];
-        }
+        if (underscore >= 0) name = name[(underscore + 1)..];
 
         for (int i = name.Length - 1; i > 0; i--)
         {
-            if (char.IsAsciiLetterUpper(name[i]) && !char.IsAsciiLetterUpper(name[i - 1]))
-            {
-                return name[i..];
-            }
+            if (char.IsAsciiLetterUpper(name[i]) && !char.IsAsciiLetterUpper(name[i - 1])) return name[i..];
         }
 
         return name;
     }
 
     /// <summary>Each underscore-separated word title-cased.</summary>
-    private static string Title(string name)
+    private static string ToTitle(string name)
     {
         StringBuilder result = new(name.Length);
         foreach (string piece in name.Split('_', StringSplitOptions.RemoveEmptyEntries))
         {
-            result.Append(Word(piece));
+            result.Append(ToWord(piece));
         }
 
         return result.Length == 0 ? "_" : result.ToString();
     }
 
     /// <summary>A name C# accepts as an identifier: not starting with a digit, not a keyword.</summary>
-    private static string Legal(string text)
+    private static string ToLegal(string text)
     {
-        if (char.IsAsciiDigit(text[0]))
-        {
-            text = "_" + text;
-        }
+        if (char.IsAsciiDigit(text[0])) text = "_" + text;
 
         return _keywords.Contains(text) ? text + "_" : text;
     }
 
-    private static string Word(string piece)
+    private static string ToWord(string piece)
     {
         bool lower = false;
         bool upper = false;
@@ -232,10 +205,7 @@ internal static class Names
             upper |= char.IsAsciiLetterUpper(c);
         }
 
-        if (lower && upper)
-        {
-            return char.ToUpperInvariant(piece[0]) + piece[1..];
-        }
+        if (lower && upper) return char.ToUpperInvariant(piece[0]) + piece[1..];
 
         return char.ToUpperInvariant(piece[0]) + piece[1..].ToLowerInvariant();
     }

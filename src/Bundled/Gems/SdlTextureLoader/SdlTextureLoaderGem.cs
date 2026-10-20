@@ -24,10 +24,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
     private static Result<Texture> Load(string path, ReadOnlySpan<byte> file, JsonElement settings)
     {
         Result<TextureMeta> meta = Json.Read<TextureMeta>(settings);
-        if (!meta.Ok)
-        {
-            return Result.Failure<Texture>($"its .meta is not a texture's: {meta.Error}");
-        }
+        if (!meta.Ok) return Result.Failure<Texture>($"its .meta is not a texture's: {meta.Error}");
 
         SDL.Surface* decoded = Decode(path, file, meta.Value.Size);
         if (decoded == null)
@@ -45,7 +42,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
 
         try
         {
-            return Mip(level0, meta.Value);
+            return MakeMips(level0, meta.Value);
         }
         finally
         {
@@ -63,15 +60,9 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
         fixed (byte* bytes = file)
         {
             SDL.IOStream* io = SDL.IOFromConstMem(bytes, (ulong)file.Length);
-            if (io == null)
-            {
-                return null;
-            }
+            if (io == null) return null;
 
-            if (!path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
-            {
-                return IMG.LoadIo(io, closeio: true);
-            }
+            if (!path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)) return IMG.LoadIo(io, closeio: true);
 
             SDL.Surface* drawn = IMG.LoadSizedSVGIo(io, width, 0);
             SDL.CloseIO(io);
@@ -83,7 +74,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
     /// <paramref name="level0"/> as a texture, with the levels below it when <paramref name="meta"/> asks for mips, each
     /// half the one above, all in one array.
     /// </summary>
-    private static Result<Texture> Mip(SDL.Surface* level0, TextureMeta meta)
+    private static Result<Texture> MakeMips(SDL.Surface* level0, TextureMeta meta)
     {
         int count = meta.Mipmaps ? 1 + BitOperations.Log2((uint)Math.Max(level0->W, level0->H)) : 1;
         TextureLevel[] levels = new TextureLevel[count];
@@ -102,10 +93,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
         for (int i = 1; i < count; i++)
         {
             SDL.Surface* level = SDL.ScaleSurface(above, levels[i].Width, levels[i].Height, SDL.ScaleMode.Linear);
-            if (above != level0)
-            {
-                SDL.DestroySurface(above);
-            }
+            if (above != level0) SDL.DestroySurface(above);
 
             if (level == null)
             {
@@ -116,10 +104,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
             above = level;
         }
 
-        if (above != level0)
-        {
-            SDL.DestroySurface(above);
-        }
+        if (above != level0) SDL.DestroySurface(above);
 
         return Result.Success(new Texture
         {

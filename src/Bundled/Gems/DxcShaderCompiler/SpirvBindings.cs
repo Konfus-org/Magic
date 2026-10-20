@@ -52,7 +52,7 @@ internal static class SpirvBindings
     /// The shader <paramref name="spirv"/> is, compiled for <paramref name="stage"/>, with what it binds; why not, when
     /// it binds something the binding model has no place for.
     /// </summary>
-    public static Result<GpuShader> Read(ReadOnlyMemory<byte> spirv, GpuStage stage)
+    internal static Result<GpuShader> Read(ReadOnlyMemory<byte> spirv, GpuStage stage)
     {
         ReadOnlySpan<uint> words = MemoryMarshal.Cast<byte, uint>(spirv.Span);
         if (words.Length < HeaderWords || words[0] != MagicNumber)
@@ -76,16 +76,13 @@ internal static class SpirvBindings
         {
             uint count = words[at] >> 16;
             uint opcode = words[at] & 0xFFFF;
-            if (count == 0 || at + count > words.Length)
-            {
-                return Result.Failure<GpuShader>("its words are cut short.");
-            }
+            if (count == 0 || at + count > words.Length) return Result.Failure<GpuShader>("its words are cut short.");
 
             ReadOnlySpan<uint> operands = words.Slice(at + 1, (int)count - 1);
             switch (opcode)
             {
                 case OpName when operands.Length >= 2:
-                    names[operands[0]] = Literal(operands[1..]);
+                    names[operands[0]] = ReadLiteral(operands[1..]);
                     break;
                 case OpDecorate when operands.Length >= 2:
                     Decorate(operands, bindings, sets, blocks, bufferBlocks);
@@ -132,10 +129,7 @@ internal static class SpirvBindings
             }
 
             string name = names.GetValueOrDefault(id, string.Empty);
-            if (name.Length == 0)
-            {
-                return Result.Failure<GpuShader>("a resource has no name.");
-            }
+            if (name.Length == 0) return Result.Failure<GpuShader>("a resource has no name.");
 
             if (arrays.Contains(pointee.Type))
             {
@@ -163,11 +157,8 @@ internal static class SpirvBindings
                 return Result.Failure<GpuShader>($"{name} is a struct that is neither a buffer nor a constant block.");
             }
 
-            Result<GpuBindingKind> kind = KindOf(stage, set, isBuffer ? Resource.Buffer : resource, name);
-            if (!kind.Ok)
-            {
-                return Result.Failure<GpuShader>(kind.Error);
-            }
+            Result<GpuBindingKind> kind = TryGetKind(stage, set, isBuffer ? Resource.Buffer : resource, name);
+            if (!kind.Ok) return Result.Failure<GpuShader>(kind.Error);
 
             found.Add(new GpuShaderBinding(name, kind.Value, binding));
         }
@@ -219,7 +210,7 @@ internal static class SpirvBindings
     /// holds sampled textures, storage textures and storage buffers; compute's write space what it writes; the uniform
     /// space its one constant block.
     /// </summary>
-    private static Result<GpuBindingKind> KindOf(GpuStage stage, uint set, Resource resource, string name)
+    private static Result<GpuBindingKind> TryGetKind(GpuStage stage, uint set, Resource resource, string name)
     {
         (uint read, uint write, uint uniform) = stage switch
         {
@@ -228,10 +219,7 @@ internal static class SpirvBindings
             GpuStage.Compute => (0u, 1u, 2u),
             _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "There is no such shader stage."),
         };
-        if (set == uniform && resource == Resource.Block)
-        {
-            return Result.Success(GpuBindingKind.Uniform);
-        }
+        if (set == uniform && resource == Resource.Block) return Result.Success(GpuBindingKind.Uniform);
 
         if (set == read)
         {
@@ -262,7 +250,7 @@ internal static class SpirvBindings
     /// <summary>
     /// A literal string operand: UTF-8, ending at its first zero byte.
     /// </summary>
-    private static string Literal(ReadOnlySpan<uint> words)
+    private static string ReadLiteral(ReadOnlySpan<uint> words)
     {
         ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(words);
         int end = bytes.IndexOf((byte)0);

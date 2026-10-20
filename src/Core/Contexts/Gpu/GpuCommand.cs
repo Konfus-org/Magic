@@ -6,7 +6,7 @@ namespace Magic.Contexts.Gpu;
 /// <summary>
 /// One GPU command, as <see cref="GpuCommands"/> records it: plain data whose <see cref="Type"/> says which fields mean
 /// something; the rest are default. A run (of texture levels, sampled textures, textures, buffers, regions or bytes)
-/// is a slice of the list's own, which the list hands back by the command (<see cref="GpuCommands.LevelsOf"/> and
+/// is a slice of the list's own, which the list hands back by the command (<see cref="GpuCommands.GetLevels"/> and
 /// the others like it).
 /// </summary>
 public readonly record struct GpuCommand(

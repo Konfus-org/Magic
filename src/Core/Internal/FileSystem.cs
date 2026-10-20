@@ -17,7 +17,7 @@ internal sealed class FileSystem : IFileSystem
 
     public string Combine(params ReadOnlySpan<string> segments) => Path.Join(segments);
 
-    public string Parent(string path) => Path.GetDirectoryName(path) ?? path;
+    public string GetParent(string path) => Path.GetDirectoryName(path) ?? path;
 
     public bool FileExists(string path) => File.Exists(path);
 
@@ -28,10 +28,7 @@ internal sealed class FileSystem : IFileSystem
         List<string> found = [];
         foreach (string file in Directory.EnumerateFiles(folder))
         {
-            if (HasExtension(file, extension))
-            {
-                found.Add(file);
-            }
+            if (HasExtension(file, extension)) found.Add(file);
         }
 
         return found;
@@ -42,15 +39,12 @@ internal sealed class FileSystem : IFileSystem
     /// each as its path from <paramref name="folder"/> with <c>/</c> between folders on every OS: the form an asset path
     /// takes. Folders it may not read are skipped.
     /// </summary>
-    public static IReadOnlyList<string> FindUnder(string folder, string extension)
+    internal static IReadOnlyList<string> FindUnder(string folder, string extension)
     {
         List<string> found = [];
         foreach (string file in Directory.EnumerateFiles(folder, "*", _under))
         {
-            if (HasExtension(file, extension))
-            {
-                found.Add(Relative(folder, file));
-            }
+            if (HasExtension(file, extension)) found.Add(MakeRelative(folder, file));
         }
 
         return found;
@@ -65,7 +59,7 @@ internal sealed class FileSystem : IFileSystem
     /// exists. <paramref name="folder"/> must exist.
     /// </summary>
     [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "The subscription owns the watcher, and disposing it disposes the watcher.")]
-    public static Subscription Watch(string folder, Action<string> changed)
+    internal static Subscription Watch(string folder, Action<string> changed)
     {
         FileSystemWatcher watcher = new(folder)
         {
@@ -75,21 +69,18 @@ internal sealed class FileSystem : IFileSystem
             // Room for a burst, such as a build copying a folder of files at once, before the OS drops what follows.
             InternalBufferSize = 64 * 1024,
         };
-        watcher.Created += (_, e) => changed(Relative(folder, e.FullPath));
+        watcher.Created += (_, e) => changed(MakeRelative(folder, e.FullPath));
 
         // A folder is "written" whenever a file in it is, and that file is reported itself.
         watcher.Changed += (_, e) =>
         {
-            if (!Directory.Exists(e.FullPath))
-            {
-                changed(Relative(folder, e.FullPath));
-            }
+            if (!Directory.Exists(e.FullPath)) changed(MakeRelative(folder, e.FullPath));
         };
-        watcher.Deleted += (_, e) => changed(Relative(folder, e.FullPath));
+        watcher.Deleted += (_, e) => changed(MakeRelative(folder, e.FullPath));
         watcher.Renamed += (_, e) =>
         {
-            changed(Relative(folder, e.OldFullPath));
-            changed(Relative(folder, e.FullPath));
+            changed(MakeRelative(folder, e.OldFullPath));
+            changed(MakeRelative(folder, e.FullPath));
         };
         watcher.Error += (_, e) => Debugging.Warn($"Watching {folder} missed changes: {e.GetException().Message}");
         watcher.EnableRaisingEvents = true;
@@ -126,7 +117,7 @@ internal sealed class FileSystem : IFileSystem
         string beside = $"{path}.{Path.GetRandomFileName()}";
         try
         {
-            Directory.CreateDirectory(Parent(path));
+            Directory.CreateDirectory(GetParent(path));
             await File.WriteAllBytesAsync(beside, bytes, cancel).ConfigureAwait(false);
             File.Move(beside, path, overwrite: true);
             return Result.Success();
@@ -137,19 +128,13 @@ internal sealed class FileSystem : IFileSystem
         }
         finally
         {
-            if (File.Exists(beside))
-            {
-                File.Delete(beside);
-            }
+            if (File.Exists(beside)) File.Delete(beside);
         }
     }
 
     public Result Delete(string path)
     {
-        if (!File.Exists(path))
-        {
-            return Result.Success();
-        }
+        if (!File.Exists(path)) return Result.Success();
 
         try
         {
@@ -174,7 +159,7 @@ internal sealed class FileSystem : IFileSystem
     /// <summary>
     /// <paramref name="path"/> from <paramref name="folder"/>, with <c>/</c> between folders on every OS.
     /// </summary>
-    private static string Relative(string folder, string path)
+    private static string MakeRelative(string folder, string path)
     {
         return Path.GetRelativePath(folder, path).Replace(Path.DirectorySeparatorChar, '/');
     }

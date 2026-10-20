@@ -33,10 +33,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
     {
         foreach (Entity ball in _balls)
         {
-            if (world.IsAlive(ball))
-            {
-                world.Destroy(ball);
-            }
+            if (world.IsAlive(ball)) world.Destroy(ball);
         }
 
         _balls.Clear();
@@ -64,10 +61,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
     public void Update(in Frame frame)
     {
         bool isClick = input[Control.MouseLeft].WasPressed;
-        if (!isClick && !input[Control.GamepadSouth].WasPressed)
-        {
-            return;
-        }
+        if (!isClick && !input[Control.GamepadSouth].WasPressed) return;
 
         Transform camera = world.Get<Transform>(owner);
         Vector3 forward = Vector3.Transform(Vector3.UnitZ, camera.Rotation);
@@ -82,10 +76,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
         {
             Vector2 pointer = new(input[Control.MouseX].Value, input[Control.MouseY].Value);
             Vector3 far = pointer.ToWorld(world.Get<Camera>(owner), camera, new Size(window.Width, window.Height), Reach);
-            if (physics.Cast(camera.Position, far) is { } hit)
-            {
-                aim = Vector3.Normalize(hit.Point - at.Position);
-            }
+            if (physics.Cast(camera.Position, far) is { } hit) aim = Vector3.Normalize(hit.Point - at.Position);
         }
 
         Renderer renderer = new() { Model = Model, Materials = new MaterialSlots { Material } };
@@ -94,10 +85,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
         while (_balls.Count > Most)
         {
             Entity oldest = _balls.Dequeue();
-            if (world.IsAlive(oldest))
-            {
-                world.Destroy(oldest);
-            }
+            if (world.IsAlive(oldest)) world.Destroy(oldest);
         }
     }
 }

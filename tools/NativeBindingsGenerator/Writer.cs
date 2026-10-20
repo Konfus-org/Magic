@@ -8,7 +8,7 @@ namespace Magic.Tools.NativeBindingsGenerator;
 /// </summary>
 internal static class Writer
 {
-    public static string Write(Options options, IReadOnlyList<Declaration> declarations, IReadOnlySet<string> structs)
+    internal static string Write(Options options, IReadOnlyList<Declaration> declarations, IReadOnlySet<string> structs)
     {
         List<string> owners = [];
         Dictionary<string, List<Declaration>> byOwner = new(StringComparer.Ordinal);
@@ -45,10 +45,7 @@ internal static class Writer
 
         foreach (string owner in owners)
         {
-            if (owner.Length == 0 || structs.Contains(owner))
-            {
-                continue;
-            }
+            if (owner.Length == 0 || structs.Contains(owner)) continue;
 
             text.Append('\n');
             Container(text, options, owner, $"public static unsafe partial class {owner}", byOwner, owners, structs, 0);
@@ -59,7 +56,7 @@ internal static class Writer
             if (structs.Contains(owner) && Names.Split(owner, options.Prefixes).Owner.Length == 0)
             {
                 text.Append('\n');
-                Container(text, options, owner, $"public unsafe partial struct {Names.Pascal(owner)}", byOwner, owners, structs, 0);
+                Container(text, options, owner, $"public unsafe partial struct {Names.ToPascal(owner)}", byOwner, owners, structs, 0);
             }
         }
 
@@ -95,7 +92,7 @@ internal static class Writer
             if (structs.Contains(child) && string.Equals(Names.Split(child, options.Prefixes).Owner, owner, StringComparison.Ordinal))
             {
                 Separate(text, ref first);
-                Container(text, options, child, $"public partial struct {Names.Pascal(Names.Split(child, options.Prefixes).Name)}", byOwner, owners, structs, depth + 1);
+                Container(text, options, child, $"public partial struct {Names.ToPascal(Names.Split(child, options.Prefixes).Name)}", byOwner, owners, structs, depth + 1);
             }
         }
 
@@ -106,10 +103,7 @@ internal static class Writer
     {
         foreach (Declaration declaration in members)
         {
-            if (declaration.Kind == DeclarationKind.Function)
-            {
-                return true;
-            }
+            if (declaration.Kind == DeclarationKind.Function) return true;
         }
 
         return false;
@@ -117,10 +111,7 @@ internal static class Writer
 
     private static void Separate(StringBuilder text, ref bool first)
     {
-        if (!first)
-        {
-            text.Append('\n');
-        }
+        if (!first) text.Append('\n');
 
         first = false;
     }
@@ -130,10 +121,7 @@ internal static class Writer
         string indent = new(' ', depth * 4);
         foreach (string line in body.TrimEnd('\n').Split('\n'))
         {
-            if (line.Length > 0)
-            {
-                text.Append(indent);
-            }
+            if (line.Length > 0) text.Append(indent);
 
             text.Append(line).Append('\n');
         }

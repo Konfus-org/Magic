@@ -33,25 +33,25 @@ internal sealed class Materials : IDisposable
     /// The raster bins every frame has, whose pixels do not clip: single-sided and double-sided. A surface's own clusters'
     /// come after, and its cards' <see cref="CardBins"/> after those (Shaders/Include/Culling.hlsli's CardBinOffset).
     /// </summary>
-    public const int FixedRasterBins = 2;
+    internal const int FixedRasterBins = 2;
 
     /// <summary>
     /// The first surface's cards' raster bin; a surface's own clusters' bins are those before it.
     /// </summary>
-    public const int CardBins = 128;
+    internal const int CardBins = 128;
 
     /// <summary>
     /// Raster bins there are rows for, a phase's in the bins' draw arguments.
     /// </summary>
-    public const int RasterBinRows = 256;
+    internal const int RasterBinRows = 256;
 
     /// <summary>
     /// A row's <see cref="Bins"/> word: its raster bin in the low byte, its resolve bin in the third, and these.
     /// </summary>
-    public const uint BinMasked = 1u << 8;
-    public const uint BinDoubleSided = 1u << 9;
-    public const uint BinTransparent = 1u << 10;
-    public const uint BinReady = 1u << 11;
+    internal const uint BinMasked = 1u << 8;
+    internal const uint BinDoubleSided = 1u << 9;
+    internal const uint BinTransparent = 1u << 10;
+    internal const uint BinReady = 1u << 11;
 
     /// <summary>
     /// The most resolve bins there are, as a byte numbers them.
@@ -66,7 +66,7 @@ internal sealed class Materials : IDisposable
     /// <summary>
     /// The surfaces of the <see cref="FixedRasterBins"/>, in bin order: no surface, single-sided then double-sided.
     /// </summary>
-    public static IReadOnlyList<SurfaceKey> FixedRasterKeys { get; } = [new SurfaceKey(Handle<Shader>.None, false, false), new SurfaceKey(Handle<Shader>.None, false, true)];
+    internal static IReadOnlyList<SurfaceKey> FixedRasterKeys { get; } = [new SurfaceKey(Handle<Shader>.None, false, false), new SurfaceKey(Handle<Shader>.None, false, true)];
 
     private readonly Assets _assets;
     private readonly TexturePools _textures;
@@ -102,7 +102,7 @@ internal sealed class Materials : IDisposable
     /// </summary>
     private readonly Dictionary<FailureType, Handle<Material>> _failures = [];
 
-    public Materials(IGpu gpu, Assets assets, TexturePools textures, PassGraph graph, CancellationToken stopping)
+    internal Materials(IGpu gpu, Assets assets, TexturePools textures, PassGraph graph, CancellationToken stopping)
     {
         _assets = assets;
         _textures = textures;
@@ -115,7 +115,7 @@ internal sealed class Materials : IDisposable
         foreach (FailureType type in Enum.GetValues<FailureType>())
         {
             _failures[type] = assets.Failure<Material>(type);
-            EntryOf(_failures[type]);
+            GetEntry(_failures[type]);
         }
     }
 
@@ -126,61 +126,61 @@ internal sealed class Materials : IDisposable
         Bins.Dispose();
     }
 
-    public GpuArray<GpuMaterial> Records { get; }
+    internal GpuArray<GpuMaterial> Records { get; }
 
     /// <summary>
     /// What each material row gives global illumination: its colour and the light it gives off.
     /// </summary>
-    public GpuArray<GpuMaterialGi> Gi { get; }
+    internal GpuArray<GpuMaterialGi> Gi { get; }
 
     /// <summary>
     /// How each material row is drawn: its raster and resolve bins, and whether it is in, transparent, masked or
     /// double-sided (<see cref="BinReady"/> and the rest); 0, not in, until it is.
     /// </summary>
-    public GpuArray<uint> Bins { get; }
+    internal GpuArray<uint> Bins { get; }
 
     /// <summary>
     /// The surfaces with a raster bin of their own, from <see cref="FixedRasterBins"/> on, in bin order: what their
     /// clusters clip by when they are masked, cards or fading.
     /// </summary>
-    public List<SurfaceKey> RasterBins { get; } = [];
+    internal List<SurfaceKey> RasterBins { get; } = [];
 
     /// <summary>
     /// The surfaces their pixels are shaded with, in resolve bin order: a surface and whether it is double-sided.
     /// </summary>
-    public List<SurfaceKey> ResolveBins { get; } = [];
+    internal List<SurfaceKey> ResolveBins { get; } = [];
 
     /// <summary>
     /// The transparent surfaces drawn forward.
     /// </summary>
-    public HashSet<SurfaceKey> TransparentSurfaces { get; } = [];
+    internal HashSet<SurfaceKey> TransparentSurfaces { get; } = [];
 
     /// <summary>
     /// The materials whose row, surface or type changed since the scene last asked: whose instances it draws anew.
     /// </summary>
-    public HashSet<Handle<Material>> Changed { get; } = [];
+    internal HashSet<Handle<Material>> Changed { get; } = [];
 
     /// <summary>
     /// What a material slot is drawn with, once its material is in; none in the slot is the default material. Starts
     /// loading it the first time it is asked for, and is null while it loads.
     /// </summary>
-    public DrawnMaterial? Get(Handle<Material> material)
+    internal DrawnMaterial? Get(Handle<Material> material)
     {
-        return EntryOf(material).Drawn;
+        return GetEntry(material).Drawn;
     }
 
     /// <summary>
     /// A material slot's row, whose bins say when it is in; starts loading it the first time it is asked for.
     /// </summary>
-    public int RowOf(Handle<Material> material)
+    internal int GetRow(Handle<Material> material)
     {
-        return EntryOf(material).Row;
+        return GetEntry(material).Row;
     }
 
     /// <summary>
     /// Why a material slot is drawn as the failure, in a few words; null when it is not.
     /// </summary>
-    public string? FailureOf(Handle<Material> material)
+    internal string? GetFailure(Handle<Material> material)
     {
         return _materials.TryGetValue(material == Handle<Material>.None ? _default : material, out MaterialEntry? entry) ? entry.Failure : null;
     }
@@ -189,7 +189,7 @@ internal sealed class Materials : IDisposable
     /// The material drawn in a broken one's place when <paramref name="type"/> broke: what a model that does not load
     /// is drawn with in every slot, for the mesh failure.
     /// </summary>
-    public Handle<Material> Failure(FailureType type)
+    internal Handle<Material> GetFailureMaterial(FailureType type)
     {
         return _failures[type];
     }
@@ -197,14 +197,14 @@ internal sealed class Materials : IDisposable
     /// <summary>
     /// Whether the material in <paramref name="row"/> is drawn: in, its textures in and its pipelines compiled.
     /// </summary>
-    public bool IsShown(int row) => (Bins.Rows[row] & BinReady) != 0;
+    internal bool IsShown(int row) => (Bins.Rows[row] & BinReady) != 0;
 
     /// <summary>
     /// Lets the material go once no instance draws with it: its row and its variants' are freed, and the textures it
     /// samples that no other material does leave the pools, as do its cards' atlases no other variant has. It loads
     /// again if it is asked for again. The default and failure materials stay.
     /// </summary>
-    public void Release(Handle<Material> material)
+    internal void Release(Handle<Material> material)
     {
         if (material == _default || _failures.ContainsValue(material) || !_materials.Remove(material, out MaterialEntry? entry))
         {
@@ -214,24 +214,18 @@ internal sealed class Materials : IDisposable
         _rows.Free(entry.Row, 1);
         Bins.Set(entry.Row, 0);
         Changed.Remove(material);
-        if (entry.Asset is not { } released)
-        {
-            return;
-        }
+        if (entry.Asset is not { } released) return;
 
         foreach (MaterialParam param in released.Params.Values)
         {
-            if (param.Texture != Handle<Texture>.None && !IsSampled(param.Texture))
-            {
-                _textures.Release(param.Texture);
-            }
+            if (param.Texture != Handle<Texture>.None && !IsSampled(param.Texture)) _textures.Release(param.Texture);
         }
     }
 
     /// <summary>
     /// The material's file changed and it loaded again.
     /// </summary>
-    public void Reload(Material material)
+    internal void Reload(Material material)
     {
         Take(material.Handle, material);
     }
@@ -240,20 +234,14 @@ internal sealed class Materials : IDisposable
     /// A shader changed: a surface materials use is read again, no longer broken until it fails again, and its
     /// materials packed again.
     /// </summary>
-    public void Reload(Shader shader)
+    internal void Reload(Shader shader)
     {
         _graph.BrokenSurfaces.Remove(shader.Handle);
-        if (!_surfaces.Remove(shader.Handle))
-        {
-            return;
-        }
+        if (!_surfaces.Remove(shader.Handle)) return;
 
         foreach ((Handle<Material> handle, MaterialEntry entry) in _materials)
         {
-            if (entry.Asset is { } material && material.Shader == shader.Handle)
-            {
-                Take(handle, material);
-            }
+            if (entry.Asset is { } material && material.Shader == shader.Handle) Take(handle, material);
         }
     }
 
@@ -262,7 +250,7 @@ internal sealed class Materials : IDisposable
     /// came in or failed or whose surface failed to compile, draws those whose pipelines are compiled now, then uploads
     /// what changed.
     /// </summary>
-    public void Flush()
+    internal void Flush()
     {
         while (_surfacesRead.Reader.TryRead(out (Handle<Shader> Surface, SurfaceSource? Source) read))
         {
@@ -278,7 +266,7 @@ internal sealed class Materials : IDisposable
         {
             foreach ((Handle<Material> handle, MaterialEntry entry) in _materials)
             {
-                if (entry.Asset is { } material && (UsesAny(material, _textures.Changed) || _graph.Broke.Contains(material.Shader)))
+                if (entry.Asset is { } material && (IsUsingAnyOf(material, _textures.Changed) || _graph.Broke.Contains(material.Shader)))
                 {
                     Pack(handle, entry);
                 }
@@ -314,42 +302,30 @@ internal sealed class Materials : IDisposable
     {
         foreach (MaterialEntry entry in _materials.Values)
         {
-            if (entry.Asset is not { } material)
-            {
-                continue;
-            }
+            if (entry.Asset is not { } material) continue;
 
             foreach (MaterialParam param in material.Params.Values)
             {
-                if (param.Texture == texture)
-                {
-                    return true;
-                }
+                if (param.Texture == texture) return true;
             }
         }
 
         return false;
     }
 
-    private static bool UsesAny(Material material, HashSet<Handle<Texture>> textures)
+    private static bool IsUsingAnyOf(Material material, HashSet<Handle<Texture>> textures)
     {
         foreach (MaterialParam param in material.Params.Values)
         {
-            if (textures.Contains(param.Texture))
-            {
-                return true;
-            }
+            if (textures.Contains(param.Texture)) return true;
         }
 
         return false;
     }
 
-    private MaterialEntry EntryOf(Handle<Material> material)
+    private MaterialEntry GetEntry(Handle<Material> material)
     {
-        if (material == Handle<Material>.None)
-        {
-            material = _default;
-        }
+        if (material == Handle<Material>.None) material = _default;
 
         if (!_materials.TryGetValue(material, out MaterialEntry? entry))
         {
@@ -365,10 +341,7 @@ internal sealed class Materials : IDisposable
     private async Task LoadAsync(Handle<Material> handle)
     {
         Result<Material> loaded = await _assets.LoadAsync(handle, _stopping).ConfigureAwait(false);
-        if (!loaded.Ok)
-        {
-            Debugging.Error($"A material does not load, so it is drawn as the failure: {loaded.Error}");
-        }
+        if (!loaded.Ok) Debugging.Error($"A material does not load, so it is drawn as the failure: {loaded.Error}");
 
         _loaded.Writer.TryWrite((handle, loaded.Ok ? loaded.Value : null));
     }
@@ -378,10 +351,7 @@ internal sealed class Materials : IDisposable
     /// </summary>
     private void Take(Handle<Material> handle, Material? material)
     {
-        if (!_materials.TryGetValue(handle, out MaterialEntry? entry))
-        {
-            return;
-        }
+        if (!_materials.TryGetValue(handle, out MaterialEntry? entry)) return;
 
         entry.Asset = material;
         if (material is not null && !_surfaces.ContainsKey(material.Shader))
@@ -407,19 +377,13 @@ internal sealed class Materials : IDisposable
 
     private void TakeSurface(Handle<Shader> surface, SurfaceSource? source)
     {
-        if (!_surfaces.TryGetValue(surface, out SurfaceEntry? entry))
-        {
-            return;
-        }
+        if (!_surfaces.TryGetValue(surface, out SurfaceEntry? entry)) return;
 
         entry.Source = source;
         entry.IsRead = true;
         foreach ((Handle<Material> handle, MaterialEntry material) in _materials)
         {
-            if (material.Asset is { } asset && asset.Shader == surface)
-            {
-                Pack(handle, material);
-            }
+            if (material.Asset is { } asset && asset.Shader == surface) Pack(handle, material);
         }
     }
 
@@ -436,10 +400,7 @@ internal sealed class Materials : IDisposable
             return;
         }
 
-        if (!_surfaces.TryGetValue(material.Shader, out SurfaceEntry? surface) || !surface.IsRead)
-        {
-            return;
-        }
+        if (!_surfaces.TryGetValue(material.Shader, out SurfaceEntry? surface) || !surface.IsRead) return;
 
         if (surface.Source is not { } source || _graph.BrokenSurfaces.Contains(material.Shader))
         {
@@ -456,22 +417,19 @@ internal sealed class Materials : IDisposable
                 return;
             }
 
-            isLoading |= param.Texture != Handle<Texture>.None && _textures.RefOf(param.Texture) == TexturePools.None;
+            isLoading |= param.Texture != Handle<Texture>.None && _textures.GetRef(param.Texture) == TexturePools.None;
         }
 
-        if (isLoading)
-        {
-            return;
-        }
+        if (isLoading) return;
 
-        foreach (string unknown in source.Layout.Unknown(material.Params.Keys))
+        foreach (string unknown in source.Layout.FindUnknown(material.Params.Keys))
         {
-            Debugging.Warn($"{_assets.Path(handle)} sets {unknown}, which {source.Name}'s MaterialParams does not declare.");
+            Debugging.Warn($"{_assets.GetPath(handle)} sets {unknown}, which {source.Name}'s MaterialParams does not declare.");
         }
 
         GpuMaterial row = default;
         IReadOnlyDictionary<string, MaterialParam>?[] layers = [material.Params];
-        source.Layout.Write(layers, param => _textures.RefOf(param.Texture), _ => null, MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
+        source.Layout.Write(layers, param => _textures.GetRef(param.Texture), _ => null, MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
         (Vector3 color, Vector3 emission) = source.Layout.GiOf(material.Params);
         GpuMaterialGi gi = new() { Color = new Vector4(color, 1), Emission = new Vector4(emission, 0) };
         DrawnMaterial drawn = new(entry.Row, new SurfaceKey(material.Shader, material.Type == MaterialType.Masked, material.DoubleSided), material.Type);
@@ -488,10 +446,7 @@ internal sealed class Materials : IDisposable
     {
         entry.Broken = type;
         Handle<Material> failure = _failures[type];
-        if (handle == failure || EntryOf(failure).Packed is not { } packed)
-        {
-            return;
-        }
+        if (handle == failure || GetEntry(failure).Packed is not { } packed) return;
 
         DrawnMaterial drawn = new(entry.Row, packed.Drawn.Surface with { DoubleSided = doubleSided }, MaterialType.Opaque);
         Draw(handle, entry, packed with { Gi = _failureGi, Drawn = drawn, Failure = why });
@@ -509,10 +464,7 @@ internal sealed class Materials : IDisposable
             return;
         }
 
-        if (entry.Waiting is null)
-        {
-            _waiting.Add(handle);
-        }
+        if (entry.Waiting is null) _waiting.Add(handle);
 
         entry.Waiting = packed;
     }
@@ -529,17 +481,11 @@ internal sealed class Materials : IDisposable
         Gi.Set(entry.Row, packed.Gi);
         WriteBins(packed.Drawn);
         Changed.Add(handle);
-        if (!_failures.ContainsValue(handle))
-        {
-            return;
-        }
+        if (!_failures.ContainsValue(handle)) return;
 
         foreach ((Handle<Material> broken, MaterialEntry waiting) in _materials)
         {
-            if (broken != handle && waiting.Broken is { } type && _failures[type] == handle)
-            {
-                Pack(broken, waiting);
-            }
+            if (broken != handle && waiting.Broken is { } type && _failures[type] == handle) Pack(broken, waiting);
         }
     }
 
@@ -565,10 +511,7 @@ internal sealed class Materials : IDisposable
         // A surface past the bins there are is drawn with the last one's, and said: never left out.
         static int BinOf(Dictionary<SurfaceKey, int> bins, List<SurfaceKey> order, SurfaceKey key, int most)
         {
-            if (bins.TryGetValue(key, out int bin))
-            {
-                return bin;
-            }
+            if (bins.TryGetValue(key, out int bin)) return bin;
 
             if (order.Count >= most - FixedRasterBins)
             {
@@ -584,31 +527,31 @@ internal sealed class Materials : IDisposable
 
     private sealed class MaterialEntry(int row)
     {
-        public int Row { get; } = row;
+        internal int Row { get; } = row;
 
-        public Material? Asset { get; set; }
+        internal Material? Asset { get; set; }
 
         /// <summary>
         /// What it is drawn as; null until it is drawn.
         /// </summary>
-        public PackedMaterial? Packed { get; set; }
+        internal PackedMaterial? Packed { get; set; }
 
-        public DrawnMaterial? Drawn => Packed?.Drawn;
+        internal DrawnMaterial? Drawn => Packed?.Drawn;
 
         /// <summary>
         /// What it was packed as last, while it waits for its pipelines to be drawn so; null when it does not wait.
         /// </summary>
-        public PackedMaterial? Waiting { get; set; }
+        internal PackedMaterial? Waiting { get; set; }
 
         /// <summary>
         /// What broke, when it is packed as a failure material or waits for one to be drawn; null when it is not broken.
         /// </summary>
-        public FailureType? Broken { get; set; }
+        internal FailureType? Broken { get; set; }
 
         /// <summary>
         /// Why it is drawn as the failure, in a few words; null when it is not.
         /// </summary>
-        public string? Failure => Packed?.Failure;
+        internal string? Failure => Packed?.Failure;
     }
 
     /// <summary>
@@ -619,9 +562,9 @@ internal sealed class Materials : IDisposable
 
     private sealed class SurfaceEntry
     {
-        public SurfaceSource? Source { get; set; }
+        internal SurfaceSource? Source { get; set; }
 
-        public bool IsRead { get; set; }
+        internal bool IsRead { get; set; }
     }
 }
 

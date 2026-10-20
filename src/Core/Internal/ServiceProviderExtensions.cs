@@ -12,7 +12,7 @@ internal static class ServiceProviderExtensions
         /// The <typeparamref name="T"/> a gem provides; null when none does, or when the gem that does was not made, which
         /// Core has said why and <paramref name="isMade"/> tells apart.
         /// </summary>
-        public T? Provided<T>(out bool isMade)
+        internal T? GetProvided<T>(out bool isMade)
             where T : class
         {
             try

@@ -19,7 +19,7 @@ internal static unsafe class Metal
     /// </summary>
     private const uint Version = (2 * 10000) + (3 * 100);
 
-    public static Result<byte[]> Translate(byte[] spirv, string name, GpuStage stage)
+    internal static Result<byte[]> Translate(byte[] spirv, string name, GpuStage stage)
     {
         Spvc.Context* context;
         if (Spvc.ContextCreate(&context) != Spvc.Result.Success)
@@ -39,19 +39,16 @@ internal static unsafe class Metal
                     || Spvc.CompilerCreateCompilerOptions(compiler, &options) != Spvc.Result.Success
                     || Spvc.CompilerOptionsSetUint(options, Spvc.CompilerOption.MslVersion, Version) != Spvc.Result.Success)
                 {
-                    return Failed(context, name);
+                    return GetFailure(context, name);
                 }
 
                 Result bound = Bind(compiler, stage);
-                if (!bound.Ok)
-                {
-                    return Result.Failure<byte[]>($"{name}: {bound.Error}");
-                }
+                if (!bound.Ok) return Result.Failure<byte[]>($"{name}: {bound.Error}");
 
                 byte* source;
                 if (Spvc.CompilerInstallCompilerOptions(compiler, options) != Spvc.Result.Success || Spvc.CompilerCompile(compiler, &source) != Spvc.Result.Success)
                 {
-                    return Failed(context, name);
+                    return GetFailure(context, name);
                 }
 
                 // The text belongs to the context, which is destroyed below.
@@ -64,7 +61,7 @@ internal static unsafe class Metal
         }
     }
 
-    private static Result<byte[]> Failed(Spvc.Context* context, string name)
+    private static Result<byte[]> GetFailure(Spvc.Context* context, string name)
     {
         return Result.Failure<byte[]>($"{name}: SPIR-V could not be translated to Metal: {CString.Read(Spvc.ContextGetLastErrorString(context))}");
     }
@@ -122,10 +119,7 @@ internal static unsafe class Metal
             collected = Collect(compiler, resources, Spvc.ResourceType.StorageBuffer, 0, buffers, storageSets, "storage buffer");
         }
 
-        if (!collected.Ok)
-        {
-            return collected;
-        }
+        if (!collected.Ok) return collected;
 
         uint readOnlyTextures = 0;
         uint readWriteTextures = 0;

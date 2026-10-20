@@ -66,14 +66,14 @@ csharp_space_around_declaration_statements = false
 csharp_space_before_open_square_brackets = false
 csharp_space_between_empty_square_brackets = false
 csharp_space_between_square_brackets = false
-csharp_preserve_single_line_statements = false
+csharp_preserve_single_line_statements = true
 csharp_preserve_single_line_blocks = true
 dotnet_style_operator_placement_when_wrapping = beginning_of_line
 
 # Blank lines: one between members and between the steps of a method, never two
 dotnet_style_allow_multiple_blank_lines_experimental = false
 dotnet_diagnostic.IDE2000.severity = warning
-csharp_style_allow_embedded_statements_on_same_line_experimental = false
+csharp_style_allow_embedded_statements_on_same_line_experimental = true
 dotnet_diagnostic.IDE2001.severity = warning
 csharp_style_allow_blank_lines_between_consecutive_braces_experimental = false
 dotnet_diagnostic.IDE2002.severity = warning
@@ -87,7 +87,9 @@ csharp_style_allow_blank_line_after_token_in_arrow_expression_clause_experimenta
 dotnet_diagnostic.IDE2006.severity = warning
 
 # Braces always: an unbraced if is one added line away from a bug
-csharp_prefer_braces = true
+# An if whose body is one short statement is one line without braces (CODESTANDARDS Methods); a multi-line body
+# always has them. Loops always have them too, which no option can ask for, so the standard says it.
+csharp_prefer_braces = when_multiline
 dotnet_diagnostic.IDE0011.severity = warning
 
 # Types are written out, so code reads without hovering; new() and [] when the type is already on the line

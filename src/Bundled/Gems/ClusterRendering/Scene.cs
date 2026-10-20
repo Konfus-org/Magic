@@ -100,40 +100,40 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         Instances.Dispose();
     }
 
-    public GpuArray<GpuSceneInstance> Instances { get; } = new(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, 1024);
+    internal GpuArray<GpuSceneInstance> Instances { get; } = new(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, 1024);
 
     /// <summary>
     /// The slots there are, a GPU thread each where culling runs over the scene.
     /// </summary>
-    public int Capacity => Instances.Capacity;
+    internal int Capacity => Instances.Capacity;
 
     /// <summary>
     /// The slots of the instances with a transparent surface, which the views sort and draw forward.
     /// </summary>
-    public HashSet<int> Transparent { get; } = [];
+    internal HashSet<int> Transparent { get; } = [];
 
     /// <summary>
     /// The instances drawn as the failure, by slot: why, in a few words, and what failed, by its path.
     /// </summary>
-    public IReadOnlyDictionary<int, (string Why, string What)> Failures => _failures;
+    internal IReadOnlyDictionary<int, (string Why, string What)> Failures => _failures;
 
     /// <summary>
     /// This frame's spheres, each around an instance where it was or where it is, that moved, changed model, came, went,
     /// could be drawn at last, or whose model or a material came in again: where what is made from the scene and kept,
     /// shadows and the field global illumination traces, is made again.
     /// </summary>
-    public IReadOnlyList<MovedSphere> Moved => _moved;
+    internal IReadOnlyList<MovedSphere> Moved => _moved;
 
     /// <summary>
     /// Where the instance at <paramref name="slot"/> is, as the last frame copied it.
     /// </summary>
-    public Vector3 PositionOf(int slot) => _entries[slot].Transform.Position;
+    internal Vector3 GetPosition(int slot) => _entries[slot].Transform.Position;
 
     /// <summary>
     /// Keeps the models and materials of <paramref name="preloaded"/>, taken in for a domain before it spawns, though
     /// no look draws them yet, until <see cref="Release"/> lets them go as many times.
     /// </summary>
-    public void Hold(Preloaded preloaded)
+    internal void Hold(Preloaded preloaded)
     {
         foreach (Handle<Model> model in preloaded.Models)
         {
@@ -150,15 +150,12 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// Lets go one hold of <paramref name="preloaded"/>'s models and materials: what no hold keeps and no look draws
     /// leaves the pool and the materials, as a dropped look's does.
     /// </summary>
-    public void Release(Preloaded preloaded)
+    internal void Release(Preloaded preloaded)
     {
         GatherDrawn();
         foreach (Handle<Model> model in preloaded.Models)
         {
-            if (!_heldModels.TryGetValue(model, out int holds))
-            {
-                continue;
-            }
+            if (!_heldModels.TryGetValue(model, out int holds)) continue;
 
             if (holds > 1)
             {
@@ -167,18 +164,12 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             }
 
             _heldModels.Remove(model);
-            if (!_drawnModels.Contains(model))
-            {
-                models.Release(model);
-            }
+            if (!_drawnModels.Contains(model)) models.Release(model);
         }
 
         foreach (Handle<Material> material in preloaded.Materials)
         {
-            if (!_heldMaterials.TryGetValue(material, out int holds))
-            {
-                continue;
-            }
+            if (!_heldMaterials.TryGetValue(material, out int holds)) continue;
 
             if (holds > 1)
             {
@@ -187,29 +178,23 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             }
 
             _heldMaterials.Remove(material);
-            if (!_drawnMaterials.Contains(material))
-            {
-                materials.Release(material);
-            }
+            if (!_drawnMaterials.Contains(material)) materials.Release(material);
         }
     }
 
     /// <summary>
     /// The model and materials an instance draws.
     /// </summary>
-    public Renderer RendererOf(int slot) => _entries[slot].Renderer;
+    internal Renderer GetRenderer(int slot) => _entries[slot].Renderer;
 
     /// <summary>
     /// Takes in what changed since the last frame, then uploads it. <paramref name="time"/> is the frame's, which a fade
     /// starts at; <paramref name="player"/> where detail is wanted first.
     /// </summary>
-    public void Update(WorldCopy copy, float time, Vector3 player)
+    internal void Update(WorldCopy copy, float time, Vector3 player)
     {
         Delta<InstanceCopy> instances = copy.Instances;
-        if (_entries.Length < instances.Length)
-        {
-            Array.Resize(ref _entries, instances.Length);
-        }
+        if (_entries.Length < instances.Length) Array.Resize(ref _entries, instances.Length);
 
         _moved.Clear();
         _stillMoving.Clear();
@@ -252,43 +237,28 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         bool wasLive = entry.IsLive;
         bool hasMoved = !wasLive || entry.Transform != transform;
         bool isNewLook = !wasLive || entry.Renderer.Model != renderer.Model || entry.Renderer.Materials != renderer.Materials;
-        if (wasLive && isNewLook)
-        {
-            Forget(slot, ref entry);
-        }
+        if (wasLive && isNewLook) Forget(slot, ref entry);
 
-        if (hasMoved)
-        {
-            AddMoved(entry, transform, renderer.Model);
-        }
+        if (hasMoved) AddMoved(entry, transform, renderer.Model);
 
         entry.Transform = transform;
         entry.Renderer = renderer;
         entry.IsLive = true;
         entry.FadeStart = wasLive ? entry.FadeStart : time;
         entry.Look = isNewLook ? Take(slot, new Look(renderer.Model, renderer.Materials), time) : entry.Look;
-        if (entry.Look is not { } look)
-        {
-            return;
-        }
+        if (entry.Look is not { } look) return;
 
         float distance = Vector3.Distance(transform.Position, player);
         if (distance < look.Nearest)
         {
-            if (look.Nearest == float.MaxValue)
-            {
-                _nearer.Add(look);
-            }
+            if (look.Nearest == float.MaxValue) _nearer.Add(look);
 
             look.Nearest = distance;
         }
 
         // A new row's last place is its place already; a moved one's becomes it the frame after, unless it moves again.
         _changed.Add((slot, wasLive && hasMoved));
-        if (wasLive && hasMoved)
-        {
-            _stillMoving.Add(slot);
-        }
+        if (wasLive && hasMoved) _stillMoving.Add(slot);
     }
 
     /// <summary>
@@ -299,7 +269,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     {
         foreach (LookEntry look in _nearer)
         {
-            look.ModelRow = models.RowOf(look.HasFailed ? models.Failed : look.Look.Model, look.Nearest);
+            look.ModelRow = models.GetRow(look.HasFailed ? models.Failed : look.Look.Model, look.Nearest);
             look.Nearest = float.MaxValue;
         }
 
@@ -335,7 +305,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     private void WorkOut(int index)
     {
         (int slot, bool keepsLast) = _changed[index];
-        _rows[index] = RowOf(slot, _entries[slot], keepsLast);
+        _rows[index] = MakeRow(slot, _entries[slot], keepsLast);
     }
 
     /// <summary>
@@ -343,12 +313,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// moved, else its own; its model's row and its material slots', its look's; and how it fades, in from when its look
     /// could be drawn when it waited for that. Empty while its look cannot be drawn yet.
     /// </summary>
-    private GpuSceneInstance RowOf(int slot, in InstanceEntry entry, bool keepsLast)
+    private GpuSceneInstance MakeRow(int slot, in InstanceEntry entry, bool keepsLast)
     {
-        if (entry.Look is not { IsReady: true } look)
-        {
-            return default;
-        }
+        if (entry.Look is not { IsReady: true } look) return default;
 
         Transform transform = entry.Transform;
         Matrix4x4 linear = transform.Matrix;
@@ -404,25 +371,25 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     {
         Look look = entry.Look;
         bool hasFailed = models.HasFailed(look.Model);
-        (string Why, string What)? failure = hasFailed ? ("Model does not load", assets.Path(look.Model) ?? string.Empty) : null;
+        (string Why, string What)? failure = hasFailed ? ("Model does not load", assets.GetPath(look.Model) ?? string.Empty) : null;
         bool isTransparent = false;
         bool areShown = true;
         MaterialRows rows = default;
         for (int i = 0; i < MaterialSlots.Capacity; i++)
         {
             Handle<Material> material = look.Materials[i];
-            int materialRow = materials.RowOf(hasFailed ? materials.Failure(FailureType.Mesh) : material);
+            int materialRow = materials.GetRow(hasFailed ? materials.GetFailureMaterial(FailureType.Mesh) : material);
             rows[i >> 1] |= (uint)materialRow << ((i & 1) * 16);
             areShown &= materials.IsShown(materialRow);
             isTransparent |= !hasFailed && materials.Get(material) is { Type: MaterialType.Transparent };
-            if (!hasFailed && materials.FailureOf(material) is { } why)
+            if (!hasFailed && materials.GetFailure(material) is { } why)
             {
-                failure ??= (why, assets.Path(material) ?? string.Empty);
+                failure ??= (why, assets.GetPath(material) ?? string.Empty);
             }
         }
 
         entry.HasFailed = hasFailed;
-        entry.ModelRow = models.RowOf(hasFailed ? models.Failed : look.Model, float.MaxValue);
+        entry.ModelRow = models.GetRow(hasFailed ? models.Failed : look.Model, float.MaxValue);
 
         entry.Rows = rows;
         entry.IsTransparent = isTransparent;
@@ -440,24 +407,15 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// </summary>
     private void Classify(int slot, LookEntry look)
     {
-        if (look.IsTransparent && look.IsReady)
-        {
-            Transparent.Add(slot);
-        }
+        if (look.IsTransparent && look.IsReady) Transparent.Add(slot);
 
-        if (look.Failure is { } failure)
-        {
-            _failures[slot] = failure;
-        }
+        if (look.Failure is { } failure) _failures[slot] = failure;
     }
 
     private void Remove(int slot)
     {
         ref InstanceEntry entry = ref _entries[slot];
-        if (entry.IsLive)
-        {
-            AddMoved(entry, null, default);
-        }
+        if (entry.IsLive) AddMoved(entry, null, default);
 
         Forget(slot, ref entry);
         entry = default;
@@ -470,24 +428,15 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// </summary>
     private void AddMoved(in InstanceEntry entry, Transform? now, Handle<Model> model)
     {
-        if (entry.IsLive && SphereOf(entry.Transform, entry.Renderer.Model) is { } was)
-        {
-            _moved.Add(was);
-        }
+        if (entry.IsLive && GetSphere(entry.Transform, entry.Renderer.Model) is { } was) _moved.Add(was);
 
-        if (now is { } transform && SphereOf(transform, model) is { } goes)
-        {
-            _moved.Add(goes);
-        }
+        if (now is { } transform && GetSphere(transform, model) is { } goes) _moved.Add(goes);
     }
 
-    private MovedSphere? SphereOf(Transform transform, Handle<Model> model)
+    private MovedSphere? GetSphere(Transform transform, Handle<Model> model)
     {
-        Vector4 bounds = models.BoundsOf(model);
-        if (bounds.W <= 0)
-        {
-            return null;
-        }
+        Vector4 bounds = models.GetBounds(model);
+        if (bounds.W <= 0) return null;
 
         Vector3 centre = transform.Position + Vector3.Transform(new Vector3(bounds.X, bounds.Y, bounds.Z) * transform.Scale, transform.Rotation);
         Vector3 scale = Vector3.Abs(transform.Scale);
@@ -505,16 +454,13 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// </summary>
     private void Recheck(float time)
     {
-        if (models.Changed.Count == 0 && materials.Changed.Count == 0)
-        {
-            return;
-        }
+        if (models.Changed.Count == 0 && materials.Changed.Count == 0) return;
 
-        bool hasFailureChanged = models.Changed.Contains(models.Failed) || materials.Changed.Contains(materials.Failure(FailureType.Mesh));
+        bool hasFailureChanged = models.Changed.Contains(models.Failed) || materials.Changed.Contains(materials.GetFailureMaterial(FailureType.Mesh));
         foreach (LookEntry entry in _looks.Values)
         {
             // A look whose model failed draws the failure model and its material, so it is worked out again as they come in.
-            if (!models.Changed.Contains(entry.Look.Model) && !(entry.HasFailed && hasFailureChanged) && !DrawsAny(entry.Look, materials.Changed))
+            if (!models.Changed.Contains(entry.Look.Model) && !(entry.HasFailed && hasFailureChanged) && !IsDrawingAnyOf(entry.Look, materials.Changed))
             {
                 continue;
             }
@@ -536,15 +482,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
                 Transparent.Remove(slot);
                 _failures.Remove(slot);
                 Classify(slot, entry);
-                if (isRowChanged)
-                {
-                    Instances.Set(slot, RowOf(slot, _entries[slot], keepsLast: false));
-                }
+                if (isRowChanged) Instances.Set(slot, MakeRow(slot, _entries[slot], keepsLast: false));
 
-                if (isRemade && SphereOf(_entries[slot].Transform, entry.Look.Model) is { } sphere)
-                {
-                    _moved.Add(sphere);
-                }
+                if (isRemade && GetSphere(_entries[slot].Transform, entry.Look.Model) is { } sphere) _moved.Add(sphere);
             }
         }
 
@@ -555,19 +495,13 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// <summary>
     /// Whether <paramref name="look"/> draws any of <paramref name="drawn"/> in one of its slots.
     /// </summary>
-    private static bool DrawsAny(Look look, HashSet<Handle<Material>> drawn)
+    private static bool IsDrawingAnyOf(Look look, HashSet<Handle<Material>> drawn)
     {
-        if (drawn.Count == 0)
-        {
-            return false;
-        }
+        if (drawn.Count == 0) return false;
 
         for (int i = 0; i < MaterialSlots.Capacity; i++)
         {
-            if (drawn.Contains(look.Materials[i]))
-            {
-                return true;
-            }
+            if (drawn.Contains(look.Materials[i])) return true;
         }
 
         return false;
@@ -579,26 +513,17 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// </summary>
     private void LetGo()
     {
-        if (_droppedLooks.Count == 0)
-        {
-            return;
-        }
+        if (_droppedLooks.Count == 0) return;
 
         foreach (Look dropped in _droppedLooks)
         {
-            if (_looks.TryGetValue(dropped, out LookEntry? entry) && entry.Slots.Count == 0)
-            {
-                _looks.Remove(dropped);
-            }
+            if (_looks.TryGetValue(dropped, out LookEntry? entry) && entry.Slots.Count == 0) _looks.Remove(dropped);
         }
 
         GatherDrawn();
         foreach (Look dropped in _droppedLooks)
         {
-            if (_looks.ContainsKey(dropped))
-            {
-                continue;
-            }
+            if (_looks.ContainsKey(dropped)) continue;
 
             if (!_drawnModels.Contains(dropped.Model) && !_heldModels.ContainsKey(dropped.Model))
             {
@@ -640,18 +565,12 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// </summary>
     private void Forget(int slot, ref InstanceEntry entry)
     {
-        if (!entry.IsLive || entry.Look is not { } look)
-        {
-            return;
-        }
+        if (!entry.IsLive || entry.Look is not { } look) return;
 
         _failures.Remove(slot);
         Transparent.Remove(slot);
         look.Slots.Remove(slot);
-        if (look.Slots.Count == 0)
-        {
-            _droppedLooks.Add(look.Look);
-        }
+        if (look.Slots.Count == 0) _droppedLooks.Add(look.Look);
 
         entry.Look = null;
     }
@@ -667,28 +586,28 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// </summary>
     private sealed class LookEntry(Look look)
     {
-        public Look Look { get; } = look;
+        internal Look Look { get; } = look;
 
-        public HashSet<int> Slots { get; } = [];
+        internal HashSet<int> Slots { get; } = [];
 
-        public int ModelRow { get; set; }
+        internal int ModelRow { get; set; }
 
-        public float Nearest { get; set; } = float.MaxValue;
+        internal float Nearest { get; set; } = float.MaxValue;
 
-        public MaterialRows Rows { get; set; }
+        internal MaterialRows Rows { get; set; }
 
-        public bool HasFailed { get; set; }
+        internal bool HasFailed { get; set; }
 
-        public bool IsTransparent { get; set; }
+        internal bool IsTransparent { get; set; }
 
-        public (string Why, string What)? Failure { get; set; }
+        internal (string Why, string What)? Failure { get; set; }
 
         /// <summary>
         /// Whether its instances can be drawn as they should be, and since when, in the frame's time.
         /// </summary>
-        public bool IsReady { get; set; }
+        internal bool IsReady { get; set; }
 
-        public float ReadyAt { get; set; }
+        internal float ReadyAt { get; set; }
     }
 
     /// <summary>
@@ -696,11 +615,11 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// </summary>
     private struct InstanceEntry
     {
-        public Transform Transform;
-        public Renderer Renderer;
-        public LookEntry? Look;
-        public float FadeStart;
-        public bool IsLive;
+        internal Transform Transform;
+        internal Renderer Renderer;
+        internal LookEntry? Look;
+        internal float FadeStart;
+        internal bool IsLive;
     }
 }
 
@@ -718,7 +637,7 @@ internal sealed record Preloaded(HashSet<Handle<Model>> Models, HashSet<Handle<M
     /// <summary>
     /// What <paramref name="prefabs"/> draw, from their parts and the parts under them. Any thread.
     /// </summary>
-    public static Preloaded Of(IReadOnlyList<Prefab> prefabs)
+    internal static Preloaded Of(IReadOnlyList<Prefab> prefabs)
     {
         HashSet<Handle<Model>> models = [];
         HashSet<Handle<Material>> materials = [];
@@ -736,36 +655,34 @@ internal sealed record Preloaded(HashSet<Handle<Model>> Models, HashSet<Handle<M
             {
                 foreach (IComponent component in part.Components)
                 {
-                    switch (component)
-                    {
-                        case Renderer renderer:
-                            if (renderer.Model != Handle<Model>.None)
-                            {
-                                models.Add(renderer.Model);
-                            }
-
-                            for (int i = 0; i < MaterialSlots.Capacity; i++)
-                            {
-                                Handle<Material> material = renderer.Materials[i];
-                                if (material != Handle<Material>.None)
-                                {
-                                    materials.Add(material);
-                                }
-                            }
-
-                            break;
-                        case Sky { Material: var sky } when sky != Handle<Material>.None:
-                            materials.Add(sky);
-                            break;
-                        case PostProcessing { Effects: var named } when named != Handle<Pipeline>.None:
-                            effects = named;
-                            break;
-                        default:
-                            break;
-                    }
+                    AddComponent(component);
                 }
 
                 Add(part.Children);
+            }
+        }
+
+        void AddComponent(IComponent component)
+        {
+            switch (component)
+            {
+                case Renderer renderer:
+                    if (renderer.Model != Handle<Model>.None) models.Add(renderer.Model);
+
+                    for (int i = 0; i < MaterialSlots.Capacity; i++)
+                    {
+                        if (renderer.Materials[i] != Handle<Material>.None) materials.Add(renderer.Materials[i]);
+                    }
+
+                    break;
+                case Sky { Material: var sky } when sky != Handle<Material>.None:
+                    materials.Add(sky);
+                    break;
+                case PostProcessing { Effects: var named } when named != Handle<Pipeline>.None:
+                    effects = named;
+                    break;
+                default:
+                    break;
             }
         }
     }

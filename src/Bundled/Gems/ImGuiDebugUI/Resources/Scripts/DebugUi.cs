@@ -89,11 +89,8 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
 
         Follow();
 
-        GpuPipeline pipeline = PipelineFor(context.Format);
-        if (_lists.Calls.Length == 0 || context.Area.IsEmpty || pipeline == GpuPipeline.None)
-        {
-            return;
-        }
+        GpuPipeline pipeline = GetPipeline(context.Format);
+        if (_lists.Calls.Length == 0 || context.Area.IsEmpty || pipeline == GpuPipeline.None) return;
 
         Upload(ref _vertexBuffer, ref _vertexBytes, GpuBufferUsage.Vertex, MemoryMarshal.AsBytes(_lists.Vertices));
         Upload(ref _indexBuffer, ref _indexBytes, GpuBufferUsage.Index, MemoryMarshal.AsBytes(_lists.Indices));
@@ -108,10 +105,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
         uint bound = 0;
         foreach (DrawCall call in _lists.Calls)
         {
-            if (!_textures.TryGetValue(call.Texture, out (GpuTexture Texture, int, int, uint) texture))
-            {
-                continue;
-            }
+            if (!_textures.TryGetValue(call.Texture, out (GpuTexture Texture, int, int, uint) texture)) continue;
 
             if (bound != call.Texture)
             {
@@ -132,10 +126,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
         foreach ((uint id, TextureChange texture) in _lists.Known)
         {
             _textures.TryGetValue(id, out (GpuTexture Texture, int Width, int Height, uint Version) known);
-            if (known.Version == texture.Version)
-            {
-                continue;
-            }
+            if (known.Version == texture.Version) continue;
 
             if (known.Texture == GpuTexture.None || known.Width != texture.Width || known.Height != texture.Height)
             {
@@ -182,7 +173,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     /// The pipeline for <paramref name="format"/>, made the first time; none until the shaders are compiled, and for
     /// good once one does not compile, which is logged.
     /// </summary>
-    private GpuPipeline PipelineFor(GpuFormat format)
+    private GpuPipeline GetPipeline(GpuFormat format)
     {
         if (_pipelines.TryGetValue(format, out GpuPipeline pipeline) || format == GpuFormat.Invalid || _shaders is not { } shaders)
         {
@@ -204,10 +195,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
                 Cull = GpuCull.None,
             })
             : Result.Failure<GpuPipeline>(vertex.Ok ? fragment.Error : vertex.Error);
-        if (!made.Ok)
-        {
-            Debugging.Error($"The debug UI is not drawn: {made.Error}");
-        }
+        if (!made.Ok) Debugging.Error($"The debug UI is not drawn: {made.Error}");
 
         return _pipelines[format] = made.Ok ? made.Value : GpuPipeline.None;
     }

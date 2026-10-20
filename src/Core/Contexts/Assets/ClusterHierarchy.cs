@@ -64,10 +64,7 @@ public sealed class ClusterHierarchy
         ReadOnlySpan<byte> indices = Indices.Span;
         foreach (Cluster cluster in clusters)
         {
-            if (cluster.Error > error || cluster.ParentError <= error)
-            {
-                continue;
-            }
+            if (cluster.Error > error || cluster.ParentError <= error) continue;
 
             if (!bySlot.TryGetValue(cluster.MaterialSlot, out (List<Vertex> Vertices, List<uint> Indices) into))
             {

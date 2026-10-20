@@ -23,7 +23,7 @@ public static class Json
     /// The dialect, for .NET's serializer itself: <c>JsonSerializer.Deserialize&lt;T&gt;(json, Json.Options)</c>. It
     /// cannot be changed.
     /// </summary>
-    public static JsonSerializerOptions Options { get; } = Dialect();
+    public static JsonSerializerOptions Options { get; } = MakeDialect();
 
     /// <summary>
     /// <paramref name="utf8"/> as a <typeparamref name="T"/>, or why it is not one. A byte order mark, which editors on
@@ -32,10 +32,7 @@ public static class Json
     public static Result<T> Read<T>(ReadOnlySpan<byte> utf8)
     {
         ReadOnlySpan<byte> byteOrderMark = Encoding.UTF8.Preamble;
-        if (utf8.StartsWith(byteOrderMark))
-        {
-            utf8 = utf8[byteOrderMark.Length..];
-        }
+        if (utf8.StartsWith(byteOrderMark)) utf8 = utf8[byteOrderMark.Length..];
 
         T? value;
         try
@@ -101,7 +98,7 @@ public static class Json
         }
     }
 
-    private static JsonSerializerOptions Dialect()
+    private static JsonSerializerOptions MakeDialect()
     {
         JsonSerializerOptions options = new()
         {
@@ -125,10 +122,7 @@ public static class Json
     /// </summary>
     private static void WithoutAssetHandle(JsonTypeInfo type)
     {
-        if (!IsAsset(type.Type))
-        {
-            return;
-        }
+        if (!IsAsset(type.Type)) return;
 
         for (int i = type.Properties.Count - 1; i >= 0; i--)
         {
@@ -143,10 +137,7 @@ public static class Json
     {
         foreach (Type contract in type.GetInterfaces())
         {
-            if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IAsset<>))
-            {
-                return true;
-            }
+            if (contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IAsset<>)) return true;
         }
 
         return false;

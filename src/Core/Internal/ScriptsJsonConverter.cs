@@ -16,10 +16,7 @@ internal sealed class ScriptsJsonConverter : JsonConverter<Scripts>
 {
     public override Scripts Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        if (reader.TokenType != JsonTokenType.StartArray)
-        {
-            throw new JsonException("Scripts are an array of handles.");
-        }
+        if (reader.TokenType != JsonTokenType.StartArray) throw new JsonException("Scripts are an array of handles.");
 
         Scripts scripts = default;
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
@@ -35,10 +32,7 @@ internal sealed class ScriptsJsonConverter : JsonConverter<Scripts>
         writer.WriteStartArray();
         foreach (Handle<Script> script in value)
         {
-            if (script != Handle<Script>.None)
-            {
-                JsonSerializer.Serialize(writer, script, options);
-            }
+            if (script != Handle<Script>.None) JsonSerializer.Serialize(writer, script, options);
         }
 
         writer.WriteEndArray();

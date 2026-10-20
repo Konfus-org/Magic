@@ -20,14 +20,14 @@ internal sealed unsafe class FontSource : IDisposable
     /// Adds <paramref name="font"/> to the current context's atlas, as its default font, at <paramref name="size"/>: the
     /// height of a line, ImGui's meaning of a font's size.
     /// </summary>
-    public FontSource(Font font, float size)
+    internal FontSource(Font font, float size)
     {
         _font = GCHandle.Alloc(font);
         _loader = (ImFontLoader*)ImGui.MemAlloc((ulong)sizeof(ImFontLoader));
         *_loader = default;
         _loader->FontSrcContainsGlyph = &ContainsGlyph;
-        _loader->FontBakedInit = &InitBaked;
-        _loader->FontBakedLoadGlyph = &LoadGlyph;
+        _loader->FontBakedInit = &TryInitBaked;
+        _loader->FontBakedLoadGlyph = &TryLoadGlyph;
 
         // The font's data is the asset's handle, in memory of this object's own: ImGui copies data the atlas does not
         // own, but only once it first reads the font, so the original must outlive this call.
@@ -61,12 +61,12 @@ internal sealed unsafe class FontSource : IDisposable
     /// Takes the font out of ImGui's atlas, for another to take its place; before <see cref="Dispose"/>, while the
     /// context is still there.
     /// </summary>
-    public void Remove()
+    internal void Remove()
     {
         ImFontAtlas.RemoveFont(ImGui.GetIO()->Fonts, _added);
     }
 
-    private static Font? FontOf(ImFontConfig* source)
+    private static Font? GetFont(ImFontConfig* source)
     {
         return GCHandle.FromIntPtr(*(nint*)source->FontData).Target as Font;
     }
@@ -74,19 +74,16 @@ internal sealed unsafe class FontSource : IDisposable
     [UnmanagedCallersOnly]
     private static bool ContainsGlyph(ImFontAtlas* atlas, ImFontConfig* source, uint codepoint)
     {
-        return FontOf(source) is { } font && font.Glyphs.ContainsKey(codepoint);
+        return GetFont(source) is { } font && font.Glyphs.ContainsKey(codepoint);
     }
 
     /// <summary>
     /// The font's line, scaled to the size ImGui draws it at.
     /// </summary>
     [UnmanagedCallersOnly]
-    private static bool InitBaked(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData)
+    private static bool TryInitBaked(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData)
     {
-        if (FontOf(source) is not { } font)
-        {
-            return false;
-        }
+        if (GetFont(source) is not { } font) return false;
 
         float scale = baked->Size / font.LineHeight;
         baked->Ascent = font.Ascent * scale;
@@ -99,12 +96,9 @@ internal sealed unsafe class FontSource : IDisposable
     /// Drawn at the asset's size its pixels land one to one; at any other size ImGui stretches them.
     /// </summary>
     [UnmanagedCallersOnly]
-    private static bool LoadGlyph(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData, uint codepoint, ImFontGlyph* glyph, float* advance)
+    private static bool TryLoadGlyph(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData, uint codepoint, ImFontGlyph* glyph, float* advance)
     {
-        if (FontOf(source) is not { } font || !font.Glyphs.TryGetValue(codepoint, out Glyph loaded))
-        {
-            return false;
-        }
+        if (GetFont(source) is not { } font || !font.Glyphs.TryGetValue(codepoint, out Glyph loaded)) return false;
 
         float scale = baked->Size / font.LineHeight;
         if (advance != null)
@@ -115,16 +109,10 @@ internal sealed unsafe class FontSource : IDisposable
 
         glyph->Codepoint = codepoint;
         glyph->AdvanceX = loaded.Advance * scale;
-        if (loaded.Width == 0 || loaded.Height == 0)
-        {
-            return true;
-        }
+        if (loaded.Width == 0 || loaded.Height == 0) return true;
 
         int rectangle = ImFontAtlas.PackAddRect(atlas, loaded.Width, loaded.Height);
-        if (rectangle < 0)
-        {
-            return false;
-        }
+        if (rectangle < 0) return false;
 
         glyph->X0 = loaded.BearingX * scale;
         glyph->Y0 = MathF.Round(baked->Ascent) - (loaded.BearingY * scale);

@@ -61,17 +61,11 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     private Result<Model> Load(string path, ReadOnlySpan<byte> bytes, JsonElement settings)
     {
         Result<ModelMeta> meta = Json.Read<ModelMeta>(settings);
-        if (!meta.Ok)
-        {
-            return Result.Failure<Model>($"its .meta is not a model's: {meta.Error}");
-        }
+        if (!meta.Ok) return Result.Failure<Model>($"its .meta is not a model's: {meta.Error}");
 
         lock (_importing)
         {
-            if (_stopped)
-            {
-                return Result.Failure<Model>("the model loader has stopped.");
-            }
+            if (_stopped) return Result.Failure<Model>("the model loader has stopped.");
 
             _running++;
         }
@@ -96,10 +90,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     {
         lock (_importing)
         {
-            if (_running > 0)
-            {
-                return false;
-            }
+            if (_running > 0) return false;
 
             _stopped = true;
         }
@@ -118,7 +109,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         {
             Assimp.SetImportPropertyInteger(properties, Assimp.ConfigImportFbxPreservePivots, 0);
             fixed (byte* bytes = file)
-            fixed (byte* hint = CString.Bytes(format))
+            fixed (byte* hint = CString.ToBytes(format))
             {
                 scene = Assimp.ImportFileFromMemoryWithProperties(bytes, (uint)file.Length, (uint)Steps, hint, properties);
             }
@@ -172,10 +163,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         for (uint i = 0; i < node->MNumMeshes; i++)
         {
             Assimp.Mesh* source = scene->MMeshes[node->MMeshes[i]];
-            if (IsTriangles(source) && source->MNumVertices > 0)
-            {
-                meshes.Add(Bake(source, world * toEngine, origin));
-            }
+            if (IsTriangles(source) && source->MNumVertices > 0) meshes.Add(Bake(source, world * toEngine, origin));
         }
 
         for (uint i = 0; i < node->MNumChildren; i++)
@@ -198,18 +186,18 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         Vertex[] vertices = new Vertex[source->MNumVertices];
         for (int i = 0; i < vertices.Length; i++)
         {
-            Vector3 normal = Vector3.Normalize(Vector3.TransformNormal(Vector(source->MNormals[i]), normals));
+            Vector3 normal = Vector3.Normalize(Vector3.TransformNormal(ToVector3(source->MNormals[i]), normals));
             Vector4 tangent = new(1, 0, 0, 1);
             if (hasTangents)
             {
-                Vector3 along = Vector3.Normalize(Vector3.TransformNormal(Vector(source->MTangents[i]), transform));
-                Vector3 bitangent = Vector3.TransformNormal(Vector(source->MBitangents[i]), transform);
+                Vector3 along = Vector3.Normalize(Vector3.TransformNormal(ToVector3(source->MTangents[i]), transform));
+                Vector3 bitangent = Vector3.TransformNormal(ToVector3(source->MBitangents[i]), transform);
                 tangent = new Vector4(along, Vector3.Dot(Vector3.Cross(normal, along), bitangent) < 0 ? -1 : 1);
             }
 
             vertices[i] = new Vertex
             {
-                Position = Vector3.Transform(Vector(source->MVertices[i]), transform) - origin,
+                Position = Vector3.Transform(ToVector3(source->MVertices[i]), transform) - origin,
                 Normal = normal,
                 Tangent = tangent,
                 Uv = uvs is null ? Vector2.Zero : new Vector2(uvs[i].X, uvs[i].Y),
@@ -231,7 +219,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         return new Mesh { Vertices = vertices, Indices = indices, MaterialSlot = Math.Min((int)source->MMaterialIndex, MaterialSlots.Capacity - 1) };
     }
 
-    private static Vector3 Vector(Assimp.Vector3D vector) => Unsafe.BitCast<Assimp.Vector3D, Vector3>(vector);
+    private static Vector3 ToVector3(Assimp.Vector3D vector) => Unsafe.BitCast<Assimp.Vector3D, Vector3>(vector);
 
     /// <summary>
     /// What Assimp hands over, to the engine's frame. glTF and OBJ come right-handed, in metres, +Y up, the front at +Z.
@@ -251,7 +239,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
             Turn(ref frame, scene, "CoordAxis", 0);
             Turn(ref frame, scene, "UpAxis", 1);
             Turn(ref frame, scene, "FrontAxis", 2);
-            scale = (float)(Number(scene, "UnitScaleFactor", 1) / 100);
+            scale = (float)(GetNumber(scene, "UnitScaleFactor", 1) / 100);
         }
 
         return frame * Matrix4x4.CreateScale(-scale, scale, scale);
@@ -264,60 +252,36 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     /// </summary>
     private static void Turn(ref Matrix4x4 frame, Assimp.Scene* scene, string key, int to)
     {
-        int from = (int)Number(scene, key, to);
-        frame[from is >= 0 and <= 2 ? from : to, to] = Number(scene, key + "Sign", 1) < 0 ? -1 : 1;
+        int from = (int)GetNumber(scene, key, to);
+        frame[from is >= 0 and <= 2 ? from : to, to] = GetNumber(scene, key + "Sign", 1) < 0 ? -1 : 1;
     }
 
     /// <summary>
     /// The number the scene's metadata holds under <paramref name="key"/>, whatever its width, or
     /// <paramref name="fallback"/> where there is none or it is not a number.
     /// </summary>
-    private static double Number(Assimp.Scene* scene, string key, double fallback)
+    private static double GetNumber(Assimp.Scene* scene, string key, double fallback)
     {
         Assimp.Metadata* metadata = scene->MMetaData;
-        if (metadata is null)
-        {
-            return fallback;
-        }
+        if (metadata is null) return fallback;
 
         for (uint i = 0; i < metadata->MNumProperties; i++)
         {
-            if (!string.Equals(CString.Read(metadata->MKeys[i].Data), key, StringComparison.Ordinal))
-            {
-                continue;
-            }
+            if (!string.Equals(CString.Read(metadata->MKeys[i].Data), key, StringComparison.Ordinal)) continue;
 
             Assimp.MetadataType type = metadata->MValues[i].MType;
             void* data = metadata->MValues[i].MData;
-            if (type == Assimp.MetadataType.AiBool)
-            {
-                return *(byte*)data != 0 ? 1 : 0;
-            }
+            if (type == Assimp.MetadataType.AiBool) return *(byte*)data != 0 ? 1 : 0;
 
-            if (type == Assimp.MetadataType.AiInt32)
-            {
-                return *(int*)data;
-            }
+            if (type == Assimp.MetadataType.AiInt32) return *(int*)data;
 
-            if (type == Assimp.MetadataType.AiUint32)
-            {
-                return *(uint*)data;
-            }
+            if (type == Assimp.MetadataType.AiUint32) return *(uint*)data;
 
-            if (type == Assimp.MetadataType.AiInt64)
-            {
-                return *(long*)data;
-            }
+            if (type == Assimp.MetadataType.AiInt64) return *(long*)data;
 
-            if (type == Assimp.MetadataType.AiUint64)
-            {
-                return *(ulong*)data;
-            }
+            if (type == Assimp.MetadataType.AiUint64) return *(ulong*)data;
 
-            if (type == Assimp.MetadataType.AiFloat)
-            {
-                return *(float*)data;
-            }
+            if (type == Assimp.MetadataType.AiFloat) return *(float*)data;
 
             return type == Assimp.MetadataType.AiDouble ? *(double*)data : fallback;
         }

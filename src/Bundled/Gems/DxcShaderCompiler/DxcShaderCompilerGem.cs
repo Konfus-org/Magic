@@ -65,10 +65,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// </summary>
     public void Update(in Frame frame)
     {
-        if (_settings.DebugInfo == _debugInfo)
-        {
-            return;
-        }
+        if (_settings.DebugInfo == _debugInfo) return;
 
         _debugInfo = _settings.DebugInfo;
         _assets.RemakeAsync<Shader>().FireAndForget();
@@ -132,10 +129,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     public async Task<Result<GpuShader>> CompileAsync(string path, GpuStage stage, GpuShaderFormat format, CancellationToken cancel)
     {
         Handle<Shader> asset = _assets.Find<Shader>(path);
-        if (asset == Handle<Shader>.None)
-        {
-            return Result.Failure<GpuShader>($"{path}: no asset is there.");
-        }
+        if (asset == Handle<Shader>.None) return Result.Failure<GpuShader>($"{path}: no asset is there.");
 
         Result<Shader> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
         return loaded.Ok ? await CompileAsync(loaded.Value.Text, path, stage, format, cancel).ConfigureAwait(false) : Result.Failure<GpuShader>(loaded.Error);
@@ -153,19 +147,13 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
         HashSet<string> including = new(StringComparer.OrdinalIgnoreCase) { name };
         Result<string> spliced = await SpliceAsync(hlsl, name, including, cancel).ConfigureAwait(false);
-        if (!spliced.Ok)
-        {
-            return Result.Failure<GpuShader>(spliced.Error);
-        }
+        if (!spliced.Ok) return Result.Failure<GpuShader>(spliced.Error);
 
         string source = $"#define {define} 1\n#line 1 \"{name}\"\n{spliced.Value}";
         ulong key = XxHash3.HashToUInt64(Encoding.UTF8.GetBytes($"{name}\n{stage}\n{format}\n{source}"));
         TaskCompletionSource<Result<GpuShader>> own = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<Result<GpuShader>> compiling = _compiling.GetOrAdd(key, own.Task);
-        if (compiling != own.Task)
-        {
-            return await compiling.WaitAsync(cancel).ConfigureAwait(false);
-        }
+        if (compiling != own.Task) return await compiling.WaitAsync(cancel).ConfigureAwait(false);
 
         try
         {
@@ -232,18 +220,12 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             }
 
             Result<Shader> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
-            if (!loaded.Ok)
-            {
-                return Result.Failure<string>($"{name}:{number}: {loaded.Error}");
-            }
+            if (!loaded.Ok) return Result.Failure<string>($"{name}:{number}: {loaded.Error}");
 
             including.Add(path);
             Result<string> included = await SpliceAsync(loaded.Value.Text, path, including, cancel).ConfigureAwait(false);
             including.Remove(path);
-            if (!included.Ok)
-            {
-                return included;
-            }
+            if (!included.Ok) return included;
 
             spliced.Append(CultureInfo.InvariantCulture, $"#line 1 \"{path}\"\n")
                 .Append(included.Value)
@@ -260,11 +242,8 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// </summary>
     private Result<GpuShader> Compile(string source, string name, string profile, GpuStage stage, GpuShaderFormat format)
     {
-        Result<byte[]> spirv = Dxc(source, name, profile, isSpirv: true);
-        if (!spirv.Ok)
-        {
-            return Result.Failure<GpuShader>(spirv.Error);
-        }
+        Result<byte[]> spirv = CompileWithDxc(source, name, profile, isSpirv: true);
+        if (!spirv.Ok) return Result.Failure<GpuShader>(spirv.Error);
 
         Result<GpuShader> reflected = SpirvBindings.Read(spirv.Value, stage);
         if (!reflected.Ok)
@@ -275,7 +254,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         Result<byte[]> code = format switch
         {
             GpuShaderFormat.Spirv => spirv,
-            GpuShaderFormat.Dxil => Dxc(source, name, profile, isSpirv: false),
+            GpuShaderFormat.Dxil => CompileWithDxc(source, name, profile, isSpirv: false),
             GpuShaderFormat.Msl => Metal.Translate(spirv.Value, name, stage),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "There is no such shader format."),
         };
@@ -290,36 +269,33 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// <summary>
     /// A COM method of a DXC object: the function at <paramref name="slot"/> of its table.
     /// </summary>
-    private static unsafe nint Method(nint instance, int slot)
+    private static unsafe nint GetMethod(nint instance, int slot)
     {
         return (*(nint**)instance)[slot];
     }
 
     private static unsafe void Release(nint instance)
     {
-        if (instance != 0)
-        {
-            ((delegate* unmanaged<nint, uint>)Method(instance, 2))(instance);
-        }
+        if (instance != 0) ((delegate* unmanaged<nint, uint>)GetMethod(instance, 2))(instance);
     }
 
     /// <summary>
     /// What a DXC result method at <paramref name="slot"/> hands out: its object or its error text, IDxcBlobs both.
     /// </summary>
-    private static unsafe nint Output(nint result, int slot)
+    private static unsafe nint GetOutput(nint result, int slot)
     {
         nint output;
-        ((delegate* unmanaged<nint, nint*, int>)Method(result, slot))(result, &output);
+        ((delegate* unmanaged<nint, nint*, int>)GetMethod(result, slot))(result, &output);
         return output;
     }
 
     /// <summary>
     /// The bytes an IDxcBlob holds.
     /// </summary>
-    private static unsafe ReadOnlySpan<byte> Bytes(nint blob)
+    private static unsafe ReadOnlySpan<byte> GetBytes(nint blob)
     {
-        void* start = ((delegate* unmanaged<nint, void*>)Method(blob, 3))(blob);
-        nuint size = ((delegate* unmanaged<nint, nuint>)Method(blob, 4))(blob);
+        void* start = ((delegate* unmanaged<nint, void*>)GetMethod(blob, 3))(blob);
+        nuint size = ((delegate* unmanaged<nint, nuint>)GetMethod(blob, 4))(blob);
         return new ReadOnlySpan<byte>(start, (int)size);
     }
 
@@ -327,7 +303,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// A null-terminated copy of <paramref name="text"/> as the OS's <c>wchar_t</c>: UTF-16 on Windows, UTF-32
     /// elsewhere. Freed with <see cref="NativeMemory.Free"/>.
     /// </summary>
-    private static unsafe nint WideString(string text)
+    private static unsafe nint ToWideString(string text)
     {
         Encoding encoding = OperatingSystem.IsWindows() ? Encoding.Unicode : Encoding.UTF32;
         int terminator = OperatingSystem.IsWindows() ? 2 : 4;
@@ -340,7 +316,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// <summary>
     /// One DXC compile of <paramref name="source"/>, to SPIR-V or DXIL; a failure carries DXC's own text.
     /// </summary>
-    private unsafe Result<byte[]> Dxc(string source, string name, string profile, bool isSpirv)
+    private unsafe Result<byte[]> CompileWithDxc(string source, string name, string profile, bool isSpirv)
     {
         List<string> arguments = ["-E", "main", "-T", profile, "-HV", "2021", "-WX", "-O3", "-Zpc"];
 
@@ -367,50 +343,38 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         {
             for (int i = 0; i < wide.Length; i++)
             {
-                wide[i] = WideString(arguments[i]);
+                wide[i] = ToWideString(arguments[i]);
             }
 
             Guid compilerClass = _compilerClass;
             Guid compilerInterface = _compilerInterface;
             Guid resultInterface = _resultInterface;
             int created = NativeMethods.DxcCreateInstance(&compilerClass, &compilerInterface, &compiler);
-            if (created < 0)
-            {
-                return Result.Failure<byte[]>($"{name}: DXC could not start (0x{created:X8}).");
-            }
+            if (created < 0) return Result.Failure<byte[]>($"{name}: DXC could not start (0x{created:X8}).");
 
             fixed (byte* bytes = text)
             fixed (nint* argumentList = wide)
             {
                 DxcBuffer buffer = new() { Start = bytes, Size = (nuint)text.Length, Encoding = Utf8CodePage };
-                int compiled = ((delegate* unmanaged<nint, DxcBuffer*, nint*, uint, nint, Guid*, nint*, int>)Method(compiler, 3))(compiler, &buffer, argumentList, (uint)wide.Length, 0, &resultInterface, &result);
-                if (compiled < 0)
-                {
-                    return Result.Failure<byte[]>($"{name}: DXC failed to run (0x{compiled:X8}).");
-                }
+                int compiled = ((delegate* unmanaged<nint, DxcBuffer*, nint*, uint, nint, Guid*, nint*, int>)GetMethod(compiler, 3))(compiler, &buffer, argumentList, (uint)wide.Length, 0, &resultInterface, &result);
+                if (compiled < 0) return Result.Failure<byte[]>($"{name}: DXC failed to run (0x{compiled:X8}).");
             }
 
             int status;
-            ((delegate* unmanaged<nint, int*, int>)Method(result, 3))(result, &status);
+            ((delegate* unmanaged<nint, int*, int>)GetMethod(result, 3))(result, &status);
             if (status < 0)
             {
-                errors = Output(result, 5);
-                string message = errors == 0 ? $"0x{status:X8}" : Encoding.UTF8.GetString(Bytes(errors)).TrimEnd('\0', '\n', ' ');
+                errors = GetOutput(result, 5);
+                string message = errors == 0 ? $"0x{status:X8}" : Encoding.UTF8.GetString(GetBytes(errors)).TrimEnd('\0', '\n', ' ');
                 return Result.Failure<byte[]>(message);
             }
 
-            output = Output(result, 4);
-            if (output == 0)
-            {
-                return Result.Failure<byte[]>($"{name}: DXC compiled nothing.");
-            }
+            output = GetOutput(result, 4);
+            if (output == 0) return Result.Failure<byte[]>($"{name}: DXC compiled nothing.");
 
             // Direct3D 12 takes DXIL only with the validator's hash in its container; the gem writes it (DxilHash).
-            byte[] code = Bytes(output).ToArray();
-            if (!isSpirv)
-            {
-                DxilHash.Sign(code);
-            }
+            byte[] code = GetBytes(output).ToArray();
+            if (!isSpirv) DxilHash.Sign(code);
 
             return Result.Success(code);
         }
@@ -433,15 +397,15 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     [StructLayout(LayoutKind.Sequential)]
     private unsafe struct DxcBuffer
     {
-        public byte* Start;
-        public nuint Size;
-        public uint Encoding;
+        internal byte* Start;
+        internal nuint Size;
+        internal uint Encoding;
     }
 
     private static unsafe partial class NativeMethods
     {
         [LibraryImport("dxcompiler")]
         [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
-        public static partial int DxcCreateInstance(Guid* classId, Guid* interfaceId, nint* instance);
+        internal static partial int DxcCreateInstance(Guid* classId, Guid* interfaceId, nint* instance);
     }
 }

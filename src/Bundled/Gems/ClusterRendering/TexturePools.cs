@@ -28,21 +28,21 @@ internal sealed class TexturePools : IDisposable
     /// <summary>
     /// What a <c>TextureRef</c> holds for no texture: a surface's factor alone.
     /// </summary>
-    public const uint None = uint.MaxValue;
+    internal const uint None = uint.MaxValue;
 
-    public const int Count = 8;
+    internal const int Count = 8;
 
     /// <summary>
     /// The pools' names, which the frame binds them by and a surface's shader reads them by
     /// (Shaders/Include/SurfaceBindings.hlsli): colour (sRGB) then data (linear), each 256, 512, 1024 and 2048 texels a
     /// side.
     /// </summary>
-    public static readonly string[] Names = ["PoolSrgb256", "PoolSrgb512", "PoolSrgb1024", "PoolSrgb2048", "PoolLinear256", "PoolLinear512", "PoolLinear1024", "PoolLinear2048"];
+    internal static readonly string[] Names = ["PoolSrgb256", "PoolSrgb512", "PoolSrgb1024", "PoolSrgb2048", "PoolLinear256", "PoolLinear512", "PoolLinear1024", "PoolLinear2048"];
 
     /// <summary>
     /// Raised whenever how a texture is resampled or compressed changes, so the cache's are made again.
     /// </summary>
-    public const int CacheVersion = 2;
+    internal const int CacheVersion = 2;
 
     private static readonly int[] _sizes = [256, 512, 1024, 2048];
 
@@ -79,7 +79,7 @@ internal sealed class TexturePools : IDisposable
     /// </summary>
     private float _anisotropy;
 
-    public TexturePools(IGpu gpu, Assets assets, Caches caches, ClusterRenderingSettings settings, CancellationToken stopping)
+    internal TexturePools(IGpu gpu, Assets assets, Caches caches, ClusterRenderingSettings settings, CancellationToken stopping)
     {
         _gpu = gpu;
         _assets = assets;
@@ -108,25 +108,22 @@ internal sealed class TexturePools : IDisposable
         _gpu.Release(Sampler);
     }
 
-    public GpuSampler Sampler { get; private set; }
+    internal GpuSampler Sampler { get; private set; }
 
     /// <summary>
     /// The textures taken in, or failed, this frame, until it ends: whose models' cards and materials are worked out
     /// anew.
     /// </summary>
-    public HashSet<Handle<Texture>> Changed { get; } = [];
+    internal HashSet<Handle<Texture>> Changed { get; } = [];
 
     /// <summary>
     /// Filters with as many taps as the settings now say, 1 to 16, from now on: a sampler made again when that changed,
     /// the old one released. Render thread, each frame.
     /// </summary>
-    public void FollowSettings()
+    internal void FollowSettings()
     {
         float clamped = Math.Clamp(_settings.Anisotropy, 1, 16);
-        if (clamped == _anisotropy)
-        {
-            return;
-        }
+        if (clamped == _anisotropy) return;
 
         _anisotropy = clamped;
         _gpu.Release(Sampler);
@@ -137,58 +134,43 @@ internal sealed class TexturePools : IDisposable
     /// <paramref name="texture"/> as a surface names it, once it is in; starts loading it the first time it is asked for,
     /// and is <see cref="None"/> while it loads. Whether it failed is <see cref="HasFailed"/>.
     /// </summary>
-    public uint RefOf(Handle<Texture> texture)
+    internal uint GetRef(Handle<Texture> texture)
     {
-        if (texture == Handle<Texture>.None)
-        {
-            return None;
-        }
+        if (texture == Handle<Texture>.None) return None;
 
-        if (_textures.TryGetValue(texture, out Resident? resident))
-        {
-            return resident.Ref;
-        }
+        if (_textures.TryGetValue(texture, out Resident? resident)) return resident.Ref;
 
         _textures[texture] = new Resident();
         LoadAsync(texture).FireAndForget();
         return None;
     }
 
-    public bool HasFailed(Handle<Texture> texture) => _textures.TryGetValue(texture, out Resident? resident) && resident.HasFailed;
+    internal bool HasFailed(Handle<Texture> texture) => _textures.TryGetValue(texture, out Resident? resident) && resident.HasFailed;
 
     /// <summary>
     /// Lets the texture go once no material samples it: its layer goes back to its pool, for the next texture to take,
     /// and it loads again if it is asked for again.
     /// </summary>
-    public void Release(Handle<Texture> texture)
+    internal void Release(Handle<Texture> texture)
     {
-        if (!_textures.Remove(texture, out Resident? resident))
-        {
-            return;
-        }
+        if (!_textures.Remove(texture, out Resident? resident)) return;
 
         Changed.Remove(texture);
-        if (resident.Ref != None)
-        {
-            _pools[resident.Ref >> 16].Free(resident.Ref & 0xFFFF);
-        }
+        if (resident.Ref != None) _pools[resident.Ref >> 16].Free(resident.Ref & 0xFFFF);
     }
 
     /// <summary>
     /// The texture's file changed and it loaded again: it is resampled into the layer it has.
     /// </summary>
-    public void Reload(Texture texture)
+    internal void Reload(Texture texture)
     {
-        if (_textures.ContainsKey(texture.Handle))
-        {
-            PrepareAsync(texture).FireAndForget();
-        }
+        if (_textures.ContainsKey(texture.Handle)) PrepareAsync(texture).FireAndForget();
     }
 
     /// <summary>
     /// A pool's texture as it stands, an empty one while it holds nothing.
     /// </summary>
-    public GpuTexture TextureOf(int pool)
+    internal GpuTexture GetTexture(int pool)
     {
         return _pools[pool].Texture == GpuTexture.None ? _empty : _pools[pool].Texture;
     }
@@ -197,7 +179,7 @@ internal sealed class TexturePools : IDisposable
     /// Takes in what workers finished since the last frame: each texture prepared is placed in its pool, and each that
     /// did not load is counted failed.
     /// </summary>
-    public void Flush()
+    internal void Flush()
     {
         while (_arrived.Reader.TryRead(out Arrival arrival))
         {
@@ -215,7 +197,7 @@ internal sealed class TexturePools : IDisposable
     /// <summary>
     /// Ends the frame: what changed this frame is forgotten, and the uploads held back from a pool's growing go in now.
     /// </summary>
-    public void EndFrame()
+    internal void EndFrame()
     {
         Changed.Clear();
         foreach (Pool pool in _pools)
@@ -250,7 +232,7 @@ internal sealed class TexturePools : IDisposable
     /// </summary>
     private async Task PrepareAsync(Texture texture)
     {
-        int pool = PoolOf(texture);
+        int pool = GetPool(texture);
         byte[][] levels = await Task.Run(() => ReadOrCompressAsync(texture, pool), _stopping).ConfigureAwait(false);
         _arrived.Writer.TryWrite(new Arrival(texture.Handle, pool, levels));
     }
@@ -261,7 +243,7 @@ internal sealed class TexturePools : IDisposable
     /// </summary>
     private async Task<byte[][]> ReadOrCompressAsync(Texture texture, int pool)
     {
-        ulong version = _assets.Version(texture.Handle);
+        ulong version = _assets.GetVersion(texture.Handle);
         version = (version != 0 ? version : XxHash3.HashToUInt64(texture.Pixels.Span)) ^ (ulong)pool;
         if (await _caches.ReadAsync<CompressedTexture>(texture.Handle.Id, version, _stopping).ConfigureAwait(false) is { Ok: true } cached)
         {
@@ -308,17 +290,11 @@ internal sealed class TexturePools : IDisposable
     /// </summary>
     private void Place(Handle<Texture> texture, int pool, byte[][] levels)
     {
-        if (!_textures.TryGetValue(texture, out Resident? resident))
-        {
-            return;
-        }
+        if (!_textures.TryGetValue(texture, out Resident? resident)) return;
 
         if (resident.Ref == None || (int)(resident.Ref >> 16) != pool)
         {
-            if (resident.Ref != None)
-            {
-                _pools[resident.Ref >> 16].Free(resident.Ref & 0xFFFF);
-            }
+            if (resident.Ref != None) _pools[resident.Ref >> 16].Free(resident.Ref & 0xFFFF);
 
             resident.Ref = ((uint)pool << 16) | (uint)_pools[pool].Allocate(_gpu);
         }
@@ -330,10 +306,7 @@ internal sealed class TexturePools : IDisposable
 
     private void Upload(Handle<Texture> texture, byte[][] levels)
     {
-        if (!_textures.TryGetValue(texture, out Resident? resident) || resident.Ref == None)
-        {
-            return;
-        }
+        if (!_textures.TryGetValue(texture, out Resident? resident) || resident.Ref == None) return;
 
         Pool pool = _pools[resident.Ref >> 16];
         uint layer = resident.Ref & 0xFFFF;
@@ -352,7 +325,7 @@ internal sealed class TexturePools : IDisposable
     /// <summary>
     /// The pool for a texture: colour or data by its format, and the smallest size that holds it.
     /// </summary>
-    private static int PoolOf(Texture texture)
+    private static int GetPool(Texture texture)
     {
         int largest = Math.Max(texture.Width, texture.Height);
         int size = 0;
@@ -372,7 +345,7 @@ internal sealed class TexturePools : IDisposable
     /// </summary>
     private static byte[][] Resample(Texture texture, uint size)
     {
-        int count = LevelsOf(size);
+        int count = GetLevels(size);
         byte[][] levels = new byte[count][];
         for (int level = 0; level < count; level++)
         {
@@ -380,10 +353,7 @@ internal sealed class TexturePools : IDisposable
             TextureLevel source = texture.Levels[0];
             foreach (TextureLevel candidate in texture.Levels)
             {
-                if (candidate.Width >= side && candidate.Height >= side)
-                {
-                    source = candidate;
-                }
+                if (candidate.Width >= side && candidate.Height >= side) source = candidate;
             }
 
             levels[level] = ResampleLevel(texture.Pixels.Span.Slice(source.Offset, source.Size), source.Width, source.Height, side);
@@ -395,7 +365,7 @@ internal sealed class TexturePools : IDisposable
     /// <summary>
     /// Mips of a pool of <paramref name="size"/> texels a side, down to <see cref="SmallestMip"/>.
     /// </summary>
-    private static int LevelsOf(uint size) => BitOperations.Log2(size) - BitOperations.Log2(SmallestMip) + 1;
+    private static int GetLevels(uint size) => BitOperations.Log2(size) - BitOperations.Log2(SmallestMip) + 1;
 
     private static byte[] ResampleLevel(ReadOnlySpan<byte> pixels, int width, int height, int side)
     {
@@ -410,17 +380,7 @@ internal sealed class TexturePools : IDisposable
                 int fromY = (int)((long)y * height / side);
                 for (int channel = 0; channel < 4; channel++)
                 {
-                    int sum = 0;
-                    for (int dy = 0; dy < boxY; dy++)
-                    {
-                        for (int dx = 0; dx < boxX; dx++)
-                        {
-                            int texel = (Math.Min(fromY + dy, height - 1) * width) + Math.Min(fromX + dx, width - 1);
-                            sum += pixels[(texel * 4) + channel];
-                        }
-                    }
-
-                    resampled[(((y * side) + x) * 4) + channel] = (byte)(sum / (boxX * boxY));
+                    resampled[(((y * side) + x) * 4) + channel] = (byte)(SumBox(pixels, width, height, fromX, fromY, boxX, boxY, channel) / (boxX * boxY));
                 }
             }
         }
@@ -429,13 +389,32 @@ internal sealed class TexturePools : IDisposable
     }
 
     /// <summary>
+    /// The sum of one channel over the box of texels from (<paramref name="fromX"/>, <paramref name="fromY"/>), clamped
+    /// to the image's edge.
+    /// </summary>
+    private static int SumBox(ReadOnlySpan<byte> pixels, int width, int height, int fromX, int fromY, int boxX, int boxY, int channel)
+    {
+        int sum = 0;
+        for (int dy = 0; dy < boxY; dy++)
+        {
+            for (int dx = 0; dx < boxX; dx++)
+            {
+                int texel = (Math.Min(fromY + dy, height - 1) * width) + Math.Min(fromX + dx, width - 1);
+                sum += pixels[(texel * 4) + channel];
+            }
+        }
+
+        return sum;
+    }
+
+    /// <summary>
     /// A texture as the pools hold it: its reference, <see cref="None"/> until it is in.
     /// </summary>
     private sealed class Resident
     {
-        public uint Ref { get; set; } = None;
+        internal uint Ref { get; set; } = None;
 
-        public bool HasFailed { get; set; }
+        internal bool HasFailed { get; set; }
     }
 
     /// <summary>
@@ -452,38 +431,32 @@ internal sealed class TexturePools : IDisposable
         private uint _capacity;
         private uint _used;
 
-        public GpuTexture Texture { get; private set; }
+        internal GpuTexture Texture { get; private set; }
 
         /// <summary>
         /// It grew this frame, so its first <see cref="Copied"/> layers are written by the copy from the old array.
         /// </summary>
-        public bool HasGrown { get; set; }
+        internal bool HasGrown { get; set; }
 
-        public uint Copied { get; private set; }
+        internal uint Copied { get; private set; }
 
-        public int Allocate(IGpu gpu)
+        internal int Allocate(IGpu gpu)
         {
-            if (_free.TryPop(out uint layer))
-            {
-                return (int)layer;
-            }
+            if (_free.TryPop(out uint layer)) return (int)layer;
 
-            if (_used == _capacity)
-            {
-                Grow(gpu, Math.Max(4, _capacity * 2));
-            }
+            if (_used == _capacity) Grow(gpu, Math.Max(4, _capacity * 2));
 
             return (int)_used++;
         }
 
-        public void Free(uint layer)
+        internal void Free(uint layer)
         {
             _free.Push(layer);
         }
 
         private void Grow(IGpu gpu, uint capacity)
         {
-            uint levels = (uint)LevelsOf(size);
+            uint levels = (uint)GetLevels(size);
             GpuTexture grown = gpu.CreateTexture(new GpuTextureDescription(format, GpuTextureUsage.Sampled, size, size, levels, capacity, GpuTextureKind.Texture2DArray));
             for (uint layer = 0; layer < _used; layer++)
             {
@@ -493,10 +466,7 @@ internal sealed class TexturePools : IDisposable
                 }
             }
 
-            if (Texture != GpuTexture.None)
-            {
-                gpu.Release(Texture);
-            }
+            if (Texture != GpuTexture.None) gpu.Release(Texture);
 
             HasGrown = _used > 0;
             Copied = _used;

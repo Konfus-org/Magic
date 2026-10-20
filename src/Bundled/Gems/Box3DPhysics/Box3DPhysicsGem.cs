@@ -160,19 +160,13 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     public void Update(in Frame frame)
     {
-        if (!_isApplied && _stepped.IsSet)
-        {
-            Apply();
-        }
+        if (!_isApplied && _stepped.IsSet) Apply();
     }
 
     public unsafe void FixedUpdate(in Frame frame)
     {
         WaitForStep();
-        if (!_isApplied)
-        {
-            Apply();
-        }
+        if (!_isApplied) Apply();
 
         _step++;
         _shapes.TakeArrived();
@@ -187,10 +181,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         {
             for (int i = 0; i < tags.Length; i++)
             {
-                if (tags[i].Has(Tag.Player))
-                {
-                    _cameras.Add(transforms[i].Position);
-                }
+                if (tags[i].Has(Tag.Player)) _cameras.Add(transforms[i].Position);
             }
         }
 
@@ -200,7 +191,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             (ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Physics> physics) = chunk;
             for (int i = 0; i < entities.Length; i++)
             {
-                if (MayBeNear(transforms[i], farthest))
+                if (CanBeNear(transforms[i], farthest))
                 {
                     Follow(entities[i], ref transforms[i], ref physics[i], frame.DeltaSeconds);
                 }
@@ -209,10 +200,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
         foreach ((Entity entity, int slot) in _slots)
         {
-            if (_bodies[slot].Seen != _step)
-            {
-                _gone.Add(entity);
-            }
+            if (_bodies[slot].Seen != _step) _gone.Add(entity);
         }
 
         foreach (Entity entity in _gone)
@@ -246,21 +234,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         WaitForStep();
         B3.RayResult result = B3.WorldCastRayClosest(_box3d, ToVec(from), ToVec(to - from), FilterOf(motions));
-        if (!result.Hit)
-        {
-            return null;
-        }
+        if (!result.Hit) return null;
 
-        Entity entity = _bodies[SlotOf(result.ShapeId)].Entity;
+        Entity entity = _bodies[GetSlot(result.ShapeId)].Entity;
         return new RayHit(entity, FromVec(result.Point), FromVec(result.Normal), result.Fraction * Vector3.Distance(from, to));
     }
 
-    public unsafe int Overlap(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
+    public unsafe int FindOverlapping(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
     {
-        if (found.IsEmpty)
-        {
-            return 0;
-        }
+        if (found.IsEmpty) return 0;
 
         WaitForStep();
         B3.Vec3 point = default;
@@ -284,7 +266,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
     {
-        HashSet<Handle<Model>> models = ModelsOf(prefabs);
+        HashSet<Handle<Model>> models = GetModels(prefabs);
         Preload preload = new(models, progress, cancel);
         await _threads.InvokeAsync(EngineThread.Main, () =>
         {
@@ -326,13 +308,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private void Follow(Entity entity, ref Transform transform, ref Physics physics, float step)
     {
-        Handle<Model> model = ModelOf(entity);
+        Handle<Model> model = GetModel(entity);
         ModelShape? shape = _shapes.Get(model);
         bool hasBody = _slots.TryGetValue(entity, out int slot);
-        if (!IsNear(transform, shape, hasBody ? _settings.Range * Leave : _settings.Range))
-        {
-            return;
-        }
+        if (!IsNear(transform, shape, hasBody ? _settings.Range * Leave : _settings.Range)) return;
 
         if (!hasBody)
         {
@@ -384,21 +363,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// body of the many entities far from every player, which is most of a world. With no player camera, everything
     /// could be.
     /// </summary>
-    private bool MayBeNear(in Transform transform, float range)
+    private bool CanBeNear(in Transform transform, float range)
     {
-        if (_cameras.Count == 0)
-        {
-            return true;
-        }
+        if (_cameras.Count == 0) return true;
 
         float limit = range + (transform.Scale.Length() * _shapes.Longest);
         float limitSquared = limit * limit;
         foreach (Vector3 camera in _cameras)
         {
-            if (Vector3.DistanceSquared(transform.Position, camera) < limitSquared)
-            {
-                return true;
-            }
+            if (Vector3.DistanceSquared(transform.Position, camera) < limitSquared) return true;
         }
 
         return false;
@@ -411,19 +384,13 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private bool IsNear(in Transform transform, ModelShape? shape, float range)
     {
-        if (_cameras.Count == 0)
-        {
-            return true;
-        }
+        if (_cameras.Count == 0) return true;
 
         Vector3 scale = Vector3.Abs(transform.Scale);
         float reach = shape is null ? scale.Length() : (((shape.Max - shape.Min) * scale).Length() + ((shape.Max + shape.Min) * scale).Length()) * 0.5f;
         foreach (Vector3 camera in _cameras)
         {
-            if (Vector3.Distance(transform.Position, camera) - reach < range)
-            {
-                return true;
-            }
+            if (Vector3.Distance(transform.Position, camera) - reach < range) return true;
         }
 
         return false;
@@ -448,10 +415,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private unsafe void Create(Entity entity, Handle<Model> model, ModelShape? shape, in Transform transform, in Physics physics)
     {
-        if (shape is null)
-        {
-            return;
-        }
+        if (shape is null) return;
 
         int slot;
         if (_free.Count > 0)
@@ -479,8 +443,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         def.UserData = (void*)(nuint)(slot + 1);
         B3.BodyId id = B3.CreateBody(_box3d, &def);
         B3.ShapeDef shapeDef = B3.DefaultShapeDef();
-        shapeDef.BaseMaterial = MaterialOf(physics.Surface, physics.Bounce);
-        shapeDef.Filter.CategoryBits = (ulong)MotionsOf(physics.Motion);
+        shapeDef.BaseMaterial = GetMaterial(physics.Surface, physics.Bounce);
+        shapeDef.Filter.CategoryBits = (ulong)GetMotions(physics.Motion);
         Shape kind = physics.Shape;
         if (kind == Shape.Mesh && (physics.Motion != Motion.Static || shape.Mesh is null))
         {
@@ -498,9 +462,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             {
                 float scale = physics.Mass / mass.Mass;
                 mass.Mass = physics.Mass;
-                mass.Inertia.Cx = Scaled(mass.Inertia.Cx, scale);
-                mass.Inertia.Cy = Scaled(mass.Inertia.Cy, scale);
-                mass.Inertia.Cz = Scaled(mass.Inertia.Cz, scale);
+                mass.Inertia.Cx = Scale(mass.Inertia.Cx, scale);
+                mass.Inertia.Cy = Scale(mass.Inertia.Cy, scale);
+                mass.Inertia.Cz = Scale(mass.Inertia.Cz, scale);
                 B3.BodySetMassData(id, mass);
             }
         }
@@ -550,10 +514,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
     private void Destroy(Entity entity)
     {
-        if (!_slots.Remove(entity, out int slot))
-        {
-            return;
-        }
+        if (!_slots.Remove(entity, out int slot)) return;
 
         B3.DestroyBody(_bodies[slot].Id);
         _bodies[slot] = default;
@@ -571,10 +532,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         {
             for (int i = 0; i < entities.Length; i++)
             {
-                if (_slots.TryGetValue(entities[i], out int slot))
-                {
-                    _listening.Add(slot);
-                }
+                if (_slots.TryGetValue(entities[i], out int slot)) _listening.Add(slot);
             }
         }
 
@@ -590,18 +548,12 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private void WaitForStep()
     {
-        if (_stepped.IsSet)
-        {
-            return;
-        }
+        if (_stepped.IsSet) return;
 
         bool timed = _stepWait.Enabled;
         long start = timed ? Stopwatch.GetTimestamp() : 0;
         _stepped.Wait();
-        if (timed)
-        {
-            _stepWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
-        }
+        if (timed) _stepWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
     }
 
     /// <summary>
@@ -616,18 +568,12 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             // and before the world is destroyed. Were it to leave on the token, a kick between the run starting to end
             // and Stop() would reset the step event with no thread left to set it, and WaitForStep would wait forever.
             _kick.Wait(CancellationToken.None);
-            if (_isEnding)
-            {
-                return;
-            }
+            if (_isEnding) return;
 
             bool timed = _stepDuration.Enabled;
             long start = timed ? Stopwatch.GetTimestamp() : 0;
             Step();
-            if (timed)
-            {
-                _stepDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
-            }
+            if (timed) _stepDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
 
             _stepped.Set();
         }
@@ -653,7 +599,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         _touched.Clear();
         foreach (int slot in _listening)
         {
-            _touched[slot] = Touching(slot);
+            _touched[slot] = GetTouching(slot);
         }
     }
 
@@ -661,7 +607,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// What the body in <paramref name="slot"/> touches after the step, each as <see cref="ContactPhase.Stay"/>: the
     /// main thread works the phase out against what the component held. Physics thread.
     /// </summary>
-    private unsafe Contacts Touching(int slot)
+    private unsafe Contacts GetTouching(int slot)
     {
         Contacts now = default;
         int written = 0;
@@ -671,11 +617,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         int count = B3.BodyGetContactData(id, data, capacity);
         for (int i = 0; i < count && written < Contacts.Capacity; i++)
         {
-            Contact contact = ContactOf(slot, data[i]);
-            if (contact.Phase != ContactPhase.None)
-            {
-                now[written++] = contact;
-            }
+            Contact contact = GetContact(slot, data[i]);
+            if (contact.Phase != ContactPhase.None) now[written++] = contact;
         }
 
         return now;
@@ -694,10 +637,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         foreach (ref readonly Moved moved in CollectionsMarshal.AsSpan(_moves))
         {
             ref Body body = ref bodies[moved.Slot];
-            if (!_world.IsAlive(body.Entity))
-            {
-                continue;
-            }
+            if (!_world.IsAlive(body.Entity)) continue;
 
             ref Transform transform = ref _world.Get<Transform>(body.Entity);
             if (transform.Position == body.Transform.Position && transform.Rotation == body.Transform.Rotation)
@@ -731,10 +671,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             for (int i = 0; i < entities.Length; i++)
             {
                 Contacts read = default;
-                if (_slots.TryGetValue(entities[i], out int slot))
-                {
-                    _touched.TryGetValue(slot, out read);
-                }
+                if (_slots.TryGetValue(entities[i], out int slot)) _touched.TryGetValue(slot, out read);
 
                 Touch(entities[i], ref contacts[i], read);
             }
@@ -752,13 +689,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         int written = 0;
         foreach (Contact touching in read)
         {
-            if (touching.Phase == ContactPhase.None)
-            {
-                continue;
-            }
+            if (touching.Phase == ContactPhase.None) continue;
 
             Contact contact = touching;
-            contact.Phase = PhaseOf(contacts, contact.Other) is ContactPhase.Enter or ContactPhase.Stay ? ContactPhase.Stay : ContactPhase.Enter;
+            contact.Phase = GetPhase(contacts, contact.Other) is ContactPhase.Enter or ContactPhase.Stay ? ContactPhase.Stay : ContactPhase.Enter;
             if (contact.Phase == ContactPhase.Enter)
             {
                 Debugging.Verbose($"Entity {entity.Id} touched entity {contact.Other.Id} at ({contact.Point.X:0.###}, {contact.Point.Y:0.###}, {contact.Point.Z:0.###}), {contact.Impulse:0.###} Ns.");
@@ -769,15 +703,12 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
         foreach (Contact held in contacts)
         {
-            if (held.Phase is ContactPhase.None or ContactPhase.Exit || PhaseOf(now, held.Other) != ContactPhase.None)
+            if (held.Phase is ContactPhase.None or ContactPhase.Exit || GetPhase(now, held.Other) != ContactPhase.None)
             {
                 continue;
             }
 
-            if (written == Contacts.Capacity)
-            {
-                break;
-            }
+            if (written == Contacts.Capacity) break;
 
             now[written++] = held with { Phase = ContactPhase.Exit, Impulse = 0 };
             Debugging.Verbose($"Entity {entity.Id} parted from entity {held.Other.Id}.");
@@ -791,10 +722,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// mean of the contact points, the normal turned to point away from the other body, and the impulse along it;
     /// a contact with no points, the two only near, is <see cref="ContactPhase.None"/>.
     /// </summary>
-    private unsafe Contact ContactOf(int slot, in B3.ContactData data)
+    private unsafe Contact GetContact(int slot, in B3.ContactData data)
     {
-        bool isA = SlotOf(data.ShapeIdA) == slot;
-        int other = isA ? SlotOf(data.ShapeIdB) : SlotOf(data.ShapeIdA);
+        bool isA = GetSlot(data.ShapeIdA) == slot;
+        int other = isA ? GetSlot(data.ShapeIdB) : GetSlot(data.ShapeIdA);
         Vector3 centre = FromVec(B3.BodyGetWorldCenterOfMass(B3.ShapeGetBody(data.ShapeIdA)));
         Vector3 point = Vector3.Zero;
         Vector3 normal = Vector3.Zero;
@@ -812,10 +743,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             }
         }
 
-        if (points == 0)
-        {
-            return default;
-        }
+        if (points == 0) return default;
 
         normal = Vector3.Normalize(normal);
         return new Contact
@@ -828,14 +756,11 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         };
     }
 
-    private static ContactPhase PhaseOf(in Contacts contacts, Entity other)
+    private static ContactPhase GetPhase(in Contacts contacts, Entity other)
     {
         foreach (Contact held in contacts)
         {
-            if (held.Phase != ContactPhase.None && held.Other == other)
-            {
-                return held.Phase;
-            }
+            if (held.Phase != ContactPhase.None && held.Other == other) return held.Phase;
         }
 
         return ContactPhase.None;
@@ -844,7 +769,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// <summary>
     /// The body slot a shape belongs to, kept one up in its body's user data so that 0 is no body.
     /// </summary>
-    private static unsafe int SlotOf(B3.ShapeId shape)
+    private static unsafe int GetSlot(B3.ShapeId shape)
     {
         return (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
     }
@@ -860,7 +785,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         return filter;
     }
 
-    private static Motions MotionsOf(Motion motion)
+    private static Motions GetMotions(Motion motion)
     {
         return motion switch
         {
@@ -876,7 +801,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// little rolling resistance, so a sticky ball stops rolling. Two surfaces that touch take the geometric mean of
     /// their frictions and the larger of their bounces, so a sticky box on ice still slides, a little.
     /// </summary>
-    private static B3.SurfaceMaterial MaterialOf(Surface surface, float bounce)
+    private static B3.SurfaceMaterial GetMaterial(Surface surface, float bounce)
     {
         B3.SurfaceMaterial material = B3.DefaultSurfaceMaterial();
         (material.Friction, material.RollingResistance) = surface switch
@@ -892,7 +817,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         return material;
     }
 
-    private Handle<Model> ModelOf(Entity entity)
+    private Handle<Model> GetModel(Entity entity)
     {
         return _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
     }
@@ -901,7 +826,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// The models the bodies among <paramref name="prefabs"/> are shaped like: each part with a <see cref="Physics"/>
     /// and a <see cref="Renderer"/> naming a model, and the parts under them. Any thread.
     /// </summary>
-    private static HashSet<Handle<Model>> ModelsOf(IReadOnlyList<Prefab> prefabs)
+    private static HashSet<Handle<Model>> GetModels(IReadOnlyList<Prefab> prefabs)
     {
         HashSet<Handle<Model>> models = [];
         foreach (Prefab prefab in prefabs)
@@ -923,10 +848,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
                     model = component is Renderer renderer ? renderer.Model : model;
                 }
 
-                if (isBody && model != Handle<Model>.None)
-                {
-                    models.Add(model);
-                }
+                if (isBody && model != Handle<Model>.None) models.Add(model);
 
                 Add(part.Children);
             }
@@ -953,10 +875,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             int done = 0;
             foreach (Handle<Model> model in preload.Models)
             {
-                if (_shapes.Get(model) is not null)
-                {
-                    done++;
-                }
+                if (_shapes.Get(model) is not null) done++;
             }
 
             float share = preload.Models.Count == 0 ? 1 : (float)done / preload.Models.Count;
@@ -974,7 +893,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         }
     }
 
-    private static B3.Vec3 Scaled(B3.Vec3 vector, float scale)
+    private static B3.Vec3 Scale(B3.Vec3 vector, float scale)
     {
         return new() { X = vector.X * scale, Y = vector.Y * scale, Z = vector.Z * scale };
     }
@@ -1004,7 +923,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     private static unsafe byte OnOverlap(B3.ShapeId shape, void* context)
     {
         OverlapQuery* query = (OverlapQuery*)context;
-        query->Found[query->Count++] = query->Bodies[SlotOf(shape)].Entity;
+        query->Found[query->Count++] = query->Bodies[GetSlot(shape)].Entity;
         return query->Count < query->Capacity ? (byte)1 : (byte)0;
     }
 
@@ -1013,17 +932,17 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private struct Body
     {
-        public B3.BodyId Id;
+        internal B3.BodyId Id;
 
-        public Entity Entity;
+        internal Entity Entity;
 
-        public Handle<Model> Model;
+        internal Handle<Model> Model;
 
-        public Transform Transform;
+        internal Transform Transform;
 
-        public Physics Physics;
+        internal Physics Physics;
 
-        public uint Seen;
+        internal uint Seen;
     }
 
     /// <summary>
@@ -1038,15 +957,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private sealed class Preload(HashSet<Handle<Model>> models, IProgress<float> progress, CancellationToken cancel)
     {
-        public HashSet<Handle<Model>> Models { get; } = models;
+        internal HashSet<Handle<Model>> Models { get; } = models;
 
-        public IProgress<float> Progress { get; } = progress;
+        internal IProgress<float> Progress { get; } = progress;
 
-        public CancellationToken Cancel { get; } = cancel;
+        internal CancellationToken Cancel { get; } = cancel;
 
-        public TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public float Reported { get; set; } = -1;
+        internal float Reported { get; set; } = -1;
     }
 
     /// <summary>
@@ -1055,12 +974,12 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private unsafe struct OverlapQuery
     {
-        public Body* Bodies;
+        internal Body* Bodies;
 
-        public Entity* Found;
+        internal Entity* Found;
 
-        public int Capacity;
+        internal int Capacity;
 
-        public int Count;
+        internal int Count;
     }
 }

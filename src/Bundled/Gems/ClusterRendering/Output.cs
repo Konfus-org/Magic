@@ -30,7 +30,7 @@ internal sealed class Output : IDisposable
     /// </summary>
     private volatile Compiled? _shaders;
 
-    public Output(IGpu gpu, IShaderCompiler compiler, CancellationToken stopping)
+    internal Output(IGpu gpu, IShaderCompiler compiler, CancellationToken stopping)
     {
         _gpu = gpu;
         _linear = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
@@ -55,15 +55,12 @@ internal sealed class Output : IDisposable
     /// the target first when <paramref name="clears"/>; only the clear until the pipeline is made and the view has an
     /// image.
     /// </summary>
-    public void Draw(ViewTarget target, in FrameConstants constants, BoundResource image, GpuFilter filter, bool clears, Failures failures)
+    internal void Draw(ViewTarget target, in FrameConstants constants, BoundResource image, GpuFilter filter, bool clears, Failures failures)
     {
-        GpuPipeline pipeline = PipelineFor(target.Format, isNothing: false);
+        GpuPipeline pipeline = GetPipeline(target.Format, isNothing: false);
         if (pipeline == GpuPipeline.None || image.Texture == GpuTexture.None)
         {
-            if (clears)
-            {
-                Clear(target.Texture);
-            }
+            if (clears) Clear(target.Texture);
 
             return;
         }
@@ -76,15 +73,12 @@ internal sealed class Output : IDisposable
     /// failure's magenta, clearing the rest of the target first when <paramref name="clears"/>; only the clear until
     /// the pipeline is made.
     /// </summary>
-    public void DrawNothing(ViewTarget target, in FrameConstants constants, bool clears)
+    internal void DrawNothing(ViewTarget target, in FrameConstants constants, bool clears)
     {
-        GpuPipeline pipeline = PipelineFor(target.Format, isNothing: true);
+        GpuPipeline pipeline = GetPipeline(target.Format, isNothing: true);
         if (pipeline == GpuPipeline.None)
         {
-            if (clears)
-            {
-                Clear(target.Texture);
-            }
+            if (clears) Clear(target.Texture);
 
             return;
         }
@@ -95,7 +89,7 @@ internal sealed class Output : IDisposable
     /// <summary>
     /// Clears a target to black, as a window nothing is drawn into this frame is.
     /// </summary>
-    public void Clear(GpuTexture target)
+    internal void Clear(GpuTexture target)
     {
         _gpu.Commands.RenderPass([new GpuTextureLevel(target)], GpuContents.Clear).Dispose();
     }
@@ -110,15 +104,9 @@ internal sealed class Output : IDisposable
         using GpuDebugGroup group = _gpu.Commands.DebugGroup("Output");
         using GpuRenderPass render = _gpu.Commands.RenderPass([new GpuTextureLevel(target.Texture)], clears ? GpuContents.Clear : GpuContents.Keep);
         render.Viewport(target.Area).Scissor(target.Area).Pipeline(pipeline).Constants(GpuStage.Fragment, constants);
-        if (textures.Length > 0)
-        {
-            render.Textures(GpuStage.Fragment, textures);
-        }
+        if (textures.Length > 0) render.Textures(GpuStage.Fragment, textures);
 
-        if (buffers.Length > 0)
-        {
-            render.Buffers(GpuStage.Fragment, buffers);
-        }
+        if (buffers.Length > 0) render.Buffers(GpuStage.Fragment, buffers);
 
         render.Draw(3);
     }
@@ -127,7 +115,7 @@ internal sealed class Output : IDisposable
     /// The pipeline for <paramref name="format"/> with the finished image's fragment stage, or the nothing-drawn one
     /// when <paramref name="isNothing"/>; none until the shaders are compiled, and for good, logged, when one does not.
     /// </summary>
-    private GpuPipeline PipelineFor(GpuFormat format, bool isNothing)
+    private GpuPipeline GetPipeline(GpuFormat format, bool isNothing)
     {
         if (_pipelines.TryGetValue((format, isNothing), out GpuPipeline pipeline) || _shaders is not { } shaders)
         {

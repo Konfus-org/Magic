@@ -94,9 +94,9 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
             ? new Vector2(_input[Control.MouseMotionX].Value, _input[Control.MouseMotionY].Value) * MouseTurn
             : Vector2.Zero;
         Vector2 turn = mouse + (new Vector2(_input[Control.GamepadRightX].Value, -_input[Control.GamepadRightY].Value) * (StickTurn * frame.DeltaSeconds));
-        float right = Axis(Control.KeyD, Control.KeyA) + _input[Control.GamepadLeftX].Value;
-        float forward = Axis(Control.KeyW, Control.KeyS) + _input[Control.GamepadLeftY].Value;
-        float up = Axis(Control.KeyE, Control.KeyQ) + Axis(Control.GamepadRightTrigger, Control.GamepadLeftTrigger);
+        float right = ReadAxis(Control.KeyD, Control.KeyA) + _input[Control.GamepadLeftX].Value;
+        float forward = ReadAxis(Control.KeyW, Control.KeyS) + _input[Control.GamepadLeftY].Value;
+        float up = ReadAxis(Control.KeyE, Control.KeyQ) + ReadAxis(Control.GamepadRightTrigger, Control.GamepadLeftTrigger);
 
         // Out from the middle, then around it, turning to look at it no faster than TurnToMiddle.
         ref Transform transform = ref _world.Get<Transform>(owner);
@@ -119,10 +119,7 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
 
         // Along where it looks, and up and down the world's up; no faster for two keys, or a key and a stick, at once.
         Vector3 move = Vector3.Transform(new Vector3(right, 0, forward), rotation) + (Vector3.UnitY * up);
-        if (move.LengthSquared() > 1)
-        {
-            move = Vector3.Normalize(move);
-        }
+        if (move.LengthSquared() > 1) move = Vector3.Normalize(move);
 
         bool isFast = _input[Control.KeyLeftShift].IsDown || _input[Control.GamepadLeftShoulder].IsDown;
         transform.Rotation = rotation;
@@ -132,7 +129,7 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
     /// <summary>
     /// One control's value less another's: -1 to 1 for a pair of keys.
     /// </summary>
-    private float Axis(Control positive, Control negative)
+    private float ReadAxis(Control positive, Control negative)
     {
         return _input[positive].Value - _input[negative].Value;
     }

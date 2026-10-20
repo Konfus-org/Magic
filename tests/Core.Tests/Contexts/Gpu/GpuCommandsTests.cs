@@ -14,7 +14,7 @@ public sealed class GpuCommandsTests
 
         commands.RenderPass(colors, GpuContents.Keep).Dispose();
 
-        Assert.Equal(colors, commands.LevelsOf(commands.Commands[0]).ToArray());
+        Assert.Equal(colors, commands.GetLevels(commands.Commands[0]).ToArray());
     }
 
     [Fact]
@@ -57,7 +57,7 @@ public sealed class GpuCommandsTests
 
         commands.ComputePass(textures, []).Dispose();
 
-        Assert.Equal(textures, commands.LevelsOf(commands.Commands[0]).ToArray());
+        Assert.Equal(textures, commands.GetLevels(commands.Commands[0]).ToArray());
     }
 
     [Fact]
@@ -68,7 +68,7 @@ public sealed class GpuCommandsTests
 
         commands.ComputePass([], buffers).Dispose();
 
-        Assert.Equal(buffers, commands.BuffersOf(commands.Commands[0]).ToArray());
+        Assert.Equal(buffers, commands.GetBuffers(commands.Commands[0]).ToArray());
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class GpuCommandsTests
         commands.CopyTexture(from, to);
 
         GpuTextureRegion[] expected = [from, to];
-        Assert.Equal(expected, commands.RegionsOf(commands.Commands[0]).ToArray());
+        Assert.Equal(expected, commands.GetRegions(commands.Commands[0]).ToArray());
     }
 
     [Fact]
@@ -94,7 +94,7 @@ public sealed class GpuCommandsTests
         commands.CopyBuffer(from, 0, to, 0, 64);
 
         GpuBuffer[] expected = [from, to];
-        Assert.Equal(expected, commands.BuffersOf(commands.Commands[0]).ToArray());
+        Assert.Equal(expected, commands.GetBuffers(commands.Commands[0]).ToArray());
     }
 
     [Fact]
@@ -126,7 +126,7 @@ public sealed class GpuCommandsTests
 
         commands.DebugGroup("Lumière").Dispose();
 
-        Assert.Equal(Encoding.UTF8.GetBytes("Lumière"), commands.BytesOf(commands.Commands[0]).ToArray());
+        Assert.Equal(Encoding.UTF8.GetBytes("Lumière"), commands.GetBytes(commands.Commands[0]).ToArray());
     }
 
     [Fact]

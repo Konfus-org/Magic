@@ -11,7 +11,7 @@ internal static unsafe class ImGuiInput
 {
     private static readonly (Control Control, ImGuiKey Key)[] _keys = Keys();
 
-    public static void Feed(ImGuiIO* io, IInput input, TextArena text)
+    internal static void Feed(ImGuiIO* io, IInput input, TextArena text)
     {
         foreach ((Control control, ImGuiKey key) in _keys)
         {
@@ -31,16 +31,10 @@ internal static unsafe class ImGuiInput
         // ImGui scrolls right for a negative x.
         float wheelX = input[Control.MouseWheelX].Value;
         float wheelY = input[Control.MouseWheelY].Value;
-        if (wheelX != 0 || wheelY != 0)
-        {
-            ImGuiIO.AddMouseWheelEvent(io, -wheelX, wheelY);
-        }
+        if (wheelX != 0 || wheelY != 0) ImGuiIO.AddMouseWheelEvent(io, -wheelX, wheelY);
 
         // Only while a field has the keyboard: the key that opens a window must not be typed into the field it opens.
-        if (io->WantTextInput && input.Text.Length > 0)
-        {
-            ImGuiIO.AddInputCharactersUTF8(io, text.Of(input.Text));
-        }
+        if (io->WantTextInput && input.Text.Length > 0) ImGuiIO.AddInputCharactersUTF8(io, text.Of(input.Text));
     }
 
     /// <summary>
@@ -48,20 +42,14 @@ internal static unsafe class ImGuiInput
     /// </summary>
     private static void FeedKey(ImGuiIO* io, ImGuiKey key, ControlState state)
     {
-        if (state.WasPressed && !state.IsDown)
-        {
-            ImGuiIO.AddKeyEvent(io, key, true);
-        }
+        if (state.WasPressed && !state.IsDown) ImGuiIO.AddKeyEvent(io, key, true);
 
         ImGuiIO.AddKeyEvent(io, key, state.IsDown);
     }
 
     private static void FeedButton(ImGuiIO* io, int button, ControlState state)
     {
-        if (state.WasPressed && !state.IsDown)
-        {
-            ImGuiIO.AddMouseButtonEvent(io, button, true);
-        }
+        if (state.WasPressed && !state.IsDown) ImGuiIO.AddMouseButtonEvent(io, button, true);
 
         ImGuiIO.AddMouseButtonEvent(io, button, state.IsDown);
     }

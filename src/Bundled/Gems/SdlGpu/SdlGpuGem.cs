@@ -155,7 +155,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.SetPointerProperty(properties, SDL.PropGpuDeviceCreateVulkanOptionsPointer, &vulkan);
         if (settings.Driver.ToSdl() is { Length: > 0 } driver)
         {
-            fixed (byte* driverName = CString.Bytes(driver))
+            fixed (byte* driverName = CString.ToBytes(driver))
             {
                 SDL.SetStringProperty(properties, SDL.PropGpuDeviceCreateNameString, driverName);
             }
@@ -208,10 +208,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         {
             if (texture.Window is { } window)
             {
-                if (window.Native != 0)
-                {
-                    Release(Kind.Window, window.Native);
-                }
+                if (window.Native != 0) Release(Kind.Window, window.Native);
 
                 continue;
             }
@@ -268,7 +265,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
         SDL.GPUBufferCreateInfo info = new() { Usage = usage.ToSdl(), Size = bytes };
         SDL.GPUBuffer* buffer = SDL.CreateGPUBuffer(_device, &info);
-        return buffer == null ? throw Failed($"a {bytes}-byte buffer") : new GpuBuffer(_buffers.Add((nint)buffer));
+        return buffer == null ? throw MakeFailure($"a {bytes}-byte buffer") : new GpuBuffer(_buffers.Add((nint)buffer));
     }
 
     public GpuTexture CreateTexture(in GpuTextureDescription description)
@@ -289,21 +286,18 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.GPUTexture* texture = SDL.CreateGPUTexture(_device, &info);
         if (texture == null)
         {
-            throw Failed($"a {description.Width} x {description.Height} {description.Format} texture");
+            throw MakeFailure($"a {description.Width} x {description.Height} {description.Format} texture");
         }
 
         uint depth = description.Kind == GpuTextureKind.Texture3D ? description.Layers : 1;
         return new GpuTexture(_textures.Add(new TextureObject((nint)texture, description.Format, description.Width, description.Height, depth)));
     }
 
-    public GpuTexture WindowTarget(IWindow window)
+    public GpuTexture GetWindowTarget(IWindow window)
     {
         ThrowIfNotRender();
 
-        if (_windows.TryGetValue(window.Id, out GpuTexture target))
-        {
-            return target;
-        }
+        if (_windows.TryGetValue(window.Id, out GpuTexture target)) return target;
 
         // A headless window is none of SDL's: a target with no image, ever.
         SDL.Window* native = window.Id == 0 ? null : SDL.GetWindowFromID(window.Id);
@@ -318,28 +312,22 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         return target;
     }
 
-    public GpuFormat FormatOf(GpuTexture texture)
+    public GpuFormat GetFormat(GpuTexture texture)
     {
         ThrowIfNotRender();
 
         return _textures[texture.Id].Format;
     }
 
-    public Size SizeOf(GpuTexture texture)
+    public Size GetSize(GpuTexture texture)
     {
         ThrowIfNotRender();
 
         TextureObject stored = _textures[texture.Id];
-        if (stored.Window is not { } window)
-        {
-            return new Size((int)stored.Width, (int)stored.Height);
-        }
+        if (stored.Window is not { } window) return new Size((int)stored.Width, (int)stored.Height);
 
         SDL.Window* native = (SDL.Window*)window.Native;
-        if (native == null || (SDL.GetWindowFlags(native) & SDL.WindowMinimized) != 0)
-        {
-            return Size.Empty;
-        }
+        if (native == null || (SDL.GetWindowFlags(native) & SDL.WindowMinimized) != 0) return Size.Empty;
 
         int width;
         int height;
@@ -365,7 +353,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             MaxLod = 1000,
         };
         SDL.GPUSampler* sampler = SDL.CreateGPUSampler(_device, &info);
-        return sampler == null ? throw Failed("a sampler") : new GpuSampler(_samplers.Add((nint)sampler));
+        return sampler == null ? throw MakeFailure("a sampler") : new GpuSampler(_samplers.Add((nint)sampler));
     }
 
     public Result<GpuPipeline> CreatePipeline(GpuPipelineDescription description)
@@ -463,7 +451,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         ThrowIfNotRender();
 
-        byte[] entryPoint = CString.Bytes(compute.EntryPoint);
+        byte[] entryPoint = CString.ToBytes(compute.EntryPoint);
         fixed (byte* code = compute.Code.Span)
         fixed (byte* entry = entryPoint)
         {
@@ -494,10 +482,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         ThrowIfNotRender();
 
-        if (data.IsEmpty)
-        {
-            return;
-        }
+        if (data.IsEmpty) return;
 
         (nint staged, uint stagedOffset) = Stage(data);
         _transfers.Add(new Transfer(staged, stagedOffset, (uint)data.Length, buffer, offset, default));
@@ -507,10 +492,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         ThrowIfNotRender();
 
-        if (data.IsEmpty)
-        {
-            return;
-        }
+        if (data.IsEmpty) return;
 
         (nint staged, uint stagedOffset) = Stage(data);
         _transfers.Add(new Transfer(staged, stagedOffset, (uint)data.Length, default, 0, region));
@@ -520,20 +502,14 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         ThrowIfNotRender();
 
-        if (buffer != GpuBuffer.None)
-        {
-            _releasing.Add((Kind.Buffer, buffer.Id));
-        }
+        if (buffer != GpuBuffer.None) _releasing.Add((Kind.Buffer, buffer.Id));
     }
 
     public void Release(GpuTexture texture)
     {
         ThrowIfNotRender();
 
-        if (texture == GpuTexture.None)
-        {
-            return;
-        }
+        if (texture == GpuTexture.None) return;
 
         if (_textures[texture.Id].Window is { } window)
         {
@@ -549,20 +525,14 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         ThrowIfNotRender();
 
-        if (sampler != GpuSampler.None)
-        {
-            _releasing.Add((Kind.Sampler, sampler.Id));
-        }
+        if (sampler != GpuSampler.None) _releasing.Add((Kind.Sampler, sampler.Id));
     }
 
     public void Release(GpuPipeline pipeline)
     {
         ThrowIfNotRender();
 
-        if (_pipelines[pipeline.Id] is { Handle: not 0 } stored)
-        {
-            _releasing.Add((stored.Kind, pipeline.Id));
-        }
+        if (_pipelines[pipeline.Id] is { Handle: not 0 } stored) _releasing.Add((stored.Kind, pipeline.Id));
     }
 
     public Result<byte[]> Read(GpuBuffer buffer, uint bytes)
@@ -626,7 +596,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         return capture.Task;
     }
 
-    private static InvalidOperationException Failed(string what) => new($"The GPU could not make {what}: {CString.Read(SDL.GetError())}");
+    private static InvalidOperationException MakeFailure(string what) => new($"The GPU could not make {what}: {CString.Read(SDL.GetError())}");
 
     /// <summary>
     /// Whether SDL is loaded and started, as the platform gem starts it: its events are up, whatever else is.
@@ -688,10 +658,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
         CopyCaptures(commandBuffer);
         _fences[slot] = (nint)SDL.SubmitGPUCommandBufferAndAcquireFence(commandBuffer);
-        if (_fences[slot] == 0)
-        {
-            Debugging.Error($"SDL did not submit the frame: {CString.Read(SDL.GetError())}");
-        }
+        if (_fences[slot] == 0) Debugging.Error($"SDL did not submit the frame: {CString.Read(SDL.GetError())}");
 
         FinishCaptures((SDL.GPUFence*)_fences[slot]);
 
@@ -729,15 +696,12 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private void FinishCaptures(SDL.GPUFence* fence)
     {
-        if (_capturing.Count == 0)
-        {
-            return;
-        }
+        if (_capturing.Count == 0) return;
 
         bool isDone = fence != null && SDL.WaitForGPUFences(_device, waitAll: true, &fence, 1);
         foreach (Capture capture in _capturing)
         {
-            capture.Done.SetResult(isDone ? Pixels(capture) : Result.Failure<GpuImage>($"The frame it was in never finished: {CString.Read(SDL.GetError())}"));
+            capture.Done.SetResult(isDone ? TryReadPixels(capture) : Result.Failure<GpuImage>($"The frame it was in never finished: {CString.Read(SDL.GetError())}"));
             SDL.ReleaseGPUTransferBuffer(_device, (SDL.GPUTransferBuffer*)capture.Transfer);
             SDL.ReleaseGPUTexture(_device, (SDL.GPUTexture*)capture.Copy);
         }
@@ -748,7 +712,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// <summary>
     /// A capture's downloaded pixels as RGBA, opaque: a window shows no alpha, whatever was written to it.
     /// </summary>
-    private Result<GpuImage> Pixels(in Capture capture)
+    private Result<GpuImage> TryReadPixels(in Capture capture)
     {
         byte* mapped = (byte*)SDL.MapGPUTransferBuffer(_device, (SDL.GPUTransferBuffer*)capture.Transfer, cycle: false);
         if (mapped == null)
@@ -824,10 +788,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 Kind.TransferBuffer => 0,
                 _ => 0,
             };
-            if (handle != 0)
-            {
-                freed.Add((kind, handle));
-            }
+            if (handle != 0) freed.Add((kind, handle));
         }
 
         _releasing.Clear();
@@ -869,20 +830,14 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private void FollowSwapchain()
     {
-        if (_vsyncPresenting == _settings.Vsync && _composing == _settings.Composition)
-        {
-            return;
-        }
+        if (_vsyncPresenting == _settings.Vsync && _composing == _settings.Composition) return;
 
         _vsyncPresenting = _settings.Vsync;
         _composing = _settings.Composition;
         foreach ((uint id, GpuTexture target) in _windows)
         {
             SDL.Window* window = id == 0 ? null : SDL.GetWindowFromID(id);
-            if (window == null)
-            {
-                continue;
-            }
+            if (window == null) continue;
 
             _textures[target.Id] = _textures[target.Id] with { Format = ApplySwapchain(window, id) };
         }
@@ -917,8 +872,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private GpuFormat ApplySwapchain(SDL.Window* window, uint id)
     {
-        SDL.GPUPresentMode present = PresentMode(window);
-        SDL.GPUSwapchainComposition composition = CompositionFor(window, id);
+        SDL.GPUPresentMode present = GetPresentMode(window);
+        SDL.GPUSwapchainComposition composition = GetComposition(window, id);
         if (!SDL.SetGPUSwapchainParameters(_device, window, composition, present))
         {
             Debugging.Warn($"Window {id} presents as SDL chose, not {composition} with {present}: {CString.Read(SDL.GetError())}");
@@ -933,7 +888,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// The composition the settings ask for, where the window supports it; SDR, which every window does, otherwise,
     /// and a warning says so.
     /// </summary>
-    private SDL.GPUSwapchainComposition CompositionFor(SDL.Window* window, uint id)
+    private SDL.GPUSwapchainComposition GetComposition(SDL.Window* window, uint id)
     {
         SDL.GPUSwapchainComposition asked = _settings.Composition.ToSdl();
         if (asked == SDL.GPUSwapchainComposition.Sdr || SDL.WindowSupportsGPUSwapchainComposition(_device, window, asked))
@@ -949,12 +904,9 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// Vsync, or when the settings turn it off, uncapped: immediate (tearing allowed) where the window has it, else
     /// mailbox.
     /// </summary>
-    private SDL.GPUPresentMode PresentMode(SDL.Window* window)
+    private SDL.GPUPresentMode GetPresentMode(SDL.Window* window)
     {
-        if (_settings.Vsync)
-        {
-            return SDL.GPUPresentMode.Vsync;
-        }
+        if (_settings.Vsync) return SDL.GPUPresentMode.Vsync;
 
         return SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Immediate) ? SDL.GPUPresentMode.Immediate
             : SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Mailbox) ? SDL.GPUPresentMode.Mailbox
@@ -966,7 +918,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private SDL.GPUShader* CreateShader(GpuShader shader)
     {
-        byte[] entryPoint = CString.Bytes(shader.EntryPoint);
+        byte[] entryPoint = CString.ToBytes(shader.EntryPoint);
         fixed (byte* code = shader.Code.Span)
         fixed (byte* entry = entryPoint)
         {
@@ -990,7 +942,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         SDL.GPUTransferBufferCreateInfo info = new() { Usage = usage, Size = bytes };
         SDL.GPUTransferBuffer* transfer = SDL.CreateGPUTransferBuffer(_device, &info);
-        return transfer == null ? throw Failed($"a {bytes}-byte transfer buffer") : transfer;
+        return transfer == null ? throw MakeFailure($"a {bytes}-byte transfer buffer") : transfer;
     }
 
     /// <summary>
@@ -1055,10 +1007,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
         if (_stagingMapped == null)
         {
-            if (bytes > _stagingCapacity)
-            {
-                GrowStaging(bytes);
-            }
+            if (bytes > _stagingCapacity) GrowStaging(bytes);
 
             _stagingMapped = (byte*)SDL.MapGPUTransferBuffer(_device, _staging, cycle: true);
             if (_stagingMapped == null)
@@ -1088,10 +1037,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void UnmapStaging()
     {
-        if (_stagingMapped == null)
-        {
-            return;
-        }
+        if (_stagingMapped == null) return;
 
         SDL.UnmapGPUTransferBuffer(_device, _staging);
         _stagingMapped = null;
@@ -1103,10 +1049,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private void RunTransfers(SDL.GPUCommandBuffer* commandBuffer)
     {
-        if (_transfers.Count == 0)
-        {
-            return;
-        }
+        if (_transfers.Count == 0) return;
 
         SDL.GPUCopyPass* copyPass = SDL.BeginGPUCopyPass(commandBuffer);
         foreach (Transfer transfer in _transfers)
@@ -1119,7 +1062,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 continue;
             }
 
-            SDL.GPUTextureRegion region = TextureRegion(transfer.Region);
+            SDL.GPUTextureRegion region = ToTextureRegion(transfer.Region);
             SDL.GPUTextureTransferInfo texels = new() { TransferBuffer = (SDL.GPUTransferBuffer*)transfer.Staged, Offset = transfer.StagedOffset, PixelsPerRow = region.W, RowsPerLayer = region.H };
             SDL.UploadToGPUTexture(copyPass, &texels, &region, cycle: false);
         }
@@ -1131,7 +1074,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// <summary>
     /// A region with its size filled in: a width, height or depth of 0 is the whole level.
     /// </summary>
-    private SDL.GPUTextureRegion TextureRegion(in GpuTextureRegion region)
+    private SDL.GPUTextureRegion ToTextureRegion(in GpuTextureRegion region)
     {
         TextureObject stored = _textures[region.Texture.Id];
         int level = (int)region.Level;
@@ -1154,10 +1097,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private void Run(SDL.GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        if (_isSkipping && command.Type != GpuCommandType.EndRenderPass)
-        {
-            return;
-        }
+        if (_isSkipping && command.Type != GpuCommandType.EndRenderPass) return;
 
         switch (command.Type)
         {
@@ -1165,10 +1105,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 BeginRenderPass(commandBuffer, command);
                 break;
             case GpuCommandType.EndRenderPass:
-                if (_renderPass != null)
-                {
-                    SDL.EndGPURenderPass(_renderPass);
-                }
+                if (_renderPass != null) SDL.EndGPURenderPass(_renderPass);
 
                 _renderPass = null;
                 _isSkipping = false;
@@ -1259,7 +1196,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BeginRenderPass(SDL.GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<GpuTextureLevel> colors = _commands.LevelsOf(command);
+        ReadOnlySpan<GpuTextureLevel> colors = _commands.GetLevels(command);
         SDL.GPUColorTargetInfo* targets = stackalloc SDL.GPUColorTargetInfo[colors.Length];
         for (int i = 0; i < colors.Length; i++)
         {
@@ -1302,8 +1239,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BeginComputePass(SDL.GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<GpuTextureLevel> levels = _commands.LevelsOf(command);
-        ReadOnlySpan<GpuBuffer> written = _commands.BuffersOf(command);
+        ReadOnlySpan<GpuTextureLevel> levels = _commands.GetLevels(command);
+        ReadOnlySpan<GpuBuffer> written = _commands.GetBuffers(command);
         SDL.GPUStorageTextureReadWriteBinding* textures = stackalloc SDL.GPUStorageTextureReadWriteBinding[levels.Length];
         SDL.GPUStorageBufferReadWriteBinding* buffers = stackalloc SDL.GPUStorageBufferReadWriteBinding[written.Length];
         for (int i = 0; i < levels.Length; i++)
@@ -1333,7 +1270,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BindVertexBuffers(in GpuCommand command)
     {
-        ReadOnlySpan<GpuBuffer> run = _commands.BuffersOf(command);
+        ReadOnlySpan<GpuBuffer> run = _commands.GetBuffers(command);
         SDL.GPUBufferBinding* buffers = stackalloc SDL.GPUBufferBinding[run.Length];
         for (int i = 0; i < run.Length; i++)
         {
@@ -1345,7 +1282,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BindBuffers(in GpuCommand command)
     {
-        ReadOnlySpan<GpuBuffer> run = _commands.BuffersOf(command);
+        ReadOnlySpan<GpuBuffer> run = _commands.GetBuffers(command);
         SDL.GPUBuffer** buffers = stackalloc SDL.GPUBuffer*[run.Length];
         for (int i = 0; i < run.Length; i++)
         {
@@ -1370,7 +1307,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BindRawTextures(in GpuCommand command)
     {
-        ReadOnlySpan<GpuTexture> run = _commands.TexturesOf(command);
+        ReadOnlySpan<GpuTexture> run = _commands.GetTextures(command);
         SDL.GPUTexture** textures = stackalloc SDL.GPUTexture*[run.Length];
         for (int i = 0; i < run.Length; i++)
         {
@@ -1395,7 +1332,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BindTextures(in GpuCommand command)
     {
-        ReadOnlySpan<GpuSampledTexture> run = _commands.SampledOf(command);
+        ReadOnlySpan<GpuSampledTexture> run = _commands.GetSampled(command);
         SDL.GPUTextureSamplerBinding* textures = stackalloc SDL.GPUTextureSamplerBinding[run.Length];
         for (int i = 0; i < run.Length; i++)
         {
@@ -1424,7 +1361,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void PushConstants(SDL.GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<byte> bytes = _commands.BytesOf(command);
+        ReadOnlySpan<byte> bytes = _commands.GetBytes(command);
         fixed (byte* data = bytes)
         {
             switch (command.Stage)
@@ -1449,8 +1386,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private void CopyTexture(SDL.GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<GpuTextureRegion> run = _commands.RegionsOf(command);
-        SDL.GPUTextureRegion from = TextureRegion(run[0]);
+        ReadOnlySpan<GpuTextureRegion> run = _commands.GetRegions(command);
+        SDL.GPUTextureRegion from = ToTextureRegion(run[0]);
         SDL.GPUTextureLocation source = new() { Texture = from.Texture, MipLevel = from.MipLevel, Layer = from.Layer, X = from.X, Y = from.Y, Z = from.Z };
         SDL.GPUTextureLocation destination = new() { Texture = (SDL.GPUTexture*)_textures[run[1].Texture.Id].Handle, MipLevel = run[1].Level, Layer = run[1].Layer, X = run[1].X, Y = run[1].Y, Z = run[1].Z };
         SDL.GPUCopyPass* copyPass = SDL.BeginGPUCopyPass(commandBuffer);
@@ -1460,7 +1397,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void CopyBuffer(SDL.GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<GpuBuffer> run = _commands.BuffersOf(command);
+        ReadOnlySpan<GpuBuffer> run = _commands.GetBuffers(command);
         SDL.GPUBufferLocation source = new() { Buffer = (SDL.GPUBuffer*)_buffers[run[0].Id], Offset = command.First };
         SDL.GPUBufferLocation destination = new() { Buffer = (SDL.GPUBuffer*)_buffers[run[1].Id], Offset = command.Offset };
         SDL.GPUCopyPass* copyPass = SDL.BeginGPUCopyPass(commandBuffer);
@@ -1470,7 +1407,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private void BeginDebugGroup(SDL.GPUCommandBuffer* commandBuffer, in GpuCommand command)
     {
-        ReadOnlySpan<byte> name = _commands.BytesOf(command);
+        ReadOnlySpan<byte> name = _commands.GetBytes(command);
         byte* terminated = stackalloc byte[name.Length + 1];
         name.CopyTo(new Span<byte>(terminated, name.Length));
         terminated[name.Length] = 0;
@@ -1484,15 +1421,9 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private SDL.GPUTexture* Texture(SDL.GPUCommandBuffer* commandBuffer, GpuTexture texture)
     {
         TextureObject stored = _textures[texture.Id];
-        if (stored.Window is not { } window)
-        {
-            return (SDL.GPUTexture*)stored.Handle;
-        }
+        if (stored.Window is not { } window) return (SDL.GPUTexture*)stored.Handle;
 
-        if (_images.TryGetValue(texture.Id, out nint acquired))
-        {
-            return (SDL.GPUTexture*)acquired;
-        }
+        if (_images.TryGetValue(texture.Id, out nint acquired)) return (SDL.GPUTexture*)acquired;
 
         uint width = 0;
         uint height = 0;
@@ -1604,16 +1535,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         private readonly List<bool> _isLive = [false];
         private readonly Stack<uint> _free = [];
 
-        public IEnumerable<T> Live
+        internal IEnumerable<T> Live
         {
             get
             {
                 for (int i = 0; i < _items.Count; i++)
                 {
-                    if (_isLive[i])
-                    {
-                        yield return _items[i];
-                    }
+                    if (_isLive[i]) yield return _items[i];
                 }
             }
         }
@@ -1621,13 +1549,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         /// <summary>
         /// What <paramref name="id"/> holds; the default for an id that holds nothing.
         /// </summary>
-        public T this[uint id]
+        internal T this[uint id]
         {
             get => id < _items.Count && _isLive[(int)id] ? _items[(int)id] : default;
             set => _items[(int)id] = value;
         }
 
-        public uint Add(T item)
+        internal uint Add(T item)
         {
             if (_free.TryPop(out uint id))
             {
@@ -1644,12 +1572,9 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         /// <summary>
         /// Forgets <paramref name="id"/>, handing back what it held.
         /// </summary>
-        public T Free(uint id)
+        internal T Free(uint id)
         {
-            if (id == 0 || id >= _items.Count || !_isLive[(int)id])
-            {
-                return default;
-            }
+            if (id == 0 || id >= _items.Count || !_isLive[(int)id]) return default;
 
             T item = _items[(int)id];
             _items[(int)id] = default;

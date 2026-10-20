@@ -39,22 +39,22 @@ internal sealed class Reader
         _options = options;
         _target = target;
         _compilation = Parse();
-        _macros = new(_compilation, TypedefType);
+        _macros = new(_compilation, GetTypedefType);
     }
 
     /// <summary>The C names of the structs the library defines: what a function can attach to.</summary>
-    public IReadOnlySet<string> Structs => _structs;
+    internal IReadOnlySet<string> Structs => _structs;
 
     /// <summary>Every C name read and the qualified C# name it became, enum members included.</summary>
-    public IReadOnlyList<(string CName, string Name)> NameMap => _names;
+    internal IReadOnlyList<(string CName, string Name)> NameMap => _names;
 
-    public IReadOnlyList<Declaration> Declarations => _declarations;
+    internal IReadOnlyList<Declaration> Declarations => _declarations;
 
-    public IReadOnlyList<Skip> Skipped => _skipped;
+    internal IReadOnlyList<Skip> Skipped => _skipped;
 
-    public IReadOnlyList<string> Errors => _errors;
+    internal IReadOnlyList<string> Errors => _errors;
 
-    public static Reader Read(Options options, Target target)
+    internal static Reader Read(Options options, Target target)
     {
         Reader reader = new(options, target);
         reader.Read();
@@ -177,8 +177,8 @@ internal sealed class Reader
         // holds its values, so a parameter typed X takes the enum.
         foreach (CppEnum cppEnum in compilation.Enums)
         {
-            string? enumName = NameOf(cppEnum);
-            if (enumName is not null && IsOurs(cppEnum) && enumName.EndsWith('_') && _typedefs.TryGetValue(enumName[..^1], out CppTypedef? flags) && Unqualified(flags.ElementType) is CppPrimitiveType)
+            string? enumName = GetName(cppEnum);
+            if (enumName is not null && IsOurs(cppEnum) && enumName.EndsWith('_') && _typedefs.TryGetValue(enumName[..^1], out CppTypedef? flags) && Unqualify(flags.ElementType) is CppPrimitiveType)
             {
                 _flagEnums[flags.Name] = enumName;
             }
@@ -191,8 +191,8 @@ internal sealed class Reader
                 Attempt(typedef, () => Alias(typedef));
             }
 
-            CppType element = Unqualified(typedef.ElementType);
-            if (element is CppPointerType pointer && Unqualified(pointer.ElementType) is CppClass { IsDefinition: false } opaque)
+            CppType element = Unqualify(typedef.ElementType);
+            if (element is CppPointerType pointer && Unqualify(pointer.ElementType) is CppClass { IsDefinition: false } opaque)
             {
                 _opaqueNames.TryAdd(opaque, typedef);
             }
@@ -214,18 +214,12 @@ internal sealed class Reader
 
         foreach (CppClass cppClass in compilation.Classes)
         {
-            if (cppClass.IsDefinition && IsOurs(cppClass) && NameOf(cppClass) is { } name)
-            {
-                _structs.Add(name);
-            }
+            if (cppClass.IsDefinition && IsOurs(cppClass) && GetName(cppClass) is { } name) _structs.Add(name);
         }
 
         foreach (CppMacro macro in compilation.Macros)
         {
-            if (IsOurs(macro))
-            {
-                Constant(macro);
-            }
+            if (IsOurs(macro)) Constant(macro);
         }
 
         foreach (CppEnum cppEnum in compilation.Enums)
@@ -239,7 +233,7 @@ internal sealed class Reader
         HashSet<string> declared = new(StringComparer.Ordinal);
         foreach (CppClass cppClass in compilation.Classes)
         {
-            if (IsOurs(cppClass) && NameOf(cppClass) is { } name && declared.Add(name))
+            if (IsOurs(cppClass) && GetName(cppClass) is { } name && declared.Add(name))
             {
                 Attempt(cppClass, () => Struct(cppClass, name));
             }
@@ -272,7 +266,7 @@ internal sealed class Reader
         }
         catch (UnsupportedException ex)
         {
-            _errors.Add($"{Where(element)}: error BND002: [{_target.Name}] {ex.Message}");
+            _errors.Add($"{DescribeWhere(element)}: error BND002: [{_target.Name}] {ex.Message}");
         }
     }
 
@@ -280,39 +274,33 @@ internal sealed class Reader
     private bool IsOurs(CppElement element)
     {
         string? file = element.Span.Start.File;
-        if (string.IsNullOrEmpty(file))
-        {
-            return false;
-        }
+        if (string.IsNullOrEmpty(file)) return false;
 
         StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         string full = Path.GetFullPath(file);
         return full.StartsWith(_options.Root, comparison) || full.StartsWith(ShimFolder, comparison);
     }
 
-    private static string Where(CppElement element)
+    private static string DescribeWhere(CppElement element)
         => element.Span.Start.File is { Length: > 0 } file ? $"{file}({element.Span.Start.Line.ToString(CultureInfo.InvariantCulture)})" : "Bindings";
 
     private void Constant(CppMacro macro)
     {
-        if (macro.Parameters is { Count: > 0 } || macro.Tokens.Count == 0 || macro.Name.StartsWith('_'))
-        {
-            return;
-        }
+        if (macro.Parameters is { Count: > 0 } || macro.Tokens.Count == 0 || macro.Name.StartsWith('_')) return;
 
         Macros.Value? value = _macros.Evaluate(macro, Constant, out string reason);
         if (value is null)
         {
-            _skipped.Add(new($"macro {macro.Name} ({reason})", Where(macro)));
+            _skipped.Add(new($"macro {macro.Name} ({reason})", DescribeWhere(macro)));
             return;
         }
 
         (string owner, string rest) = Names.Split(macro.Name, _options.Prefixes);
-        string name = Names.Pascal(rest);
-        _constants[macro.Name] = Qualified(macro.Name);
+        string name = Names.ToPascal(rest);
+        _constants[macro.Name] = Qualify(macro.Name);
         _constantParts[macro.Name] = (value.Type, value.Expression);
-        _declarations.Add(new(DeclarationKind.Constant, macro.Name, owner, false, name, ConstantText(value.Type, name, value.Expression)));
-        _names.Add((macro.Name, Qualified(macro.Name)));
+        _declarations.Add(new(DeclarationKind.Constant, macro.Name, owner, false, name, MakeConstantText(value.Type, name, value.Expression)));
+        _names.Add((macro.Name, Qualify(macro.Name)));
     }
 
     /// <summary>
@@ -323,19 +311,19 @@ internal sealed class Reader
     {
         if (_flagEnums.TryGetValue(typedef.Name, out string? flagEnum))
         {
-            _names.Add((typedef.Name, Qualified(flagEnum)));
+            _names.Add((typedef.Name, Qualify(flagEnum)));
             return;
         }
 
-        CppType element = Unqualified(typedef.ElementType);
-        if (element is CppClass or CppEnum || (element is CppPointerType pointer && Unqualified(pointer.ElementType) is CppClass { IsDefinition: false }))
+        CppType element = Unqualify(typedef.ElementType);
+        if (element is CppClass or CppEnum || (element is CppPointerType pointer && Unqualify(pointer.ElementType) is CppClass { IsDefinition: false }))
         {
             return;
         }
 
         try
         {
-            _names.Add((typedef.Name, FunctionTypeOf(element) is { } functionType ? FunctionPointer(functionType) : Type(typedef, true)));
+            _names.Add((typedef.Name, FindFunctionType(element) is { } functionType ? MakeFunctionPointer(functionType) : TranslateType(typedef, true)));
         }
         catch (UnsupportedException)
         {
@@ -347,16 +335,13 @@ internal sealed class Reader
         => _constants.TryGetValue(cName, out string? name) ? (_constantParts[cName].Type, name) : null;
 
     /// <summary>The C# primitive a typedef stands for, for a cast in a macro, or null when it is no primitive.</summary>
-    private string? TypedefType(string name)
+    private string? GetTypedefType(string name)
     {
-        if (!_typedefs.TryGetValue(name, out CppTypedef? typedef))
-        {
-            return null;
-        }
+        if (!_typedefs.TryGetValue(name, out CppTypedef? typedef)) return null;
 
         try
         {
-            string type = Type(typedef, false);
+            string type = TranslateType(typedef, false);
             return type.Contains('*', StringComparison.Ordinal) || type.Contains('.', StringComparison.Ordinal) ? null : type;
         }
         catch (UnsupportedException)
@@ -369,7 +354,7 @@ internal sealed class Reader
     /// A constant's declaration. A string is a <c>byte*</c> to the UTF-8 literal's bytes, which live in the assembly's
     /// static data and never move, so it is handed to C as a C string constant is, with no copy and no pinning.
     /// </summary>
-    private static string ConstantText(string type, string name, string expression)
+    private static string MakeConstantText(string type, string name, string expression)
     {
         if (!string.Equals(type, "string", StringComparison.Ordinal))
         {
@@ -390,10 +375,7 @@ internal sealed class Reader
         HashSet<(string Owner, string Name)> types = [];
         foreach (Declaration declaration in _declarations)
         {
-            if (declaration.Kind == DeclarationKind.Type)
-            {
-                types.Add((declaration.Owner, declaration.Name));
-            }
+            if (declaration.Kind == DeclarationKind.Type) types.Add((declaration.Owner, declaration.Name));
         }
 
         for (int i = 0; i < _declarations.Count; i++)
@@ -403,12 +385,12 @@ internal sealed class Reader
             {
                 Rename(i, declaration.Owner, Names.Split(declaration.CName, _options.Prefixes).Name);
             }
-            else if (declaration.Kind == DeclarationKind.Constant && declaration.Owner.Length > 0 && !_structs.Contains(declaration.Owner) && types.Contains(("", Names.Pascal(declaration.Owner))))
+            else if (declaration.Kind == DeclarationKind.Constant && declaration.Owner.Length > 0 && !_structs.Contains(declaration.Owner) && types.Contains(("", Names.ToPascal(declaration.Owner))))
             {
                 // A constant whose owner is a type with no members of its own to join (ImGuiKey_LegacyNativeKey_BEGIN
                 // beside the enum ImGuiKey) would need a class of that name beside the type: it keeps its whole name in
                 // the library's class instead.
-                Rename(i, "", Names.Pascal(declaration.CName));
+                Rename(i, "", Names.ToPascal(declaration.CName));
             }
         }
     }
@@ -418,25 +400,25 @@ internal sealed class Reader
     {
         Declaration declaration = _declarations[index];
         (string type, string expression) = _constantParts[declaration.CName];
-        _declarations[index] = declaration with { Owner = owner, Name = name, Text = ConstantText(type, name, expression) };
-        _constants[declaration.CName] = owner.Length == 0 ? name : Container(owner) + "." + name;
+        _declarations[index] = declaration with { Owner = owner, Name = name, Text = MakeConstantText(type, name, expression) };
+        _constants[declaration.CName] = owner.Length == 0 ? name : GetContainer(owner) + "." + name;
         int recorded = _names.FindIndex(pair => string.Equals(pair.CName, declaration.CName, StringComparison.Ordinal));
         _names[recorded] = (declaration.CName, _constants[declaration.CName]);
     }
 
     private void Enum(CppEnum cppEnum)
     {
-        string cName = NameOf(cppEnum) ?? throw new UnsupportedException("an enum with neither a name nor a typedef");
+        string cName = GetName(cppEnum) ?? throw new UnsupportedException("an enum with neither a name nor a typedef");
         (string owner, string rest) = Names.Split(cName, _options.Prefixes);
-        string name = Names.Pascal(rest);
-        string underlying = Underlying(cppEnum);
+        string name = Names.ToPascal(rest);
+        string underlying = GetUnderlying(cppEnum);
         List<string> memberNames = [];
         foreach (CppEnumItem item in cppEnum.Items)
         {
             memberNames.Add(item.Name);
         }
 
-        string[] members = Names.EnumMembers(cName, memberNames, _options.Prefixes);
+        string[] members = Names.MakeEnumMembers(cName, memberNames, _options.Prefixes);
         HashSet<string> distinct = new(StringComparer.Ordinal);
         for (int i = 0; i < members.Length; i++)
         {
@@ -448,27 +430,24 @@ internal sealed class Reader
 
         bool flags = IsFlags(cppEnum);
         StringBuilder text = new();
-        text.Append(Summary(cppEnum.Comment));
-        if (flags)
-        {
-            text.Append("[Flags]\n");
-        }
+        text.Append(MakeSummary(cppEnum.Comment));
+        if (flags) text.Append("[Flags]\n");
 
         text.Append(CultureInfo.InvariantCulture, $"public enum {name} : {underlying}\n{{\n");
         for (int i = 0; i < members.Length; i++)
         {
             CppEnumItem item = cppEnum.Items[i];
             string value = flags && item.Value > 0 ? "0x" + item.Value.ToString("X", CultureInfo.InvariantCulture) : item.Value.ToString(CultureInfo.InvariantCulture);
-            text.Append(Indent(Summary(item.Comment)));
+            text.Append(Indent(MakeSummary(item.Comment)));
             text.Append(CultureInfo.InvariantCulture, $"    {members[i]} = {value},\n");
         }
 
         text.Append("}\n");
         _declarations.Add(new(DeclarationKind.Type, cName, owner, false, name, text.ToString()));
-        _names.Add((cName, Qualified(cName)));
+        _names.Add((cName, Qualify(cName)));
         for (int i = 0; i < members.Length; i++)
         {
-            _names.Add((memberNames[i], Qualified(cName) + "." + members[i]));
+            _names.Add((memberNames[i], Qualify(cName) + "." + members[i]));
         }
     }
 
@@ -476,7 +455,7 @@ internal sealed class Reader
     /// A C enum is an int unless its values need more; which the C compiler picks for one that fits differs by ABI
     /// (unsigned where nothing is negative on GNU), so it is decided here by the values alone.
     /// </summary>
-    private static string Underlying(CppEnum cppEnum)
+    private static string GetUnderlying(CppEnum cppEnum)
     {
         long min = 0;
         long max = 0;
@@ -486,10 +465,7 @@ internal sealed class Reader
             max = Math.Max(max, item.Value);
         }
 
-        if (min >= int.MinValue && max <= int.MaxValue)
-        {
-            return "int";
-        }
+        if (min >= int.MinValue && max <= int.MaxValue) return "int";
 
         return min >= 0 && max <= uint.MaxValue ? "uint" : "long";
     }
@@ -507,17 +483,11 @@ internal sealed class Reader
             }
         }
 
-        if (flagMembers < 2)
-        {
-            return false;
-        }
+        if (flagMembers < 2) return false;
 
         foreach (CppEnumItem item in cppEnum.Items)
         {
-            if (item.Value < 0 || (item.Value & ~bits) != 0)
-            {
-                return false;
-            }
+            if (item.Value < 0 || (item.Value & ~bits) != 0) return false;
         }
 
         return true;
@@ -532,23 +502,23 @@ internal sealed class Reader
         }
 
         (string owner, string rest) = Names.Split(cName, _options.Prefixes);
-        string name = Names.Pascal(rest);
+        string name = Names.ToPascal(rest);
         string text;
         try
         {
-            text = StructText(cppClass, cName, name);
+            text = MakeStructText(cppClass, cName, name);
         }
         catch (LayoutException ex)
         {
-            _skipped.Add(new($"the layout of {cName} ({ex.Message}; it is opaque)", Where(cppClass)));
-            text = $"{Summary(cppClass.Comment)}/// <remarks>Opaque: its layout differs between compilers ({ex.Message}), so it is only ever used through a pointer.</remarks>\npublic partial struct {name}\n{{\n}}\n";
+            _skipped.Add(new($"the layout of {cName} ({ex.Message}; it is opaque)", DescribeWhere(cppClass)));
+            text = $"{MakeSummary(cppClass.Comment)}/// <remarks>Opaque: its layout differs between compilers ({ex.Message}), so it is only ever used through a pointer.</remarks>\npublic partial struct {name}\n{{\n}}\n";
         }
 
-        _declarations.Add(new(DeclarationKind.Type, cName, owner, false, name, Unshadowed(text, owner, name)));
-        _names.Add((cName, Qualified(cName)));
+        _declarations.Add(new(DeclarationKind.Type, cName, owner, false, name, Unshadow(text, owner, name)));
+        _names.Add((cName, Qualify(cName)));
         if (cppClass.Name.Length > 0 && !string.Equals(cppClass.Name, cName, StringComparison.Ordinal))
         {
-            _names.Add((cppClass.Name, Qualified(cName)));
+            _names.Add((cppClass.Name, Qualify(cName)));
         }
     }
 
@@ -558,12 +528,9 @@ internal sealed class Reader
     /// the code lines after the declaration's own. A reference to the nested struct itself is already written with its
     /// owner.
     /// </summary>
-    private string Unshadowed(string text, string owner, string name)
+    private string Unshadow(string text, string owner, string name)
     {
-        if (owner.Length == 0)
-        {
-            return text;
-        }
+        if (owner.Length == 0) return text;
 
         string declaration = $"public partial struct {name}";
         Regex reference = new($@"(?<![\w.]){Regex.Escape(name)}(?![\w])", RegexOptions.None, TimeSpan.FromSeconds(10));
@@ -584,19 +551,16 @@ internal sealed class Reader
     /// A struct or union as C# text. A field whose type is an anonymous struct or union gets that type declared
     /// beside it, as a nested struct named after the field (<c>input</c> becomes <c>InputUnion</c>).
     /// </summary>
-    private string StructText(CppClass cppClass, string cName, string name)
+    private string MakeStructText(CppClass cppClass, string cName, string name)
     {
-        if (cppClass.ClassKind == CppClassKind.Class)
-        {
-            throw new UnsupportedException($"{cName} is a C++ class");
-        }
+        if (cppClass.ClassKind == CppClassKind.Class) throw new UnsupportedException($"{cName} is a C++ class");
 
         bool union = cppClass.ClassKind == CppClassKind.Union;
         StringBuilder text = new();
-        text.Append(Summary(cppClass.Comment));
+        text.Append(MakeSummary(cppClass.Comment));
 
         // A struct packed tighter than its fields align (#pragma pack) says so, or its fields would drift.
-        string pack = cppClass.AlignOf is 1 or 2 && Alignment(cppClass) > cppClass.AlignOf ? $", Pack = {cppClass.AlignOf.ToString(CultureInfo.InvariantCulture)}" : "";
+        string pack = cppClass.AlignOf is 1 or 2 && GetAlignment(cppClass) > cppClass.AlignOf ? $", Pack = {cppClass.AlignOf.ToString(CultureInfo.InvariantCulture)}" : "";
         text.Append(union ? $"[StructLayout(LayoutKind.Explicit{pack})]\n" : $"[StructLayout(LayoutKind.Sequential{pack})]\n");
         text.Append(CultureInfo.InvariantCulture, $"public partial struct {name}\n{{\n");
         HashSet<string> fieldNames = new(StringComparer.Ordinal);
@@ -607,9 +571,9 @@ internal sealed class Reader
         {
             if (field.IsBitField)
             {
-                string bitType = Type(Unqualified(field.Type), false);
-                string storage = Storage(bitType, Unqualified(field.Type));
-                if (bits is not null && Size(bits.Value.Type) != Size(storage))
+                string bitType = TranslateType(Unqualify(field.Type), false);
+                string storage = GetStorage(bitType, Unqualify(field.Type));
+                if (bits is not null && GetSize(bits.Value.Type) != GetSize(storage))
                 {
                     // MSVC starts a new unit when a bit field's type changes size; GCC packs on. No one layout serves.
                     throw new LayoutException("bit fields of different sizes in one run");
@@ -618,40 +582,31 @@ internal sealed class Reader
                 if (bits is null)
                 {
                     bits = (storage, 0, $"_bits{bitRuns++}");
-                    if (!first)
-                    {
-                        text.Append('\n');
-                    }
+                    if (!first) text.Append('\n');
 
                     first = false;
-                    text.Append(CultureInfo.InvariantCulture, $"    private {Backing(storage)} {bits.Value.Name};\n");
+                    text.Append(CultureInfo.InvariantCulture, $"    private {GetBacking(storage)} {bits.Value.Name};\n");
                 }
 
-                string bitName = Names.Pascal(field.Name);
+                string bitName = Names.ToPascal(field.Name);
                 _names.Add(($"{cName}.{field.Name}", bitName));
-                text.Append('\n').Append(Indent(Summary(field.Comment)));
-                text.Append(Indent(BitField(storage, bitType, bits.Value.Name, bitName, bits.Value.Offset, field.BitFieldWidth)));
+                text.Append('\n').Append(Indent(MakeSummary(field.Comment)));
+                text.Append(Indent(MakeBitField(storage, bitType, bits.Value.Name, bitName, bits.Value.Offset, field.BitFieldWidth)));
                 bits = (storage, bits.Value.Offset + field.BitFieldWidth, bits.Value.Name);
                 continue;
             }
 
             bits = null;
-            string fieldName = field.Name.Length == 0 ? "" : Names.Pascal(field.Name);
+            string fieldName = field.Name.Length == 0 ? "" : Names.ToPascal(field.Name);
             string kind = "";
-            if (Unqualified(field.Type) is CppClass anonymous && !IsNamed(anonymous.Name) && !_classNames.ContainsKey(anonymous))
+            if (Unqualify(field.Type) is CppClass anonymous && !IsNamed(anonymous.Name) && !_classNames.ContainsKey(anonymous))
             {
                 // An unnamed union or struct member is a field named Union or Struct, of a nested type of that name.
                 kind = anonymous.ClassKind == CppClassKind.Union ? "Union" : "Struct";
-                if (fieldName.Length == 0)
-                {
-                    fieldName = kind;
-                }
+                if (fieldName.Length == 0) fieldName = kind;
             }
 
-            if (fieldName.Length == 0)
-            {
-                throw new UnsupportedException($"{cName} has an unnamed member");
-            }
+            if (fieldName.Length == 0) throw new UnsupportedException($"{cName} has an unnamed member");
 
             if (string.Equals(fieldName, name, StringComparison.Ordinal) || !fieldNames.Add(fieldName))
             {
@@ -662,43 +617,37 @@ internal sealed class Reader
             string fieldType = kind.Length == 0 ? "" : field.Name.Length == 0 ? fieldName + "Type" : fieldName + kind;
 
             _names.Add(($"{cName}.{(field.Name.Length == 0 ? fieldName : field.Name)}", fieldName));
-            if (!first)
-            {
-                text.Append('\n');
-            }
+            if (!first) text.Append('\n');
 
             first = false;
-            if (fieldType.Length > 0 && Unqualified(field.Type) is CppClass anonymousType)
+            if (fieldType.Length > 0 && Unqualify(field.Type) is CppClass anonymousType)
             {
-                text.Append(Indent(StructText(anonymousType, $"{cName}.{fieldName}", fieldType)));
+                text.Append(Indent(MakeStructText(anonymousType, $"{cName}.{fieldName}", fieldType)));
                 text.Append('\n');
             }
 
-            text.Append(Indent(Summary(field.Comment)));
-            if (union)
-            {
-                text.Append("    [FieldOffset(0)]\n");
-            }
+            text.Append(Indent(MakeSummary(field.Comment)));
+            if (union) text.Append("    [FieldOffset(0)]\n");
 
-            text.Append(Indent(fieldType.Length > 0 ? $"public {fieldType} {fieldName};\n" : Field(field, fieldName, cName)));
+            text.Append(Indent(fieldType.Length > 0 ? $"public {fieldType} {fieldName};\n" : MakeField(field, fieldName, cName)));
         }
 
         text.Append("}\n");
         return text.ToString();
     }
 
-    private string Field(CppField field, string fieldName, string structName)
+    private string MakeField(CppField field, string fieldName, string structName)
     {
-        CppType type = Unqualified(field.Type);
+        CppType type = Unqualify(field.Type);
         if (type is not CppArrayType array)
         {
-            string fieldType = Type(type, false);
+            string fieldType = TranslateType(type, false);
             return $"public {fieldType} {fieldName};\n";
         }
 
         int count = 1;
         CppType element = array;
-        while (Unqualified(element) is CppArrayType dimension)
+        while (Unqualify(element) is CppArrayType dimension)
         {
             if (dimension.Size <= 0)
             {
@@ -709,26 +658,23 @@ internal sealed class Reader
             element = dimension.ElementType;
         }
 
-        string elementType = Type(Unqualified(element), false);
+        string elementType = TranslateType(Unqualify(element), false);
         string size = count.ToString(CultureInfo.InvariantCulture);
-        if (_fixedBufferTypes.Contains(elementType))
-        {
-            return $"public fixed {elementType} {fieldName}[{size}];\n";
-        }
+        if (_fixedBufferTypes.Contains(elementType)) return $"public fixed {elementType} {fieldName}[{size}];\n";
 
         return $"[InlineArray({size})]\npublic partial struct {fieldName}Array\n{{\n    private {elementType} _element0;\n}}\n\npublic {fieldName}Array {fieldName};\n";
     }
 
     /// <summary>The alignment the struct's fields would give it unpacked: the largest of theirs.</summary>
-    private static int Alignment(CppClass cppClass)
+    private static int GetAlignment(CppClass cppClass)
     {
         int alignment = 1;
         foreach (CppField field in cppClass.Fields)
         {
-            CppType type = Unqualified(field.Type);
+            CppType type = Unqualify(field.Type);
             while (type is CppArrayType array)
             {
-                type = Unqualified(array.ElementType);
+                type = Unqualify(array.ElementType);
             }
 
             int fieldAlignment = type switch
@@ -747,23 +693,17 @@ internal sealed class Reader
     /// The integer a bit field is stored as: its own type for a primitive, the integer of its enum, and
     /// <c>int</c> for an enum this library did not define (a typedef to one, as Dear ImGui's flags are).
     /// </summary>
-    private static string Storage(string type, CppType cType)
+    private static string GetStorage(string type, CppType cType)
     {
-        if (type is "uint" or "int" or "ushort" or "short" or "byte" or "sbyte" or "bool")
-        {
-            return type;
-        }
+        if (type is "uint" or "int" or "ushort" or "short" or "byte" or "sbyte" or "bool") return type;
 
-        if (cType is CppEnum cppEnum)
-        {
-            return Underlying(cppEnum);
-        }
+        if (cType is CppEnum cppEnum) return GetUnderlying(cppEnum);
 
         return "int";
     }
 
     /// <summary>The size in bytes of a bit field's storage type, which is what a compiler packs a run by.</summary>
-    private static int Size(string storage) => storage switch
+    private static int GetSize(string storage) => storage switch
     {
         "int" or "uint" => 4,
         "short" or "ushort" => 2,
@@ -771,7 +711,7 @@ internal sealed class Reader
     };
 
     /// <summary>The unsigned integer a run of bit fields stored as <paramref name="storage"/> is kept in.</summary>
-    private static string Backing(string storage) => storage switch
+    private static string GetBacking(string storage) => storage switch
     {
         "int" or "uint" => "uint",
         "short" or "ushort" => "ushort",
@@ -783,9 +723,9 @@ internal sealed class Reader
     /// read and written as C reads and writes it: a signed one sign-extends, a bool is its one bit, an enum goes
     /// through its integer.
     /// </summary>
-    private static string BitField(string storage, string type, string backing, string name, int offset, int width)
+    private static string MakeBitField(string storage, string type, string backing, string name, int offset, int width)
     {
-        string backingType = Backing(storage);
+        string backingType = GetBacking(storage);
         string mask = backingType switch
         {
             "uint" => string.Create(CultureInfo.InvariantCulture, $"0x{(width >= 32 ? uint.MaxValue : (1u << width) - 1):X}u"),
@@ -813,23 +753,23 @@ internal sealed class Reader
     private void Opaque(string cName, CppClass cppClass)
     {
         (string owner, string rest) = Names.Split(cName, _options.Prefixes);
-        string name = Names.Pascal(rest);
-        string text = $"{Summary(cppClass.Comment)}/// <remarks>Opaque: only ever used through a pointer.</remarks>\npublic partial struct {name}\n{{\n}}\n";
+        string name = Names.ToPascal(rest);
+        string text = $"{MakeSummary(cppClass.Comment)}/// <remarks>Opaque: only ever used through a pointer.</remarks>\npublic partial struct {name}\n{{\n}}\n";
         _declarations.Add(new(DeclarationKind.Type, cName, owner, false, name, text));
-        _names.Add((cName, Qualified(cName)));
+        _names.Add((cName, Qualify(cName)));
     }
 
     private void Function(CppFunction function)
     {
         if (function.Flags.HasFlag(CppFunctionFlags.Variadic))
         {
-            _skipped.Add(new($"variadic function {function.Name}", Where(function)));
+            _skipped.Add(new($"variadic function {function.Name}", DescribeWhere(function)));
             return;
         }
 
         if (function.Flags.HasFlag(CppFunctionFlags.Inline) || function.StorageQualifier == CppStorageQualifier.Static)
         {
-            _skipped.Add(new($"inline function {function.Name}", Where(function)));
+            _skipped.Add(new($"inline function {function.Name}", DescribeWhere(function)));
             return;
         }
 
@@ -837,15 +777,15 @@ internal sealed class Reader
         {
             if (IsVaList(parameter.Type))
             {
-                _skipped.Add(new($"function {function.Name} (takes a va_list)", Where(function)));
+                _skipped.Add(new($"function {function.Name} (takes a va_list)", DescribeWhere(function)));
                 return;
             }
         }
 
         (string owner, string rest) = Names.Split(function.Name, _options.Prefixes);
-        string name = Names.Pascal(rest);
+        string name = Names.ToPascal(rest);
         bool attaches = _structs.Contains(owner);
-        if (attaches && string.Equals(name, Names.Pascal(Names.Split(owner, _options.Prefixes).Name), StringComparison.Ordinal))
+        if (attaches && string.Equals(name, Names.ToPascal(Names.Split(owner, _options.Prefixes).Name), StringComparison.Ordinal))
         {
             // A C# member cannot be named like its type: a constructor named for its struct, ImDrawCmd_ImDrawCmd, is ImDrawCmd.ImDrawCmd_.
             name += "_";
@@ -856,33 +796,27 @@ internal sealed class Reader
         HashSet<string> parameterNames = new(StringComparer.Ordinal);
         foreach (CppParameter parameter in function.Parameters)
         {
-            if (index > 0)
-            {
-                parameters.Append(", ");
-            }
+            if (index > 0) parameters.Append(", ");
 
-            string parameterName = parameter.Name.Length == 0 ? "arg" + index.ToString(CultureInfo.InvariantCulture) : Names.Camel(parameter.Name);
-            if (!parameterNames.Add(parameterName))
-            {
-                parameterName += index.ToString(CultureInfo.InvariantCulture);
-            }
+            string parameterName = parameter.Name.Length == 0 ? "arg" + index.ToString(CultureInfo.InvariantCulture) : Names.ToCamel(parameter.Name);
+            if (!parameterNames.Add(parameterName)) parameterName += index.ToString(CultureInfo.InvariantCulture);
 
-            CppType type = Unqualified(parameter.Type);
-            string parameterType = type is CppArrayType array ? Type(Unqualified(array.ElementType), false) + "*" : Type(type, false);
+            CppType type = Unqualify(parameter.Type);
+            string parameterType = type is CppArrayType array ? TranslateType(Unqualify(array.ElementType), false) + "*" : TranslateType(type, false);
             parameters.Append(CultureInfo.InvariantCulture, $"{parameterType} {parameterName}");
             index++;
         }
 
-        string returnType = Type(Unqualified(function.ReturnType), true);
-        string text = $"{Summary(function.Comment)}[DllImport(Library, EntryPoint = \"{function.Name}\", ExactSpelling = true)]\npublic static extern {returnType} {name}({parameters});\n";
-        _declarations.Add(new(DeclarationKind.Function, function.Name, owner, attaches, name, attaches ? Unshadowed(text, Names.Split(owner, _options.Prefixes).Owner, Names.Pascal(Names.Split(owner, _options.Prefixes).Name)) : text));
-        _names.Add((function.Name, (owner.Length == 0 ? _options.Class : Container(owner)) + "." + name));
+        string returnType = TranslateType(Unqualify(function.ReturnType), true);
+        string text = $"{MakeSummary(function.Comment)}[DllImport(Library, EntryPoint = \"{function.Name}\", ExactSpelling = true)]\npublic static extern {returnType} {name}({parameters});\n";
+        _declarations.Add(new(DeclarationKind.Function, function.Name, owner, attaches, name, attaches ? Unshadow(text, Names.Split(owner, _options.Prefixes).Owner, Names.ToPascal(Names.Split(owner, _options.Prefixes).Name)) : text));
+        _names.Add((function.Name, (owner.Length == 0 ? _options.Class : GetContainer(owner)) + "." + name));
     }
 
     /// <summary>A <c>va_list</c>, which no C# can build the same on every OS, so what takes one is skipped.</summary>
     private static bool IsVaList(CppType type)
     {
-        type = Unqualified(type);
+        type = Unqualify(type);
         while (type is CppTypedef typedef)
         {
             if (string.Equals(typedef.Name, "va_list", StringComparison.Ordinal) || string.Equals(typedef.Name, "__builtin_va_list", StringComparison.Ordinal))
@@ -890,21 +824,21 @@ internal sealed class Reader
                 return true;
             }
 
-            type = Unqualified(typedef.ElementType);
+            type = Unqualify(typedef.ElementType);
         }
 
-        return type is CppArrayType array && Unqualified(array.ElementType) is CppClass { Name: "__va_list_tag" };
+        return type is CppArrayType array && Unqualify(array.ElementType) is CppClass { Name: "__va_list_tag" };
     }
 
     /// <summary>The C# type for a C one, as it is written in a declaration.</summary>
-    private string Type(CppType type, bool voidAllowed)
+    private string TranslateType(CppType type, bool voidAllowed)
     {
         switch (type)
         {
             case CppQualifiedType qualified:
-                return Type(qualified.ElementType, voidAllowed);
+                return TranslateType(qualified.ElementType, voidAllowed);
             case CppPrimitiveType primitive:
-                string text = Primitive(primitive);
+                string text = TranslatePrimitive(primitive);
                 if (string.Equals(text, "void", StringComparison.Ordinal) && !voidAllowed)
                 {
                     throw new UnsupportedException("void where a value is needed");
@@ -912,40 +846,31 @@ internal sealed class Reader
 
                 return text;
             case CppPointerType pointer:
-                CppType element = Unqualified(pointer.ElementType);
-                return FunctionTypeOf(element) is { } functionType ? FunctionPointer(functionType) : Type(element, true) + "*";
+                CppType element = Unqualify(pointer.ElementType);
+                return FindFunctionType(element) is { } functionType ? MakeFunctionPointer(functionType) : TranslateType(element, true) + "*";
             case CppTypedef typedef:
-                if (_flagEnums.TryGetValue(typedef.Name, out string? flagEnum))
+                if (_flagEnums.TryGetValue(typedef.Name, out string? flagEnum)) return Qualify(flagEnum);
+
+                if (_unsignedSizeTypedefs.Contains(typedef.Name)) return "nuint";
+
+                if (_signedSizeTypedefs.Contains(typedef.Name)) return "nint";
+
+                CppType target = Unqualify(typedef.ElementType);
+                if (target is CppPointerType handle && Unqualify(handle.ElementType) is CppClass { IsDefinition: false } opaque)
                 {
-                    return Qualified(flagEnum);
+                    return Qualify(_opaqueNames.TryGetValue(opaque, out CppTypedef? named) ? named.Name : opaque.Name) + "*";
                 }
 
-                if (_unsignedSizeTypedefs.Contains(typedef.Name))
-                {
-                    return "nuint";
-                }
-
-                if (_signedSizeTypedefs.Contains(typedef.Name))
-                {
-                    return "nint";
-                }
-
-                CppType target = Unqualified(typedef.ElementType);
-                if (target is CppPointerType handle && Unqualified(handle.ElementType) is CppClass { IsDefinition: false } opaque)
-                {
-                    return Qualified(_opaqueNames.TryGetValue(opaque, out CppTypedef? named) ? named.Name : opaque.Name) + "*";
-                }
-
-                return Type(target, voidAllowed);
+                return TranslateType(target, voidAllowed);
             case CppClass cppClass:
                 if (!cppClass.IsDefinition && _opaqueNames.TryGetValue(cppClass, out CppTypedef? handleTypedef))
                 {
-                    return Qualified(handleTypedef.Name);
+                    return Qualify(handleTypedef.Name);
                 }
 
-                return Qualified(NameOf(cppClass) ?? throw new UnsupportedException("a struct with neither a name nor a typedef"));
+                return Qualify(GetName(cppClass) ?? throw new UnsupportedException("a struct with neither a name nor a typedef"));
             case CppEnum cppEnum:
-                return Qualified(NameOf(cppEnum) ?? throw new UnsupportedException("an enum with neither a name nor a typedef"));
+                return Qualify(GetName(cppEnum) ?? throw new UnsupportedException("an enum with neither a name nor a typedef"));
             case CppArrayType:
                 throw new UnsupportedException("an array where only a field may have one");
             case CppFunctionType:
@@ -955,19 +880,19 @@ internal sealed class Reader
         }
     }
 
-    private string FunctionPointer(CppFunctionType functionType)
+    private string MakeFunctionPointer(CppFunctionType functionType)
     {
         StringBuilder text = new("delegate* unmanaged<");
         foreach (CppParameter parameter in functionType.Parameters)
         {
-            text.Append(Type(Unqualified(parameter.Type), false)).Append(", ");
+            text.Append(TranslateType(Unqualify(parameter.Type), false)).Append(", ");
         }
 
-        text.Append(Type(Unqualified(functionType.ReturnType), true)).Append('>');
+        text.Append(TranslateType(Unqualify(functionType.ReturnType), true)).Append('>');
         return text.ToString();
     }
 
-    private static string Primitive(CppPrimitiveType primitive) => primitive.Kind switch
+    private static string TranslatePrimitive(CppPrimitiveType primitive) => primitive.Kind switch
     {
         CppPrimitiveKind.Void => "void",
         CppPrimitiveKind.Bool => "bool",
@@ -991,7 +916,7 @@ internal sealed class Reader
         _ => throw new UnsupportedException($"the primitive type {primitive.Kind}"),
     };
 
-    private static CppType Unqualified(CppType type)
+    private static CppType Unqualify(CppType type)
     {
         while (type is CppQualifiedType qualified)
         {
@@ -1006,18 +931,18 @@ internal sealed class Reader
     /// (<c>typedef int b3AssertFcn(const char*)</c>) and take a pointer to it (<c>b3AssertFcn*</c>), which is a function
     /// pointer as much as a pointer typedef is.
     /// </summary>
-    private static CppFunctionType? FunctionTypeOf(CppType type)
+    private static CppFunctionType? FindFunctionType(CppType type)
     {
-        type = Unqualified(type);
+        type = Unqualify(type);
         while (type is CppTypedef typedef)
         {
-            type = Unqualified(typedef.ElementType);
+            type = Unqualify(typedef.ElementType);
         }
 
         return type as CppFunctionType;
     }
 
-    private string? NameOf(CppClass cppClass)
+    private string? GetName(CppClass cppClass)
         => _classNames.TryGetValue(cppClass, out string? name) ? name : IsNamed(cppClass.Name) ? cppClass.Name : null;
 
     /// <summary>
@@ -1026,17 +951,11 @@ internal sealed class Reader
     /// <c>enum { ImGuiDir_None, … }</c>), that prefix with the underscore the flags idiom expects, so the typedef takes
     /// the enum.
     /// </summary>
-    private string? NameOf(CppEnum cppEnum)
+    private string? GetName(CppEnum cppEnum)
     {
-        if (IsNamed(cppEnum.Name))
-        {
-            return cppEnum.Name;
-        }
+        if (IsNamed(cppEnum.Name)) return cppEnum.Name;
 
-        if (_enumNames.TryGetValue(cppEnum, out string? name))
-        {
-            return name;
-        }
+        if (_enumNames.TryGetValue(cppEnum, out string? name)) return name;
 
         // The prefix most members share: an enum may hold a few of another's (ImGuiKey holds the ImGuiMod_ values).
         Dictionary<string, int> prefixes = new(StringComparer.Ordinal);
@@ -1053,10 +972,7 @@ internal sealed class Reader
         string? prefix = null;
         foreach ((string own, int count) in prefixes)
         {
-            if (prefix is null || count > prefixes[prefix])
-            {
-                prefix = own;
-            }
+            if (prefix is null || count > prefixes[prefix]) prefix = own;
         }
 
         return prefix is not null && _typedefs.TryGetValue(prefix, out CppTypedef? typedef) && IsInteger(typedef) ? prefix + "_" : null;
@@ -1065,10 +981,10 @@ internal sealed class Reader
     /// <summary>Whether a typedef is, through any typedefs between, an integer.</summary>
     private static bool IsInteger(CppTypedef typedef)
     {
-        CppType type = Unqualified(typedef.ElementType);
+        CppType type = Unqualify(typedef.ElementType);
         while (type is CppTypedef inner)
         {
-            type = Unqualified(inner.ElementType);
+            type = Unqualify(inner.ElementType);
         }
 
         return type is CppPrimitiveType { Kind: not (CppPrimitiveKind.Float or CppPrimitiveKind.Double or CppPrimitiveKind.Void or CppPrimitiveKind.Bool) };
@@ -1079,31 +995,25 @@ internal sealed class Reader
         => name.Length > 0 && !name.Contains("(unnamed", StringComparison.Ordinal) && !name.Contains("(anonymous", StringComparison.Ordinal);
 
     /// <summary>A type's C# name as written from anywhere in the namespace: owner-qualified when it has one.</summary>
-    private string Qualified(string cName)
+    private string Qualify(string cName)
     {
         (string owner, string rest) = Names.Split(cName, _options.Prefixes);
-        string name = Names.Pascal(rest);
-        return owner.Length == 0 ? name : Container(owner) + "." + name;
+        string name = Names.ToPascal(rest);
+        return owner.Length == 0 ? name : GetContainer(owner) + "." + name;
     }
 
     /// <summary>The C# name of an owner: a struct's PascalCase name, or a static class named as the prefix is written.</summary>
-    private string Container(string owner)
+    private string GetContainer(string owner)
     {
-        if (_structs.Contains(owner))
-        {
-            return Qualified(owner);
-        }
+        if (_structs.Contains(owner)) return Qualify(owner);
 
         return owner;
     }
 
-    private static string Summary(CppComment? comment)
+    private static string MakeSummary(CppComment? comment)
     {
         string? raw = comment?.ToString();
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return "";
-        }
+        if (string.IsNullOrWhiteSpace(raw)) return "";
 
         StringBuilder text = new("/// <summary>\n");
         bool blank = false;
@@ -1130,10 +1040,7 @@ internal sealed class Reader
 
     private static string Indent(string text)
     {
-        if (text.Length == 0)
-        {
-            return text;
-        }
+        if (text.Length == 0) return text;
 
         StringBuilder result = new(text.Length + 64);
         foreach (string line in text.TrimEnd('\n').Split('\n'))

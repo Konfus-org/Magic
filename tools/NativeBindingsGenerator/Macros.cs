@@ -41,7 +41,7 @@ internal sealed class Macros
 
     /// <param name="compilation">The parse, every macro of which, the compiler's and the system headers' included, can be expanded.</param>
     /// <param name="typedefType">The C# primitive a typedef name stands for, or null when it is no primitive.</param>
-    public Macros(CppCompilation compilation, Func<string, string?> typedefType)
+    internal Macros(CppCompilation compilation, Func<string, string?> typedefType)
     {
         _typedefType = typedefType;
         foreach (CppMacro macro in compilation.Macros)
@@ -62,7 +62,7 @@ internal sealed class Macros
     /// The constant <paramref name="macro"/> makes, with <paramref name="constants"/> giving each constant already
     /// made its C# type and qualified name, or null with <paramref name="reason"/> saying why it makes none.
     /// </summary>
-    public Value? Evaluate(CppMacro macro, Func<string, (string Type, string Name)?> constants, out string reason)
+    internal Value? Evaluate(CppMacro macro, Func<string, (string Type, string Name)?> constants, out string reason)
     {
         reason = "";
         List<(CppTokenKind Kind, string Text)> tokens;
@@ -91,13 +91,10 @@ internal sealed class Macros
         for (int i = 0; i < tokens.Count; i++)
         {
             (CppTokenKind kind, string text) = tokens[i];
-            if (kind == CppTokenKind.Comment)
-            {
-                continue;
-            }
+            if (kind == CppTokenKind.Comment) continue;
 
             bool value = false;
-            if (kind == CppTokenKind.Punctuation && string.Equals(text, "(", StringComparison.Ordinal) && Cast(tokens, i, out string? castType, out int castEnd))
+            if (kind == CppTokenKind.Punctuation && string.Equals(text, "(", StringComparison.Ordinal) && TryCast(tokens, i, out string? castType, out int castEnd))
             {
                 cast ??= castType;
                 expression.Append("unchecked((").Append(castType).Append(")(");
@@ -111,7 +108,7 @@ internal sealed class Macros
                 strings.Add(text);
                 value = true;
             }
-            else if (kind == CppTokenKind.Literal && Number(text) is { } number)
+            else if (kind == CppTokenKind.Literal && ParseNumber(text) is { } number)
             {
                 isUnsigned |= number.Unsigned;
                 isLong |= number.Long;
@@ -229,19 +226,13 @@ internal sealed class Macros
 
     private List<(CppTokenKind Kind, string Text)> Expand(List<(CppTokenKind Kind, string Text)> tokens, int depth)
     {
-        if (depth > 32)
-        {
-            throw new UnsupportedException("expands without end");
-        }
+        if (depth > 32) throw new UnsupportedException("expands without end");
 
         List<(CppTokenKind Kind, string Text)> output = [];
         for (int i = 0; i < tokens.Count; i++)
         {
             (CppTokenKind kind, string text) = tokens[i];
-            if (kind == CppTokenKind.Comment)
-            {
-                continue;
-            }
+            if (kind == CppTokenKind.Comment) continue;
 
             if (kind != CppTokenKind.Identifier || !_known.TryGetValue(text, out CppMacro? macro))
             {
@@ -286,10 +277,7 @@ internal sealed class Macros
             if (string.Equals(text, "(", StringComparison.Ordinal))
             {
                 depth++;
-                if (depth > 1)
-                {
-                    arguments[^1].Add(tokens[i]);
-                }
+                if (depth > 1) arguments[^1].Add(tokens[i]);
             }
             else if (string.Equals(text, ")", StringComparison.Ordinal))
             {
@@ -362,7 +350,7 @@ internal sealed class Macros
     }
 
     /// <summary>Whether the <c>(</c> at <paramref name="open"/> starts a cast to a primitive, and to which C# type.</summary>
-    private bool Cast(List<(CppTokenKind Kind, string Text)> tokens, int open, out string type, out int close)
+    private bool TryCast(List<(CppTokenKind Kind, string Text)> tokens, int open, out string type, out int close)
     {
         type = "";
         close = open;
@@ -372,25 +360,16 @@ internal sealed class Macros
             (CppTokenKind kind, string text) = tokens[i];
             if (string.Equals(text, ")", StringComparison.Ordinal))
             {
-                if (words.Length == 0 || i + 1 >= tokens.Count)
-                {
-                    return false;
-                }
+                if (words.Length == 0 || i + 1 >= tokens.Count) return false;
 
                 // A cast is followed by what it casts: a value, a parenthesis or a sign, never a binary operator.
                 string next = tokens[i + 1].Text;
                 bool operand = next is "(" or "-" or "~" || !_operators.Contains(next);
-                if (!operand)
-                {
-                    return false;
-                }
+                if (!operand) return false;
 
                 string spelled = words.ToString();
                 string? mapped = _keywordCasts.TryGetValue(spelled, out string? keyword) ? keyword : _typedefType(spelled);
-                if (mapped is null)
-                {
-                    return false;
-                }
+                if (mapped is null) return false;
 
                 // A constant has no pointer-sized type in C#: a size_t cast makes a 64-bit one.
                 type = mapped switch
@@ -403,15 +382,9 @@ internal sealed class Macros
                 return true;
             }
 
-            if (kind is not (CppTokenKind.Identifier or CppTokenKind.Keyword))
-            {
-                return false;
-            }
+            if (kind is not (CppTokenKind.Identifier or CppTokenKind.Keyword)) return false;
 
-            if (words.Length > 0)
-            {
-                words.Append(' ');
-            }
+            if (words.Length > 0) words.Append(' ');
 
             words.Append(text);
         }
@@ -420,12 +393,9 @@ internal sealed class Macros
     }
 
     /// <summary>A C number literal as C# text with its kind, or null for one C# has no literal for (octal, a char).</summary>
-    public static (string Text, bool Unsigned, bool Long, bool Float, bool Double)? Number(string literal)
+    private static (string Text, bool Unsigned, bool Long, bool Float, bool Double)? ParseNumber(string literal)
     {
-        if (literal.Length == 0 || (!char.IsAsciiDigit(literal[0]) && literal[0] != '.'))
-        {
-            return null;
-        }
+        if (literal.Length == 0 || (!char.IsAsciiDigit(literal[0]) && literal[0] != '.')) return null;
 
         bool hex = literal.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
         int end = literal.Length;
@@ -443,10 +413,7 @@ internal sealed class Macros
             return (digits + (isFloat ? "f" : ""), false, false, isFloat, !isFloat);
         }
 
-        if (!hex && digits.Length > 1 && digits[0] == '0')
-        {
-            return null;
-        }
+        if (!hex && digits.Length > 1 && digits[0] == '0') return null;
 
         bool isUnsigned = suffix.Contains('U', StringComparison.Ordinal);
         bool isLong = suffix.Contains('L', StringComparison.Ordinal);

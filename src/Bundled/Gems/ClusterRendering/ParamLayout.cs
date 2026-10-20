@@ -21,12 +21,12 @@ internal sealed partial class ParamLayout
     /// <summary>
     /// The most a material's params pack to: the eight rows of its row in the materials buffer.
     /// </summary>
-    public const int RecordBytes = 128;
+    internal const int RecordBytes = 128;
 
     /// <summary>
     /// The most a pass's params pack to: seven rows of the constant block, the last being the renderer's.
     /// </summary>
-    public const int PassBytes = 112;
+    internal const int PassBytes = 112;
 
     /// <summary>
     /// The places along a curve param its value is packed at, evenly from its first key to its last, after where those
@@ -71,21 +71,21 @@ internal sealed partial class ParamLayout
         _bodyEnd = bodyEnd;
     }
 
-    public string StructName { get; }
+    private string StructName { get; }
 
-    public IReadOnlyList<ParamField> Fields { get; }
+    internal IReadOnlyList<ParamField> Fields { get; }
 
     /// <summary>
     /// Bytes of the packed record, a multiple of 16.
     /// </summary>
-    public int Size { get; }
+    internal int Size { get; }
 
     /// <summary>
     /// <c>struct structName { ... };</c> in <paramref name="hlsl"/>, laid out; none when the text has no such struct, so a
     /// pass with no params needs none. Why not, for a member of a type a param cannot be, or more than
     /// <paramref name="maxBytes"/> of them.
     /// </summary>
-    public static Result<ParamLayout?> Parse(string hlsl, string structName, bool allowTextures, bool allowCurves, int maxBytes)
+    internal static Result<ParamLayout?> Parse(string hlsl, string structName, bool allowTextures, bool allowCurves, int maxBytes)
     {
         Match match = StructPattern().Match(hlsl);
         while (match.Success && !string.Equals(match.Groups["name"].Value, structName, StringComparison.Ordinal))
@@ -93,10 +93,7 @@ internal sealed partial class ParamLayout
             match = match.NextMatch();
         }
 
-        if (!match.Success)
-        {
-            return Result.Success<ParamLayout?>(null);
-        }
+        if (!match.Success) return Result.Success<ParamLayout?>(null);
 
         Group body = match.Groups["body"];
         List<ParamField> fields = [];
@@ -104,10 +101,7 @@ internal sealed partial class ParamLayout
         foreach (string raw in StripComments(body.Value).Split(';'))
         {
             string declaration = raw.Trim();
-            if (declaration.Length == 0)
-            {
-                continue;
-            }
+            if (declaration.Length == 0) continue;
 
             Match member = MemberPattern().Match(declaration);
             if (!member.Success)
@@ -140,7 +134,7 @@ internal sealed partial class ParamLayout
             ParamField field = new(name, type, 0, new MaterialParam());
             int align = field.Components switch { 1 => 4, 2 => 8, _ => 16 };
             offset = (offset + align - 1) / align * align;
-            fields.Add(field with { Offset = offset, Default = DefaultOf(field, member.Groups["default"].Success ? member.Groups["default"].Value.Trim() : null), Role = member.Groups["role"].Value });
+            fields.Add(field with { Offset = offset, Default = GetDefault(field, member.Groups["default"].Success ? member.Groups["default"].Value.Trim() : null), Role = member.Groups["role"].Value });
             offset += field.Size;
         }
 
@@ -159,7 +153,7 @@ internal sealed partial class ParamLayout
     /// unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows, as
     /// <c>StructName signature { prologue ... }</c>.
     /// </summary>
-    public string Prepare(string signature, string prologue, string rows)
+    internal string Prepare(string signature, string prologue, string rows)
     {
         string body = _hlsl[_bodyStart.._bodyEnd];
         char[] blanked = body.ToCharArray();
@@ -167,14 +161,11 @@ internal sealed partial class ParamLayout
         {
             for (int i = tail.Index; i < tail.Index + tail.Length; i++)
             {
-                if (blanked[i] is not '\n' and not '\r')
-                {
-                    blanked[i] = ' ';
-                }
+                if (blanked[i] is not '\n' and not '\r') blanked[i] = ' ';
             }
         }
 
-        string loader = Loader(signature, prologue, rows);
+        string loader = MakeLoader(signature, prologue, rows);
         int structEnd = _hlsl.IndexOf(';', _bodyEnd) + 1;
         return new StringBuilder(_hlsl.Length + loader.Length + 1)
             .Append(_hlsl, 0, _bodyStart)
@@ -189,15 +180,12 @@ internal sealed partial class ParamLayout
     /// <summary>
     /// The names in <paramref name="values"/> the struct does not declare, for the caller to warn of.
     /// </summary>
-    public List<string> Unknown(IEnumerable<string> values)
+    internal List<string> FindUnknown(IEnumerable<string> values)
     {
         List<string> unknown = [];
         foreach (string name in values)
         {
-            if (Named(name) is null)
-            {
-                unknown.Add(name);
-            }
+            if (FindField(name) is null) unknown.Add(name);
         }
 
         return unknown;
@@ -209,7 +197,7 @@ internal sealed partial class ParamLayout
     /// mid grey, less as much of it as its <c>: GiMetallic</c> member says it is metal, as a metal scatters no light the
     /// way a matte surface does, only mirrors it; and the light of its <c>: GiEmissive</c> member, none without one.
     /// </summary>
-    public (Vector3 Color, Vector3 Emission) GiOf(IReadOnlyDictionary<string, MaterialParam> values)
+    internal (Vector3 Color, Vector3 Emission) GiOf(IReadOnlyDictionary<string, MaterialParam> values)
     {
         Vector3 color = Vector3.One;
         Vector3 emission = Vector3.Zero;
@@ -246,7 +234,7 @@ internal sealed partial class ParamLayout
     /// else its default, else zero; a texture as <paramref name="texture"/> resolves it, and a curve as
     /// <paramref name="curve"/> does, all zeros for none.
     /// </summary>
-    public void Write(ReadOnlySpan<IReadOnlyDictionary<string, MaterialParam>?> layers, Func<MaterialParam, uint> texture, Func<MaterialParam, Curve?> curve, Span<byte> record)
+    internal void Write(ReadOnlySpan<IReadOnlyDictionary<string, MaterialParam>?> layers, Func<MaterialParam, uint> texture, Func<MaterialParam, Curve?> curve, Span<byte> record)
     {
         record.Clear();
         foreach (ParamField field in Fields)
@@ -285,7 +273,7 @@ internal sealed partial class ParamLayout
     /// HLSL that unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows:
     /// <c>MaterialParams LoadMaterialParams(uint material) { ... }</c>. One line, so it shifts no line after it.
     /// </summary>
-    private string Loader(string signature, string prologue, string rows)
+    private string MakeLoader(string signature, string prologue, string rows)
     {
         StringBuilder text = new();
         text.Append(StructName).Append(' ').Append(signature).Append(" { ").Append(prologue).Append(' ').Append(StructName).Append(" loaded; ");
@@ -312,14 +300,11 @@ internal sealed partial class ParamLayout
     /// <summary>
     /// The member called <paramref name="name"/>, or null.
     /// </summary>
-    private ParamField? Named(string name)
+    private ParamField? FindField(string name)
     {
         foreach (ParamField field in Fields)
         {
-            if (string.Equals(field.Name, name, StringComparison.Ordinal))
-            {
-                return field;
-            }
+            if (string.Equals(field.Name, name, StringComparison.Ordinal)) return field;
         }
 
         return null;
@@ -331,10 +316,7 @@ internal sealed partial class ParamLayout
     /// </summary>
     private static void WriteCurve(Curve? curve, Span<byte> destination)
     {
-        if (curve is not { Keys.Count: > 0 })
-        {
-            return;
-        }
+        if (curve is not { Keys.Count: > 0 }) return;
 
         float start = curve.Keys[0].At;
         float end = curve.Keys[^1].At;
@@ -373,12 +355,9 @@ internal sealed partial class ParamLayout
     /// The declared default as a param: the numbers of its initialiser in order (into r to a for a Color, and one
     /// number into every component, as <c>float4(0.5)</c> does), true as 1, anything else zero.
     /// </summary>
-    private static MaterialParam DefaultOf(ParamField field, string? text)
+    private static MaterialParam GetDefault(ParamField field, string? text)
     {
-        if (text is null || field.Type is ParamType.TextureRef or ParamType.Curve)
-        {
-            return new MaterialParam();
-        }
+        if (text is null || field.Type is ParamType.TextureRef or ParamType.Curve) return new MaterialParam();
 
         if (field.Type == ParamType.Bool)
         {
@@ -478,9 +457,9 @@ internal enum ParamType : byte
 /// </summary>
 internal sealed record ParamField(string Name, ParamType Type, int Offset, MaterialParam Default)
 {
-    public string Role { get; init; } = string.Empty;
+    internal string Role { get; init; } = string.Empty;
 
-    public int Components => Type switch
+    internal int Components => Type switch
     {
         ParamType.Float or ParamType.Int or ParamType.Uint or ParamType.Bool or ParamType.TextureRef => 1,
         ParamType.Float2 or ParamType.Int2 or ParamType.Uint2 => 2,
@@ -490,9 +469,9 @@ internal sealed record ParamField(string Name, ParamType Type, int Offset, Mater
         _ => 1,
     };
 
-    public int Size => Components * 4;
+    internal int Size => Components * 4;
 
-    public bool IsFloat => Type is ParamType.Float or ParamType.Float2 or ParamType.Float3 or ParamType.Float4 or ParamType.Color;
+    internal bool IsFloat => Type is ParamType.Float or ParamType.Float2 or ParamType.Float3 or ParamType.Float4 or ParamType.Color;
 
-    public bool IsInt => Type is ParamType.Int or ParamType.Int2 or ParamType.Int3 or ParamType.Int4;
+    internal bool IsInt => Type is ParamType.Int or ParamType.Int2 or ParamType.Int3 or ParamType.Int4;
 }

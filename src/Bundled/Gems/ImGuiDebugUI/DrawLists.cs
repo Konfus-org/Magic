@@ -22,23 +22,23 @@ internal sealed unsafe class DrawLists
     /// <summary>
     /// In window pixels, as ImGui lays out in them.
     /// </summary>
-    public ReadOnlySpan<ImDrawVert> Vertices => _vertices.AsSpan(0, _vertexCount);
+    internal ReadOnlySpan<ImDrawVert> Vertices => _vertices.AsSpan(0, _vertexCount);
 
-    public ReadOnlySpan<ushort> Indices => _indices.AsSpan(0, _indexCount);
+    internal ReadOnlySpan<ushort> Indices => _indices.AsSpan(0, _indexCount);
 
-    public ReadOnlySpan<DrawCall> Calls => CollectionsMarshal.AsSpan(_calls);
+    internal ReadOnlySpan<DrawCall> Calls => CollectionsMarshal.AsSpan(_calls);
 
     /// <summary>
     /// Every texture ImGui has, by its number, as it last was, each with the version of its pixels, which goes up as
     /// ImGui changes them: what draws them uploads those whose version it has not, and lets go of those gone.
     /// </summary>
-    public Dictionary<uint, TextureChange> Known { get; } = [];
+    internal Dictionary<uint, TextureChange> Known { get; } = [];
 
     /// <summary>
     /// Copies the frame ImGui just ended, for a window of <paramref name="width"/> by <paramref name="height"/> pixels,
     /// and answers ImGui's asks about its textures.
     /// </summary>
-    public void Copy(ImDrawData* data, int width, int height)
+    internal void Copy(ImDrawData* data, int width, int height)
     {
         CopyTextures(data);
         Grow(ref _vertices, data->TotalVtxCount);
@@ -55,20 +55,14 @@ internal sealed unsafe class DrawLists
             for (int commandIndex = 0; commandIndex < list->CmdBuffer.Size; commandIndex++)
             {
                 ImDrawCmd command = list->CmdBuffer.Data[commandIndex];
-                if (command.UserCallback != null || command.ElemCount == 0)
-                {
-                    continue;
-                }
+                if (command.UserCallback != null || command.ElemCount == 0) continue;
 
                 Rectangle clip = Rectangle.Intersect(window, Rectangle.FromLTRB(
                     (int)MathF.Floor(command.ClipRect.X),
                     (int)MathF.Floor(command.ClipRect.Y),
                     (int)MathF.Ceiling(command.ClipRect.Z),
                     (int)MathF.Ceiling(command.ClipRect.W)));
-                if (clip.Width <= 0 || clip.Height <= 0)
-                {
-                    continue;
-                }
+                if (clip.Width <= 0 || clip.Height <= 0) continue;
 
                 ulong texture = command.TexRef.TexData != null ? command.TexRef.TexData->TexID : command.TexRef.TexID;
                 _calls.Add(new DrawCall((uint)texture, clip, command.ElemCount, (uint)indexBase + command.IdxOffset, vertexBase + (int)command.VtxOffset));
@@ -84,23 +78,17 @@ internal sealed unsafe class DrawLists
 
     private static void Grow<T>(ref T[] array, int count)
     {
-        if (array.Length < count)
-        {
-            Array.Resize(ref array, Math.Max(count, array.Length * 2));
-        }
+        if (array.Length < count) Array.Resize(ref array, Math.Max(count, array.Length * 2));
     }
 
     /// <summary>
     /// The texture's pixels as RGBA8: as they are, or ImGui's one-byte coverage made white with it as alpha.
     /// </summary>
-    private static byte[] Rgba(ImTextureData* texture)
+    private static byte[] ToRgba(ImTextureData* texture)
     {
         int count = texture->Width * texture->Height;
         ReadOnlySpan<byte> pixels = new(texture->Pixels, count * texture->BytesPerPixel);
-        if (texture->BytesPerPixel == 4)
-        {
-            return pixels.ToArray();
-        }
+        if (texture->BytesPerPixel == 4) return pixels.ToArray();
 
         byte[] rgba = new byte[count * 4];
         for (int pixel = 0; pixel < count; pixel++)
@@ -124,14 +112,11 @@ internal sealed unsafe class DrawLists
         for (int i = 0; textures != null && i < textures->Size; i++)
         {
             ImTextureData* texture = textures->Data[i];
-            if (texture->Status == ImTextureStatus.WantCreate)
-            {
-                ImTextureData.SetTexID(texture, _nextTexture++);
-            }
+            if (texture->Status == ImTextureStatus.WantCreate) ImTextureData.SetTexID(texture, _nextTexture++);
 
             if (texture->Status is ImTextureStatus.WantCreate or ImTextureStatus.WantUpdates)
             {
-                Known[(uint)texture->TexID] = new TextureChange(texture->Width, texture->Height, Rgba(texture), _nextVersion++);
+                Known[(uint)texture->TexID] = new TextureChange(texture->Width, texture->Height, ToRgba(texture), _nextVersion++);
                 ImTextureData.SetStatus(texture, ImTextureStatus.Ok);
             }
             else if (texture->Status == ImTextureStatus.WantDestroy && texture->UnusedFrames > 0)

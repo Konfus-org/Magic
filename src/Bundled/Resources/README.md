@@ -68,8 +68,8 @@ after a change, waits for what it is made into. A caller's cancellation token on
 **Post-processing.** Once its loader has made it, a gem's post-processor for the type, if the project lists one, works
 on the asset before anyone gets it, on every load and reload: a model gets its clusters, a pipeline its passes. What is
 slow to make that way is kept in [the cache](../../Core/README.md#the-cache), checked against the asset's version
-(`Assets.Version`), a hash of its file and its sidecar's settings, so it is made again only when either changes. What a
-post-processor loads as it works is what the asset is made from (`Assets.Dependencies`), and an asset made from itself,
+(`Assets.GetVersion`), a hash of its file and its sidecar's settings, so it is made again only when either changes. What a
+post-processor loads as it works is what the asset is made from (`Assets.GetDependencies`), and an asset made from itself,
 a pipeline that brings itself in, directly or through others, fails that load rather than waiting for itself.
 
 ## Hot reload

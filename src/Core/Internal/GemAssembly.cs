@@ -15,14 +15,14 @@ namespace Magic.Internal;
 /// <param name="Author">Who made it, as its project says (<c>Authors</c>); its name when that says nothing.</param>
 /// <param name="Description">What it is and provides, in a sentence, as its project says (<c>Description</c>); empty
 /// when that says nothing.</param>
-/// <param name="Version">Its version, as its project says (<c>Version</c>), 1.0.0 when that says nothing.</param>
+/// <param name="Version">Its version, as its project says (<c>GetVersion</c>), 1.0.0 when that says nothing.</param>
 /// <param name="Type">Its one <see cref="IGem"/> class.</param>
 /// <param name="Settings">The settings type its constructor takes, if any.</param>
 /// <param name="Provides">What it provides: every interface its class implements but <see cref="IGem"/>,
 /// <see cref="IDisposable"/>, <see cref="ILogSink"/> and <see cref="IPreloader"/>, which Core takes itself, so any
 /// number of gems can be sinks or preloaders.</param>
 /// <param name="Assembly">Its assembly, which holds the components and scripts it declares.</param>
-/// <param name="Resources">The folder of its own assets (<see cref="ResourcesOf"/>).</param>
+/// <param name="Resources">The folder of its own assets (<see cref="GetResources"/>).</param>
 internal readonly record struct GemAssembly(string Name, string Path, string Author, string Description, Version Version, Type Type, Type? Settings, List<Type> Provides, Assembly Assembly, string Resources)
 {
     /// <summary>
@@ -47,23 +47,17 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
     /// Reads gem <paramref name="name"/>'s assembly: it must hold exactly one <see cref="IGem"/> class, with one public
     /// constructor that takes at most one <see cref="ISettings"/>. Why not, when it does not, or cannot be loaded.
     /// </summary>
-    public static Result<GemAssembly> Load(IFileSystem files, string name)
+    internal static Result<GemAssembly> Load(IFileSystem files, string name)
     {
         string path = files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
         Result<Assembly> loaded = LoadAssembly(files, path, $"Gem {name}", isCode: false, again: false);
-        if (!loaded.Ok)
-        {
-            return Result.Failure<GemAssembly>(loaded.Error);
-        }
+        if (!loaded.Ok) return Result.Failure<GemAssembly>(loaded.Error);
 
         Assembly assembly = loaded.Value;
         List<Type> gems = [];
         foreach (Type type in Assemblies.From(assembly))
         {
-            if (type.IsClass && !type.IsAbstract && type.IsAssignableTo(typeof(IGem)))
-            {
-                gems.Add(type);
-            }
+            if (type.IsClass && !type.IsAbstract && type.IsAssignableTo(typeof(IGem))) gems.Add(type);
         }
 
         if (gems.Count != 1)
@@ -82,10 +76,7 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
         foreach (ParameterInfo parameter in constructors[0].GetParameters())
         {
             Type type = parameter.ParameterType;
-            if (!type.IsAssignableTo(typeof(ISettings)))
-            {
-                continue;
-            }
+            if (!type.IsAssignableTo(typeof(ISettings))) continue;
 
             if (settings is not null)
             {
@@ -104,10 +95,10 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
             }
         }
 
-        string author = Metadata(assembly, AuthorKey) ?? name;
+        string author = GetMetadata(assembly, AuthorKey) ?? name;
         string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
-        return Result.Success(new GemAssembly(name, path, author, description, version, gem, settings, provides, assembly, ResourcesOf(files, assembly)));
+        return Result.Success(new GemAssembly(name, path, author, description, version, gem, settings, provides, assembly, GetResources(files, assembly)));
     }
 
     /// <summary>
@@ -120,12 +111,9 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
     /// Loaded <paramref name="again"/>, as it is built now, it goes into a new context beside the last, which stays for
     /// whatever holds its types, and one gone by then is an error.
     /// </summary>
-    public static Assembly? LoadCode(IFileSystem files, string path, string what, bool again)
+    internal static Assembly? LoadCode(IFileSystem files, string path, string what, bool again)
     {
-        if (!again && !files.FileExists(path))
-        {
-            return null;
-        }
+        if (!again && !files.FileExists(path)) return null;
 
         Result<Assembly> loaded = LoadAssembly(files, path, what, isCode: true, again);
         if (!loaded.Ok)
@@ -143,16 +131,16 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
     /// <see cref="ResourcesKey"/>, its source <c>Resources/</c>, which every build but a release records; else
     /// <c>Resources/</c> beside it, where a release copies them.
     /// </summary>
-    public static string ResourcesOf(IFileSystem files, Assembly assembly)
+    internal static string GetResources(IFileSystem files, Assembly assembly)
     {
-        return Metadata(assembly, ResourcesKey) ?? files.Combine(files.Parent(assembly.Location), "Resources");
+        return GetMetadata(assembly, ResourcesKey) ?? files.Combine(files.GetParent(assembly.Location), "Resources");
     }
 
     /// <summary>
     /// What <paramref name="assembly"/>'s build recorded as <paramref name="key"/>; null when nothing, or nothing but
     /// an empty string, was.
     /// </summary>
-    private static string? Metadata(Assembly assembly, string key)
+    private static string? GetMetadata(Assembly assembly, string key)
     {
         foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
         {
@@ -176,15 +164,9 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
     {
         lock (_loading)
         {
-            if (!again && _loaded.TryGetValue(path, out Assembly? loaded))
-            {
-                return Result.Success(loaded);
-            }
+            if (!again && _loaded.TryGetValue(path, out Assembly? loaded)) return Result.Success(loaded);
 
-            if (!files.FileExists(path))
-            {
-                return Result.Failure<Assembly>($"{what} was not found: there is no {path}.");
-            }
+            if (!files.FileExists(path)) return Result.Failure<Assembly>($"{what} was not found: there is no {path}.");
 
             try
             {
@@ -207,10 +189,7 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
     private static Assembly LoadFromBytes(IFileSystem files, GemLoadContext context, string path)
     {
         Result<byte[]> read = files.Read(path);
-        if (!read.Ok)
-        {
-            throw new IOException(read.Error);
-        }
+        if (!read.Ok) throw new IOException(read.Error);
 
         using MemoryStream assembly = new(read.Value);
         string symbolsPath = System.IO.Path.ChangeExtension(path, ".pdb");

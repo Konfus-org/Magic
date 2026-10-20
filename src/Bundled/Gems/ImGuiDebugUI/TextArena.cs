@@ -29,7 +29,7 @@ internal sealed unsafe class TextArena : IDisposable
     /// <summary>
     /// The text as a C string, good until <see cref="Reset"/>.
     /// </summary>
-    public byte* Of(string text)
+    internal byte* Of(string text)
     {
         int most = Encoding.UTF8.GetMaxByteCount(text.Length) + 1;
         if (_block < 0 || _used + most > _blocks[_block].Bytes)
@@ -61,7 +61,7 @@ internal sealed unsafe class TextArena : IDisposable
     /// <summary>
     /// Lets every string go, for the next frame's; the blocks stay for it.
     /// </summary>
-    public void Reset()
+    internal void Reset()
     {
         _block = -1;
         _used = 0;

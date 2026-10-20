@@ -16,10 +16,7 @@ internal sealed class TagsJsonConverter : JsonConverter<Tags>
 {
     public override Tags Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        if (reader.TokenType != JsonTokenType.StartArray)
-        {
-            throw new JsonException("Tags are an array of ids.");
-        }
+        if (reader.TokenType != JsonTokenType.StartArray) throw new JsonException("Tags are an array of ids.");
 
         Tags tags = default;
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
@@ -35,10 +32,7 @@ internal sealed class TagsJsonConverter : JsonConverter<Tags>
         writer.WriteStartArray();
         foreach (Tag tag in value)
         {
-            if (tag.IsValid)
-            {
-                writer.WriteNumberValue(tag.Id);
-            }
+            if (tag.IsValid) writer.WriteNumberValue(tag.Id);
         }
 
         writer.WriteEndArray();

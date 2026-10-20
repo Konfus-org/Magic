@@ -112,10 +112,7 @@ public sealed class Events
         [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a watcher throws, it is logged and the others still hear the message.")]
         public override void DeliverOldest()
         {
-            if (!Messages.TryDequeue(out T message))
-            {
-                return;
-            }
+            if (!Messages.TryDequeue(out T message)) return;
 
             foreach (Action<T> watcher in Volatile.Read(ref _watchers))
             {

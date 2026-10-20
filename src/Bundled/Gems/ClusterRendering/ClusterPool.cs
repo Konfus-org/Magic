@@ -69,7 +69,7 @@ internal sealed class ClusterPool : IDisposable
     private readonly Channel<Arrival> _arrived = Channel.CreateUnbounded<Arrival>(new UnboundedChannelOptions { SingleReader = true });
     private int _wordCapacity;
 
-    public ClusterPool(IGpu gpu, Assets assets, TexturePools textures, MeshFields fields, ClusterRenderingSettings settings, CancellationToken stopping)
+    internal ClusterPool(IGpu gpu, Assets assets, TexturePools textures, MeshFields fields, ClusterRenderingSettings settings, CancellationToken stopping)
     {
         _gpu = gpu;
         _assets = assets;
@@ -96,36 +96,36 @@ internal sealed class ClusterPool : IDisposable
         _gpu.Release(Geometry);
     }
 
-    public GpuArray<GpuModel> Models { get; }
+    internal GpuArray<GpuModel> Models { get; }
 
-    public GpuArray<GpuLevel> Levels { get; }
+    internal GpuArray<GpuLevel> Levels { get; }
 
-    public GpuArray<GpuCluster> Clusters { get; }
+    internal GpuArray<GpuCluster> Clusters { get; }
 
-    public GpuArray<GpuCard> Cards { get; }
+    internal GpuArray<GpuCard> Cards { get; }
 
     /// <summary>
     /// Every model's vertices and triangles, as words.
     /// </summary>
-    public GpuBuffer Geometry { get; private set; }
+    internal GpuBuffer Geometry { get; private set; }
 
     /// <summary>
     /// The model a renderer whose model does not load is drawn with, in the mesh failure material: the failure cube
     /// (<see cref="Assets.Failure{T}"/>).
     /// </summary>
-    public Handle<Model> Failed { get; }
+    internal Handle<Model> Failed { get; }
 
     /// <summary>
     /// The models taken in, again or for the first time, failed, or whose cards' atlases or field came in, since the scene
     /// last asked: whose instances can be drawn now, or are drawn anew.
     /// </summary>
-    public HashSet<Handle<Model>> Changed { get; } = [];
+    internal HashSet<Handle<Model>> Changed { get; } = [];
 
     /// <summary>
     /// The model's row, made and its load started the first time it is asked for; <paramref name="distance"/> is how far
     /// from the player an instance of it is, which orders what is taken in.
     /// </summary>
-    public int RowOf(Handle<Model> model, float distance)
+    internal int GetRow(Handle<Model> model, float distance)
     {
         if (!_models.TryGetValue(model, out ModelEntry? entry))
         {
@@ -139,36 +139,33 @@ internal sealed class ClusterPool : IDisposable
         return entry.Row;
     }
 
-    public bool HasFailed(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && entry.HasFailed;
+    internal bool HasFailed(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && entry.HasFailed;
 
     /// <summary>
     /// Whether the model can be drawn as it should be: it is in, and its cards' atlases are in, or one failed and its
     /// clusters stand in for its cards at every distance, so nothing about it changes once it shows; the failure model
     /// in its place, when the model did not load.
     /// </summary>
-    public bool IsDrawable(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && (entry.HasFailed && model != Failed ? IsDrawable(Failed) : CanDraw(entry));
+    internal bool IsDrawable(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && (entry.HasFailed && model != Failed ? IsDrawable(Failed) : CanDraw(entry));
 
     /// <summary>
     /// The sphere around the model at full detail, in its own space; none until it is in.
     /// </summary>
-    public Vector4 BoundsOf(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && entry.In is { } packed ? packed.Bounds : default;
+    internal Vector4 GetBounds(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && entry.In is { } packed ? packed.Bounds : default;
 
     /// <summary>
     /// The model as it is in the pool, for what draws its clusters itself: its first cluster's row and what was packed;
     /// none until it is in.
     /// </summary>
-    public (int FirstCluster, PackedModel Packed)? InPool(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && entry.In is { } packed ? (entry.FirstCluster, packed) : null;
+    internal (int FirstCluster, PackedModel Packed)? InPool(Handle<Model> model) => _models.TryGetValue(model, out ModelEntry? entry) && entry.In is { } packed ? (entry.FirstCluster, packed) : null;
 
     /// <summary>
     /// Lets the model go once no instance draws it: its clusters leave the pool and its row is freed, and it loads again
     /// if it is asked for again. The failure model stays.
     /// </summary>
-    public void Release(Handle<Model> model)
+    internal void Release(Handle<Model> model)
     {
-        if (model == Failed || !_models.Remove(model, out ModelEntry? entry))
-        {
-            return;
-        }
+        if (model == Failed || !_models.Remove(model, out ModelEntry? entry)) return;
 
         _ready.Remove(entry);
         Free(entry);
@@ -180,12 +177,9 @@ internal sealed class ClusterPool : IDisposable
     /// <summary>
     /// The model's file changed and it loaded again: it is packed again, and taken in in place of what it had.
     /// </summary>
-    public void Reload(Model model)
+    internal void Reload(Model model)
     {
-        if (_models.TryGetValue(model.Handle, out ModelEntry? entry))
-        {
-            PackAsync(entry, model).FireAndForget();
-        }
+        if (_models.TryGetValue(model.Handle, out ModelEntry? entry)) PackAsync(entry, model).FireAndForget();
     }
 
     /// <summary>
@@ -194,7 +188,7 @@ internal sealed class ClusterPool : IDisposable
     /// the models whose cards are all in now, counting changed every model that can or cannot be drawn where it could
     /// not or could before; then uploads what changed.
     /// </summary>
-    public void Flush()
+    internal void Flush()
     {
         while (_arrived.Reader.TryRead(out Arrival arrival))
         {
@@ -232,15 +226,9 @@ internal sealed class ClusterPool : IDisposable
                 bool wereIn = entry.AreCardsIn;
                 bool wasDrawable = CanDraw(entry);
                 WriteCards(entry);
-                if (entry.AreCardsIn != wereIn)
-                {
-                    WriteRow(entry);
-                }
+                if (entry.AreCardsIn != wereIn) WriteRow(entry);
 
-                if (entry.AreCardsIn != wereIn || CanDraw(entry) != wasDrawable)
-                {
-                    Changed.Add(entry.Handle);
-                }
+                if (entry.AreCardsIn != wereIn || CanDraw(entry) != wasDrawable) Changed.Add(entry.Handle);
             }
         }
 
@@ -287,15 +275,9 @@ internal sealed class ClusterPool : IDisposable
     /// </summary>
     private void TakePacked(ModelEntry entry, PackedModel packed)
     {
-        if (IsReleased(entry))
-        {
-            return;
-        }
+        if (IsReleased(entry)) return;
 
-        if (entry.Waiting is null)
-        {
-            _ready.Add(entry);
-        }
+        if (entry.Waiting is null) _ready.Add(entry);
 
         entry.Waiting = packed;
         entry.HasFailed = false;
@@ -308,10 +290,7 @@ internal sealed class ClusterPool : IDisposable
     /// </summary>
     private void TakeField(ModelEntry entry, PackedModel packed, ModelField? field)
     {
-        if (IsReleased(entry) || entry.In != packed)
-        {
-            return;
-        }
+        if (IsReleased(entry) || entry.In != packed) return;
 
         entry.Field = _fields.Take(entry.Handle, field);
         WriteRow(entry);
@@ -324,10 +303,7 @@ internal sealed class ClusterPool : IDisposable
     /// </summary>
     private long Take(ModelEntry entry)
     {
-        if (entry.Waiting is not { } packed)
-        {
-            return 0;
-        }
+        if (entry.Waiting is not { } packed) return 0;
 
         Free(entry);
         entry.Waiting = null;
@@ -379,10 +355,7 @@ internal sealed class ClusterPool : IDisposable
     /// </summary>
     private void WriteRow(ModelEntry entry)
     {
-        if (entry.In is not { } packed)
-        {
-            return;
-        }
+        if (entry.In is not { } packed) return;
 
         Models.Set(entry.Row, new GpuModel
         {
@@ -405,17 +378,14 @@ internal sealed class ClusterPool : IDisposable
     /// </summary>
     private void WriteCards(ModelEntry entry)
     {
-        if (entry.In is not { } packed)
-        {
-            return;
-        }
+        if (entry.In is not { } packed) return;
 
         bool areIn = true;
         for (int i = 0; i < packed.Cards.Length; i++)
         {
             PackedCard card = packed.Cards[i];
-            uint surface = _textures.RefOf(card.Card.Surface.Handle);
-            uint normals = _textures.RefOf(card.Card.Normals.Handle);
+            uint surface = _textures.GetRef(card.Card.Surface.Handle);
+            uint normals = _textures.GetRef(card.Card.Normals.Handle);
             areIn &= surface != TexturePools.None && normals != TexturePools.None;
             Cards.Set(entry.FirstCard + i, card.Row with { Surface = surface, Normals = normals });
         }
@@ -462,10 +432,7 @@ internal sealed class ClusterPool : IDisposable
 
     private void Free(ModelEntry entry)
     {
-        if (entry.In is not { } packed)
-        {
-            return;
-        }
+        if (entry.In is not { } packed) return;
 
         _words.Free(entry.FirstWord, packed.Words.Length);
         _clusterRows.Free(entry.FirstCluster, packed.Clusters.Length);
@@ -521,51 +488,15 @@ internal sealed class ClusterPool : IDisposable
     private static PackedModel Pack(Model model)
     {
         float step = model.Clusters?.PositionStep ?? StepOver(model.Meshes);
-        ClusterHierarchy hierarchy = model.Clusters ?? Flat(model.Meshes, step);
+        ClusterHierarchy hierarchy = model.Clusters ?? Flatten(model.Meshes, step);
         List<uint> words = [];
         List<GpuCluster> clusters = [];
         List<GpuLevel> levels = [];
         Vector4 bounds = default;
         Span<uint> packedVertex = stackalloc uint[VertexWords];
         Add(hierarchy, packedVertex);
-        List<PackedCard> packedCards = [];
-        foreach (Mesh mesh in model.Cards?.Meshes ?? [])
-        {
-            if (mesh.Card is not { } card)
-            {
-                continue;
-            }
-
-            ReadOnlySpan<Vertex> corners = mesh.Vertices.Span;
-            for (int i = 0; i + 3 < corners.Length; i += 4)
-            {
-                Vertex corner = corners[i];
-                packedCards.Add(new PackedCard(card, new GpuCard
-                {
-                    Centre = corner.Position,
-                    HalfWidth = corner.Normal.X,
-                    HalfHeight = corner.Normal.Y,
-                    Turn = corner.Normal.Z,
-                    Slot = (uint)mesh.MaterialSlot,
-                    Surface = TexturePools.None,
-                    Normals = TexturePools.None,
-                }));
-                float reach = new Vector2(corner.Normal.X, corner.Normal.Y).Length();
-                bounds = Enclose(bounds, new Vector4(corner.Position, reach));
-            }
-        }
-
-        // Each group's error sphere encloses its clusters', so a coarser cluster's, or its parent's, can reach past the
-        // bounds: an instance picks its levels of clusters by how near and far all of them reach, or it can pass over
-        // the level a cluster's own test wants and draw nothing there.
-        Vector3 middle = new(bounds.X, bounds.Y, bounds.Z);
-        float clusterReach = bounds.W;
-        foreach (GpuCluster cluster in clusters)
-        {
-            clusterReach = MathF.Max(clusterReach, Vector3.Distance(middle, new Vector3(cluster.ErrorBounds.X, cluster.ErrorBounds.Y, cluster.ErrorBounds.Z)) + cluster.ErrorBounds.W);
-            clusterReach = MathF.Max(clusterReach, Vector3.Distance(middle, new Vector3(cluster.ParentErrorBounds.X, cluster.ParentErrorBounds.Y, cluster.ParentErrorBounds.Z)) + cluster.ParentErrorBounds.W);
-        }
-
+        List<PackedCard> packedCards = PackCards(model, ref bounds);
+        float clusterReach = ComputeReach(bounds, clusters);
         return new PackedModel([.. words], [.. clusters], [.. levels], [.. packedCards], bounds, clusterReach, step, model.Cards?.Distance ?? 0, hierarchy.Cut(float.MaxValue));
 
         // A level is a run of one level's clusters, with the least error and the most parent error of any in it.
@@ -611,15 +542,63 @@ internal sealed class ClusterPool : IDisposable
                     ParentError = parentError,
                     Vertices = firstVertex,
                     Triangles = firstTriangle,
-                    Counts = GpuCluster.CountsOf(cluster.TriangleCount, cluster.VertexCount, cluster.MaterialSlot, cluster.Level),
+                    Counts = GpuCluster.PackCounts(cluster.TriangleCount, cluster.VertexCount, cluster.MaterialSlot, cluster.Level),
                     Step = step,
                 });
-                if (cluster.Level == 0)
-                {
-                    bounds = Enclose(bounds, cluster.Bounds);
-                }
+                if (cluster.Level == 0) bounds = Enclose(bounds, cluster.Bounds);
             }
         }
+    }
+    /// <summary>
+    /// The model's cards as the GPU holds them, one per card quad, their atlases not yet in; <paramref name="bounds"/>
+    /// grows to take each card in.
+    /// </summary>
+    private static List<PackedCard> PackCards(Model model, ref Vector4 bounds)
+    {
+        List<PackedCard> packedCards = [];
+        foreach (Mesh mesh in model.Cards?.Meshes ?? [])
+        {
+            if (mesh.Card is not { } card) continue;
+
+            ReadOnlySpan<Vertex> corners = mesh.Vertices.Span;
+            for (int i = 0; i + 3 < corners.Length; i += 4)
+            {
+                Vertex corner = corners[i];
+                packedCards.Add(new PackedCard(card, new GpuCard
+                {
+                    Centre = corner.Position,
+                    HalfWidth = corner.Normal.X,
+                    HalfHeight = corner.Normal.Y,
+                    Turn = corner.Normal.Z,
+                    Slot = (uint)mesh.MaterialSlot,
+                    Surface = TexturePools.None,
+                    Normals = TexturePools.None,
+                }));
+                float reach = new Vector2(corner.Normal.X, corner.Normal.Y).Length();
+                bounds = Enclose(bounds, new Vector4(corner.Position, reach));
+            }
+        }
+
+        return packedCards;
+    }
+
+    /// <summary>
+    /// How far from the model's middle any of its clusters' error spheres reach. Each group's error sphere encloses its
+    /// clusters', so a coarser cluster's, or its parent's, can reach past the bounds: an instance picks its levels of
+    /// clusters by how near and far all of them reach, or it can pass over the level a cluster's own test wants and
+    /// draw nothing there.
+    /// </summary>
+    private static float ComputeReach(Vector4 bounds, List<GpuCluster> clusters)
+    {
+        Vector3 middle = new(bounds.X, bounds.Y, bounds.Z);
+        float clusterReach = bounds.W;
+        foreach (GpuCluster cluster in clusters)
+        {
+            clusterReach = MathF.Max(clusterReach, Vector3.Distance(middle, new Vector3(cluster.ErrorBounds.X, cluster.ErrorBounds.Y, cluster.ErrorBounds.Z)) + cluster.ErrorBounds.W);
+            clusterReach = MathF.Max(clusterReach, Vector3.Distance(middle, new Vector3(cluster.ParentErrorBounds.X, cluster.ParentErrorBounds.Y, cluster.ParentErrorBounds.Z)) + cluster.ParentErrorBounds.W);
+        }
+
+        return clusterReach;
     }
 
     /// <summary>
@@ -645,7 +624,7 @@ internal sealed class ClusterPool : IDisposable
     /// <paramref name="meshes"/> split into clusters as they come, of one level, never simplified: a model drawn as it
     /// is at every distance, on the grid <paramref name="step"/> apart.
     /// </summary>
-    private static ClusterHierarchy Flat(IReadOnlyList<Mesh> meshes, float step)
+    private static ClusterHierarchy Flatten(IReadOnlyList<Mesh> meshes, float step)
     {
         List<Vertex> vertices = [];
         List<byte> indices = [];
@@ -668,15 +647,7 @@ internal sealed class ClusterPool : IDisposable
 
                 for (int corner = 0; corner < 3; corner++)
                 {
-                    uint index = triangles[t + corner];
-                    if (!local.TryGetValue(index, out int at))
-                    {
-                        at = local.Count;
-                        local[index] = at;
-                        vertices.Add(source[(int)index]);
-                    }
-
-                    indices.Add((byte)at);
+                    indices.Add(IndexWithin(triangles[t + corner], source, local, vertices));
                 }
             }
 
@@ -685,24 +656,7 @@ internal sealed class ClusterPool : IDisposable
             void Close()
             {
                 int count = (indices.Count - firstIndex) / 3;
-                if (count > 0)
-                {
-                    Vector4 sphere = SphereAround(vertices, firstVertex, vertices.Count - firstVertex);
-                    clusters.Add(new Cluster
-                    {
-                        FirstVertex = firstVertex,
-                        VertexCount = vertices.Count - firstVertex,
-                        FirstIndex = firstIndex,
-                        TriangleCount = count,
-                        MaterialSlot = mesh.MaterialSlot,
-                        Level = 0,
-                        Bounds = sphere,
-                        ErrorBounds = sphere,
-                        Error = 0,
-                        ParentErrorBounds = sphere,
-                        ParentError = float.PositiveInfinity,
-                    });
-                }
+                if (count > 0) clusters.Add(MakeFlatCluster(vertices, firstVertex, firstIndex, count, mesh.MaterialSlot));
 
                 firstVertex = vertices.Count;
                 firstIndex = indices.Count;
@@ -711,6 +665,41 @@ internal sealed class ClusterPool : IDisposable
         }
 
         return new ClusterHierarchy { Vertices = vertices.ToArray(), Indices = indices.ToArray(), Clusters = clusters.ToArray(), PositionStep = step };
+    }
+
+    /// <summary>
+    /// The source vertex's index within the cluster being made, the vertex added to it the first time it is asked for.
+    /// </summary>
+    private static byte IndexWithin(uint index, ReadOnlySpan<Vertex> source, Dictionary<uint, int> local, List<Vertex> vertices)
+    {
+        if (local.TryGetValue(index, out int at)) return (byte)at;
+
+        at = local.Count;
+        local[index] = at;
+        vertices.Add(source[(int)index]);
+        return (byte)at;
+    }
+
+    /// <summary>
+    /// A cluster of a flat hierarchy: full detail, no error and no parent, its sphere every bound it has.
+    /// </summary>
+    private static Cluster MakeFlatCluster(List<Vertex> vertices, int firstVertex, int firstIndex, int count, int slot)
+    {
+        Vector4 sphere = ComputeSphere(vertices, firstVertex, vertices.Count - firstVertex);
+        return new Cluster
+        {
+            FirstVertex = firstVertex,
+            VertexCount = vertices.Count - firstVertex,
+            FirstIndex = firstIndex,
+            TriangleCount = count,
+            MaterialSlot = slot,
+            Level = 0,
+            Bounds = sphere,
+            ErrorBounds = sphere,
+            Error = 0,
+            ParentErrorBounds = sphere,
+            ParentError = float.PositiveInfinity,
+        };
     }
 
     /// <summary>
@@ -724,10 +713,10 @@ internal sealed class ClusterPool : IDisposable
         uint z = Steps(vertex.Position.Z);
         words[0] = x | (y << 20);
         words[1] = (y >> 12) | (z << 8);
-        Vector2 normal = Octahedral(vertex.Normal);
-        words[2] = Unorm(normal.X, 16) | (Unorm(normal.Y, 16) << 16);
-        Vector2 tangent = Octahedral(new Vector3(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z));
-        words[3] = Unorm(tangent.X, 16) | (Unorm(tangent.Y, 15) << 16) | (vertex.Tangent.W < 0 ? 1u << 31 : 0);
+        Vector2 normal = EncodeOctahedral(vertex.Normal);
+        words[2] = ToUnorm(normal.X, 16) | (ToUnorm(normal.Y, 16) << 16);
+        Vector2 tangent = EncodeOctahedral(new Vector3(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z));
+        words[3] = ToUnorm(tangent.X, 16) | (ToUnorm(tangent.Y, 15) << 16) | (vertex.Tangent.W < 0 ? 1u << 31 : 0);
         words[4] = BitConverter.HalfToUInt16Bits((Half)vertex.Uv.X) | ((uint)BitConverter.HalfToUInt16Bits((Half)vertex.Uv.Y) << 16);
 
         // Two's complement in 20 bits: a negative step's high bits are cut off, and the shader sign-extends them back.
@@ -737,13 +726,10 @@ internal sealed class ClusterPool : IDisposable
     /// <summary>
     /// A direction folded onto an octahedron and unfolded onto a square, 0 to 1 each way (Cigolle et al. 2014).
     /// </summary>
-    private static Vector2 Octahedral(Vector3 direction)
+    private static Vector2 EncodeOctahedral(Vector3 direction)
     {
         float sum = MathF.Abs(direction.X) + MathF.Abs(direction.Y) + MathF.Abs(direction.Z);
-        if (sum <= 0)
-        {
-            return new Vector2(0.5f, 0.5f);
-        }
+        if (sum <= 0) return new Vector2(0.5f, 0.5f);
 
         Vector3 folded = direction / sum;
         Vector2 square = new(folded.X, folded.Y);
@@ -755,9 +741,9 @@ internal sealed class ClusterPool : IDisposable
         return (square * 0.5f) + new Vector2(0.5f);
     }
 
-    private static uint Unorm(float value, int bits) => (uint)MathF.Round(Math.Clamp(value, 0, 1) * ((1 << bits) - 1));
+    private static uint ToUnorm(float value, int bits) => (uint)MathF.Round(Math.Clamp(value, 0, 1) * ((1 << bits) - 1));
 
-    private static Vector4 SphereAround(List<Vertex> vertices, int first, int count)
+    private static Vector4 ComputeSphere(List<Vertex> vertices, int first, int count)
     {
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -782,23 +768,14 @@ internal sealed class ClusterPool : IDisposable
     /// </summary>
     private static Vector4 Enclose(Vector4 a, Vector4 b)
     {
-        if (a.W <= 0)
-        {
-            return b;
-        }
+        if (a.W <= 0) return b;
 
         Vector3 from = new(a.X, a.Y, a.Z);
         Vector3 to = new(b.X, b.Y, b.Z);
         float apart = Vector3.Distance(from, to);
-        if (apart + b.W <= a.W)
-        {
-            return a;
-        }
+        if (apart + b.W <= a.W) return a;
 
-        if (apart + a.W <= b.W)
-        {
-            return b;
-        }
+        if (apart + a.W <= b.W) return b;
 
         float radius = (apart + a.W + b.W) / 2;
         Vector3 centre = from + ((to - from) * ((radius - a.W) / MathF.Max(apart, 1e-6f)));
@@ -812,29 +789,29 @@ internal sealed class ClusterPool : IDisposable
     /// </summary>
     private sealed class ModelEntry(Handle<Model> handle, int row)
     {
-        public Handle<Model> Handle { get; } = handle;
+        internal Handle<Model> Handle { get; } = handle;
 
-        public int Row { get; } = row;
+        internal int Row { get; } = row;
 
-        public PackedModel? In { get; set; }
+        internal PackedModel? In { get; set; }
 
-        public PackedModel? Waiting { get; set; }
+        internal PackedModel? Waiting { get; set; }
 
-        public int FirstWord { get; set; }
+        internal int FirstWord { get; set; }
 
-        public int FirstCluster { get; set; }
+        internal int FirstCluster { get; set; }
 
-        public int FirstLevel { get; set; }
+        internal int FirstLevel { get; set; }
 
-        public int FirstCard { get; set; }
+        internal int FirstCard { get; set; }
 
-        public uint Field { get; set; }
+        internal uint Field { get; set; }
 
-        public bool AreCardsIn { get; set; }
+        internal bool AreCardsIn { get; set; }
 
-        public float Distance { get; set; } = float.MaxValue;
+        internal float Distance { get; set; } = float.MaxValue;
 
-        public bool HasFailed { get; set; }
+        internal bool HasFailed { get; set; }
     }
 
     /// <summary>

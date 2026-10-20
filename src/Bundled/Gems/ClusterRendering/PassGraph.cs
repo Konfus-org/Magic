@@ -81,35 +81,35 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// <summary>
     /// The listing the frame draws with; none until the first is compiled.
     /// </summary>
-    public Listing? Current { get; private set; }
+    internal Listing? Current { get; private set; }
 
     /// <summary>
     /// The effects the latest listing, built or building, runs.
     /// </summary>
-    public Handle<Pipeline> Effects { get; private set; }
+    internal Handle<Pipeline> Effects { get; private set; }
 
     /// <summary>
     /// Whether a listing is being built, which the frame swaps in once it is compiled.
     /// </summary>
-    public bool IsBuilding => _next is not null;
+    internal bool IsBuilding => _next is not null;
 
     /// <summary>
     /// The surfaces that do not compile for some pass, whose materials are drawn as the failure
     /// (<see cref="Materials"/>), until the shader changes.
     /// </summary>
-    public HashSet<Handle<Shader>> BrokenSurfaces { get; } = [];
+    internal HashSet<Handle<Shader>> BrokenSurfaces { get; } = [];
 
     /// <summary>
     /// The surfaces that failed to compile since the materials last asked: whose materials are packed anew.
     /// </summary>
-    public HashSet<Handle<Shader>> Broke { get; } = [];
+    internal HashSet<Handle<Shader>> Broke { get; } = [];
 
     /// <summary>
     /// A pipeline (made again when one of its passes changes) or a shader changed: the listing is built again, once the
     /// build under way, if any, is swapped in, so a burst of changes (a remake of every shader, one at a time) is one
     /// further build, not one each.
     /// </summary>
-    public void Invalidate()
+    internal void Invalidate()
     {
         _isStale = true;
     }
@@ -118,7 +118,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// Runs <paramref name="pass"/> after the world's effects from now on, as a debug view is; none to stop. The listing
     /// is built again when it changes.
     /// </summary>
-    public void Append(Handle<Pass> pass)
+    internal void Append(Handle<Pass> pass)
     {
         _isStale |= pass != _appended;
         _appended = pass;
@@ -133,7 +133,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// compiled) and a burst of changes starts one build, not one each; a build that throws (an error, said by
     /// FireAndForget) never swaps in, and nothing builds again after it. Each frame, before anything records.
     /// </summary>
-    public void Update(Handle<Pipeline> pipeline, Handle<Pipeline> effects, Handle<Pipeline> overlay, SceneVariants variants)
+    internal void Update(Handle<Pipeline> pipeline, Handle<Pipeline> effects, Handle<Pipeline> overlay, SceneVariants variants)
     {
         if (_next is { IsCompiled: true } built && HasEvery(built, variants))
         {
@@ -159,12 +159,9 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// A draw pass's pipeline for <paramref name="variant"/>, compiling it the first time it is asked for; none while it
     /// compiles.
     /// </summary>
-    public GpuPipeline SurfacePipeline(ListedPass pass, SurfaceKey variant)
+    internal GpuPipeline GetSurfacePipeline(ListedPass pass, SurfaceKey variant)
     {
-        if (pass.Surfaces.TryGetValue(variant, out GpuPipeline made))
-        {
-            return made;
-        }
+        if (pass.Surfaces.TryGetValue(variant, out GpuPipeline made)) return made;
 
         pass.Surfaces[variant] = GpuPipeline.None;
         CompileSurfaceAsync(pass, variant, isCounted: false).FireAndForget();
@@ -179,12 +176,9 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// drawable once that listing is swapped in. A material waits for this (<see cref="Materials"/>), so nothing is drawn
     /// black, left out, or drawn without the world's effects for a while.
     /// </summary>
-    public bool IsDrawable(SurfaceKey surface, MaterialType type)
+    internal bool IsDrawable(SurfaceKey surface, MaterialType type)
     {
-        if ((_next ?? Current) is not { } listing)
-        {
-            return false;
-        }
+        if ((_next ?? Current) is not { } listing) return false;
 
         bool isTransparent = type == MaterialType.Transparent;
         bool isDrawable = true;
@@ -200,10 +194,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
                 _ => null,
             };
 
-            if (variant is not { } key)
-            {
-                continue;
-            }
+            if (variant is not { } key) continue;
 
             // A pass of the listing being built is asked only once it has come back, as it then starts the variants it
             // has so far, which its listing waits for, and one asked before would be waited for though never counted.
@@ -228,12 +219,9 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         bool hasEvery = true;
         foreach (ListedPass pass in listing.Passes)
         {
-            if (!pass.DrawsSurfaces)
-            {
-                continue;
-            }
+            if (!pass.DrawsSurfaces) continue;
 
-            foreach (SurfaceKey variant in pass.VariantsOf(variants))
+            foreach (SurfaceKey variant in pass.GetVariants(variants))
             {
                 hasEvery &= IsMade(pass, variant);
             }
@@ -248,7 +236,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// </summary>
     private bool IsMade(ListedPass pass, SurfaceKey variant)
     {
-        return SurfacePipeline(pass, variant) != GpuPipeline.None || pass.Broken.Contains(variant);
+        return GetSurfacePipeline(pass, variant) != GpuPipeline.None || pass.Broken.Contains(variant);
     }
 
     /// <summary>
@@ -263,25 +251,19 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         List<string> failures = [];
         foreach (Handle<Pipeline> handle in (Handle<Pipeline>[])[pipeline, effects, overlay])
         {
-            if (handle == Handle<Pipeline>.None)
-            {
-                continue;
-            }
+            if (handle == Handle<Pipeline>.None) continue;
 
             Result<Pipeline> frame = await assets.LoadAsync(handle, stopping).ConfigureAwait(false);
             if (!frame.Ok)
             {
                 Debugging.Error($"A pipeline does not load, so its passes do not run: {frame.Error}");
-                failures.Add($"A pipeline does not load: {Listing.FirstLine(frame.Error)}");
+                failures.Add($"A pipeline does not load: {Listing.GetFirstLine(frame.Error)}");
                 continue;
             }
 
             foreach (PipelinePass pass in frame.Value.Passes)
             {
-                if (await LoadPassAsync(pass, failures).ConfigureAwait(false) is { } ready)
-                {
-                    loaded.Add(ready);
-                }
+                if (await LoadPassAsync(pass, failures).ConfigureAwait(false) is { } ready) loaded.Add(ready);
             }
         }
 
@@ -293,7 +275,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         if (appended != Handle<Pass>.None)
         {
             Result<Pass> view = await assets.LoadAsync(appended, stopping).ConfigureAwait(false);
-            string name = Path.GetFileNameWithoutExtension(assets.Path(appended) ?? string.Empty);
+            string name = Path.GetFileNameWithoutExtension(assets.GetPath(appended) ?? string.Empty);
             if (!view.Ok)
             {
                 Debugging.Error($"Debug view {name} does not load, so it is not shown: {view.Error}");
@@ -305,7 +287,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         }
 
         await threads.InvokeAsync(EngineThread.Render, () => listing.Fit(loaded, failures, variants), stopping).ConfigureAwait(false);
-        Task<Result<StageBindings>> piecesProbe = ProbeAsync(_engineVisible, [], GpuStage.Vertex, [(PiecesText(placeOnly: false), "Pieces")]);
+        Task<Result<StageBindings>> piecesProbe = ProbeAsync(_engineVisible, [], GpuStage.Vertex, [(GetPiecesText(placeOnly: false), "Pieces")]);
         List<Task> probes = [];
         foreach (ListedPass pass in listing.Passes)
         {
@@ -318,8 +300,8 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         // The place-only pieces use a part of what the pieces do, and are bound as the pieces are, so a draw binds once.
         Result<StageBindings> piecesBound = await piecesProbe.ConfigureAwait(false);
         Task<Result<GpuShader>> fullscreen = compiler.CompileAsync(FullscreenPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
-        Task<Result<GpuShader>> pieces = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, PiecesText(placeOnly: false), "Pieces");
-        Task<Result<GpuShader>> places = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, PiecesText(placeOnly: true), "Pieces (place only)");
+        Task<Result<GpuShader>> pieces = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, GetPiecesText(placeOnly: false), "Pieces");
+        Task<Result<GpuShader>> places = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, GetPiecesText(placeOnly: true), "Pieces (place only)");
         Task<Result<GpuShader>> tiles = compiler.CompileAsync(TilesPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
         foreach (ListedPass pass in listing.Passes)
         {
@@ -341,7 +323,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         if (!text.Ok || !layout.Ok)
         {
             Debugging.Error($"Pass {pass.Name} does not run: {layout.Error}");
-            failures.Add($"Pass {pass.Name} does not run: {Listing.FirstLine(layout.Error)}");
+            failures.Add($"Pass {pass.Name} does not run: {Listing.GetFirstLine(layout.Error)}");
             return null;
         }
 
@@ -350,13 +332,13 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         if (layout.Value is { } paramLayout)
         {
             body = paramLayout.Prepare("LoadPassParams()", string.Empty, "PassRaw");
-            foreach (string unknown in paramLayout.Unknown(pass.Params.Keys))
+            foreach (string unknown in paramLayout.FindUnknown(pass.Params.Keys))
             {
                 Debugging.Warn($"Pass {pass.Name} is given {unknown}, which its shader's PassParams does not declare.");
             }
 
-            Dictionary<Handle<Curve>, Curve> curves = await CurvesOfAsync(paramLayout, pass).ConfigureAwait(false);
-            paramLayout.Write([pass.Params], _ => TexturePools.None, param => curves.GetValueOrDefault(CurveOf(param)), MemoryMarshal.AsBytes(new Span<PassWords>(ref words)));
+            Dictionary<Handle<Curve>, Curve> curves = await GetCurvesAsync(paramLayout, pass).ConfigureAwait(false);
+            paramLayout.Write([pass.Params], _ => TexturePools.None, param => curves.GetValueOrDefault(GetCurve(param)), MemoryMarshal.AsBytes(new Span<PassWords>(ref words)));
         }
 
         return new Loaded(pass.Pass, pass.Name, body, words);
@@ -366,16 +348,13 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// The curves a pass's params name for its <c>Curve</c> members, the default curve for one they leave out, loaded; one
     /// that does not load is said, and packs as nothing.
     /// </summary>
-    private async Task<Dictionary<Handle<Curve>, Curve>> CurvesOfAsync(ParamLayout layout, PipelinePass pass)
+    private async Task<Dictionary<Handle<Curve>, Curve>> GetCurvesAsync(ParamLayout layout, PipelinePass pass)
     {
         Dictionary<Handle<Curve>, Curve> curves = [];
         foreach (ParamField field in layout.Fields)
         {
-            Handle<Curve> handle = field.Type == ParamType.Curve ? CurveOf(pass.Params.GetValueOrDefault(field.Name) ?? field.Default) : Handle<Curve>.None;
-            if (handle == Handle<Curve>.None || curves.ContainsKey(handle))
-            {
-                continue;
-            }
+            Handle<Curve> handle = field.Type == ParamType.Curve ? GetCurve(pass.Params.GetValueOrDefault(field.Name) ?? field.Default) : Handle<Curve>.None;
+            if (handle == Handle<Curve>.None || curves.ContainsKey(handle)) continue;
 
             Result<Curve> loaded = await assets.LoadAsync(handle, stopping).ConfigureAwait(false);
             if (!loaded.Ok)
@@ -393,7 +372,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// <summary>
     /// The curve a param names, the default curve for none.
     /// </summary>
-    private Handle<Curve> CurveOf(MaterialParam param)
+    private Handle<Curve> GetCurve(MaterialParam param)
     {
         return param.Curve == Handle<Curve>.None ? assets.Default<Curve>() : param.Curve;
     }
@@ -417,13 +396,10 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         }
         else if (pass.Pass.Kind == PassKind.Compute)
         {
-            Result<GpuShader> shader = await CompileBoundAsync(pass, GpuStage.Compute, PassBody(pass), pass.Name).ConfigureAwait(false);
+            Result<GpuShader> shader = await CompileBoundAsync(pass, GpuStage.Compute, GetPassBody(pass), pass.Name).ConfigureAwait(false);
             make = () =>
             {
-                if (!shader.Ok)
-                {
-                    return Result.Failure<GpuPipeline>(shader.Error);
-                }
+                if (!shader.Ok) return Result.Failure<GpuPipeline>(shader.Error);
 
                 pass.Threads = (shader.Value.ThreadCountX, shader.Value.ThreadCountY, shader.Value.ThreadCountZ);
                 return gpu.CreatePipeline(shader.Value);
@@ -473,10 +449,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         }
 
         Result<Script> asset = await assets.LoadAsync(pass.Pass.Script, stopping).ConfigureAwait(false);
-        if (!asset.Ok)
-        {
-            return Result.Failure<IPipelineScript>($"its script does not load: {asset.Error}");
-        }
+        if (!asset.Ok) return Result.Failure<IPipelineScript>($"its script does not load: {asset.Error}");
 
         Result<IScript> made = scripts.Make(asset.Value);
         if (!made.Ok)
@@ -495,7 +468,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
 
     private async Task<Result<GpuPipelineDescription>> FullscreenAsync(ListedPass pass, Result<GpuShader> vertex)
     {
-        Result<GpuShader> fragment = await CompileBoundAsync(pass, GpuStage.Fragment, PassBody(pass), pass.Name).ConfigureAwait(false);
+        Result<GpuShader> fragment = await CompileBoundAsync(pass, GpuStage.Fragment, GetPassBody(pass), pass.Name).ConfigureAwait(false);
         if (!vertex.Ok || !fragment.Ok)
         {
             return Result.Failure<GpuPipelineDescription>(vertex.Ok ? fragment.Error : vertex.Error);
@@ -511,7 +484,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// </summary>
     private async Task<Result<GpuPipelineDescription>> DepthAsync(ListedPass pass)
     {
-        Result<GpuShader> vertex = await CompileBoundAsync(pass, GpuStage.Vertex, PassBody(pass), pass.Name).ConfigureAwait(false);
+        Result<GpuShader> vertex = await CompileBoundAsync(pass, GpuStage.Vertex, GetPassBody(pass), pass.Name).ConfigureAwait(false);
         Result<GpuShader> compiled = await compiler.CompileAsync(DepthOnlyPath, GpuStage.Fragment, gpu.ShaderFormat, stopping).ConfigureAwait(false);
 
         // The fragment stage is written by hand to bind nothing, as what only writes depth needs nothing.
@@ -568,22 +541,13 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         PassDrawn drawn = pass.Pass.Draw.Drawn;
         bool hasSurface = variant.Shader != Handle<Shader>.None;
         GpuShader? vertex = drawn == PassDrawn.Visibility && !hasSurface ? pass.PlaceVertex : pass.Vertex;
-        if (vertex is null)
-        {
-            return Result.Failure<GpuPipelineDescription>(string.Empty);
-        }
+        if (vertex is null) return Result.Failure<GpuPipelineDescription>(string.Empty);
 
         Result<(string Text, string Name)> source = await SurfaceTextAsync(pass, variant).ConfigureAwait(false);
-        if (!source.Ok)
-        {
-            return Result.Failure<GpuPipelineDescription>(source.Error);
-        }
+        if (!source.Ok) return Result.Failure<GpuPipelineDescription>(source.Error);
 
         Result<GpuShader> fragment = await CompileBoundAsync(pass, GpuStage.Fragment, source.Value.Text, source.Value.Name).ConfigureAwait(false);
-        if (!fragment.Ok)
-        {
-            return Result.Failure<GpuPipelineDescription>(fragment.Error);
-        }
+        if (!fragment.Ok) return Result.Failure<GpuPipelineDescription>(fragment.Error);
 
         return Result.Success(new GpuPipelineDescription
         {
@@ -608,15 +572,12 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         PassDrawn drawn = pass.Pass.Draw.Drawn;
         bool hasSurface = variant.Shader != Handle<Shader>.None;
         Handle<Shader> shader = variant.Shader;
-        string name = hasSurface ? assets.Path(shader) ?? "a surface" : "no surface";
+        string name = hasSurface ? assets.GetPath(shader) ?? "a surface" : "no surface";
         string surface = string.Empty;
         if (hasSurface)
         {
             Result<SurfaceSource> source = await SurfaceSource.ReadAsync(assets, shader, stopping).ConfigureAwait(false);
-            if (!source.Ok)
-            {
-                return Result.Failure<(string Text, string Name)>(source.Error);
-            }
+            if (!source.Ok) return Result.Failure<(string Text, string Name)>(source.Error);
 
             surface = source.Value.Text;
         }
@@ -629,7 +590,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         text.Append("#define SKY_CUBE ").Append(pass.DrawsCube ? 1 : 0).Append('\n');
         text.Append("#include \"Include/SurfaceBindings.hlsli\"\n");
         text.Append("#line 1 \"").Append(name).Append("\"\n").Append(surface).Append('\n');
-        text.Append("#include \"Templates/").Append(TemplateOf(drawn, hasSurface)).Append(".frag.hlsl\"\n");
+        text.Append("#include \"Templates/").Append(GetTemplate(drawn, hasSurface)).Append(".frag.hlsl\"\n");
         return Result.Success((text.ToString(), $"{pass.Name} with {name}"));
     }
 
@@ -652,21 +613,21 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
 
         if (pass.Pass.Kind == PassKind.Compute)
         {
-            Keep(pass, GpuStage.Compute, await ProbeAsync(pass, GpuStage.Compute, [(PassBody(pass), pass.Name)]).ConfigureAwait(false));
+            Keep(pass, GpuStage.Compute, await ProbeAsync(pass, GpuStage.Compute, [(GetPassBody(pass), pass.Name)]).ConfigureAwait(false));
             return;
         }
 
         if (pass.Pass.Kind == PassKind.Fullscreen)
         {
             pass.SetBound(GpuStage.Vertex, none);
-            Keep(pass, GpuStage.Fragment, await ProbeAsync(pass, GpuStage.Fragment, [(PassBody(pass), pass.Name)]).ConfigureAwait(false));
+            Keep(pass, GpuStage.Fragment, await ProbeAsync(pass, GpuStage.Fragment, [(GetPassBody(pass), pass.Name)]).ConfigureAwait(false));
             return;
         }
 
         if (pass.Pass.Draw.Drawn == PassDrawn.Depth)
         {
             pass.SetBound(GpuStage.Fragment, none);
-            Keep(pass, GpuStage.Vertex, await ProbeAsync(pass, GpuStage.Vertex, [(PassBody(pass), pass.Name)]).ConfigureAwait(false));
+            Keep(pass, GpuStage.Vertex, await ProbeAsync(pass, GpuStage.Vertex, [(GetPassBody(pass), pass.Name)]).ConfigureAwait(false));
             return;
         }
 
@@ -690,10 +651,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         foreach (SurfaceKey variant in variants)
         {
             Result<(string Text, string Name)> source = await SurfaceTextAsync(pass, variant).ConfigureAwait(false);
-            if (!source.Ok)
-            {
-                return Result.Failure<StageBindings>(source.Error);
-            }
+            if (!source.Ok) return Result.Failure<StageBindings>(source.Error);
 
             sources.Add(source.Value);
         }
@@ -726,30 +684,27 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
 
     /// <summary>
     /// What a stage's shaders use of what <paramref name="visible"/> and <paramref name="writes"/> declare: each compiled
-    /// to SPIR-V with every name declared, what it bound read back, and the union resolved (<see cref="StageBindings.Of"/>)
+    /// to SPIR-V with every name declared, what it bound read back, and the union resolved (<see cref="StageBindings.TryCreate"/>)
     /// with whatever is <paramref name="also"/> bound.
     /// </summary>
     private async Task<Result<StageBindings>> ProbeAsync(IReadOnlyList<ResourceInfo> visible, IReadOnlyList<PassBinding> writes, GpuStage stage, IReadOnlyList<(string Text, string Name)> sources, IReadOnlyList<GpuShaderBinding>? also = null)
     {
-        string header = StageBindings.Header(stage, visible, writes, null);
+        string header = StageBindings.MakeHeader(stage, visible, writes, null);
         List<GpuShaderBinding> used = [.. also ?? []];
         foreach ((string text, string name) in sources)
         {
             Result<GpuShader> probe = await compiler.CompileAsync(header + text, name, stage, GpuShaderFormat.Spirv, stopping).ConfigureAwait(false);
-            if (!probe.Ok)
-            {
-                return Result.Failure<StageBindings>(probe.Error);
-            }
+            if (!probe.Ok) return Result.Failure<StageBindings>(probe.Error);
 
             used.AddRange(probe.Value.Bindings);
         }
 
-        return StageBindings.Of(used, visible, writes);
+        return StageBindings.TryCreate(used, visible, writes);
     }
 
     private Task<Result<StageBindings>> ProbeAsync(ListedPass pass, GpuStage stage, IReadOnlyList<(string Text, string Name)> sources, IReadOnlyList<GpuShaderBinding>? also = null)
     {
-        return ProbeAsync(pass.Visible, pass.WritesOf(stage), stage, sources, also);
+        return ProbeAsync(pass.Visible, pass.GetWrites(stage), stage, sources, also);
     }
 
     /// <summary>
@@ -758,30 +713,27 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// </summary>
     private async Task<Result<GpuShader>> CompileBoundAsync(IReadOnlyList<ResourceInfo> visible, IReadOnlyList<PassBinding> writes, Result<StageBindings> bound, GpuStage stage, string text, string name)
     {
-        if (!bound.Ok)
-        {
-            return Result.Failure<GpuShader>(bound.Error);
-        }
+        if (!bound.Ok) return Result.Failure<GpuShader>(bound.Error);
 
-        Result<GpuShader> compiled = await compiler.CompileAsync(StageBindings.Header(stage, visible, writes, bound.Value) + text, name, stage, gpu.ShaderFormat, stopping).ConfigureAwait(false);
+        Result<GpuShader> compiled = await compiler.CompileAsync(StageBindings.MakeHeader(stage, visible, writes, bound.Value) + text, name, stage, gpu.ShaderFormat, stopping).ConfigureAwait(false);
         return compiled.Ok ? bound.Value.Check(compiled.Value, name) : compiled;
     }
 
     private Task<Result<GpuShader>> CompileBoundAsync(ListedPass pass, GpuStage stage, string text, string name)
     {
-        StageBindings? bound = pass.Bound(stage);
-        return CompileBoundAsync(pass.Visible, pass.WritesOf(stage), bound is null ? Result.Failure<StageBindings>(pass.ProbeError) : Result.Success(bound), stage, text, name);
+        StageBindings? bound = pass.GetBindings(stage);
+        return CompileBoundAsync(pass.Visible, pass.GetWrites(stage), bound is null ? Result.Failure<StageBindings>(pass.ProbeError) : Result.Success(bound), stage, text, name);
     }
 
     /// <summary>
     /// The pass's own shader's text, named as its errors name it.
     /// </summary>
-    private static string PassBody(ListedPass pass)
+    private static string GetPassBody(ListedPass pass)
     {
         return $"#line 1 \"{pass.Name}\"\n{pass.Body}";
     }
 
-    private static string PiecesText(bool placeOnly)
+    private static string GetPiecesText(bool placeOnly)
     {
         return $"#define PIECES_PLACE_ONLY {(placeOnly ? 1 : 0)}\n#include \"{PiecesPath}\"\n";
     }
@@ -789,7 +741,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// <summary>
     /// The template a draw composes its surfaces into.
     /// </summary>
-    private static string TemplateOf(PassDrawn drawn, bool hasSurface)
+    private static string GetTemplate(PassDrawn drawn, bool hasSurface)
     {
         return drawn switch
         {

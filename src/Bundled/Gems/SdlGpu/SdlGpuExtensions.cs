@@ -16,7 +16,7 @@ internal static class SdlGpuExtensions
         /// SDL's name for the driver, what it is asked for by name; empty for <see cref="GpuDriver.Auto"/>, its own
         /// choice.
         /// </summary>
-        public string ToSdl() => driver switch
+        internal string ToSdl() => driver switch
         {
             GpuDriver.Vulkan => "vulkan",
             GpuDriver.Direct3d12 => "direct3d12",
@@ -30,7 +30,7 @@ internal static class SdlGpuExtensions
         /// <summary>
         /// The composition as SDL names it, whether or not the window supports it.
         /// </summary>
-        public SDL.GPUSwapchainComposition ToSdl() => composition switch
+        internal SDL.GPUSwapchainComposition ToSdl() => composition switch
         {
             Composition.SdrLinear => SDL.GPUSwapchainComposition.SdrLinear,
             Composition.Hdr10 => SDL.GPUSwapchainComposition.Hdr10St2084,
@@ -41,7 +41,7 @@ internal static class SdlGpuExtensions
 
     extension(GpuFormat format)
     {
-        public SDL.GPUTextureFormat ToSdl() => format switch
+        internal SDL.GPUTextureFormat ToSdl() => format switch
         {
             GpuFormat.Invalid => SDL.GPUTextureFormat.Invalid,
             GpuFormat.R8Unorm => SDL.GPUTextureFormat.R8Unorm,
@@ -68,7 +68,7 @@ internal static class SdlGpuExtensions
 
     extension(SDL.GPUTextureFormat format)
     {
-        public GpuFormat ToMagic() => format switch
+        internal GpuFormat ToMagic() => format switch
         {
             SDL.GPUTextureFormat.R8g8b8a8Unorm => GpuFormat.Rgba8Unorm,
             SDL.GPUTextureFormat.R8g8b8a8UnormSrgb => GpuFormat.Rgba8Srgb,
@@ -82,7 +82,7 @@ internal static class SdlGpuExtensions
 
     extension(GpuShaderFormat format)
     {
-        public uint ToSdl() => format switch
+        internal uint ToSdl() => format switch
         {
             GpuShaderFormat.Spirv => SDL.GpuShaderformatSpirv,
             GpuShaderFormat.Dxil => SDL.GpuShaderformatDxil,
@@ -96,7 +96,7 @@ internal static class SdlGpuExtensions
         /// <summary>
         /// Magic's usage bits are SDL's, in the same order.
         /// </summary>
-        public uint ToSdl() => (uint)usage;
+        internal uint ToSdl() => (uint)usage;
     }
 
     extension(GpuTextureUsage usage)
@@ -104,12 +104,12 @@ internal static class SdlGpuExtensions
         /// <summary>
         /// Magic's usage bits are SDL's, in the same order.
         /// </summary>
-        public uint ToSdl() => (uint)usage;
+        internal uint ToSdl() => (uint)usage;
     }
 
     extension(GpuTextureKind kind)
     {
-        public SDL.GPUTextureType ToSdl() => kind switch
+        internal SDL.GPUTextureType ToSdl() => kind switch
         {
             GpuTextureKind.Texture2D => SDL.GPUTextureType.Type2d,
             GpuTextureKind.Texture2DArray => SDL.GPUTextureType.Type2dArray,
@@ -121,14 +121,14 @@ internal static class SdlGpuExtensions
 
     extension(GpuFilter filter)
     {
-        public SDL.GPUFilter ToSdl() => filter switch
+        internal SDL.GPUFilter ToSdl() => filter switch
         {
             GpuFilter.Linear => SDL.GPUFilter.Linear,
             GpuFilter.Nearest => SDL.GPUFilter.Nearest,
             _ => throw new ArgumentOutOfRangeException(nameof(filter), filter, "There is no such filter."),
         };
 
-        public SDL.GPUSamplerMipmapMode ToSdlMipmaps() => filter switch
+        internal SDL.GPUSamplerMipmapMode ToSdlMipmaps() => filter switch
         {
             GpuFilter.Linear => SDL.GPUSamplerMipmapMode.Linear,
             GpuFilter.Nearest => SDL.GPUSamplerMipmapMode.Nearest,
@@ -138,7 +138,7 @@ internal static class SdlGpuExtensions
 
     extension(GpuWrap wrap)
     {
-        public SDL.GPUSamplerAddressMode ToSdl() => wrap switch
+        internal SDL.GPUSamplerAddressMode ToSdl() => wrap switch
         {
             GpuWrap.Clamp => SDL.GPUSamplerAddressMode.ClampToEdge,
             GpuWrap.Repeat => SDL.GPUSamplerAddressMode.Repeat,
@@ -149,7 +149,7 @@ internal static class SdlGpuExtensions
 
     extension(GpuCompare compare)
     {
-        public SDL.GPUCompareOp ToSdl() => compare switch
+        internal SDL.GPUCompareOp ToSdl() => compare switch
         {
             GpuCompare.Never => SDL.GPUCompareOp.Never,
             GpuCompare.Less => SDL.GPUCompareOp.Less,
@@ -165,7 +165,7 @@ internal static class SdlGpuExtensions
 
     extension(GpuVertexFormat format)
     {
-        public SDL.GPUVertexElementFormat ToSdl() => format switch
+        internal SDL.GPUVertexElementFormat ToSdl() => format switch
         {
             GpuVertexFormat.Float1 => SDL.GPUVertexElementFormat.Float,
             GpuVertexFormat.Float2 => SDL.GPUVertexElementFormat.Float2,
@@ -179,7 +179,7 @@ internal static class SdlGpuExtensions
 
     extension(GpuCull cull)
     {
-        public SDL.GPUCullMode ToSdl() => cull switch
+        internal SDL.GPUCullMode ToSdl() => cull switch
         {
             GpuCull.None => SDL.GPUCullMode.None,
             GpuCull.Back => SDL.GPUCullMode.Back,
@@ -190,7 +190,7 @@ internal static class SdlGpuExtensions
 
     extension(GpuContents contents)
     {
-        public SDL.GPULoadOp ToSdl() => contents switch
+        internal SDL.GPULoadOp ToSdl() => contents switch
         {
             GpuContents.Keep => SDL.GPULoadOp.Load,
             GpuContents.Clear => SDL.GPULoadOp.Clear,
@@ -201,13 +201,13 @@ internal static class SdlGpuExtensions
 
     extension(GpuBlend blend)
     {
-        public SDL.GPUColorTargetBlendState ToSdl() => blend switch
+        internal SDL.GPUColorTargetBlendState ToSdl() => blend switch
         {
             GpuBlend.None => default,
-            GpuBlend.Alpha => Blending(SDL.GPUBlendFactor.SrcAlpha, SDL.GPUBlendFactor.OneMinusSrcAlpha, SDL.GPUBlendOp.Add),
-            GpuBlend.Premultiplied => Blending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.OneMinusSrcAlpha, SDL.GPUBlendOp.Add),
-            GpuBlend.Add => Blending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.One, SDL.GPUBlendOp.Add),
-            GpuBlend.Max => Blending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.One, SDL.GPUBlendOp.Max),
+            GpuBlend.Alpha => MakeBlending(SDL.GPUBlendFactor.SrcAlpha, SDL.GPUBlendFactor.OneMinusSrcAlpha, SDL.GPUBlendOp.Add),
+            GpuBlend.Premultiplied => MakeBlending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.OneMinusSrcAlpha, SDL.GPUBlendOp.Add),
+            GpuBlend.Add => MakeBlending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.One, SDL.GPUBlendOp.Add),
+            GpuBlend.Max => MakeBlending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.One, SDL.GPUBlendOp.Max),
             _ => throw new ArgumentOutOfRangeException(nameof(blend), blend, "There is no such blend."),
         };
     }
@@ -216,7 +216,7 @@ internal static class SdlGpuExtensions
     /// Colour blends <paramref name="source"/> and <paramref name="destination"/> with <paramref name="operation"/>;
     /// alpha does the same, except that straight alpha keeps its own: one of src, one minus src of dst.
     /// </summary>
-    private static SDL.GPUColorTargetBlendState Blending(SDL.GPUBlendFactor source, SDL.GPUBlendFactor destination, SDL.GPUBlendOp operation) => new()
+    private static SDL.GPUColorTargetBlendState MakeBlending(SDL.GPUBlendFactor source, SDL.GPUBlendFactor destination, SDL.GPUBlendOp operation) => new()
     {
         EnableBlend = true,
         SrcColorBlendfactor = source,

@@ -12,7 +12,7 @@ internal static class SdlControlExtensions
 {
     extension(SDL.Scancode scancode)
     {
-        public Control? Control => scancode switch
+        internal Control? Control => scancode switch
         {
             SDL.Scancode.A => Control.KeyA,
             SDL.Scancode.B => Control.KeyB,
@@ -139,7 +139,7 @@ internal static class SdlControlExtensions
 
     extension(SDL.GamepadButton button)
     {
-        public Control? Control => button switch
+        internal Control? Control => button switch
         {
             SDL.GamepadButton.South => Control.GamepadSouth,
             SDL.GamepadButton.East => Control.GamepadEast,
@@ -174,7 +174,7 @@ internal static class SdlControlExtensions
     /// <summary>
     /// The control a mouse button event's button, SDL's button number, is.
     /// </summary>
-    public static Control? MouseControl(byte button) => button switch
+    internal static Control? ToMouseControl(byte button) => button switch
     {
         SDL.ButtonLeft => Control.MouseLeft,
         SDL.ButtonMiddle => Control.MouseMiddle,

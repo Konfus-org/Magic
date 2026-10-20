@@ -20,7 +20,7 @@ internal sealed class SettingsDocs(IFileSystem files)
     /// <summary>
     /// <paramref name="property"/>'s summary as plain text; empty when it has none.
     /// </summary>
-    public string SummaryOf(PropertyInfo property)
+    internal string GetSummary(PropertyInfo property)
     {
         Type declaring = property.DeclaringType ?? throw new ArgumentException($"{property.Name} belongs to no type.", nameof(property));
         if (!_summaries.TryGetValue(declaring.Assembly, out Dictionary<string, string>? summaries))
@@ -44,10 +44,7 @@ internal sealed class SettingsDocs(IFileSystem files)
             return;
         }
 
-        if (node is not XElement element)
-        {
-            return;
-        }
+        if (node is not XElement element) return;
 
         if (element.Attribute("cref") is { } cref)
         {
@@ -74,16 +71,10 @@ internal sealed class SettingsDocs(IFileSystem files)
     {
         Dictionary<string, string> summaries = new(StringComparer.Ordinal);
         string path = Path.ChangeExtension(assembly.Location, ".xml");
-        if (!files.FileExists(path))
-        {
-            return summaries;
-        }
+        if (!files.FileExists(path)) return summaries;
 
         Result<byte[]> bytes = files.Read(path);
-        if (!bytes.Ok)
-        {
-            return summaries;
-        }
+        if (!bytes.Ok) return summaries;
 
         XDocument document;
         try
@@ -98,10 +89,7 @@ internal sealed class SettingsDocs(IFileSystem files)
         StringBuilder text = new();
         foreach (XElement member in document.Descendants("member"))
         {
-            if (member.Attribute("name") is not { } id || member.Element("summary") is not { } summary)
-            {
-                continue;
-            }
+            if (member.Attribute("name") is not { } id || member.Element("summary") is not { } summary) continue;
 
             text.Clear();
             AppendText(text, summary);

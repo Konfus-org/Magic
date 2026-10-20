@@ -14,37 +14,25 @@ internal static class ProjectFile
     /// <summary>
     /// Reads the project at <paramref name="path"/>: a .magic file, or the folder holding exactly one.
     /// </summary>
-    public static Result<Project> Open(IFileSystem files, string path)
+    internal static Result<Project> Open(IFileSystem files, string path)
     {
         Result<string> found = Find(files, path);
-        if (!found.Ok)
-        {
-            return Result.Failure<Project>(found.Error);
-        }
+        if (!found.Ok) return Result.Failure<Project>(found.Error);
 
         Result<byte[]> bytes = files.Read(found.Value);
-        if (!bytes.Ok)
-        {
-            return Result.Failure<Project>(bytes.Error);
-        }
+        if (!bytes.Ok) return Result.Failure<Project>(bytes.Error);
 
         Result<Project> read = Json.Read<Project>(bytes.Value);
-        if (!read.Ok)
-        {
-            return Result.Failure<Project>($"{found.Value} is not a valid project: {read.Error}");
-        }
+        if (!read.Ok) return Result.Failure<Project>($"{found.Value} is not a valid project: {read.Error}");
 
         Project project = read.Value;
-        project.Root = files.Parent(found.Value);
+        project.Root = files.GetParent(found.Value);
         return Result.Success(project);
     }
 
     private static Result<string> Find(IFileSystem files, string path)
     {
-        if (files.FileExists(path))
-        {
-            return Result.Success(path);
-        }
+        if (files.FileExists(path)) return Result.Success(path);
 
         if (!files.FolderExists(path))
         {

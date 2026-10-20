@@ -82,10 +82,7 @@ public static class Debugging
     /// </summary>
     public static void Verbose(string message, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
     {
-        if (IsVerbose)
-        {
-            Write(LogLevel.Verbose, message, member, file, line);
-        }
+        if (IsVerbose) Write(LogLevel.Verbose, message, member, file, line);
     }
 
     public static void Info(string message, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
@@ -128,10 +125,7 @@ public static class Debugging
     /// </summary>
     public static void Assert([DoesNotReturnIf(false)] bool condition, string message = "", [CallerArgumentExpression(nameof(condition))] string expression = "", [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
     {
-        if (!condition)
-        {
-            Crash(Stamp(LogLevel.Critical, Failed(expression, message), member, file, line));
-        }
+        if (!condition) Crash(Stamp(LogLevel.Critical, FormatFailed(expression, message), member, file, line));
     }
 
     /// <summary>
@@ -145,10 +139,7 @@ public static class Debugging
         void AddSink()
         {
             _sinks.Add(sink);
-            if (_startup is not { } startup)
-            {
-                return;
-            }
+            if (_startup is not { } startup) return;
 
             _startup = null;
             foreach (LogLine line in startup)
@@ -168,10 +159,7 @@ public static class Debugging
         TaskCompletionSource removed = new();
 
         // The printing task has finished, at exit: the sink gets nothing more.
-        if (!_entries.Writer.TryWrite(new Entry(default, RemoveSink)))
-        {
-            return;
-        }
+        if (!_entries.Writer.TryWrite(new Entry(default, RemoveSink))) return;
 
         if (!removed.Task.Wait(TimeSpan.FromSeconds(CatchUpSeconds)))
         {
@@ -204,7 +192,7 @@ public static class Debugging
         _entries.Writer.TryWrite(new Entry(Stamp(level, message, member, file, line), null));
     }
 
-    private static string Failed(string expression, string message)
+    private static string FormatFailed(string expression, string message)
     {
         return message.Length == 0 ? $"Assert failed: {expression}" : $"Assert failed: {expression}: {message}";
     }
@@ -228,19 +216,13 @@ public static class Debugging
                 if (_startup is { } startup)
                 {
                     startup.Enqueue(entry.Line);
-                    if (startup.Count > StartupLines)
-                    {
-                        startup.Dequeue();
-                    }
+                    if (startup.Count > StartupLines) startup.Dequeue();
                 }
 
                 WriteSinks(entry.Line);
             }
 
-            if (Volatile.Read(ref _crashing) != 0)
-            {
-                return;
-            }
+            if (Volatile.Read(ref _crashing) != 0) return;
         }
     }
 
@@ -272,20 +254,14 @@ public static class Debugging
     private static void Crash(in LogLine critical)
     {
         // Only the first crash writes; another thread crashing at the same time waits for the process to end.
-        if (Interlocked.Exchange(ref _crashing, 1) == 1)
-        {
-            Thread.Sleep(Timeout.Infinite);
-        }
+        if (Interlocked.Exchange(ref _crashing, 1) == 1) Thread.Sleep(Timeout.Infinite);
 
         // Nothing more is queued, and whatever the printing task has not taken yet goes to the crash file.
         _entries.Writer.TryComplete();
         StringBuilder text = new();
         while (_entries.Reader.TryRead(out Entry entry))
         {
-            if (entry.Change is null)
-            {
-                text.Append(entry.Line.ToString()).Append('\n');
-            }
+            if (entry.Change is null) text.Append(entry.Line.ToString()).Append('\n');
         }
 
         text.Append(critical.ToString()).Append('\n').Append(new StackTrace(1, true).ToString());
@@ -296,10 +272,7 @@ public static class Debugging
 
         // A developer debugging any build stops here, at the crash, before the process ends. With no debugger
         // attached nothing waits, so a run nobody watches still ends.
-        if (Debugger.IsAttached)
-        {
-            Debugger.Break();
-        }
+        if (Debugger.IsAttached) Debugger.Break();
 
         Environment.FailFast(critical.Message);
     }

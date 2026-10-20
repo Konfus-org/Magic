@@ -70,7 +70,7 @@ public sealed class GpuComputePassTests
 
         pass.Textures(textures);
 
-        Assert.Equal(textures, commands.SampledOf(commands.Commands[^1]).ToArray());
+        Assert.Equal(textures, commands.GetSampled(commands.Commands[^1]).ToArray());
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class GpuComputePassTests
 
         pass.Constants(0x01020304u);
 
-        Assert.Equal(BitConverter.GetBytes(0x01020304u), commands.BytesOf(commands.Commands[^1]).ToArray());
+        Assert.Equal(BitConverter.GetBytes(0x01020304u), commands.GetBytes(commands.Commands[^1]).ToArray());
     }
 
     [Fact]

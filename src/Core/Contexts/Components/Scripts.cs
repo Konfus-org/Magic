@@ -33,25 +33,16 @@ public struct Scripts : IComponent, IEquatable<Scripts>
         int count = 0;
         foreach (Handle<Script> held in this)
         {
-            if (held == Handle<Script>.None)
-            {
-                continue;
-            }
+            if (held == Handle<Script>.None) continue;
 
-            if (!other.Has(held))
-            {
-                return false;
-            }
+            if (!other.Has(held)) return false;
 
             count++;
         }
 
         foreach (Handle<Script> held in other)
         {
-            if (held != Handle<Script>.None)
-            {
-                count--;
-            }
+            if (held != Handle<Script>.None) count--;
         }
 
         return count == 0;
@@ -72,17 +63,11 @@ public struct Scripts : IComponent, IEquatable<Scripts>
 
     public readonly bool Has(Handle<Script> script)
     {
-        if (script == Handle<Script>.None)
-        {
-            return false;
-        }
+        if (script == Handle<Script>.None) return false;
 
         foreach (Handle<Script> held in this)
         {
-            if (held == script)
-            {
-                return true;
-            }
+            if (held == script) return true;
         }
 
         return false;
@@ -93,10 +78,7 @@ public struct Scripts : IComponent, IEquatable<Scripts>
     /// </summary>
     public bool Add(Handle<Script> script)
     {
-        if (script == Handle<Script>.None || Has(script))
-        {
-            return false;
-        }
+        if (script == Handle<Script>.None || Has(script)) return false;
 
         for (int i = 0; i < Capacity; i++)
         {
@@ -115,10 +97,7 @@ public struct Scripts : IComponent, IEquatable<Scripts>
     /// </summary>
     public bool Remove(Handle<Script> script)
     {
-        if (script == Handle<Script>.None)
-        {
-            return false;
-        }
+        if (script == Handle<Script>.None) return false;
 
         for (int i = 0; i < Capacity; i++)
         {

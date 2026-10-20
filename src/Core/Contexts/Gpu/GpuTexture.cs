@@ -3,7 +3,7 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A texture <see cref="IGpu.CreateTexture"/> made, or a window's render target (<see cref="IGpu.WindowTarget"/>).
+/// A texture <see cref="IGpu.CreateTexture"/> made, or a window's render target (<see cref="IGpu.GetWindowTarget"/>).
 /// </summary>
 public readonly record struct GpuTexture(uint Id)
 {

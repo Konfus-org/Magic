@@ -16,15 +16,9 @@ public static class CurveExtensions
         public float At(float place)
         {
             IReadOnlyList<CurveKey> keys = curve.Keys;
-            if (keys.Count == 0)
-            {
-                return 0;
-            }
+            if (keys.Count == 0) return 0;
 
-            if (place <= keys[0].At)
-            {
-                return keys[0].Value;
-            }
+            if (place <= keys[0].At) return keys[0].Value;
 
             for (int i = 1; i < keys.Count; i++)
             {

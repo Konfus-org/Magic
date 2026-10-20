@@ -21,12 +21,12 @@ internal sealed class MeshFields : IDisposable
     /// <summary>
     /// Texels a side of a model's field.
     /// </summary>
-    public const int Resolution = 32;
+    internal const int Resolution = 32;
 
     /// <summary>
     /// Raised whenever how a field is made or written changes, so the cache's older ones are made again.
     /// </summary>
-    public const int CacheVersion = 1;
+    internal const int CacheVersion = 1;
 
     /// <summary>
     /// Models whose distance fields are held at once, 64 KB each.
@@ -50,7 +50,7 @@ internal sealed class MeshFields : IDisposable
     private readonly Dictionary<Handle<Model>, int> _byModel = [];
     private readonly Stack<int> _free = new();
 
-    public MeshFields(IGpu gpu, Assets assets, Caches caches)
+    internal MeshFields(IGpu gpu, Assets assets, Caches caches)
     {
         _gpu = gpu;
         _assets = assets;
@@ -75,12 +75,12 @@ internal sealed class MeshFields : IDisposable
     /// <summary>
     /// Every field, a brick of <see cref="Resolution"/> texels a side each, in rows of <see cref="Across"/> both ways.
     /// </summary>
-    public GpuTexture Atlas { get; }
+    internal GpuTexture Atlas { get; }
 
     /// <summary>
     /// Each brick's box in its model's space and its corner in the atlas, by slot.
     /// </summary>
-    public GpuArray<GpuMeshField> Table { get; }
+    internal GpuArray<GpuMeshField> Table { get; }
 
     /// <summary>
     /// <paramref name="model"/>'s field, made from <paramref name="meshes"/>, from the cache, or made and kept there; none
@@ -88,14 +88,14 @@ internal sealed class MeshFields : IDisposable
     /// triangles it is made from. From any thread: all of it runs on a worker, never the thread that asks, which may be
     /// the render thread.
     /// </summary>
-    public Task<ModelField?> ReadOrMakeAsync(Handle<Model> model, IReadOnlyList<Mesh> meshes, CancellationToken cancel)
+    internal Task<ModelField?> ReadOrMakeAsync(Handle<Model> model, IReadOnlyList<Mesh> meshes, CancellationToken cancel)
     {
         return Task.Run(() => ReadOrMakeOnWorkerAsync(model, meshes, cancel), cancel);
     }
 
     private async Task<ModelField?> ReadOrMakeOnWorkerAsync(Handle<Model> model, IReadOnlyList<Mesh> meshes, CancellationToken cancel)
     {
-        ulong version = _assets.Version(model);
+        ulong version = _assets.GetVersion(model);
         version = version != 0 ? version : HashOf(meshes);
         if (await _caches.ReadAsync<ModelField>(model.Id, version, cancel).ConfigureAwait(false) is { Ok: true } cached)
         {
@@ -103,10 +103,7 @@ internal sealed class MeshFields : IDisposable
         }
 
         ModelField? made = Make(meshes);
-        if (made is not null)
-        {
-            await _caches.WriteAsync(model.Id, version, made, cancel).ConfigureAwait(false);
-        }
+        if (made is not null) await _caches.WriteAsync(model.Id, version, made, cancel).ConfigureAwait(false);
 
         return made;
     }
@@ -131,13 +128,10 @@ internal sealed class MeshFields : IDisposable
     /// Packs <paramref name="field"/> as <paramref name="model"/>'s, in place of the one it had: the slot its row names, 0
     /// for none when it has none or the atlas is full.
     /// </summary>
-    public uint Take(Handle<Model> model, ModelField? field)
+    internal uint Take(Handle<Model> model, ModelField? field)
     {
         Release(model);
-        if (field is null || !_free.TryPop(out int slot))
-        {
-            return 0;
-        }
+        if (field is null || !_free.TryPop(out int slot)) return 0;
 
         _byModel[model] = slot;
         uint x = (uint)(slot % Across * Resolution);
@@ -151,7 +145,7 @@ internal sealed class MeshFields : IDisposable
     /// <summary>
     /// Lets <paramref name="model"/>'s field go: its model left the pool.
     /// </summary>
-    public void Release(Handle<Model> model)
+    internal void Release(Handle<Model> model)
     {
         if (_byModel.Remove(model, out int slot))
         {
@@ -166,11 +160,8 @@ internal sealed class MeshFields : IDisposable
     /// </summary>
     private static ModelField? Make(IReadOnlyList<Mesh> meshes)
     {
-        Vector3[] corners = Corners(meshes);
-        if (corners.Length == 0)
-        {
-            return null;
-        }
+        Vector3[] corners = GetCorners(meshes);
+        if (corners.Length == 0) return null;
 
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -196,29 +187,7 @@ internal sealed class MeshFields : IDisposable
         Array.Fill(nearest, -1);
         for (int triangle = 0; triangle < corners.Length / 3; triangle++)
         {
-            Vector3 a = corners[triangle * 3];
-            Vector3 b = corners[(triangle * 3) + 1];
-            Vector3 c = corners[(triangle * 3) + 2];
-            (int x0, int x1) = Span(MathF.Min(a.X, MathF.Min(b.X, c.X)) - band, MathF.Max(a.X, MathF.Max(b.X, c.X)) + band, min.X, step.X);
-            (int y0, int y1) = Span(MathF.Min(a.Y, MathF.Min(b.Y, c.Y)) - band, MathF.Max(a.Y, MathF.Max(b.Y, c.Y)) + band, min.Y, step.Y);
-            (int z0, int z1) = Span(MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) - band, MathF.Max(a.Z, MathF.Max(b.Z, c.Z)) + band, min.Z, step.Z);
-            for (int z = z0; z <= z1; z++)
-            {
-                for (int y = y0; y <= y1; y++)
-                {
-                    for (int x = x0; x <= x1; x++)
-                    {
-                        Vector3 point = min + (new Vector3(x, y, z) * step);
-                        float distance = Vector3.DistanceSquared(point, ClosestOnTriangle(point, a, b, c));
-                        int index = x + (Resolution * (y + (Resolution * z)));
-                        if (distance < squared[index])
-                        {
-                            squared[index] = distance;
-                            nearest[index] = triangle;
-                        }
-                    }
-                }
-            }
+            RecordNearest(corners, triangle, min, step, band, squared, nearest);
         }
 
         // A texel a surface passes through is a wall the flood does not cross: every one within half its diagonal.
@@ -242,11 +211,40 @@ internal sealed class MeshFields : IDisposable
 
         return new ModelField(min, size, distances);
     }
+    /// <summary>
+    /// The triangle as the nearest surface of every texel within <paramref name="band"/> of it where it is nearer than
+    /// what the texel had: the squared distance, and which triangle.
+    /// </summary>
+    private static void RecordNearest(ReadOnlySpan<Vector3> corners, int triangle, Vector3 min, Vector3 step, float band, float[] squared, int[] nearest)
+    {
+        Vector3 a = corners[triangle * 3];
+        Vector3 b = corners[(triangle * 3) + 1];
+        Vector3 c = corners[(triangle * 3) + 2];
+        (int x0, int x1) = Span(MathF.Min(a.X, MathF.Min(b.X, c.X)) - band, MathF.Max(a.X, MathF.Max(b.X, c.X)) + band, min.X, step.X);
+        (int y0, int y1) = Span(MathF.Min(a.Y, MathF.Min(b.Y, c.Y)) - band, MathF.Max(a.Y, MathF.Max(b.Y, c.Y)) + band, min.Y, step.Y);
+        (int z0, int z1) = Span(MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) - band, MathF.Max(a.Z, MathF.Max(b.Z, c.Z)) + band, min.Z, step.Z);
+        for (int z = z0; z <= z1; z++)
+        {
+            for (int y = y0; y <= y1; y++)
+            {
+                for (int x = x0; x <= x1; x++)
+                {
+                    Vector3 point = min + (new Vector3(x, y, z) * step);
+                    float distance = Vector3.DistanceSquared(point, FindClosestOnTriangle(point, a, b, c));
+                    int index = x + (Resolution * (y + (Resolution * z)));
+                    if (distance >= squared[index]) continue;
+
+                    squared[index] = distance;
+                    nearest[index] = triangle;
+                }
+            }
+        }
+    }
 
     /// <summary>
     /// Every triangle of <paramref name="meshes"/>, three corners each.
     /// </summary>
-    private static Vector3[] Corners(IReadOnlyList<Mesh> meshes)
+    private static Vector3[] GetCorners(IReadOnlyList<Mesh> meshes)
     {
         int count = 0;
         foreach (Mesh mesh in meshes)
@@ -307,35 +305,17 @@ internal sealed class MeshFields : IDisposable
             int y = index / Resolution % Resolution;
             int z = index / (Resolution * Resolution);
             int found = 0;
-            if (x > 0)
-            {
-                neighbours[found++] = index - 1;
-            }
+            if (x > 0) neighbours[found++] = index - 1;
 
-            if (x < Resolution - 1)
-            {
-                neighbours[found++] = index + 1;
-            }
+            if (x < Resolution - 1) neighbours[found++] = index + 1;
 
-            if (y > 0)
-            {
-                neighbours[found++] = index - Resolution;
-            }
+            if (y > 0) neighbours[found++] = index - Resolution;
 
-            if (y < Resolution - 1)
-            {
-                neighbours[found++] = index + Resolution;
-            }
+            if (y < Resolution - 1) neighbours[found++] = index + Resolution;
 
-            if (z > 0)
-            {
-                neighbours[found++] = index - (Resolution * Resolution);
-            }
+            if (z > 0) neighbours[found++] = index - (Resolution * Resolution);
 
-            if (z < Resolution - 1)
-            {
-                neighbours[found++] = index + (Resolution * Resolution);
-            }
+            if (z < Resolution - 1) neighbours[found++] = index + (Resolution * Resolution);
 
             foreach (int neighbour in neighbours[..found])
             {
@@ -356,73 +336,49 @@ internal sealed class MeshFields : IDisposable
     /// </summary>
     private static bool IsInFront(Vector3 point, Vector3[] corners, int triangle)
     {
-        if (triangle < 0)
-        {
-            return true;
-        }
+        if (triangle < 0) return true;
 
         Vector3 a = corners[triangle * 3];
         Vector3 b = corners[(triangle * 3) + 1];
         Vector3 c = corners[(triangle * 3) + 2];
         Vector3 facing = Vector3.Cross(b - a, c - a);
-        return Vector3.Dot(point - ClosestOnTriangle(point, a, b, c), facing) >= 0;
+        return Vector3.Dot(point - FindClosestOnTriangle(point, a, b, c), facing) >= 0;
     }
 
     /// <summary>
     /// The point of triangle <paramref name="a"/>, <paramref name="b"/>, <paramref name="c"/> nearest
     /// <paramref name="p"/> (Ericson 2004, "Real-Time Collision Detection", 5.1.5).
     /// </summary>
-    private static Vector3 ClosestOnTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
+    private static Vector3 FindClosestOnTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
     {
         Vector3 ab = b - a;
         Vector3 ac = c - a;
         Vector3 ap = p - a;
         float d1 = Vector3.Dot(ab, ap);
         float d2 = Vector3.Dot(ac, ap);
-        if (d1 <= 0 && d2 <= 0)
-        {
-            return a;
-        }
+        if (d1 <= 0 && d2 <= 0) return a;
 
         Vector3 bp = p - b;
         float d3 = Vector3.Dot(ab, bp);
         float d4 = Vector3.Dot(ac, bp);
-        if (d3 >= 0 && d4 <= d3)
-        {
-            return b;
-        }
+        if (d3 >= 0 && d4 <= d3) return b;
 
         float vc = (d1 * d4) - (d3 * d2);
-        if (vc <= 0 && d1 >= 0 && d3 <= 0)
-        {
-            return a + (ab * (d1 / (d1 - d3)));
-        }
+        if (vc <= 0 && d1 >= 0 && d3 <= 0) return a + (ab * (d1 / (d1 - d3)));
 
         Vector3 cp = p - c;
         float d5 = Vector3.Dot(ab, cp);
         float d6 = Vector3.Dot(ac, cp);
-        if (d6 >= 0 && d5 <= d6)
-        {
-            return c;
-        }
+        if (d6 >= 0 && d5 <= d6) return c;
 
         float vb = (d5 * d2) - (d1 * d6);
-        if (vb <= 0 && d2 >= 0 && d6 <= 0)
-        {
-            return a + (ac * (d2 / (d2 - d6)));
-        }
+        if (vb <= 0 && d2 >= 0 && d6 <= 0) return a + (ac * (d2 / (d2 - d6)));
 
         float va = (d3 * d6) - (d5 * d4);
-        if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0)
-        {
-            return b + ((c - b) * ((d4 - d3) / (d4 - d3 + (d5 - d6))));
-        }
+        if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) return b + ((c - b) * ((d4 - d3) / (d4 - d3 + (d5 - d6))));
 
         float denominator = va + vb + vc;
-        if (MathF.Abs(denominator) < 1e-20f)
-        {
-            return a;
-        }
+        if (MathF.Abs(denominator) < 1e-20f) return a;
 
         float v = vb / denominator;
         float w = vc / denominator;

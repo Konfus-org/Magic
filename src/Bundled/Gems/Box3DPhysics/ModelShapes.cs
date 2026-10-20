@@ -47,7 +47,7 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
     /// <summary>
     /// Takes in the shapes workers fitted since the last step; freed instead once the shapes have been let go.
     /// </summary>
-    public void TakeArrived()
+    internal void TakeArrived()
     {
         while (_fitted.Reader.TryRead(out (Handle<Model> Model, ModelShape Shape) fitted))
         {
@@ -67,17 +67,14 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
     /// at least 1, which a shape still loading is taken to reach: at an entity's scale, a bound on how far its shape
     /// could reach, whatever its model, that tells from the transform alone whether it could be near.
     /// </summary>
-    public float Longest { get; private set; } = 1;
+    internal float Longest { get; private set; } = 1;
 
     /// <summary>
     /// The shape of <paramref name="model"/>, or null while it loads.
     /// </summary>
-    public ModelShape? Get(Handle<Model> model)
+    internal ModelShape? Get(Handle<Model> model)
     {
-        if (model == Handle<Model>.None)
-        {
-            return _unitCube;
-        }
+        if (model == Handle<Model>.None) return _unitCube;
 
         if (!_shapes.TryGetValue(model, out ModelShape? shape))
         {
@@ -115,21 +112,21 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
 /// </summary>
 internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
 {
-    public Vector3 Min { get; } = min;
+    internal Vector3 Min { get; } = min;
 
-    public Vector3 Max { get; } = max;
+    internal Vector3 Max { get; } = max;
 
     /// <summary>
     /// How far the shape reaches from the model's origin at scale 1, at most: half the bounds' diagonal, plus how far
     /// off the origin their centre is. At a scale it reaches at most this times the scale's length, as each axis is
     /// stretched by no more than that.
     /// </summary>
-    public float Reach { get; } = ((max - min).Length() + (max + min).Length()) * 0.5f;
+    internal float Reach { get; } = ((max - min).Length() + (max + min).Length()) * 0.5f;
 
     /// <summary>
     /// The model's triangles, shared by every mesh shape made from it; null for a model with none, and once freed.
     /// </summary>
-    public B3.MeshData* Mesh { get; private set; }
+    internal B3.MeshData* Mesh { get; private set; }
 
     /// <summary>
     /// The shape fitted to <paramref name="model"/>: its bounds to every mesh's vertices, and one Box3D mesh of all their
@@ -137,7 +134,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
     /// the model winds them, which Box3D takes as their front, the side things rest on. Null for a model with no
     /// triangles, which takes the unit cube's.
     /// </summary>
-    public static ModelShape? Of(Model model)
+    internal static ModelShape? Of(Model model)
     {
         int vertexCount = 0;
         int indexCount = 0;
@@ -147,10 +144,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
             indexCount += mesh.Indices.Length;
         }
 
-        if (vertexCount == 0 || indexCount < 3)
-        {
-            return null;
-        }
+        if (vertexCount == 0 || indexCount < 3) return null;
 
         B3.Vec3[] vertices = new B3.Vec3[vertexCount];
         int[] indices = new int[indexCount];
@@ -192,7 +186,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
         }
     }
 
-    public void Free()
+    internal void Free()
     {
         if (Mesh is not null)
         {

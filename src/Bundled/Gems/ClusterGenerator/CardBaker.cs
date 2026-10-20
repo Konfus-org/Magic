@@ -32,19 +32,14 @@ internal static class CardBaker
     /// (material uv in red and green, how far behind the middle in blue, cover in alpha) and the normals (xyz * 0.5 + 0.5,
     /// cover in alpha).
     /// </summary>
-    public static (Vector3 Centre, float Half, byte[] Surface, byte[] Normals) Bake(Mesh mesh)
+    internal static (Vector3 Centre, float Half, byte[] Surface, byte[] Normals) Bake(Mesh mesh)
     {
         ReadOnlySpan<Vertex> vertices = mesh.Vertices.Span;
         ReadOnlySpan<uint> indices = mesh.Indices.Span;
-        Vector4 sphere = ClusterBuilder.SphereAround(vertices);
-        Vector3 centre = new(sphere.X, sphere.Y, sphere.Z);
-        float half = MathF.Max(sphere.W, 1e-4f);
+        Vector4 sphere = ClusterBuilder.ComputeSphere(vertices);
+        Raster raster = new(new Vector3(sphere.X, sphere.Y, sphere.Z), MathF.Max(sphere.W, 1e-4f));
         byte[] surface = new byte[Card.Size * Card.Size * 4];
         byte[] normals = new byte[Card.Size * Card.Size * 4];
-        int size = CellSize * Samples;
-        float[] depths = new float[size * size];
-        Vector2[] uvs = new Vector2[size * size];
-        Vector3[] faces = new Vector3[size * size];
         for (int view = 0; view < Card.Views; view++)
         {
             // Seen from this side, looking back at the centre: right is +X when it looks along +Z, and up is +Y.
@@ -52,127 +47,26 @@ internal static class CardBaker
             Vector3 side = new(MathF.Sin(turn), 0, MathF.Cos(turn));
             Vector3 forward = -side;
             Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, forward));
-            Array.Fill(depths, float.PositiveInfinity);
+            raster.Clear();
             for (int t = 0; t + 2 < indices.Length; t += 3)
             {
-                Draw(vertices[(int)indices[t]], vertices[(int)indices[t + 1]], vertices[(int)indices[t + 2]], right, forward);
+                raster.Draw(vertices[(int)indices[t]], vertices[(int)indices[t + 1]], vertices[(int)indices[t + 2]], right, forward);
             }
 
-            Resolve(view % Card.Columns * CellSize, view / Card.Columns * CellSize);
+            raster.Resolve(view % Card.Columns * CellSize, view / Card.Columns * CellSize, surface, normals);
         }
 
         Dilate(surface);
         Dilate(normals);
-        return (centre, half, surface, normals);
-
-        // The triangle, seen from the side right and forward give, into the samples it covers where it is the nearest.
-        void Draw(in Vertex a, in Vertex b, in Vertex c, Vector3 right, Vector3 forward)
-        {
-            Vector3 pa = Project(a.Position, right, forward);
-            Vector3 pb = Project(b.Position, right, forward);
-            Vector3 pc = Project(c.Position, right, forward);
-            float area = Edge(pa, pb, pc);
-            if (MathF.Abs(area) < 1e-12f)
-            {
-                return;
-            }
-
-            int fromX = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.X, MathF.Min(pb.X, pc.X))));
-            int toX = Math.Min(size - 1, (int)MathF.Ceiling(MathF.Max(pa.X, MathF.Max(pb.X, pc.X))));
-            int fromY = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.Y, MathF.Min(pb.Y, pc.Y))));
-            int toY = Math.Min(size - 1, (int)MathF.Ceiling(MathF.Max(pa.Y, MathF.Max(pb.Y, pc.Y))));
-            for (int y = fromY; y <= toY; y++)
-            {
-                for (int x = fromX; x <= toX; x++)
-                {
-                    Vector3 point = new(x + 0.5f, y + 0.5f, 0);
-                    float wa = Edge(pb, pc, point) / area;
-                    float wb = Edge(pc, pa, point) / area;
-                    float wc = 1 - wa - wb;
-                    if (wa < 0 || wb < 0 || wc < 0)
-                    {
-                        continue;
-                    }
-
-                    float depth = (wa * pa.Z) + (wb * pb.Z) + (wc * pc.Z);
-                    int at = (y * size) + x;
-                    if (depth >= depths[at])
-                    {
-                        continue;
-                    }
-
-                    depths[at] = depth;
-                    uvs[at] = (wa * a.Uv) + (wb * b.Uv) + (wc * c.Uv);
-                    faces[at] = (wa * a.Normal) + (wb * b.Normal) + (wc * c.Normal);
-                }
-            }
-        }
-
-        Vector3 Project(Vector3 position, Vector3 right, Vector3 forward)
-        {
-            Vector3 local = position - centre;
-            float x = Vector3.Dot(local, right) / half;
-            float y = local.Y / half;
-            return new Vector3(((x * 0.5f) + 0.5f) * size, (0.5f - (y * 0.5f)) * size, Vector3.Dot(local, forward));
-        }
-
-        // Each texel of the view's cell from its samples: the cover is the share of them the mesh is in, the uv, the
-        // normal and the depth their mean over those, the depth in half sides behind the middle, -1 to 1.
-        void Resolve(int cellX, int cellY)
-        {
-            for (int y = 0; y < CellSize; y++)
-            {
-                for (int x = 0; x < CellSize; x++)
-                {
-                    int covered = 0;
-                    Vector2 uv = Vector2.Zero;
-                    Vector3 normal = Vector3.Zero;
-                    float depth = 0;
-                    for (int sy = 0; sy < Samples; sy++)
-                    {
-                        for (int sx = 0; sx < Samples; sx++)
-                        {
-                            int at = (((y * Samples) + sy) * size) + (x * Samples) + sx;
-                            if (float.IsPositiveInfinity(depths[at]))
-                            {
-                                continue;
-                            }
-
-                            covered++;
-                            uv += uvs[at];
-                            normal += faces[at];
-                            depth += depths[at];
-                        }
-                    }
-
-                    if (covered == 0)
-                    {
-                        continue;
-                    }
-
-                    uv /= covered;
-                    normal = normal.LengthSquared() > 1e-12f ? Vector3.Normalize(normal) : Vector3.UnitY;
-                    byte cover = (byte)(255 * covered / (Samples * Samples));
-                    int texel = (((cellY + y) * Card.Size) + cellX + x) * 4;
-                    surface[texel] = Unit(uv.X - MathF.Floor(uv.X));
-                    surface[texel + 1] = Unit(uv.Y - MathF.Floor(uv.Y));
-                    surface[texel + 2] = Unit((depth / covered / half * 0.5f) + 0.5f);
-                    surface[texel + 3] = cover;
-                    normals[texel] = Unit((normal.X * 0.5f) + 0.5f);
-                    normals[texel + 1] = Unit((normal.Y * 0.5f) + 0.5f);
-                    normals[texel + 2] = Unit((normal.Z * 0.5f) + 0.5f);
-                    normals[texel + 3] = cover;
-                }
-            }
-        }
+        return (raster.Centre, raster.Half, surface, normals);
     }
 
     /// <summary>
     /// Twice the signed area of the triangle <paramref name="a"/>, <paramref name="b"/>, <paramref name="c"/> on screen.
     /// </summary>
-    private static float Edge(Vector3 a, Vector3 b, Vector3 c) => ((b.X - a.X) * (c.Y - a.Y)) - ((b.Y - a.Y) * (c.X - a.X));
+    private static float EdgeFunction(Vector3 a, Vector3 b, Vector3 c) => ((b.X - a.X) * (c.Y - a.Y)) - ((b.Y - a.Y) * (c.X - a.X));
 
-    private static byte Unit(float value) => (byte)Math.Clamp((int)MathF.Round(value * 255), 0, 255);
+    private static byte ToByte(float value) => (byte)Math.Clamp((int)MathF.Round(value * 255), 0, 255);
 
     /// <summary>
     /// Spreads the colours of the covered texels <see cref="Spread"/> texels past their edge, within each view's cell,
@@ -194,44 +88,161 @@ internal static class CardBaker
                 for (int x = 0; x < Card.Size; x++)
                 {
                     int at = (y * Card.Size) + x;
-                    if (filled[at])
-                    {
-                        continue;
-                    }
+                    if (filled[at] || !TryAverageNeighbours(atlas, filled, x, y, out Vector3 mean)) continue;
 
-                    int count = 0;
-                    Vector3 sum = Vector3.Zero;
-                    for (int dy = -1; dy <= 1; dy++)
-                    {
-                        for (int dx = -1; dx <= 1; dx++)
-                        {
-                            int nx = x + dx;
-                            int ny = y + dy;
-                            if (nx < 0 || ny < 0 || nx >= Card.Size || ny >= Card.Size || nx / CellSize != x / CellSize || ny / CellSize != y / CellSize || !filled[(ny * Card.Size) + nx])
-                            {
-                                continue;
-                            }
-
-                            int texel = ((ny * Card.Size) + nx) * 4;
-                            sum += new Vector3(atlas[texel], atlas[texel + 1], atlas[texel + 2]);
-                            count++;
-                        }
-                    }
-
-                    if (count == 0)
-                    {
-                        continue;
-                    }
-
-                    sum /= count;
-                    atlas[at * 4] = (byte)sum.X;
-                    atlas[(at * 4) + 1] = (byte)sum.Y;
-                    atlas[(at * 4) + 2] = (byte)sum.Z;
+                    atlas[at * 4] = (byte)mean.X;
+                    atlas[(at * 4) + 1] = (byte)mean.Y;
+                    atlas[(at * 4) + 2] = (byte)mean.Z;
                     next[at] = true;
                 }
             }
 
             filled = next;
+        }
+    }
+
+    /// <summary>
+    /// The mean colour of the covered texels among the eight around (<paramref name="x"/>, <paramref name="y"/>) within
+    /// its view's cell; false when none of them is covered.
+    /// </summary>
+    private static bool TryAverageNeighbours(byte[] atlas, bool[] filled, int x, int y, out Vector3 mean)
+    {
+        int count = 0;
+        Vector3 sum = Vector3.Zero;
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                int nx = x + dx;
+                int ny = y + dy;
+                bool inCell = nx >= 0 && ny >= 0 && nx < Card.Size && ny < Card.Size && nx / CellSize == x / CellSize && ny / CellSize == y / CellSize;
+                if (!inCell || !filled[(ny * Card.Size) + nx]) continue;
+
+                int texel = ((ny * Card.Size) + nx) * 4;
+                sum += new Vector3(atlas[texel], atlas[texel + 1], atlas[texel + 2]);
+                count++;
+            }
+        }
+
+        mean = count == 0 ? Vector3.Zero : sum / count;
+        return count > 0;
+    }
+
+    /// <summary>
+    /// One view's samples: the nearest depth, uv and normal the mesh put at each, <see cref="Samples"/> a side per texel
+    /// of the view's cell, looking straight at the mesh from a side with its centre in the middle and its sphere filling
+    /// the cell.
+    /// </summary>
+    private sealed class Raster(Vector3 centre, float half)
+    {
+        private const int Size = CellSize * Samples;
+
+        private readonly float[] _depths = new float[Size * Size];
+
+        private readonly Vector2[] _uvs = new Vector2[Size * Size];
+
+        private readonly Vector3[] _faces = new Vector3[Size * Size];
+
+        internal Vector3 Centre { get; } = centre;
+
+        internal float Half { get; } = half;
+
+        internal void Clear() => Array.Fill(_depths, float.PositiveInfinity);
+
+        /// <summary>
+        /// The triangle, seen from the side <paramref name="right"/> and <paramref name="forward"/> give, into the samples
+        /// it covers where it is the nearest.
+        /// </summary>
+        internal void Draw(in Vertex a, in Vertex b, in Vertex c, Vector3 right, Vector3 forward)
+        {
+            Vector3 pa = Project(a.Position, right, forward);
+            Vector3 pb = Project(b.Position, right, forward);
+            Vector3 pc = Project(c.Position, right, forward);
+            float area = EdgeFunction(pa, pb, pc);
+            if (MathF.Abs(area) < 1e-12f) return;
+
+            int fromX = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.X, MathF.Min(pb.X, pc.X))));
+            int toX = Math.Min(Size - 1, (int)MathF.Ceiling(MathF.Max(pa.X, MathF.Max(pb.X, pc.X))));
+            int fromY = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.Y, MathF.Min(pb.Y, pc.Y))));
+            int toY = Math.Min(Size - 1, (int)MathF.Ceiling(MathF.Max(pa.Y, MathF.Max(pb.Y, pc.Y))));
+            for (int y = fromY; y <= toY; y++)
+            {
+                for (int x = fromX; x <= toX; x++)
+                {
+                    Vector3 point = new(x + 0.5f, y + 0.5f, 0);
+                    float wa = EdgeFunction(pb, pc, point) / area;
+                    float wb = EdgeFunction(pc, pa, point) / area;
+                    float wc = 1 - wa - wb;
+                    if (wa < 0 || wb < 0 || wc < 0) continue;
+
+                    float depth = (wa * pa.Z) + (wb * pb.Z) + (wc * pc.Z);
+                    int at = (y * Size) + x;
+                    if (depth >= _depths[at]) continue;
+
+                    _depths[at] = depth;
+                    _uvs[at] = (wa * a.Uv) + (wb * b.Uv) + (wc * c.Uv);
+                    _faces[at] = (wa * a.Normal) + (wb * b.Normal) + (wc * c.Normal);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The view's cell at (<paramref name="cellX"/>, <paramref name="cellY"/>) of both atlases from the samples: a
+        /// texel's cover is the share of its samples the mesh is in, and its uv, normal and depth their mean over those,
+        /// the depth in half sides behind the middle, -1 to 1.
+        /// </summary>
+        internal void Resolve(int cellX, int cellY, byte[] surface, byte[] normals)
+        {
+            for (int y = 0; y < CellSize; y++)
+            {
+                for (int x = 0; x < CellSize; x++)
+                {
+                    WriteTexel(x, y, (((cellY + y) * Card.Size) + cellX + x) * 4, surface, normals);
+                }
+            }
+        }
+
+        private Vector3 Project(Vector3 position, Vector3 right, Vector3 forward)
+        {
+            Vector3 local = position - Centre;
+            float x = Vector3.Dot(local, right) / Half;
+            float y = local.Y / Half;
+            return new Vector3(((x * 0.5f) + 0.5f) * Size, (0.5f - (y * 0.5f)) * Size, Vector3.Dot(local, forward));
+        }
+
+        private void WriteTexel(int x, int y, int texel, byte[] surface, byte[] normals)
+        {
+            int covered = 0;
+            Vector2 uv = Vector2.Zero;
+            Vector3 normal = Vector3.Zero;
+            float depth = 0;
+            for (int sy = 0; sy < Samples; sy++)
+            {
+                for (int sx = 0; sx < Samples; sx++)
+                {
+                    int at = (((y * Samples) + sy) * Size) + (x * Samples) + sx;
+                    if (float.IsPositiveInfinity(_depths[at])) continue;
+
+                    covered++;
+                    uv += _uvs[at];
+                    normal += _faces[at];
+                    depth += _depths[at];
+                }
+            }
+
+            if (covered == 0) return;
+
+            uv /= covered;
+            normal = normal.LengthSquared() > 1e-12f ? Vector3.Normalize(normal) : Vector3.UnitY;
+            byte cover = (byte)(255 * covered / (Samples * Samples));
+            surface[texel] = ToByte(uv.X - MathF.Floor(uv.X));
+            surface[texel + 1] = ToByte(uv.Y - MathF.Floor(uv.Y));
+            surface[texel + 2] = ToByte((depth / covered / Half * 0.5f) + 0.5f);
+            surface[texel + 3] = cover;
+            normals[texel] = ToByte((normal.X * 0.5f) + 0.5f);
+            normals[texel + 1] = ToByte((normal.Y * 0.5f) + 0.5f);
+            normals[texel + 2] = ToByte((normal.Z * 0.5f) + 0.5f);
+            normals[texel + 3] = cover;
         }
     }
 }

@@ -9,7 +9,7 @@ namespace Magic.ImGuiDebugUI;
 /// </summary>
 internal static unsafe class Look
 {
-    public static void Apply(ImGuiStyle* style)
+    internal static void Apply(ImGuiStyle* style)
     {
         ImGui.StyleColorsDark(style);
         style->WindowRounding = 10f;

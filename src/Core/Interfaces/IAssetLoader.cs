@@ -20,7 +20,7 @@ public interface IAssetLoader<T>
     /// <paramref name="settings"/>, which the loader reads as a type of its own
     /// (<c>Json.Read&lt;TextureMeta&gt;(settings)</c>), so no loader handles the sidecar's format. A loader may load the
     /// assets one is made from through <see cref="Assets"/>, as a prefab loads the prefabs it places: they are what it is
-    /// made from (<see cref="Assets.Dependencies{T}"/>), so it is made again when one of them changes. The asset's
+    /// made from (<see cref="Assets.GetDependencies{T}"/>), so it is made again when one of them changes. The asset's
     /// <see cref="IAsset{TSelf}.Handle"/> is left as it is: <see cref="Assets"/> gives it. On workers, for several files
     /// at once.
     /// </summary>

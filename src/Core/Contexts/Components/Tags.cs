@@ -31,25 +31,16 @@ public struct Tags : IComponent, IEquatable<Tags>
         int count = 0;
         foreach (Tag held in this)
         {
-            if (!held.IsValid)
-            {
-                continue;
-            }
+            if (!held.IsValid) continue;
 
-            if (!other.Has(held))
-            {
-                return false;
-            }
+            if (!other.Has(held)) return false;
 
             count++;
         }
 
         foreach (Tag held in other)
         {
-            if (held.IsValid)
-            {
-                count--;
-            }
+            if (held.IsValid) count--;
         }
 
         return count == 0;
@@ -70,17 +61,11 @@ public struct Tags : IComponent, IEquatable<Tags>
 
     public readonly bool Has(Tag tag)
     {
-        if (!tag.IsValid)
-        {
-            return false;
-        }
+        if (!tag.IsValid) return false;
 
         foreach (Tag held in this)
         {
-            if (held == tag)
-            {
-                return true;
-            }
+            if (held == tag) return true;
         }
 
         return false;
@@ -91,10 +76,7 @@ public struct Tags : IComponent, IEquatable<Tags>
     /// </summary>
     public bool Add(Tag tag)
     {
-        if (!tag.IsValid || Has(tag))
-        {
-            return false;
-        }
+        if (!tag.IsValid || Has(tag)) return false;
 
         for (int i = 0; i < Capacity; i++)
         {

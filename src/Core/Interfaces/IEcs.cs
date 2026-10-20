@@ -80,7 +80,7 @@ public interface IEcs
     /// The entity's components, each boxed: for saving the world, not the frame loop, which reads them through
     /// queries. Allocates.
     /// </summary>
-    IComponent[] Components(Entity entity);
+    IComponent[] GetComponents(Entity entity);
 
     /// <summary>
     /// The entity's component by reference, so a write goes straight into storage. Good until the entity's components

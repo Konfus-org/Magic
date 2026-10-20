@@ -57,10 +57,7 @@ public sealed class Lifetime : IDisposable
 
     private void End(string reason, bool restart)
     {
-        if (Interlocked.Exchange(ref _stopped, 1) == 1)
-        {
-            return;
-        }
+        if (Interlocked.Exchange(ref _stopped, 1) == 1) return;
 
         IsRestarting = restart;
         Debugging.Info($"{(restart ? "Restarting" : "Stopping")}: {reason}");

@@ -32,7 +32,7 @@ internal static class Program
 
         try
         {
-            return Generate(options) ? 0 : 1;
+            return TryGenerate(options) ? 0 : 1;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -41,7 +41,7 @@ internal static class Program
         }
     }
 
-    private static bool Generate(Options options)
+    private static bool TryGenerate(Options options)
     {
         Dictionary<(DeclarationKind Kind, string CName), (Declaration Declaration, string Target)> merged = [];
         List<Declaration> ordered = [];
@@ -68,10 +68,7 @@ internal static class Program
             foreach (Declaration declaration in reader.Declarations)
             {
                 (DeclarationKind Kind, string CName) key = (declaration.Kind, declaration.CName);
-                if (dropped.Contains(key))
-                {
-                    continue;
-                }
+                if (dropped.Contains(key)) continue;
 
                 if (!merged.TryGetValue(key, out (Declaration Declaration, string Target) seen))
                 {
@@ -80,7 +77,7 @@ internal static class Program
                 }
                 else if (!string.Equals(seen.Declaration.Text, declaration.Text, StringComparison.Ordinal))
                 {
-                    if (Reconciled(seen.Declaration.Text, declaration.Text) is { } reconciledText)
+                    if (Reconcile(seen.Declaration.Text, declaration.Text) is { } reconciledText)
                     {
                         Declaration reconciled = seen.Declaration with { Text = reconciledText };
                         merged[key] = (reconciled, seen.Target);
@@ -183,14 +180,11 @@ internal static class Program
     /// <c>*</c> is a <c>wchar_t</c> pointer, written <c>void*</c>: its width is the OS's, and the caller encodes for
     /// the OS it runs on. Null when they differ in any other way.
     /// </summary>
-    private static string? Reconciled(string first, string second)
+    private static string? Reconcile(string first, string second)
     {
-        List<string> firstTokens = Tokens(first);
-        List<string> secondTokens = Tokens(second);
-        if (firstTokens.Count != secondTokens.Count)
-        {
-            return null;
-        }
+        List<string> firstTokens = Tokenize(first);
+        List<string> secondTokens = Tokenize(second);
+        if (firstTokens.Count != secondTokens.Count) return null;
 
         StringBuilder text = new(first.Length);
         for (int i = 0; i < firstTokens.Count; i++)
@@ -230,7 +224,7 @@ internal static class Program
         => string.Equals(token, first, StringComparison.Ordinal) || string.Equals(token, second, StringComparison.Ordinal) || string.Equals(token, third, StringComparison.Ordinal);
 
     /// <summary>The text as runs of identifier characters and runs of everything else, so a type name is one token.</summary>
-    private static List<string> Tokens(string text)
+    private static List<string> Tokenize(string text)
     {
         List<string> tokens = [];
         int start = 0;
@@ -256,10 +250,7 @@ internal static class Program
         {
             string a = i < firstLines.Length ? firstLines[i].Trim() : "";
             string b = i < secondLines.Length ? secondLines[i].Trim() : "";
-            if (!string.Equals(a, b, StringComparison.Ordinal))
-            {
-                return (a, b);
-            }
+            if (!string.Equals(a, b, StringComparison.Ordinal)) return (a, b);
         }
 
         return ("", "");

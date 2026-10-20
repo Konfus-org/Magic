@@ -21,7 +21,7 @@ internal sealed class Reports
     /// text was not showing anywhere, which is when a warning or error logs: looked up for those alone, the kind whose
     /// answer is read.
     /// </summary>
-    public bool Add(string text, ReportKind kind, Color color, Vector3? position, string? tooltip, float seconds, double now)
+    internal bool Add(string text, ReportKind kind, Color color, Vector3? position, string? tooltip, float seconds, double now)
     {
         lock (_lock)
         {
@@ -61,7 +61,7 @@ internal sealed class Reports
     /// <paramref name="lines"/>, what has none, each in the order it was first reported, the lines reported every frame
     /// first. What has had its time, and was not reported again since the last take, is gone after it.
     /// </summary>
-    public void Take(double now, List<ShownReport> world, List<ShownReport> lines)
+    internal void Take(double now, List<ShownReport> world, List<ShownReport> lines)
     {
         lock (_lock)
         {
@@ -91,10 +91,7 @@ internal sealed class Reports
     {
         foreach ((string shown, _) in _reports.Keys)
         {
-            if (string.Equals(shown, text, StringComparison.Ordinal))
-            {
-                return true;
-            }
+            if (string.Equals(shown, text, StringComparison.Ordinal)) return true;
         }
 
         return false;
@@ -102,24 +99,24 @@ internal sealed class Reports
 
     private sealed class Report
     {
-        public required string Label { get; set; }
+        internal required string Label { get; set; }
 
-        public Color Color { get; set; }
+        internal Color Color { get; set; }
 
-        public string? Tooltip { get; set; }
+        internal string? Tooltip { get; set; }
 
-        public double Expires { get; set; }
+        internal double Expires { get; set; }
 
         /// <summary>
         /// Reported since it was last taken: it shows at least once, however short its time.
         /// </summary>
-        public bool IsFresh { get; set; }
+        internal bool IsFresh { get; set; }
 
-        public int Count { get; set; }
+        internal int Count { get; set; }
 
-        public ReportKind Kind { get; init; }
+        internal ReportKind Kind { get; init; }
 
-        public long Order { get; init; }
+        internal long Order { get; init; }
     }
 }
 

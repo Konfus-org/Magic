@@ -21,12 +21,12 @@ internal sealed class GiVolume : IDisposable
     /// <summary>
     /// Voxels a side of a level; the shaders' GiResolution.
     /// </summary>
-    public const int Resolution = 64;
+    internal const int Resolution = 64;
 
     /// <summary>
     /// Voxels a side of a brick, what is made again at once; a level moves a brick at a time.
     /// </summary>
-    public const int Brick = 8;
+    internal const int Brick = 8;
 
     /// <summary>
     /// Probes a side of a level; the shaders' GiProbes.
@@ -62,7 +62,7 @@ internal sealed class GiVolume : IDisposable
     private readonly Level[] _levels = new Level[MaxLevels];
     private uint _frame;
 
-    public GiVolume(IGpu gpu)
+    internal GiVolume(IGpu gpu)
     {
         Rows = new GpuArray<GpuGiLevel>(gpu, GpuBufferUsage.ComputeRead | GpuBufferUsage.GraphicsRead, 1 + MaxLevels);
         for (int level = 0; level < MaxLevels; level++)
@@ -79,22 +79,22 @@ internal sealed class GiVolume : IDisposable
     /// <summary>
     /// <c>GiLevels</c>: a <see cref="GpuGi"/>, then a <see cref="GpuGiLevel"/> for each level.
     /// </summary>
-    public GpuArray<GpuGiLevel> Rows { get; }
+    internal GpuArray<GpuGiLevel> Rows { get; }
 
     /// <summary>
     /// Rays traced this frame, every probe due's.
     /// </summary>
-    public uint Rays { get; private set; }
+    internal uint Rays { get; private set; }
 
     /// <summary>
     /// Threads the blend of this frame's probes runs, 256 a probe.
     /// </summary>
-    public uint ProbeThreads { get; private set; }
+    internal uint ProbeThreads { get; private set; }
 
     /// <summary>
     /// Nothing is held: the next frame makes every level whole.
     /// </summary>
-    public void Clear()
+    internal void Clear()
     {
         foreach (Level level in _levels)
         {
@@ -110,7 +110,7 @@ internal sealed class GiVolume : IDisposable
     /// <paramref name="moved"/>, and uploads them with which probes are traced this frame and how much of what they held
     /// they keep, from the frame's <paramref name="seconds"/>.
     /// </summary>
-    public void Plan(Vector3 camera, IReadOnlyList<MovedSphere> moved, float seconds, ClusterRenderingSettings settings)
+    internal void Plan(Vector3 camera, IReadOnlyList<MovedSphere> moved, float seconds, ClusterRenderingSettings settings)
     {
         int levels = Math.Clamp(settings.GiLevels, 1, MaxLevels);
         float finest = Math.Clamp(settings.GiVoxel, 0.05f, 4);
@@ -158,7 +158,7 @@ internal sealed class GiVolume : IDisposable
         Rows.Set(0, Unsafe.As<GpuGi, GpuGiLevel>(ref header));
         for (int index = 0; index < MaxLevels; index++)
         {
-            Rows.Set(1 + index, _levels[index].Row());
+            Rows.Set(1 + index, _levels[index].GetRow());
         }
 
         Rows.Flush();
@@ -189,21 +189,21 @@ internal sealed class GiVolume : IDisposable
         private (int X, int Y, int Z) _high;
         private BrickMask _dirty;
 
-        public bool IsHeld { get; set; }
+        internal bool IsHeld { get; set; }
 
-        public float Voxel { get; set; } = 1;
+        internal float Voxel { get; set; } = 1;
 
         /// <summary>
         /// Frames a probe of it waits to be traced again.
         /// </summary>
-        public uint Period { get; set; } = 1;
+        internal uint Period { get; set; } = 1;
 
         /// <summary>
         /// How much of what a probe of it held it keeps as it takes in what it was traced with.
         /// </summary>
-        public float Hysteresis { get; set; }
+        internal float Hysteresis { get; set; }
 
-        public void Clear()
+        internal void Clear()
         {
             _dirty = default;
             _low = (int.MaxValue, int.MaxValue, int.MaxValue);
@@ -213,7 +213,7 @@ internal sealed class GiVolume : IDisposable
         /// <summary>
         /// Moves to <paramref name="origin"/> and makes every brick again.
         /// </summary>
-        public void MarkAll((int X, int Y, int Z) origin)
+        internal void MarkAll((int X, int Y, int Z) origin)
         {
             _origin = origin;
             MarkBricks((_origin.X / Brick, _origin.Y / Brick, _origin.Z / Brick), ((_origin.X / Brick) + Bricks - 1, (_origin.Y / Brick) + Bricks - 1, (_origin.Z / Brick) + Bricks - 1));
@@ -222,7 +222,7 @@ internal sealed class GiVolume : IDisposable
         /// <summary>
         /// Moves to <paramref name="origin"/>, making again the bricks it moved into.
         /// </summary>
-        public void MarkMoved((int X, int Y, int Z) origin)
+        internal void MarkMoved((int X, int Y, int Z) origin)
         {
             (int X, int Y, int Z) was = _origin;
             _origin = origin;
@@ -232,29 +232,30 @@ internal sealed class GiVolume : IDisposable
                 {
                     for (int x = 0; x < Bricks; x++)
                     {
-                        int bx = (_origin.X / Brick) + x;
-                        int by = (_origin.Y / Brick) + y;
-                        int bz = (_origin.Z / Brick) + z;
-                        if (!IsIn(bx * Brick, was.X) || !IsIn(by * Brick, was.Y) || !IsIn(bz * Brick, was.Z))
-                        {
-                            MarkBrick(bx, by, bz);
-                        }
+                        (int X, int Y, int Z) brick = ((_origin.X / Brick) + x, (_origin.Y / Brick) + y, (_origin.Z / Brick) + z);
+                        if (!WasIn(brick, was)) MarkBrick(brick.X, brick.Y, brick.Z);
                     }
                 }
             }
         }
 
         /// <summary>
+        /// Whether the brick was within the level when its origin was <paramref name="was"/>: one that was not is new to
+        /// the level and has to be traced.
+        /// </summary>
+        private static bool WasIn((int X, int Y, int Z) brick, (int X, int Y, int Z) was) => IsIn(brick.X * Brick, was.X) && IsIn(brick.Y * Brick, was.Y) && IsIn(brick.Z * Brick, was.Z);
+
+        /// <summary>
         /// Makes again the bricks of this level that a box, in metres, touches.
         /// </summary>
-        public void Mark(Vector3 min, Vector3 max)
+        internal void Mark(Vector3 min, Vector3 max)
         {
-            (int X, int Y, int Z) low = (Math.Max(Floor(min.X), _origin.X / Brick), Math.Max(Floor(min.Y), _origin.Y / Brick), Math.Max(Floor(min.Z), _origin.Z / Brick));
-            (int X, int Y, int Z) high = (Math.Min(Floor(max.X), ((_origin.X + Resolution) / Brick) - 1), Math.Min(Floor(max.Y), ((_origin.Y + Resolution) / Brick) - 1), Math.Min(Floor(max.Z), ((_origin.Z + Resolution) / Brick) - 1));
+            (int X, int Y, int Z) low = (Math.Max(FloorToBrick(min.X), _origin.X / Brick), Math.Max(FloorToBrick(min.Y), _origin.Y / Brick), Math.Max(FloorToBrick(min.Z), _origin.Z / Brick));
+            (int X, int Y, int Z) high = (Math.Min(FloorToBrick(max.X), ((_origin.X + Resolution) / Brick) - 1), Math.Min(FloorToBrick(max.Y), ((_origin.Y + Resolution) / Brick) - 1), Math.Min(FloorToBrick(max.Z), ((_origin.Z + Resolution) / Brick) - 1));
             MarkBricks(low, high);
         }
 
-        public GpuGiLevel Row()
+        internal GpuGiLevel GetRow()
         {
             bool isDirty = _low.X <= _high.X;
             return new GpuGiLevel
@@ -278,7 +279,7 @@ internal sealed class GiVolume : IDisposable
         /// <summary>
         /// The brick a place in metres is in, along one axis.
         /// </summary>
-        private int Floor(float metres) => (int)MathF.Floor(metres / Voxel / Brick);
+        private int FloorToBrick(float metres) => (int)MathF.Floor(metres / Voxel / Brick);
 
         private static bool IsIn(int voxel, int origin) => voxel >= origin && voxel < origin + Resolution;
 

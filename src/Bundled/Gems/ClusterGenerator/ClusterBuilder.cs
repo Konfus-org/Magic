@@ -37,21 +37,15 @@ internal static class ClusterBuilder
     /// <summary>
     /// <paramref name="model"/>'s clusters at every level, finest to coarsest; null when it has no triangles.
     /// </summary>
-    public static ClusterHierarchy? Build(Model model, CancellationToken cancel)
+    internal static ClusterHierarchy? Build(Model model, CancellationToken cancel)
     {
         float step = StepOf(model);
-        if (step <= 0)
-        {
-            return null;
-        }
+        if (step <= 0) return null;
 
         List<Part> current = [];
         foreach (Mesh mesh in model.Meshes)
         {
-            if (mesh.Indices.Length < 3)
-            {
-                continue;
-            }
+            if (mesh.Indices.Length < 3) continue;
 
             Vertex[] vertices = mesh.Vertices.ToArray();
             for (int i = 0; i < vertices.Length; i++)
@@ -78,10 +72,7 @@ internal static class ClusterBuilder
             current.AddRange(Split(vertices, [.. indices], slots, 0, 0, null));
         }
 
-        if (current.Count == 0)
-        {
-            return null;
-        }
+        if (current.Count == 0) return null;
 
         // The border of a group that stops simplifying is frozen: its clusters are drawn as they are from then on, so
         // what is made beside them at every later level must still meet them there.
@@ -91,13 +82,10 @@ internal static class ClusterBuilder
         {
             cancel.ThrowIfCancellationRequested();
             all.AddRange(current);
-            if (current.Count <= 1 || level + 1 >= MaxLevels)
-            {
-                break;
-            }
+            if (current.Count <= 1 || level + 1 >= MaxLevels) break;
 
             List<List<Part>> groups = Group(current);
-            HashSet<Vector3>[] borders = BordersOf(groups);
+            HashSet<Vector3>[] borders = FindBorders(groups);
             foreach (HashSet<Vector3> border in borders)
             {
                 border.UnionWith(frozen);
@@ -118,13 +106,10 @@ internal static class ClusterBuilder
                 }
             }
 
-            if (current.Count == 0)
-            {
-                break;
-            }
+            if (current.Count == 0) break;
         }
 
-        return Hierarchy(all, step);
+        return BuildHierarchy(all, step);
     }
 
     /// <summary>
@@ -163,130 +148,11 @@ internal static class ClusterBuilder
     /// </summary>
     private static List<Part> Split(Vertex[] vertices, int[] indices, int[] slots, int level, float error, Vector4? errorBounds)
     {
-        int count = indices.Length / 3;
-        Vector3[] centres = new Vector3[count];
-        Dictionary<Vector3, List<int>> touching = [];
-        for (int t = 0; t < count; t++)
-        {
-            Vector3 a = vertices[indices[t * 3]].Position;
-            Vector3 b = vertices[indices[(t * 3) + 1]].Position;
-            Vector3 c = vertices[indices[(t * 3) + 2]].Position;
-            centres[t] = (a + b + c) / 3;
-            foreach (Vector3 corner in (ReadOnlySpan<Vector3>)[a, b, c])
-            {
-                if (!touching.TryGetValue(corner, out List<int>? triangles))
-                {
-                    triangles = [];
-                    touching[corner] = triangles;
-                }
-
-                triangles.Add(t);
-            }
-        }
-
-        int[] order = MortonOrder(centres);
-        bool[] taken = new bool[count];
+        Growth growth = new(vertices, indices, slots);
         List<Part> parts = [];
-        int cursor = 0;
-        while (true)
+        while (growth.TryGrow(out List<int> chosen, out Dictionary<int, int> local, out int slot))
         {
-            while (cursor < order.Length && taken[order[cursor]])
-            {
-                cursor++;
-            }
-
-            if (cursor == order.Length)
-            {
-                break;
-            }
-
-            int slot = slots[order[cursor]];
-            List<int> chosen = [];
-            Dictionary<int, int> local = [];
-            HashSet<int> frontier = [];
-            Vector3 sum = Vector3.Zero;
-            int next = order[cursor];
-            while (next >= 0)
-            {
-                Take(next);
-                if (chosen.Count == ClusterHierarchy.MaxTriangles)
-                {
-                    break;
-                }
-
-                next = Best();
-            }
-
-            parts.Add(PartOf(vertices, indices, chosen, local, slot, level, error, errorBounds));
-
-            void Take(int triangle)
-            {
-                taken[triangle] = true;
-                chosen.Add(triangle);
-                sum += centres[triangle];
-                frontier.Remove(triangle);
-                for (int corner = 0; corner < 3; corner++)
-                {
-                    int vertex = indices[(triangle * 3) + corner];
-                    local.TryAdd(vertex, local.Count);
-                    foreach (int beside in touching[vertices[vertex].Position])
-                    {
-                        if (!taken[beside] && slots[beside] == slot)
-                        {
-                            frontier.Add(beside);
-                        }
-                    }
-                }
-            }
-
-            int Best()
-            {
-                Vector3 middle = sum / chosen.Count;
-                int best = -1;
-                (int Added, float Distance) bestScore = (int.MaxValue, float.MaxValue);
-                foreach (int triangle in frontier)
-                {
-                    int added = NewVertices(triangle);
-                    if (local.Count + added > ClusterHierarchy.MaxVertices)
-                    {
-                        continue;
-                    }
-
-                    float distance = Vector3.DistanceSquared(centres[triangle], middle);
-                    if (added < bestScore.Added || (added == bestScore.Added && distance < bestScore.Distance))
-                    {
-                        (best, bestScore) = (triangle, (added, distance));
-                    }
-                }
-
-                if (best >= 0 || frontier.Count > 0)
-                {
-                    return best;
-                }
-
-                // Nothing beside it: the next triangle left in Morton order, near it, of its slot.
-                for (int i = cursor; i < order.Length; i++)
-                {
-                    int triangle = order[i];
-                    if (!taken[triangle] && slots[triangle] == slot && local.Count + NewVertices(triangle) <= ClusterHierarchy.MaxVertices)
-                    {
-                        return triangle;
-                    }
-                }
-
-                return -1;
-            }
-
-            int NewVertices(int triangle)
-            {
-                int added = 0;
-                for (int corner = 0; corner < 3; corner++)
-                {
-                    added += local.ContainsKey(indices[(triangle * 3) + corner]) ? 0 : 1;
-                }
-
-                return added;
-            }
+            parts.Add(MakePart(vertices, indices, chosen, local, slot, level, error, errorBounds));
         }
 
         return parts;
@@ -295,7 +161,7 @@ internal static class ClusterBuilder
     /// <summary>
     /// One cluster: the chosen triangles with their vertices numbered from 0 in the order they were met.
     /// </summary>
-    private static Part PartOf(Vertex[] vertices, int[] indices, List<int> chosen, Dictionary<int, int> local, int slot, int level, float error, Vector4? errorBounds)
+    private static Part MakePart(Vertex[] vertices, int[] indices, List<int> chosen, Dictionary<int, int> local, int slot, int level, float error, Vector4? errorBounds)
     {
         Vertex[] own = new Vertex[local.Count];
         foreach ((int vertex, int index) in local)
@@ -312,7 +178,7 @@ internal static class ClusterBuilder
             }
         }
 
-        Vector4 bounds = SphereAround(own);
+        Vector4 bounds = ComputeSphere(own);
         Vector4 errorSphere = errorBounds ?? bounds;
         return new Part
         {
@@ -334,57 +200,19 @@ internal static class ClusterBuilder
     /// </summary>
     private static List<List<Part>> Group(List<Part> parts)
     {
-        Dictionary<Vector3, List<int>> touching = [];
-        for (int p = 0; p < parts.Count; p++)
-        {
-            foreach (Vertex vertex in parts[p].Vertices)
-            {
-                if (!touching.TryGetValue(vertex.Position, out List<int>? owners))
-                {
-                    owners = [];
-                    touching[vertex.Position] = owners;
-                }
-
-                if (owners.Count == 0 || owners[^1] != p)
-                {
-                    owners.Add(p);
-                }
-            }
-        }
-
-        Dictionary<int, int>[] shared = new Dictionary<int, int>[parts.Count];
-        for (int p = 0; p < parts.Count; p++)
-        {
-            shared[p] = [];
-        }
-
-        foreach (List<int> owners in touching.Values)
-        {
-            for (int i = 0; i < owners.Count; i++)
-            {
-                for (int j = i + 1; j < owners.Count; j++)
-                {
-                    shared[owners[i]][owners[j]] = shared[owners[i]].GetValueOrDefault(owners[j]) + 1;
-                    shared[owners[j]][owners[i]] = shared[owners[j]].GetValueOrDefault(owners[i]) + 1;
-                }
-            }
-        }
-
+        Dictionary<int, int>[] shared = CountSharedBorders(parts);
         Vector3[] centres = new Vector3[parts.Count];
         for (int p = 0; p < parts.Count; p++)
         {
             centres[p] = new Vector3(parts[p].Bounds.X, parts[p].Bounds.Y, parts[p].Bounds.Z);
         }
 
-        int[] order = MortonOrder(centres);
+        int[] order = ComputeMortonOrder(centres);
         bool[] grouped = new bool[parts.Count];
         List<List<Part>> groups = [];
         for (int o = 0; o < order.Length; o++)
         {
-            if (grouped[order[o]])
-            {
-                continue;
-            }
+            if (grouped[order[o]]) continue;
 
             List<int> members = [order[o]];
             grouped[order[o]] = true;
@@ -395,17 +223,11 @@ internal static class ClusterBuilder
                 int most = 0;
                 foreach ((int part, int border) in beside)
                 {
-                    if (!grouped[part] && border > most)
-                    {
-                        (best, most) = (part, border);
-                    }
+                    if (!grouped[part] && border > most) (best, most) = (part, border);
                 }
 
                 best = best >= 0 ? best : NearNext(o, members[^1]);
-                if (best < 0)
-                {
-                    break;
-                }
+                if (best < 0) break;
 
                 members.Add(best);
                 grouped[best] = true;
@@ -432,10 +254,7 @@ internal static class ClusterBuilder
             for (int o = from + 1; o < order.Length; o++)
             {
                 int part = order[o];
-                if (grouped[part])
-                {
-                    continue;
-                }
+                if (grouped[part]) continue;
 
                 float reach = (parts[part].Bounds.W + parts[last].Bounds.W) * 2;
                 return Vector3.DistanceSquared(centres[part], centres[last]) <= reach * reach ? part : -1;
@@ -446,9 +265,51 @@ internal static class ClusterBuilder
     }
 
     /// <summary>
+    /// For each cluster, how many vertices it shares with each other cluster: the length of the border between them,
+    /// which is what grouping keeps together, so a group's border with the rest is short.
+    /// </summary>
+    private static Dictionary<int, int>[] CountSharedBorders(List<Part> parts)
+    {
+        Dictionary<Vector3, List<int>> touching = [];
+        for (int p = 0; p < parts.Count; p++)
+        {
+            foreach (Vertex vertex in parts[p].Vertices)
+            {
+                if (!touching.TryGetValue(vertex.Position, out List<int>? owners))
+                {
+                    owners = [];
+                    touching[vertex.Position] = owners;
+                }
+
+                if (owners.Count == 0 || owners[^1] != p) owners.Add(p);
+            }
+        }
+
+        Dictionary<int, int>[] shared = new Dictionary<int, int>[parts.Count];
+        for (int p = 0; p < parts.Count; p++)
+        {
+            shared[p] = [];
+        }
+
+        foreach (List<int> owners in touching.Values)
+        {
+            for (int i = 0; i < owners.Count; i++)
+            {
+                for (int j = i + 1; j < owners.Count; j++)
+                {
+                    shared[owners[i]][owners[j]] = shared[owners[i]].GetValueOrDefault(owners[j]) + 1;
+                    shared[owners[j]][owners[i]] = shared[owners[j]].GetValueOrDefault(owners[i]) + 1;
+                }
+            }
+        }
+
+        return shared;
+    }
+
+    /// <summary>
     /// For each group, the places its clusters share with another group's: its border, which it keeps as it simplifies.
     /// </summary>
-    private static HashSet<Vector3>[] BordersOf(List<List<Part>> groups)
+    private static HashSet<Vector3>[] FindBorders(List<List<Part>> groups)
     {
         const int Shared = -1;
         Dictionary<Vector3, int> groupAt = [];
@@ -478,10 +339,7 @@ internal static class ClusterBuilder
             {
                 foreach (Vertex vertex in part.Vertices)
                 {
-                    if (groupAt[vertex.Position] == Shared)
-                    {
-                        borders[g].Add(vertex.Position);
-                    }
+                    if (groupAt[vertex.Position] == Shared) borders[g].Add(vertex.Position);
                 }
             }
         }
@@ -523,10 +381,7 @@ internal static class ClusterBuilder
         Mesh soup = new() { Vertices = vertices.ToArray(), Indices = indices.ToArray() };
         QuadricSimplifier.Reduced reduced = QuadricSimplifier.Reduce(soup, triangles / 2, border);
         ReadOnlySpan<uint> kept = reduced.Mesh.Indices.Span;
-        if (kept.Length / 3 > triangles * MinReduction)
-        {
-            return null;
-        }
+        if (kept.Length / 3 > triangles * MinReduction) return null;
 
         error = MathF.Max(error, reduced.Error);
         foreach (Part part in group)
@@ -564,7 +419,7 @@ internal static class ClusterBuilder
     /// <summary>
     /// The parts as Core's hierarchy, coarsest level last; those never simplified into anything have no parent.
     /// </summary>
-    private static ClusterHierarchy Hierarchy(List<Part> parts, float step)
+    private static ClusterHierarchy BuildHierarchy(List<Part> parts, float step)
     {
         parts.Sort(static (left, right) => left.Level.CompareTo(right.Level));
         List<Vertex> vertices = [];
@@ -597,7 +452,7 @@ internal static class ClusterBuilder
     /// <summary>
     /// The sphere around <paramref name="vertices"/>: the middle of their box, out to the farthest.
     /// </summary>
-    internal static Vector4 SphereAround(ReadOnlySpan<Vertex> vertices)
+    internal static Vector4 ComputeSphere(ReadOnlySpan<Vertex> vertices)
     {
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -625,15 +480,9 @@ internal static class ClusterBuilder
         Vector3 a = new(first.X, first.Y, first.Z);
         Vector3 b = new(second.X, second.Y, second.Z);
         float distance = Vector3.Distance(a, b);
-        if (distance + second.W <= first.W)
-        {
-            return first;
-        }
+        if (distance + second.W <= first.W) return first;
 
-        if (distance + first.W <= second.W)
-        {
-            return second;
-        }
+        if (distance + first.W <= second.W) return second;
 
         float radius = (distance + first.W + second.W) / 2;
         Vector3 centre = a + ((b - a) * ((radius - first.W) / distance));
@@ -644,7 +493,7 @@ internal static class ClusterBuilder
     /// The indices of <paramref name="points"/> in Morton order: along a curve through their box that keeps what is near
     /// in space near in the order.
     /// </summary>
-    private static int[] MortonOrder(Vector3[] points)
+    private static int[] ComputeMortonOrder(Vector3[] points)
     {
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -683,25 +532,172 @@ internal static class ClusterBuilder
     /// </summary>
     private sealed class Part
     {
-        public required Vertex[] Vertices { get; init; }
+        internal required Vertex[] Vertices { get; init; }
 
-        public required byte[] Indices { get; init; }
+        internal required byte[] Indices { get; init; }
 
-        public required int Slot { get; init; }
+        internal required int Slot { get; init; }
 
-        public required int Level { get; init; }
+        internal required int Level { get; init; }
 
-        public required Vector4 Bounds { get; init; }
+        internal required Vector4 Bounds { get; init; }
 
-        public required Vector4 ErrorBounds { get; init; }
+        internal required Vector4 ErrorBounds { get; init; }
 
-        public required float Error { get; init; }
+        internal required float Error { get; init; }
 
         /// <summary>
         /// The error bounds of what it was simplified into; its own until it is.
         /// </summary>
-        public required Vector4 ParentErrorBounds { get; set; }
+        internal required Vector4 ParentErrorBounds { get; set; }
 
-        public float ParentError { get; set; } = float.PositiveInfinity;
+        internal float ParentError { get; set; } = float.PositiveInfinity;
+    }
+
+    /// <summary>
+    /// Grows clusters over a mesh's triangles, one at a time: each starts at the first triangle left in Morton order
+    /// and takes, of the triangles beside it in its material slot, the one adding the fewest new vertices and nearest
+    /// its middle, until it is full (<see cref="ClusterHierarchy.MaxTriangles"/>, <see cref="ClusterHierarchy.MaxVertices"/>)
+    /// or nothing beside it is left.
+    /// </summary>
+    private sealed class Growth
+    {
+        private readonly Vertex[] _vertices;
+        private readonly int[] _indices;
+        private readonly int[] _slots;
+        private readonly Vector3[] _centres;
+        private readonly Dictionary<Vector3, List<int>> _touching = [];
+        private readonly int[] _order;
+        private readonly bool[] _taken;
+        private List<int> _chosen = [];
+        private Dictionary<int, int> _local = [];
+        private readonly HashSet<int> _frontier = [];
+        private Vector3 _sum;
+        private int _slot;
+        private int _cursor;
+
+        public Growth(Vertex[] vertices, int[] indices, int[] slots)
+        {
+            _vertices = vertices;
+            _indices = indices;
+            _slots = slots;
+            int count = indices.Length / 3;
+            _centres = new Vector3[count];
+            for (int t = 0; t < count; t++)
+            {
+                Vector3 a = vertices[indices[t * 3]].Position;
+                Vector3 b = vertices[indices[(t * 3) + 1]].Position;
+                Vector3 c = vertices[indices[(t * 3) + 2]].Position;
+                _centres[t] = (a + b + c) / 3;
+                foreach (Vector3 corner in (ReadOnlySpan<Vector3>)[a, b, c])
+                {
+                    if (!_touching.TryGetValue(corner, out List<int>? triangles))
+                    {
+                        triangles = [];
+                        _touching[corner] = triangles;
+                    }
+
+                    triangles.Add(t);
+                }
+            }
+
+            _order = ComputeMortonOrder(_centres);
+            _taken = new bool[count];
+        }
+
+        /// <summary>
+        /// The next cluster: its triangles, each of its vertices' index within it, and its material slot. False once
+        /// every triangle is in one.
+        /// </summary>
+        internal bool TryGrow(out List<int> chosen, out Dictionary<int, int> local, out int slot)
+        {
+            while (_cursor < _order.Length && _taken[_order[_cursor]])
+            {
+                _cursor++;
+            }
+
+            chosen = _chosen = [];
+            local = _local = [];
+            slot = 0;
+            if (_cursor == _order.Length) return false;
+
+            slot = _slot = _slots[_order[_cursor]];
+            _frontier.Clear();
+            _sum = Vector3.Zero;
+            int next = _order[_cursor];
+            while (next >= 0)
+            {
+                Take(next);
+                if (_chosen.Count == ClusterHierarchy.MaxTriangles) break;
+
+                next = FindBest();
+            }
+
+            return true;
+        }
+
+        private void Take(int triangle)
+        {
+            _taken[triangle] = true;
+            _chosen.Add(triangle);
+            _sum += _centres[triangle];
+            _frontier.Remove(triangle);
+            for (int corner = 0; corner < 3; corner++)
+            {
+                int vertex = _indices[(triangle * 3) + corner];
+                _local.TryAdd(vertex, _local.Count);
+                foreach (int beside in _touching[_vertices[vertex].Position])
+                {
+                    if (!_taken[beside] && _slots[beside] == _slot) _frontier.Add(beside);
+                }
+            }
+        }
+
+        /// <summary>
+        /// The triangle to take next: on the frontier, the one adding the fewest vertices, nearest the middle of those
+        /// taken; with nothing beside the cluster, the next triangle left in Morton order of its slot that fits; -1
+        /// when none does.
+        /// </summary>
+        private int FindBest()
+        {
+            Vector3 middle = _sum / _chosen.Count;
+            int best = -1;
+            (int Added, float Distance) bestScore = (int.MaxValue, float.MaxValue);
+            foreach (int triangle in _frontier)
+            {
+                int added = CountNewVertices(triangle);
+                if (_local.Count + added > ClusterHierarchy.MaxVertices) continue;
+
+                float distance = Vector3.DistanceSquared(_centres[triangle], middle);
+                if (added < bestScore.Added || (added == bestScore.Added && distance < bestScore.Distance))
+                {
+                    (best, bestScore) = (triangle, (added, distance));
+                }
+            }
+
+            if (best >= 0 || _frontier.Count > 0) return best;
+
+            for (int i = _cursor; i < _order.Length; i++)
+            {
+                int triangle = _order[i];
+                if (!_taken[triangle] && _slots[triangle] == _slot && _local.Count + CountNewVertices(triangle) <= ClusterHierarchy.MaxVertices)
+                {
+                    return triangle;
+                }
+            }
+
+            return -1;
+        }
+
+        private int CountNewVertices(int triangle)
+        {
+            int added = 0;
+            for (int corner = 0; corner < 3; corner++)
+            {
+                added += _local.ContainsKey(_indices[(triangle * 3) + corner]) ? 0 : 1;
+            }
+
+            return added;
+        }
     }
 }

@@ -349,8 +349,8 @@ it is kept, so nobody changes one once it is loaded. A `Handle<T>` is an asset b
 `Handle<T>.None` is none.
 
 `Assets` (`Magic.Services`) finds an asset by its path (`Find<T>`), a type's default (`Default<T>`) and the assets in
-a folder (`Paths`), loads one (`LoadAsync<T>`), says what one was made from (`Dependencies<T>`) and its version
-(`Version<T>`), and hands out one a gem made rather than read from a file (`Add<T>`), from any thread.
+a folder (`Paths`), loads one (`LoadAsync<T>`), says what one was made from (`GetDependencies<T>`) and its version
+(`GetVersion<T>`), and hands out one a gem made rather than read from a file (`Add<T>`), from any thread.
 
 How a file becomes an asset depends on its type. A type whose file is the class as JSON implements `IJsonAsset<T>`
 (`Material : IJsonAsset<Material>`), and one whose file is UTF-8 text kept in its `Text` implements `ITextAsset<T>`:
@@ -359,7 +359,7 @@ is an `IAssetLoader<T>` a gem provides by implementing it, as any interface: it 
 bytes and the import settings its sidecar holds beside the id, which it reads as a type of its own
 (`Json.Read<TextureMeta>(settings)`), so no loader handles the sidecar's format; it loads asynchronously, and the
 assets it loads as it reads one, as a prefab loads the prefabs it places, are what that one is made from
-(`Dependencies<T>`). A type no gem reads is read as JSON or text when it is an `IJsonAsset<T>` or an `ITextAsset<T>`,
+(`GetDependencies<T>`). A type no gem reads is read as JSON or text when it is an `IJsonAsset<T>` or an `ITextAsset<T>`,
 and refused otherwise. An `ILoadPostProcessor<T>`, which a gem provides the same way, works on an asset once its
 loader has made it and before anyone gets it, on every load and reload (a model's clusters, a pipeline's passes):
 what it returns is the asset everyone gets, it is handed the asset's version, a hash of its file and sidecar, to check
@@ -579,7 +579,7 @@ buffers, textures, samplers and pipelines, upload to them, and record the frame'
 on the render thread. The provider submits and presents them in its `Render` hook; it is made before every gem that
 takes it, so its `Render` runs after theirs, and a gem that takes it records in `Render`. A render target is a
 `GpuTexture`: a texture a gem made (a render texture, which it can then sample, as an editor's viewport is), or a
-window's, from `IGpu.WindowTarget(window)`. Whatever draws asks `IGpu.FormatOf` and `IGpu.SizeOf` of its target and
+window's, from `IGpu.GetWindowTarget(window)`. Whatever draws asks `IGpu.FormatOf` and `IGpu.SizeOf` of its target and
 treats the two alike; a window's can be drawn into, never sampled or read, but `IGpu.CaptureAsync` reads back what it
 shows next, for a screenshot. `GpuCommands` is a frame's commands as plain data, `GpuCommand`s with the handles and
 bytes they point into. Drawing and computing happen inside a pass: `RenderPass` and `ComputePass` hand back a

@@ -52,7 +52,7 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// Entries of the table point and spot lights' pages are found in: at least twice the pages the views read of them a
     /// frame, which the largest pool there is leaves room for.
     /// </summary>
-    public const int LightTableEntries = 65536;
+    internal const int LightTableEntries = 65536;
 
     /// <summary>
     /// Bytes of a table's entry, and of a page's record.
@@ -80,38 +80,38 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// <summary>
     /// The pool every page is drawn into: depth, reverse-Z, <see cref="Page"/> texels a page.
     /// </summary>
-    public GpuTexture Pool { get; private set; }
+    internal GpuTexture Pool { get; private set; }
 
     /// <summary>
     /// A record for each page of the pool, what owns it and the frame it was last read in, then the sun's entries, then
     /// the two lights' tables, an entry a page each.
     /// </summary>
-    public GpuBuffer Tables { get; private set; }
+    internal GpuBuffer Tables { get; private set; }
 
     /// <summary>
     /// The clipmap this frame (<see cref="GpuSunClipmap"/>), then its levels (<see cref="GpuSunLevel"/>).
     /// </summary>
-    public GpuBuffer Clipmap { get; private set; }
+    internal GpuBuffer Clipmap { get; private set; }
 
-    public int PoolSize { get; private set; }
+    private int PoolSize { get; set; }
 
     /// <summary>
     /// Entries of the sun's table and of a lights' table, which the passes that look through them run a thread for each
     /// of.
     /// </summary>
-    public int SunEntries => _levelCount * Window * Window;
+    internal int SunEntries => _levelCount * Window * Window;
 
     /// <summary>
     /// Pages of the pool, the last quarter of which are split in sixteen small pages each.
     /// </summary>
-    public int PoolPages => PoolSize / Page * (PoolSize / Page);
+    private int PoolPages => PoolSize / Page * (PoolSize / Page);
 
     /// <summary>
     /// The pool's pages kept whole, and the small pages its last quarter is split into: the pages there are to take.
     /// </summary>
-    public int WholePages => PoolPages * 3 / 4;
+    internal int WholePages => PoolPages * 3 / 4;
 
-    public int SmallPages => PoolPages / 4 * 16;
+    internal int SmallPages => PoolPages / 4 * 16;
 
     /// <summary>
     /// Rows of <see cref="Tables"/> before the sun's entries: a record for each page, whole or small, past the whole
@@ -126,15 +126,12 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// swaps the lights' tables, and makes the pool and the tables again when the settings size them otherwise;
     /// <paramref name="changedLightWords"/> is how many words the scene's bitmask of the lights that changed has.
     /// </summary>
-    public void Plan(Vector3 camera, Vector3 sun, int changedLightWords, int moved, ulong frame, ClusterRenderingSettings settings)
+    internal void Plan(Vector3 camera, Vector3 sun, int changedLightWords, int moved, ulong frame, ClusterRenderingSettings settings)
     {
         int poolSize = (int)BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(settings.ShadowPool, 1024, 16384));
         int levels = Math.Clamp(settings.ShadowLevels, 1, MaxLevels);
         bool isMade = poolSize != PoolSize || levels != _levelCount;
-        if (isMade)
-        {
-            Make(poolSize, levels);
-        }
+        if (isMade) Make(poolSize, levels);
 
         _isSwapped = !_isSwapped;
 
@@ -148,10 +145,7 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
         float depthStep = depthRange / 4;
         bool isTurned = Vector3.Dot(direction, _sunDirection) < 0.999999f;
         bool isMoved = float.IsNaN(_depthOrigin) || MathF.Abs(depth - _depthOrigin) > depthStep;
-        if (isMoved || isTurned)
-        {
-            _depthOrigin = MathF.Round(depth / depthStep) * depthStep;
-        }
+        if (isMoved || isTurned) _depthOrigin = MathF.Round(depth / depthStep) * depthStep;
 
         _sunDirection = direction;
         float finest = Math.Max(settings.ShadowFinest, 0.5f);
@@ -206,12 +200,9 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
     /// Names the pool and the tables in <paramref name="frame"/>, for the passes that draw and read the shadows; nothing
     /// before the first <see cref="Plan"/> makes them.
     /// </summary>
-    public void Bind(ResourceSet frame)
+    internal void Bind(ResourceSet frame)
     {
-        if (PoolSize == 0)
-        {
-            return;
-        }
+        if (PoolSize == 0) return;
 
         frame.Set("ShadowPool", BoundResource.Of(Pool, (uint)PoolSize, (uint)PoolSize));
         frame.Set("ShadowTables", BoundResource.Of(Tables, (uint)(TableRows * Row)));
@@ -236,10 +227,7 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
 
     private void Release()
     {
-        if (PoolSize == 0)
-        {
-            return;
-        }
+        if (PoolSize == 0) return;
 
         gpu.Release(Pool);
         gpu.Release(Tables);
@@ -260,30 +248,30 @@ internal sealed class Shadows(IGpu gpu) : IDisposable
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuSunClipmap
 {
-    public Vector3 Right;
-    public uint Levels;
-    public Vector3 Up;
-    public uint Frame;
-    public Vector3 Direction;
-    public uint AllDirty;
-    public float CameraDepth;
-    public float DepthRange;
-    public float Finest;
-    public uint ChangedLightWords;
-    public uint PoolAcross;
-    public uint WholePages;
-    public uint SmallPages;
-    public uint Moved;
-    public Vector3 Camera;
-    public uint SunTable;
-    public uint LightTable;
-    public uint LightTableLast;
-    public uint LightEntries;
-    public uint Padding0;
-    public uint Padding1;
-    public uint Padding2;
-    public uint Padding3;
-    public uint Padding4;
+    internal Vector3 Right;
+    internal uint Levels;
+    internal Vector3 Up;
+    internal uint Frame;
+    internal Vector3 Direction;
+    internal uint AllDirty;
+    internal float CameraDepth;
+    internal float DepthRange;
+    internal float Finest;
+    internal uint ChangedLightWords;
+    internal uint PoolAcross;
+    internal uint WholePages;
+    internal uint SmallPages;
+    internal uint Moved;
+    internal Vector3 Camera;
+    internal uint SunTable;
+    internal uint LightTable;
+    internal uint LightTableLast;
+    internal uint LightEntries;
+    internal uint Padding0;
+    internal uint Padding1;
+    internal uint Padding2;
+    internal uint Padding3;
+    internal uint Padding4;
 }
 
 /// <summary>
@@ -293,12 +281,12 @@ internal struct GpuSunClipmap
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuSunLevel
 {
-    public int OriginX;
-    public int OriginY;
-    public float PageSize;
-    public float Texel;
-    public float CameraX;
-    public float CameraY;
-    public float Padding0;
-    public float Padding1;
+    internal int OriginX;
+    internal int OriginY;
+    internal float PageSize;
+    internal float Texel;
+    internal float CameraX;
+    internal float CameraY;
+    internal float Padding0;
+    internal float Padding1;
 }

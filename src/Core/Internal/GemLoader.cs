@@ -53,14 +53,14 @@ internal sealed class GemLoader
     /// Loads the project's code and the gems it lists, and registers the gems with <paramref name="services"/>, which
     /// already holds what Core provides but the assets, made over where the gems' are once they have loaded.
     /// </summary>
-    public GemLoader(ServiceCollection services, IFileSystem files, Project project, Assemblies assemblies)
+    internal GemLoader(ServiceCollection services, IFileSystem files, Project project, Assemblies assemblies)
     {
         _files = files;
         _assemblies = assemblies;
         LoadCode(files.Combine(AppContext.BaseDirectory, "Resources", "Resources.dll"), "Magic's scripts");
         LoadCode(files.Combine(AppContext.BaseDirectory, "Projects", project.Name, project.Name + ".dll"), $"{project.Name}'s code");
 
-        List<string> resources = [GemAssembly.ResourcesOf(files, typeof(GemLoader).Assembly)];
+        List<string> resources = [GemAssembly.GetResources(files, typeof(GemLoader).Assembly)];
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
         foreach (string listing in project.Gems)
         {
@@ -87,7 +87,7 @@ internal sealed class GemLoader
                 continue;
             }
 
-            if (Clash(services, gem) is { } clash)
+            if (FindClash(services, gem) is { } clash)
             {
                 Debugging.Error(clash);
                 continue;
@@ -112,7 +112,7 @@ internal sealed class GemLoader
     /// listed: in a release, the copies the build made beside each assembly; in any other build, the source folders the
     /// build recorded, so assets are read where they are written.
     /// </summary>
-    public IReadOnlyList<string> Resources { get; }
+    internal IReadOnlyList<string> Resources { get; }
 
     /// <summary>
     /// Watches where the code that is no gem was loaded from, until the subscription is disposed, and loads what is
@@ -121,12 +121,12 @@ internal sealed class GemLoader
     /// holds, so the world runs the scripts as they are now. The gems are never loaded again: a gem takes a restart.
     /// </summary>
     [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "The subscription returned owns the list, and disposing it disposes the list.")]
-    public Subscription WatchCode(Assets assets)
+    internal Subscription WatchCode(Assets assets)
     {
         SubscriptionList watching = new();
         foreach (CodeFile code in _code)
         {
-            watching.Add(FileSystem.Watch(_files.Parent(code.Path), _ => ReloadCodeAsync(code, assets).FireAndForget()));
+            watching.Add(FileSystem.Watch(_files.GetParent(code.Path), _ => ReloadCodeAsync(code, assets).FireAndForget()));
         }
 
         return new Subscription(watching.Dispose);
@@ -136,7 +136,7 @@ internal sealed class GemLoader
     /// Makes every gem that was registered, in the order they are listed, each after whatever its constructor asks for;
     /// the gems, in the order they were made. A gem that could not be made has said why, and is left out.
     /// </summary>
-    public List<IGem> Make(ServiceProvider container)
+    internal List<IGem> Make(ServiceProvider container)
     {
         foreach (GemAssembly gem in _gems)
         {
@@ -193,10 +193,7 @@ internal sealed class GemLoader
     {
         ReadOnlySpan<int> parts = [version.Major, version.Minor, version.Build, version.Revision];
         string[] asked = wanted.Split('.');
-        if (asked.Length > parts.Length)
-        {
-            return false;
-        }
+        if (asked.Length > parts.Length) return false;
 
         for (int i = 0; i < asked.Length; i++)
         {
@@ -213,7 +210,7 @@ internal sealed class GemLoader
     /// Why <paramref name="gem"/> is not made when it would provide something Core or a gem listed before it already
     /// provides; null when it provides nothing that is taken.
     /// </summary>
-    private static string? Clash(ServiceCollection services, GemAssembly gem)
+    private static string? FindClash(ServiceCollection services, GemAssembly gem)
     {
         foreach (Type contract in gem.Provides)
         {
@@ -224,7 +221,7 @@ internal sealed class GemLoader
                 Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
                 if (provider.IsAssignableTo(contract))
                 {
-                    return $"Gem {gem.Name} provides {NameOf(contract)}, which {provider.Name} already provides; it is not made.";
+                    return $"Gem {gem.Name} provides {GetName(contract)}, which {provider.Name} already provides; it is not made.";
                 }
             }
         }
@@ -235,15 +232,12 @@ internal sealed class GemLoader
     /// <summary>
     /// <paramref name="type"/>'s name as C# writes it, <c>IAssetLoader&lt;Texture&gt;</c> rather than <c>IAssetLoader`1</c>.
     /// </summary>
-    private static string NameOf(Type type)
+    private static string GetName(Type type)
     {
-        if (!type.IsGenericType)
-        {
-            return type.Name;
-        }
+        if (!type.IsGenericType) return type.Name;
 
         string name = type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)];
-        return $"{name}<{string.Join(", ", Array.ConvertAll(type.GetGenericArguments(), NameOf))}>";
+        return $"{name}<{string.Join(", ", Array.ConvertAll(type.GetGenericArguments(), GetName))}>";
     }
 
     /// <summary>
@@ -261,10 +255,7 @@ internal sealed class GemLoader
             throw new InvalidOperationException($"it needs {gem.Name}, which is being made: a cycle, as {gem.Name} needs something that needs it.");
         }
 
-        if (!_tried.Add(gem.Type))
-        {
-            throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
-        }
+        if (!_tried.Add(gem.Type)) throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
 
         Result<ISettings?> settings = services.GetRequiredService<Settings>().Make(gem.Name, gem.Settings);
         if (!settings.Ok)
@@ -292,10 +283,7 @@ internal sealed class GemLoader
         }
 
         _made.Add(made);
-        if (made is ILogSink sink)
-        {
-            Debugging.Add(sink);
-        }
+        if (made is ILogSink sink) Debugging.Add(sink);
 
         string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
         Debugging.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
@@ -310,19 +298,19 @@ internal sealed class GemLoader
     {
         private int _changes;
 
-        public string Path { get; } = path;
+        internal string Path { get; } = path;
 
-        public string What { get; } = what;
+        internal string What { get; } = what;
 
         /// <summary>
         /// Notes one more change to its folder: which one, to ask <see cref="IsLatest"/> of after the settle.
         /// </summary>
-        public int Note()
+        internal int Note()
         {
             return Interlocked.Increment(ref _changes);
         }
 
-        public bool IsLatest(int change)
+        internal bool IsLatest(int change)
         {
             return change == Volatile.Read(ref _changes);
         }

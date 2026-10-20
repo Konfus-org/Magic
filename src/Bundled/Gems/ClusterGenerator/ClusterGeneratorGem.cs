@@ -73,10 +73,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
                 writer.Write(mesh.Indices.Length);
                 writer.Write(MemoryMarshal.AsBytes(mesh.Vertices.Span));
                 writer.Write(MemoryMarshal.AsBytes(mesh.Indices.Span));
-                if (mesh.Card is not { } card)
-                {
-                    throw new InvalidOperationException("A card mesh has no card.");
-                }
+                if (mesh.Card is not { } card) throw new InvalidOperationException("A card mesh has no card.");
 
                 WriteAtlas(card.Surface);
                 WriteAtlas(card.Normals);
@@ -145,7 +142,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
             ulong id = reader.ReadUInt64();
             byte[] pixels = new byte[reader.ReadInt32()];
             bytes.ReadExactly(pixels);
-            return AtlasOf(id, pixels);
+            return MakeAtlas(id, pixels);
         }
     }
 
@@ -154,10 +151,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// </summary>
     public void Update(in Frame frame)
     {
-        if (_settings.CardHeight == _cardHeight)
-        {
-            return;
-        }
+        if (_settings.CardHeight == _cardHeight) return;
 
         _cardHeight = _settings.CardHeight;
         _assets.RemakeAsync<Model>().FireAndForget();
@@ -167,7 +161,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     {
         ulong key = asset.Handle.Id;
         float cardHeight = _settings.CardHeight;
-        ulong madeFrom = MadeFrom(version, cardHeight);
+        ulong madeFrom = CombineVersion(version, cardHeight);
         ClustersAndCards made;
         if (await _caches.ReadAsync<ClustersAndCards>(key, madeFrom, cancel).ConfigureAwait(false) is { Ok: true } cached)
         {
@@ -176,7 +170,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         }
         else
         {
-            made = new(CardsOf(asset, cardHeight), ClusterBuilder.Build(asset, cancel));
+            made = new(MakeCards(asset, cardHeight), ClusterBuilder.Build(asset, cancel));
             Debugging.Verbose($"Made {made.Clusters?.Clusters.Length ?? 0} clusters and {made.Cards?.Meshes.Count ?? 0} cards of model {key}.");
             await _caches.WriteAsync(key, madeFrom, made, cancel).ConfigureAwait(false);
         }
@@ -189,7 +183,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// What a model's clusters and cards are made from: its <paramref name="version"/>, and the
     /// <paramref name="cardHeight"/> its cards start at.
     /// </summary>
-    private static ulong MadeFrom(ulong version, float cardHeight)
+    private static ulong CombineVersion(ulong version, float cardHeight)
     {
         XxHash3 hash = new();
         hash.Append(BitConverter.GetBytes(version));
@@ -202,15 +196,12 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// of the view tall; none for a model that lies flat. How big it is, which its height on screen is measured by, is
     /// half the largest side of the box around its vertices.
     /// </summary>
-    private static ModelCards? CardsOf(Model model, float cardHeight)
+    private static ModelCards? MakeCards(Model model, float cardHeight)
     {
-        (Vector3 min, Vector3 max) = BoundsOf(model);
+        (Vector3 min, Vector3 max) = GetBounds(model);
         Vector3 size = max - min;
         float radius = min.X > max.X ? 0 : MathF.Max(size.X, MathF.Max(size.Y, size.Z)) / 2;
-        if (radius <= 0 || size.Y < radius * 2 * FlatShare)
-        {
-            return null;
-        }
+        if (radius <= 0 || size.Y < radius * 2 * FlatShare) return null;
 
         Mesh[] cards = new Mesh[model.Meshes.Count];
         for (int i = 0; i < cards.Length; i++)
@@ -218,10 +209,10 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
             (Vector3 centre, float half, byte[] surface, byte[] normals) = CardBaker.Bake(model.Meshes[i]);
             Card card = new()
             {
-                Surface = AtlasOf(HandleOf(model.Handle, i, 1), surface),
-                Normals = AtlasOf(HandleOf(model.Handle, i, 2), normals),
+                Surface = MakeAtlas(HandleOf(model.Handle, i, 1), surface),
+                Normals = MakeAtlas(HandleOf(model.Handle, i, 2), normals),
             };
-            cards[i] = CardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
+            cards[i] = MakeCardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
         }
 
         return new ModelCards { Distance = radius / (cardHeight * MathF.Tan(HalfFieldOfView)), Meshes = cards };
@@ -231,7 +222,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// One card as a mesh: four vertices at <paramref name="centre"/>, each with its corner in its uv, the card's half
     /// width and half height in its normal, no turn, and a tangent whose w is 0, which marks a card.
     /// </summary>
-    private static Mesh CardMesh(Vector3 centre, float half, int slot, Card card)
+    private static Mesh MakeCardMesh(Vector3 centre, float half, int slot, Card card)
     {
         Vector3 sides = new(half, half, 0);
         Vector4 marker = new(1, 0, 0, 0);
@@ -248,7 +239,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// <summary>
     /// A card's atlas as a texture: its texels, linear, read between texels and never past its edge.
     /// </summary>
-    private static Texture AtlasOf(ulong id, byte[] pixels)
+    private static Texture MakeAtlas(ulong id, byte[] pixels)
     {
         return new Texture
         {
@@ -280,7 +271,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// <summary>
     /// The box around <paramref name="model"/>'s vertices; min past max when it has none.
     /// </summary>
-    private static (Vector3 Min, Vector3 Max) BoundsOf(Model model)
+    private static (Vector3 Min, Vector3 Max) GetBounds(Model model)
     {
         Vector3 min = new(float.MaxValue);
         Vector3 max = new(float.MinValue);
@@ -302,10 +293,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// </summary>
     private void HandOut(ModelCards? cards)
     {
-        if (cards is null)
-        {
-            return;
-        }
+        if (cards is null) return;
 
         foreach (Mesh mesh in cards.Meshes)
         {

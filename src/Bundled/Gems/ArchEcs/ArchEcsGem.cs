@@ -96,10 +96,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
     public void Update(in Frame frame)
     {
-        if (_jobs is null)
-        {
-            StartJobs();
-        }
+        if (_jobs is null) StartJobs();
 
         _entities.Record(_world.Size);
         _archetypes.Record(_world.Archetypes.Count);
@@ -135,7 +132,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         object[] values = new object[components.Length];
         for (int i = 0; i < components.Length; i++)
         {
-            types[i] = ComponentTypeOf(components[i].GetType());
+            types[i] = GetComponentType(components[i].GetType());
             values[i] = components[i];
         }
 
@@ -178,7 +175,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public void Destroy(Entity entity)
     {
         ThrowIfNotMain();
-        ArchEntity alive = Alive(entity);
+        ArchEntity alive = GetAlive(entity);
         ThrowIfQuerying();
         _world.Destroy(alive);
     }
@@ -193,7 +190,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T : unmanaged, IComponent
     {
         ThrowIfNotMain();
-        ArchEntity alive = Alive(entity);
+        ArchEntity alive = GetAlive(entity);
         ref T existing = ref _world.TryGetRef<T>(alive, out bool has);
         if (has)
         {
@@ -209,18 +206,15 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public void Set(Entity entity, ReadOnlySpan<IComponent> components)
     {
         ThrowIfNotMain();
-        ArchEntity alive = Alive(entity);
+        ArchEntity alive = GetAlive(entity);
         ComponentType[] types = new ComponentType[components.Length];
         object[] values = new object[components.Length];
         int added = 0;
         for (int i = 0; i < components.Length; i++)
         {
             values[i] = components[i];
-            ComponentType type = ComponentTypeOf(components[i].GetType());
-            if (!_world.Has(alive, type))
-            {
-                types[added++] = type;
-            }
+            ComponentType type = GetComponentType(components[i].GetType());
+            if (!_world.Has(alive, type)) types[added++] = type;
         }
 
         if (added > 0)
@@ -232,10 +226,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         _world.SetRange(alive, values);
     }
 
-    public IComponent[] Components(Entity entity)
+    public IComponent[] GetComponents(Entity entity)
     {
         ThrowIfNotMain();
-        object?[] held = _world.GetAllComponents(Alive(entity));
+        object?[] held = _world.GetAllComponents(GetAlive(entity));
         IComponent[] components = new IComponent[held.Length];
         for (int i = 0; i < held.Length; i++)
         {
@@ -249,11 +243,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T : unmanaged, IComponent
     {
         ThrowIfCannotRead();
-        ref T component = ref _world.TryGetRef<T>(Alive(entity), out bool has);
-        if (!has)
-        {
-            throw new InvalidOperationException($"{entity} has no {typeof(T).Name}.");
-        }
+        ref T component = ref _world.TryGetRef<T>(GetAlive(entity), out bool has);
+        if (!has) throw new InvalidOperationException($"{entity} has no {typeof(T).Name}.");
 
         return ref component;
     }
@@ -266,11 +257,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T : unmanaged, IComponent
     {
         ThrowIfNotMain();
-        ArchEntity alive = Alive(entity);
-        if (!_world.Has<T>(alive))
-        {
-            return;
-        }
+        ArchEntity alive = GetAlive(entity);
+        if (!_world.Has<T>(alive)) return;
 
         ThrowIfQuerying();
         _world.Remove<T>(alive);
@@ -352,12 +340,12 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// <summary>
     /// A chunk's live entities as Magic's: Arch's arrays run to the chunk's capacity, past its last entity.
     /// </summary>
-    private static ReadOnlySpan<Entity> Entities(Chunk chunk) => MemoryMarshal.Cast<ArchEntity, Entity>(chunk.Entities.AsSpan(0, chunk.Count));
+    private static ReadOnlySpan<Entity> GetEntities(Chunk chunk) => MemoryMarshal.Cast<ArchEntity, Entity>(chunk.Entities.AsSpan(0, chunk.Count));
 
     /// <summary>
     /// A chunk's <typeparamref name="T"/> components, at its live entities' indexes.
     /// </summary>
-    private static Span<T> Components<T>(Chunk chunk) => chunk.GetArray<T>().AsSpan(0, chunk.Count);
+    private static Span<T> GetComponents<T>(Chunk chunk) => chunk.GetArray<T>().AsSpan(0, chunk.Count);
 
     /// <summary>
     /// Runs the phase's systems. One that throws is logged and taken off, and the phase goes on without it.
@@ -408,10 +396,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         Scheduled[] systems = _systems[phase];
         int index = Array.IndexOf(systems, scheduled);
-        if (index < 0)
-        {
-            return;
-        }
+        if (index < 0) return;
 
         _systems[phase] = [.. systems.AsSpan(0, index), .. systems.AsSpan(index + 1)];
     }
@@ -447,12 +432,9 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// The ECS's type of <paramref name="type"/>, a component known only as the program runs, from Arch's registry, or
     /// from its typed registration the first time, so a struct is measured as the typed calls measure it.
     /// </summary>
-    private static ComponentType ComponentTypeOf(Type type)
+    private static ComponentType GetComponentType(Type type)
     {
-        if (ComponentRegistry.TryGet(type, out ComponentType registered))
-        {
-            return registered;
-        }
+        if (ComponentRegistry.TryGet(type, out ComponentType registered)) return registered;
 
         return typeof(Component<>).MakeGenericType(type).GetField(nameof(Component<int>.ComponentType))?.GetValue(null) is ComponentType found
             ? found
@@ -466,16 +448,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         ThrowIfNotMain();
         ThrowIfQuerying();
-        if (_created.Length < count)
-        {
-            _created = new ArchEntity[BitOperations.RoundUpToPowerOf2((uint)count)];
-        }
+        if (_created.Length < count) _created = new ArchEntity[BitOperations.RoundUpToPowerOf2((uint)count)];
 
         Span<ArchEntity> created = _created.AsSpan(0, count);
-        if (count > 0)
-        {
-            _world.Create(created, in signature, count);
-        }
+        if (count > 0) _world.Create(created, in signature, count);
 
         return created;
     }
@@ -498,22 +474,16 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
             _querying--;
         }
 
-        if (Interlocked.Exchange(ref _thrown, null) is { } thrown)
-        {
-            ExceptionDispatchInfo.Throw(thrown);
-        }
+        if (Interlocked.Exchange(ref _thrown, null) is { } thrown) ExceptionDispatchInfo.Throw(thrown);
     }
 
     /// <summary>
     /// Arch's handle for <paramref name="entity"/>, which must be alive.
     /// </summary>
-    private ArchEntity Alive(Entity entity)
+    private ArchEntity GetAlive(Entity entity)
     {
         ArchEntity arch = Unsafe.BitCast<Entity, ArchEntity>(entity);
-        if (!_world.IsAlive(arch))
-        {
-            throw new InvalidOperationException($"{entity} is not alive.");
-        }
+        if (!_world.IsAlive(arch)) throw new InvalidOperationException($"{entity} is not alive.");
 
         return arch;
     }
@@ -531,10 +501,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// </summary>
     private void ThrowIfCannotRead()
     {
-        if (!_isParallel)
-        {
-            ThrowIfNotMain();
-        }
+        if (!_isParallel) ThrowIfNotMain();
     }
 
     private void ThrowIfQuerying()
@@ -560,9 +527,9 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// </summary>
     private static class All
     {
-        public static readonly QueryDescription Description = new();
+        internal static readonly QueryDescription Description = new();
 
-        public static EcsChunk Cut(Chunk chunk) => new(Entities(chunk));
+        internal static EcsChunk Cut(Chunk chunk) => new(GetEntities(chunk));
     }
 
     /// <summary>
@@ -572,11 +539,11 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private static class All<T1>
         where T1 : unmanaged, IComponent
     {
-        public static readonly QueryDescription Description = new QueryDescription().WithAll<T1>();
+        internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1>();
 
-        public static readonly Signature Signature = new(Component<T1>.ComponentType);
+        internal static readonly Signature Signature = new(Component<T1>.ComponentType);
 
-        public static EcsChunk<T1> Cut(Chunk chunk) => new(Entities(chunk), Components<T1>(chunk));
+        internal static EcsChunk<T1> Cut(Chunk chunk) => new(GetEntities(chunk), GetComponents<T1>(chunk));
     }
 
     /// <summary>
@@ -586,11 +553,11 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
     {
-        public static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2>();
+        internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2>();
 
-        public static readonly Signature Signature = new(Component<T1>.ComponentType, Component<T2>.ComponentType);
+        internal static readonly Signature Signature = new(Component<T1>.ComponentType, Component<T2>.ComponentType);
 
-        public static EcsChunk<T1, T2> Cut(Chunk chunk) => new(Entities(chunk), Components<T1>(chunk), Components<T2>(chunk));
+        internal static EcsChunk<T1, T2> Cut(Chunk chunk) => new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk));
     }
 
     /// <summary>
@@ -601,9 +568,9 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
     {
-        public static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3>();
+        internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3>();
 
-        public static EcsChunk<T1, T2, T3> Cut(Chunk chunk) => new(Entities(chunk), Components<T1>(chunk), Components<T2>(chunk), Components<T3>(chunk));
+        internal static EcsChunk<T1, T2, T3> Cut(Chunk chunk) => new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk), GetComponents<T3>(chunk));
     }
 
     /// <summary>
@@ -615,9 +582,9 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent
     {
-        public static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3, T4>();
+        internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3, T4>();
 
-        public static EcsChunk<T1, T2, T3, T4> Cut(Chunk chunk) => new(Entities(chunk), Components<T1>(chunk), Components<T2>(chunk), Components<T3>(chunk), Components<T4>(chunk));
+        internal static EcsChunk<T1, T2, T3, T4> Cut(Chunk chunk) => new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk), GetComponents<T3>(chunk), GetComponents<T4>(chunk));
     }
 
     /// <summary>
@@ -635,10 +602,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         public void Dispose()
         {
-            if (!_isWalking)
-            {
-                return;
-            }
+            if (!_isWalking) return;
 
             _isWalking = false;
             ecs._querying--;

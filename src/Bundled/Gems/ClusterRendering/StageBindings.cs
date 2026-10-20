@@ -10,7 +10,7 @@ namespace Magic.ClusterRendering;
 /// What one stage of a pass binds: the names its shader uses, as a probe compile of it found them
 /// (<see cref="GpuShader.Bindings"/>), each resolved to what the pass can see and given its slot among its kind, which
 /// the renderer binds it at and the shader is compiled again to read it at. A draw's is the union over its templates,
-/// which every surface pipeline of it uses no more than (<see cref="Check"/>). <see cref="Header"/> declares to a shader
+/// which every surface pipeline of it uses no more than (<see cref="Check"/>). <see cref="MakeHeader"/> declares to a shader
 /// every name a pass can see, these at their slots and the rest past them, so a shader reads whichever it uses and the
 /// compiler drops the rest.
 /// </summary>
@@ -20,21 +20,21 @@ internal sealed class StageBindings
     /// The most a stage binds of a kind, as every GPU allows: sampled textures, and storage textures or buffers read or
     /// written.
     /// </summary>
-    public const int MaxSampled = 16;
-    public const int MaxStorage = 8;
+    internal const int MaxSampled = 16;
+    internal const int MaxStorage = 8;
 
-    public List<BoundName> Sampled { get; } = [];
+    internal List<BoundName> Sampled { get; } = [];
 
     /// <summary>
     /// The textures read texel by texel with no sampler (<see cref="ResourceInfo.IsStorageRead"/>).
     /// </summary>
-    public List<BoundName> StorageReads { get; } = [];
+    internal List<BoundName> StorageReads { get; } = [];
 
-    public List<BoundName> Buffers { get; } = [];
+    internal List<BoundName> Buffers { get; } = [];
 
-    public List<BoundName> TextureWrites { get; } = [];
+    internal List<BoundName> TextureWrites { get; } = [];
 
-    public List<BoundName> BufferWrites { get; } = [];
+    internal List<BoundName> BufferWrites { get; } = [];
 
     /// <summary>
     /// What the names <paramref name="used"/> by a shader, or the shaders of a draw's templates together, bind: each
@@ -42,7 +42,7 @@ internal sealed class StageBindings
     /// the order the pass sees the names. Why not, when a name is read as what it is not, or more are used than a
     /// stage binds.
     /// </summary>
-    public static Result<StageBindings> Of(IReadOnlyList<GpuShaderBinding> used, IReadOnlyList<ResourceInfo> visible, IReadOnlyList<PassBinding> writes)
+    internal static Result<StageBindings> TryCreate(IReadOnlyList<GpuShaderBinding> used, IReadOnlyList<ResourceInfo> visible, IReadOnlyList<PassBinding> writes)
     {
         Dictionary<string, ResourceInfo> seen = new(StringComparer.Ordinal);
         foreach (ResourceInfo info in visible)
@@ -59,10 +59,7 @@ internal sealed class StageBindings
         Dictionary<string, GpuBindingKind> kinds = new(StringComparer.Ordinal);
         foreach (GpuShaderBinding binding in used)
         {
-            if (binding.Kind == GpuBindingKind.Uniform)
-            {
-                continue;
-            }
+            if (binding.Kind == GpuBindingKind.Uniform) continue;
 
             if (kinds.TryGetValue(binding.Name, out GpuBindingKind kind) && kind != binding.Kind)
             {
@@ -70,10 +67,7 @@ internal sealed class StageBindings
             }
 
             kinds[binding.Name] = binding.Kind;
-            if (KindError(binding, seen, written) is { } why)
-            {
-                return Result.Failure<StageBindings>(why);
-            }
+            if (GetKindError(binding, seen, written) is { } why) return Result.Failure<StageBindings>(why);
         }
 
         StageBindings bound = new();
@@ -108,7 +102,7 @@ internal sealed class StageBindings
     /// first, then storage textures, then buffers, as the binding model counts them, for the probe that finds which are
     /// used.
     /// </summary>
-    public static string Header(GpuStage stage, IReadOnlyList<ResourceInfo> visible, IReadOnlyList<PassBinding> writes, StageBindings? bound)
+    internal static string MakeHeader(GpuStage stage, IReadOnlyList<ResourceInfo> visible, IReadOnlyList<PassBinding> writes, StageBindings? bound)
     {
         StringBuilder header = new("#include \"Include/Frame.hlsli\"\n#include \"Include/Structs.hlsli\"\n");
         HashSet<string> written = new(StringComparer.Ordinal);
@@ -132,7 +126,7 @@ internal sealed class StageBindings
         {
             if (!info.IsBuffer && !info.IsStorageRead && !written.Contains(info.Name))
             {
-                uint read = SlotOf(bound?.Sampled, info.Name, 0, ref next);
+                uint read = GetSlot(bound?.Sampled, info.Name, 0, ref next);
                 string sampler = info.Filter == PassFilter.Comparison ? "SamplerComparisonState" : "SamplerState";
                 header.Append(CultureInfo.InvariantCulture, $"{info.ReadType} {info.Name} : READ({read});\n{sampler} {info.Name}Sampler : SAMPLER({read});\n");
             }
@@ -142,7 +136,7 @@ internal sealed class StageBindings
         {
             if (!info.IsBuffer && info.IsStorageRead && !written.Contains(info.Name))
             {
-                header.Append(CultureInfo.InvariantCulture, $"{info.ReadType} {info.Name} : READ({SlotOf(bound?.StorageReads, info.Name, sampled, ref next)});\n");
+                header.Append(CultureInfo.InvariantCulture, $"{info.ReadType} {info.Name} : READ({GetSlot(bound?.StorageReads, info.Name, sampled, ref next)});\n");
             }
         }
 
@@ -150,14 +144,11 @@ internal sealed class StageBindings
         {
             if (info.IsBuffer && !written.Contains(info.Name))
             {
-                header.Append(CultureInfo.InvariantCulture, $"{info.ReadType} {info.Name} : READ({SlotOf(bound?.Buffers, info.Name, sampled + storageReads, ref next)});\n");
+                header.Append(CultureInfo.InvariantCulture, $"{info.ReadType} {info.Name} : READ({GetSlot(bound?.Buffers, info.Name, sampled + storageReads, ref next)});\n");
             }
         }
 
-        if (stage != GpuStage.Compute)
-        {
-            return header.ToString();
-        }
+        if (stage != GpuStage.Compute) return header.ToString();
 
         uint writtenTextures = (uint)(bound?.TextureWrites.Count ?? 0);
         uint nextWrite = writtenTextures + (uint)(bound?.BufferWrites.Count ?? 0);
@@ -165,7 +156,7 @@ internal sealed class StageBindings
         {
             if (!write.Info.IsBuffer)
             {
-                header.Append(CultureInfo.InvariantCulture, $"{write.Info.WriteType} {write.Info.Name} : WRITE({SlotOf(bound?.TextureWrites, write.Info.Name, 0, ref nextWrite)});\n");
+                header.Append(CultureInfo.InvariantCulture, $"{write.Info.WriteType} {write.Info.Name} : WRITE({GetSlot(bound?.TextureWrites, write.Info.Name, 0, ref nextWrite)});\n");
             }
         }
 
@@ -173,7 +164,7 @@ internal sealed class StageBindings
         {
             if (write.Info.IsBuffer)
             {
-                header.Append(CultureInfo.InvariantCulture, $"{write.Info.WriteType} {write.Info.Name} : WRITE({SlotOf(bound?.BufferWrites, write.Info.Name, writtenTextures, ref nextWrite)});\n");
+                header.Append(CultureInfo.InvariantCulture, $"{write.Info.WriteType} {write.Info.Name} : WRITE({GetSlot(bound?.BufferWrites, write.Info.Name, writtenTextures, ref nextWrite)});\n");
             }
         }
 
@@ -185,9 +176,9 @@ internal sealed class StageBindings
     /// the register it is bound at, and its own constant block. Why not, when it uses a name past them or at another
     /// register.
     /// </summary>
-    public Result<GpuShader> Check(GpuShader shader, string name)
+    internal Result<GpuShader> Check(GpuShader shader, string name)
     {
-        List<GpuShaderBinding> bindings = AsShader();
+        List<GpuShaderBinding> bindings = ToShaderBindings();
         foreach (GpuShaderBinding binding in shader.Bindings)
         {
             if (binding.Kind == GpuBindingKind.Uniform)
@@ -196,7 +187,7 @@ internal sealed class StageBindings
                 continue;
             }
 
-            List<BoundName> list = ListOf(binding.Kind);
+            List<BoundName> list = GetList(binding.Kind);
             if (!list.Exists(bound => string.Equals(bound.Binding.Info.Name, binding.Name, StringComparison.Ordinal) && RegisterOf(binding.Kind, bound.Slot) == binding.Register))
             {
                 return Result.Failure<GpuShader>($"{name} uses {binding.Name} at {binding.Register}, which its pass does not bind there.");
@@ -206,7 +197,7 @@ internal sealed class StageBindings
         return Result.Success(shader with { Bindings = bindings });
     }
 
-    private List<BoundName> ListOf(GpuBindingKind kind) => kind switch
+    private List<BoundName> GetList(GpuBindingKind kind) => kind switch
     {
         GpuBindingKind.Sampled => Sampled,
         GpuBindingKind.StorageTexture => StorageReads,
@@ -234,7 +225,7 @@ internal sealed class StageBindings
     /// Why a shader reads a name as what it is not: a sampled texture that is a buffer, a write of what the pass does not
     /// write, or a name the pass does not see.
     /// </summary>
-    private static string? KindError(GpuShaderBinding binding, Dictionary<string, ResourceInfo> seen, Dictionary<string, PassBinding> written)
+    private static string? GetKindError(GpuShaderBinding binding, Dictionary<string, ResourceInfo> seen, Dictionary<string, PassBinding> written)
     {
         bool isWrite = binding.Kind is GpuBindingKind.ReadWriteStorageTexture or GpuBindingKind.ReadWriteStorageBuffer;
         if (isWrite)
@@ -266,23 +257,20 @@ internal sealed class StageBindings
     /// The register a name is declared at: its own slot in <paramref name="list"/> past <paramref name="before"/>, the
     /// registers of the kinds before it, else the next number past every bound name.
     /// </summary>
-    private static uint SlotOf(List<BoundName>? list, string name, uint before, ref uint next)
+    private static uint GetSlot(List<BoundName>? list, string name, uint before, ref uint next)
     {
         if (list is not null)
         {
             foreach (BoundName bound in list)
             {
-                if (string.Equals(bound.Binding.Info.Name, name, StringComparison.Ordinal))
-                {
-                    return before + bound.Slot;
-                }
+                if (string.Equals(bound.Binding.Info.Name, name, StringComparison.Ordinal)) return before + bound.Slot;
             }
         }
 
         return next++;
     }
 
-    private List<GpuShaderBinding> AsShader()
+    private List<GpuShaderBinding> ToShaderBindings()
     {
         List<GpuShaderBinding> bindings = [];
         Add(Sampled, GpuBindingKind.Sampled);

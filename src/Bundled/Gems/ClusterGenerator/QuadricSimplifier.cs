@@ -35,7 +35,7 @@ internal static class QuadricSimplifier
     /// of the mesh's it carries (<see cref="Reduced.Sources"/>), so a caller that keeps a material by vertex keeps it by
     /// triangle. The error is how far the surface may have moved, in the mesh's units.
     /// </summary>
-    public static Reduced Reduce(Mesh mesh, int target, IReadOnlySet<Vector3> locked)
+    internal static Reduced Reduce(Mesh mesh, int target, IReadOnlySet<Vector3> locked)
     {
         Simplification work = new(mesh, locked);
         work.Run(Math.Max(1, target));
@@ -47,7 +47,7 @@ internal static class QuadricSimplifier
     /// A mesh <see cref="Reduce"/> brought down, the source vertex each of its vertices carries everything but its place
     /// from, and how far its surface may have moved.
     /// </summary>
-    public readonly record struct Reduced(Mesh Mesh, int[] Sources, float Error);
+    internal readonly record struct Reduced(Mesh Mesh, int[] Sources, float Error);
 
     /// <summary>
     /// One mesh being simplified: its welded points, its triangles, and each point's references to the triangle corners
@@ -72,6 +72,9 @@ internal static class QuadricSimplifier
         /// as no triangle has both. A vertex that moved takes its normal from its set (<see cref="ToMesh"/>).
         /// </summary>
         private readonly int[] _smooth;
+        private bool[] _keptDeleted = [];
+
+        private bool[] _goneDeleted = [];
 
         public Simplification(Mesh source, IReadOnlySet<Vector3> locked)
         {
@@ -96,10 +99,7 @@ internal static class QuadricSimplifier
 
                 weld[i] = point;
                 _smooth[i] = i;
-                if (!sameAt.TryAdd((position, vertices[i].Normal), i))
-                {
-                    Join(i, sameAt[(position, vertices[i].Normal)]);
-                }
+                if (!sameAt.TryAdd((position, vertices[i].Normal), i)) Join(i, sameAt[(position, vertices[i].Normal)]);
             }
 
             for (int i = 0; i + 2 < indices.Length; i += 3)
@@ -118,23 +118,18 @@ internal static class QuadricSimplifier
         /// <summary>
         /// The most error of any collapse made, a squared distance, as the quadric error is a sum of squared distances.
         /// </summary>
-        public double MaxError { get; private set; }
+        internal double MaxError { get; private set; }
 
         /// <summary>
         /// Collapses edges, pass by pass, until <paramref name="target"/> triangles are left, or the passes run out.
         /// </summary>
-        public void Run(int target)
+        internal void Run(int target)
         {
             int deleted = 0;
             int count = _triangles.Count;
-            bool[] keptDeleted = [];
-            bool[] goneDeleted = [];
             for (int pass = 0; pass < MaxPasses && count - deleted > target; pass++)
             {
-                if (pass % 5 == 0)
-                {
-                    Update(pass);
-                }
+                if (pass % 5 == 0) Update(pass);
 
                 foreach (Triangle triangle in _triangles)
                 {
@@ -145,77 +140,13 @@ internal static class QuadricSimplifier
                 for (int t = 0; t < _triangles.Count && count - deleted > target; t++)
                 {
                     Triangle triangle = _triangles[t];
-                    if (triangle.Error[3] > threshold || triangle.Deleted || triangle.Dirty)
-                    {
-                        continue;
-                    }
+                    if (triangle.Error[3] > threshold || triangle.Deleted || triangle.Dirty) continue;
 
                     for (int edge = 0; edge < 3; edge++)
                     {
-                        if (triangle.Error[edge] > threshold)
-                        {
-                            continue;
-                        }
+                        if (triangle.Error[edge] > threshold || !TryCollapseEdge(triangle, edge, out int removed)) continue;
 
-                        // The edge's first end stays, at the place the collapse puts it; its second goes into it.
-                        int keptId = triangle.Points[edge];
-                        int goneId = triangle.Points[(edge + 1) % 3];
-                        Point kept = _points[keptId];
-                        Point gone = _points[goneId];
-                        if (kept.Border != gone.Border)
-                        {
-                            // An edge along a border collapses along it; one across would pull the border in.
-                            continue;
-                        }
-
-                        CollapseError(keptId, goneId, out Vector3 place);
-                        if (keptDeleted.Length < kept.Count)
-                        {
-                            Array.Resize(ref keptDeleted, kept.Count * 2);
-                        }
-
-                        if (goneDeleted.Length < gone.Count)
-                        {
-                            Array.Resize(ref goneDeleted, gone.Count * 2);
-                        }
-
-                        if (Flipped(place, goneId, kept, keptDeleted) || Flipped(place, keptId, gone, goneDeleted))
-                        {
-                            continue;
-                        }
-
-                        bool ontoKept = place == kept.Position;
-                        bool ontoGone = !ontoKept && place == gone.Position;
-                        JoinAcross(goneId, kept, keptDeleted);
-                        if (ontoKept || ontoGone)
-                        {
-                            SharedSources(goneId, kept, keptDeleted, ontoKept);
-                        }
-
-                        MaxError = Math.Max(MaxError, triangle.Error[edge]);
-                        kept.Position = place;
-                        kept.Quadric += gone.Quadric;
-                        kept.Locked |= gone.Locked;
-                        int start = _refs.Count;
-                        deleted += Retarget(keptId, kept, keptDeleted, ontoGone);
-                        deleted += Retarget(keptId, gone, goneDeleted, ontoKept);
-                        int added = _refs.Count - start;
-                        if (added <= kept.Count)
-                        {
-                            // Fits where the kept point's references were: move them there, so the list does not grow.
-                            for (int r = 0; r < added; r++)
-                            {
-                                _refs[kept.Start + r] = _refs[start + r];
-                            }
-
-                            _refs.RemoveRange(start, added);
-                        }
-                        else
-                        {
-                            kept.Start = start;
-                        }
-
-                        kept.Count = added;
+                        deleted += removed;
                         break;
                     }
                 }
@@ -225,13 +156,73 @@ internal static class QuadricSimplifier
         }
 
         /// <summary>
+        /// Collapses the triangle's edge when the collapse is sound: its first end stays, at the place the collapse puts
+        /// it, and its second goes into it; <paramref name="deleted"/> is how many triangles went with it. An edge along
+        /// a border collapses along it, one across would pull the border in, and a collapse that flips a triangle is
+        /// refused.
+        /// </summary>
+        private bool TryCollapseEdge(Triangle triangle, int edge, out int deleted)
+        {
+            deleted = 0;
+            int keptId = triangle.Points[edge];
+            int goneId = triangle.Points[(edge + 1) % 3];
+            Point kept = _points[keptId];
+            Point gone = _points[goneId];
+            if (kept.Border != gone.Border) return false;
+
+            ComputeCollapseError(keptId, goneId, out Vector3 place);
+            if (_keptDeleted.Length < kept.Count) Array.Resize(ref _keptDeleted, kept.Count * 2);
+            if (_goneDeleted.Length < gone.Count) Array.Resize(ref _goneDeleted, gone.Count * 2);
+            if (IsFlipped(place, goneId, kept, _keptDeleted) || IsFlipped(place, keptId, gone, _goneDeleted)) return false;
+
+            bool ontoKept = place == kept.Position;
+            bool ontoGone = !ontoKept && place == gone.Position;
+            JoinAcross(goneId, kept, _keptDeleted);
+            if (ontoKept || ontoGone) SharedSources(goneId, kept, _keptDeleted, ontoKept);
+
+            MaxError = Math.Max(MaxError, triangle.Error[edge]);
+            kept.Position = place;
+            kept.Quadric += gone.Quadric;
+            kept.Locked |= gone.Locked;
+            int start = _refs.Count;
+            deleted += Retarget(keptId, kept, _keptDeleted, ontoGone);
+            deleted += Retarget(keptId, gone, _goneDeleted, ontoKept);
+            MoveReferences(kept, start);
+            return true;
+        }
+
+        /// <summary>
+        /// The references added for the kept point, from <paramref name="start"/> on, become its run: moved into the
+        /// room its old run had when they fit, so the list does not grow, else left where they were added.
+        /// </summary>
+        private void MoveReferences(Point kept, int start)
+        {
+            int added = _refs.Count - start;
+            if (added <= kept.Count)
+            {
+                for (int r = 0; r < added; r++)
+                {
+                    _refs[kept.Start + r] = _refs[start + r];
+                }
+
+                _refs.RemoveRange(start, added);
+            }
+            else
+            {
+                kept.Start = start;
+            }
+
+            kept.Count = added;
+        }
+
+        /// <summary>
         /// The mesh as it is now: one vertex per (point, source vertex) pair a corner uses, the source vertex at the
         /// point's place, and which source vertex each is. At a point that is not locked where a corner has come from
         /// elsewhere, the vertices of each smooth set (<see cref="_smooth"/>) take the normal of the triangles the set
         /// is the corners of, summed by their area, and their tangent is laid flat to it; a locked point keeps its
         /// source normals, as the clusters either side of a border must carry the same normals along it.
         /// </summary>
-        public Mesh ToMesh(out int[] sources)
+        internal Mesh ToMesh(out int[] sources)
         {
             ReadOnlySpan<Vertex> sourceVertices = _source.Vertices.Span;
             Dictionary<(int Point, int Source), uint> made = [];
@@ -242,10 +233,7 @@ internal static class QuadricSimplifier
             Dictionary<(int Point, int Set), (Vector3 Normal, bool Moved)> sets = [];
             foreach (Triangle triangle in _triangles)
             {
-                if (triangle.Deleted)
-                {
-                    continue;
-                }
+                if (triangle.Deleted) continue;
 
                 Vector3 first = _points[triangle.Points[0]].Position;
                 Vector3 area = Vector3.Cross(_points[triangle.Points[1]].Position - first, _points[triangle.Points[2]].Position - first);
@@ -271,10 +259,7 @@ internal static class QuadricSimplifier
             for (int i = 0; i < vertices.Count; i++)
             {
                 (Vector3 sum, bool moved) = sets[madeAt[i]];
-                if (!moved || _points[madeAt[i].Point].Locked || sum.Length() <= 0)
-                {
-                    continue;
-                }
+                if (!moved || _points[madeAt[i].Point].Locked || sum.Length() <= 0) continue;
 
                 Vector3 normal = Vector3.Normalize(sum);
                 Vertex vertex = vertices[i];
@@ -318,10 +303,7 @@ internal static class QuadricSimplifier
             {
                 (int index, int corner) = _refs[point.Start + r];
                 Triangle triangle = _triangles[index];
-                if (triangle.Deleted || !deleted[r])
-                {
-                    continue;
-                }
+                if (triangle.Deleted || !deleted[r]) continue;
 
                 int otherCorner = triangle.Points[(corner + 1) % 3] == other ? (corner + 1) % 3 : (corner + 2) % 3;
                 Join(triangle.Source[corner], triangle.Source[otherCorner]);
@@ -333,16 +315,13 @@ internal static class QuadricSimplifier
         /// turn one of <paramref name="point"/>'s triangles over (or make it a sliver); marks those that would lose the
         /// edge, which the collapse deletes.
         /// </summary>
-        private bool Flipped(Vector3 place, int other, Point point, bool[] deleted)
+        private bool IsFlipped(Vector3 place, int other, Point point, bool[] deleted)
         {
             for (int r = 0; r < point.Count; r++)
             {
                 (int index, int corner) = _refs[point.Start + r];
                 Triangle triangle = _triangles[index];
-                if (triangle.Deleted)
-                {
-                    continue;
-                }
+                if (triangle.Deleted) continue;
 
                 int next = triangle.Points[(corner + 1) % 3];
                 int last = triangle.Points[(corner + 2) % 3];
@@ -354,17 +333,11 @@ internal static class QuadricSimplifier
 
                 Vector3 toNext = Normalized(_points[next].Position - place);
                 Vector3 toLast = Normalized(_points[last].Position - place);
-                if (MathF.Abs(Vector3.Dot(toNext, toLast)) > 0.999f)
-                {
-                    return true;
-                }
+                if (MathF.Abs(Vector3.Dot(toNext, toLast)) > 0.999f) return true;
 
                 Vector3 normal = Normalized(Vector3.Cross(toNext, toLast));
                 deleted[r] = false;
-                if (Vector3.Dot(normal, triangle.Normal) < 0.2f)
-                {
-                    return true;
-                }
+                if (Vector3.Dot(normal, triangle.Normal) < 0.2f) return true;
             }
 
             return false;
@@ -385,10 +358,7 @@ internal static class QuadricSimplifier
             {
                 (int index, int corner) = _refs[point.Start + r];
                 Triangle triangle = _triangles[index];
-                if (triangle.Deleted || !deleted[r])
-                {
-                    continue;
-                }
+                if (triangle.Deleted || !deleted[r]) continue;
 
                 int otherCorner = triangle.Points[(corner + 1) % 3] == other ? (corner + 1) % 3 : (corner + 2) % 3;
                 if (ontoPoint)
@@ -414,10 +384,7 @@ internal static class QuadricSimplifier
             {
                 (int index, int corner) = _refs[point.Start + r];
                 Triangle triangle = _triangles[index];
-                if (triangle.Deleted)
-                {
-                    continue;
-                }
+                if (triangle.Deleted) continue;
 
                 if (deleted[r])
                 {
@@ -447,6 +414,22 @@ internal static class QuadricSimplifier
         private void Update(int pass)
         {
             _triangles.RemoveAll(static triangle => triangle.Deleted);
+            IndexReferences();
+            if (pass != 0) return;
+
+            MarkBorders();
+            AddBorderPlanes(AddPlaneQuadrics());
+            foreach (Triangle triangle in _triangles)
+            {
+                SetErrors(triangle);
+            }
+        }
+
+        /// <summary>
+        /// Each point's run in <see cref="_refs"/>: the triangles that use it, and at which corner.
+        /// </summary>
+        private void IndexReferences()
+        {
             foreach (Point point in _points)
             {
                 point.Count = 0;
@@ -479,36 +462,48 @@ internal static class QuadricSimplifier
                     point.Count++;
                 }
             }
+        }
 
-            if (pass != 0)
-            {
-                return;
-            }
-
-            // A border is an edge with one triangle: its points only collapse into each other, or the mesh would shrink
-            // away from it.
+        /// <summary>
+        /// A border is an edge with one triangle: its points only collapse into each other, or the mesh would shrink
+        /// away from it.
+        /// </summary>
+        private void MarkBorders()
+        {
             foreach (Point point in _points)
             {
-                Dictionary<int, int> uses = [];
-                for (int r = 0; r < point.Count; r++)
+                foreach ((int id, int count) in CountNeighbourUses(point))
                 {
-                    Triangle triangle = _triangles[_refs[point.Start + r].Triangle];
-                    for (int corner = 0; corner < 3; corner++)
-                    {
-                        int id = triangle.Points[corner];
-                        uses[id] = uses.GetValueOrDefault(id) + 1;
-                    }
+                    if (count == 1) _points[id].Border = true;
                 }
+            }
+        }
 
-                foreach ((int id, int count) in uses)
+        /// <summary>
+        /// How many of the point's triangles each point among their corners is in, the point itself included.
+        /// </summary>
+        private Dictionary<int, int> CountNeighbourUses(Point point)
+        {
+            Dictionary<int, int> uses = [];
+            for (int r = 0; r < point.Count; r++)
+            {
+                Triangle triangle = _triangles[_refs[point.Start + r].Triangle];
+                for (int corner = 0; corner < 3; corner++)
                 {
-                    if (count == 1)
-                    {
-                        _points[id].Border = true;
-                    }
+                    int id = triangle.Points[corner];
+                    uses[id] = uses.GetValueOrDefault(id) + 1;
                 }
             }
 
+            return uses;
+        }
+
+        /// <summary>
+        /// Each triangle's plane, as the quadric its three points sum, and its normal; and how many triangles share
+        /// each edge, which says which edges are borders.
+        /// </summary>
+        private Dictionary<(int, int), int> AddPlaneQuadrics()
+        {
             Dictionary<(int, int), int> edgeUses = [];
             foreach (Triangle triangle in _triangles)
             {
@@ -526,19 +521,23 @@ internal static class QuadricSimplifier
                 }
             }
 
-            // Garland and Heckbert's border planes: through each border edge, standing up from its triangle. A flat panel's
-            // corners sit on two of them, so sliding one along the other edge costs its distance from the first, and the
-            // error cap keeps the corner; points along a straight border still collapse into each other for nothing.
+            return edgeUses;
+        }
+
+        /// <summary>
+        /// Garland and Heckbert's border planes: through each border edge, standing up from its triangle. A flat panel's
+        /// corners sit on two of them, so sliding one along the other edge costs its distance from the first, and the
+        /// error cap keeps the corner; points along a straight border still collapse into each other for nothing.
+        /// </summary>
+        private void AddBorderPlanes(Dictionary<(int, int), int> edgeUses)
+        {
             foreach (Triangle triangle in _triangles)
             {
                 for (int edge = 0; edge < 3; edge++)
                 {
                     int from = triangle.Points[edge];
                     int to = triangle.Points[(edge + 1) % 3];
-                    if (edgeUses[EdgeKey(from, to)] != 1)
-                    {
-                        continue;
-                    }
+                    if (edgeUses[EdgeKey(from, to)] != 1) continue;
 
                     Vector3 edgeStart = _points[from].Position;
                     Vector3 normal = Normalized(Vector3.Cross(_points[to].Position - edgeStart, triangle.Normal));
@@ -546,11 +545,6 @@ internal static class QuadricSimplifier
                     _points[from].Quadric += plane;
                     _points[to].Quadric += plane;
                 }
-            }
-
-            foreach (Triangle triangle in _triangles)
-            {
-                SetErrors(triangle);
             }
         }
 
@@ -563,7 +557,7 @@ internal static class QuadricSimplifier
         {
             for (int edge = 0; edge < 3; edge++)
             {
-                triangle.Error[edge] = CollapseError(triangle.Points[edge], triangle.Points[(edge + 1) % 3], out _);
+                triangle.Error[edge] = ComputeCollapseError(triangle.Points[edge], triangle.Points[(edge + 1) % 3], out _);
             }
 
             triangle.Error[3] = Math.Min(triangle.Error[0], Math.Min(triangle.Error[1], triangle.Error[2]));
@@ -573,7 +567,7 @@ internal static class QuadricSimplifier
         /// The error of collapsing the edge, and the place the point goes: where the summed quadric is least, or the best
         /// of the two ends and their middle when that cannot be solved (or an end is on a border).
         /// </summary>
-        private double CollapseError(int firstId, int secondId, out Vector3 place)
+        private double ComputeCollapseError(int firstId, int secondId, out Vector3 place)
         {
             Point first = _points[firstId];
             Point second = _points[secondId];
@@ -624,26 +618,26 @@ internal static class QuadricSimplifier
         /// <summary>
         /// The welded point of each corner.
         /// </summary>
-        public int[] Points { get; init; } = [];
+        internal int[] Points { get; init; } = [];
 
         /// <summary>
         /// Each corner's source vertex, for what it carries besides its place.
         /// </summary>
-        public int[] Source { get; init; } = [];
+        internal int[] Source { get; init; } = [];
 
         /// <summary>
         /// The error of collapsing edge 0, 1 and 2 (corner i to i + 1), and the least of them.
         /// </summary>
-        public double[] Error { get; } = new double[4];
+        internal double[] Error { get; } = new double[4];
 
-        public bool Deleted { get; set; }
+        internal bool Deleted { get; set; }
 
         /// <summary>
         /// A collapse this pass changed it, so it waits for the next.
         /// </summary>
-        public bool Dirty { get; set; }
+        internal bool Dirty { get; set; }
 
-        public Vector3 Normal { get; set; }
+        internal Vector3 Normal { get; set; }
     }
 
     /// <summary>
@@ -652,20 +646,20 @@ internal static class QuadricSimplifier
     /// </summary>
     private sealed class Point
     {
-        public Vector3 Position { get; set; }
+        internal Vector3 Position { get; set; }
 
-        public SymmetricMatrix Quadric { get; set; }
+        internal SymmetricMatrix Quadric { get; set; }
 
-        public int Start { get; set; }
+        internal int Start { get; set; }
 
-        public int Count { get; set; }
+        internal int Count { get; set; }
 
-        public bool Border { get; set; }
+        internal bool Border { get; set; }
 
         /// <summary>
         /// It stays where it is: on the border of a group of clusters, which the clusters around it meet.
         /// </summary>
-        public bool Locked { get; set; }
+        internal bool Locked { get; set; }
     }
 
     /// <summary>
@@ -703,7 +697,7 @@ internal static class QuadricSimplifier
         /// <summary>
         /// The determinant of the 3x3 matrix the nine entries make.
         /// </summary>
-        public double Det(int a11, int a12, int a13, int a21, int a22, int a23, int a31, int a32, int a33)
+        internal double Det(int a11, int a12, int a13, int a21, int a22, int a23, int a31, int a32, int a33)
         {
             return (this[a11] * this[a22] * this[a33]) + (this[a13] * this[a21] * this[a32]) + (this[a12] * this[a23] * this[a31])
                 - (this[a13] * this[a22] * this[a31]) - (this[a11] * this[a23] * this[a32]) - (this[a12] * this[a21] * this[a33]);
@@ -712,7 +706,7 @@ internal static class QuadricSimplifier
         /// <summary>
         /// The squared distance of the point from the planes summed into the matrix.
         /// </summary>
-        public double VertexError(Vector3 point)
+        internal double VertexError(Vector3 point)
         {
             double x = point.X;
             double y = point.Y;

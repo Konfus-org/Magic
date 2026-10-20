@@ -60,10 +60,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     private Result<Font> Load(ReadOnlySpan<byte> bytes, JsonElement settings)
     {
         Result<FontMeta> meta = Json.Read<FontMeta>(settings);
-        if (!meta.Ok)
-        {
-            return Result.Failure<Font>($"its .meta is not a font's: {meta.Error}");
-        }
+        if (!meta.Ok) return Result.Failure<Font>($"its .meta is not a font's: {meta.Error}");
 
         lock (_loading)
         {
@@ -82,10 +79,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         {
             SDL.IOStream* io = SDL.IOFromConstMem(bytes, (ulong)file.Length);
             TTF.Font* font = io == null ? null : TTF.OpenFontIO(io, closeio: true, size);
-            if (font == null)
-            {
-                return Result.Failure<Font>($"SDL_ttf could not read it: {CString.Read(SDL.GetError())}");
-            }
+            if (font == null) return Result.Failure<Font>($"SDL_ttf could not read it: {CString.Read(SDL.GetError())}");
 
             try
             {
@@ -93,16 +87,10 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
                 for (uint codepoint = 32; codepoint <= 255; codepoint++)
                 {
                     // Printable ASCII, then Latin-1 past its control characters.
-                    if (codepoint is > 126 and < 160 || !TTF.FontHasGlyph(font, codepoint))
-                    {
-                        continue;
-                    }
+                    if (codepoint is > 126 and < 160 || !TTF.FontHasGlyph(font, codepoint)) continue;
 
                     Result<Drawn> glyph = DrawGlyph(font, codepoint);
-                    if (!glyph.Ok)
-                    {
-                        return Result.Failure<Font>(glyph.Error);
-                    }
+                    if (!glyph.Ok) return Result.Failure<Font>(glyph.Error);
 
                     drawn.Add(glyph.Value);
                 }
@@ -136,10 +124,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         SDL.Surface* image = TTF.GetGlyphImage(font, codepoint, &type);
         if (image == null || image->W == 0 || image->H == 0)
         {
-            if (image != null)
-            {
-                SDL.DestroySurface(image);
-            }
+            if (image != null) SDL.DestroySurface(image);
 
             return Result.Success(new Drawn(codepoint, [], 0, 0, minX, maxY, advance));
         }
@@ -172,7 +157,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         int width = 256;
         int height = 256;
         List<(int X, int Y)> places = [];
-        while (!Place(drawn, width, height, places))
+        while (!TryPlace(drawn, width, height, places))
         {
             if (width <= height)
             {
@@ -215,7 +200,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     /// Shelf packing, into <paramref name="places"/>: characters left to right, in rows as tall as the tallest in each;
     /// false when they do not all fit in <paramref name="width"/> × <paramref name="height"/>.
     /// </summary>
-    private static bool Place(List<Drawn> drawn, int width, int height, List<(int X, int Y)> places)
+    private static bool TryPlace(List<Drawn> drawn, int width, int height, List<(int X, int Y)> places)
     {
         places.Clear();
         int x = 0;
@@ -230,10 +215,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
                 rowHeight = 0;
             }
 
-            if (glyph.Width > width || y + glyph.Height > height)
-            {
-                return false;
-            }
+            if (glyph.Width > width || y + glyph.Height > height) return false;
 
             places.Add((x, y));
             x += glyph.Width + Padding;

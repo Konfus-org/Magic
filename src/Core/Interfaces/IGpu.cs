@@ -19,8 +19,8 @@ namespace Magic.Interfaces;
 /// </para>
 /// <para>
 /// A render target is a texture: one the drawer made (a render texture, which can then be sampled, as an editor's
-/// viewport is), or a window's (<see cref="WindowTarget"/>). Whatever draws asks it for its <see cref="FormatOf"/>
-/// and <see cref="SizeOf"/> and treats the two alike.
+/// viewport is), or a window's (<see cref="GetWindowTarget"/>). Whatever draws asks it for its <see cref="GetFormat"/>
+/// and <see cref="GetSize"/> and treats the two alike.
 /// </para>
 /// <para>
 /// The provider is made before every gem that takes it, so its Render runs after theirs: take it, and record in
@@ -68,19 +68,19 @@ public interface IGpu
     /// not sRGB, so the last pass of a frame encodes its colour itself. While the window has no image (minimised, or
     /// none at all in a headless run) it is 0 x 0, and the passes into it are skipped.
     /// </summary>
-    GpuTexture WindowTarget(IWindow window);
+    GpuTexture GetWindowTarget(IWindow window);
 
     /// <summary>
     /// What a texture was made with, or a window's image format: what the pipelines that draw into it are made for.
     /// <see cref="GpuFormat.Invalid"/> for a window with no image and for what is no texture.
     /// </summary>
-    GpuFormat FormatOf(GpuTexture texture);
+    GpuFormat GetFormat(GpuTexture texture);
 
     /// <summary>
     /// Level 0's width and height in pixels, a window's as it is now: what whatever draws into a target sizes its own
     /// textures by.
     /// </summary>
-    Size SizeOf(GpuTexture texture);
+    Size GetSize(GpuTexture texture);
 
     /// <summary>
     /// Copies <paramref name="data"/> now; it reaches the buffer at the start of the next submit, before that frame's

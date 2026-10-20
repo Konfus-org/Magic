@@ -42,10 +42,7 @@ internal static class Program
         {
             foreach (Token token in result.Tokens)
             {
-                if (Settings.Parse(token.Value) is { Ok: false } setting)
-                {
-                    result.AddError(setting.Error);
-                }
+                if (Settings.Parse(token.Value) is { Ok: false } setting) result.AddError(setting.Error);
             }
         });
         Option<string> preset = new("--preset")
@@ -65,10 +62,7 @@ internal static class Program
 
         // Help, version and bad arguments are answered here and exit.
         ParseResult parsed = command.Parse(rawArgs);
-        if (parsed.Action is not null)
-        {
-            return await parsed.InvokeAsync().ConfigureAwait(false);
-        }
+        if (parsed.Action is not null) return await parsed.InvokeAsync().ConfigureAwait(false);
 
         Debugging.IsVerbose = parsed.GetValue(verbose);
 
@@ -88,10 +82,7 @@ internal static class Program
         // and their events to: the render thread.
         try
         {
-            if (!Engine.Run(args))
-            {
-                return 1;
-            }
+            if (!Engine.Run(args)) return 1;
         }
         catch (Exception ex)
         {

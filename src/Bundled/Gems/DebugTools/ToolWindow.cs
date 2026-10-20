@@ -22,18 +22,12 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
     /// True while it is open: draw what is in it, then End; <paramref name="copy"/> whether Copy was clicked in its
     /// menu, so the window puts what it shows on the clipboard.
     /// </summary>
-    public bool Begin(out bool copy)
+    internal bool Begin(out bool copy)
     {
-        if (input?[key].WasPressed == true)
-        {
-            _isOpen = !_isOpen;
-        }
+        if (input?[key].WasPressed == true) _isOpen = !_isOpen;
 
         copy = false;
-        if (!_isOpen)
-        {
-            return false;
-        }
+        if (!_isOpen) return false;
 
         ui.Begin(_title, ref _isOpen, scrollable: true);
         copy = ui.MenuItem("Copy");
@@ -43,7 +37,7 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
     /// <summary>
     /// Ends what Begin began. Closed by its button, the window stays closed from the next frame.
     /// </summary>
-    public void End()
+    internal void End()
     {
         ui.End();
     }
@@ -51,11 +45,8 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
     /// <summary>
     /// Puts <paramref name="text"/> on the clipboard; without a window there is none, and it goes nowhere.
     /// </summary>
-    public void Copy(string text)
+    internal void Copy(string text)
     {
-        if (window is { } shown)
-        {
-            shown.Clipboard = text;
-        }
+        if (window is { } shown) shown.Clipboard = text;
     }
 }

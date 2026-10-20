@@ -91,10 +91,7 @@ public static class Engine
         List<IPreloader> preloaders = [];
         foreach (IGem gem in gems)
         {
-            if (gem is IPreloader preloader)
-            {
-                preloaders.Add(preloader);
-            }
+            if (gem is IPreloader preloader) preloaders.Add(preloader);
         }
 
         world.Preloaders = preloaders;
@@ -186,15 +183,9 @@ public static class Engine
     {
         for (int i = gems.Count - 1; i >= 0; i--)
         {
-            if (gems[i] is ILogSink sink)
-            {
-                Debugging.Remove(sink);
-            }
+            if (gems[i] is ILogSink sink) Debugging.Remove(sink);
 
-            if (gems[i] is not IDisposable disposable)
-            {
-                continue;
-            }
+            if (gems[i] is not IDisposable disposable) continue;
 
             try
             {

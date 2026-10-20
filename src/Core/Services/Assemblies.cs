@@ -52,10 +52,7 @@ public sealed class Assemblies
     public Result<Type> Get<T>(string name)
     {
         Result<Type> type = Get(name);
-        if (!type.Ok || type.Value.IsAssignableTo(typeof(T)))
-        {
-            return type;
-        }
+        if (!type.Ok || type.Value.IsAssignableTo(typeof(T))) return type;
 
         return Result.Failure<Type>($"{name} is a {type.Value.FullName}, not a {typeof(T).Name}.");
     }
@@ -74,10 +71,7 @@ public sealed class Assemblies
             List<Type> loaded = [];
             foreach (Type? type in ex.Types)
             {
-                if (type is not null)
-                {
-                    loaded.Add(type);
-                }
+                if (type is not null) loaded.Add(type);
             }
 
             return loaded;

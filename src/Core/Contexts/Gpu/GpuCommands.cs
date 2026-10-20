@@ -36,39 +36,39 @@ public sealed class GpuCommands
     /// <summary>
     /// The run of texture levels <paramref name="command"/> points at.
     /// </summary>
-    public ReadOnlySpan<GpuTextureLevel> LevelsOf(in GpuCommand command)
+    public ReadOnlySpan<GpuTextureLevel> GetLevels(in GpuCommand command)
         => CollectionsMarshal.AsSpan(_levels).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
     /// The run of sampled textures <paramref name="command"/> points at.
     /// </summary>
-    public ReadOnlySpan<GpuSampledTexture> SampledOf(in GpuCommand command)
+    public ReadOnlySpan<GpuSampledTexture> GetSampled(in GpuCommand command)
         => CollectionsMarshal.AsSpan(_sampled).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
     /// The run of textures <paramref name="command"/> points at.
     /// </summary>
-    public ReadOnlySpan<GpuTexture> TexturesOf(in GpuCommand command)
+    public ReadOnlySpan<GpuTexture> GetTextures(in GpuCommand command)
         => CollectionsMarshal.AsSpan(_textures).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
     /// The run of buffers <paramref name="command"/> points at: its second run for a compute pass, whose first is its
     /// levels.
     /// </summary>
-    public ReadOnlySpan<GpuBuffer> BuffersOf(in GpuCommand command) => command.Type == GpuCommandType.BeginComputePass
+    public ReadOnlySpan<GpuBuffer> GetBuffers(in GpuCommand command) => command.Type == GpuCommandType.BeginComputePass
         ? CollectionsMarshal.AsSpan(_buffers).Slice(command.SecondRunStart, command.SecondRunLength)
         : CollectionsMarshal.AsSpan(_buffers).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
     /// The run of texture regions <paramref name="command"/> points at.
     /// </summary>
-    public ReadOnlySpan<GpuTextureRegion> RegionsOf(in GpuCommand command)
+    public ReadOnlySpan<GpuTextureRegion> GetRegions(in GpuCommand command)
         => CollectionsMarshal.AsSpan(_regions).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
     /// The run of bytes <paramref name="command"/> points at.
     /// </summary>
-    public ReadOnlySpan<byte> BytesOf(in GpuCommand command)
+    public ReadOnlySpan<byte> GetBytes(in GpuCommand command)
         => CollectionsMarshal.AsSpan(_bytes).Slice(command.RunStart, command.RunLength);
 
     public void Clear()

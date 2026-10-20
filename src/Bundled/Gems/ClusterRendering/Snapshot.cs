@@ -30,7 +30,7 @@ internal sealed class Snapshot : IDisposable
     /// </summary>
     private WorldCopy _back = new();
 
-    public Snapshot(World world)
+    internal Snapshot(World world)
     {
         _instances = new Slots<InstanceCopy>(_back.Instances);
         _lights = new Slots<LightCopy>(_back.Lights);
@@ -56,12 +56,12 @@ internal sealed class Snapshot : IDisposable
     /// <summary>
     /// The copy Render reads: the frame LateUpdate last finished, swapped in by <see cref="Swap"/>. Render thread.
     /// </summary>
-    public WorldCopy Front { get; private set; } = new();
+    internal WorldCopy Front { get; private set; } = new();
 
     /// <summary>
     /// Ends a frame's copy, after the systems ran: takes in what outgrew the slots and finds what is gone. LateUpdate.
     /// </summary>
-    public void Finish()
+    internal void Finish()
     {
         _instances.Finish();
         _lights.Finish();
@@ -71,7 +71,7 @@ internal sealed class Snapshot : IDisposable
     /// Hands the copy just finished to Render, and takes the one Render is done with to write next. Sync, when neither
     /// thread is touching either.
     /// </summary>
-    public void Swap()
+    internal void Swap()
     {
         (Front, _back) = (_back, Front);
     }
@@ -86,7 +86,7 @@ internal sealed class Snapshot : IDisposable
         _lights.Begin(_back.Lights);
     }
 
-    private static Vector3 IntensityOf(Color color, float intensity) => new Vector3(color.R, color.G, color.B) * intensity;
+    private static Vector3 GetIntensity(Color color, float intensity) => new Vector3(color.R, color.G, color.B) * intensity;
 
     /// <summary>
     /// Starts the frame's copy in LateUpdate, before the systems added after it copy anything.
@@ -129,7 +129,7 @@ internal sealed class Snapshot : IDisposable
             for (int i = 0; i < found.Length; i++)
             {
                 PointLight light = found[i];
-                lights.Take(entities[i], new LightCopy(transforms[i].Position, Vector3.UnitZ, IntensityOf(light.Color, light.Intensity), light.Range, light.Radius, 0, 1, IsSpot: false, light.Shadowless), ref tally);
+                lights.Take(entities[i], new LightCopy(transforms[i].Position, Vector3.UnitZ, GetIntensity(light.Color, light.Intensity), light.Range, light.Radius, 0, 1, IsSpot: false, light.Shadowless), ref tally);
             }
 
             lights.Count(tally);
@@ -151,7 +151,7 @@ internal sealed class Snapshot : IDisposable
                 float cosInner = MathF.Cos(MathF.Min(light.InnerAngle, light.OuterAngle) * (MathF.PI / 180));
                 float scale = 1 / MathF.Max(cosInner - cosOuter, 1e-4f);
                 Vector3 forward = Vector3.Transform(Vector3.UnitZ, transforms[i].Rotation);
-                lights.Take(entities[i], new LightCopy(transforms[i].Position, forward, IntensityOf(light.Color, light.Intensity), light.Range, light.Radius, scale, -cosOuter * scale, IsSpot: true, light.Shadowless), ref tally);
+                lights.Take(entities[i], new LightCopy(transforms[i].Position, forward, GetIntensity(light.Color, light.Intensity), light.Range, light.Radius, scale, -cosOuter * scale, IsSpot: true, light.Shadowless), ref tally);
             }
 
             lights.Count(tally);
@@ -186,10 +186,7 @@ internal sealed class Snapshot : IDisposable
             {
                 for (int i = 0; i < tags.Length && copy.Player is null; i++)
                 {
-                    if (tags[i].Has(Tag.Player))
-                    {
-                        copy.Player = transforms[i].Position;
-                    }
+                    if (tags[i].Has(Tag.Player)) copy.Player = transforms[i].Position;
                 }
             }
         }
@@ -206,7 +203,7 @@ internal sealed class Snapshot : IDisposable
             {
                 if (copy.Sun is null && lights.Length > 0)
                 {
-                    copy.Sun = new SunCopy(Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[0].Rotation)), IntensityOf(lights[0].Color, lights[0].Intensity));
+                    copy.Sun = new SunCopy(Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[0].Rotation)), GetIntensity(lights[0].Color, lights[0].Intensity));
                 }
             }
         }
@@ -221,10 +218,7 @@ internal sealed class Snapshot : IDisposable
             WorldCopy copy = snapshot._back;
             foreach ((_, Span<Sky> skies) in query)
             {
-                if (copy.Sky is null && skies.Length > 0)
-                {
-                    copy.Sky = skies[0].Material;
-                }
+                if (copy.Sky is null && skies.Length > 0) copy.Sky = skies[0].Material;
             }
         }
     }
@@ -238,10 +232,7 @@ internal sealed class Snapshot : IDisposable
             WorldCopy copy = snapshot._back;
             foreach ((_, Span<PostProcessing> found) in query)
             {
-                if (copy.Effects == Handle<Pipeline>.None && found.Length > 0)
-                {
-                    copy.Effects = found[0].Effects;
-                }
+                if (copy.Effects == Handle<Pipeline>.None && found.Length > 0) copy.Effects = found[0].Effects;
             }
         }
     }
@@ -254,36 +245,36 @@ internal sealed class Snapshot : IDisposable
 /// </summary>
 internal sealed class WorldCopy
 {
-    public Delta<InstanceCopy> Instances { get; } = new();
+    internal Delta<InstanceCopy> Instances { get; } = new();
 
     /// <summary>
     /// The point and spot lights, by their entity's slot.
     /// </summary>
-    public Delta<LightCopy> Lights { get; } = new();
+    internal Delta<LightCopy> Lights { get; } = new();
 
-    public List<CameraCopy> Cameras { get; } = [];
+    internal List<CameraCopy> Cameras { get; } = [];
 
     /// <summary>
     /// Where the first camera tagged player is, which detail is kept nearest to when there is too much; none without one.
     /// </summary>
-    public Vector3? Player { get; set; }
+    internal Vector3? Player { get; set; }
 
     /// <summary>
     /// The first directional light, or none.
     /// </summary>
-    public SunCopy? Sun { get; set; }
+    internal SunCopy? Sun { get; set; }
 
     /// <summary>
     /// The world's sky, if it has one: its material, which may be none.
     /// </summary>
-    public Handle<Material>? Sky { get; set; }
+    internal Handle<Material>? Sky { get; set; }
 
     /// <summary>
     /// The world's effects, or none.
     /// </summary>
-    public Handle<Pipeline> Effects { get; set; }
+    internal Handle<Pipeline> Effects { get; set; }
 
-    public void Clear()
+    internal void Clear()
     {
         Instances.Clear();
         Lights.Clear();
@@ -309,13 +300,13 @@ internal sealed class Delta<T>
     /// <summary>
     /// The slots there are, live or not: how many a table of them needs.
     /// </summary>
-    public int Length { get; private set; }
+    internal int Length { get; private set; }
 
-    public ReadOnlySpan<Change> Changed => _changed.AsSpan(0, _changedCount);
+    internal ReadOnlySpan<Change> Changed => _changed.AsSpan(0, _changedCount);
 
-    public List<int> Removed { get; } = [];
+    internal List<int> Removed { get; } = [];
 
-    public void Clear()
+    internal void Clear()
     {
         _changedCount = 0;
         Removed.Clear();
@@ -325,7 +316,7 @@ internal sealed class Delta<T>
     /// Notes <paramref name="slot"/> as changed to <paramref name="value"/>, from any thread; there is room for every
     /// slot once (<see cref="Reserve"/>).
     /// </summary>
-    public void Add(int slot, in T value)
+    internal void Add(int slot, in T value)
     {
         _changed[Interlocked.Increment(ref _changedCount) - 1] = new Change(slot, value);
     }
@@ -333,19 +324,16 @@ internal sealed class Delta<T>
     /// <summary>
     /// Makes room for <paramref name="slots"/> changes, and says there are that many slots.
     /// </summary>
-    public void Reserve(int slots)
+    internal void Reserve(int slots)
     {
         Length = slots;
-        if (slots > _changed.Length)
-        {
-            Array.Resize(ref _changed, (int)BitOperations.RoundUpToPowerOf2((uint)slots));
-        }
+        if (slots > _changed.Length) Array.Resize(ref _changed, (int)BitOperations.RoundUpToPowerOf2((uint)slots));
     }
 
     /// <summary>
     /// A slot's new value.
     /// </summary>
-    public readonly record struct Change(int Slot, T Value);
+    internal readonly record struct Change(int Slot, T Value);
 }
 
 /// <summary>
@@ -384,7 +372,7 @@ internal sealed class Slots<T>(Delta<T> into)
     /// One seen this frame, on whichever thread its chunk is on; the chunk's counts go into <paramref name="tally"/>,
     /// which <see cref="Count"/> adds once the chunk is done.
     /// </summary>
-    public void Take(Entity entity, in T value, ref Tally tally)
+    internal void Take(Entity entity, in T value, ref Tally tally)
     {
         if (entity.Id >= _mirrors.Length)
         {
@@ -395,10 +383,7 @@ internal sealed class Slots<T>(Delta<T> into)
         tally.Seen++;
         ref Mirror mirror = ref _mirrors[entity.Id];
         mirror.Stamp = _stamp;
-        if (!mirror.IsLive)
-        {
-            tally.New++;
-        }
+        if (!mirror.IsLive) tally.New++;
 
         if (mirror.IsLive && mirror.Version == entity.Version && MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in mirror.Value)).SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value))))
         {
@@ -411,7 +396,7 @@ internal sealed class Slots<T>(Delta<T> into)
         _into.Add(entity.Id, value);
     }
 
-    public void Count(in Tally tally)
+    internal void Count(in Tally tally)
     {
         Interlocked.Add(ref _seenCount, tally.Seen);
         Interlocked.Add(ref _newCount, tally.New);
@@ -420,7 +405,7 @@ internal sealed class Slots<T>(Delta<T> into)
     /// <summary>
     /// Starts a frame's copy, which goes <paramref name="into"/> the frame's delta, cleared.
     /// </summary>
-    public void Begin(Delta<T> into)
+    internal void Begin(Delta<T> into)
     {
         unchecked
         {
@@ -433,7 +418,7 @@ internal sealed class Slots<T>(Delta<T> into)
         _newCount = 0;
     }
 
-    public void Finish()
+    internal void Finish()
     {
         while (_outgrew.TryDequeue(out (Entity Entity, T Value) late))
         {
@@ -468,19 +453,19 @@ internal sealed class Slots<T>(Delta<T> into)
     /// <summary>
     /// How many of a chunk were seen, and of those how many are new.
     /// </summary>
-    public struct Tally
+    internal struct Tally
     {
-        public int Seen { get; set; }
+        internal int Seen { get; set; }
 
-        public int New { get; set; }
+        internal int New { get; set; }
     }
 
     private struct Mirror
     {
-        public T Value;
-        public int Version;
-        public uint Stamp;
-        public bool IsLive;
+        internal T Value;
+        internal int Version;
+        internal uint Stamp;
+        internal bool IsLive;
     }
 }
 

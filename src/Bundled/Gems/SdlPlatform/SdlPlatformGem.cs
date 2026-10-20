@@ -125,12 +125,9 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             throw new InvalidOperationException($"SDL {version / 1000000}.{version / 1000 % 1000}.{version % 1000} is older than the {SDL.MajorVersion}.{SDL.MinorVersion}.{SDL.MicroVersion} Magic was built against.");
         }
 
-        if (run.Headless)
-        {
-            return;
-        }
+        if (run.Headless) return;
 
-        fixed (byte* title = CString.Bytes(project.Name))
+        fixed (byte* title = CString.ToBytes(project.Name))
         {
             _window = SDL.CreateWindow(title, settings.Width, settings.Height, SDL.WindowResizable | SDL.WindowHighPixelDensity);
         }
@@ -146,19 +143,16 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
         // Typed characters come as text events only while text input is on: always, as a desktop has no on-screen
         // keyboard for it to bring up.
-        if (!SDL.StartTextInput(_window))
-        {
-            Debugging.Warn($"Typed text is not read: {CString.Read(SDL.GetError())}");
-        }
+        if (!SDL.StartTextInput(_window)) Debugging.Warn($"Typed text is not read: {CString.Read(SDL.GetError())}");
 
         // The main thread has not started: its state is set here, before anything reads it.
-        if (ReadWindowSize(out int width, out int height))
+        if (TryReadWindowSize(out int width, out int height))
         {
             Width = width;
             Height = height;
         }
 
-        _clipboard = ClipboardText();
+        _clipboard = ReadClipboard();
 
         int keyboardsCount;
         uint* keyboards = SDL.GetKeyboards(&keyboardsCount);
@@ -186,10 +180,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             SDL.CloseGamepad((SDL.Gamepad*)gamepad);
         }
 
-        if (_window != null)
-        {
-            SDL.DestroyWindow(_window);
-        }
+        if (_window != null) SDL.DestroyWindow(_window);
 
         SDL.Quit();
     }
@@ -203,10 +194,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         set
         {
             _title = value;
-            if (_window != null)
-            {
-                Volatile.Write(ref _wantedTitle, value);
-            }
+            if (_window != null) Volatile.Write(ref _wantedTitle, value);
         }
     }
 
@@ -219,10 +207,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         set
         {
             _icon = value;
-            if (_window != null)
-            {
-                ShowAsync(value).FireAndForget();
-            }
+            if (_window != null) ShowAsync(value).FireAndForget();
         }
     }
 
@@ -245,10 +230,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         set
         {
             _clipboard = value;
-            if (_window != null)
-            {
-                Volatile.Write(ref _wantedClipboard, value);
-            }
+            if (_window != null) Volatile.Write(ref _wantedClipboard, value);
         }
     }
 
@@ -271,10 +253,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             bool wasReleased = false;
             for (int i = 0; i < _devices.Count; i++)
             {
-                if (_devices[i].Kind != control.DeviceKind)
-                {
-                    continue;
-                }
+                if (_devices[i].Kind != control.DeviceKind) continue;
 
                 ControlState state = _controls[i][control.Index];
                 value = MathF.Abs(state.Value) > MathF.Abs(value) ? state.Value : value;
@@ -292,7 +271,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         get
         {
-            int index = device.Kind == control.DeviceKind ? IndexOf(device.Kind, device.Id) : -1;
+            int index = device.Kind == control.DeviceKind ? FindIndex(device.Kind, device.Id) : -1;
             return index < 0 ? default : _controls[index][control.Index];
         }
     }
@@ -342,7 +321,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     _lifetime.Stop("window closed");
                     break;
                 case SDL.EventType.WindowPixelSizeChanged:
-                    if (ReadWindowSize(out int width, out int height))
+                    if (TryReadWindowSize(out int width, out int height))
                     {
                         Write(new Change(ChangeKind.Resized, Width: width, Height: height));
                     }
@@ -376,7 +355,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     break;
                 case SDL.EventType.MouseButtonDown:
                 case SDL.EventType.MouseButtonUp:
-                    if (SdlControlExtensions.MouseControl(sdlEvent.Button.Button) is { } button)
+                    if (SdlControlExtensions.ToMouseControl(sdlEvent.Button.Button) is { } button)
                     {
                         Set(DeviceKind.Mouse, sdlEvent.Button.Which, button, sdlEvent.Button.Down ? 1 : 0);
                     }
@@ -406,7 +385,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     Write(new Change(ChangeKind.Typed, Text: CString.Read(sdlEvent.Text.Text)));
                     break;
                 case SDL.EventType.ClipboardUpdate:
-                    Write(new Change(ChangeKind.Clipboard, Text: ClipboardText()));
+                    Write(new Change(ChangeKind.Clipboard, Text: ReadClipboard()));
                     break;
                 case SDL.EventType.GamepadButtonDown:
                 case SDL.EventType.GamepadButtonUp:
@@ -432,10 +411,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     private unsafe void Resize()
     {
-        if (_window == null || (_settings.Width == _askedWidth && _settings.Height == _askedHeight))
-        {
-            return;
-        }
+        if (_window == null || (_settings.Width == _askedWidth && _settings.Height == _askedHeight)) return;
 
         (_askedWidth, _askedHeight) = (_settings.Width, _settings.Height);
         Volatile.Write(ref _wantedSize, new WindowSize(_askedWidth, _askedHeight));
@@ -448,7 +424,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         if (Interlocked.Exchange(ref _wantedTitle, null) is { } title)
         {
-            fixed (byte* text = CString.Bytes(title))
+            fixed (byte* text = CString.ToBytes(title))
             {
                 SDL.SetWindowTitle(_window, text);
             }
@@ -456,7 +432,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
         if (Interlocked.Exchange(ref _wantedClipboard, null) is { } clipboard)
         {
-            fixed (byte* text = CString.Bytes(clipboard))
+            fixed (byte* text = CString.ToBytes(clipboard))
             {
                 SDL.SetClipboardText(text);
             }
@@ -467,10 +443,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             SDL.SetWindowSize(_window, size.Width, size.Height);
         }
 
-        if (Interlocked.Exchange(ref _wantedIcon, null) is { } icon)
-        {
-            SetIcon(icon);
-        }
+        if (Interlocked.Exchange(ref _wantedIcon, null) is { } icon) SetIcon(icon);
     }
 
     /// <summary>
@@ -483,10 +456,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             states[i] = states[i] with { WasPressed = false, WasReleased = false };
         }
 
-        if (kind != DeviceKind.Mouse)
-        {
-            return;
-        }
+        if (kind != DeviceKind.Mouse) return;
 
         states[Control.MouseMotionX.Index] = default;
         states[Control.MouseMotionY.Index] = default;
@@ -509,7 +479,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the settings' dead zone, and past it growing from 0 to 1 at
     /// full deflection, so the zone's edge is no step. Triggers only reach the positive half.
     /// </summary>
-    private float Stick(short value)
+    private float ToStick(short value)
     {
         float raw = Math.Max(value / 32767f, -1f);
         float deadZone = Math.Clamp(_settings.StickDeadZone, 0, 0.5f);
@@ -526,7 +496,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         switch (change.Kind)
         {
             case ChangeKind.Added:
-                index = IndexOf(change.Device, change.Id);
+                index = FindIndex(change.Device, change.Id);
                 if (index < 0)
                 {
                     // A device that gives no name is shown as what it is.
@@ -536,7 +506,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
                 break;
             case ChangeKind.Removed:
-                index = IndexOf(change.Device, change.Id);
+                index = FindIndex(change.Device, change.Id);
                 if (index >= 0)
                 {
                     _devices.RemoveAt(index);
@@ -545,15 +515,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
                 break;
             case ChangeKind.Set:
-                index = IndexOf(change.Device, change.Id);
-                if (index >= 0)
-                {
-                    SetState(_controls[index], change.Control, change.Value);
-                }
+                index = FindIndex(change.Device, change.Id);
+                if (index >= 0) SetState(_controls[index], change.Control, change.Value);
 
                 break;
             case ChangeKind.Add:
-                index = IndexOf(change.Device, change.Id);
+                index = FindIndex(change.Device, change.Id);
                 if (index >= 0)
                 {
                     ControlState[] states = _controls[index];
@@ -576,14 +543,11 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         }
     }
 
-    private int IndexOf(DeviceKind kind, uint id)
+    private int FindIndex(DeviceKind kind, uint id)
     {
         for (int i = 0; i < _devices.Count; i++)
         {
-            if (_devices[i].Kind == kind && _devices[i].Id == id)
-            {
-                return i;
-            }
+            if (_devices[i].Kind == kind && _devices[i].Id == id) return i;
         }
 
         return -1;
@@ -603,10 +567,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     private void Set(DeviceKind kind, uint id, Control control, float value)
     {
-        if (kind != DeviceKind.Gamepad)
-        {
-            Announce(kind, id);
-        }
+        if (kind != DeviceKind.Gamepad) Announce(kind, id);
 
         Write(new Change(ChangeKind.Set, kind, id, control, value));
     }
@@ -625,10 +586,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     private unsafe void Announce(DeviceKind kind, uint id)
     {
-        if (!_announced.Add((kind, id)))
-        {
-            return;
-        }
+        if (!_announced.Add((kind, id))) return;
 
         Write(new Change(ChangeKind.Added, kind, id, Name: CString.Read(kind == DeviceKind.Keyboard ? SDL.GetKeyboardNameForID(id) : SDL.GetMouseNameForID(id))));
     }
@@ -636,7 +594,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// <summary>
     /// The clipboard's text, which SDL hands out as a copy that is freed once read.
     /// </summary>
-    private static unsafe string ClipboardText()
+    private static unsafe string ReadClipboard()
     {
         byte* text = SDL.GetClipboardText();
         string value = CString.Read(text);
@@ -646,18 +604,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
     private void Forget(DeviceKind kind, uint id)
     {
-        if (_announced.Remove((kind, id)))
-        {
-            Write(new Change(ChangeKind.Removed, kind, id));
-        }
+        if (_announced.Remove((kind, id))) Write(new Change(ChangeKind.Removed, kind, id));
     }
 
     private unsafe void OpenGamepad(uint id)
     {
-        if (_gamepads.ContainsKey(id))
-        {
-            return;
-        }
+        if (_gamepads.ContainsKey(id)) return;
 
         SDL.Gamepad* gamepad = SDL.OpenGamepad(id);
         if (gamepad == null)
@@ -674,10 +626,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
     private unsafe void CloseGamepad(uint id)
     {
-        if (!_gamepads.Remove(id, out nint gamepad))
-        {
-            return;
-        }
+        if (!_gamepads.Remove(id, out nint gamepad)) return;
 
         Debugging.Info($"Gamepad disconnected: {CString.Read(SDL.GetGamepadName((SDL.Gamepad*)gamepad))}");
         SDL.CloseGamepad((SDL.Gamepad*)gamepad);
@@ -688,18 +637,18 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         // SDL's stick y grows downward; Magic's is up positive, unless the settings invert it.
         float up = _settings.InvertStickY ? 1 : -1;
-        Set(DeviceKind.Gamepad, id, Control.GamepadLeftX, Stick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Leftx)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadLeftY, up * Stick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Lefty)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadRightX, Stick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Rightx)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadRightY, up * Stick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Righty)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadLeftTrigger, Stick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.LeftTrigger)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadRightTrigger, Stick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.RightTrigger)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadLeftX, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Leftx)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadLeftY, up * ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Lefty)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadRightX, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Rightx)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadRightY, up * ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Righty)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadLeftTrigger, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.LeftTrigger)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadRightTrigger, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.RightTrigger)));
     }
 
     /// <summary>
     /// The window's size in pixels, and the pixel density mouse positions are scaled by.
     /// </summary>
-    private unsafe bool ReadWindowSize(out int width, out int height)
+    private unsafe bool TryReadWindowSize(out int width, out int height)
     {
         float density = SDL.GetWindowPixelDensity(_window);
         _pixelDensity = density > 0 ? density : 1;
@@ -718,10 +667,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     private async Task ShowAsync(Handle<Icon> icon)
     {
-        if (icon == Handle<Icon>.None)
-        {
-            return;
-        }
+        if (icon == Handle<Icon>.None) return;
 
         Result<Icon> loaded = await _assets.LoadAsync(icon, _lifetime.Stopping).ConfigureAwait(false);
         Result<Texture> image = loaded.Ok
@@ -733,10 +679,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             return;
         }
 
-        if (icon == _icon)
-        {
-            Volatile.Write(ref _wantedIcon, image.Value);
-        }
+        if (icon == _icon) Volatile.Write(ref _wantedIcon, image.Value);
     }
 
     /// <summary>

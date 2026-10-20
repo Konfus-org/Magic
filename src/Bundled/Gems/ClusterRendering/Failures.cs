@@ -23,7 +23,7 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     /// <summary>
     /// Bytes of <see cref="Raised"/>, a word per code.
     /// </summary>
-    public const uint RaisedBytes = CodeCount * sizeof(uint);
+    internal const uint RaisedBytes = CodeCount * sizeof(uint);
 
     /// <summary>
     /// Rows the listing's failures fill at most, each wrapped over as many as it takes: the rest are in the log.
@@ -64,18 +64,18 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     /// <summary>
     /// A word per code, 1 once a shader raised it this frame: the frame's <c>Failures</c>.
     /// </summary>
-    public GpuBuffer Raised { get; } = gpu.CreateBuffer(GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite | GpuBufferUsage.GraphicsRead, RaisedBytes);
+    internal GpuBuffer Raised { get; } = gpu.CreateBuffer(GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite | GpuBufferUsage.GraphicsRead, RaisedBytes);
 
     /// <summary>
     /// The lines and the codes' words as glyphs: the frame's <c>FailureText</c>.
     /// </summary>
-    public GpuBuffer Text => _text.Buffer;
+    internal GpuBuffer Text => _text.Buffer;
 
     /// <summary>
     /// The failure's colour as it breathes at <paramref name="time"/>, as Include/Failure.hlsli has it: what a target a
     /// pass that never runs would draw into is cleared to.
     /// </summary>
-    public static Color PulseColor(float time)
+    internal static Color GetPulseColor(float time)
     {
         float wave = (MathF.Sin(time * 2f * MathF.PI / PulsePeriod) * 0.5f) + 0.5f;
         float pulse = PulseMin + ((1f - PulseMin) * wave);
@@ -87,12 +87,9 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     /// <see cref="LineGlyphs"/> as it takes, the first <see cref="MaxLines"/> rows of them; packed again only when they
     /// changed.
     /// </summary>
-    public void Say(IReadOnlyList<string> lines)
+    internal void Say(IReadOnlyList<string> lines)
     {
-        if (ReferenceEquals(lines, _said) && lines.Count == _saidCount)
-        {
-            return;
-        }
+        if (ReferenceEquals(lines, _said) && lines.Count == _saidCount) return;
 
         _said = lines;
         _saidCount = lines.Count;
@@ -102,10 +99,7 @@ internal sealed class Failures(IGpu gpu) : IDisposable
             Wrap(line);
         }
 
-        if (_rows.Count > MaxLines)
-        {
-            _rows.RemoveRange(MaxLines, _rows.Count - MaxLines);
-        }
+        if (_rows.Count > MaxLines) _rows.RemoveRange(MaxLines, _rows.Count - MaxLines);
 
         _text.Set(0, (uint)_rows.Count);
         for (int i = 0; i < _rows.Count; i++)
@@ -123,7 +117,7 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     /// Uploads the words and empties the raised codes, before the frame's passes run, so a code shows the frame it is
     /// raised; <paramref name="zeros"/> is a buffer of zeros at least <see cref="RaisedBytes"/> long.
     /// </summary>
-    public void Begin(GpuBuffer zeros)
+    internal void Begin(GpuBuffer zeros)
     {
         _text.Flush();
         gpu.Commands.CopyBuffer(zeros, 0, Raised, 0, RaisedBytes);
@@ -142,10 +136,7 @@ internal sealed class Failures(IGpu gpu) : IDisposable
             if (end < line.Length)
             {
                 int space = line.LastIndexOf(' ', end, end - start);
-                if (space > start)
-                {
-                    end = space;
-                }
+                if (space > start) end = space;
             }
 
             _rows.Add(line[start..end]);

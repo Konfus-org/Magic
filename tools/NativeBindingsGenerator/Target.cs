@@ -8,7 +8,7 @@ namespace Magic.Tools.NativeBindingsGenerator;
 /// </summary>
 internal sealed record Target(string Name, CppTargetCpu Cpu, string System, string Vendor, string Abi)
 {
-    public static readonly Target[] All =
+    internal static readonly Target[] All =
     [
         new("win-x64", CppTargetCpu.X86_64, "windows", "pc", "msvc"),
         new("linux-x64", CppTargetCpu.X86_64, "linux", "pc", "gnu"),

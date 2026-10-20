@@ -76,35 +76,23 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     private void Follow()
     {
         bool isWanted = _settings.Enabled && _settings.IntervalSeconds > 0;
-        if (_listener is not null && (!isWanted || !SameMeters()))
-        {
-            Stop();
-        }
+        if (_listener is not null && (!isWanted || !HasSameMeters())) Stop();
 
-        if (isWanted && _listener is null)
-        {
-            Start();
-        }
+        if (isWanted && _listener is null) Start();
     }
 
     /// <summary>
     /// Whether the settings' meters are still the ones listened to, by contents: a settings change hands the gem a new
     /// list even when nothing in it changed.
     /// </summary>
-    private bool SameMeters()
+    private bool HasSameMeters()
     {
         IReadOnlyList<string> meters = _settings.Meters;
-        if (meters.Count != _meters.Count)
-        {
-            return false;
-        }
+        if (meters.Count != _meters.Count) return false;
 
         for (int i = 0; i < meters.Count; i++)
         {
-            if (!string.Equals(meters[i], _meters[i], StringComparison.Ordinal))
-            {
-                return false;
-            }
+            if (!string.Equals(meters[i], _meters[i], StringComparison.Ordinal)) return false;
         }
 
         return true;
@@ -131,10 +119,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// </summary>
     private void Stop()
     {
-        if (_listener is null)
-        {
-            return;
-        }
+        if (_listener is null) return;
 
         Report();
         _listener.Dispose();
@@ -148,10 +133,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     private void Add<T>(Instrument instrument, T measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
         where T : struct, INumber<T>
     {
-        if (state is not Measured measured)
-        {
-            return;
-        }
+        if (state is not Measured measured) return;
 
         double value = double.CreateTruncating(measurement);
         measured.Add(value, tags);
@@ -198,12 +180,9 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// </summary>
     private void Publish(Instrument instrument, MeterListener listener)
     {
-        if (!Listens(instrument.Meter.Name))
-        {
-            return;
-        }
+        if (!IsListening(instrument.Meter.Name)) return;
 
-        Measured measured = new(instrument, RoleOf(instrument));
+        Measured measured = new(instrument, GetRole(instrument));
         lock (_lock)
         {
             _measured.Add(measured);
@@ -217,10 +196,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// </summary>
     private void Complete(Instrument instrument, object? state)
     {
-        if (state is not Measured measured)
-        {
-            return;
-        }
+        if (state is not Measured measured) return;
 
         lock (_lock)
         {
@@ -232,7 +208,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// Whether <paramref name="meter"/> is one of the settings' meters or under one: "Magic" takes "Magic.Core" and
     /// every "Magic.Gems.&lt;Gem&gt;", not "Magical".
     /// </summary>
-    private bool Listens(string meter)
+    private bool IsListening(string meter)
     {
         foreach (string name in _meters)
         {
@@ -248,7 +224,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// <summary>
     /// Which part of the slowest frame an instrument feeds, by the name Core records it under.
     /// </summary>
-    private static Role RoleOf(Instrument instrument) => instrument.Name switch
+    private static Role GetRole(Instrument instrument) => instrument.Name switch
     {
         Metrics.FrameDuration => Role.Frame,
         Metrics.HookDuration => Role.Hook,
@@ -260,7 +236,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// <paramref name="value"/> in <paramref name="unit"/>, with seconds shown as milliseconds: most of what is timed in
     /// a frame takes far less than one.
     /// </summary>
-    private static string Amount(double value, string? unit) => unit switch
+    private static string FormatAmount(double value, string? unit) => unit switch
     {
         "s" => string.Create(CultureInfo.InvariantCulture, $"{value * 1000:0.###} ms"),
         null or "" => value.ToString("0.###", CultureInfo.InvariantCulture),
@@ -322,11 +298,11 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     {
         private readonly Lock _lock = new();
         private readonly List<Series> _series = [];
-        private readonly Summary _summary = SummaryOf(instrument);
+        private readonly Summary _summary = GetSummary(instrument);
 
-        public Role Role => role;
+        internal Role Role => role;
 
-        public void Add(double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        internal void Add(double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
             lock (_lock)
             {
@@ -337,16 +313,13 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// <summary>
         /// Logs a line for each series measured over the last <paramref name="seconds"/>, and starts it over.
         /// </summary>
-        public void Report(double seconds)
+        internal void Report(double seconds)
         {
             lock (_lock)
             {
                 foreach (Series series in _series)
                 {
-                    if (series.Count == 0)
-                    {
-                        continue;
-                    }
+                    if (series.Count == 0) continue;
 
                     Debugging.Info(Describe(series, seconds));
                     series.Clear();
@@ -354,18 +327,12 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             }
         }
 
-        private static Summary SummaryOf(Instrument instrument)
+        private static Summary GetSummary(Instrument instrument)
         {
-            if (instrument.IsObservable)
-            {
-                return Summary.Latest;
-            }
+            if (instrument.IsObservable) return Summary.Latest;
 
             Type kind = instrument.GetType().GetGenericTypeDefinition();
-            if (kind == typeof(Histogram<>))
-            {
-                return Summary.Distribution;
-            }
+            if (kind == typeof(Histogram<>)) return Summary.Distribution;
 
             return kind == typeof(Counter<>) || kind == typeof(UpDownCounter<>) ? Summary.Total : Summary.Latest;
         }
@@ -377,10 +344,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         {
             foreach (Series series in _series)
             {
-                if (series.Matches(tags))
-                {
-                    return series;
-                }
+                if (series.Matches(tags)) return series;
             }
 
             Series added = new(tags.ToArray());
@@ -402,14 +366,14 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             switch (_summary)
             {
                 case Summary.Distribution:
-                    text.Append(CultureInfo.InvariantCulture, $"{series.Count} in {seconds:0.##} s, mean {Amount(series.Sum / series.Count, unit)}, min {Amount(series.Min, unit)}, max {Amount(series.Max, unit)}");
+                    text.Append(CultureInfo.InvariantCulture, $"{series.Count} in {seconds:0.##} s, mean {FormatAmount(series.Sum / series.Count, unit)}, min {FormatAmount(series.Min, unit)}, max {FormatAmount(series.Max, unit)}");
                     break;
                 case Summary.Total:
-                    text.Append(CultureInfo.InvariantCulture, $"{Amount(series.Sum, unit)} in {seconds:0.##} s, {Amount(series.Sum / seconds, unit)}/s");
+                    text.Append(CultureInfo.InvariantCulture, $"{FormatAmount(series.Sum, unit)} in {seconds:0.##} s, {FormatAmount(series.Sum / seconds, unit)}/s");
                     break;
                 case Summary.Latest:
                 default:
-                    text.Append(Amount(series.Last, unit));
+                    text.Append(FormatAmount(series.Last, unit));
                     break;
             }
 
@@ -422,19 +386,19 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// </summary>
     private sealed class Series(KeyValuePair<string, object?>[] tags)
     {
-        public ReadOnlySpan<KeyValuePair<string, object?>> Tags => tags;
+        internal ReadOnlySpan<KeyValuePair<string, object?>> Tags => tags;
 
-        public long Count { get; private set; }
+        internal long Count { get; private set; }
 
-        public double Sum { get; private set; }
+        internal double Sum { get; private set; }
 
-        public double Min { get; private set; }
+        internal double Min { get; private set; }
 
-        public double Max { get; private set; }
+        internal double Max { get; private set; }
 
-        public double Last { get; private set; }
+        internal double Last { get; private set; }
 
-        public void Add(double value)
+        internal void Add(double value)
         {
             if (Count == 0)
             {
@@ -452,7 +416,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             Count++;
         }
 
-        public void Clear()
+        internal void Clear()
         {
             Count = 0;
             Sum = 0;
@@ -462,12 +426,9 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// Whether <paramref name="other"/> are this series' tags, in the same order: an instrument is recorded with
         /// its tags in one order.
         /// </summary>
-        public bool Matches(ReadOnlySpan<KeyValuePair<string, object?>> other)
+        internal bool Matches(ReadOnlySpan<KeyValuePair<string, object?>> other)
         {
-            if (other.Length != tags.Length)
-            {
-                return false;
-            }
+            if (other.Length != tags.Length) return false;
 
             for (int i = 0; i < other.Length; i++)
             {
@@ -519,14 +480,14 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// <summary>
         /// The frame whose time Core records next: the one whose <see cref="LogMetricsGem.Update"/> ran last.
         /// </summary>
-        public ulong Current { get; set; }
+        internal ulong Current { get; set; }
 
         /// <summary>
         /// Keeps a hook's time in the frame being timed.
         /// </summary>
-        public void Add(double seconds, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        internal void Add(double seconds, ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
-            Hook hook = new(Tag(tags, Metrics.GemNameTag), Tag(tags, Metrics.FramePhaseTag), seconds);
+            Hook hook = new(FindTag(tags, Metrics.GemNameTag), FindTag(tags, Metrics.FramePhaseTag), seconds);
             lock (_lock)
             {
                 _hooks.Add(hook);
@@ -536,9 +497,9 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// <summary>
         /// Keeps a piece of handed work's time in the frame being timed, under the thread that ran it.
         /// </summary>
-        public void AddWork(double seconds, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        internal void AddWork(double seconds, ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
-            bool isRender = Tag(tags, Metrics.ThreadNameTag) is "render";
+            bool isRender = FindTag(tags, Metrics.ThreadNameTag) is "render";
             lock (_lock)
             {
                 if (isRender)
@@ -556,7 +517,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// Ends the frame being timed, which took <paramref name="seconds"/>, keeping its hooks and handed work when it
         /// is the slowest yet.
         /// </summary>
-        public void Ended(double seconds)
+        internal void Ended(double seconds)
         {
             TimeSpan paused = GC.GetTotalPauseDuration();
             lock (_lock)
@@ -584,60 +545,51 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// <summary>
         /// Logs the slowest frame since the last report, and starts over.
         /// </summary>
-        public void Report()
+        internal void Report()
         {
             lock (_lock)
             {
-                if (_count == 0)
-                {
-                    return;
-                }
+                if (_count == 0) return;
 
                 _slowestHooks.Sort(static (first, second) => second.Seconds.CompareTo(first.Seconds));
                 StringBuilder text = new();
-                text.Append(CultureInfo.InvariantCulture, $"Slowest frame f{_index} took {Amount(_seconds, "s")}, {_seconds * _count / _sum:0.#}x the mean:");
+                text.Append(CultureInfo.InvariantCulture, $"Slowest frame f{_index} took {FormatAmount(_seconds, "s")}, {_seconds * _count / _sum:0.#}x the mean:");
                 double hooked = 0;
                 for (int i = 0; i < _slowestHooks.Count; i++)
                 {
                     Hook hook = _slowestHooks[i];
                     // A render-thread hook ran beside the main thread's frame rather than inside it.
-                    if (hook.Phase is not nameof(Phase.Render))
-                    {
-                        hooked += hook.Seconds;
-                    }
+                    if (hook.Phase is not nameof(Phase.Render)) hooked += hook.Seconds;
 
                     if (i < HooksShown)
                     {
-                        text.Append(CultureInfo.InvariantCulture, $" {hook.Gem}.{hook.Phase} {Amount(hook.Seconds, "s")},");
+                        text.Append(CultureInfo.InvariantCulture, $" {hook.Gem}.{hook.Phase} {FormatAmount(hook.Seconds, "s")},");
                     }
                 }
 
-                text.Append(" outside the main thread's hooks ").Append(Amount(_seconds - hooked, "s"));
+                text.Append(" outside the main thread's hooks ").Append(FormatAmount(_seconds - hooked, "s"));
                 if (_slowestMainWork > 0)
                 {
-                    text.Append(", of it work handed to the main thread ").Append(Amount(_slowestMainWork, "s"));
+                    text.Append(", of it work handed to the main thread ").Append(FormatAmount(_slowestMainWork, "s"));
                 }
 
                 if (_slowestRenderWork > 0)
                 {
-                    text.Append("; work handed to the render thread ").Append(Amount(_slowestRenderWork, "s"));
+                    text.Append("; work handed to the render thread ").Append(FormatAmount(_slowestRenderWork, "s"));
                 }
 
-                text.Append("; GC paused ").Append(Amount(_paused.TotalSeconds, "s"));
+                text.Append("; GC paused ").Append(FormatAmount(_paused.TotalSeconds, "s"));
                 Debugging.Info(text.ToString());
                 _count = 0;
                 _sum = 0;
             }
         }
 
-        private static object? Tag(ReadOnlySpan<KeyValuePair<string, object?>> tags, string key)
+        private static object? FindTag(ReadOnlySpan<KeyValuePair<string, object?>> tags, string key)
         {
             foreach (KeyValuePair<string, object?> tag in tags)
             {
-                if (string.Equals(tag.Key, key, StringComparison.Ordinal))
-                {
-                    return tag.Value;
-                }
+                if (string.Equals(tag.Key, key, StringComparison.Ordinal)) return tag.Value;
             }
 
             return null;

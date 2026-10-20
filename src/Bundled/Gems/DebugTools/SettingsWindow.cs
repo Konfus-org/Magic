@@ -97,7 +97,7 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private string _filter = string.Empty;
 
-    public SettingsWindow(ToolWindow window, IDebugUI ui, Settings settings, Assets assets, ICommands? commands, Events events, IInput? input, CancellationToken stopping)
+    internal SettingsWindow(ToolWindow window, IDebugUI ui, Settings settings, Assets assets, ICommands? commands, Events events, IInput? input, CancellationToken stopping)
     {
         _window = window;
         _ui = ui;
@@ -106,10 +106,10 @@ internal sealed class SettingsWindow : IDisposable
         _input = input;
         _stopping = stopping;
         _presets = [.. settings.Presets];
-        _presetNames = Array.ConvertAll(_presets, preset => Path.GetFileNameWithoutExtension(assets.Path(preset)) ?? string.Empty);
+        _presetNames = Array.ConvertAll(_presets, preset => Path.GetFileNameWithoutExtension(assets.GetPath(preset)) ?? string.Empty);
         Array.Sort(_presetNames, _presets, StringComparer.OrdinalIgnoreCase);
-        Handle<Pass>[] passes = Array.ConvertAll([.. assets.Paths(ViewsFolder)], assets.Find<Pass>);
-        _viewNames = Array.ConvertAll(passes, pass => Path.GetFileNameWithoutExtension(assets.Path(pass)) ?? string.Empty);
+        Handle<Pass>[] passes = Array.ConvertAll([.. assets.GetPaths(ViewsFolder)], assets.Find<Pass>);
+        _viewNames = Array.ConvertAll(passes, pass => Path.GetFileNameWithoutExtension(assets.GetPath(pass)) ?? string.Empty);
         Array.Sort(_viewNames, passes, StringComparer.OrdinalIgnoreCase);
         _viewDescriptions = new string[_viewNames.Length];
         Array.Fill(_viewDescriptions, string.Empty);
@@ -117,14 +117,11 @@ internal sealed class SettingsWindow : IDisposable
         _views[0] = "Normal";
         for (int i = 0; i < _viewNames.Length; i++)
         {
-            _views[i + 1] = Words(_viewNames[i]);
+            _views[i + 1] = ToWords(_viewNames[i]);
         }
 
         DescribeViewsAsync(assets, passes, stopping).FireAndForget();
-        if (commands is null)
-        {
-            return;
-        }
+        if (commands is null) return;
 
         _commands.Add(commands.Register("get", "Logs every setting of a gem as Gem.setting=value lines: get DebugTools.", RunGet));
         _commands.Add(commands.Register("set", "Changes a setting while running, until the next preset: set DebugTools.frameRate=false.", RunSet));
@@ -137,14 +134,11 @@ internal sealed class SettingsWindow : IDisposable
         _commands.Dispose();
     }
 
-    public void Update()
+    internal void Update()
     {
         StepView();
         ShowView();
-        if (!_window.Begin(out bool copy))
-        {
-            return;
-        }
+        if (!_window.Begin(out bool copy)) return;
 
         IReadOnlyList<Setting> all = _settings.All;
         Collect(all);
@@ -163,7 +157,7 @@ internal sealed class SettingsWindow : IDisposable
             DrawRows(all);
             if (copy)
             {
-                _window.Copy(Lines(setting => Matches(setting, Words(setting.Name))));
+                _window.Copy(GetLines(setting => Matches(setting, ToWords(setting.Name))));
             }
         }
         else
@@ -174,7 +168,7 @@ internal sealed class SettingsWindow : IDisposable
             if (copy)
             {
                 string tab = _tabs[_tab];
-                _window.Copy(Lines(setting => string.Equals(PlaceOf(setting).Tab, tab, StringComparison.Ordinal)));
+                _window.Copy(GetLines(setting => string.Equals(PlaceOf(setting).Tab, tab, StringComparison.Ordinal)));
             }
         }
 
@@ -217,10 +211,7 @@ internal sealed class SettingsWindow : IDisposable
                 isUnfolded = _ui.Header(header);
             }
 
-            if (!isUnfolded)
-            {
-                continue;
-            }
+            if (!isUnfolded) continue;
 
             DrawRow(row, setting);
             _ui.Tooltip(row.Tip);
@@ -231,7 +222,7 @@ internal sealed class SettingsWindow : IDisposable
     /// A name in words: <c>RenderScale</c> and <c>renderScale</c> are "Render scale"; an acronym stays as it is
     /// (<c>LodBiasLOD</c> is "Lod bias LOD").
     /// </summary>
-    private static string Words(string name)
+    private static string ToWords(string name)
     {
         StringBuilder words = new(name.Length + 8);
         for (int i = 0; i < name.Length; i++)
@@ -273,7 +264,7 @@ internal sealed class SettingsWindow : IDisposable
     /// What is typed for a setting, as the console takes it: JSON when it parses as JSON (1920, true, ["a"],
     /// "quoted"), and a string when it does not.
     /// </summary>
-    private static JsonNode? ValueOf(string text)
+    private static JsonNode? ParseValue(string text)
     {
         try
         {
@@ -288,7 +279,7 @@ internal sealed class SettingsWindow : IDisposable
     /// <summary>
     /// The settings <paramref name="includes"/> as <c>Gem.setting=value</c> lines.
     /// </summary>
-    private string Lines(Predicate<Setting> includes)
+    private string GetLines(Predicate<Setting> includes)
     {
         StringBuilder text = new();
         foreach (Setting setting in _settings.All)
@@ -310,10 +301,7 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void Collect(IReadOnlyList<Setting> all)
     {
-        if (_rows.Count > 0)
-        {
-            return;
-        }
+        if (_rows.Count > 0) return;
 
         List<Row> rows = [];
         List<string> tabs = [];
@@ -324,7 +312,7 @@ internal sealed class SettingsWindow : IDisposable
             (string tab, string header) = PlaceOf(setting);
             RangeAttribute? range = setting.Attributes.OfType<RangeAttribute>().FirstOrDefault();
             bool restarts = setting.Attributes.OfType<RequireRestartAttribute>().Any();
-            string label = Words(setting.Name);
+            string label = ToWords(setting.Name);
             string tip = setting.Description.Length > 0 ? $"{setting.Key}: {setting.Description}" : setting.Key;
             Row row = new()
             {
@@ -338,22 +326,16 @@ internal sealed class SettingsWindow : IDisposable
                 Min = range is null ? 0 : Convert.ToSingle(range.Minimum, CultureInfo.InvariantCulture),
                 Max = range is null ? 0 : Convert.ToSingle(range.Maximum, CultureInfo.InvariantCulture),
                 Choices = setting.Type.IsEnum ? [.. Enum.GetValues(setting.Type).Cast<object>()] : [],
-                Labels = setting.Type.IsEnum ? Array.ConvertAll(Enum.GetNames(setting.Type), Words) : [],
+                Labels = setting.Type.IsEnum ? Array.ConvertAll(Enum.GetNames(setting.Type), ToWords) : [],
             };
             rows.Add(row);
-            if (!tabs.Contains(row.Tab, StringComparer.Ordinal))
-            {
-                tabs.Add(row.Tab);
-            }
+            if (!tabs.Contains(row.Tab, StringComparer.Ordinal)) tabs.Add(row.Tab);
 
-            if (!headers.Contains((row.Tab, row.Header)))
-            {
-                headers.Add((row.Tab, row.Header));
-            }
+            if (!headers.Contains((row.Tab, row.Header))) headers.Add((row.Tab, row.Header));
         }
 
         string[] met = [.. tabs];
-        tabs.Sort((left, right) => TabOrder(left, met).CompareTo(TabOrder(right, met)));
+        tabs.Sort((left, right) => GetTabOrder(left, met).CompareTo(GetTabOrder(right, met)));
         _rows.AddRange(rows.OrderBy(row => tabs.IndexOf(row.Tab)).ThenBy(row => headers.IndexOf((row.Tab, row.Header))));
         _tabs = [.. tabs];
         foreach ((string tab, _) in headers)
@@ -365,7 +347,7 @@ internal sealed class SettingsWindow : IDisposable
     /// <summary>
     /// Where a tab goes: Render first and Debug last, the rest between them as they were first met.
     /// </summary>
-    private static int TabOrder(string tab, string[] met)
+    private static int GetTabOrder(string tab, string[] met)
     {
         return string.Equals(tab, "Render", StringComparison.Ordinal) ? -1
             : string.Equals(tab, "Debug", StringComparison.Ordinal) ? met.Length
@@ -390,11 +372,8 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void DrawView()
     {
-        int index = ViewIndex();
-        if (_ui.Choice("View", ref index, _views))
-        {
-            Show(index == 0 ? string.Empty : _viewNames[index - 1]);
-        }
+        int index = GetViewIndex();
+        if (_ui.Choice("View", ref index, _views)) Show(index == 0 ? string.Empty : _viewNames[index - 1]);
 
         _ui.Tooltip(index == 0 || _viewDescriptions[index - 1].Length == 0 ? NormalTip : _viewDescriptions[index - 1]);
     }
@@ -402,7 +381,7 @@ internal sealed class SettingsWindow : IDisposable
     /// <summary>
     /// Where the view shown is in the choice: 0 for the frame as it is, or a view not listed.
     /// </summary>
-    private int ViewIndex()
+    private int GetViewIndex()
     {
         return Array.FindIndex(_viewNames, name => string.Equals(name, _debugView, StringComparison.OrdinalIgnoreCase)) + 1;
     }
@@ -423,18 +402,12 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void StepView()
     {
-        if (_input is not { } input)
-        {
-            return;
-        }
+        if (_input is not { } input) return;
 
         int step = input[Control.KeyF5].WasPressed ? 1 : input[Control.KeyF6].WasPressed ? -1 : 0;
-        if (step == 0)
-        {
-            return;
-        }
+        if (step == 0) return;
 
-        int index = (ViewIndex() + step + _views.Length) % _views.Length;
+        int index = (GetViewIndex() + step + _views.Length) % _views.Length;
         Show(index == 0 ? string.Empty : _viewNames[index - 1]);
     }
 
@@ -444,12 +417,9 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void ShowView()
     {
-        if (_debugView.Length == 0)
-        {
-            return;
-        }
+        if (_debugView.Length == 0) return;
 
-        int index = ViewIndex();
+        int index = GetViewIndex();
         string description = index == 0 ? string.Empty : _viewDescriptions[index - 1];
         if (!string.Equals(_linedView, _debugView, StringComparison.Ordinal) || !_viewLine.EndsWith(description, StringComparison.Ordinal))
         {
@@ -470,10 +440,7 @@ internal sealed class SettingsWindow : IDisposable
         for (int i = 0; i < passes.Length; i++)
         {
             Result<Pass> pass = await assets.LoadAsync(passes[i], cancel).ConfigureAwait(false);
-            if (pass.Ok)
-            {
-                _viewDescriptions[i] = pass.Value.Description;
-            }
+            if (pass.Ok) _viewDescriptions[i] = pass.Value.Description;
         }
     }
 
@@ -487,41 +454,26 @@ internal sealed class SettingsWindow : IDisposable
         switch (setting.Value)
         {
             case bool flag:
-                if (_ui.Checkbox(row.Id, ref flag))
-                {
-                    Change(setting, flag);
-                }
+                if (_ui.Checkbox(row.Id, ref flag)) Change(setting, flag);
 
                 break;
             case float number:
-                if (_ui.Slider(row.Id, ref number, row.Min, row.Max))
-                {
-                    Change(setting, number);
-                }
+                if (_ui.Slider(row.Id, ref number, row.Min, row.Max)) Change(setting, number);
 
                 break;
             case double number:
                 float slid = (float)number;
-                if (_ui.Slider(row.Id, ref slid, row.Min, row.Max))
-                {
-                    Change(setting, (double)slid);
-                }
+                if (_ui.Slider(row.Id, ref slid, row.Min, row.Max)) Change(setting, (double)slid);
 
                 break;
             case int whole:
                 float slidWhole = whole;
-                if (_ui.Slider(row.Id, ref slidWhole, row.Min, row.Max))
-                {
-                    Change(setting, (int)MathF.Round(slidWhole));
-                }
+                if (_ui.Slider(row.Id, ref slidWhole, row.Min, row.Max)) Change(setting, (int)MathF.Round(slidWhole));
 
                 break;
             case Enum choice:
                 int index = Array.IndexOf(row.Choices, choice);
-                if (_ui.Choice(row.Id, ref index, row.Labels) && index >= 0)
-                {
-                    Change(setting, row.Choices[index]);
-                }
+                if (_ui.Choice(row.Id, ref index, row.Labels) && index >= 0) Change(setting, row.Choices[index]);
 
                 break;
             default:
@@ -539,10 +491,7 @@ internal sealed class SettingsWindow : IDisposable
         if (!Equals(setting.Value, row.Value) || row.Shown is null)
         {
             string shown = setting.Value as string ?? JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options);
-            if (row.Draft is null || string.Equals(row.Draft, row.Shown, StringComparison.Ordinal))
-            {
-                row.Draft = shown;
-            }
+            if (row.Draft is null || string.Equals(row.Draft, row.Shown, StringComparison.Ordinal)) row.Draft = shown;
 
             row.Value = setting.Value;
             row.Shown = shown;
@@ -551,12 +500,9 @@ internal sealed class SettingsWindow : IDisposable
         string draft = row.Draft ?? string.Empty;
         bool isEntered = _ui.Input(row.Id, ref draft);
         row.Draft = draft;
-        if (!isEntered)
-        {
-            return;
-        }
+        if (!isEntered) return;
 
-        Change(setting, setting.Type == typeof(string) ? draft : ValueOf(draft));
+        Change(setting, setting.Type == typeof(string) ? draft : ParseValue(draft));
         row.Shown = null;
         row.Draft = null;
     }
@@ -567,23 +513,17 @@ internal sealed class SettingsWindow : IDisposable
     private void Change(Setting setting, object? value)
     {
         Result set = _settings.Set(setting.Key, value);
-        if (!set.Ok)
-        {
-            Debugging.Warn(set.Error);
-        }
+        if (!set.Ok) Debugging.Warn(set.Error);
     }
 
     /// <summary>
     /// Sets the setting <c>Gem.setting=value</c> names, the value JSON, or a string when it is not; why not is a
     /// warning.
     /// </summary>
-    private bool SetLine(string line)
+    private bool TrySetLine(string line)
     {
         Result set = _settings.Set(line);
-        if (!set.Ok)
-        {
-            Debugging.Warn(set.Error);
-        }
+        if (!set.Ok) Debugging.Warn(set.Error);
 
         return set.Ok;
     }
@@ -594,10 +534,7 @@ internal sealed class SettingsWindow : IDisposable
     private async Task ApplyAsync(Handle<Preset> preset, CancellationToken cancel)
     {
         Result applied = await _settings.ApplyAsync(preset, cancel).ConfigureAwait(false);
-        if (!applied.Ok)
-        {
-            Debugging.Warn(applied.Error);
-        }
+        if (!applied.Ok) Debugging.Warn(applied.Error);
     }
 
     /// <summary>
@@ -607,7 +544,7 @@ internal sealed class SettingsWindow : IDisposable
     private void RunGet(ReadOnlySpan<string> words)
     {
         string gem = words.Length == 1 ? words[0] : string.Empty;
-        string lines = Lines(setting => string.Equals(setting.Owner, gem, StringComparison.OrdinalIgnoreCase));
+        string lines = GetLines(setting => string.Equals(setting.Owner, gem, StringComparison.OrdinalIgnoreCase));
         if (lines.Length == 0)
         {
             Debugging.Warn($"get takes a gem with settings: {string.Join(", ", _settings.All.Select(setting => setting.Owner).Distinct(StringComparer.Ordinal))}.");
@@ -628,10 +565,7 @@ internal sealed class SettingsWindow : IDisposable
             return;
         }
 
-        if (SetLine(words[0]))
-        {
-            Debugging.Info($"Setting {words[0]}");
-        }
+        if (TrySetLine(words[0])) Debugging.Info($"Setting {words[0]}");
     }
 
     /// <summary>
@@ -679,7 +613,7 @@ internal sealed class SettingsWindow : IDisposable
         }
 
         Show(view);
-        Debugging.Info($"View: {Words(view)}.");
+        Debugging.Info($"View: {ToWords(view)}.");
     }
 
     /// <summary>
@@ -690,38 +624,38 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private sealed class Row
     {
-        public required int Index { get; init; }
+        internal required int Index { get; init; }
 
-        public required string Tab { get; init; }
+        internal required string Tab { get; init; }
 
-        public required string Header { get; init; }
+        internal required string Header { get; init; }
 
-        public required string Heading { get; init; }
+        internal required string Heading { get; init; }
 
-        public required string Label { get; init; }
+        internal required string Label { get; init; }
 
-        public required string Id { get; init; }
+        internal required string Id { get; init; }
 
-        public required string Tip { get; init; }
+        internal required string Tip { get; init; }
 
-        public float Min { get; init; }
+        internal float Min { get; init; }
 
-        public float Max { get; init; }
+        internal float Max { get; init; }
 
-        public object[] Choices { get; init; } = [];
+        internal object[] Choices { get; init; } = [];
 
-        public string[] Labels { get; init; } = [];
+        internal string[] Labels { get; init; } = [];
 
         /// <summary>
         /// The value a text field last showed, and the text it showed it as.
         /// </summary>
-        public object? Value { get; set; }
+        internal object? Value { get; set; }
 
-        public string? Shown { get; set; }
+        internal string? Shown { get; set; }
 
         /// <summary>
         /// What is in a text field, typed or shown.
         /// </summary>
-        public string? Draft { get; set; }
+        internal string? Draft { get; set; }
     }
 }

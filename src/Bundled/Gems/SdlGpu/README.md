@@ -11,7 +11,7 @@ comes from the bindings project, and the copy that runs is the one every gem sha
 Each setting is documented on `SdlGpuSettings` and shown in the settings window. Which GPU and API open, and whether
 the API validates, are read as the device opens, so changing one starts the engine again; `vsync` and `composition`
 are followed every frame, and every window presents the new way from the next. `composition` decides a window's
-image's format, and so how the last pass of a frame encodes its colour, which `IGpu.FormatOf` tells; no display
+image's format, and so how the last pass of a frame encodes its colour, which `IGpu.GetFormat` tells; no display
 without HDR takes the two HDR compositions, which then fall back to SDR.
 
 ## Behaviour
@@ -24,10 +24,10 @@ without HDR takes the two HDR compositions, which then fall back to SDR.
   it down) and stops it again in `Dispose`. It asks for SPIR-V, DXIL and Metal source, and takes the first the driver
   takes as `IGpu.ShaderFormat`. Vulkan is asked for 1.1, whose subgroup operations are HLSL's wave intrinsics. If no
   device opens, the gem throws with SDL's error and is not made.
-- It knows no window until one is asked for. `IGpu.WindowTarget(window)` claims the window, found by `IWindow.Id` in
+- It knows no window until one is asked for. `IGpu.GetWindowTarget(window)` claims the window, found by `IWindow.Id` in
   the SDL every gem shares, presenting as `vsync` says, and hands back a texture that is its render target, the same
   one every call; any number of windows can be targets. Their images' format is what `composition` made it, 8-bit
-  UNORM (SDR) unless asked otherwise, which `IGpu.FormatOf` tells, so the last pass of a frame encodes its own colour
+  UNORM (SDR) unless asked otherwise, which `IGpu.GetFormat` tells, so the last pass of a frame encodes its own colour
   for it. `Release` gives a window back, once the frames in flight are done with it. Headless, a window target's
   format is `GpuFormat.Invalid`, it has no image ever, and the GPU still computes and renders offscreen.
 - `Render`, after that of every gem that takes `IGpu`, submits the frame while the main thread runs the next one: the
