@@ -2,9 +2,9 @@
 // Rendering": exposure from EV100, 1 / (1.2 * 2^EV100)), metered one of two ways, by what its pass reads:
 // - the view's pixels (ExposureHistogram): the mean EV100 of the histogram's pixels between its darkest and brightest
 //   shares, so it follows what the view sees, a dark wall filling it brightening everything;
-// - the world's light (SkySh): the EV100 a mid-grey level surface in the open reads, lit by the sun through the sky's
-//   shadow at the camera and by the sky, as an incident meter reads it, so what fills the view never changes it, only
-//   the light does: for a world its sun, its weather and its sky light.
+// - the world's light (SkySh): the EV100 a mid-grey level surface in the open reads, lit by the key light through the
+//   sky's shadow at the camera, the other directional lights and the sky, as an incident meter reads it, so what fills
+//   the view never changes it, only the light does: for a world its sun or moon, its weather and its sky light.
 // Either is eased towards at a rate that brightens slower than it darkens, as eyes do. The view's lighting is
 // pre-exposed with it from the next frame on.
 
@@ -32,9 +32,9 @@ struct PassParams
 };
 
 #if defined(HAS_SkySh)
-// The EV100 of a mid-grey level surface in the open, lit by the sun through the sky's shadow at the camera and by the
-// sky: EV100 = log2(L * S / K) for ISO S = 100 and calibration K = 12.5, as the histogram's pixels are binned
-// (Post/ExposureHistogram.comp.hlsl).
+// The EV100 of a mid-grey level surface in the open, lit by the key light through the sky's shadow at the camera, by
+// the other directional lights and by the sky: EV100 = log2(L * S / K) for ISO S = 100 and calibration K = 12.5, as the
+// histogram's pixels are binned (Post/ExposureHistogram.comp.hlsl).
 float MeteredEv(PassParams params)
 {
     float3 sh[9];
@@ -43,8 +43,13 @@ float MeteredEv(PassParams params)
         sh[i] = LOAD(SkySh, float4, i).rgb;
     }
 
-    float sun = saturate(-SunDirection.y) * SkyShadowAt(float3(0.0, 0.0, 0.0));
-    float3 white = ShIrradiance(float3(0.0, 1.0, 0.0), sh) + SunIlluminance * (sun / Pi);
+    float3 white = ShIrradiance(float3(0.0, 1.0, 0.0), sh);
+    white += KeyLightIlluminance * SkyShadowAt(float3(0.0, 0.0, 0.0)) * (saturate(-KeyLightDirection.y) / Pi);
+    [loop] for (uint other = 0u; other < min(DirectionalCount, DirectionalLightCapacity); other++)
+    {
+        white += Directional[other].Illuminance * (saturate(-Directional[other].Direction.y) / Pi);
+    }
+
     return log2(max(Luminance(white) * MidGrey, 1e-12) * 8.0);
 }
 #else

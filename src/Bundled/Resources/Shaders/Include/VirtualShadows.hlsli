@@ -655,7 +655,7 @@ float SunVirtualShadow(float3 position, float3 normal, float viewDepth, float di
     if (found > 0.0)
     {
         float distance = (blockers / found - depth) * 2.0 * sun.depthRange;
-        float penumbra = distance * 2.0 * tan(SunAngularRadius);
+        float penumbra = distance * 2.0 * tan(KeyLightAngularRadius);
         float finestTexel = sun.finest / (float)SunWindow / (float)PageContent;
         float wanted = log2(max(penumbra / (4.0 * finestTexel), 1.0)) + (dither * 2.0 - 1.0) * SunLevelBlend;
         level = clamp((uint)ceil(max(wanted, 0.0)), finest, widest);

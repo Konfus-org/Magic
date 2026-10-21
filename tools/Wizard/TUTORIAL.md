@@ -1008,20 +1008,20 @@ Each prints an `event: message` line and a `data:` line holding the JSON-RPC ans
 
 ```
 event: message
-data: {"result":{"content":[{"type":"text","text":"{"project":"Samples","root":"samples","frame":14297,"entities":60685,"domains":["Domains/Grid/Grid.domain"],"isLoading":false,"isLoaded":true}"}]},"id":1,"jsonrpc":"2.0"}
+data: {"result":{"content":[{"type":"text","text":"{"project":"Samples","root":"samples","frame":14297,"entities":60686,"domains":["Domains/Grid/Grid.domain"],"isLoading":false,"isLoaded":true}"}]},"id":1,"jsonrpc":"2.0"}
 ```
 
 The tool's own answer is the `text` value: JSON inside a JSON string, so its quotes arrive escaped as `"`. That
-one reads `{"project":"Samples","root":"samples","frame":14297,"entities":60685,"domains":["Domains/Grid/Grid.domain"],"isLoading":false,"isLoaded":true}`.
+one reads `{"project":"Samples","root":"samples","frame":14297,"entities":60686,"domains":["Domains/Grid/Grid.domain"],"isLoading":false,"isLoaded":true}`.
 `component_types` answers `Camera`, `Contacts`, `DirectionalLight`, `Physics`, `PointLight`, `PostProcessing`,
 `Renderer`, `Scripts`, `Sky`, `Spin`, `SpotLight`, `Tags`, `Transform` and `Weather`.
 
 Now change the world. Find the sun, read it, and turn it red:
 
 ```powershell
-Mcp entity_list '{"component":"DirectionalLight"}'   # one entity, such as 58175.0.1: DirectionalLight, Tags, Transform
+Mcp entity_list '{"component":"DirectionalLight"}'   # two entities, the sun and the moon, such as 58175.0.1: DirectionalLight, Spin, Transform
 Mcp entity_get '{"id":"58175.0.1"}'
-Mcp component_set '{"id":"58175.0.1","component":"DirectionalLight","value":{"color":{"r":1,"g":0.2,"b":0.2},"intensity":5}}'
+Mcp component_set '{"id":"58175.0.1","component":"DirectionalLight","value":{"mode":"sun","color":{"r":1,"g":0.2,"b":0.2},"intensity":120000}}'
 ```
 
 The world turns red in the engine window. Then try what it refuses:
@@ -2146,7 +2146,7 @@ dotnet run --project Wizard
 It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 
 1. Paste the full path of the samples into the box, the folder or its `Samples.magic`, and press **Play**.
-2. The engine window opens on the Grid. The status on the right reads `Samples · frame N · 60685 entities`, the frame
+2. The engine window opens on the Grid. The status on the right reads `Samples · frame N · 60686 entities`, the frame
    counting up (` · loading` follows while a domain is still opening).
 3. The console fills with the engine's log from the gem's first line on: `Gem Mcp 1.0.0 by Konfus started`, `MCP
    clients reach the engine at http://localhost:<port>/mcp`, `Opened Domains/Grid/Grid.domain: 58184 entities in 1025
@@ -2593,10 +2593,10 @@ Create `tools/Wizard/Wizard/Components/Editor/EntityList.razor`:
 
 Why it is shaped this way:
 
-- **A page at a time.** The samples' world holds 60,685 entities, more than a list should draw, so the panel asks for
+- **A page at a time.** The samples' world holds 60,686 entities, more than a list should draw, so the panel asks for
   the first hundred that match and **Show 100 more** asks for more. The count in the header is how many match.
 - **The filter is the hierarchy's stand-in.** Entities have no names or parents, so what tells them apart is what they
-  hold: "With DirectionalLight" finds the sun, "With Camera" the player's camera. The types come from
+  hold: "With DirectionalLight" finds the sun and the moon, "With Camera" the player's camera. The types come from
   `component_types`, asked again whenever the engine starts.
 - **One poll a second.** Each walks the world on the engine's main thread, which is the 3.3 ms measured at the top. If
   a larger world makes that show, poll less often or only on a change of filter.
@@ -2922,12 +2922,12 @@ The page owns the selection and hands it to both panels. That is the whole of Wi
 
 Run Wizard (in a browser or the shell), Play the samples, then:
 
-1. The entity list shows `60685` and, first, the player and the domain's globals: the player's camera
-   (`Camera, Scripts, Tags, Transform`), the sun (`DirectionalLight, Tags, Transform`), `PostProcessing`, `Weather`,
+1. The entity list shows `60686` and, first, the player and the domain's globals: the player's camera
+   (`Camera, Scripts, Tags, Transform`), the sun and the moon (`DirectionalLight, Spin, Transform`), `PostProcessing`, `Weather`,
    then the point lights.
 2. Choose **With Camera**: one entity. Choose **Every entity** again.
 3. Select the sun. The inspector shows `Transform` (position, rotation and scale, no matrix), `DirectionalLight` and
-   `Tags`.
+   `Spin`.
 4. Set the colour's `g` to `0.3` and `b` to `0.2`, pressing Tab after each. The world turns red in the engine window
    (type `screenshot` in the console to keep a picture of it), and the fields still read `0.3` and `0.2` after the
    next refresh.

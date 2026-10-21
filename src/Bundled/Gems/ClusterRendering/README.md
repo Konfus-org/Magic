@@ -74,7 +74,7 @@ pipelines: the one the settings pick, and the effects the world's `PostProcessin
 
 In LateUpdate, while the render thread may still be drawing the frame before, what Render reads is copied into the
 copy it is not reading. One system on the main thread reads what the world has one of, or a few: the cameras, the
-player, the sun, the sky, the weather and the post-processing. Systems on the ECS's threads then copy each instance's
+player, the directional lights, the sky, the weather and the post-processing. Systems on the ECS's threads then copy each instance's
 transform and renderer and each light, kept at its entity's slot and compared with what was there, so only what
 changed is passed on. Sync swaps the two copies, and Render reads the one just finished.
 
@@ -138,13 +138,23 @@ in view into depth slices by a count and a prefix, nearest first, gives each sli
 can reach it, and each tile of pixels a bit for each light that reaches it, each light setting the bits of the tiles
 its sphere covers (Drobot 2017). A pixel walks only the lights in both, the walk kept uniform across a wave.
 
+Directional lights reach everything, so they are not binned: the frame holds them. One of them is the key light, which
+casts the shadows of the virtual shadow maps' clipmap: the sun while it is up, else the moon while it is, else the
+brightest of the rest. A sun or moon below the horizon lights nothing, as the ground is in the way, and the one that is
+not the key light is not lit, as beside the other it is nothing: the moon by day is a millionth of the sun. The key
+light's light reaches each place through the sky's shadow when it is a sun or a moon. The other directional lights, a
+few, light every pixel whole, with no shadow; one more than the frame holds lights nothing, which the log says once.
+
 ### Virtual shadow maps
 
 Every shadow is drawn into pages of one depth pool, each with a border for filtering, only the pages the view's pixels
 read, kept from frame to frame and drawn again only where what casts into them moved: of a page, only the rectangle a
-moving thing reaches is emptied and drawn, so a small caster moving in a big page costs little. The sun's pages are a
-clipmap of as many levels as the settings say about the camera, a level's window moving a page at a time with its
-entries addressed round so a page that stays keeps what was drawn. A point or spot light's pages are its six faces' at
+moving thing reaches is emptied and drawn, so a small caster moving in a big page costs little. The sun's pages, the
+key light's whichever directional light it is, are a clipmap of as many levels as the settings say about the camera, a
+level's window moving a page at a time with its entries addressed round so a page that stays keeps what was drawn. The
+clipmap keeps the way it was drawn for until the light has turned from it by a step the settings set, then draws every
+page again for where the light is, so a sun crossing the sky is drawn again in steps rather than every frame, and a
+light that turns a little each frame does not leave its shadows behind. A point or spot light's pages are its six faces' at
 a mip, a texel at most two pixels wide; its coarsest mip is one small page, a fraction of a page, which a pixel is
 shaded through while its own waits. Each frame, on the GPU:
 
@@ -222,10 +232,13 @@ from showing where they meet or lagging behind a change:
 
 ### The sky
 
-The world's sky material names a sky shader, drawn along each direction over what nothing was drawn on, from the sun
-and the weather the frame's constants hold. The sun is the directional light tagged as the sun: there is one, and the
-world says which it is, so a directional light that is not tagged lights nothing, which the log says once. The weather,
-still air and a clear sky without one, reaches every pass the same way, so whatever the wind should move can read it.
+The world's sky material names a sky shader, drawn along each direction over what nothing was drawn on, from the sun,
+the moon and the weather the frame's constants hold. The sun and the moon are directional lights whose mode says so,
+the first of each: its colour and intensity are the light's above the air, its direction the way it shines, and its
+disc as wide as its entity's scale says, 1 as it looks from the Earth. A second sun or moon lights nothing, which the
+log says once. The sky draws both whether or not either lights the world now, so the moon shows by day as faintly as
+its light stands out against the sky's. The weather, still air and a clear sky without one, reaches every pass the
+same way, so whatever the wind should move can read it.
 In the view each pixel hands the sky a dither that moves each frame, so a sky that marches through its air or its
 clouds in a few steps offsets them by it, and the upscale blends them; the capture and the sky's shadow are handed the
 same one everywhere.
@@ -239,18 +252,21 @@ A world with no sky material has the renderer's own, a gradient as bright as the
 
 ### The sky's shadow
 
-What the sky has in front of the sun, its clouds, shades the world: the sun reaches each place only by the share the
-sky lets through toward it. The sky shader says that share for any place, and the renderer draws it, composed into a
-template of its own as the sky is, into a small texture over the ground around the camera each frame, so the shadows
-cross the ground as the wind carries the clouds. Everything the sun lights reads it by name: the lighting of each
-pixel, times the sun's shadow map, so an overcast sky leaves no hard shadow as it leaves no sun; the light the global
-illumination's rays find; and, at the camera's own place, the exposure metered from the world's light and the sun's
-light the fog scatters. The texture covers a level square through the camera, its middle moved in whole steps of the
-world so the shadows of still clouds stand still, and a place is looked up where its way toward the sun crosses it,
-which serves every height below the clouds. It is read through a cubic filter rather than a bilinear one, as up close a
-texel covers much of the view and a bilinear read would show the texels' grid along a cloud's edge. The share under the camera is the share the view sees of the sun's disc,
-so the ground goes dark as the disc does. A world with the renderer's own sky, or a broken one, has nothing in front of
-the sun.
+What the sky has between the key light and the world, when the key light is its sun or moon, shades the world: its
+air, which reddens and dims the light as it nears the horizon and lets none through below it, and its clouds. The light
+reaches each place only by the share, by colour, the sky lets through toward it. The sky shader says that share for
+any place and any light, and the renderer draws it for the key light, composed into a template of its own as the sky
+is, into a small texture over the ground around the camera each frame, so the shadows cross the ground as the wind
+carries the clouds and the world goes red as the sun sets. Everything the key light lights reads it by name: the
+lighting of each pixel, times the key light's shadow map, so an overcast sky leaves no hard shadow as it leaves no sun;
+the light the global illumination's rays find; and, at the camera's own place, the exposure metered from the world's
+light and the key light's light the fog scatters. The texture covers a level square through the camera, its middle
+moved in whole steps of the world so the shadows of still clouds stand still, and a place is looked up where its way
+toward the light crosses it, which serves every height below the clouds. It is read through a cubic filter rather than
+a bilinear one, as up close a texel covers much of the view and a bilinear read would show the texels' grid along a
+cloud's edge. The share under the camera is the share the view sees of the light's disc, so the ground goes dark as the
+disc does. A world with the renderer's own sky, or a broken one, has nothing in front of the light, and lets it through
+whole while it is up.
 
 ### The sky's light
 
@@ -364,6 +380,10 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
   coarse as its shadow's texels allow.
 - A light that moves draws all its pages again every frame, which past the pages a frame may draw leaves them read
   coarse.
+- Only the key light casts shadows among the directional lights: the others light everything whole, inside and out,
+  and so does what global illumination's rays find of them.
+- The key light's shadow lags the light by up to the turn step, as it is drawn again in steps; each step draws every
+  page of it again, which shows as its shadows sharpening again for a few frames.
 - A second view runs the shadows' passes again, and takes the lights' pages over from the first.
 - Reflections are traced for opaque surfaces only: a transparent one, glass or water drawn as transparent, reflects the
   sky. What is reflected is the field, flat-coloured and without highlights, a voxel to a quarter of a metre close by

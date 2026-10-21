@@ -374,7 +374,7 @@ its matrix is what takes its model into the world.
 A tag is a label with no data that a file names without any code declaring it: a `tags` list on an entity, beside its
 components, gives it a `Tags` component holding up to eight tags, each a stable hash of its name. The engine's own
 are the spawn tag, where a domain puts the player, the player tag, the player's camera, which detail is kept
-nearest to ([The world](#the-world)), and the sun tag, the directional light that is the world's sun. An entity's scripts are held the same way: a `Scripts` component of up to eight
+nearest to ([The world](#the-world)). An entity's scripts are held the same way: a `Scripts` component of up to eight
 `.cs` asset handles, which a prefab's scripts list gives it and any system can query ([Scripts](#scripts)).
 
 ## Scripts
@@ -488,7 +488,8 @@ loads. What it compiled is kept in [the cache](#the-cache), so a shader compiles
 shader library in [Resources/Shaders](../Bundled/Resources/Shaders/README.md).
 
 What a renderer draws from the world is components: a `Camera` for each view, what each entity draws, the lights,
-the sun among them by its tag, the sky, the `Weather`, which says the wind and the clouds as they are now, and
+among them the directional lights whose mode makes them the sun and the moon its sky draws, the sky, the `Weather`,
+which says the wind and the clouds as they are now, and
 `PostProcessing`, which names the world's effects as a `Pipeline`. A `Pipeline` is an ordered list of
 `Pass`es and other pipelines, and a `Pass` one step of a frame: the stage it runs in, its shader, and the resources it
 reads, writes and makes, by name. Both are plain JSON assets, so an effect is data a world names, and what a renderer

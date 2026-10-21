@@ -531,8 +531,9 @@ float3 GiIrradianceAt(float3 position, float3 normal, float3 view, out float hel
 #include "Lighting/Ibl.hlsli"
 #include "Lighting/Lights.hlsli"
 
-// The light the field's surface sends back the way a ray hit it: what it gives off, the sun through the sky's shadow
-// and the point and spot lights its cell lists as far as the field lets them through, and everything else as the probes
+// The light the field's surface sends back the way a ray hit it: what it gives off, the key light through the sky's
+// shadow and the point and spot lights its cell lists as far as the field lets them through, the other directional
+// lights unshadowed, as the view's lighting has them, and everything else as the probes
 // held it last, the sky's (its nine coefficients) where they hold nothing. What a probe's ray takes, which is how light
 // bounces again and again, and what a reflection the view cannot see shows.
 float3 GiHitRadiance(GiHit hit, uint levels, float3 sh[9])
@@ -544,15 +545,20 @@ float3 GiHitRadiance(GiHit hit, uint levels, float3 sh[9])
     float3 albedo = surface.a > 0.0 ? surface.rgb : float3(0.5, 0.5, 0.5);
     float3 radiance = GiEmission.SampleLevel(GiEmissionSampler, uvw, 0.0).rgb;
     float3 origin = hit.position + normal * hitLevel.voxel;
-    [branch] if (any(SunIlluminance > 0.0))
+    [branch] if (any(KeyLightIlluminance > 0.0))
     {
-        float facing = saturate(dot(normal, -SunDirection));
+        float facing = saturate(dot(normal, -KeyLightDirection));
         [branch] if (facing > 0.0)
         {
-            float visible = GiVisibility(origin, -SunDirection, GiFarAway, hit.level, levels);
-            float through = SkyShadowAt(hit.position - CameraPosition);
-            radiance += albedo * SunIlluminance * (facing * visible * through * InvPi);
+            float visible = GiVisibility(origin, -KeyLightDirection, GiFarAway, hit.level, levels);
+            float3 through = SkyShadowAt(hit.position - CameraPosition);
+            radiance += albedo * KeyLightIlluminance * through * (facing * visible * InvPi);
         }
+    }
+
+    [loop] for (uint other = 0u; other < min(DirectionalCount, DirectionalLightCapacity); other++)
+    {
+        radiance += albedo * Directional[other].Illuminance * (saturate(dot(normal, -Directional[other].Direction)) * InvPi);
     }
 
     // The lights listed for the cell the hit is in, as the view's lighting has them reach and face it.

@@ -1,9 +1,10 @@
 // The sky template: one triangle over what nothing was drawn on (depth tested against the view's), or over a face of a
 // cube when it captures the sky (SKY_CUBE) for the ambient light. The world's sky is its material's sky shader
-// (Include/Sky.hlsli), composed before this, evaluated along each direction from the frame's sun and weather; what it
-// gives is the sky's luminance in nits, not pre-exposed, so it lights the world as the sky would. The sun's disc it
-// hands back apart is shown in the view and left out of the capture, which the sun's own light stands for. Without a
-// sky (SKY_FALLBACK) it is the renderer's own: a clear sky as bright as the sun makes it, with the sun's disc. What a
+// (Include/Sky.hlsli), composed before this, evaluated along each direction from the frame's sun, moon and weather;
+// what it gives is the sky's luminance in nits, not pre-exposed, so it lights the world as the sky would. The sun's and
+// the moon's discs it hands back apart are shown in the view and left out of the capture, which their own light stands
+// for. Without a sky (SKY_FALLBACK) it is the renderer's own: a clear sky as bright as the sun makes it, with the sun's
+// disc. What a
 // sky gives off pre-exposed is added in the view as it is, and never captured. In the view each pixel's dither moves
 // each frame, interleaved gradient noise, for a sky that integrates by steps; a capture's is the same everywhere.
 
@@ -28,17 +29,18 @@ static const float NightSky = 0.002;
 
 SkyLight FallbackSky(float3 direction)
 {
-    float3 towardSun = -SunDirection;
-    float sunLux = Luminance(SunIlluminance);
+    float3 towardSun = -SkyLights.SunDirection;
+    float sunLux = Luminance(SkyLights.SunIlluminance);
     float day = saturate(towardSun.y * 4.0 + 0.2);
     float up = direction.y;
     float3 sky = up >= 0.0 ? lerp(Horizon, Zenith, sqrt(saturate(up))) : lerp(Horizon * 0.6, Ground, saturate(-up * 4.0));
     sky += Glow * (0.6 * pow(saturate(dot(direction, towardSun)), 8.0));
-    float disc = dot(direction, towardSun) >= cos(SunAngularRadius) ? 1.0 : 0.0;
+    float radius = max(SkyLights.SunAngularRadius, 1e-4);
+    float disc = dot(direction, towardSun) >= cos(radius) && towardSun.y > 0.0 ? 1.0 : 0.0;
 
     SkyLight light;
     light.nits = sky * max(sunLux * NitsPerLux * day, NightSky);
-    light.sun = SunIlluminance * (disc / (Pi * Pow2(SunAngularRadius)));
+    light.discs = SkyLights.SunIlluminance * (disc / (Pi * Pow2(radius)));
     light.emissive = float3(0.0, 0.0, 0.0);
     return light;
 }
@@ -70,6 +72,6 @@ float4 main(PassVaryings input) : SV_Target0
 #if SKY_CUBE
     return float4(light.nits, 1.0);
 #else
-    return float4((light.nits + light.sun) * LOAD(Exposure, float4, 0u).x + light.emissive, 1.0);
+    return float4((light.nits + light.discs) * LOAD(Exposure, float4, 0u).x + light.emissive, 1.0);
 #endif
 }

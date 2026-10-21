@@ -17,7 +17,7 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
 {
     SkyLight light;
     light.nits = float3(1.0, 1.0, 1.0) * (Luminance(input.sunIlluminance) * material.captured);
-    light.sun = float3(0.0, 0.0, 0.0);
+    light.discs = float3(0.0, 0.0, 0.0);
     light.emissive = float3(0.0, 0.0, 0.0);
     if (!input.isCapture)
     {
@@ -28,8 +28,8 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
     return light;
 }
 
-// Nothing in front of the sun, so the world stays lit.
-float SunThrough(SkyInputs input, float3 position, MaterialParams material)
+// No air and nothing in front of the light, so the world stays lit.
+float3 LightThrough(SkyInputs input, float3 position, float3 towardLight, MaterialParams material)
 {
-    return 1.0;
+    return float3(1.0, 1.0, 1.0);
 }

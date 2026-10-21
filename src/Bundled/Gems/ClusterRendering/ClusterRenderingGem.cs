@@ -326,7 +326,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         {
             _shadows.Plan(
                 camera.Transform.Position,
-                copy.Sun?.Direction ?? -Vector3.UnitY,
+                copy.KeyLightDirection,
                 _world.Lights.ChangedWords,
                 _world.Instances.Moved.Count,
                 frame.Index,

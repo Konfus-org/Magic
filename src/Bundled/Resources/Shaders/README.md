@@ -13,8 +13,9 @@ rules every shader follows, and how they are compiled, are in the
 A renderer reads what a surface is made of, from its G-buffer or straight from the surface's own function in a forward
 pass, and hands it to the lighting entry point (`Lighting/Shade.hlsli`), which answers the light the surface sends
 toward the viewer, in nits. It looks the pixel up in the DFG table at (n·v, roughness), prepares the surface's shading
-model, adds the sun through its shadow and each local light that reaches the pixel, walked from the frame's light bins
-and tiles, then light from everywhere: the sky's harmonics, or the probes of global illumination where they hold the
+model, adds the key light through its shadow (the sun by day, the moon by night, else the brightest other directional
+light), the other directional lights whole, and each local light that reaches the pixel, walked from the frame's light
+bins and tiles, then light from everywhere: the sky's harmonics, or the probes of global illumination where they hold the
 place, for diffuse, and the sky prefiltered by roughness for reflections, coloured by the probes along the reflection
 where they hold it, or the world's traced reflections where the renderer has them, less what occlusion hides. The
 renderer multiplies by exposure and adds the surface's emissive,
@@ -24,7 +25,8 @@ it offers:
 - **The DFG table** is the GGX lobe's albedo integrated at (n·v, roughness), split into F0 and F90 terms, and cloth's
   sheen albedo, made once by a compute pass into a small texture. It makes rough metals keep their energy (multiple
   scattering) under lights and the environment alike.
-- **Units.** The sun in lux, point and spot lights in candela (lumens / 4π, and lumens / π for a spot), the sky in nits.
+- **Units.** Directional lights in lux, the sun's and the moon's as they are above the air (about 120 000 and, full,
+  0.3), point and spot lights in candela (lumens / 4π, and lumens / π for a spot), the sky in nits.
   The lighting answers in nits; exposure, from EV100 (`1 / (1.2 · 2^EV100)`), turns that into the pre-exposed scene
   colour, where emissive surfaces already are.
 - **Shading models**: metallic-roughness, clear coat (coat, coat roughness), cloth (sheen, sheen roughness) and

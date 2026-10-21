@@ -37,9 +37,27 @@ internal readonly record struct LightCopy(
     bool Shadowless);
 
 /// <summary>
-/// The sun: the way its light travels, and its illuminance in lux times its colour.
+/// The sky's sun or moon: the way its light travels, its illuminance in lux times its colour, and its disc's angular
+/// radius in radians.
 /// </summary>
-internal readonly record struct SunCopy(Vector3 Direction, Vector3 Illuminance);
+internal readonly record struct SkyLightCopy(Vector3 Direction, Vector3 Illuminance, float AngularRadius);
+
+/// <summary>
+/// A directional light that lights the world alone: the way its light travels, and its illuminance in lux times its
+/// colour.
+/// </summary>
+internal readonly record struct DirectionalCopy(Vector3 Direction, Vector3 Illuminance);
+
+/// <summary>
+/// The directional light that casts the shadows: the way its light travels, its illuminance in lux times its colour,
+/// its disc's angular radius in radians, which softens its shadows, and whether it is the sky's sun or moon, whose
+/// light reaches the world through the sky's air and clouds.
+/// </summary>
+internal readonly record struct KeyLightCopy(
+    Vector3 Direction,
+    Vector3 Illuminance,
+    float AngularRadius,
+    bool IsSkyLight);
 
 /// <summary>
 /// The world as the GPU draws it, in two halves: the copy of it the render thread reads, and the rows the GPU reads
@@ -147,14 +165,28 @@ internal sealed class WorldProcessor : IDisposable
     }
 
     /// <summary>
-    /// What the renderer needs that the world has one of, or a few: its cameras, the player, the sun, the sky, the
-    /// weather and the effects, read in one place, once a frame, after starting the frame's copy. The sun is the first
-    /// directional light tagged as the sun; one that is not tagged lights nothing, as there is one sun and the world
-    /// says which it is, and a world with directional lights but none tagged is told so once.
+    /// What the renderer needs that the world has one of, or a few: its cameras, the player, its directional lights,
+    /// the sky, the weather and the effects, read in one place, once a frame, after starting the frame's copy.
     /// </summary>
     private sealed class ReadWorld(WorldProcessor owner, World world) : ISystem
     {
-        private bool _hasWarnedOfSun;
+        /// <summary>
+        /// The radii, in radians, of the sun's and the moon's discs as they look from the Earth, which a sun or moon
+        /// light's scale multiplies.
+        /// </summary>
+        private const float SunRadius = 0.00465f;
+        private const float MoonRadius = 0.0045f;
+
+        /// <summary>
+        /// How far below the horizon a sun or moon still counts as up, as a sine: half a degree, where the ground
+        /// already hides it from the world, so its light has faded to nothing through the air by the time the next is
+        /// picked.
+        /// </summary>
+        private const float Horizon = -0.0087f;
+
+        private bool _hasWarnedOfSuns;
+        private bool _hasWarnedOfMoons;
+        private bool _hasWarnedOfLights;
 
         public Phase Phase => Phase.LateUpdate;
 
@@ -163,20 +195,123 @@ internal sealed class WorldProcessor : IDisposable
             Renderables next = owner.Begin();
             ReadCameras(next.Cameras);
             next.Player = FindTagged<Camera>(Tag.Player)?.Transform.Position;
-            if (FindTagged<DirectionalLight>(Tag.Sun) is { } sun)
-            {
-                Vector3 direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, sun.Transform.Rotation));
-                next.Sun = new SunCopy(direction, GetIntensity(sun.Value.Color, sun.Value.Intensity));
-            }
-
+            ReadDirectionalLights(next);
+            next.KeyLight = PickKeyLight(next);
             next.Sky = FindFirst<Sky>()?.Material;
             next.Weather = FindFirst<Weather>();
             next.Effects = FindFirst<PostProcessing>()?.Effects ?? Handle<Pipeline>.None;
-            if (next.Sun is not null || _hasWarnedOfSun || FindFirst<DirectionalLight>() is null) return;
+        }
 
-            Debugging.Warn("The world has a directional light but none tagged \"sun\", so it has no sun: "
-                + "give the sun's entity \"tags\": [ \"sun\" ].");
-            _hasWarnedOfSun = true;
+        /// <summary>
+        /// The light that casts the shadows and that the sky's shadow is drawn for: the sun while it is up, else the
+        /// moon while it is, else the brightest of the other directional lights, which leaves their list, as it is lit
+        /// with its shadows; none without any. A sun or moon that is down lights nothing, so only the one up is lit.
+        /// </summary>
+        private static KeyLightCopy? PickKeyLight(Renderables next)
+        {
+            if (next.Sun is { } sun && IsUp(sun.Direction))
+            {
+                return new KeyLightCopy(sun.Direction, sun.Illuminance, sun.AngularRadius, IsSkyLight: true);
+            }
+
+            if (next.Moon is { } moon && IsUp(moon.Direction))
+            {
+                float share = next.Sun is { } lighting ? GetMoonPhaseShare(lighting.Direction, moon.Direction) : 1;
+                return new KeyLightCopy(moon.Direction, moon.Illuminance * share, moon.AngularRadius, IsSkyLight: true);
+            }
+
+            int brightest = -1;
+            float most = 0;
+            for (int i = 0; i < next.Directional.Count; i++)
+            {
+                Vector3 illuminance = next.Directional[i].Illuminance;
+                float lux = illuminance.X + illuminance.Y + illuminance.Z;
+                if (lux <= most) continue;
+
+                brightest = i;
+                most = lux;
+            }
+
+            if (brightest < 0) return null;
+
+            DirectionalCopy light = next.Directional[brightest];
+            next.Directional.RemoveAt(brightest);
+            return new KeyLightCopy(light.Direction, light.Illuminance, 0, IsSkyLight: false);
+        }
+
+        /// <summary>
+        /// Whether a sun or moon whose light travels along <paramref name="direction"/> is above the
+        /// <see cref="Horizon"/>.
+        /// </summary>
+        private static bool IsUp(Vector3 direction) => -direction.Y > Horizon;
+
+        /// <summary>
+        /// The share of a full moon's light the moon sends the world by its phase, the sun lighting it from an angle
+        /// round from behind the Earth: the share of a sphere's lit side that shows (Lambert's sphere), as the sky
+        /// draws it.
+        /// </summary>
+        private static float GetMoonPhaseShare(Vector3 sunDirection, Vector3 moonDirection)
+        {
+            float cosAngle = Math.Clamp(Vector3.Dot(-sunDirection, moonDirection), -1, 1);
+            float angle = MathF.Acos(cosAngle);
+            return Math.Clamp((MathF.Sin(angle) + ((MathF.PI - angle) * cosAngle)) / MathF.PI, 0, 1);
+        }
+
+        /// <summary>
+        /// Every directional light, by its mode: the first sun and the first moon are the sky's, each with a disc as
+        /// wide as its entity's largest scale says, and the rest light the world alone, as many as the frame holds. A
+        /// second sun or moon, or a light past what the frame holds, lights nothing, which is said once.
+        /// </summary>
+        private void ReadDirectionalLights(Renderables next)
+        {
+            foreach ((_, Span<Transform> transforms, Span<DirectionalLight> found) in world
+                .Query<Transform, DirectionalLight>())
+            {
+                for (int i = 0; i < found.Length; i++)
+                {
+                    Transform transform = transforms[i];
+                    DirectionalLight light = found[i];
+                    Vector3 direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transform.Rotation));
+                    Vector3 illuminance = GetIntensity(light.Color, light.Intensity);
+                    float size = MathF.Max(transform.Scale.X, MathF.Max(transform.Scale.Y, transform.Scale.Z));
+                    if (light.Mode == DirectionalLightMode.Sun && next.Sun is null)
+                    {
+                        next.Sun = new SkyLightCopy(direction, illuminance, SunRadius * size);
+                    }
+                    else if (light.Mode == DirectionalLightMode.Sun)
+                    {
+                        WarnOnce(ref _hasWarnedOfSuns, "The world has more than one directional light in sun mode; "
+                            + "its sky has one sun, the first, and the others light nothing.");
+                    }
+                    else if (light.Mode == DirectionalLightMode.Moon && next.Moon is null)
+                    {
+                        next.Moon = new SkyLightCopy(direction, illuminance, MoonRadius * size);
+                    }
+                    else if (light.Mode == DirectionalLightMode.Moon)
+                    {
+                        WarnOnce(ref _hasWarnedOfMoons, "The world has more than one directional light in moon mode; "
+                            + "its sky has one moon, the first, and the others light nothing.");
+                    }
+                    else if (next.Directional.Count < DirectionalLights.Capacity)
+                    {
+                        next.Directional.Add(new DirectionalCopy(direction, illuminance));
+                    }
+                    else
+                    {
+                        WarnOnce(ref _hasWarnedOfLights, $"The world has more than {DirectionalLights.Capacity} "
+                            + "directional lights besides its sun and moon; a frame lights by that many, and the "
+                            + "others light nothing.");
+                    }
+                }
+            }
+        }
+
+        private static void WarnOnce(ref bool hasWarned, string message)
+        {
+            if (hasWarned) return;
+
+            Debugging.Warn(message);
+            hasWarned = true;
         }
 
         private void ReadCameras(List<CameraCopy> cameras)
@@ -308,8 +443,8 @@ internal sealed class WorldProcessor : IDisposable
 
 /// <summary>
 /// The world as one frame's Render reads it: what changed among the instances and lights since the copy before, and
-/// the cameras, player, sun, sky, weather and effects as they were. There are two, written and read in turn
-/// (<see cref="WorldProcessor"/>).
+/// the cameras, player, directional lights, sky, weather and effects as they were. There are two, written and read in
+/// turn (<see cref="WorldProcessor"/>).
 /// </summary>
 internal sealed class Renderables
 {
@@ -329,9 +464,32 @@ internal sealed class Renderables
     internal Vector3? Player { get; set; }
 
     /// <summary>
-    /// The first directional light tagged as the sun, or none.
+    /// The sky's sun, the first directional light in sun mode, or none.
     /// </summary>
-    internal SunCopy? Sun { get; set; }
+    internal SkyLightCopy? Sun { get; set; }
+
+    /// <summary>
+    /// The sky's moon, the first directional light in moon mode, or none.
+    /// </summary>
+    internal SkyLightCopy? Moon { get; set; }
+
+    /// <summary>
+    /// The directional lights that light the world alone, without shadows: those in default mode, but the one that is
+    /// the <see cref="KeyLight"/>.
+    /// </summary>
+    internal List<DirectionalCopy> Directional { get; } = [];
+
+    /// <summary>
+    /// The directional light that casts the shadows: the sun while it is up, else the moon while it is, else the
+    /// brightest default light; or none.
+    /// </summary>
+    internal KeyLightCopy? KeyLight { get; set; }
+
+    /// <summary>
+    /// The way the key light's light travels; straight down without one, which then gives no light, so the shadows and
+    /// the lighting agree on a direction either way.
+    /// </summary>
+    internal Vector3 KeyLightDirection => KeyLight?.Direction ?? -Vector3.UnitY;
 
     /// <summary>
     /// The world's sky, if it has one: its material, which may be none.
@@ -355,6 +513,9 @@ internal sealed class Renderables
         Cameras.Clear();
         Player = null;
         Sun = null;
+        Moon = null;
+        Directional.Clear();
+        KeyLight = null;
         Sky = null;
         Weather = null;
         Effects = Handle<Pipeline>.None;

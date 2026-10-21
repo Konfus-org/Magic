@@ -294,9 +294,9 @@ internal sealed class View : IDisposable
             ProjScale = new Vector2(1 / tanX, 1 / tanY),
             Near = lens.Near,
             Far = lens.Far,
-            SunDirection = frame.Copy.Sun?.Direction ?? Vector3.UnitZ,
-            SunAngularRadius = 0.00465f,
-            SunIlluminance = frame.Copy.Sun?.Illuminance ?? Vector3.Zero,
+            KeyLightDirection = frame.Copy.KeyLightDirection,
+            KeyLightAngularRadius = frame.Copy.KeyLight?.AngularRadius ?? 0,
+            KeyLightIlluminance = frame.Copy.KeyLight?.Illuminance ?? Vector3.Zero,
             LightCount = frame.Counts.Lights,
             FrameIndex = (uint)(frame.Frame.Index % uint.MaxValue),
             TileCountX = tilesX,
@@ -309,6 +309,8 @@ internal sealed class View : IDisposable
             SkyMaterial = (uint)frame.SkyMaterial,
             PrevViewProj = _lastViewProj,
             ClusterError = Math.Clamp(settings.ClusterError, 0.25f, 16),
+            KeyLightThroughSky = frame.Copy.KeyLight is { IsSkyLight: true } ? 1u : 0u,
+            DirectionalCount = (uint)Math.Min(frame.Copy.Directional.Count, DirectionalLights.Capacity),
             CameraMotion = position - _lastPosition,
             PixelScale = height * 0.5f / tanY,
             PriorityPosition = (frame.Player ?? position) - position,
@@ -323,6 +325,8 @@ internal sealed class View : IDisposable
                 Density = Math.Clamp(weather.Density, 0, 1),
                 CloudShadow = new Vector3(weather.CloudShadow.R, weather.CloudShadow.G, weather.CloudShadow.B),
             },
+            SkyLights = GetSkyLights(frame.Copy),
+            Directional = GetDirectionalLights(frame.Copy.Directional),
         };
 
         _lastViewProj = view * still;
@@ -356,6 +360,37 @@ internal sealed class View : IDisposable
         return (
             (uint)Math.Clamp(MathF.Ceiling(width), 1, Math.Max(1, MathF.Ceiling(targetWidth * 4))),
             (uint)Math.Clamp(MathF.Ceiling(height), 1, Math.Max(1, MathF.Ceiling(targetHeight * 4))));
+    }
+
+    /// <summary>
+    /// The sky's sun and moon as the frame holds them, each pointing straight down and giving no light without one.
+    /// </summary>
+    private static SkyLightConstants GetSkyLights(Renderables copy) => new()
+    {
+        SunDirection = copy.Sun?.Direction ?? -Vector3.UnitY,
+        SunAngularRadius = copy.Sun?.AngularRadius ?? 0,
+        SunIlluminance = copy.Sun?.Illuminance ?? Vector3.Zero,
+        MoonDirection = copy.Moon?.Direction ?? -Vector3.UnitY,
+        MoonAngularRadius = copy.Moon?.AngularRadius ?? 0,
+        MoonIlluminance = copy.Moon?.Illuminance ?? Vector3.Zero,
+    };
+
+    /// <summary>
+    /// The directional lights that light the world alone, as many as the frame holds.
+    /// </summary>
+    private static DirectionalLights GetDirectionalLights(List<DirectionalCopy> lights)
+    {
+        DirectionalLights held = default;
+        for (int i = 0; i < Math.Min(lights.Count, DirectionalLights.Capacity); i++)
+        {
+            held[i] = new DirectionalLightConstants
+            {
+                Direction = lights[i].Direction,
+                Illuminance = lights[i].Illuminance,
+            };
+        }
+
+        return held;
     }
 
     /// <summary>

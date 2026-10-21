@@ -1,5 +1,6 @@
-// The light a surface sends toward the viewer, in nits, before exposure: the sun through its shadow, the point and spot
-// lights that reach it, and the sky from everywhere. The lighting pass shades the G-buffer with it and a transparent
+// The light a surface sends toward the viewer, in nits, before exposure: the key light through its shadow (the sun by
+// day, the moon by night, else the brightest other directional light), the other directional lights, unshadowed, the
+// point and spot lights that reach it, and the sky from everywhere. The lighting pass shades the G-buffer with it and a transparent
 // surface itself, so both look the same. What it reads its draw or pass reads by these names, which the renderer
 // declares: SkySpecular (the sky prefiltered for each roughness), Dfg, Lights, LightBins, LightTiles and SkySh, and for
 // shadows the virtual shadow maps (Include/VirtualShadows.hlsli: ShadowPool (comparison), ShadowTables and SunClipmap),
@@ -7,8 +8,8 @@
 // and traced reflections, each a texel per pixel of the view, the reflections in place of the sky's where they have
 // them, and the probes of global illumination (Lighting/Gi.hlsli), which light from everywhere comes from in place of
 // the sky alone, and which a surface reflects where nothing traced its reflection: their light along it, the sky's
-// detail kept by as much of the sky as they see that way. The sun reaches it through the sky's shadow where the frame
-// draws one (SkyShadow).
+// detail kept by as much of the sky as they see that way. A sun or a moon reaches it through the sky's air and clouds,
+// the sky's shadow, where the frame draws one (SkyShadow).
 //
 // The lights reaching a pixel are found as Drobot 2017 ("Improved Culling for Tiled and Clustered Rendering") finds
 // them: the view's lights are sorted nearest first, a z-bin holds the first and last of them that can reach its depths,
@@ -52,12 +53,13 @@ struct ShadePoint
     float viewDepth;
 };
 
-// The sun's share at a point: what the sky lets through of it there (Include/SkyShadow.hlsli), times its virtual
-// shadow map's, its level picked by a dither that moves each frame, which the temporal upscale blends, times what
-// contact shadows, when the world draws them, say of the pixel an opaque surface was drawn at.
-float SunShadow(float3 position, float3 normal, float viewDepth, float2 pixel)
+// The key light's share at a point, by colour: what the sky lets through of it there, for a sun or moon
+// (Include/SkyShadow.hlsli), times its virtual shadow map's, its level picked by a dither that moves each frame, which
+// the temporal upscale blends, times what contact shadows, when the world draws them, say of the pixel an opaque
+// surface was drawn at.
+float3 KeyLightShadow(float3 position, float3 normal, float viewDepth, float2 pixel)
 {
-    float lit = SkyShadowAt(position);
+    float3 lit = SkyShadowAt(position);
 #if defined(HAS_ShadowTables)
     lit *= SunVirtualShadow(position, normal, viewDepth, InterleavedGradientNoise(pixel + float2(17.0, 59.0), FrameIndex));
 #endif
@@ -66,6 +68,19 @@ float SunShadow(float3 position, float3 normal, float viewDepth, float2 pixel)
     lit *= ContactShadows.Load(int3(pixel, 0));
 #endif
     return lit;
+}
+
+// The directional lights besides the key light, each lighting the surface whole, with no shadow and no disc.
+float3 OtherDirectionalLights(Shading shading)
+{
+    float3 luminance = float3(0.0, 0.0, 0.0);
+    [loop] for (uint i = 0u; i < min(DirectionalCount, DirectionalLightCapacity); i++)
+    {
+        DirectionalLightConstants light = Directional[i];
+        luminance += ShadeLight(shading, DirectionalLight(shading, light.Direction, light.Illuminance, 0.0));
+    }
+
+    return luminance;
 }
 
 float3 LocalLights(Shading shading, float3 position, float3 normal, float2 pixel, float viewDepth)
@@ -119,14 +134,19 @@ float3 Shade(ShadePoint surface)
     Shading shading = PrepareShading(surface.baseColor, surface.metallic, surface.specular, surface.roughness, surface.normal, surface.view, surface.model, surface.modelData, dfg, sheen);
 
     float3 luminance = float3(0.0, 0.0, 0.0);
-    [branch] if (any(SunIlluminance > 0.0))
+    [branch] if (any(KeyLightIlluminance > 0.0))
     {
-        // A surface the sun gives nothing, turned from it, needs no look at its shadow.
-        float3 sunlit = ShadeLight(shading, DirectionalLight(shading, SunDirection, SunIlluminance, SunAngularRadius));
-        [branch] if (any(sunlit > 0.0))
+        // A surface the light gives nothing, turned from it, needs no look at its shadow.
+        float3 keyLit = ShadeLight(shading, DirectionalLight(shading, KeyLightDirection, KeyLightIlluminance, KeyLightAngularRadius));
+        [branch] if (any(keyLit > 0.0))
         {
-            luminance += sunlit * SunShadow(surface.position, surface.normal, surface.viewDepth, surface.pixel);
+            luminance += keyLit * KeyLightShadow(surface.position, surface.normal, surface.viewDepth, surface.pixel);
         }
+    }
+
+    [branch] if (DirectionalCount > 0u)
+    {
+        luminance += OtherDirectionalLights(shading);
     }
 
     [branch] if (LightCount > 0u)

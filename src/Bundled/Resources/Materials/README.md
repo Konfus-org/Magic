@@ -43,16 +43,18 @@ through, and the renderer adds its reflection at the reflectance its index of re
 
 A sky is written against its own contract, [Shaders/Include/Sky.hlsli](../Shaders/Include/Sky.hlsli), as a surface is
 against the surface contract: it declares its parameter block as a surface does, and defines two functions: one that
-says the sky's light along a direction, from what the renderer hands it, the world's sun and its weather among them, and
-one that says how much of the sun's light gets through the sky to a place of the world, its shadow. Its light is in
-nits, not pre-exposed, as it lights the world: the renderer draws it in the view and captures it for light from
-everywhere and for reflections, so a sky's colours reach everything it lights. It hands back the sun's disc apart from
-the rest, as the capture leaves the disc out, the sun's own light standing for it; so a sky draws its disc however it
-likes, and nothing counts the sun twice. What it gives off pre-exposed, shown as it is whatever the exposure and never
-captured, is handed back apart too: the failure sky shows its magenta that way, so a broken sky never lights the world
-magenta. The shadow lights the world, the sun reaching each place only by what gets through, so it must agree with what
-the sky shows in front of the sun's disc: clouds that hide the disc darken the ground beneath them, and a sky with
-nothing in front of the sun lets it all through. The weather is the world's state and the params are the sky's look: a
+says the sky's light along a direction, from what the renderer hands it, the world's sun, its moon and its weather
+among them, and one that says how much of the sun's or the moon's light gets through the sky to a place of the world,
+by colour, its shadow. Its light is in nits, not pre-exposed, as it lights the world: the renderer draws it in the view
+and captures it for light from everywhere and for reflections, so a sky's colours reach everything it lights. It hands
+back the sun's and the moon's discs apart from the rest, as the capture leaves them out, their own light standing for
+them; so a sky draws them however it likes, the moon lit from wherever its sun is, and nothing counts either twice.
+What it gives off pre-exposed, shown as it is whatever the exposure and never captured, is handed back apart too: the
+failure sky shows its magenta that way, so a broken sky never lights the world magenta. The shadow lights the world,
+the sun or moon reaching each place only by what gets through, so it must agree with what the sky shows of the light:
+air that reddens the sun's disc near the horizon reddens the light on the ground, the ground hides a light below the
+horizon, clouds that hide the disc darken the ground beneath them, and a sky with no air and nothing in front of the
+light lets it all through. The weather is the world's state and the params are the sky's look: a
 sky reads the clouds' coverage, colours and wind from its inputs and keeps its params for how it draws them. A sky that
 integrates along the view in steps, through air or clouds, can afford few of them: its inputs hand each pixel of the
 view a dither that moves each frame, and steps offset by it are blended by the view's temporal upscale into many more.

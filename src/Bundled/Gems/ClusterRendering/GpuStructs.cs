@@ -90,15 +90,16 @@ internal struct FrameConstants
     internal float Far;
 
     /// <summary>
-    /// The way the sun's light travels, and its disc's half-angle in radians.
+    /// The directional light that casts the shadows (<see cref="KeyLightCopy"/>): the way its light travels, and its
+    /// disc's half-angle in radians.
     /// </summary>
-    internal Vector3 SunDirection;
-    internal float SunAngularRadius;
+    internal Vector3 KeyLightDirection;
+    internal float KeyLightAngularRadius;
 
     /// <summary>
-    /// The sun's illuminance in lux, times its colour; zero with no sun.
+    /// The key light's illuminance in lux, times its colour; zero with none.
     /// </summary>
-    internal Vector3 SunIlluminance;
+    internal Vector3 KeyLightIlluminance;
     internal uint LightCount;
 
     internal uint FrameIndex;
@@ -133,7 +134,17 @@ internal struct FrameConstants
     /// Pixels a cluster's error may cover before a finer one is drawn.
     /// </summary>
     internal float ClusterError;
-    internal Vector2 Padding;
+
+    /// <summary>
+    /// 1 when the key light is the sky's sun or moon, whose light reaches the world through the sky's air and clouds,
+    /// the sky's shadow; 0 when it is a light alone.
+    /// </summary>
+    internal uint KeyLightThroughSky;
+
+    /// <summary>
+    /// How many of <see cref="Directional"/> light the world.
+    /// </summary>
+    internal uint DirectionalCount;
 
     /// <summary>
     /// The last frame's <see cref="ViewProj"/> without its jitter.
@@ -176,9 +187,63 @@ internal struct FrameConstants
     internal WeatherConstants Weather;
 
     /// <summary>
+    /// The sky's sun and moon, which the sky draws whether or not either lights the world now.
+    /// </summary>
+    internal SkyLightConstants SkyLights;
+
+    /// <summary>
+    /// The directional lights that light the world alone, without shadows, the first <see cref="DirectionalCount"/>.
+    /// </summary>
+    internal DirectionalLights Directional;
+
+    /// <summary>
     /// The pass's params, packed by its <see cref="ParamLayout"/>, in the first seven rows; its iteration in the last.
     /// </summary>
     internal PassWords Pass;
+}
+
+/// <summary>
+/// The sky's sun and moon in a <see cref="FrameConstants"/>, <c>SkyLightConstants</c> in Shaders/Include/Frame.hlsli
+/// member for member: the way each one's light travels, its illuminance in lux times its colour, zero without one, and
+/// its disc's half-angle in radians.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct SkyLightConstants
+{
+    internal Vector3 SunDirection;
+    internal float SunAngularRadius;
+    internal Vector3 SunIlluminance;
+    internal float MoonAngularRadius;
+    internal Vector3 MoonDirection;
+    internal float Padding0;
+    internal Vector3 MoonIlluminance;
+    internal float Padding1;
+}
+
+/// <summary>
+/// A directional light that lights the world alone in a <see cref="FrameConstants"/>,
+/// <c>DirectionalLightConstants</c> in Shaders/Include/Frame.hlsli member for member: the way its light travels, and
+/// its illuminance in lux times its colour.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct DirectionalLightConstants
+{
+    internal Vector3 Direction;
+    internal float Padding0;
+    internal Vector3 Illuminance;
+    internal float Padding1;
+}
+
+/// <summary>
+/// The directional lights a <see cref="FrameConstants"/> holds: as many as a world's are lit by besides its sun and
+/// moon.
+/// </summary>
+[InlineArray(DirectionalLights.Capacity)]
+internal struct DirectionalLights
+{
+    internal const int Capacity = 4;
+
+    private DirectionalLightConstants _light;
 }
 
 /// <summary>

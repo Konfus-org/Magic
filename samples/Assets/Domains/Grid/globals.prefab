@@ -26,10 +26,18 @@
         },
         {
             "name": "Sun",
-            "tags": [ "sun" ],
             "components": {
                 "Transform": { "rotation": { "x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023 } },
-                "DirectionalLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 3 }
+                "DirectionalLight": { "mode": "sun", "color": { "r": 1, "g": 0.97, "b": 0.93 }, "intensity": 120000 },
+                "Spin": { "degreesPerSecond": 0.5, "axis": { "x": 0.513, "y": 0.3, "z": -0.351 } }
+            }
+        },
+        {
+            "name": "Moon",
+            "components": {
+                "Transform": { "rotation": { "x": 0.53336, "y": 0.15154, "z": -0.351, "w": -0.75456 } },
+                "DirectionalLight": { "mode": "moon", "color": { "r": 0.85, "g": 0.9, "b": 1 }, "intensity": 0.3 },
+                "Spin": { "degreesPerSecond": 0.45, "axis": { "x": 0.513, "y": 0.3, "z": -0.351 } }
             }
         },
         {

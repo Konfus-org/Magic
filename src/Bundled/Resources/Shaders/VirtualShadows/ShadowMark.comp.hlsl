@@ -79,7 +79,7 @@ void main(uint3 id : SV_DispatchThreadID)
     float2 pixel = (float2)id.xy + 0.5;
     float viewDepth = ViewDepth(depth);
     float3 position = ViewToWorld(ViewPosition(pixel, viewDepth));
-    if (any(SunIlluminance > 0.0))
+    if (any(KeyLightIlluminance > 0.0))
     {
         float3 normal = OctDecode(Normal.Load(int3(id.xy, 0)).xy * 2.0 - 1.0);
         MarkSun(sun, position, normal, viewDepth);

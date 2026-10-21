@@ -22,6 +22,33 @@ struct WeatherConstants
     float Padding;
 };
 
+// The sky's sun and moon, which the sky draws whether or not either lights the world now: the renderer's
+// SkyLightConstants (GpuStructs.cs), member for member. Each points straight down with no light without one.
+struct SkyLightConstants
+{
+    float3 SunDirection;     // the way its light travels
+    float SunAngularRadius;  // its disc's half-angle, radians
+    float3 SunIlluminance;   // lux times its colour, above the air
+    float MoonAngularRadius;
+    float3 MoonDirection;
+    float Padding0;
+    float3 MoonIlluminance;  // a full moon's lux times its colour, above the air
+    float Padding1;
+};
+
+// A directional light that lights the world alone, without shadows: the renderer's DirectionalLightConstants, member
+// for member.
+struct DirectionalLightConstants
+{
+    float3 Direction;        // the way its light travels
+    float Padding0;
+    float3 Illuminance;      // lux times its colour
+    float Padding1;
+};
+
+// The directional lights a frame holds besides the key light; the renderer's DirectionalLights.Capacity.
+static const uint DirectionalLightCapacity = 4u;
+
 cbuffer Frame : UNIFORM(0)
 {
     float4x4 ViewProj;
@@ -37,10 +64,12 @@ cbuffer Frame : UNIFORM(0)
     float Near;
     float Far;
 
-    float3 SunDirection;     // the way its light travels
-    float SunAngularRadius;
+    // The key light: the directional light that casts the shadows, the sun while it is up, else the moon while it is,
+    // else the brightest other.
+    float3 KeyLightDirection;     // the way its light travels
+    float KeyLightAngularRadius;  // its disc's half-angle, radians, which softens its shadows
 
-    float3 SunIlluminance;   // lux times its colour; zero with no sun
+    float3 KeyLightIlluminance;   // lux times its colour; zero with none
     uint LightCount;
 
     uint FrameIndex;
@@ -55,7 +84,9 @@ cbuffer Frame : UNIFORM(0)
 
     float DeltaSeconds;
     float ClusterError;      // pixels a cluster's error may cover on screen before a finer one is drawn
-    float2 Padding;
+    uint KeyLightThroughSky; // 1 when the key light is the sky's sun or moon, whose light reaches the world through the
+                             // sky's air and clouds (Include/SkyShadow.hlsli); 0 for a light alone
+    uint DirectionalCount;   // how many of Directional light the world
 
     // The last frame's ViewProj without its jitter, for a position relative to the last frame's camera.
     float4x4 PrevViewProj;
@@ -72,6 +103,9 @@ cbuffer Frame : UNIFORM(0)
                              // output filter is nearest, so only the output pass scales
 
     WeatherConstants Weather;
+
+    SkyLightConstants SkyLights;
+    DirectionalLightConstants Directional[DirectionalLightCapacity];
 
     uint4 PassRaw[8];
 };

@@ -111,6 +111,15 @@ internal sealed class ClusterRenderingSettings : ISettings
     public float ShadowDepth { get; set; } = 4000;
 
     /// <summary>
+    /// Degrees the sun, or whichever directional light casts the shadows, turns before its shadow is drawn again for
+    /// where it is: a sun crossing the sky redraws its shadow in these steps, finer the more often, each a burst of
+    /// pages to draw.
+    /// </summary>
+    [Category("Render/Shadows")]
+    [Range(0.01, 10)]
+    public float ShadowTurn { get; set; } = 0.25f;
+
+    /// <summary>
     /// Pages of shadow drawn a frame at most, the sun's coarsest levels first, then lights nearest the player; the rest
     /// wait a frame, drawn coarser till then.
     /// </summary>

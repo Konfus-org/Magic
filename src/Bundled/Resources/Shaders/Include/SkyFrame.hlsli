@@ -1,5 +1,5 @@
-// What the renderer hands a sky shader (Include/Sky.hlsli) from the frame's constants: its sun and its weather, the
-// same to every sky draw, so the sky seen, the sky captured and the sky's shadow on the world are one sky.
+// What the renderer hands a sky shader (Include/Sky.hlsli) from the frame's constants: its sun, its moon and its
+// weather, the same to every sky draw, so the sky seen, the sky captured and the sky's shadow on the world are one sky.
 
 #ifndef MAGIC_SKY_FRAME_HLSLI
 #define MAGIC_SKY_FRAME_HLSLI
@@ -14,9 +14,12 @@ SkyInputs SkyInputsOf(float3 direction, bool isCapture, float dither)
     inputs.direction = direction;
     inputs.cameraPosition = CameraPosition;
     inputs.time = Time;
-    inputs.sunDirection = SunDirection;
-    inputs.sunIlluminance = SunIlluminance;
-    inputs.sunAngularRadius = SunAngularRadius;
+    inputs.sunDirection = SkyLights.SunDirection;
+    inputs.sunIlluminance = SkyLights.SunIlluminance;
+    inputs.sunAngularRadius = SkyLights.SunAngularRadius;
+    inputs.moonDirection = SkyLights.MoonDirection;
+    inputs.moonIlluminance = SkyLights.MoonIlluminance;
+    inputs.moonAngularRadius = SkyLights.MoonAngularRadius;
     inputs.wind = Weather.Wind;
     inputs.coverage = Weather.Coverage;
     inputs.density = Weather.Density;

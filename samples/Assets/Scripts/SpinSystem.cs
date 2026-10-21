@@ -8,8 +8,9 @@ using Magic.Samples.Assets.Components;
 namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
-/// Turns every entity with a <see cref="Spin"/> by its rate each frame, on the ECS's threads: a script, a system that a
-/// prefab attaches to an entity of its own, <c>{ "id": 3313 }</c>, so it runs while that entity's domain is open.
+/// Turns every entity with a <see cref="Spin"/> by its rate each frame, about its axis, on the ECS's threads: a script,
+/// a system that a prefab attaches to an entity of its own, <c>{ "id": 3313 }</c>, so it runs while that entity's
+/// domain is open.
 /// </summary>
 internal sealed class SpinSystem : IParallelSystemScript<Transform, Spin>
 {
@@ -18,9 +19,10 @@ internal sealed class SpinSystem : IParallelSystemScript<Transform, Spin>
         (_, Span<Transform> transforms, Span<Spin> spins) = chunk;
         for (int i = 0; i < transforms.Length; i++)
         {
+            Vector3 axis = spins[i].Axis == Vector3.Zero ? Vector3.UnitY : Vector3.Normalize(spins[i].Axis);
             float radians = spins[i].DegreesPerSecond * frame.DeltaSeconds * (MathF.PI / 180);
             transforms[i].Rotation = Quaternion.Normalize(
-                Quaternion.CreateFromAxisAngle(Vector3.UnitY, radians) * transforms[i].Rotation);
+                Quaternion.CreateFromAxisAngle(axis, radians) * transforms[i].Rotation);
         }
     }
 }

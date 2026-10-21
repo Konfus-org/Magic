@@ -10,11 +10,15 @@ namespace Magic.ClusterRendering;
 /// shadow costs what is on screen, however far it reaches and however many lights cast it. The GPU marks, allocates and
 /// draws the pages (Shaders/VirtualShadows/); this keeps what only the CPU can: where the sun's clipmap stands.
 /// <para>
-/// The sun's shadow is a clipmap: <see cref="ClusterRenderingSettings.ShadowLevels"/> levels about the camera, each
-/// twice as wide as the last, the finest <see cref="ClusterRenderingSettings.ShadowFinest"/> metres, each 64 pages a
-/// side, a level's window moving a whole page at a time and its entries addressed round, so a page that stays in the
-/// window keeps what was drawn in it. Its depth is measured along the sun from a plane moved in steps of a quarter of
-/// <see cref="ClusterRenderingSettings.ShadowDepth"/>; the sun turning or that plane moving starts every page again.
+/// The sun's shadow, or the shadow of whichever directional light casts the shadows (<see cref="KeyLightCopy"/>), is a
+/// clipmap: <see cref="ClusterRenderingSettings.ShadowLevels"/> levels about the camera, each twice as wide as the
+/// last, the finest <see cref="ClusterRenderingSettings.ShadowFinest"/> metres, each 64 pages a side, a level's window
+/// moving a whole page at a time and its entries addressed round, so a page that stays in the window keeps what was
+/// drawn in it. Its depth is measured along the light from a plane moved in steps of a quarter of
+/// <see cref="ClusterRenderingSettings.ShadowDepth"/>; that plane moving starts every page again, and so does the light
+/// turning by <see cref="ClusterRenderingSettings.ShadowTurn"/> from the way the clipmap was drawn for, which it keeps
+/// till then, so a light that turns a little each frame, a sun crossing the sky, is drawn again in steps rather than
+/// every frame or never.
 /// Point and spot lights' pages are found by a hash of the light, the face, its mip and the page, in a table made each
 /// frame from the pages the views want, which take their pool pages over from last frame's, so the table holds only
 /// what is wanted and never fills with what was; a light whose shadow is small on screen takes a small page, a
@@ -82,7 +86,11 @@ internal sealed class Shadows(GpuResources resources)
     /// The clipmap this frame (<see cref="GpuSunClipmap"/>), then its levels (<see cref="GpuSunLevel"/>).
     /// </summary>
     private GpuBuffer _clipmap;
-    private Vector3 _sunDirection;
+
+    /// <summary>
+    /// The way the light travels that the clipmap's pages were drawn for, kept until it turns by the settings' step.
+    /// </summary>
+    private Vector3 _heldDirection;
     private float _depthOrigin = float.NaN;
     private int _levelCount;
     private bool _isSwapped;
@@ -137,13 +145,14 @@ internal sealed class Shadows(GpuResources resources)
     }
 
     /// <summary>
-    /// Places the sun's clipmap about <paramref name="camera"/> for <paramref name="sun"/>, the way its light travels,
-    /// swaps the lights' tables, and makes the pool and the tables again when the settings size them otherwise;
-    /// <paramref name="changedLightWords"/> is how many words the bitmask of the world's lights that changed has.
+    /// Places the clipmap about <paramref name="camera"/> for <paramref name="light"/>, the way the key light's light
+    /// travels, swaps the lights' tables, and makes the pool and the tables again when the settings size them
+    /// otherwise; <paramref name="changedLightWords"/> is how many words the bitmask of the world's lights that changed
+    /// has.
     /// </summary>
     internal void Plan(
         Vector3 camera,
-        Vector3 sun,
+        Vector3 light,
         int changedLightWords,
         int moved,
         ulong frame,
@@ -156,15 +165,18 @@ internal sealed class Shadows(GpuResources resources)
 
         _isSwapped = !_isSwapped;
 
-        (Vector3 direction, Vector3 right, Vector3 up) = GetSunFrame(sun);
+        Vector3 wanted = Vector3.Normalize(light);
+        float turnStep = Math.Clamp(settings.ShadowTurn, 0.01f, 10) * (MathF.PI / 180);
+        bool isTurned = Vector3.Dot(wanted, _heldDirection) < MathF.Cos(turnStep);
+        if (isTurned) _heldDirection = wanted;
+
+        (Vector3 direction, Vector3 right, Vector3 up) = GetSunFrame(_heldDirection);
         float depthRange = Math.Max(settings.ShadowDepth, 10);
         float depth = Vector3.Dot(camera, direction);
         float depthStep = depthRange / 4;
-        bool isTurned = Vector3.Dot(direction, _sunDirection) < 0.999999f;
         bool isMoved = float.IsNaN(_depthOrigin) || MathF.Abs(depth - _depthOrigin) > depthStep;
         if (isMoved || isTurned) _depthOrigin = MathF.Round(depth / depthStep) * depthStep;
 
-        _sunDirection = direction;
         float finest = Math.Max(settings.ShadowFinest, 0.5f);
         int lightTable = Records + SunEntries;
         GpuSunClipmap clipmap = new()
