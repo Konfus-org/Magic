@@ -118,8 +118,8 @@ internal static class GpuContract
         "ShadowEntry",
         GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite | GpuBufferUsage.GraphicsRead);
 
-    internal static ResourceInfo SunClipmap { get; } =
-        FrameBuffer("SunClipmap", "GpuSunClipmap", GpuBufferUsage.ComputeRead | GpuBufferUsage.GraphicsRead);
+    internal static ResourceInfo ShadowClipmap { get; } =
+        FrameBuffer("ShadowClipmap", "GpuClipmap", GpuBufferUsage.ComputeRead | GpuBufferUsage.GraphicsRead);
 
     internal static ResourceInfo Moved { get; } = FrameBuffer("Moved", "float4", GpuBufferUsage.ComputeRead);
 
@@ -182,7 +182,7 @@ internal static class GpuContract
         List<ResourceInfo> all =
         [
             Instances, Models, Levels, Clusters, Cards, Geometry, Materials, MaterialBins, MaterialGi, .. TexturePools,
-            MeshFieldAtlas, MeshFields, GiLevels, WorldLights, ChangedLights, ShadowPool, ShadowTables, SunClipmap,
+            MeshFieldAtlas, MeshFields, GiLevels, WorldLights, ChangedLights, ShadowPool, ShadowTables, ShadowClipmap,
             Moved, ZBinsEmpty, Zeros, Failures, Depth, Visibility, Albedo, Normal, Material, Hdr, Velocity, Exposure,
             Target,
         ];

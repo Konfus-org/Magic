@@ -1,9 +1,9 @@
 // Finds what may cast into the shadow pages drawn this frame, a thread an instance, read once and held against each
-// shadow group (ShadowAllocate) in turn: an instance whose bounds reach the rectangle a sun page's view draws, or a
+// shadow group (ShadowAllocate) in turn: an instance whose bounds reach the rectangle a clipmap page's view draws, or a
 // light's reach, hands the levels of its model's clusters whose error can suit the group's texels to the shadows'
-// cluster cull, in jobs of 64. A sun level's texels are the same size everywhere, so one level of clusters suits it; a
-// light's grow with distance from it, and the face's finest mip drawn sets them. Cards cast no shadow: an instance far
-// enough for its cards casts with its clusters, as coarse as the shadow's texels allow.
+// cluster cull, in jobs of 64. A clipmap level's texels are the same size everywhere, so one level of clusters suits
+// it; a light's grow with distance from it, and the face's finest mip drawn sets them. Cards cast no shadow: an
+// instance far enough for its cards casts with its clusters, as coarse as the shadow's texels allow.
 
 #include "Include/Culling.hlsli"
 #include "Include/VirtualShadows.hlsli"

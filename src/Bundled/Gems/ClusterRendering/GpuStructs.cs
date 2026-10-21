@@ -516,16 +516,16 @@ internal struct GpuDrawArgs
 }
 
 /// <summary>
-/// The sun's clipmap this frame (Shaders/Include/VirtualShadows.hlsli's GpuSunClipmap), its levels after it: its frame,
-/// the axes across it and the way its light travels, how many levels it has, the frame's number (pages last read before
-/// it are free to take), whether every page starts again, how far along the sun the camera is from the plane depth is
+/// The key light's clipmap this frame (Shaders/Include/VirtualShadows.hlsli's GpuClipmap), its levels after it: the two
+/// axes across it and the way the light travels, how many levels it has, the frame's number (pages last read before it
+/// are free to take), whether every page starts again, how far along the light the camera is from the plane depth is
 /// measured from, how deep a page reaches either side of it, the finest level's width, the words of the changed lights'
 /// bits, the pool's pages a side, the pages of it whole and the small pages the rest is split into, how many spheres
-/// moved, where the main camera is, which the clipmap is placed about, and the rows of the tables where the sun's
+/// moved, where the main camera is, which the clipmap is placed about, and the rows of the tables where the levels'
 /// entries, this frame's lights' table and the last frame's start, and how many entries a lights' table has.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-internal struct GpuSunClipmap
+internal struct GpuClipmap
 {
     internal Vector3 Right;
     internal uint Levels;
@@ -542,7 +542,7 @@ internal struct GpuSunClipmap
     internal uint SmallPages;
     internal uint Moved;
     internal Vector3 Camera;
-    internal uint SunTable;
+    internal uint LevelTable;
     internal uint LightTable;
     internal uint LightTableLast;
     internal uint LightEntries;
@@ -554,11 +554,11 @@ internal struct GpuSunClipmap
 }
 
 /// <summary>
-/// One level of the sun's clipmap: its window's first page, counted from the sun's frame's origin, metres a page and a
-/// texel, and where the camera is across the sun from the window's corner, in metres.
+/// One level of the clipmap: its window's first page, counted from the clipmap's origin, metres a page and a texel, and
+/// where the camera is across the light from the window's corner, in metres.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-internal struct GpuSunLevel
+internal struct GpuClipmapLevel
 {
     internal int OriginX;
     internal int OriginY;

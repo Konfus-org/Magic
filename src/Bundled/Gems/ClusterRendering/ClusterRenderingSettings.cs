@@ -102,27 +102,28 @@ internal sealed class ClusterRenderingSettings : ISettings
     public float ShadowBudget { get; set; } = 256;
 
     /// <summary>
-    /// Levels of the sun's shadow, each twice as wide as the last: how far it reaches, the finest's width doubled again
-    /// for each.
+    /// Levels of the key light's shadow, each twice as wide as the last: how far it reaches, the finest's width doubled
+    /// again for each.
     /// </summary>
     [Category("Render/Shadows")]
     [Range(1, 24)]
     public int ShadowLevels { get; set; } = 16;
 
     /// <summary>
-    /// Metres across the sun's finest level of shadow, sharp close up; 64 pages of 120 texels.
+    /// Metres across the key light's finest level of shadow, sharp close up; 64 pages of 120 texels.
     /// </summary>
     [Category("Render/Shadows")]
     public float ShadowFinest { get; set; } = 8;
 
     /// <summary>
-    /// Metres along the sun a page of its shadow holds either side of the camera: as far as what casts into it can be.
+    /// Metres along the key light a page of its shadow holds either side of the camera: as far as what casts into it
+    /// can be.
     /// </summary>
     [Category("Render/Shadows")]
     public float ShadowDepth { get; set; } = 4000;
 
     /// <summary>
-    /// Degrees the sun, or whichever directional light casts the shadows, turns before its shadow is drawn again for
+    /// Degrees the key light, whichever directional light casts the shadows, turns before its shadow is drawn again for
     /// where it is: a sun crossing the sky redraws its shadow in these steps, finer the more often, each a burst of
     /// pages to draw.
     /// </summary>
@@ -131,8 +132,8 @@ internal sealed class ClusterRenderingSettings : ISettings
     public float ShadowTurn { get; set; } = 0.25f;
 
     /// <summary>
-    /// Pages of shadow drawn a frame at most, the sun's coarsest levels first, then lights nearest the player; the rest
-    /// wait a frame, drawn coarser till then.
+    /// Pages of shadow drawn a frame at most, the key light's coarsest levels first, then lights nearest the player;
+    /// the rest wait a frame, drawn coarser till then.
     /// </summary>
     [Category("Render/Shadows")]
     public int ShadowUpdates { get; set; } = 512;

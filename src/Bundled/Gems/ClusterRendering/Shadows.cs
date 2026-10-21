@@ -8,9 +8,9 @@ namespace Magic.ClusterRendering;
 /// Virtual shadow maps: every shadow is drawn into pages of one pool (<see cref="GpuContract.ShadowPool"/>), only the
 /// pages the views' pixels read, kept from frame to frame and drawn again only where what casts into them moved, so a
 /// shadow costs what is on screen, however far it reaches and however many lights cast it. The GPU marks, allocates and
-/// draws the pages (Shaders/VirtualShadows/); this keeps what only the CPU can: where the sun's clipmap stands.
+/// draws the pages (Shaders/VirtualShadows/); this keeps what only the CPU can: where the key light's clipmap stands.
 /// <para>
-/// The sun's shadow, or the shadow of whichever directional light casts the shadows (<see cref="KeyLightCopy"/>), is a
+/// The shadow of the key light, whichever directional light casts the shadows (<see cref="KeyLightCopy"/>), is a
 /// clipmap: <see cref="ClusterRenderingSettings.ShadowLevels"/> levels about the camera, each twice as wide as the
 /// last, the finest <see cref="ClusterRenderingSettings.ShadowFinest"/> metres, each 64 pages a side, a level's window
 /// moving a whole page at a time and its entries addressed round, so a page that stays in the window keeps what was
@@ -25,8 +25,8 @@ namespace Magic.ClusterRendering;
 /// sixteenth of a page.
 /// </para>
 /// <para>
-/// The pool's pages' records, the sun's entries and the two lights' tables are one buffer (<see cref="_tables"/>), so a
-/// pass that reads them binds one; <see cref="_clipmap"/> says where each starts, and which lights' table is this
+/// The pool's pages' records, the clipmap's entries and the two lights' tables are one buffer (<see cref="_tables"/>),
+/// so a pass that reads them binds one; <see cref="_clipmap"/> says where each starts, and which lights' table is this
 /// frame's, the two swapping each frame.
 /// </para>
 /// Render thread.
@@ -48,7 +48,7 @@ internal sealed class Shadows(GpuResources resources)
     private const int Border = 4;
 
     /// <summary>
-    /// Pages a side of a level of the sun's clipmap.
+    /// Pages a side of a level of the clipmap.
     /// </summary>
     private const int Window = 64;
 
@@ -74,16 +74,16 @@ internal sealed class Shadows(GpuResources resources)
     /// </summary>
     private const int ClipmapBufferBytes = ClipmapBytes + (MaxLevels * LevelBytes);
 
-    private readonly GpuSunLevel[] _levels = new GpuSunLevel[MaxLevels];
+    private readonly GpuClipmapLevel[] _levels = new GpuClipmapLevel[MaxLevels];
 
     /// <summary>
-    /// A record for each page of the pool, what owns it and the frame it was last read in, then the sun's entries, then
-    /// the two lights' tables, an entry a page each.
+    /// A record for each page of the pool, what owns it and the frame it was last read in, then the clipmap's entries,
+    /// then the two lights' tables, an entry a page each.
     /// </summary>
     private GpuBuffer _tables;
 
     /// <summary>
-    /// The clipmap this frame (<see cref="GpuSunClipmap"/>), then its levels (<see cref="GpuSunLevel"/>).
+    /// The clipmap this frame (<see cref="GpuClipmap"/>), then its levels (<see cref="GpuClipmapLevel"/>).
     /// </summary>
     private GpuBuffer _clipmap;
 
@@ -101,10 +101,10 @@ internal sealed class Shadows(GpuResources resources)
     private int _poolSize;
 
     /// <summary>
-    /// Entries of the sun's table and of a lights' table, which the passes that look through them run a thread for each
-    /// of.
+    /// Entries of the clipmap's table and of a lights' table, which the passes that look through them run a thread for
+    /// each of.
     /// </summary>
-    internal int SunEntries => _levelCount * Window * Window;
+    internal int ClipmapEntries => _levelCount * Window * Window;
 
     /// <summary>
     /// The pool's pages kept whole, and the small pages its last quarter is split into: the pages there are to take.
@@ -119,16 +119,16 @@ internal sealed class Shadows(GpuResources resources)
     private int PoolPages => _poolSize / Page * (_poolSize / Page);
 
     /// <summary>
-    /// Rows of <see cref="_tables"/> before the sun's entries: a record for each page, whole or small, past the whole
-    /// pages' as many as the pool has pages.
+    /// Rows of <see cref="_tables"/> before the clipmap's entries: a record for each page, whole or small, past the
+    /// whole pages' as many as the pool has pages.
     /// </summary>
     private int Records => PoolPages * 5;
 
-    private int TableBytes => (Records + SunEntries + (2 * LightTableEntries)) * Row;
+    private int TableBytes => (Records + ClipmapEntries + (2 * LightTableEntries)) * Row;
 
     /// <summary>
-    /// The levels the sun's clipmap has as the settings ask for them, 1 to the most it has room for: what the passes'
-    /// buffers are sized by too.
+    /// The levels the clipmap has as the settings ask for them, 1 to the most it has room for: what the passes' buffers
+    /// are sized by too.
     /// </summary>
     internal static int GetLevelCount(ClusterRenderingSettings settings)
         => Math.Clamp(settings.ShadowLevels, 1, MaxLevels);
@@ -170,7 +170,7 @@ internal sealed class Shadows(GpuResources resources)
         bool isTurned = Vector3.Dot(wanted, _heldDirection) < MathF.Cos(turnStep);
         if (isTurned) _heldDirection = wanted;
 
-        (Vector3 direction, Vector3 right, Vector3 up) = GetSunFrame(_heldDirection);
+        (Vector3 direction, Vector3 right, Vector3 up) = GetClipmapAxes(_heldDirection);
         float depthRange = Math.Max(settings.ShadowDepth, 10);
         float depth = Vector3.Dot(camera, direction);
         float depthStep = depthRange / 4;
@@ -178,8 +178,8 @@ internal sealed class Shadows(GpuResources resources)
         if (isMoved || isTurned) _depthOrigin = MathF.Round(depth / depthStep) * depthStep;
 
         float finest = Math.Max(settings.ShadowFinest, 0.5f);
-        int lightTable = Records + SunEntries;
-        GpuSunClipmap clipmap = new()
+        int lightTable = Records + ClipmapEntries;
+        GpuClipmap clipmap = new()
         {
             Right = right,
             Levels = (uint)levels,
@@ -198,31 +198,31 @@ internal sealed class Shadows(GpuResources resources)
             SmallPages = (uint)SmallPages,
             Moved = (uint)moved,
             Camera = camera,
-            SunTable = (uint)Records,
+            LevelTable = (uint)Records,
             LightTable = (uint)(_isSwapped ? lightTable + LightTableEntries : lightTable),
             LightTableLast = (uint)(_isSwapped ? lightTable : lightTable + LightTableEntries),
             LightEntries = LightTableEntries,
         };
 
         PlaceLevels(new Vector2(Vector3.Dot(camera, right), Vector3.Dot(camera, up)), finest, levels);
-        resources.Upload(_clipmap, 0, MemoryMarshal.AsBytes(new ReadOnlySpan<GpuSunClipmap>(in clipmap)));
+        resources.Upload(_clipmap, 0, MemoryMarshal.AsBytes(new ReadOnlySpan<GpuClipmap>(in clipmap)));
         resources.Upload(_clipmap, ClipmapBytes, MemoryMarshal.AsBytes(_levels.AsSpan(0, levels)));
     }
 
     /// <summary>
-    /// The sun's frame: the way its light travels and two axes across it, chosen so they turn smoothly with it.
+    /// The clipmap's axes: the way the light travels and two across it, chosen so they turn smoothly with it.
     /// </summary>
-    private static (Vector3 Direction, Vector3 Right, Vector3 Up) GetSunFrame(Vector3 sun)
+    private static (Vector3 Direction, Vector3 Right, Vector3 Up) GetClipmapAxes(Vector3 light)
     {
-        Vector3 direction = Vector3.Normalize(sun);
+        Vector3 direction = Vector3.Normalize(light);
         Vector3 reference = MathF.Abs(direction.Y) < 0.99f ? Vector3.UnitY : Vector3.UnitZ;
         Vector3 right = Vector3.Normalize(Vector3.Cross(reference, direction));
         return (direction, right, Vector3.Cross(direction, right));
     }
 
     /// <summary>
-    /// Each level's window about the camera, <paramref name="across"/> the sun from the world's origin: its first page,
-    /// a whole page from where it was, and where the camera is within it.
+    /// Each level's window about the camera, <paramref name="across"/> the light from the world's origin: its first
+    /// page, a whole page from where it was, and where the camera is within it.
     /// </summary>
     private void PlaceLevels(Vector2 across, float finest, int levels)
     {
@@ -231,7 +231,7 @@ internal sealed class Shadows(GpuResources resources)
             float pageSize = finest * (1 << level) / Window;
             int originX = (int)MathF.Floor(across.X / pageSize) - (Window / 2);
             int originY = (int)MathF.Floor(across.Y / pageSize) - (Window / 2);
-            _levels[level] = new GpuSunLevel
+            _levels[level] = new GpuClipmapLevel
             {
                 OriginX = originX,
                 OriginY = originY,
@@ -254,6 +254,6 @@ internal sealed class Shadows(GpuResources resources)
         resources.MakeTexture(GpuContract.ShadowPool, (uint)poolSize, (uint)poolSize);
         _tables = resources.MakeBuffer(GpuContract.ShadowTables, (uint)TableBytes);
         resources.Upload(_tables, 0, new byte[TableBytes]);
-        _clipmap = resources.MakeBuffer(GpuContract.SunClipmap, ClipmapBufferBytes);
+        _clipmap = resources.MakeBuffer(GpuContract.ShadowClipmap, ClipmapBufferBytes);
     }
 }

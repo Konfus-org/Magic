@@ -1,5 +1,5 @@
 {
-    "description": "The sun's clipmap level each pixel reads, a colour each, dim where a coarser stands in; teal where none.",
+    "description": "The key light's clipmap level each pixel reads, a colour each, dim where a coarser stands in; teal where none.",
     "stage": "ui",
     "kind": "fullscreen",
     "shader": { "id": 11941 },

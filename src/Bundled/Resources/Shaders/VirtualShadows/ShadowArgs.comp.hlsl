@@ -37,13 +37,13 @@ void main()
     }
 
     ShadowArgs.Store(ShadowArgsClear + 4u, 0u);
-    GpuSunClipmap sun = SunClipmapOf();
+    GpuClipmap clipmap = ClipmapOf();
     uint views = min(ShadowCounts.Load(ShadowCountViews), CountOf(ShadowViews, 80u));
     [loop] for (uint i = 0u; i < views; i++)
     {
         GpuShadowView view = LOAD(ShadowViews, GpuShadowView, i);
         ShadowTables.Store(view.entry * 16u, view.page | PageDirty);
-        uint record = RecordOf(sun, view.page) * 16u + 8u;
+        uint record = RecordOf(clipmap, view.page) * 16u + 8u;
         ShadowTables.Store(record, UnionRect(ShadowTables.Load(record), view.rect));
     }
 }

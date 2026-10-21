@@ -6,9 +6,9 @@
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
-    GpuSunClipmap sun = SunClipmapOf();
-    if (id.x < sun.lightEntries)
+    GpuClipmap clipmap = ClipmapOf();
+    if (id.x < clipmap.lightEntries)
     {
-        ShadowTables.Store4((sun.lightTable + id.x) * 16u, uint4(0u, EmptyKey, 0u, NoView));
+        ShadowTables.Store4((clipmap.lightTable + id.x) * 16u, uint4(0u, EmptyKey, 0u, NoView));
     }
 }

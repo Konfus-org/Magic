@@ -1,5 +1,5 @@
 {
-    "description": "The sun's shadow as the lighting reads it: white lit, blue shadowed, over the scene; teal where none.",
+    "description": "The key light's shadow as the lighting reads it: white lit, blue shadowed, over the scene; teal where none.",
     "stage": "ui",
     "kind": "fullscreen",
     "shader": { "id": 11940 },

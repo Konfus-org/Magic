@@ -3,5 +3,5 @@
     "kind": "compute",
     "shader": { "id": 60042 },
     "writes": [ { "name": "ShadowTables" } ],
-    "dispatch": { "per": "sunEntries" }
+    "dispatch": { "per": "clipmapEntries" }
 }

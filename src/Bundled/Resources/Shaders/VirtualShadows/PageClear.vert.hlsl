@@ -19,10 +19,10 @@ struct VsIn
 float4 main(VsIn input) : SV_Position
 {
     GpuShadowView view = LOAD(ShadowViews, GpuShadowView, input.view);
-    GpuSunClipmap sun = SunClipmapOf();
+    GpuClipmap clipmap = ClipmapOf();
     float size = (view.page & PageSmall) != 0u ? (float)SmallTexels : (float)PageTexels;
-    float pool = (float)(sun.poolAcross * PageTexels);
+    float pool = (float)(clipmap.poolAcross * PageTexels);
     float4 rect = float4(view.rect & 0xFFu, (view.rect >> 8) & 0xFFu, (view.rect >> 16) & 0xFFu, view.rect >> 24) * (size / (float)PageTexels);
-    float2 texel = (float2)PageCorner(view.page, sun) + lerp(rect.xy, rect.zw, QuadCorners[input.vertex % 6u]);
+    float2 texel = (float2)PageCorner(view.page, clipmap) + lerp(rect.xy, rect.zw, QuadCorners[input.vertex % 6u]);
     return float4(texel.x / pool * 2.0 - 1.0, 1.0 - texel.y / pool * 2.0, 0.0, 1.0);
 }

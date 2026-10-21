@@ -3,7 +3,7 @@
 // (Templates/Pieces.vert.hlsl): each corner read from the geometry, moved by its instance relative to the camera, taken
 // onto its view's page by the view's rows, then onto the page's square of the pool, and clipped to the rectangle of it
 // the view draws, so a caster reaching past it draws nothing into its neighbours or over what stands. Depth is not
-// clipped, so a caster nearer the sun than the page's depth reaches is pressed flat against it and still casts; a
+// clipped, so a caster nearer the key light than the page's depth reaches is pressed flat against it and still casts; a
 // light's face is clipped LightNear ahead of it instead, as a corner on the light itself would be on every edge of its
 // page at once, kept, and stretched across the whole pool.
 
@@ -37,10 +37,10 @@ VsOut main(VsIn input)
 
     GpuShadowView view = LOAD(ShadowViews, GpuShadowView, input.view);
     float4 page = float4(dot(view.row0, position), dot(view.row1, position), dot(view.row2, position), dot(view.row3, position));
-    GpuSunClipmap sun = SunClipmapOf();
+    GpuClipmap clipmap = ClipmapOf();
     float size = (view.page & PageSmall) != 0u ? (float)SmallTexels : (float)PageTexels;
-    float pool = (float)(sun.poolAcross * PageTexels);
-    float2 corner = (float2)PageCorner(view.page, sun);
+    float pool = (float)(clipmap.poolAcross * PageTexels);
+    float2 corner = (float2)PageCorner(view.page, clipmap);
     float scale = size / pool;
     float2 offset = float2((2.0 * corner.x + size) / pool - 1.0, 1.0 - (2.0 * corner.y + size) / pool);
 

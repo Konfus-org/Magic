@@ -2,8 +2,8 @@
 // frame (ShadowPieces: an instance's slot, a cluster's row times four plus which piece, and the view drawing it). A
 // cluster casts where its error, as the shadow's texels see it, is no more than ClusterError of them and its parent's
 // is more, as the views' cut decides (Karis 2021); then into each page drawn whose rectangle drawn its bounds reach:
-// the sun page its group is, or each face and mip of a light drawn, its pages under it looked up by key. A transparent
-// cluster casts nothing; a masked one casts whole.
+// the clipmap page its group is, or each face and mip of a light drawn, its pages under it looked up by key. A
+// transparent cluster casts nothing; a masked one casts whole.
 
 #include "Include/Culling.hlsli"
 #include "Include/VirtualShadows.hlsli"
@@ -18,7 +18,7 @@ void Emit(uint slot, uint index, uint pieces, uint view)
     }
 }
 
-void CastLight(GpuSunClipmap sun, uint lightSlot, uint bits, float3 centre, float3 fromLight, float radius, uint views, uint slot, uint index, uint pieces)
+void CastLight(GpuClipmap clipmap, uint lightSlot, uint bits, float3 centre, float3 fromLight, float radius, uint views, uint slot, uint index, uint pieces)
 {
     [loop] for (uint face = 0u; face < 6u; face++)
     {
@@ -64,13 +64,13 @@ void CastLight(GpuSunClipmap sun, uint lightSlot, uint bits, float3 centre, floa
             {
                 [loop] for (uint x = first.x; x <= last.x; x++)
                 {
-                    uint found = FindLightEntry(ShadowTables, sun.lightTable, LightKeyOf(lightSlot, face, mip, uint2(x, y)), sun.lightEntries);
+                    uint found = FindLightEntry(ShadowTables, clipmap.lightTable, LightKeyOf(lightSlot, face, mip, uint2(x, y)), clipmap.lightEntries);
                     if (found == NoView)
                     {
                         continue;
                     }
 
-                    uint view = ShadowTables.Load((sun.lightTable + found) * 16u + 12u);
+                    uint view = ShadowTables.Load((clipmap.lightTable + found) * 16u + 12u);
                     if (view < views && ReachesViewRect(LOAD(ShadowViews, GpuShadowView, view), centre, radius))
                     {
                         Emit(slot, index, pieces, view);
@@ -111,7 +111,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         return;
     }
 
-    GpuSunClipmap sun = SunClipmapOf();
+    GpuClipmap clipmap = ClipmapOf();
     GpuShadowGroup target = LOAD(ShadowGroups, GpuShadowGroup, work.w);
     uint views = ShadowCounts.Load(ShadowCountViews);
     float3 centre = InstancePosition(instance, cluster.bounds.xyz);
@@ -119,7 +119,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
     uint pieces = ClusterPieces(cluster);
     if ((target.target & LightOwner) == 0u)
     {
-        // A sun level's texels are one size: the cut is the same everywhere on it.
+        // A clipmap level's texels are one size: the cut is the same everywhere on it.
         float perMetre = instance.maxScale / target.texel;
         if (cluster.error * perMetre > ClusterError || cluster.parentError * perMetre <= ClusterError)
         {
@@ -143,5 +143,5 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         return;
     }
 
-    CastLight(sun, target.target & ~LightOwner, target.faceMips, centre, centre - target.light, radius, views, slot, index, pieces);
+    CastLight(clipmap, target.target & ~LightOwner, target.faceMips, centre, centre - target.light, radius, views, slot, index, pieces);
 }

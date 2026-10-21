@@ -3,25 +3,25 @@
 // them changed. A page is 128 texels a side, a border of 4 round 120 that hold the shadow, so a filter at its edge
 // reads its own border; the pool's last quarter is split into small pages, 32 texels with a border of 2.
 //
-// The sun's pages are a clipmap: levels about the camera, each twice as wide as the last and 64 pages a side, a level's
-// window moving a page at a time, its entries addressed round by the page's place so a page that stays in the window
-// keeps its entry. A point or spot light's pages are its six cube faces' at a mip (8, 4, 2 or 1 page a side, or one
-// small page), found in a hash table by light, face, mip and page, made anew each frame from what is wanted, carrying
-// its pages over from the last frame's table.
+// The key light's pages are a clipmap: levels about the camera, each twice as wide as the last and 64 pages a side, a
+// level's window moving a page at a time, its entries addressed round by the page's place so a page that stays in the
+// window keeps its entry. A point or spot light's pages are its six cube faces' at a mip (8, 4, 2 or 1 page a side, or
+// one small page), found in a hash table by light, face, mip and page, made anew each frame from what is wanted,
+// carrying its pages over from the last frame's table.
 //
 // The tables are one buffer (ShadowTables) of 16-byte rows: a record for each page of the pool, whole pages' first,
-// then the sun's entries, then two tables of lights' entries, this frame's and the last's, which swap each frame; the
-// clipmap (SunClipmap) says where each starts. An entry is four words: its pool page plus one (0 for none) with
-// PageDirty (it waits to be drawn) and PageSmall (a small page); a sun entry's tag, the page it stands for, or a light
-// entry's key, EmptyKey for none; the frame it was last wanted in; and the view drawing it this frame (ShadowViews),
-// NoView for none. A page's record is what owns it, a sun entry plus one or a light entry with LightOwner, the frame it
-// was last read in, so the pages read longest ago are the first taken for what is wanted now, and the rectangle of it
-// waiting to be drawn again: all of it when new, else where what moved since it was drawn reaches, as only that can
-// have changed, so a small caster moving in a big page draws little; and, only while the allocator gives pages out,
-// what it was taken from, which lets go of it once all are given. The views read a page only where it is not waiting,
-// which for a sun page waiting only where something moved is everywhere else on it, as the rest still holds what it
-// did; elsewhere the next coarser, so nothing is ever unshadowed for waiting: a sun level past the last, or a light
-// with none, is lit.
+// then the clipmap's entries, then two tables of lights' entries, this frame's and the last's, which swap each frame;
+// the clipmap (ShadowClipmap) says where each starts. An entry is four words: its pool page plus one (0 for none) with
+// PageDirty (it waits to be drawn) and PageSmall (a small page); a clipmap entry's tag, the page it stands for, or a
+// light entry's key, EmptyKey for none; the frame it was last wanted in; and the view drawing it this frame
+// (ShadowViews), NoView for none. A page's record is what owns it, a clipmap entry plus one or a light entry with
+// LightOwner, the frame it was last read in, so the pages read longest ago are the first taken for what is wanted now,
+// and the rectangle of it waiting to be drawn again: all of it when new, else where what moved since it was drawn
+// reaches, as only that can have changed, so a small caster moving in a big page draws little; and, only while the
+// allocator gives pages out, what it was taken from, which lets go of it once all are given. The views read a page only
+// where it is not waiting, which for a clipmap page waiting only where something moved is everywhere else on it, as the
+// rest still holds what it did; elsewhere the next coarser, so nothing is ever unshadowed for waiting: a clipmap level
+// past the last, or a light with none, is lit.
 
 #ifndef MAGIC_VIRTUAL_SHADOWS_HLSLI
 #define MAGIC_VIRTUAL_SHADOWS_HLSLI
@@ -37,11 +37,11 @@ static const uint PageContent = 120u;
 static const uint SmallTexels = 32u;
 static const uint SmallBorder = 2u;
 static const uint SmallContent = 28u;
-static const uint SunWindow = 64u;
-static const uint SunEntriesPerLevel = SunWindow * SunWindow;
+static const uint ClipmapWindow = 64u;
+static const uint ClipmapEntriesPerLevel = ClipmapWindow * ClipmapWindow;
 
-// Levels the sun's clipmap has at most, as the renderer's Shadows.MaxLevels.
-static const uint SunMaxLevels = 24u;
+// Levels the clipmap has at most, as the renderer's Shadows.MaxLevels.
+static const uint ClipmapMaxLevels = 24u;
 static const uint PageDirty = 0x80000000u;
 static const uint PageSmall = 0x40000000u;
 static const uint PageNumber = 0x3FFFFFFFu;
@@ -54,26 +54,26 @@ static const uint LightProbes = 32u;
 // The nearest a light's faces see, in metres.
 static const float LightNear = 0.05;
 
-// Texels of a page a receiver is pushed out along its normal, so it does not shadow itself: the sun's, and a point or
-// spot light's, whose faces' texels meet a receiver at steeper angles.
+// Texels of a page a receiver is pushed out along its normal, so it does not shadow itself: the clipmap's, and a point
+// or spot light's, whose faces' texels meet a receiver at steeper angles.
 static const float ShadowBias = 1.5;
 static const float LightShadowBias = 3.0;
 
 // Pixels a texel of a point or spot light's face covers at most: two, as its shadow is soft, which wants a quarter of
-// the pages one would, so many lights near the camera leave the pool room for the sun.
+// the pages one would, so many lights near the camera leave the pool room for the clipmap.
 static const float LightTexelPixels = 2.0;
 
-// Levels, as a share of a doubling, either side of where one sun level gives way to the next over which a pixel picks
-// between them by dither (SunLevelFor).
-static const float SunLevelBlend = 0.2;
+// Levels, as a share of a doubling, either side of where one clipmap level gives way to the next over which a pixel
+// picks between them by dither (ClipmapLevelFor).
+static const float ClipmapLevelBlend = 0.2;
 
-// The sun levels past a pixel's own that it marks (VirtualShadows/ShadowMark.comp.hlsl) and its soft shadow is searched
-// and filtered through, and no further: the page it reads is one it asked for, and its penumbra is at most a few of
-// that level's texels, so the nearer the camera comes, the sharper the shadow. And the levels finer than its own it
-// marks and may be filtered at where its penumbra is narrower than its own level's texels: a shadow's edge close up
+// The clipmap levels past a pixel's own that it marks (VirtualShadows/ShadowMark.comp.hlsl) and its soft shadow is
+// searched and filtered through, and no further: the page it reads is one it asked for, and its penumbra is at most a
+// few of that level's texels, so the nearer the camera comes, the sharper the shadow. And the levels finer than its own
+// it marks and may be filtered at where its penumbra is narrower than its own level's texels: a shadow's edge close up
 // is then as sharp as half a pixel, where a level whose texels are a pixel wide would blur it over the filter's five.
-static const uint SunSoftLevels = 3u;
-static const uint SunFinerLevels = 1u;
+static const uint ClipmapSoftLevels = 3u;
+static const uint ClipmapFinerLevels = 1u;
 
 // A view's ShadowArgs, by byte: the indirect draws of the pages' clear and of the shadows' pieces, five words each;
 // whether the culls placed more jobs or pieces than there was room for, which would leave the pages drawn with them
@@ -93,12 +93,12 @@ static const uint ShadowCountGroups = 4u;
 static const uint ShadowCountJobs = 8u;
 static const uint ShadowCountPieces = 12u;
 
-// The sun's clipmap this frame (the renderer's GpuSunClipmap): the sun's frame, how many levels, the frame's number,
-// whether every page starts again, the main camera's depth along the sun, how deep a page reaches either side, the
+// The key light's clipmap this frame (the renderer's GpuClipmap): its axes, how many levels, the frame's number,
+// whether every page starts again, the main camera's depth along the light, how deep a page reaches either side, the
 // finest level's width, the changed lights' bits' words, the pool's layout, how many spheres moved (Moved), where the
 // main camera is, which the clipmap is placed about and the moved spheres are relative to, and where the tables start
-// in ShadowTables and how many entries a light table has. Its levels follow it, from SunLevelsAt.
-struct GpuSunClipmap
+// in ShadowTables and how many entries a light table has. Its levels follow it, from ClipmapLevelsAt.
+struct GpuClipmap
 {
     float3 right;
     uint levels;
@@ -115,7 +115,7 @@ struct GpuSunClipmap
     uint smallPages;
     uint moved;
     float3 camera;
-    uint sunTable;
+    uint levelTable;
     uint lightTable;
     uint lightTableLast;
     uint lightEntries;
@@ -123,11 +123,11 @@ struct GpuSunClipmap
     uint4 padding1;
 };
 
-static const uint SunLevelsAt = 128u;
+static const uint ClipmapLevelsAt = 128u;
 
-// One level of the clipmap: its window's first page, counted from the sun's origin, metres a page and a texel, and
-// where the main camera is across the sun from the window's corner.
-struct GpuSunLevel
+// One level of the clipmap: its window's first page, counted from the clipmap's origin, metres a page and a texel, and
+// where the main camera is across the light from the window's corner.
+struct GpuClipmapLevel
 {
     int2 origin;
     float pageSize;
@@ -163,9 +163,9 @@ struct GpuShadowView
     uint entry;
 };
 
-// What culling finds casters by: one sun page drawn, or the views of one light: the page's level, or the light's slot
-// with LightOwner; the faces and mips the light's views are at as bits, face * LightMips + mip; the level's metres a
-// texel; the sun page's view, NoView for a light; and where the light is, relative to the camera, and how far it
+// What culling finds casters by: one clipmap page drawn, or the views of one light: the page's level, or the light's
+// slot with LightOwner; the faces and mips the light's views are at as bits, face * LightMips + mip; the level's metres
+// a texel; the clipmap page's view, NoView for a light; and where the light is, relative to the camera, and how far it
 // reaches.
 struct GpuShadowGroup
 {
@@ -178,20 +178,20 @@ struct GpuShadowGroup
 };
 
 // A point relative to this view's camera, relative to the main camera instead, which the clipmap is placed about.
-float3 MainRelative(GpuSunClipmap sun, float3 position)
+float3 MainRelative(GpuClipmap clipmap, float3 position)
 {
-    return position + (CameraPosition - sun.camera);
+    return position + (CameraPosition - clipmap.camera);
 }
 
-#if defined(HAS_SunClipmap)
-GpuSunClipmap SunClipmapOf()
+#if defined(HAS_ShadowClipmap)
+GpuClipmap ClipmapOf()
 {
-    return LOAD(SunClipmap, GpuSunClipmap, 0u);
+    return LOAD(ShadowClipmap, GpuClipmap, 0u);
 }
 
-GpuSunLevel SunLevelOf(uint level)
+GpuClipmapLevel ClipmapLevelOf(uint level)
 {
-    return SunClipmap.Load<GpuSunLevel>(SunLevelsAt + level * 32u);
+    return ShadowClipmap.Load<GpuClipmapLevel>(ClipmapLevelsAt + level * 32u);
 }
 #endif
 
@@ -207,10 +207,10 @@ uint FacePages(uint mip)
 }
 
 // A pool page's record, as an entry names the page: whole pages' first, then small pages'.
-uint RecordOf(GpuSunClipmap sun, uint page)
+uint RecordOf(GpuClipmap clipmap, uint page)
 {
     uint index = (page & PageNumber) - 1u;
-    return (page & PageSmall) != 0u ? sun.poolAcross * sun.poolAcross + index : index;
+    return (page & PageSmall) != 0u ? clipmap.poolAcross * clipmap.poolAcross + index : index;
 }
 
 // A rectangle of a page, border and all, in 128ths of it, rounded out to its texels: its first column and row and one
@@ -272,24 +272,24 @@ bool ReachesViewRect(GpuShadowView view, float3 centre, float radius)
 
 
 // The pool's texel a page's corner is at.
-uint2 PageCorner(uint page, GpuSunClipmap sun)
+uint2 PageCorner(uint page, GpuClipmap clipmap)
 {
     uint index = (page & PageNumber) - 1u;
     if ((page & PageSmall) != 0u)
     {
-        uint whole = sun.wholePages + index / 16u;
+        uint whole = clipmap.wholePages + index / 16u;
         uint part = index % 16u;
-        return uint2(whole % sun.poolAcross, whole / sun.poolAcross) * PageTexels + uint2(part % 4u, part / 4u) * SmallTexels;
+        return uint2(whole % clipmap.poolAcross, whole / clipmap.poolAcross) * PageTexels + uint2(part % 4u, part / 4u) * SmallTexels;
     }
 
-    return uint2(index % sun.poolAcross, index / sun.poolAcross) * PageTexels;
+    return uint2(index % clipmap.poolAcross, index / clipmap.poolAcross) * PageTexels;
 }
 
 // The pool's texel at a place in a page's shadow, 0 to 1 across what it holds.
-float2 PageTexel(uint page, float2 place, GpuSunClipmap sun)
+float2 PageTexel(uint page, float2 place, GpuClipmap clipmap)
 {
     bool isSmall = (page & PageSmall) != 0u;
-    return (float2)PageCorner(page, sun) + (isSmall ? SmallBorder : PageBorder) + saturate(place) * (isSmall ? SmallContent : PageContent);
+    return (float2)PageCorner(page, clipmap) + (isSmall ? SmallBorder : PageBorder) + saturate(place) * (isSmall ? SmallContent : PageContent);
 }
 
 bool HasPage(uint page)
@@ -304,28 +304,28 @@ bool IsDrawn(uint page)
 }
 
 
-// The sun level whose texels are as fine as a pixel at a view depth: a pixel there covers viewDepth / PixelScale metres.
-// Within SunLevelBlend of a level's either side, a pixel picks between the two by dither, 0 to 1, more of it the
-// coarser the nearer it is to that, so the levels blend into each other rather than meeting at a line; a dither of 0
-// gives the finest it ever picks there.
-uint SunLevelFor(GpuSunClipmap sun, float viewDepth, float dither)
+// The clipmap level whose texels are as fine as a pixel at a view depth: a pixel there covers viewDepth / PixelScale
+// metres. Within ClipmapLevelBlend of a level's either side, a pixel picks between the two by dither, 0 to 1, more of
+// it the coarser the nearer it is to that, so the levels blend into each other rather than meeting at a line; a dither
+// of 0 gives the finest it ever picks there.
+uint ClipmapLevelFor(GpuClipmap clipmap, float viewDepth, float dither)
 {
-    float finestTexel = sun.finest / (float)SunWindow / (float)PageContent;
+    float finestTexel = clipmap.finest / (float)ClipmapWindow / (float)PageContent;
     float wanted = max(viewDepth / PixelScale / finestTexel, 1.0);
-    float level = log2(wanted) + (dither * 2.0 - 1.0) * SunLevelBlend;
-    return min((uint)ceil(max(level, 0.0)), sun.levels - 1u);
+    float level = log2(wanted) + (dither * 2.0 - 1.0) * ClipmapLevelBlend;
+    return min((uint)ceil(max(level, 0.0)), clipmap.levels - 1u);
 }
 
-// Which page of a sun level a camera-relative point is on, counted from the sun's origin, and where on it, 0 to 1;
-// false when the point is outside the level's window.
-bool SunPageOf(GpuSunClipmap sun, GpuSunLevel level, float3 position, out int2 page, out float2 place)
+// Which page of a clipmap level a camera-relative point is on, counted from the clipmap's origin, and where on it, 0 to
+// 1; false when the point is outside the level's window.
+bool ClipmapPageOf(GpuClipmap clipmap, GpuClipmapLevel level, float3 position, out int2 page, out float2 place)
 {
-    float3 main = MainRelative(sun, position);
-    float2 across = float2(dot(main, sun.right), dot(main, sun.up)) + level.camera;
+    float3 main = MainRelative(clipmap, position);
+    float2 across = float2(dot(main, clipmap.right), dot(main, clipmap.up)) + level.camera;
     float2 pages = across / level.pageSize;
     page = int2(0, 0);
     place = float2(0.0, 0.0);
-    if (any(pages < 0.0) || any(pages >= (float)SunWindow))
+    if (any(pages < 0.0) || any(pages >= (float)ClipmapWindow))
     {
         return false;
     }
@@ -336,39 +336,40 @@ bool SunPageOf(GpuSunClipmap sun, GpuSunLevel level, float3 position, out int2 p
     return true;
 }
 
-// A sun page's entry, counted from the sun's first: by level, its place in the window addressed round.
-uint SunEntryOf(uint level, int2 page)
+// A clipmap page's entry, counted from the clipmap's first: by level, its place in the window addressed round.
+uint ClipmapEntryOf(uint level, int2 page)
 {
-    uint2 wrapped = (uint2)(page & int(SunWindow - 1u));
-    return level * SunEntriesPerLevel + wrapped.y * SunWindow + wrapped.x;
+    uint2 wrapped = (uint2)(page & int(ClipmapWindow - 1u));
+    return level * ClipmapEntriesPerLevel + wrapped.y * ClipmapWindow + wrapped.x;
 }
 
-uint SunTagOf(int2 page)
+uint ClipmapTagOf(int2 page)
 {
     return ((uint)page.x & 0xFFFFu) | (((uint)page.y & 0xFFFFu) << 16);
 }
 
-// The page a sun entry stands for now, its level's window having moved: its place, counted from the sun's origin.
-int2 SunPageAt(GpuSunLevel level, uint entry)
+// The page a clipmap entry stands for now, its level's window having moved: its place, counted from the clipmap's
+// origin.
+int2 ClipmapPageAt(GpuClipmapLevel level, uint entry)
 {
-    uint local = entry % SunEntriesPerLevel;
-    int2 wrapped = int2(local % SunWindow, local / SunWindow);
-    int2 offset = (wrapped - (level.origin & int(SunWindow - 1u)) + int(SunWindow)) & int(SunWindow - 1u);
+    uint local = entry % ClipmapEntriesPerLevel;
+    int2 wrapped = int2(local % ClipmapWindow, local / ClipmapWindow);
+    int2 offset = (wrapped - (level.origin & int(ClipmapWindow - 1u)) + int(ClipmapWindow)) & int(ClipmapWindow - 1u);
     return level.origin + offset;
 }
 
-// A camera-relative point's depth from the sun, reverse-Z: nearer the sun is more.
-float SunDepthOf(GpuSunClipmap sun, float3 position)
+// A camera-relative point's depth from the light, reverse-Z: nearer the light is more.
+float ClipmapDepthOf(GpuClipmap clipmap, float3 position)
 {
-    float along = dot(MainRelative(sun, position), sun.direction) + sun.cameraDepth;
-    return 0.5 - along / (2.0 * sun.depthRange);
+    float along = dot(MainRelative(clipmap, position), clipmap.direction) + clipmap.cameraDepth;
+    return 0.5 - along / (2.0 * clipmap.depthRange);
 }
 
-#if defined(HAS_SunClipmap)
-// A camera-relative point pushed out along its normal by a texel of a sun level, as it looks itself up there.
-float3 SunMoved(GpuSunClipmap sun, uint level, float3 position, float3 normal)
+#if defined(HAS_ShadowClipmap)
+// A camera-relative point pushed out along its normal by a texel of a clipmap level, as it looks itself up there.
+float3 ClipmapMoved(GpuClipmap clipmap, uint level, float3 position, float3 normal)
 {
-    return NormalOffset(position, normal, -sun.direction, SunLevelOf(min(level, sun.levels - 1u)).texel * ShadowBias);
+    return NormalOffset(position, normal, -clipmap.direction, ClipmapLevelOf(min(level, clipmap.levels - 1u)).texel * ShadowBias);
 }
 #endif
 
@@ -539,7 +540,7 @@ uint InsertLightEntry(RWByteAddressBuffer tables, uint first, uint key, uint ent
 }
 #endif
 
-#if defined(HAS_ShadowPool) && defined(HAS_ShadowTables) && defined(HAS_SunClipmap)
+#if defined(HAS_ShadowPool) && defined(HAS_ShadowTables) && defined(HAS_ShadowClipmap)
 float PoolSize()
 {
     float width;
@@ -549,24 +550,24 @@ float PoolSize()
 }
 
 // The depth a page holds at a place on it, unfiltered.
-float PageDepthAt(uint page, float2 place, GpuSunClipmap sun)
+float PageDepthAt(uint page, float2 place, GpuClipmap clipmap)
 {
-    return ShadowPool.Load(int3(PageTexel(page, place, sun), 0));
+    return ShadowPool.Load(int3(PageTexel(page, place, clipmap), 0));
 }
 
 // The share of light reaching a receiver through a page: a 5 x 5 tent of comparisons (Lighting/Shadows.hlsli), which
 // the page's border keeps inside it.
-float PageShadow(uint page, float2 place, float depth, GpuSunClipmap sun)
+float PageShadow(uint page, float2 place, float depth, GpuClipmap clipmap)
 {
     float size = PoolSize();
-    return ShadowPcf(ShadowPool, ShadowPoolSampler, PageTexel(page, place, sun) / size, depth, float2(size, size));
+    return ShadowPcf(ShadowPool, ShadowPoolSampler, PageTexel(page, place, clipmap) / size, depth, float2(size, size));
 }
 
 // Whether an entry's page can be read at a place on it, 0 to 1 across what it holds: there is one, and it is not
 // waiting to be drawn there. A page waiting only where something moved, its record's rectangle, is read everywhere
 // further from that than the filter reaches, as the rest of it still holds what it did; one waiting whole, new or
 // started again, is not.
-bool IsReadable(GpuSunClipmap sun, uint page, float2 place)
+bool IsReadable(GpuClipmap clipmap, uint page, float2 place)
 {
     if (!HasPage(page))
     {
@@ -578,7 +579,7 @@ bool IsReadable(GpuSunClipmap sun, uint page, float2 place)
         return true;
     }
 
-    uint rect = ShadowTables.Load(RecordOf(sun, page) * 16u + 8u);
+    uint rect = ShadowTables.Load(RecordOf(clipmap, page) * 16u + 8u);
     if (rect == 0u || rect == WholeRect)
     {
         return false;
@@ -591,22 +592,22 @@ bool IsReadable(GpuSunClipmap sun, uint page, float2 place)
         || texel.y + reach < (float)((rect >> 8) & 0xFFu) || texel.y - reach >= (float)(rect >> 24);
 }
 
-// The sun level at or past level that holds a page readable at a point: its entry's page, and where on it; false past
-// the last level.
-bool SunDrawnAt(GpuSunClipmap sun, inout uint level, float3 position, out uint page, out float2 place)
+// The clipmap level at or past level that holds a page readable at a point: its entry's page, and where on it; false
+// past the last level.
+bool ClipmapDrawnAt(GpuClipmap clipmap, inout uint level, float3 position, out uint page, out float2 place)
 {
     page = 0u;
     place = float2(0.0, 0.0);
-    [loop] for (; level < sun.levels; level++)
+    [loop] for (; level < clipmap.levels; level++)
     {
         int2 at;
-        if (!SunPageOf(sun, SunLevelOf(level), position, at, place))
+        if (!ClipmapPageOf(clipmap, ClipmapLevelOf(level), position, at, place))
         {
             continue;
         }
 
-        ShadowEntry entry = TABLE_ENTRY(ShadowTables, sun.sunTable + SunEntryOf(level, at));
-        if (entry.tag == SunTagOf(at) && IsReadable(sun, entry.page, place))
+        ShadowEntry entry = TABLE_ENTRY(ShadowTables, clipmap.levelTable + ClipmapEntryOf(level, at));
+        if (entry.tag == ClipmapTagOf(at) && IsReadable(clipmap, entry.page, place))
         {
             page = entry.page & ~PageDirty;
             return true;
@@ -616,29 +617,29 @@ bool SunDrawnAt(GpuSunClipmap sun, inout uint level, float3 position, out uint p
     return false;
 }
 
-// The share of the sun reaching a camera-relative point, its penumbra as wide as the sun's disc makes it (PCSS,
+// The share of the key light reaching a camera-relative point, its penumbra as wide as the light's disc makes it (PCSS,
 // Fernando 2005), widened through the clipmap's coarser levels rather than more taps: the casters near the point found
 // at the coarsest level it may be filtered at, over all the filter reaches there, so every pixel whose filter could see
 // a caster finds it and the penumbra fades all the way out, and where no level from there on holds a page, none is
-// found rather than the point left lit; their distance along the sun times the sun's angular diameter the penumbra;
-// and the point filtered at the level whose texels a quarter of that wide are, never more than SunFinerLevels finer
-// than the pixel's own nor more than SunSoftLevels coarser, so close up a wide penumbra is narrowed to what those
-// levels hold. The point is pushed out by a texel of whichever level it is looked up in, and compared a texel of
-// depth nearer the sun, so a surface facing the sun, which the push does not move, does not shadow itself. Both the
-// pixel's level and the filter's are picked by dither, 0 to 1, where two levels meet (SunLevelFor), so neither steps
-// from one to the next.
-float SunVirtualShadow(float3 position, float3 normal, float viewDepth, float dither)
+// found rather than the point left lit; their distance along the light times the light's angular diameter the penumbra;
+// and the point filtered at the level whose texels a quarter of that wide are, never more than ClipmapFinerLevels finer
+// than the pixel's own nor more than ClipmapSoftLevels coarser, so close up a wide penumbra is narrowed to what those
+// levels hold. The point is pushed out by a texel of whichever level it is looked up in, and compared a texel of depth
+// nearer the light, so a surface facing it, which the push does not move, does not shadow itself. Both the pixel's
+// level and the filter's are picked by dither, 0 to 1, where two levels meet (ClipmapLevelFor), so neither steps from
+// one to the next.
+float KeyLightVirtualShadow(float3 position, float3 normal, float viewDepth, float dither)
 {
-    GpuSunClipmap sun = SunClipmapOf();
-    uint level = SunLevelFor(sun, viewDepth, dither);
-    uint finest = level > SunFinerLevels ? level - SunFinerLevels : 0u;
-    uint widest = min(level + SunSoftLevels, sun.levels - 1u);
+    GpuClipmap clipmap = ClipmapOf();
+    uint level = ClipmapLevelFor(clipmap, viewDepth, dither);
+    uint finest = level > ClipmapFinerLevels ? level - ClipmapFinerLevels : 0u;
+    uint widest = min(level + ClipmapSoftLevels, clipmap.levels - 1u);
     uint search = widest;
-    float3 moved = SunMoved(sun, search, position, normal);
+    float3 moved = ClipmapMoved(clipmap, search, position, normal);
     uint page;
     float2 place;
-    bool hasSearch = SunDrawnAt(sun, search, moved, page, place);
-    float depth = SunDepthOf(sun, moved);
+    bool hasSearch = ClipmapDrawnAt(clipmap, search, moved, page, place);
+    float depth = ClipmapDepthOf(clipmap, moved);
     float blockers = 0.0;
     float found = 0.0;
 
@@ -647,23 +648,23 @@ float SunVirtualShadow(float3 position, float3 normal, float viewDepth, float di
     [unroll] for (uint i = 0u; i < 9u; i++)
     {
         float2 offset = (float2(i % 3u, i / 3u) - 1.0) * step;
-        float stored = hasSearch ? PageDepthAt(page, place + offset, sun) : -1.0;
+        float stored = hasSearch ? PageDepthAt(page, place + offset, clipmap) : -1.0;
         blockers += stored > depth ? stored : 0.0;
         found += stored > depth ? 1.0 : 0.0;
     }
 
     if (found > 0.0)
     {
-        float distance = (blockers / found - depth) * 2.0 * sun.depthRange;
+        float distance = (blockers / found - depth) * 2.0 * clipmap.depthRange;
         float penumbra = distance * 2.0 * tan(KeyLightAngularRadius);
-        float finestTexel = sun.finest / (float)SunWindow / (float)PageContent;
-        float wanted = log2(max(penumbra / (4.0 * finestTexel), 1.0)) + (dither * 2.0 - 1.0) * SunLevelBlend;
+        float finestTexel = clipmap.finest / (float)ClipmapWindow / (float)PageContent;
+        float wanted = log2(max(penumbra / (4.0 * finestTexel), 1.0)) + (dither * 2.0 - 1.0) * ClipmapLevelBlend;
         level = clamp((uint)ceil(max(wanted, 0.0)), finest, widest);
     }
 
-    moved = SunMoved(sun, level, position, normal);
+    moved = ClipmapMoved(clipmap, level, position, normal);
     uint drawn = level;
-    if (!SunDrawnAt(sun, drawn, moved, page, place))
+    if (!ClipmapDrawnAt(clipmap, drawn, moved, page, place))
     {
         return 1.0;
     }
@@ -671,19 +672,19 @@ float SunVirtualShadow(float3 position, float3 normal, float viewDepth, float di
     // A coarser level than the one asked for holds the page: the point is pushed out as far as its texels are wide.
     if (drawn != level)
     {
-        moved = SunMoved(sun, drawn, position, normal);
-        SunDrawnAt(sun, drawn, moved, page, place);
+        moved = ClipmapMoved(clipmap, drawn, position, normal);
+        ClipmapDrawnAt(clipmap, drawn, moved, page, place);
     }
 
-    float texelDepth = SunLevelOf(drawn).texel / (2.0 * sun.depthRange);
-    return PageShadow(page, place, SunDepthOf(sun, moved) + texelDepth, sun);
+    float texelDepth = ClipmapLevelOf(drawn).texel / (2.0 * clipmap.depthRange);
+    return PageShadow(page, place, ClipmapDepthOf(clipmap, moved) + texelDepth, clipmap);
 }
 
 // The share of a point or spot light reaching a receiver toLight from it: its face's page at the mip as fine as the
 // pixel wants, or the next coarser drawn, the receiver pushed out along its normal by a texel there, filtered.
 float LightVirtualShadow(uint slot, float3 toLight, float3 normal, float viewDepth)
 {
-    GpuSunClipmap sun = SunClipmapOf();
+    GpuClipmap clipmap = ClipmapOf();
     float distance = length(toLight);
     uint mip = LightMipFor(viewDepth / PixelScale, distance);
     [loop] for (; mip < LightMips; mip++)
@@ -695,19 +696,19 @@ float LightVirtualShadow(uint slot, float3 toLight, float3 normal, float viewDep
         float2 onFace = FacePlaceOf(face, moved, ahead);
         uint side = FacePages(mip);
         uint2 page = min((uint2)(onFace * side), side - 1u);
-        uint found = FindLightEntry(ShadowTables, sun.lightTable, LightKeyOf(slot, face, mip, page), sun.lightEntries);
+        uint found = FindLightEntry(ShadowTables, clipmap.lightTable, LightKeyOf(slot, face, mip, page), clipmap.lightEntries);
         if (found == NoView)
         {
             continue;
         }
 
-        ShadowEntry entry = TABLE_ENTRY(ShadowTables, sun.lightTable + found);
+        ShadowEntry entry = TABLE_ENTRY(ShadowTables, clipmap.lightTable + found);
         if (!IsDrawn(entry.page))
         {
             continue;
         }
 
-        return PageShadow(entry.page, onFace * side - (float2)page, LightNear / ahead, sun);
+        return PageShadow(entry.page, onFace * side - (float2)page, LightNear / ahead, clipmap);
     }
 
     return 1.0;

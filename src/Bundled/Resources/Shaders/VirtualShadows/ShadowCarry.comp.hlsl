@@ -27,14 +27,14 @@ uint TouchedRect(float3 light, float range, uint key, uint count)
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
-    GpuSunClipmap sun = SunClipmapOf();
-    if (id.x >= sun.lightEntries)
+    GpuClipmap clipmap = ClipmapOf();
+    if (id.x >= clipmap.lightEntries)
     {
         return;
     }
 
-    ShadowEntry entry = TABLE_ENTRY(ShadowTables, sun.lightTable + id.x);
-    if (entry.tag == EmptyKey || entry.wanted != sun.frame)
+    ShadowEntry entry = TABLE_ENTRY(ShadowTables, clipmap.lightTable + id.x);
+    if (entry.tag == EmptyKey || entry.wanted != clipmap.frame)
     {
         return;
     }
@@ -46,28 +46,28 @@ void main(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    uint last = FindLightEntry(ShadowTables, sun.lightTableLast, entry.tag, sun.lightEntries);
+    uint last = FindLightEntry(ShadowTables, clipmap.lightTableLast, entry.tag, clipmap.lightEntries);
     if (last == NoView)
     {
         return;
     }
 
-    uint page = ShadowTables.Load((sun.lightTableLast + last) * 16u);
+    uint page = ShadowTables.Load((clipmap.lightTableLast + last) * 16u);
     if (!HasPage(page))
     {
         return;
     }
 
-    uint record = RecordOf(sun, page);
+    uint record = RecordOf(clipmap, page);
     if (ShadowTables.Load(record * 16u) != (last | LightOwner))
     {
         return;
     }
 
-    bool hasChanged = slot / 32u < sun.changedLightWords && (ChangedLights.Load((slot / 32u) * 4u) & (1u << (slot % 32u))) != 0u;
-    uint rect = hasChanged ? WholeRect : TouchedRect(MainRelative(sun, WorldLightPosition(light)), light.range, entry.tag, sun.moved);
-    ShadowTables.Store((sun.lightTable + id.x) * 16u, (page & ~PageDirty) | (rect != 0u || (page & PageDirty) != 0u ? PageDirty : 0u));
-    ShadowTables.Store2(record * 16u, uint2(id.x | LightOwner, sun.frame));
+    bool hasChanged = slot / 32u < clipmap.changedLightWords && (ChangedLights.Load((slot / 32u) * 4u) & (1u << (slot % 32u))) != 0u;
+    uint rect = hasChanged ? WholeRect : TouchedRect(MainRelative(clipmap, WorldLightPosition(light)), light.range, entry.tag, clipmap.moved);
+    ShadowTables.Store((clipmap.lightTable + id.x) * 16u, (page & ~PageDirty) | (rect != 0u || (page & PageDirty) != 0u ? PageDirty : 0u));
+    ShadowTables.Store2(record * 16u, uint2(id.x | LightOwner, clipmap.frame));
     if (rect != 0u)
     {
         ShadowTables.Store(record * 16u + 8u, UnionRect(ShadowTables.Load(record * 16u + 8u), rect));

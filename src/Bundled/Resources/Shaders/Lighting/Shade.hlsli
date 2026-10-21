@@ -3,13 +3,13 @@
 // point and spot lights that reach it, and the sky from everywhere. The lighting pass shades the G-buffer with it and a transparent
 // surface itself, so both look the same. What it reads its draw or pass reads by these names, which the renderer
 // declares: SkySpecular (the sky prefiltered for each roughness), Dfg, Lights, LightBins, LightTiles and SkySh, and for
-// shadows the virtual shadow maps (Include/VirtualShadows.hlsli: ShadowPool (comparison), ShadowTables and SunClipmap),
-// without which it is lit. Where the world draws them, the lighting pass also reads contact shadows, ambient occlusion
-// and traced reflections, each a texel per pixel of the view, the reflections in place of the sky's where they have
-// them, and the probes of global illumination (Lighting/Gi.hlsli), which light from everywhere comes from in place of
-// the sky alone, and which a surface reflects where nothing traced its reflection: their light along it, the sky's
-// detail kept by as much of the sky as they see that way. A sun or a moon reaches it through the sky's air and clouds,
-// the sky's shadow, where the frame draws one (SkyShadow).
+// shadows the virtual shadow maps (Include/VirtualShadows.hlsli: ShadowPool (comparison), ShadowTables and
+// ShadowClipmap), without which it is lit. Where the world draws them, the lighting pass also reads contact shadows,
+// ambient occlusion and traced reflections, each a texel per pixel of the view, the reflections in place of the sky's
+// where they have them, and the probes of global illumination (Lighting/Gi.hlsli), which light from everywhere comes
+// from in place of the sky alone, and which a surface reflects where nothing traced its reflection: their light along
+// it, the sky's detail kept by as much of the sky as they see that way. A sun or a moon reaches it through the sky's
+// air and clouds, the sky's shadow, where the frame draws one (SkyShadow).
 //
 // The lights reaching a pixel are found as Drobot 2017 ("Improved Culling for Tiled and Clustered Rendering") finds
 // them: the view's lights are sorted nearest first, a z-bin holds the first and last of them that can reach its depths,
@@ -61,7 +61,7 @@ float3 KeyLightShadow(float3 position, float3 normal, float viewDepth, float2 pi
 {
     float3 lit = SkyShadowAt(position);
 #if defined(HAS_ShadowTables)
-    lit *= SunVirtualShadow(position, normal, viewDepth, InterleavedGradientNoise(pixel + float2(17.0, 59.0), FrameIndex));
+    lit *= KeyLightVirtualShadow(position, normal, viewDepth, InterleavedGradientNoise(pixel + float2(17.0, 59.0), FrameIndex));
 #endif
 
 #if defined(HAS_ContactShadows) && !SURFACE_FORWARD

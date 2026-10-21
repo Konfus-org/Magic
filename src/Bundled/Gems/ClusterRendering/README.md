@@ -2,8 +2,8 @@
 
 Draws the world GPU-driven, as clusters at the detail each part of it needs: each camera's view of the world's
 triangles into a visibility buffer, each pixel shaded once into a G-buffer and lit once, then the sky, transparent
-surfaces lit as they are drawn, the view upscaled to its target's size, and the world's effects. Every shadow, the
-sun's and every point and spot light's, is pages of one virtual shadow map. It takes the GPU, a shader compiler, the
+surfaces lit as they are drawn, the view upscaled to its target's size, and the world's effects. Every shadow, the key
+light's and every point and spot light's, is pages of one virtual shadow map. It takes the GPU, a shader compiler, the
 assets, the cache, the world, the events, the lifetime and the engine's threads, and a window, the debug UI and the
 scripts when there are, the scripts to make the pipeline scripts a frame names; it provides the cache's ways of
 keeping a model's distance field and a texture compressed for its pool.
@@ -152,46 +152,46 @@ few, light every pixel whole, with no shadow; one more than the frame holds ligh
 
 Every shadow is drawn into pages of one depth pool, each with a border for filtering, only the pages the view's pixels
 read, kept from frame to frame and drawn again only where what casts into them moved: of a page, only the rectangle a
-moving thing reaches is emptied and drawn, so a small caster moving in a big page costs little. The sun's pages, the
-key light's whichever directional light it is, are a clipmap of as many levels as the settings say about the camera, a
-level's window moving a page at a time with its entries addressed round so a page that stays keeps what was drawn. The
-clipmap keeps the way it was drawn for until the light has turned from it by a step the settings set, then draws every
-page again for where the light is, so a sun crossing the sky is drawn again in steps rather than every frame, and a
-light that turns a little each frame does not leave its shadows behind. A point or spot light's pages are its six faces' at
-a mip, a texel at most two pixels wide; its coarsest mip is one small page, a fraction of a page, which a pixel is
-shaded through while its own waits. Each frame, on the GPU:
+moving thing reaches is emptied and drawn, so a small caster moving in a big page costs little. The key light's pages
+are a clipmap of as many levels as the settings say about the camera, a level's window moving a page at a time with its
+entries addressed round so a page that stays keeps what was drawn. The clipmap keeps the way it was drawn for until the
+light has turned from it by a step the settings set, then draws every page again for where the light is, so a sun
+crossing the sky is drawn again in steps rather than every frame, and a light that turns a little each frame does not
+leave its shadows behind. A point or spot light's pages are its six faces' at a mip, a texel at most two pixels wide;
+its coarsest mip is one small page, a fraction of a page, which a pixel is shaded through while its own waits. Each
+frame, on the GPU:
 
-- each pixel marks the pages its lighting can read: every sun level from one finer than its own to three coarser than
-  the coarsest its dither can pick, each at the point the lookup reads it there, and each shadowed light that reaches
-  it, a light's pages put into a hash table made again each frame;
-- the sun's entries follow their window, and a light's take over the pages they had last frame, each page noting the
+- each pixel marks the pages its lighting can read: every clipmap level from one finer than its own to three coarser
+  than the coarsest its dither can pick, each at the point the lookup reads it there, and each shadowed light that
+  reaches it, a light's pages put into a hash table made again each frame;
+- the clipmap's entries follow their window, and a light's take over the pages they had last frame, each page noting the
   rectangle of it that what moved since reaches;
 - one group gives the pages wanted the pool's: each light's small page first, so its pixels always have a drawn page to
-  fall back on, then the sun's levels, coarsest first, as a coarse page covers four times the ground of the next finer,
-  so after a turn every pixel soon has some shadow, which then sharpens, then lights' whole pages by how far from the
-  player they are; the pages read longest ago taken first, then, when the pool is full, pages read this frame from
-  lights farther than what wants them, which fall back on their coarser mips (never the sun's, whose coarser levels
+  fall back on, then the clipmap's levels, coarsest first, as a coarse page covers four times the ground of the next
+  finer, so after a turn every pixel soon has some shadow, which then sharpens, then lights' whole pages by how far from
+  the player they are; the pages read longest ago taken first, then, when the pool is full, pages read this frame from
+  lights farther than what wants them, which fall back on their coarser mips (never the clipmap's, whose coarser levels
   nearer pixels' soft shadows are filtered through); and picks pages waiting to be drawn, up to the count the settings
-  allow a frame, by the same priority: half as many after a frame whose culls ran out of room for casters, and twice
-  as many again, up to that count, after one that did not;
+  allow a frame, by the same priority: half as many after a frame whose culls ran out of room for casters, and twice as
+  many again, up to that count, after one that did not;
 - casters are culled by instance, then by cluster at each page's own texel size, against the rectangle of each page
   drawn, and drawn into it, the rectangle emptied first. A frame whose culls ran out of room draws nothing, as its pages
-  would have holes where the casters left out should be: every page of it waits again, read coarser till the next
-  frame draws it. Depth is clamped rather than clipped, so a caster nearer the sun than a page holds still casts; a
+  would have holes where the casters left out should be: every page of it waits again, read coarser till the next frame
+  draws it. Depth is clamped rather than clipped, so a caster nearer the key light than a page holds still casts; a
   light's faces are clipped a few centimetres ahead of it instead.
 
-A page is never read where it waits: a sun page waiting only where something moved is read everywhere else on it, as
-the rest still holds what it did, and a page waiting whole, or a light's, is not read at all, the pixel reading the
-next coarser level, or mip, that is drawn. Where one sun level gives way to the next, a pixel picks between the two by
-a dither that moves each frame, which the upscale blends, so the levels meet without a line. The sun's penumbra is as
-wide as its disc makes it (PCSS), widened through the clipmap's coarser levels rather than more taps, but never past
-the three coarser the pixel marked, nor finer than the one finer, so a shadow sharpens as the camera nears it, to half
-a pixel, and picked between two levels by the same dither, so it never steps from one to the next. The casters it is
+A page is never read where it waits: a clipmap page waiting only where something moved is read everywhere else on it, as
+the rest still holds what it did, and a page waiting whole, or a light's, is not read at all, the pixel reading the next
+coarser level, or mip, that is drawn. Where one clipmap level gives way to the next, a pixel picks between the two by a
+dither that moves each frame, which the upscale blends, so the levels meet without a line. The key light's penumbra is
+as wide as its disc makes it (PCSS), widened through the clipmap's coarser levels rather than more taps, but never past
+the three coarser the pixel marked, nor finer than the one finer, so a shadow sharpens as the camera nears it, to half a
+pixel, and picked between two levels by the same dither, so it never steps from one to the next. The casters it is
 measured from are searched for at the widest of those levels, over all its filter reaches there, so every pixel the
 filter could darken finds them and the penumbra fades out all the way to light; where no level from there on holds a
-page yet, none is found, and the pixel is filtered at its own level rather than left lit. A receiver is pushed out
-along its normal by a texel of whichever level it reads, and compared a texel of depth nearer the sun, so a surface
-facing the sun does not shadow itself.
+page yet, none is found, and the pixel is filtered at its own level rather than left lit. A receiver is pushed out along
+its normal by a texel of whichever level it reads, and compared a texel of depth nearer the light, so a surface facing
+it does not shadow itself.
 
 ### Temporal upscaling
 
@@ -370,7 +370,7 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
 ## Debugging
 
 - **Debug views.** A debug view is a pass in `Passes/Debug/`, named for the one thing it shows (the depth, the
-  normals, which lights reach each pixel, the sun's shadow as the lighting reads it) with its shader in
+  normals, which lights reach each pixel, the key light's shadow as the lighting reads it) with its shader in
   `Shaders/Debug/`: a fullscreen pass that reads what it needs by name, as any pass does, and draws into the debug
   view's texture, which each view then shows in place of its finished image, drawn without the upscale's sub-pixel
   jitter meanwhile, so it holds still. While one is named (told on `Events`), its pass runs after the world's

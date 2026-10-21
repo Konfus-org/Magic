@@ -215,10 +215,10 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// Takes in what changed, places the sun's shadow about the main camera, then for every camera with somewhere to
-    /// draw records the frame's stages once (probes), each view's stages, and the view shown in its target: up to the
-    /// stage the debug view names, and what that stage made shown in place of the finished image. A window nothing is
-    /// drawn into, with no camera on it or while the frame's passes first compile, is cleared to black.
+    /// Takes in what changed, places the key light's shadow about the main camera, then for every camera with somewhere
+    /// to draw records the frame's stages once (probes), each view's stages, and the view shown in its target: up to
+    /// the stage the debug view names, and what that stage made shown in place of the finished image. A window nothing
+    /// is drawn into, with no camera on it or while the frame's passes first compile, is cleared to black.
     /// </summary>
     public void Render(in Frame frame)
     {
@@ -396,8 +396,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         Instances: (uint)_world.Instances.Capacity,
         Pieces: (uint)Math.Max(_settings.PieceCapacity, 1024),
         Clusters: (uint)Math.Max(_settings.PieceCapacity, 1024),
-        // Room for every instance eight times over, so a frame drawing several of the shadow pages that hold the
-        // whole world, the sun's coarsest levels' after a turn, fits rather than drawing nothing and waiting.
+        // Room for every instance eight times over, so a frame drawing several of the shadow pages that hold the whole
+        // world, the clipmap's coarsest levels' after a turn, fits rather than drawing nothing and waiting.
         Jobs: (uint)Math.Max(Math.Max(_settings.PieceCapacity / 16, 8 * _world.Instances.Capacity), 1024),
         RasterBins: GpuContract.RasterBinRows,
         ResolveBins: (uint)Math.Max(_resources.ResolveBins.Count, 1),
@@ -410,7 +410,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         GiRays: _gi.Rays,
         GiProbeThreads: _gi.ProbeThreads,
         WorldLights: (uint)_world.Lights.Capacity,
-        SunEntries: (uint)_shadows.SunEntries,
+        ClipmapEntries: (uint)_shadows.ClipmapEntries,
         LightEntries: Shadows.LightTableEntries,
         ShadowViews: (uint)Math.Max(_settings.ShadowUpdates, 1),
         ShadowGroups: (uint)(Math.Max(_settings.ShadowUpdates, 1) + Shadows.GetLevelCount(_settings)),

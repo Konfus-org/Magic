@@ -1,11 +1,11 @@
-// Marks the pages of shadow the view's pixels read, a thread a pixel: every sun level the lighting's lookup can read
-// for the pixel (Include/VirtualShadows.hlsli's SunVirtualShadow), from SunFinerLevels finer than the finest its
-// dither can pick to SunSoftLevels coarser than the coarsest, each at the point the lookup reads it, pushed out along
-// the pixel's normal by that level's texel; and, for each point or spot light that casts a shadow and reaches the
-// pixel (its z-bin and tile, as the lighting finds them), its face's page at the mip as fine as the pixel, and at the
-// coarsest, which it is read through while its own waits, put into this frame's table. A page marked is wanted this
-// frame; the allocator gives it a page of the pool when it has none. Most of a page's pixels find it marked already,
-// and leave it be.
+// Marks the pages of shadow the view's pixels read, a thread a pixel: every clipmap level the lighting's lookup can
+// read for the pixel (Include/VirtualShadows.hlsli's KeyLightVirtualShadow), from ClipmapFinerLevels finer than the
+// finest its dither can pick to ClipmapSoftLevels coarser than the coarsest, each at the point the lookup reads it,
+// pushed out along the pixel's normal by that level's texel; and, for each point or spot light that casts a shadow and
+// reaches the pixel (its z-bin and tile, as the lighting finds them), its face's page at the mip as fine as the pixel,
+// and at the coarsest, which it is read through while its own waits, put into this frame's table. A page marked is
+// wanted this frame; the allocator gives it a page of the pool when it has none. Most of a page's pixels find it marked
+// already, and leave it be.
 
 #include "Include/LightCulling.hlsli"
 #include "Include/Packing.hlsli"
@@ -21,43 +21,43 @@ void Want(uint row, uint frame)
     }
 }
 
-void MarkSun(GpuSunClipmap sun, float3 position, float3 normal, float viewDepth)
+void MarkKeyLight(GpuClipmap clipmap, float3 position, float3 normal, float viewDepth)
 {
-    uint finest = SunLevelFor(sun, viewDepth, 0.0);
-    uint level = finest > SunFinerLevels ? finest - SunFinerLevels : 0u;
-    uint last = min(SunLevelFor(sun, viewDepth, 1.0) + SunSoftLevels, sun.levels - 1u);
+    uint finest = ClipmapLevelFor(clipmap, viewDepth, 0.0);
+    uint level = finest > ClipmapFinerLevels ? finest - ClipmapFinerLevels : 0u;
+    uint last = min(ClipmapLevelFor(clipmap, viewDepth, 1.0) + ClipmapSoftLevels, clipmap.levels - 1u);
     [loop] for (; level <= last; level++)
     {
         int2 page;
         float2 place;
-        if (SunPageOf(sun, SunLevelOf(level), SunMoved(sun, level, position, normal), page, place))
+        if (ClipmapPageOf(clipmap, ClipmapLevelOf(level), ClipmapMoved(clipmap, level, position, normal), page, place))
         {
-            Want(sun.sunTable + SunEntryOf(level, page), sun.frame);
+            Want(clipmap.levelTable + ClipmapEntryOf(level, page), clipmap.frame);
         }
     }
 }
 
-void MarkLightPage(GpuSunClipmap sun, uint slot, uint face, float2 onFace, uint mip)
+void MarkLightPage(GpuClipmap clipmap, uint slot, uint face, float2 onFace, uint mip)
 {
     uint side = FacePages(mip);
     uint2 page = min((uint2)(onFace * side), side - 1u);
-    uint entry = InsertLightEntry(ShadowTables, sun.lightTable, LightKeyOf(slot, face, mip, page), sun.lightEntries);
+    uint entry = InsertLightEntry(ShadowTables, clipmap.lightTable, LightKeyOf(slot, face, mip, page), clipmap.lightEntries);
     if (entry != NoView)
     {
-        Want(sun.lightTable + entry, sun.frame);
+        Want(clipmap.lightTable + entry, clipmap.frame);
     }
 }
 
-void MarkLight(GpuSunClipmap sun, uint slot, float3 toLight, float viewDepth)
+void MarkLight(GpuClipmap clipmap, uint slot, float3 toLight, float viewDepth)
 {
     uint mip = LightMipFor(viewDepth / PixelScale, length(toLight));
     uint face = FaceOf(-toLight);
     float ahead;
     float2 onFace = FacePlaceOf(face, -toLight, ahead);
-    MarkLightPage(sun, slot, face, onFace, mip);
+    MarkLightPage(clipmap, slot, face, onFace, mip);
     if (mip < LightMips - 1u)
     {
-        MarkLightPage(sun, slot, face, onFace, LightMips - 1u);
+        MarkLightPage(clipmap, slot, face, onFace, LightMips - 1u);
     }
 }
 
@@ -75,14 +75,14 @@ void main(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    GpuSunClipmap sun = SunClipmapOf();
+    GpuClipmap clipmap = ClipmapOf();
     float2 pixel = (float2)id.xy + 0.5;
     float viewDepth = ViewDepth(depth);
     float3 position = ViewToWorld(ViewPosition(pixel, viewDepth));
     if (any(KeyLightIlluminance > 0.0))
     {
         float3 normal = OctDecode(Normal.Load(int3(id.xy, 0)).xy * 2.0 - 1.0);
-        MarkSun(sun, position, normal, viewDepth);
+        MarkKeyLight(clipmap, position, normal, viewDepth);
     }
 
     // The lights reaching the pixel, as the lighting walks them (Lighting/Shade.hlsli's LocalLights).
@@ -100,7 +100,7 @@ void main(uint3 id : SV_DispatchThreadID)
             float spot = SpotAttenuation(toLight * rsqrt(max(distanceSq, 1e-8)), light.forward, float2(light.spotScale, light.spotOffset));
             [branch] if (light.shadow != NoShadowFace && distanceSq * light.invRangeSquared < 1.0 && spot > 0.0)
             {
-                MarkLight(sun, light.shadow, toLight, viewDepth);
+                MarkLight(clipmap, light.shadow, toLight, viewDepth);
             }
         }
     }
