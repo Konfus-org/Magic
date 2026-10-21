@@ -65,7 +65,9 @@ Read `Include/Bindings.hlsli` first: its header is the conventions, and the
 - **Reading the frame by name.** A pass's shader, and a surface and its template, read the frame's textures and buffers
   by name: the renderer declares every name the pass can see ahead of the shader, with `HAS_Name` defined for each, so
   a shader guards what a frame may not have and does without it, and binds whichever the shader uses, read back from
-  its compile. Only a shader the renderer does not compose binds through the binding header's macros itself.
+  its compile. The macro says a name is there, not that the pass is meant to read it: what a stage that runs once a
+  frame makes is there for every pass after it, so a shader two passes run tells them apart by a name only one of them
+  has made before it. Only a shader the renderer does not compose binds through the binding header's macros itself.
 - **Includes** name a path under `Shaders/`, `#include "Lighting/Lights.hlsli"`: the asset at that path, from whichever
   root has it, so a project's or a gem's header is included the same way. Every header has a guard and includes what
   it uses.

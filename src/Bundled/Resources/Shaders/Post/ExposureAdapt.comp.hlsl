@@ -1,16 +1,17 @@
 // The view's exposure, adapting over time (Lagarde & de Rousiers 2014, "Moving Frostbite to Physically Based
-// Rendering": exposure from EV100, 1 / (1.2 * 2^EV100)), metered one of two ways, by what its pass reads:
-// - the view's pixels (ExposureHistogram): the mean EV100 of the histogram's pixels between its darkest and brightest
-//   shares, so it follows what the view sees, a dark wall filling it brightening everything;
-// - the world's light (SkySh): the EV100 a mid-grey level surface in the open reads, lit by the key light through the
-//   sky's shadow at the camera, the other directional lights and the sky, as an incident meter reads it, so what fills
-//   the view never changes it, only the light does: for a world its sun or moon, its weather and its sky light.
+// Rendering": exposure from EV100, 1 / (1.2 * 2^EV100)), metered one of two ways, by which effect runs it:
+// - the view's pixels, where a pass of its effect before it binned them (ExposureHistogram): the mean EV100 of the
+//   histogram's pixels between its darkest and brightest shares, so it follows what the view sees, a dark wall filling
+//   it brightening everything;
+// - else the world's light (SkySh): the EV100 a mid-grey level surface in the open reads, lit by the key light through
+//   the sky's shadow at the camera, the other directional lights and the sky, as an incident meter reads it, so what
+//   fills the view never changes it, only the light does: for a world its sun or moon, its weather and its sky light.
 // Either is eased towards at a rate that brightens slower than it darkens, as eyes do, but by a view's first metering,
 // which is taken whole. The view's lighting is pre-exposed with it from the next frame on.
 
 #include "Include/Color.hlsli"
 #include "Include/SkyShadow.hlsli"
-#if defined(HAS_SkySh)
+#if !defined(HAS_ExposureHistogram)
 #include "Lighting/Ibl.hlsli"
 #endif
 
@@ -31,7 +32,9 @@ struct PassParams
     float brightening = 1.0;     // how quickly it adapts to a darker scene, per second
 };
 
-#if defined(HAS_SkySh)
+// Which meter runs is told by the histogram, which only the pixel meter's own pass makes, never by the world's light,
+// which every pass after the sky's light is captured can see.
+#if !defined(HAS_ExposureHistogram)
 // The EV100 of a mid-grey level surface in the open, lit by the key light through the sky's shadow at the camera, by
 // the other directional lights and by the sky: EV100 = log2(L * S / K) for ISO S = 100 and calibration K = 12.5, as the
 // histogram's pixels are binned (Post/ExposureHistogram.comp.hlsl).
