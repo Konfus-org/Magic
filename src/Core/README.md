@@ -28,7 +28,8 @@ render thread. It:
 A run can also restart, which `Lifetime` offers and a change to a `[RequireRestart]` setting asks for: the world is
 saved on the main thread as the last frame ends ([The world](#the-world)), the gems end, and the project runs again at
 once with the command line as every setting is now, the saved world and the frame clock, so the game goes on where it
-was.
+was. The gems are made anew, so the world put back is readied out of sight before it is shown, as a domain that
+replaces it is, the window black meanwhile.
 
 Failures are explicit and never stop the engine. A gem that cannot be found, loaded or made, or that throws in a
 hook, is logged as an error, and the run goes on without it and without the gems that need it. Only state that cannot
@@ -479,13 +480,17 @@ nothing of the code that made it, so it outlives the run, and restores into what
 read would. Restoring puts the world back from one on the main thread, in the frame it is called: it closes what is
 open, makes every entity anew, gives each its components and puts its scripts back without starting them, their
 classes found in the code loaded now, and opens each domain again around the entities its prefabs had spawned, so
-closing one and a prefab read again still find them. Each domain's folder is then read on workers as opening one
-does, so a prefab added since spawns and one gone has its entities destroyed, and the models its prefabs draw are
-held; until then they come in as anything spawned at run time does. An `Entity` is saved as its id and read back as
-the entity made for it, so what refers to another entity, in a component or a script, still does; the id of one
-destroyed before the save reads as none. The engine saves the world as a run ends to restart and restores it before
-the first frame of the next ([The run](#the-run)). A component no code loaded declares, a script whose class is not
-found, or one whose saved values no longer fit it, is an error, and the entity goes without it.
+closing one and a prefab read again still find them. The world then loads as it does when a domain replaces it, held
+out of sight from the frame it is put back: each preloader readies it at once, so nothing runs it, its scripts put
+back among what waits, and the window holds black, as no loading domain could show among what is already there. Each
+domain's folder is read on workers and taken in as opening one does, so a prefab added since spawns and one gone has
+its entities destroyed, and what its prefabs draw is in and held; once every domain has been, each preloader readies
+the world again, as what it took in is there now, and the world is shown once they all have, drawn as it loaded. An
+`Entity` is saved as its id and read back as the entity made for it, so what refers to another entity, in a
+component or a script, still does; the id of one destroyed before the save reads as none. The engine saves the world
+as a run ends to restart and restores it before the first frame of the next ([The run](#the-run)). A component no
+code loaded declares, a script whose class is not found, or one whose saved values no longer fit it, is an error, and
+the entity goes without it.
 
 ## The GPU
 

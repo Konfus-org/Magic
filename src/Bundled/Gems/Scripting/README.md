@@ -58,9 +58,11 @@ script that keeps the entities it spawned keeps them.
 Put back, in the frame the world is, a script is made as it is attached, its class found in the code loaded now as
 reading its file finds it, its constructor given the entity and its services, then each saved value is set on its
 property or field, and it runs on: `Start()` is not called, as it is as it was, so a script that spawns or subscribes
-in `Start` does not do so twice, and one that measured something as it started keeps its measure. A saved value its
-class no longer has, or that no longer fits, is warned about once and left. Its file is loaded too, so a build
-replaces the copy as it does any other.
+in `Start` does not do so twice, and one that measured something as it started keeps its measure. The world is
+readied out of sight as it is put back, so the copy is held as one started while a domain is readied is, and runs on
+from the frame after the world is first shown, unless its class is `[Impatient]`. A saved value its class no longer
+has, or that no longer fits, is warned about once and left. Its file is loaded too, so a build replaces the copy as it
+does any other.
 
 ## Running
 

@@ -42,7 +42,9 @@ namespace Magic.Services;
 /// <para>
 /// The whole world can be saved as data (<see cref="SaveAsync"/>) and put back from it (<see cref="Restore"/>): the
 /// domains open, every entity with its components and its scripts as they are. The engine does so across a restart
-/// (<see cref="Lifetime.Restart"/>), so the world goes on as it was.
+/// (<see cref="Lifetime.Restart"/>), so the world goes on as it was. Put back, it loads as a domain that replaces it
+/// does, but with no loading domain shown, as it is there already: held out of sight from the frame it is put back
+/// until its domains have been taken in again and every gem has readied it, then shown, drawn as it loaded.
 /// </para>
 /// </summary>
 public sealed class World : IDisposable
@@ -89,15 +91,16 @@ public sealed class World : IDisposable
     /// <summary>
     /// Whether a domain is opening in place of the world (<see cref="DomainOpenMode.Replace"/>): from when the open
     /// domains close until the new one is shown, or is not coming, while the loading domain is shown, then its last
-    /// image while the new one is readied. False from the frame the world is first shown, which whatever draws it reads
-    /// as it copies the frame; what runs the world hears it the frame after (<see cref="WorldLoading"/>).
+    /// image while the new one is readied; or a saved world is being put back in its place (<see cref="Restore"/>),
+    /// from the call until it is shown. False from the frame the world is first shown, which whatever draws it reads as
+    /// it copies the frame; what runs the world hears it the frame after (<see cref="WorldLoading"/>).
     /// </summary>
     public bool IsLoading => _domains?.IsLoading ?? false;
 
     /// <summary>
     /// Whether the world has loaded: a domain is open, every open one is there, spawned, and none is opening in place
-    /// of the world, so one that replaced it is shown. False while a domain is still being read, however it was opened,
-    /// which <see cref="IsLoading"/> only covers for one opening in place of the world.
+    /// of the world nor a saved world being put back, so what replaced it is shown. False while a domain is still being
+    /// read, however it was opened, which <see cref="IsLoading"/> only covers for one opening in place of the world.
     /// </summary>
     public bool IsLoaded => _domains?.IsLoaded ?? false;
 
@@ -179,13 +182,16 @@ public sealed class World : IDisposable
     /// open: closes what is open, makes every entity empty first, so that whichever is made earlier, a reference to one
     /// in a component or a script maps to it, then gives each its components and its scripts, put back as they were and
     /// not started (<see cref="IScripts.Restore"/>), and opens each domain again around the entities its prefabs had
-    /// spawned, so closing one and a prefab read again still find them. Each domain's folder is read on workers after,
-    /// as when it opens, so a prefab added since is spawned and one gone has its entities destroyed, and the models its
-    /// prefabs draw are held as they would be; until then they come in as anything spawned at run time does. No player
-    /// is put, as the one saved is among the entities. A domain that had spawned nothing, as one still opening, opens
-    /// again from the start. A component or a script no code loaded declares, or whose saved values no longer fit it,
-    /// is an error, and the entity goes without it. Main thread; without a gem that provides the ECS, nothing is
-    /// restored, which is warned about.
+    /// spawned, so closing one and a prefab read again still find them. The world loads meanwhile
+    /// (<see cref="IsLoading"/>), held out of sight from this call as one that replaced it is while it is readied
+    /// (<see cref="IPreloader.ReadyAsync"/>), so nothing that runs it runs, its scripts put back included; no loading
+    /// domain is shown, as what is put back is there already. Each domain's folder is read on workers after, as when it
+    /// opens, so a prefab added since is spawned and one gone has its entities destroyed, and what its prefabs draw is
+    /// taken in and held as it would be; once every domain has, every gem readies the world again, and it is shown once
+    /// they all have, drawn as it loaded. No player is put, as the one saved is among the entities. A domain that had
+    /// spawned nothing, as one still opening, opens again from the start. A component or a script no code loaded
+    /// declares, or whose saved values no longer fit it, is an error, and the entity goes without it. Main thread;
+    /// without a gem that provides the ECS, nothing is restored, which is warned about.
     /// </summary>
     public void Restore(WorldState state)
     {
@@ -202,6 +208,9 @@ public sealed class World : IDisposable
             made[saved.Id] = GetEcs().Create();
         }
 
+        // The domains before the components and the scripts, as putting them back holds the world out of sight: a
+        // script put back then waits until the world is shown, as one started while a domain is readied does.
+        _domains.Restore(state.Domains, made);
         EntityJsonConverter.Remap = made;
         try
         {
@@ -231,7 +240,6 @@ public sealed class World : IDisposable
             EntityJsonConverter.Remap = null;
         }
 
-        _domains.Restore(state.Domains, made);
         Debugging.Info($"Restored the world: {state.Entities.Count} entities in {state.Domains.Count} domains.");
     }
 

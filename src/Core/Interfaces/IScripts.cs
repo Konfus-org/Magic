@@ -46,9 +46,10 @@ public interface IScripts
     /// Puts the script <paramref name="state"/> names back on <paramref name="entity"/> as it saved it
     /// (<see cref="Save"/>): its class found in the code loaded now, as reading its file finds it, a copy made for the
     /// entity as <see cref="Attach"/> makes one, its values and fields set back, and run until the entity is destroyed,
-    /// but not started, as it is as it was. A value its class no longer has, or that no longer fits, is warned about
-    /// and left. One whose class is not found, or that cannot be made, is an error, and the entity goes without it.
-    /// Main thread, in the frame the world is put back.
+    /// but not started, as it is as it was. It runs from the frame after the world put back is first shown, as one
+    /// started while the world is readied does, unless the class is <see cref="Attributes.ImpatientAttribute"/>. A value
+    /// its class no longer has, or that no longer fits, is warned about and left. One whose class is not found, or that
+    /// cannot be made, is an error, and the entity goes without it. Main thread, in the frame the world is put back.
     /// </summary>
     void Restore(Entity entity, ScriptState state);
 }
