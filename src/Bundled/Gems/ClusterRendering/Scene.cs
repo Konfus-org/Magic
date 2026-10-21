@@ -363,9 +363,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 
     /// <summary>
     /// Works out what a look's instances share from its model and materials as they are now: its model's row and its
-    /// material slots', or the failure's when the model failed, whether any is transparent, why they are drawn as the
-    /// failure, and whether they can be drawn, from <paramref name="time"/> when they could not before. Once they can,
-    /// they are drawn for as long as the look is, as what it names loads again.
+    /// material slots', or the failure's when the model failed or a slot names a sky, which no mesh draws, whether any is
+    /// transparent, why they are drawn as the failure, and whether they can be drawn, from <paramref name="time"/> when
+    /// they could not before. Once they can, they are drawn for as long as the look is, as what it names loads again.
     /// </summary>
     private void Resolve(LookEntry entry, float time)
     {
@@ -378,11 +378,17 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         for (int i = 0; i < MaterialSlots.Capacity; i++)
         {
             Handle<Material> material = look.Materials[i];
-            int materialRow = materials.GetRow(hasFailed ? materials.GetFailureMaterial(FailureType.Mesh) : material);
+            bool isSky = !hasFailed && materials.IsSky(material);
+            Handle<Material> drawn = hasFailed ? materials.GetFailureMaterial(FailureType.Mesh) : isSky ? materials.GetFailureMaterial(FailureType.Shader) : material;
+            int materialRow = materials.GetRow(drawn);
             rows[i >> 1] |= (uint)materialRow << ((i & 1) * 16);
             areShown &= materials.IsShown(materialRow);
-            isTransparent |= !hasFailed && materials.Get(material) is { Type: MaterialType.Transparent };
-            if (!hasFailed && materials.GetFailure(material) is { } why)
+            isTransparent |= !hasFailed && !isSky && materials.Get(material) is { Type: MaterialType.Transparent };
+            if (isSky)
+            {
+                failure ??= ("Sky material on a mesh", assets.GetPath(material) ?? string.Empty);
+            }
+            else if (!hasFailed && materials.GetFailure(material) is { } why)
             {
                 failure ??= (why, assets.GetPath(material) ?? string.Empty);
             }

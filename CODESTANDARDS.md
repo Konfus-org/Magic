@@ -298,8 +298,10 @@ stays whole. A loop body nested three deep or more is an early `continue`, or a 
 
 An `if` whose body is one short statement is one line, with no braces: `if (count == 0) return;`,
 `if (!TryGetResource(name, out resource)) continue;`. Anything longer, an `else`, and every loop (`for`, `foreach`,
-`while`) has braces on their own lines, however short the body, so that what repeats always reads as a block. The
-build requires braces around any multi-line body (`IDE0011`).
+`while`) has braces on their own lines, however short the body, so that what repeats always reads as a block. An `if`
+that would not fit on one line within `.editorconfig`'s `max_line_length`, whatever makes it long, the condition or the
+body, puts its body in braces on the lines below, so the body is never lost off the end of a long line. The build
+requires braces around any multi-line body (`IDE0011`).
 
 ### Naming
 

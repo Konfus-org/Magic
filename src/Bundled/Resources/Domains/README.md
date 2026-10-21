@@ -18,7 +18,7 @@ Every [prefab](../Prefabs/README.md) in the domain's folder is spawned while it 
   its positions are relative to its corner, its coordinates times the cell size. A cell file can be copied or moved to
   another cell as it is. Cells are how a large world is split into files a person can work on, one piece at a time.
 - **Any other**, such as `globals.prefab`, at the domain's origin: what belongs to the whole world, such as the sky,
-  the sun, the world's post-processing and the spawn.
+  the sun, the weather, the world's post-processing and the spawn.
 
 **The spawn** is the first entity tagged `spawn` in the domain's prefabs that are not cells, else in its cells: where
 the project's player is put, and which way it faces, when the domain opens in place of the world. With none, the player

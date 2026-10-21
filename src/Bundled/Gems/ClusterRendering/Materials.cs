@@ -200,6 +200,12 @@ internal sealed class Materials : IDisposable
     internal bool IsShown(int row) => (Bins.Rows[row] & BinReady) != 0;
 
     /// <summary>
+    /// Whether a material slot's material is in and is a sky, which draws the world's sky and no mesh: a mesh that names
+    /// one is drawn as the shader failure in its place. Starts loading it the first time it is asked for.
+    /// </summary>
+    internal bool IsSky(Handle<Material> material) => Get(material) is { IsSky: true };
+
+    /// <summary>
     /// Lets the material go once no instance draws with it: its row and its variants' are freed, and the textures it
     /// samples that no other material does leave the pools, as do its cards' atlases no other variant has. It loads
     /// again if it is asked for again. The default and failure materials stay.
@@ -283,7 +289,7 @@ internal sealed class Materials : IDisposable
                 continue;
             }
 
-            if (_graph.IsDrawable(waiting.Drawn.Surface, waiting.Drawn.Type))
+            if (IsDrawable(waiting.Drawn))
             {
                 Show(_waiting[i], entry, waiting);
                 _waiting.RemoveAt(i);
@@ -432,7 +438,7 @@ internal sealed class Materials : IDisposable
         source.Layout.Write(layers, param => _textures.GetRef(param.Texture), _ => null, MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
         (Vector3 color, Vector3 emission) = source.Layout.GiOf(material.Params);
         GpuMaterialGi gi = new() { Color = new Vector4(color, 1), Emission = new Vector4(emission, 0) };
-        DrawnMaterial drawn = new(entry.Row, new SurfaceKey(material.Shader, material.Type == MaterialType.Masked, material.DoubleSided), material.Type);
+        DrawnMaterial drawn = new(entry.Row, new SurfaceKey(material.Shader, material.Type == MaterialType.Masked, material.DoubleSided), material.Type, source.IsSky);
         entry.Broken = null;
         Draw(handle, entry, new PackedMaterial(row, gi, drawn, null));
     }
@@ -448,9 +454,15 @@ internal sealed class Materials : IDisposable
         Handle<Material> failure = _failures[type];
         if (handle == failure || GetEntry(failure).Packed is not { } packed) return;
 
-        DrawnMaterial drawn = new(entry.Row, packed.Drawn.Surface with { DoubleSided = doubleSided }, MaterialType.Opaque);
+        DrawnMaterial drawn = new(entry.Row, packed.Drawn.Surface with { DoubleSided = doubleSided }, MaterialType.Opaque, IsSky: false);
         Draw(handle, entry, packed with { Gi = _failureGi, Drawn = drawn, Failure = why });
     }
+
+    /// <summary>
+    /// Whether a material packed can be drawn as it is packed: a surface once every pipeline it is drawn with is compiled,
+    /// a sky at once, as the sky draw compiles its own and draws nothing until then.
+    /// </summary>
+    private bool IsDrawable(DrawnMaterial drawn) => drawn.IsSky || _graph.IsDrawable(drawn.Surface, drawn.Type);
 
     /// <summary>
     /// Draws a material packed as soon as its pipelines are compiled: now, or once they are (<see cref="Flush"/>),
@@ -458,7 +470,7 @@ internal sealed class Materials : IDisposable
     /// </summary>
     private void Draw(Handle<Material> handle, MaterialEntry entry, PackedMaterial packed)
     {
-        if (_graph.IsDrawable(packed.Drawn.Surface, packed.Drawn.Type))
+        if (IsDrawable(packed.Drawn))
         {
             Show(handle, entry, packed);
             return;
@@ -491,10 +503,17 @@ internal sealed class Materials : IDisposable
 
     /// <summary>
     /// The row's bins word: the raster bin of its surface, the resolve bin of its surface and sides, made when they are
-    /// first needed, and how it is drawn. A transparent material has neither; it is drawn forward.
+    /// first needed, and how it is drawn. A transparent material has neither; it is drawn forward. A sky has neither
+    /// either, as no mesh draws it (<see cref="IsSky"/>).
     /// </summary>
     private void WriteBins(DrawnMaterial drawn)
     {
+        if (drawn.IsSky)
+        {
+            Bins.Set(drawn.Row, BinReady);
+            return;
+        }
+
         SurfaceKey surface = drawn.Surface;
         uint flags = BinReady | (surface.Masked ? BinMasked : 0) | (surface.DoubleSided ? BinDoubleSided : 0);
         if (drawn.Type == MaterialType.Transparent)
@@ -578,9 +597,10 @@ internal struct GpuMaterial
 }
 
 /// <summary>
-/// What a material is drawn with: its row, the surface and variant its pipeline is composed of, and how it blends.
+/// What a material is drawn with: its row, the surface and variant its pipeline is composed of, and how it blends; or,
+/// when its shader is a sky, the sky shader the sky draw is composed of, which no mesh draws.
 /// </summary>
-internal readonly record struct DrawnMaterial(int Row, SurfaceKey Surface, MaterialType Type);
+internal readonly record struct DrawnMaterial(int Row, SurfaceKey Surface, MaterialType Type, bool IsSky);
 
 /// <summary>
 /// A surface shader and the variant it is compiled as.

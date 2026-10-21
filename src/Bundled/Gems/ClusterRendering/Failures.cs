@@ -50,10 +50,12 @@ internal sealed class Failures(IGpu gpu) : IDisposable
 
     /// <summary>
     /// The lines last said, and how many there were: the listing's own list, which only grows, so the same list with
-    /// the same count is the same lines.
+    /// the same count is the same lines; and the world's own line said after them, which is made again only when it
+    /// changes, so the same string is the same line.
     /// </summary>
     private IReadOnlyList<string>? _said;
     private int _saidCount;
+    private string? _saidWorld;
 
     public void Dispose()
     {
@@ -83,21 +85,24 @@ internal sealed class Failures(IGpu gpu) : IDisposable
     }
 
     /// <summary>
-    /// The lines said this frame in place of the last frame's, each wrapped at its spaces over as many rows of
-    /// <see cref="LineGlyphs"/> as it takes, the first <see cref="MaxLines"/> rows of them; packed again only when they
-    /// changed.
+    /// The lines said this frame in place of the last frame's, the listing's then what failed in the world itself, such
+    /// as its sky, or none, each wrapped at its spaces over as many rows of <see cref="LineGlyphs"/> as it takes, the
+    /// first <see cref="MaxLines"/> rows of them; packed again only when they changed.
     /// </summary>
-    internal void Say(IReadOnlyList<string> lines)
+    internal void Say(IReadOnlyList<string> lines, string? world)
     {
-        if (ReferenceEquals(lines, _said) && lines.Count == _saidCount) return;
+        if (ReferenceEquals(lines, _said) && lines.Count == _saidCount && ReferenceEquals(world, _saidWorld)) return;
 
         _said = lines;
         _saidCount = lines.Count;
+        _saidWorld = world;
         _rows.Clear();
         foreach (string line in lines)
         {
             Wrap(line);
         }
+
+        if (world is not null) Wrap(world);
 
         if (_rows.Count > MaxLines) _rows.RemoveRange(MaxLines, _rows.Count - MaxLines);
 

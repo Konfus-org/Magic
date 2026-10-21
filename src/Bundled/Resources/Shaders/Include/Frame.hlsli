@@ -11,6 +11,17 @@
 // Pixels a side of a light tile; the renderer's Views.TileSize.
 static const uint LightTileSize = 32u;
 
+// The world's weather, still and clear without one: the renderer's WeatherConstants (GpuStructs.cs), member for member.
+struct WeatherConstants
+{
+    float3 Wind;             // metres per second: its direction and strength
+    float Coverage;          // how much of the sky clouds cover, 0 clear to 1 overcast
+    float3 CloudColor;       // the clouds where the sun lights them, linear
+    float Density;           // how thick they are, 0 wisps to 1 thick
+    float3 CloudShadow;      // the clouds in their own shade and underneath, linear
+    float Padding;
+};
+
 cbuffer Frame : UNIFORM(0)
 {
     float4x4 ViewProj;
@@ -40,7 +51,7 @@ cbuffer Frame : UNIFORM(0)
     float ZBinScale;
     float ZBinBias;
     uint ZBinCount;
-    uint SkyMaterial;
+    uint SkyMaterial;        // the sky's material's row, which a sky draw loads its params from
 
     float DeltaSeconds;
     float ClusterError;      // pixels a cluster's error may cover on screen before a finer one is drawn
@@ -59,6 +70,8 @@ cbuffer Frame : UNIFORM(0)
     float2 Jitter;           // this frame's sub-pixel offset of ViewProj, in clip space
     float2 OutputSize;       // the view's size in pixels as it is shown, which upscaling fills; the drawn size when the
                              // output filter is nearest, so only the output pass scales
+
+    WeatherConstants Weather;
 
     uint4 PassRaw[8];
 };

@@ -274,6 +274,7 @@ internal sealed class View : IDisposable
         uint resolveTiles = (width + Views.ResolveTile - 1) / Views.ResolveTile * ((height + Views.ResolveTile - 1) / Views.ResolveTile);
         (uint hizTexels, uint hizLevels) = HiZOf(width, height);
         Counts = frame.Counts with { Tiles = resolveTiles, HizTexels = hizTexels, HizLevels = hizLevels, LightTileWords = tilesX * tilesY * tileWords };
+        Weather weather = frame.Copy.Weather ?? new Weather();
         Constants = new FrameConstants
         {
             ViewProj = viewProj,
@@ -306,6 +307,14 @@ internal sealed class View : IDisposable
             TextureMipScale = frame.Jitters ? MathF.Min(1, height / MathF.Max(1, output.Y)) : 1,
             Jitter = jitter,
             OutputSize = output,
+            Weather = new WeatherConstants
+            {
+                Wind = weather.Wind,
+                Coverage = Math.Clamp(weather.Coverage, 0, 1),
+                CloudColor = new Vector3(weather.CloudColor.R, weather.CloudColor.G, weather.CloudColor.B),
+                Density = Math.Clamp(weather.Density, 0, 1),
+                CloudShadow = new Vector3(weather.CloudShadow.R, weather.CloudShadow.G, weather.CloudShadow.B),
+            },
         };
 
         _lastViewProj = view * still;

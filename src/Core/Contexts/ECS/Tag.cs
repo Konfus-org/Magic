@@ -22,6 +22,12 @@ public readonly record struct Tag(int Id)
     /// </summary>
     public static readonly Tag Player = Of("player");
 
+    /// <summary>
+    /// The sun: the directional light whatever draws the world lights it by and draws in its sky. Being a directional
+    /// light is not enough, so a world says which of its lights the sun is.
+    /// </summary>
+    public static readonly Tag Sun = Of("sun");
+
     public bool IsValid => Id != 0;
 
     /// <summary>

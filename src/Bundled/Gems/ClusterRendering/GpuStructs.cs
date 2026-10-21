@@ -76,7 +76,7 @@ internal struct FrameConstants
     internal uint ZBinCount;
 
     /// <summary>
-    /// The sky's material's row, which a sky draw of a surface loads its params from.
+    /// The sky's material's row, which a sky draw loads its params from.
     /// </summary>
     internal uint SkyMaterial;
 
@@ -124,9 +124,30 @@ internal struct FrameConstants
     internal Vector2 OutputSize;
 
     /// <summary>
+    /// The world's weather, as its <see cref="Magic.Contexts.Components.Weather"/> says, or still and clear without one.
+    /// </summary>
+    internal WeatherConstants Weather;
+
+    /// <summary>
     /// The pass's params, packed by its <see cref="ParamLayout"/>, in the first seven rows; its iteration in the last.
     /// </summary>
     internal PassWords Pass;
+}
+
+/// <summary>
+/// The world's weather in a <see cref="FrameConstants"/>, <c>WeatherConstants</c> in Shaders/Include/Frame.hlsli member
+/// for member: the wind in metres per second, how much of the sky the clouds cover and how thick they are, 0 to 1 each,
+/// and their linear colours where the sun lights them and in their own shade.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct WeatherConstants
+{
+    internal Vector3 Wind;
+    internal float Coverage;
+    internal Vector3 CloudColor;
+    internal float Density;
+    internal Vector3 CloudShadow;
+    internal float Padding;
 }
 
 /// <summary>

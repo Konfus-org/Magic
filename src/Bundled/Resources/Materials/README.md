@@ -1,7 +1,8 @@
 # Materials
 
-What a surface looks like: a `.mat` file names a surface shader and gives values to the parameters it declares. It
-says which surface shader, a `.surf.hlsl`, the material is drawn with; whether it is opaque, masked (pixels below the
+What a surface looks like, or the sky: a `.mat` file names a surface shader, or a sky shader for the world's sky, and
+gives values to the parameters it declares. It says which shader, a `.surf.hlsl` or a `.sky.hlsl`, the material is
+drawn with; whether it is opaque, masked (pixels below the
 surface's alpha cutoff are discarded) or transparent (blended, drawn after everything opaque); whether its back faces
 are drawn too; and its params, values by the names the surface's parameter block declares, where one left out takes
 the shader's default. The keys and their defaults are the `Material` type's properties, documented on it, and the
@@ -38,9 +39,24 @@ A transparent surface is compiled as a forward surface and may read what was dra
 by roughness, through the contract's helpers for that, as the engine's glass surface does: it emits what it lets
 through, and the renderer adds its reflection at the reflectance its index of refraction gives.
 
+## Writing a sky
+
+A sky is written against its own contract, [Shaders/Include/Sky.hlsli](../Shaders/Include/Sky.hlsli), as a surface is
+against the surface contract: it declares its parameter block as a surface does, and defines the one function that
+says the sky's light along a direction, from what the renderer hands it, the world's sun and its weather among them.
+Its light is in nits, not pre-exposed, as it lights the world: the renderer draws it in the view and captures it for
+light from everywhere and for reflections, so a sky's colours reach everything it lights. It hands back the sun's disc
+apart from the rest, as the capture leaves the disc out, the sun's own light standing for it; so a sky draws its disc
+however it likes, and nothing counts the sun twice. What it gives off pre-exposed, shown as it is whatever the exposure
+and never captured, is handed back apart too: the failure sky shows its magenta that way, so a broken sky never lights
+the world magenta. The weather is the world's state and the params are the sky's look: a sky reads the clouds'
+coverage, colours and wind from its inputs and keeps its params for how it draws them. The engine's procedural sky,
+under `Shaders/Skies/`, is the example.
+
 ## What must agree
 
-- The shader is a `.surf.hlsl`, not a pass shader.
+- The shader is a `.surf.hlsl` for what a mesh draws, or a `.sky.hlsl` for the world's sky, never a pass shader. A
+  mesh that names a sky material is drawn as the failure, and so is a sky whose material is a surface's.
 - Each params key is a member of the surface's parameter block, with the form its type takes.
 - A texture reference names a texture or a `.rtex`, under the key for each.
 - A masked material needs a surface that has an alpha cutoff.
@@ -48,4 +64,5 @@ through, and the renderer adds its reflection at the reflectance its index of re
 ## Adding a material
 
 Write `Name.mat` anywhere under the project's `Assets/`, or in this folder for the engine, and name it from an
-entity's `Renderer`, in the slot its model's mesh names ([Models](../Models/README.md)).
+entity's `Renderer`, in the slot its model's mesh names ([Models](../Models/README.md)), or, for a sky, from the
+world's `Sky`.

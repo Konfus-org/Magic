@@ -19,8 +19,8 @@ An open world to fly over and to stress the engine: one domain, `Assets/Domains/
 across, each region of it a different look. None of it is made as the engine runs: the cells are data, made once, and
 everything in them is a blockout of the engine's basic shapes, placed from the prefabs under `Assets/Prefabs/`
 ([Prefabs](../src/Bundled/Resources/Prefabs/README.md)), so changing a tree's prefab changes every forest. What
-belongs to the whole world, the sun, the sky, the ground, the spawn, the post-processing and the systems, is in the
-domain's `globals.prefab`, and the domain opens whole, as every domain does
+belongs to the whole world, the sun, the sky, the weather, the ground, the spawn, the post-processing and the
+systems, is in the domain's `globals.prefab`, and the domain opens whole, as every domain does
 ([Domains](../src/Bundled/Resources/Domains/README.md), [the world](../src/Core/README.md#the-world)). The first run
 makes every model's clusters and cards, which takes a while; every later run reads them from `Cache/`.
 
@@ -34,7 +34,10 @@ The world's look is data too: an entity in `globals.prefab` with a `PostProcessi
 world is drawn with, `Assets/Pipelines/Daylight.pipeline`, the engine's effects with the exposure metered from the
 light its sun and sky shed rather than from what the view sees, so nearing a dark tower or the bright field never
 changes how everything else looks, and with a height fog whose density by height is a curve, `Assets/Curves/Haze.curve`
-([Curves](../src/Bundled/Resources/Curves/README.md)).
+([Curves](../src/Bundled/Resources/Curves/README.md)). The sky is the engine's procedural one, drawn by the sun and
+the weather beside it: the weather's wind carries the clouds and its coverage says how much of the sky they cover, so
+changing the weather, or turning the sun, changes the sky and the light the world is lit by
+([Materials](../src/Bundled/Resources/Materials/README.md#writing-a-sky)).
 
 ## Scripts and components
 

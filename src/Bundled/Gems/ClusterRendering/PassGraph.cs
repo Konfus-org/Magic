@@ -638,15 +638,17 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// <summary>
     /// What a draw of surfaces binds in its fragment stage: the union over its templates, each over the default surface,
     /// whose every value comes from the materials, so no path of the template folds away as it would over a surface of
-    /// constants, and the visibility buffer's and the sky's also with no surface; and what the surface contract offers
-    /// any surface (Shaders/Include/SurfaceBindings.hlsli), the texture pools, the materials and, for a forward surface,
-    /// the scene behind, whether the probe used them or not.
+    /// constants, and the visibility buffer's also with no surface; the sky's with no sky alone, as a sky reads only the
+    /// frame's constants and what the contract offers; and what the surface contract offers any surface or sky
+    /// (Shaders/Include/SurfaceBindings.hlsli), the texture pools, the materials and, for a forward surface, the scene
+    /// behind, whether the probe used them or not.
     /// </summary>
     private async Task<Result<StageBindings>> ProbeTemplatesAsync(ListedPass pass)
     {
         SurfaceKey surface = new(assets.Default<Shader>(), false, false);
         SurfaceKey none = new(Handle<Shader>.None, false, false);
-        SurfaceKey[] variants = pass.Pass.Draw.Drawn is PassDrawn.Visibility or PassDrawn.Sky ? [surface, none] : [surface];
+        PassDrawn drawn = pass.Pass.Draw.Drawn;
+        SurfaceKey[] variants = drawn == PassDrawn.Sky ? [none] : drawn == PassDrawn.Visibility ? [surface, none] : [surface];
         List<(string Text, string Name)> sources = [];
         foreach (SurfaceKey variant in variants)
         {
@@ -662,7 +664,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             contract.Add(new GpuShaderBinding(pool, GpuBindingKind.Sampled, 0));
         }
 
-        if (pass.Pass.Draw.Drawn == PassDrawn.Transparent && pass.Visible.Exists(info => string.Equals(info.Name, "SceneColor", StringComparison.Ordinal)))
+        if (drawn == PassDrawn.Transparent && pass.Visible.Exists(info => string.Equals(info.Name, "SceneColor", StringComparison.Ordinal)))
         {
             contract.Add(new GpuShaderBinding("SceneColor", GpuBindingKind.Sampled, 0));
         }

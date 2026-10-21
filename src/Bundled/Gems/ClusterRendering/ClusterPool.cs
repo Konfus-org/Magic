@@ -656,7 +656,10 @@ internal sealed class ClusterPool : IDisposable
             void Close()
             {
                 int count = (indices.Count - firstIndex) / 3;
-                if (count > 0) clusters.Add(MakeFlatCluster(vertices, firstVertex, firstIndex, count, mesh.MaterialSlot));
+                if (count > 0)
+                {
+                    clusters.Add(MakeFlatCluster(vertices, firstVertex, firstIndex, count, mesh.MaterialSlot));
+                }
 
                 firstVertex = vertices.Count;
                 firstIndex = indices.Count;

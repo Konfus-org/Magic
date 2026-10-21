@@ -41,7 +41,9 @@ internal sealed class Snapshot : IDisposable
         _systems.Add(world.Add(new CameraCopier(this)));
         _systems.Add(world.Add(new PlayerFinder(this)));
         _systems.Add(world.Add(new SunCopier(this)));
+        _systems.Add(world.Add(new UntaggedSunWarner(this)));
         _systems.Add(world.Add(new SkyCopier(this)));
+        _systems.Add(world.Add(new WeatherCopier(this)));
         _systems.Add(world.Add(new PostProcessingCopier(this)));
     }
 
@@ -192,19 +194,52 @@ internal sealed class Snapshot : IDisposable
         }
     }
 
-    private sealed class SunCopier(Snapshot snapshot) : ISystem<Transform, DirectionalLight>
+    /// <summary>
+    /// The sun: the first directional light tagged as the sun. One that is not tagged lights nothing, as there is one
+    /// sun and the world says which it is.
+    /// </summary>
+    private sealed class SunCopier(Snapshot snapshot) : ISystem<Transform, DirectionalLight, Tags>
     {
         public Phase Phase => Phase.LateUpdate;
 
-        public void Run(in Frame frame, EcsQuery<Transform, DirectionalLight> query)
+        public void Run(in Frame frame, EcsQuery<Transform, DirectionalLight, Tags> query)
         {
             WorldCopy copy = snapshot._back;
-            foreach ((_, Span<Transform> transforms, Span<DirectionalLight> lights) in query)
+            foreach ((_, Span<Transform> transforms, Span<DirectionalLight> lights, Span<Tags> tags) in query)
             {
-                if (copy.Sun is null && lights.Length > 0)
+                for (int i = 0; i < tags.Length && copy.Sun is null; i++)
                 {
-                    copy.Sun = new SunCopy(Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[0].Rotation)), GetIntensity(lights[0].Color, lights[0].Intensity));
+                    if (tags[i].Has(Tag.Sun))
+                    {
+                        Vector3 direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[i].Rotation));
+                        copy.Sun = new SunCopy(direction, GetIntensity(lights[i].Color, lights[i].Intensity));
+                    }
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Says once when a world has directional lights but none tagged as the sun, so the sun it meant is not lost without
+    /// a word.
+    /// </summary>
+    private sealed class UntaggedSunWarner(Snapshot snapshot) : ISystem<DirectionalLight>
+    {
+        private bool _hasWarned;
+
+        public Phase Phase => Phase.LateUpdate;
+
+        public void Run(in Frame frame, EcsQuery<DirectionalLight> query)
+        {
+            if (_hasWarned || snapshot._back.Sun is not null) return;
+
+            foreach ((_, Span<DirectionalLight> lights) in query)
+            {
+                if (lights.Length == 0) continue;
+
+                Debugging.Warn("The world has a directional light but none tagged \"sun\", so it has no sun: give the sun's entity \"tags\": [ \"sun\" ].");
+                _hasWarned = true;
+                return;
             }
         }
     }
@@ -219,6 +254,20 @@ internal sealed class Snapshot : IDisposable
             foreach ((_, Span<Sky> skies) in query)
             {
                 if (copy.Sky is null && skies.Length > 0) copy.Sky = skies[0].Material;
+            }
+        }
+    }
+
+    private sealed class WeatherCopier(Snapshot snapshot) : ISystem<Weather>
+    {
+        public Phase Phase => Phase.LateUpdate;
+
+        public void Run(in Frame frame, EcsQuery<Weather> query)
+        {
+            WorldCopy copy = snapshot._back;
+            foreach ((_, Span<Weather> found) in query)
+            {
+                if (copy.Weather is null && found.Length > 0) copy.Weather = found[0];
             }
         }
     }
@@ -240,7 +289,7 @@ internal sealed class Snapshot : IDisposable
 
 /// <summary>
 /// The world as one frame's Render reads it: what changed among the instances and lights since the copy before, and
-/// the cameras, player, sun, sky and effects as they were. There are two, written and read in turn
+/// the cameras, player, sun, sky, weather and effects as they were. There are two, written and read in turn
 /// (<see cref="Snapshot"/>).
 /// </summary>
 internal sealed class WorldCopy
@@ -260,7 +309,7 @@ internal sealed class WorldCopy
     internal Vector3? Player { get; set; }
 
     /// <summary>
-    /// The first directional light, or none.
+    /// The first directional light tagged as the sun, or none.
     /// </summary>
     internal SunCopy? Sun { get; set; }
 
@@ -268,6 +317,11 @@ internal sealed class WorldCopy
     /// The world's sky, if it has one: its material, which may be none.
     /// </summary>
     internal Handle<Material>? Sky { get; set; }
+
+    /// <summary>
+    /// The world's weather, or none: still air and a clear sky.
+    /// </summary>
+    internal Weather? Weather { get; set; }
 
     /// <summary>
     /// The world's effects, or none.
@@ -282,6 +336,7 @@ internal sealed class WorldCopy
         Player = null;
         Sun = null;
         Sky = null;
+        Weather = null;
         Effects = Handle<Pipeline>.None;
     }
 }

@@ -1,5 +1,6 @@
 // Noise for stochastic effects (ambient occlusion, reflections, shadow filtering, dithering), meant to be resolved
-// over frames by temporal anti-aliasing: cheap, deterministic, and with no texture to bind.
+// over frames by temporal anti-aliasing, and smooth noise for what is drawn as a pattern (clouds): cheap,
+// deterministic, and with no texture to bind.
 
 #ifndef MAGIC_NOISE_HLSLI
 #define MAGIC_NOISE_HLSLI
@@ -49,6 +50,38 @@ float TriangularDither(float2 pixel, uint frame)
     float first = InterleavedGradientNoise(pixel, frame);
     float second = HashToUnit(PcgHash(uint(pixel.x) + uint(pixel.y) * 65536u + frame * 7919u));
     return first + second - 1.0;
+}
+
+// The dot of one of the twelve directions to a cube's edges, picked by a hash, with an offset from a lattice point:
+// the gradients of improved noise (Perlin 2002, "Improving Noise"), which need no table of directions.
+float GradientDot(uint hash, float3 offset)
+{
+    uint h = hash & 15u;
+    float u = h < 8u ? offset.x : offset.y;
+    float v = h < 4u ? offset.y : (h == 12u || h == 14u ? offset.x : offset.z);
+    return ((h & 1u) == 0u ? u : -u) + ((h & 2u) == 0u ? v : -v);
+}
+
+// A hash of a lattice point, the same for the same point however it is reached.
+uint LatticeHash(int3 cell)
+{
+    return PcgHash(asuint(cell.x) + PcgHash(asuint(cell.y) + PcgHash(asuint(cell.z))));
+}
+
+// Improved gradient noise (Perlin 2002): smooth, about -1 to 1, 0 at every lattice point, its gradients at the corners
+// of the point's cell blended by the quintic fade, so its slope is continuous too. Lattice hashes stand in for the
+// paper's permutation table.
+float GradientNoise(float3 position)
+{
+    float3 cell = floor(position);
+    float3 inside = position - cell;
+    float3 fade = inside * inside * inside * (inside * (inside * 6.0 - 15.0) + 10.0);
+    int3 corner = int3(cell);
+    float x00 = lerp(GradientDot(LatticeHash(corner), inside), GradientDot(LatticeHash(corner + int3(1, 0, 0)), inside - float3(1.0, 0.0, 0.0)), fade.x);
+    float x10 = lerp(GradientDot(LatticeHash(corner + int3(0, 1, 0)), inside - float3(0.0, 1.0, 0.0)), GradientDot(LatticeHash(corner + int3(1, 1, 0)), inside - float3(1.0, 1.0, 0.0)), fade.x);
+    float x01 = lerp(GradientDot(LatticeHash(corner + int3(0, 0, 1)), inside - float3(0.0, 0.0, 1.0)), GradientDot(LatticeHash(corner + int3(1, 0, 1)), inside - float3(1.0, 0.0, 1.0)), fade.x);
+    float x11 = lerp(GradientDot(LatticeHash(corner + int3(0, 1, 1)), inside - float3(0.0, 1.0, 1.0)), GradientDot(LatticeHash(corner + int3(1, 1, 1)), inside - float3(1.0, 1.0, 1.0)), fade.x);
+    return lerp(lerp(x00, x10, fade.y), lerp(x01, x11, fade.y), fade.z);
 }
 
 #endif

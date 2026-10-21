@@ -116,6 +116,13 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private string _missingView = string.Empty;
 
+    /// <summary>
+    /// The world's sky material drawn as the failure, said once, and why, on the failure banner while it stays so; none
+    /// and null while the sky is drawn as it is.
+    /// </summary>
+    private Handle<Material> _brokenSky;
+    private string? _skyFailure;
+
     public ClusterRenderingGem(IGpu gpu, IShaderCompiler compiler, Assets assets, Caches caches, World world, Events events, Threads threads, Lifetime lifetime, ClusterRenderingSettings settings, IWindow? window = null, IDebugUI? debug = null, IScripts? scripts = null)
     {
         _gpu = gpu;
@@ -272,11 +279,10 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         CameraCopy? main = GetMainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
         UpdateScene(copy, main, player, frame);
-        DrawnMaterial? sky = copy.Sky is { } material && material != Handle<Material>.None ? _materials.Get(material) : null;
-        SurfaceKey skySurface = sky is { } drawnSky ? drawnSky.Surface : default;
+        (SurfaceKey skySurface, int skyRow) = GetSky(copy);
         UpdateGraph(copy, skySurface);
         PlanGi(main, frame);
-        List<View> views = _views.Prepare(new ViewFrame(copy, frame, sky?.Row ?? 0, MakeCounts(), player, HasJitter()));
+        List<View> views = _views.Prepare(new ViewFrame(copy, frame, skyRow, MakeCounts(), player, HasJitter()));
         _cleared.Clear();
         if (_graph.Current is not { } listing)
         {
@@ -295,7 +301,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
         View shown = views.Find(view => view.Target.IsWindow) ?? views[0];
         SetFrame(main?.Transform.Position ?? shown.Position);
-        _failures.Say(listing.Failures);
+        _failures.Say(listing.Failures, _skyFailure);
         _failures.Begin(_zeros.Buffer);
         RecordScope frameScope = new(_frame, null, shown.Constants, shown.Counts, [], GpuBuffer.None, skySurface, frame);
         for (PassStage stage = PassStage.Probes; stage < PassStage.Cull; stage++)
@@ -332,6 +338,42 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _textures.Flush();
         _models.Flush();
         _materials.Flush();
+    }
+
+    /// <summary>
+    /// What the sky is drawn with this frame, and the row its params are loaded from: the world's sky material's sky
+    /// shader once it is in; the renderer's own sky without one, or while it loads; and the sky failure material when
+    /// the material is no sky, its shader a surface or a sky that does not compile, as a broken material is drawn as
+    /// the failure (<see cref="FailureType.Sky"/>). Why is said in the log and on the failure banner when it breaks.
+    /// </summary>
+    private (SurfaceKey Surface, int Row) GetSky(WorldCopy copy)
+    {
+        Handle<Material> material = copy.Sky ?? Handle<Material>.None;
+        DrawnMaterial? drawn = material == Handle<Material>.None ? null : _materials.Get(material);
+        Handle<Material> broken = drawn is { IsSky: false } ? material : Handle<Material>.None;
+        if (broken != _brokenSky) SayBrokenSky(broken);
+
+        if (broken != Handle<Material>.None) drawn = _materials.Get(_materials.GetFailureMaterial(FailureType.Sky));
+
+        return drawn is { IsSky: true } sky ? (sky.Surface, sky.Row) : (default, 0);
+    }
+
+    /// <summary>
+    /// Takes <paramref name="broken"/> as the sky material drawn as the failure, none when the sky is drawn as it is:
+    /// why goes in the log once and on the failure banner for as long as it stays broken.
+    /// </summary>
+    private void SayBrokenSky(Handle<Material> broken)
+    {
+        _brokenSky = broken;
+        if (broken == Handle<Material>.None)
+        {
+            _skyFailure = null;
+            return;
+        }
+
+        string why = _materials.GetFailure(broken) ?? "a surface, not a sky";
+        _skyFailure = $"Sky {_assets.GetPath(broken) ?? $"{broken.Id}"} is drawn as the failure: {why}";
+        Debugging.Error($"{_skyFailure}.");
     }
 
     /// <summary>

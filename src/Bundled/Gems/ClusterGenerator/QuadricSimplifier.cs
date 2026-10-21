@@ -144,7 +144,10 @@ internal static class QuadricSimplifier
 
                     for (int edge = 0; edge < 3; edge++)
                     {
-                        if (triangle.Error[edge] > threshold || !TryCollapseEdge(triangle, edge, out int removed)) continue;
+                        if (triangle.Error[edge] > threshold || !TryCollapseEdge(triangle, edge, out int removed))
+                        {
+                            continue;
+                        }
 
                         deleted += removed;
                         break;
@@ -173,7 +176,10 @@ internal static class QuadricSimplifier
             ComputeCollapseError(keptId, goneId, out Vector3 place);
             if (_keptDeleted.Length < kept.Count) Array.Resize(ref _keptDeleted, kept.Count * 2);
             if (_goneDeleted.Length < gone.Count) Array.Resize(ref _goneDeleted, gone.Count * 2);
-            if (IsFlipped(place, goneId, kept, _keptDeleted) || IsFlipped(place, keptId, gone, _goneDeleted)) return false;
+            if (IsFlipped(place, goneId, kept, _keptDeleted) || IsFlipped(place, keptId, gone, _goneDeleted))
+            {
+                return false;
+            }
 
             bool ontoKept = place == kept.Position;
             bool ontoGone = !ontoKept && place == gone.Position;

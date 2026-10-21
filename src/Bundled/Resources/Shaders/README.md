@@ -2,8 +2,8 @@
 
 HLSL every renderer shares: the binding model and conventions, the surface contract and the engine's surfaces, and a
 lighting library of physically based shading. A shader is an asset like any other, an `.hlsl` or `.hlsli` with a `.meta`
-beside it, a surface a `.surf.hlsl`. It goes here, in a folder for what it is (`Include/` for the headers, `Lighting/`
-for the library, `Surfaces/`, and a renderer's passes in folders for the stage they run in, its debug views in
+beside it, a surface a `.surf.hlsl` and a sky a `.sky.hlsl`. It goes here, in a folder for what it is (`Include/` for
+the headers, `Lighting/` for the library, `Surfaces/`, `Skies/`, and a renderer's passes in folders for the stage they run in, its debug views in
 `Debug/`), when what uses it ships with Magic, and in the `Resources/Shaders/` of the gem that uses it otherwise. The
 rules every shader follows, and how they are compiled, are in the
 [code standards](../../../../CODESTANDARDS.md#shaders).

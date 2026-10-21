@@ -49,7 +49,7 @@ pipelines: the one the settings pick, and the effects the world's `PostProcessin
   emptied whenever they are made again.
 - **Drawn passes** draw the visibility buffer's pieces a raster bin at a time, the G-buffer a surface's tiles at a time,
   transparent pieces farthest first, depth alone for shadows, or the sky; the renderer composes each surface variant's
-  shader from the pass's template and the surface.
+  shader from the pass's template and the surface, and the sky's from the sky template and the sky shader.
 - **Script passes.** A pass of kind `script` names a `Script` asset, a class that is an `IPipelineScript`, which the
   renderer makes for each listing it builds, through the scripting gem, with the services its constructor asks for, and
   calls on the render thread to record the pass: a hook at a point of the frame for code that is no gem, a HUD, an
@@ -72,8 +72,8 @@ pipelines: the one the settings pick, and the effects the world's `PostProcessin
 ### The copy
 
 In LateUpdate, while the render thread may still be drawing the frame before, systems on the ECS's threads copy what
-Render reads into the copy it is not reading: each instance's transform and renderer, the lights, cameras, sun, sky and
-post-processing. Each instance and light is kept at its entity's slot and compared with what was there, so only what
+Render reads into the copy it is not reading: each instance's transform and renderer, the lights, cameras, sun, sky,
+weather and post-processing. Each instance and light is kept at its entity's slot and compared with what was there, so only what
 changed is passed on. Sync swaps the two copies, and Render reads the one just finished.
 
 Every shader works with positions relative to the camera, the frame's camera position taken from each, so what is
@@ -207,6 +207,20 @@ from showing where they meet or lagging behind a change:
   strongly, made again each frame on the GPU from those that reach the field at all, found first among the table's
   slots, so the list follows lights that move and stays as a level moves.
 
+### The sky
+
+The world's sky material names a sky shader, drawn along each direction over what nothing was drawn on, from the sun
+and the weather the frame's constants hold. The sun is the directional light tagged as the sun: there is one, and the
+world says which it is, so a directional light that is not tagged lights nothing, which the log says once. The weather,
+still air and a clear sky without one, reaches every pass the same way, so whatever the wind should move can read it.
+
+A sky material is a row of the materials as a surface's is, its params packed the same way, but no mesh draws it, so
+it has no bins and no pipelines but the sky's: a mesh that names one is drawn as the shader failure. A sky whose
+material is no sky, a surface's or a sky's that does not compile, is drawn with the sky failure material in its place,
+as a broken material is drawn with a failure material: magenta in the view, and a plain grey sky in the light it sheds,
+so the world it lights stays lit. Why is said in the log once and on the failure banner for as long as it stays broken.
+A world with no sky material has the renderer's own, a gradient as bright as the sun makes it.
+
 ### The sky's light
 
 Captured each frame into a small cube, projected onto nine spherical-harmonic coefficients for light from everywhere,
@@ -310,3 +324,5 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
   sky. What is reflected is the field, flat-coloured and without highlights, a voxel to a quarter of a metre close by
   and coarser further off; and nothing where the world draws no global illumination, the sky alone.
 - A texture's mips are all resident; none is streamed by what the view reads of it.
+- The sky's clouds are drawn in the sky alone: they neither dim the sun's light on the world nor cast shadows on it,
+  so an overcast sky still lights the world with a hard-shadowed sun.

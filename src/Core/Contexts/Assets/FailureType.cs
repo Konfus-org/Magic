@@ -20,4 +20,10 @@ public enum FailureType : byte
     /// A model that does not load: solid red, on a cube.
     /// </summary>
     Mesh,
+
+    /// <summary>
+    /// A sky that cannot be drawn, its material no sky or its sky not compiling: magenta across the view, and a plain
+    /// grey sky in the light it sheds, so the world it lights stays lit.
+    /// </summary>
+    Sky,
 }
