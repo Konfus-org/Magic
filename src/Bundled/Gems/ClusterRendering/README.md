@@ -233,6 +233,9 @@ from showing where they meet or lagging behind a change:
 - A ray that runs out of steps creeping along a surface takes it as hit rather than letting the sky in, and a model
   only a few voxels big is no fatter in the field than its own field reaches, not a solid box, while a floor or a wall
   thinner than a voxel is still closed, so no ray passes through it.
+- A ray that passes into a coarser level close over a surface, a floor it grazes, finds itself inside that level's
+  fatter copy of it, though the finer level held it clear; it stops there only once it goes deeper than it came in, so
+  a ray is not stopped at the line where the levels meet, while well inside a copy still stops it.
 - The field holds each surface's colour as matte, less as much of it as the material is metal: a metal only mirrors
   light, which the field cannot, so it holds none rather than glowing in the sun.
 - What a ray hits is lit by the sun and by the point and spot lights that reach it, each through the field, so lamps
@@ -306,7 +309,9 @@ by as far as the ray went, so a reflection sliding across a mirror or a ball as 
 than smeared, a rough surface's by the surface's own motion; it is clipped toward the colours of the neighbours on the
 same surface, in YCoCg; and the further outside them it was, the less of it is kept, so what changed in a reflection,
 a ball shot across it, is replaced at once rather than trailing. The lighting takes them in place of the sky's
-reflection.
+reflection, with nothing taken off for ambient occlusion, as the ray already met what is in the way: the view's guess
+at it, made around the pixel, would black out a mirror's grazing view of the open sky and hide what lies beside
+something on screen rather than behind it.
 
 ### The air and the fog
 

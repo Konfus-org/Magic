@@ -1,10 +1,15 @@
 // Ground-truth ambient occlusion (Jimenez et al. 2016, "Practical Real-Time Strategies for Accurate Indirect
-// Occlusion"): once per 2 x 2 pixels of the view, at its top-left one, how much of the hemisphere above the surface what the view drew around it
-// leaves open, cosine-weighted, and the middle of what is open, the bent normal. Each slice of the view through the
-// pixel is searched both ways for the highest horizon within a radius, and the arc between the two horizons, clamped to
-// the hemisphere, integrated against the normal projected into the slice. The slices turn by a 4 x 4 pattern of the
-// half-size image's texels that stays put from frame to frame, so the blur after it (GtaoBlur) averages sixteen
-// directions into each pixel with no temporal filter to smear them. Written as the world bent normal in rgb (* 0.5 + 0.5) and visibility in a.
+// Occlusion"): once per 2 x 2 pixels of the view, at its top-left one, how much of the hemisphere above the surface
+// what the view drew around it leaves open, cosine-weighted, and the mean direction of what is open, the bent normal.
+// Each slice of the view through the pixel is searched both ways for the highest horizon within a radius, at whole
+// pixels, so a sample's place is the one its depth was drawn at, and the arc between the two horizons, clamped to the
+// hemisphere, integrated against the normal projected into the slice, for the visibility and the bent normal both
+// (the paper's Algorithm 2 and its extension): the arc's middle alone would lean an open surface's bent normal toward
+// the eye, as every slice shares the view's axis. The slices turn by a 4 x 4 pattern of the half-size image's texels
+// that stays put from frame to frame, so the blur after it (GtaoBlur) averages sixteen directions into each pixel with
+// no temporal filter to smear them. Seen at a grazing angle, an open surface's two slices at one texel can find more
+// than all of it open, and at another less, so the visibility is kept past one until the blur has averaged it. Written
+// as the world bent normal in rgb (* 0.5 + 0.5) and visibility in a.
 
 #include "Include/Math.hlsli"
 #include "Include/Packing.hlsli"
@@ -83,7 +88,7 @@ void main(uint3 thread : SV_DispatchThreadID)
         [loop] for (uint step = 0u; step < steps; step++)
         {
             float t = ((float)step + jitter) / (float)steps;
-            float2 offset = direction * max(radiusPixels * t * t, 1.0);
+            float2 offset = round(direction * max(radiusPixels * t * t, 1.0));
             [unroll] for (uint side = 0u; side < 2u; side++)
             {
                 float2 at = side == 0u ? pixel + offset : pixel - offset;
@@ -110,13 +115,13 @@ void main(uint3 thread : SV_DispatchThreadID)
 
         float h1 = n + min(FastAcos(clamp(ahead, -1.0, 1.0)) - n, HalfPi);
         float h0 = n + max(-FastAcos(clamp(behind, -1.0, 1.0)) - n, -HalfPi);
-        float open = projectedLength * (Arc(h0, n) + Arc(h1, n));
-        float middle = 0.5 * (h0 + h1);
-        visibility += open;
-        bent += (view * cos(middle) + ortho * sin(middle)) * open;
+        visibility += projectedLength * (Arc(h0, n) + Arc(h1, n));
+        float across = (6.0 * sin(h0 - n) - sin(3.0 * h0 - n) + 6.0 * sin(h1 - n) - sin(3.0 * h1 - n) + 16.0 * sin(n) - 3.0 * (sin(h0 + n) + sin(h1 + n))) / 12.0;
+        float toward = (-cos(3.0 * h0 - n) - cos(3.0 * h1 - n) + 8.0 * cos(n) - 3.0 * (cos(h0 + n) + cos(h1 + n))) / 12.0;
+        bent += (ortho * across + view * toward) * projectedLength;
     }
 
-    visibility = saturate(visibility / (float)slices);
+    visibility = max(visibility / (float)slices, 0.0);
     float3 bentWorld = dot(bent, bent) > 1e-8 ? ViewToWorld(normalize(bent)) : worldNormal;
     AmbientOcclusionNoisy[thread.xy] = float4(bentWorld * 0.5 + 0.5, visibility);
 }

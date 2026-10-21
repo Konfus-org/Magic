@@ -50,10 +50,10 @@ float3 BoxProjectedDirection(float3 position, float3 direction, float3 boxMin, f
 
 // The luminance a surface sends toward the viewer from its environment. irradiance is ShIrradiance at the normal (or
 // a probe's); prefiltered the prefiltered radiance along SpecularDominantDirection at the surface's roughness, and
-// coatPrefiltered the same at the coat's (read for clear coat only); the occlusions come from ambient occlusion
+// coatPrefiltered the same at the coat's (read for clear coat only); each already less what occlusion hides of it
 // (Lighting/Ambient.hlsli). Cloth's sheen is lit by the irradiance, its lobe being wide; subsurface's transmission
 // takes no ambient of its own.
-float3 ShadeAmbient(Shading shading, float3 irradiance, float3 prefiltered, float3 coatPrefiltered, float diffuseOcclusion, float specularOcclusion)
+float3 ShadeAmbient(Shading shading, float3 irradiance, float3 prefiltered, float3 coatPrefiltered)
 {
     // Single scattering reflects the prefiltered radiance; what bounces between microfacets leaves spread out, as
     // irradiance does; the diffuse layer gets what is left.
@@ -62,18 +62,18 @@ float3 ShadeAmbient(Shading shading, float3 irradiance, float3 prefiltered, floa
     float3 averageFresnel = shading.f0 + (1.0 - shading.f0) / 21.0;
     float3 multipleScatter = singleScatter * averageFresnel * (1.0 - albedo) / (1.0 - (1.0 - albedo) * averageFresnel);
     float3 diffuse = shading.diffuseColor * (1.0 - singleScatter - multipleScatter);
-    float3 ambient = singleScatter * prefiltered * specularOcclusion + (multipleScatter + diffuse) * irradiance * diffuseOcclusion;
+    float3 ambient = singleScatter * prefiltered + (multipleScatter + diffuse) * irradiance;
 
     [branch] if (shading.model == ShadingClearCoat)
     {
         float coatFresnel = F_Schlick(CoatF0, 1.0, shading.nov) * shading.modelData.x;
-        return ambient * (1.0 - coatFresnel) + coatPrefiltered * (coatFresnel * specularOcclusion);
+        return ambient * (1.0 - coatFresnel) + coatPrefiltered * coatFresnel;
     }
 
     [branch] if (shading.model == ShadingCloth)
     {
         float3 sheenColor = shading.modelData.x * sqrt(shading.baseColor);
-        return ambient * saturate(1.0 - Max3(sheenColor) * shading.sheenAlbedo) + sheenColor * (shading.sheenAlbedo * diffuseOcclusion) * irradiance;
+        return ambient * saturate(1.0 - Max3(sheenColor) * shading.sheenAlbedo) + sheenColor * shading.sheenAlbedo * irradiance;
     }
 
     return ambient;

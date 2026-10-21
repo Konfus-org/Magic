@@ -1,7 +1,8 @@
 // The ambient occlusion GTAO found at half size, each pixel the average of the 4 x 4 texels around it, so the sixteen
 // slice directions of its pattern meet in every pixel; a texel counts less the further the depth it was found at is
-// from the pixel's, so occlusion does not bleed across an edge onto what is in front or behind. The texels a group's
-// pixels average are read once for the group, each with the view depth it was found at.
+// from the pixel's, so occlusion does not bleed across an edge onto what is in front or behind. The visibility is held
+// to one only once averaged, as a texel's two slices can find more open than there is. The texels a group's pixels
+// average are read once for the group, each with the view depth it was found at.
 
 // Pixels a side of a group, and the half-size texels a side its pixels' 4 x 4s cover.
 static const uint Group = 16u;
@@ -37,7 +38,8 @@ void main(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, uint ind
     float depth = Depth.SampleLevel(DepthSampler, pixel * ViewTexel, 0.0);
     [branch] if (depth <= 0.0)
     {
-        AmbientOcclusion[thread.xy] = AmbientOcclusionNoisy.SampleLevel(AmbientOcclusionNoisySampler, pixel * ViewTexel, 0.0);
+        float4 found = AmbientOcclusionNoisy.SampleLevel(AmbientOcclusionNoisySampler, pixel * ViewTexel, 0.0);
+        AmbientOcclusion[thread.xy] = float4(found.rgb, saturate(found.a));
         return;
     }
 
@@ -58,5 +60,6 @@ void main(uint3 thread : SV_DispatchThreadID, uint3 group : SV_GroupID, uint ind
     }
 
     // A pixel no texel near enough in depth vouches for, at an edge the half size missed, keeps its nearest.
-    AmbientOcclusion[thread.xy] = weights > 1e-4 ? sum / weights : SharedOcclusion[centre.y * (int)Span + centre.x];
+    float4 averaged = weights > 1e-4 ? sum / weights : SharedOcclusion[centre.y * (int)Span + centre.x];
+    AmbientOcclusion[thread.xy] = float4(averaged.rgb, saturate(averaged.a));
 }

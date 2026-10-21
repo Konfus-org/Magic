@@ -17,7 +17,7 @@ model, adds the key light through its shadow (the sun by day, the moon by night,
 light), the other directional lights whole, and each local light that reaches the pixel, walked from the frame's light
 bins and tiles, then light from everywhere: the sky's harmonics, or the probes of global illumination where they hold the
 place, for diffuse, and the sky prefiltered by roughness for reflections, coloured by the probes along the reflection
-where they hold it, or the world's traced reflections where the renderer has them, less what occlusion hides. The
+where they hold it, less what occlusion hides, or the world's traced reflections where the renderer has them. The
 renderer multiplies by exposure and adds the surface's emissive,
 which is pre-exposed already. The pieces, each in its own header under `Lighting/` or `Include/`, which documents what
 it offers:
@@ -47,8 +47,9 @@ it offers:
   probes (`Lighting/Gi.hlsli`): the probes' irradiance over pi, as the harmonics' is, with how much of it the probes
   hold, the rest the sky's.
 - **Occlusion.** Multi-bounce ambient occlusion lets a bright surface fill in its creases; specular occlusion hides the
-  reflections a crease's bent normal says are hidden, beyond what the open hemisphere would, or from visibility alone
-  where there is no bent normal.
+  reflections of the cube and the probes a crease's bent normal says are hidden, beyond what the open hemisphere would,
+  or from visibility alone where there is no bent normal. A traced reflection takes none: its ray met what is in the
+  way, where a guess from the view around the pixel would hide a mirror's grazing view of the open sky.
 - **Shadows.** The shadow filter reads a reverse-Z shadow map, a single texture such as an atlas whose tiles keep their
   taps inside them, by a tent of comparisons gathered from a few bilinear taps with a sampler that compares
   GreaterOrEqual; a normal offset keeps a receiver off itself.

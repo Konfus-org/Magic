@@ -174,7 +174,8 @@ float3 Shade(ShadePoint surface)
     }
 
     // The material's own occlusion, and what the view's ambient occlusion found open around the pixel, whose middle,
-    // the bent normal, light from everywhere arrives along and hides the reflections a crease would.
+    // the bent normal, light from everywhere arrives along and hides the reflections of the sky and the probes a crease
+    // would.
     float visibility = surface.occlusion;
     float3 open = surface.normal;
     float specularOcclusion = SpecularOcclusion(nov, visibility, surface.roughness);
@@ -185,7 +186,9 @@ float3 Shade(ShadePoint surface)
     open = dot(bent, bent) > 1e-4 ? normalize(bent) : surface.normal;
     specularOcclusion = SpecularOcclusionCone(open, visibility, reflected, surface.roughness);
 #endif
-    // What the surface reflects, traced, where it is smooth enough to have it, in place of the sky's.
+    // What the surface reflects, traced, where it is smooth enough to have it, in place of the sky's. Its ray met what
+    // is in the way, so occlusion takes nothing off it: guessed from the view around the pixel, it would hide a mirror's
+    // grazing reflection of the open sky, or what lies beside something on screen rather than behind it.
     float4 traced = float4(0.0, 0.0, 0.0, 0.0);
 #if defined(HAS_Reflections) && !SURFACE_FORWARD
     traced = Reflections.Load(int3(surface.pixel, 0));
@@ -214,9 +217,9 @@ float3 Shade(ShadePoint surface)
         }
     }
 #endif
-    prefiltered = lerp(prefiltered, traced.rgb, traced.a);
+    prefiltered = lerp(prefiltered * specularOcclusion, traced.rgb, traced.a);
     float3 bounced = MultiBounceAo(visibility, shading.diffuseColor);
-    luminance += ShadeAmbient(shading, irradiance * bounced, prefiltered, coatPrefiltered, 1.0, specularOcclusion);
+    luminance += ShadeAmbient(shading, irradiance * bounced, prefiltered, coatPrefiltered * specularOcclusion);
     return luminance;
 }
 
