@@ -20,7 +20,7 @@ world not loading and a domain open, however long its shaders take to compile, s
 screen; a short `wait` after it lets what fades in settle, and `quit` ends the run once the script is done:
 
 ```bash
-printf 'wait loaded\nwait 600\nscreenshot\nquit\n' | Magic --project samples --frames 20000
+printf 'wait loaded\nwait 600\nscreenshot\nquit\n' | Magic --project samples --seconds 600
 ```
 
 `screenshot` asks the GPU provider for the window's presented image ([Core's README](../../../Core/README.md#the-gpu))

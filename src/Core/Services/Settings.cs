@@ -347,6 +347,7 @@ public sealed class Settings : IDisposable
             {
                 ProjectPath = _args.ProjectPath,
                 FrameLimit = _args.FrameLimit,
+                TimeLimit = _args.TimeLimit,
                 Headless = _args.Headless,
                 Settings = lines,
                 Preset = preset

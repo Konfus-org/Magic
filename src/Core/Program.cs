@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime;
 using Magic.Contexts.CmdLine;
 using Magic.Services;
@@ -32,6 +33,23 @@ internal static class Program
         Option<ulong?> frames = new("--frames")
         {
             Description = "Stop after this many frames, instead of running until a gem stops it.",
+        };
+        Option<TimeSpan?> seconds = new("--seconds")
+        {
+            Description = "Stop once the run has gone on this many seconds, however many frames that is: a ceiling "
+                + "for a run that should have stopped sooner. A run that must stop at the same point counts --frames.",
+            CustomParser = static result =>
+            {
+                if (!double.TryParse(result.Tokens[0].Value, CultureInfo.InvariantCulture, out double limit)
+                    || limit is not > 0
+                    || limit >= TimeSpan.MaxValue.TotalSeconds)
+                {
+                    result.AddError("--seconds takes a number of seconds above 0.");
+                    return null;
+                }
+
+                return TimeSpan.FromSeconds(limit);
+            },
         };
         Option<bool> headless = new("--headless")
         {
@@ -68,6 +86,7 @@ internal static class Program
         RootCommand command = new("Magic runs a project and its gems.") {
             project,
             frames,
+            seconds,
             headless,
             settings,
             preset,
@@ -87,6 +106,7 @@ internal static class Program
         {
             ProjectPath = parsed.GetRequiredValue(project),
             FrameLimit = parsed.GetValue(frames) ?? ulong.MaxValue,
+            TimeLimit = parsed.GetValue(seconds) ?? TimeSpan.MaxValue,
             Headless = parsed.GetValue(headless),
             Settings = parsed.GetValue(settings) ?? [],
             Preset = parsed.GetValue(preset) ?? string.Empty,

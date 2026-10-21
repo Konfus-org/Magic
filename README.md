@@ -62,6 +62,9 @@ repository's build ([Tools](tools/README.md#templates)).
 
 `Magic --help` lists the options. `--project` takes a `.magic` file or the folder holding one, and `--frames <n>`
 stops after n frames; closing the window stops sooner, as does a console gem's `quit` command typed in the terminal.
+`--seconds <n>` stops once the run has gone on n seconds, however many frames that is: a ceiling for a run that
+should have stopped sooner, as frames take no fixed time, where a run that must stop at the same point every time
+counts frames.
 `--headless` is for runs without a window: gems open none, and Ctrl+C stops the run cleanly, ending its gems, where
 otherwise it ends the process at once. `--set Gem.setting=value`, as many times as needed, overrides a gem's setting
 from the presets, and `--preset Name` applies a preset, an asset of such settings for a kind of machine, over the

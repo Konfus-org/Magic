@@ -32,7 +32,7 @@ What Validate runs, for when you need one step on its own:
 dotnet build Magic.slnx
 dotnet format Magic.slnx --verify-no-changes --no-restore
 dotnet test Magic.slnx
-'wait loaded', 'quit' | Magic --project samples --frames 20000 --fail-on-error --headless
+'wait loaded', 'quit' | Magic --project samples --seconds 600 --fail-on-error --headless
 tools/Screenshot.ps1
 ```
 

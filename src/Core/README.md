@@ -19,11 +19,11 @@ render thread. It:
    settings are made first of all, since every gem's are made from the presets.
 3. **Runs frames** on a main thread started beside the render thread ([The frame](#the-frame)). Before the first
    frame, on the main thread, the world opens the project's entry point, or is put back as the run before left it.
-4. **Ends the gems** once a gem stops the run through `Lifetime`, the `--frames` limit is reached, or Ctrl+C is
-   pressed in a `--headless` run (with a window, Ctrl+C ends the process at once, as it does any program). Each gem's
-   `Stop` runs on the main thread, in reverse order, ending what it owns of that thread's; then each gem's `Dispose`
-   runs on the render thread, in reverse order, so each ends before what it uses. One that throws while ending is
-   logged, and the rest still end.
+4. **Ends the gems** once a gem stops the run through `Lifetime`, the `--frames` or `--seconds` limit is reached, or
+   Ctrl+C is pressed in a `--headless` run (with a window, Ctrl+C ends the process at once, as it does any program).
+   Each gem's `Stop` runs on the main thread, in reverse order, ending what it owns of that thread's; then each gem's
+   `Dispose` runs on the render thread, in reverse order, so each ends before what it uses. One that throws while
+   ending is logged, and the rest still end.
 
 A run can also restart, which `Lifetime` offers and a change to a `[RequireRestart]` setting asks for: the world is
 saved on the main thread as the last frame ends ([The world](#the-world)), the gems end, and the project runs again at

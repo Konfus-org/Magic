@@ -24,8 +24,8 @@ public static class Engine
     /// <summary>
     /// Runs the project <paramref name="args"/> names. The calling thread must be the process's first: it becomes the
     /// render thread, which the OS ties windows and their events to, and makes and ends the gems; the frames' game side
-    /// runs on a main thread started beside it. Returns once a gem stops the run or the frame limit is reached, or
-    /// false straight away when the project cannot be opened (the reason is logged). Whatever fails after that is
+    /// runs on a main thread started beside it. Returns once a gem stops the run or its frame or time limit is reached,
+    /// or false straight away when the project cannot be opened (the reason is logged). Whatever fails after that is
     /// logged, and the run goes on without it.
     /// <para>
     /// Core's services, the world among them, and every gem and the interfaces each provides, are registered with a
@@ -107,7 +107,16 @@ public static class Engine
         world.Preloaders = preloaders;
         using Subscription codeBuilds = loader.WatchCode(container.GetRequiredService<Assets>());
 
-        using FrameLoop frames = new(gems, world, lifetime, threads, events, settings, args.FrameLimit, seconds);
+        using FrameLoop frames = new(
+            gems,
+            world,
+            lifetime,
+            threads,
+            events,
+            settings,
+            args.FrameLimit,
+            args.TimeLimit,
+            seconds);
         (Args Args, Task<WorldState> Saving, double Seconds)? next = null;
         threads.Run(
             () =>

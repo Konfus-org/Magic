@@ -17,6 +17,13 @@ public sealed class Args
     public ulong FrameLimit { get; init; } = ulong.MaxValue;
 
     /// <summary>
+    /// How long to run before stopping, by the frame clock, which goes on across a restart; by default the run goes on
+    /// until a gem stops it. A ceiling for a run that should have stopped sooner, as frames take no fixed time; a run
+    /// that must stop at the same point every time counts frames instead.
+    /// </summary>
+    public TimeSpan TimeLimit { get; init; } = TimeSpan.MaxValue;
+
+    /// <summary>
     /// The run has no window: Ctrl+C stops it cleanly, ending its gems, instead of ending the process at once.
     /// </summary>
     public bool Headless { get; init; }

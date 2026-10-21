@@ -48,7 +48,9 @@ endings; runs the tests against that build; runs the samples
 headless under `--fail-on-error`, which exits 2 when any error was logged, until their world has loaded; and runs them
 with a window through `Screenshot.ps1`, which needs a display and a GPU. Both runs wait for the world rather than for a
 number of frames, through the console's `wait loaded`, so they prove the shaders compile and the domain opens, and a
-world that never loads fails rather than passing on the loading screen; the frame count is only a ceiling. It ends
+world that never loads fails rather than passing on the loading screen. What bounds them is a time limit, Magic's
+`--seconds`, only a ceiling: a frame count would be none, as a headless loading screen costs next to nothing to draw,
+so thousands of frames go by while a cold shader cache compiles, and how many depends on the machine. It ends
 with one line per step and its exit code, `PASSED` or which step failed, and the screenshot's path, which is to be
 opened and looked at: the run is the evidence that the change works, and the image is what shows it. Its parameters,
 documented in the script, pick the steps, the build and another project.
@@ -64,8 +66,9 @@ project ends, so which native library is building, and for how long, shows as it
 `Screenshot.ps1` is the visual check: it runs the project with a window, pipes console lines in, and prints the PNG's
 path as its only output, so `$png = tools/Screenshot.ps1` keeps it. It waits until the world has loaded, however long a
 cold shader cache takes, then a while longer for what fades in to settle, takes the screenshot and quits; a world that
-never loads within the frame ceiling fails the run. Console lines can be sent before the screenshot, such as choosing
-a debug view, so what the image shows is chosen rather than found. It does not build: run the build step first.
+never loads within the time limit fails the run. The wait to settle is counted in frames, so every run's image is
+taken at the same point. Console lines can be sent before the screenshot, such as choosing a debug view, so what the
+image shows is chosen rather than found. It does not build: run the build step first.
 
 ## AgentTaskComplete.ps1
 

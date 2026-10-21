@@ -14,15 +14,17 @@ tools/Format.ps1 would change, what a build cannot check among it, such as a fil
 restore and the generated code of the configuration built, so running it alone (-Only Format) needs a build.
 The tests run against that build, so running them alone (-Only Test) needs one. Both sample runs pass --fail-on-error,
 so an error logged during a run exits 2, and both wait until the world has loaded (the console's wait loaded), shaders
-compiled and the domain open, so a world that never loads fails rather than passing on the loading screen. The
+compiled and the domain open, so a world that never loads fails rather than passing on the loading screen. Their
+ceiling is a time, not a frame count: a headless loading screen costs next to nothing to draw, so thousands of frames
+can go by while shaders compile. The
 Screenshot step runs tools/Screenshot.ps1 and prints the image's path last: open it and look at what it shows before
 reporting the change as working. It needs a display and a GPU; the others do not. Runs from any current directory.
 
 .PARAMETER Configuration
 The build configuration: Debug, Optimize or Release.
 
-.PARAMETER Frames
-The most frames each sample run may last before it counts as never having loaded: a ceiling, not a wait.
+.PARAMETER Seconds
+The longest each sample run may last, in seconds, before it counts as never having loaded: a ceiling, not a wait.
 
 .PARAMETER Project
 The project the sample runs open: a .magic file or the folder holding one, relative to the repository root.
@@ -42,7 +44,7 @@ param(
     [ValidateSet('Debug', 'Optimize', 'Release')]
     [string] $Configuration = 'Debug',
     [ValidateRange(1, [int]::MaxValue)]
-    [int] $Frames = 20000,
+    [int] $Seconds = 600,
     [string] $Project = 'samples',
     [ValidateSet('Build', 'Format', 'Test', 'Headless', 'Screenshot')]
     [string[]] $Only = @('Build', 'Format', 'Test', 'Headless', 'Screenshot')
@@ -73,12 +75,12 @@ function Invoke-FormatCheck {
     }
 }
 
-# Runs the project headless until its world has loaded, then quits; a run that reaches -Frames first never loaded.
+# Runs the project headless until its world has loaded, then quits; a run that reaches -Seconds first never loaded.
 function Invoke-Headless {
-    $log = @('wait loaded', 'quit') | & $magic --project $projectPath --frames $Frames --fail-on-error --headless | ForEach-Object { Write-Host $_; $_ }
+    $log = @('wait loaded', 'quit') | & $magic --project $projectPath --seconds $Seconds --fail-on-error --headless | ForEach-Object { Write-Host $_; $_ }
     $code = $LASTEXITCODE
     if ($code -eq 0 -and -not ($log | Select-String -SimpleMatch 'quit typed in the terminal')) {
-        Write-Host "FAILED: the world never finished loading within $Frames frames."
+        Write-Host "FAILED: the world never finished loading within $Seconds s."
         $code = 1
     }
     $global:LASTEXITCODE = $code
@@ -86,7 +88,7 @@ function Invoke-Headless {
 
 # Runs tools/Screenshot.ps1 and keeps the image's path, its last line of output.
 function Invoke-Screenshot {
-    $output = & (Join-Path $PSScriptRoot 'Screenshot.ps1') -Configuration $Configuration -Frames $Frames -Project $Project
+    $output = & (Join-Path $PSScriptRoot 'Screenshot.ps1') -Configuration $Configuration -Seconds $Seconds -Project $Project
     $code = $LASTEXITCODE
     if ($code -eq 0) { $script:screenshot = @($output)[-1] }
     $global:LASTEXITCODE = $code

@@ -85,6 +85,7 @@ internal sealed class FrameLoop : IDisposable
     private readonly Events _events;
     private readonly Settings _settings;
     private readonly ulong _frameLimit;
+    private readonly TimeSpan _timeLimit;
 
     /// <summary>
     /// Set while the render thread has no frame: it starts set, is reset as a frame is handed over and set again once
@@ -112,6 +113,7 @@ internal sealed class FrameLoop : IDisposable
         Events events,
         Settings settings,
         ulong frameLimit,
+        TimeSpan timeLimit,
         double startSeconds)
     {
         _gems = [.. gems];
@@ -135,6 +137,7 @@ internal sealed class FrameLoop : IDisposable
         _events = events;
         _settings = settings;
         _frameLimit = frameLimit;
+        _timeLimit = timeLimit;
         _renderFrame = RenderFrame;
         _fixedSeconds = startSeconds;
 
@@ -153,8 +156,8 @@ internal sealed class FrameLoop : IDisposable
     }
 
     /// <summary>
-    /// Runs frames until the run stops or the frame limit is reached, then waits for the last to be rendered. On the
-    /// main thread.
+    /// Runs frames until the run stops, the frame limit is reached or the frame clock reaches the time limit, then
+    /// waits for the last to be rendered. On the main thread.
     /// </summary>
     internal void Run()
     {
@@ -170,6 +173,12 @@ internal sealed class FrameLoop : IDisposable
             }
 
             double seconds = began + Stopwatch.GetElapsedTime(start).TotalSeconds;
+            if (seconds >= _timeLimit.TotalSeconds)
+            {
+                _lifetime.Stop($"ran {_timeLimit.TotalSeconds} s");
+                break;
+            }
+
             Frame frame = new(index, (float)(seconds - previousSeconds), seconds);
             if (index > 0) _frameDuration.Record(seconds - previousSeconds);
 

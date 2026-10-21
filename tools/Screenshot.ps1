@@ -9,7 +9,7 @@ however long its shaders take to compile, a wait for what fades in to settle, an
 screenshot and quit. The log is shown as it comes; the script's only output is the path of the PNG, its last line, so a
 caller can keep it: $png = tools/Screenshot.ps1. Open the image and look at it: a screenshot that was taken is not one
 that shows the change working. The run fails when Magic exits non-zero, when the world never finished loading within
--Frames, or when no screenshot was logged. Needs a display and a GPU, and a build (tools/Validate.ps1 -Only Build).
+-Seconds, or when no screenshot was logged. Needs a display and a GPU, and a build (tools/Validate.ps1 -Only Build).
 Runs from any current directory.
 
 .PARAMETER Configuration
@@ -19,8 +19,8 @@ The build configuration whose Magic runs: Debug, Optimize or Release.
 How many frames pass after the world has loaded before the screenshot, for what fades in, streams in or gathers light
 over frames to settle.
 
-.PARAMETER Frames
-The most frames the run may last: a ceiling, not a wait. A run that has not loaded its world by then fails.
+.PARAMETER Seconds
+The longest the run may last, in seconds: a ceiling, not a wait. A run that has not loaded its world by then fails.
 
 .PARAMETER Project
 The project to run: a .magic file or the folder holding one, relative to the repository root.
@@ -42,7 +42,7 @@ param(
     [ValidateRange(0, [int]::MaxValue)]
     [int] $Settle = 600,
     [ValidateRange(1, [int]::MaxValue)]
-    [int] $Frames = 20000,
+    [int] $Seconds = 600,
     [string] $Project = 'samples',
     [string[]] $Commands = @()
 )
@@ -63,7 +63,7 @@ $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else {
 
 # The screenshot is written by a worker, so the run goes on a few frames before it quits.
 $lines = @('wait loaded', "wait $Settle") + $Commands + @('wait 60', 'screenshot', 'wait 60', 'quit')
-$log = $lines | & $magic --project $projectPath --frames $Frames --fail-on-error | ForEach-Object { Write-Host $_; $_ }
+$log = $lines | & $magic --project $projectPath --seconds $Seconds --fail-on-error | ForEach-Object { Write-Host $_; $_ }
 $code = $LASTEXITCODE
 
 # A line reads "12:34:56.789 Info     f1234 t1 Screenshot: <path> (File.cs:60 Member)".
@@ -73,7 +73,7 @@ if ($code -ne 0) {
     exit $code
 }
 if ($null -eq $found) {
-    Write-Host "FAILED: the world never finished loading within $Frames frames, so no screenshot was taken."
+    Write-Host "FAILED: the world never finished loading within $Seconds s, so no screenshot was taken."
     exit 1
 }
 $path = $found.Matches[0].Groups[1].Value
