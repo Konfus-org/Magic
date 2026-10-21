@@ -24,7 +24,7 @@ void main(uint3 thread : SV_DispatchThreadID)
     float3 origin = GiProbePosition(level, probe);
     float3 direction = GiRayDirection(ray, header.rays, header.seed);
     float maxDistance = GiLevel(header.levels - 1u).voxel * (float)GiResolution * 0.5;
-    GiHit hit = GiTrace(origin, direction, index, header.levels, maxDistance, 0.2);
+    GiHit hit = GiTrace(origin, direction, index, header.levels, maxDistance, 0.2, false);
     if (!hit.isHit)
     {
         STORE(GiRays, float4, thread.x, float4(SkyCube.SampleLevel(SkyCubeSampler, direction, 2.0).rgb, maxDistance));

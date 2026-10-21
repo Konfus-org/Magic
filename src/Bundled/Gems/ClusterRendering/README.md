@@ -307,19 +307,33 @@ Colbert 2008), which every surface reflects the sky by.
 ### Reflections
 
 An effect: each pixel smooth enough to show them, past a roughness the settings set none, traces a ray from its GGX
-lobe, a new one each frame, through global illumination's field when the world draws it, and what it hits is lit as
-the field lights it: by its probes, the sun and the lights near it, through the field's own shadows; past everything,
-the sky as rough as the surface. Nothing is read from the view, so a reflection shows the same whatever is on screen,
-what is behind the camera or hidden as much as what is in sight, and only as coarsely as the field holds it, a voxel
-of flat colour with no highlights of its own. A ray sets out through the field from the finest level that holds its
+lobe, a new one each frame, first across the view and then, where the view cannot say, through global illumination's
+field when the world draws it.
+
+Across the view, the ray is marched against this frame's depth a few pixels at a time, so what is drawn narrower than
+that may be stepped over; where it first goes behind what was drawn, just behind a surface is a hit, shown as the view
+lit it the frame before, which the effect keeps in nits for it, as reflections are traced before this frame is lit: the
+thing itself, its own size, colour and highlights, read where it was drawn then, so what moves is followed. Far behind
+is the ray gone behind something whose far side the view never drew, the underside of a ball over a mirror; then, and
+where the ray leaves the view, the field takes the ray on from its last step in front, so what the field shows stands
+where the view would have it. Toward the view's edges what the view showed gives way to the field's, so a reflection
+does not jump as what it shows leaves the view.
+
+What the field shows is lit as it lights it: by its probes, the sun and the lights near it, through the field's own
+shadows; past everything, the sky as rough as the surface. It is the same whatever is on screen, what is behind the
+camera or hidden as much as what is in sight, only as coarsely as the field holds it, a voxel of flat colour with no
+highlights of its own. A ray the view could not start sets out through the field from the finest level that holds its
 surface, a voxel and a half of that level off it, so a far surface's ray does not start inside its own coarse copy;
 moved out of the field along its gradient where it starts inside another surface's fattened band, the foot of a wall
 within the floor's; and a voxel along the ray, past the field's rounding of its own corners, which a ray leaving a
-corner at a grazing angle would otherwise meet. A ray stops on the field's surface, not a little short of it as a
-probe's does, so a reflection is no larger than the field holds what it shows: true to size for what is a voxel or more
-across, while what is thinner, a ball shot far off or a lamp's post, shows a voxel and a half wide, fattened so that it
-closes as a wall must. A rough surface traces two rays and takes their mean, as its lobe is
-wide. The rays are filtered across the surface, over a wider patch the rougher it is, and blended over frames, more of
+corner at a grazing angle would otherwise meet. One the field takes on may start within the copy of the surface it
+leaves, which it goes on out of, or of what it is about to meet, which is then what it meets. A ray stops on the
+field's surface, not a little short of it as a probe's does, so what the field shows is no larger than it holds it: true
+to size for what is a voxel or more across, while what is thinner shows a voxel and a half wide, fattened so that it
+closes as a wall must, where the view does not show it. A rough surface traces two rays and takes their mean, as its
+lobe is wide.
+
+The rays are filtered across the surface, over a wider patch the rougher it is, and blended over frames, more of
 the last kept the rougher the surface: last frame's is looked for where the reflection's image was, behind the surface
 by as far as the ray went, so a reflection sliding across a mirror or a ball as the camera moves is followed rather
 than smeared, a rough surface's by the surface's own motion; it is clipped toward the colours of the neighbours on the

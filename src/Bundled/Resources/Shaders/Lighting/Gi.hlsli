@@ -354,8 +354,10 @@ struct GiHit
 // within that level's fatter copy of a surface the finer one held it clear of, one grazing a floor where the levels
 // meet, reads the coarser field raised by as deep as it came in, less as it climbs back out, so it stops only once it
 // goes deeper than it came in rather than where the levels meet; well inside a copy still stops it, which is all a wall
-// thinner than a voxel is held in by.
-GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float maxDistance, float stop)
+// thinner than a voxel is held in by. A ray that is leaving sets out within a copy it is known to be clear of, the
+// copy of the surface it leaves, and is held to the same: it stops only once it goes deeper than it set out, even well
+// inside, until it has climbed out.
+GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float maxDistance, float stop, bool isLeaving)
 {
     GiHit hit;
     hit.isHit = false;
@@ -367,6 +369,7 @@ GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float ma
     GpuGiLevel level = GiLevel(index);
     float t = 0.0;
     float sunk = 0.0;
+    float left = 0.0;
     [loop] for (uint step = 0u; step < 128u; step++)
     {
         float3 position = origin + direction * t;
@@ -386,11 +389,12 @@ GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float ma
         float field = GiFieldAt(level, index, position);
         float shortfall = max(0.3 * level.voxel - field, 0.0);
         sunk = index != was ? shortfall : min(sunk, shortfall);
-        float distance = field + sunk;
+        left = step == 0u && isLeaving ? shortfall : min(left, shortfall);
+        float distance = field + max(sunk, left);
         hit.distance = t;
         hit.level = index;
         hit.position = position;
-        if (distance < stop * level.voxel || field < -0.2 * level.voxel)
+        if (distance < stop * level.voxel || field + left < -0.2 * level.voxel)
         {
             hit.isHit = true;
             hit.isInside = step == 0u && distance < 0.0;

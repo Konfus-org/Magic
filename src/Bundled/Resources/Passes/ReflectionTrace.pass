@@ -4,7 +4,8 @@
     "shader": { "id": 11286 },
     "creates": [
         { "name": "ReflectionTraced", "filter": "nearest", "format": "rgba16_float" },
-        { "name": "ReflectionDistance", "filter": "nearest", "format": "r16_float" }
+        { "name": "ReflectionDistance", "filter": "nearest", "format": "r16_float" },
+        { "name": "ReflectionScene", "format": "rgba16_float", "levels": 5, "history": true }
     ],
     "writes": [ { "name": "ReflectionTraced" }, { "name": "ReflectionDistance" } ],
     "dispatch": { "per": "view" }

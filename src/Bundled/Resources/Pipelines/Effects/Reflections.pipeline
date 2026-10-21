@@ -1,7 +1,9 @@
 {
-    // Reflections of the world, not only the sky: traced through global illumination's field, and filtered.
+    // Reflections of the world, not only the sky: traced across the view where it shows what they meet, through global
+    // illumination's field where it does not, and filtered; and the lit view kept for the next frame's to read.
     "entries": [
         { "pass": { "id": 11196 } },
-        { "pass": { "id": 11197 } }
+        { "pass": { "id": 11197 } },
+        { "pass": { "id": 11198 } }
     ]
 }
