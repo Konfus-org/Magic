@@ -56,6 +56,11 @@ internal sealed class Output : IDisposable
         CompileAsync(compiler, stopping).FireAndForget();
     }
 
+    /// <summary>
+    /// A word per code, 1 once a shader raised it this frame: the frame's <c>Failures</c>.
+    /// </summary>
+    internal GpuBuffer Raised { get; }
+
     public void Dispose()
     {
         foreach (GpuPipeline pipeline in _pipelines.Values)
@@ -65,18 +70,18 @@ internal sealed class Output : IDisposable
     }
 
     /// <summary>
-    /// A word per code, 1 once a shader raised it this frame: the frame's <c>Failures</c>.
-    /// </summary>
-    internal GpuBuffer Raised { get; }
-
-    /// <summary>
     /// Draws the view's finished image into its rectangle of its target, read with <paramref name="filter"/> as it is
     /// scaled, with the failure banner over it (<see cref="SendBanner"/>); or, with no image
     /// (null), the failure's magenta, saying that nothing draws to the stage the frame is viewed at. The rest of the
     /// target is cleared first when <paramref name="clears"/>; only the clear until the pipeline is made, or while the
     /// image is not made yet.
     /// </summary>
-    internal void Draw(ViewTarget target, in FrameConstants constants, BoundResource? image, GpuFilter filter, bool clears)
+    internal void Draw(
+        ViewTarget target,
+        in FrameConstants constants,
+        BoundResource? image,
+        GpuFilter filter,
+        bool clears)
     {
         GpuPipeline pipeline = GetPipeline(target.Format, isNothing: image is null);
         if (pipeline == GpuPipeline.None || image?.Texture == GpuTexture.None)
@@ -88,7 +93,13 @@ internal sealed class Output : IDisposable
 
         if (image is { } drawn)
         {
-            Record(target, constants, pipeline, clears, [new GpuSampledTexture(drawn.Texture, filter == GpuFilter.Nearest ? _nearest : _linear)], [_banner, Raised]);
+            Record(
+                target,
+                constants,
+                pipeline,
+                clears,
+                [new GpuSampledTexture(drawn.Texture, filter == GpuFilter.Nearest ? _nearest : _linear)],
+                [_banner, Raised]);
         }
         else
         {
@@ -97,8 +108,8 @@ internal sealed class Output : IDisposable
     }
 
     /// <summary>
-    /// Sends the banner's glyphs when <paramref name="failures"/> packed them again, and empties the raised codes, before
-    /// the frame's passes run, so a code shows the frame it is raised.
+    /// Sends the banner's glyphs when <paramref name="failures"/> packed them again, and empties the raised codes,
+    /// before the frame's passes run, so a code shows the frame it is raised.
     /// </summary>
     internal void SendBanner(FailureHandler failures)
     {
@@ -124,10 +135,17 @@ internal sealed class Output : IDisposable
     /// fragment stage reading <paramref name="textures"/>, then <paramref name="buffers"/> at the registers after
     /// them.
     /// </summary>
-    private void Record(ViewTarget target, in FrameConstants constants, GpuPipeline pipeline, bool clears, ReadOnlySpan<GpuSampledTexture> textures, ReadOnlySpan<GpuBuffer> buffers)
+    private void Record(
+        ViewTarget target,
+        in FrameConstants constants,
+        GpuPipeline pipeline,
+        bool clears,
+        ReadOnlySpan<GpuSampledTexture> textures,
+        ReadOnlySpan<GpuBuffer> buffers)
     {
         using GpuDebugGroup group = _gpu.Commands.DebugGroup("Output");
-        using GpuRenderPass render = _gpu.Commands.RenderPass([new GpuTextureLevel(target.Texture)], clears ? GpuContents.Clear : GpuContents.Keep);
+        using GpuRenderPass render = _gpu.Commands
+            .RenderPass([new GpuTextureLevel(target.Texture)], clears ? GpuContents.Clear : GpuContents.Keep);
         render.Viewport(target.Area).Scissor(target.Area).Pipeline(pipeline).Constants(GpuStage.Fragment, constants);
         if (textures.Length > 0) render.Textures(GpuStage.Fragment, textures);
 
@@ -150,7 +168,13 @@ internal sealed class Output : IDisposable
         Result<GpuShader> vertex = shaders.Vertex;
         Result<GpuShader> fragment = isNothing ? shaders.Nothing : shaders.Fragment;
         Result<GpuPipeline> made = vertex.Ok && fragment.Ok
-            ? _gpu.CreatePipeline(new GpuPipelineDescription { Vertex = vertex.Value, Fragment = fragment.Value, ColorFormats = [format], Cull = GpuCull.None })
+            ? _gpu.CreatePipeline(new GpuPipelineDescription
+            {
+                Vertex = vertex.Value,
+                Fragment = fragment.Value,
+                ColorFormats = [format],
+                Cull = GpuCull.None
+            })
             : Result.Failure<GpuPipeline>(vertex.Ok ? fragment.Error : vertex.Error);
         if (!made.Ok)
         {
@@ -164,9 +188,15 @@ internal sealed class Output : IDisposable
 
     private async Task CompileAsync(IShaderCompiler compiler, CancellationToken stopping)
     {
-        Result<GpuShader> vertex = await compiler.CompileAsync(Fullscreen, GpuStage.Vertex, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
-        Result<GpuShader> fragment = await compiler.CompileAsync(Fragment, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
-        Result<GpuShader> nothing = await compiler.CompileAsync(Nothing, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
+        Result<GpuShader> vertex = await compiler.CompileAsync(Fullscreen, GpuStage.Vertex, _gpu.ShaderFormat, stopping)
+            .ConfigureAwait(false);
+        Result<GpuShader> fragment = await compiler.CompileAsync(
+            Fragment,
+            GpuStage.Fragment,
+            _gpu.ShaderFormat,
+            stopping).ConfigureAwait(false);
+        Result<GpuShader> nothing = await compiler.CompileAsync(Nothing, GpuStage.Fragment, _gpu.ShaderFormat, stopping)
+            .ConfigureAwait(false);
         _shaders = new Compiled(vertex, fragment, nothing);
     }
 

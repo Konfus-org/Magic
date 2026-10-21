@@ -5,13 +5,62 @@ using Magic.Contexts.Gpu;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// What a name a pass's shader reads or writes stands for: a texture or a buffer, the renderer's or one a pass makes,
-/// for the frame, for each view or for each target (<see cref="IsTarget"/>), how a shader declares it, and how a texture
-/// is sampled wherever one samples it. The renderer's own are <see cref="GpuContract"/>'s, which also say how the
-/// renderer uses what it makes for them; a pass's come from its <see cref="PassCreate"/>.
+/// A name as it stands this frame: its texture or buffer, its size, and for a texture that is read through one sampler
+/// wherever it is read, the materials' textures, that sampler.
 /// </summary>
-[SuppressMessage("Style", "IDE0072:Add missing cases", Justification = "A format or shape maps to the HLSL it is declared as; the rest share a default.")]
-internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, GpuFormat Format, GpuTextureKind Shape, string BufferType, PassFilter Filter = PassFilter.Default, bool IsTarget = false, GpuBufferUsage BufferUsage = GpuBufferUsage.None, GpuTextureUsage TextureUsage = GpuTextureUsage.None)
+internal readonly record struct BoundResource(
+    GpuTexture Texture,
+    GpuBuffer Buffer,
+    uint Width,
+    uint Height,
+    uint Bytes,
+    GpuSampler Sampler = default)
+{
+    internal static BoundResource Of(GpuTexture texture, uint width, uint height, GpuSampler sampler = default)
+        => new(texture, GpuBuffer.None, width, height, 0, sampler);
+
+    internal static BoundResource Of(GpuBuffer buffer, uint bytes) => new(GpuTexture.None, buffer, 0, 0, bytes);
+}
+
+/// <summary>
+/// Everything that sizes and shapes what a pass makes: two made from the same key are alike, so a key that changes, a
+/// view resized or a count grown, makes it again. <see cref="HasHistory"/> makes it twice, the frame's and the last
+/// frame's (<see cref="ResourceScope.Swap"/>).
+/// </summary>
+internal readonly record struct ResourceKey(
+    bool IsBuffer,
+    GpuFormat Format,
+    GpuTextureKind Shape,
+    GpuTextureUsage TextureUsage,
+    GpuBufferUsage BufferUsage,
+    uint Width,
+    uint Height,
+    uint Layers,
+    uint Levels,
+    uint Bytes,
+    bool HasHistory = false);
+
+/// <summary>
+/// What a name a pass's shader reads or writes stands for: a texture or a buffer, the renderer's or one a pass makes,
+/// for the frame, for each view or for each target (<see cref="IsTarget"/>), how a shader declares it, and how a
+/// texture is sampled wherever one samples it. The renderer's own are <see cref="GpuContract"/>'s, which also say how
+/// the renderer uses what it makes for them; a pass's come from its <see cref="PassCreate"/>.
+/// </summary>
+[SuppressMessage(
+    "Style",
+    "IDE0072:Add missing cases",
+    Justification = "A format or shape maps to the HLSL it is declared as; the rest share a default.")]
+internal sealed record ResourceInfo(
+    string Name,
+    bool IsBuffer,
+    bool IsFrame,
+    GpuFormat Format,
+    GpuTextureKind Shape,
+    string BufferType,
+    PassFilter Filter = PassFilter.Default,
+    bool IsTarget = false,
+    GpuBufferUsage BufferUsage = GpuBufferUsage.None,
+    GpuTextureUsage TextureUsage = GpuTextureUsage.None)
 {
     /// <summary>
     /// What ends the name a texture kept from frame to frame is read by as it was the frame before
@@ -36,7 +85,8 @@ internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, Gp
     /// <summary>
     /// The HLSL type a compute shader writes it as, with the format Vulkan needs to write a storage texture.
     /// </summary>
-    internal string WriteType => IsBuffer ? "RWByteAddressBuffer" : $"[[vk::image_format(\"{StorageFormat}\")]] RW{(Shape == GpuTextureKind.Cube ? "Texture2DArray" : TextureName)}<{Element}>";
+    internal string WriteType => IsBuffer ? "RWByteAddressBuffer" : $"[[vk::image_format(\"{StorageFormat}\")]] "
+        + $"RW{(Shape == GpuTextureKind.Cube ? "Texture2DArray" : TextureName)}<{Element}>";
 
     private string TextureName => Shape switch
     {
@@ -85,37 +135,14 @@ internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, Gp
         create.Kind == PassResource.Buffer,
         isFrame,
         create.Format,
-        create.Cube ? GpuTextureKind.Cube : create.Depth > 0 ? GpuTextureKind.Texture3D : create.Layers > 1 ? GpuTextureKind.Texture2DArray : GpuTextureKind.Texture2D,
+        create switch
+        {
+            { Cube: true } => GpuTextureKind.Cube,
+            { Depth: > 0 } => GpuTextureKind.Texture3D,
+            { Layers: > 1 } => GpuTextureKind.Texture2DArray,
+            _ => GpuTextureKind.Texture2D,
+        },
         create.Type,
         create.Filter,
         isTarget);
 }
-
-/// <summary>
-/// A name as it stands this frame: its texture or buffer, its size, and for a texture that is read through one sampler
-/// wherever it is read, the materials' textures, that sampler.
-/// </summary>
-internal readonly record struct BoundResource(GpuTexture Texture, GpuBuffer Buffer, uint Width, uint Height, uint Bytes, GpuSampler Sampler = default)
-{
-    internal static BoundResource Of(GpuTexture texture, uint width, uint height, GpuSampler sampler = default) => new(texture, GpuBuffer.None, width, height, 0, sampler);
-
-    internal static BoundResource Of(GpuBuffer buffer, uint bytes) => new(GpuTexture.None, buffer, 0, 0, bytes);
-}
-
-/// <summary>
-/// Everything that sizes and shapes what a pass makes: two made from the same key are alike, so a key that changes, a
-/// view resized or a count grown, makes it again. <see cref="HasHistory"/> makes it twice, the frame's and the last
-/// frame's (<see cref="ResourceScope.Swap"/>).
-/// </summary>
-internal readonly record struct ResourceKey(
-    bool IsBuffer,
-    GpuFormat Format,
-    GpuTextureKind Shape,
-    GpuTextureUsage TextureUsage,
-    GpuBufferUsage BufferUsage,
-    uint Width,
-    uint Height,
-    uint Layers,
-    uint Levels,
-    uint Bytes,
-    bool HasHistory = false);

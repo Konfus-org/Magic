@@ -311,8 +311,8 @@ internal sealed class Reader
 
     /// <summary>
     /// The function type under any qualifiers and typedefs, or null: a header may name a function type
-    /// (<c>typedef int b3AssertFcn(const char*)</c>) and take a pointer to it (<c>b3AssertFcn*</c>), which is a function
-    /// pointer as much as a pointer typedef is.
+    /// (<c>typedef int b3AssertFcn(const char*)</c>) and take a pointer to it (<c>b3AssertFcn*</c>), which is a
+    /// function pointer as much as a pointer typedef is.
     /// </summary>
     private static CppFunctionType? FindFunctionType(CppType type)
     {

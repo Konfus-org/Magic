@@ -9,10 +9,10 @@ using Magic.Services;
 namespace Magic.SteamAudio;
 
 /// <summary>
-/// What sound is muffled and echoed by, in Steam Audio: the solids the main thread gathered (<see cref="Surroundings"/>), each
-/// model and material one sub-scene of its triangles, shared by every solid shaped and made alike, and each solid an
-/// instance of its sub-scene, moved as its transform moves. The simulation thread's alone, which brings it up to date
-/// before each simulation.
+/// What sound is muffled and echoed by, in Steam Audio: the solids the main thread gathered
+/// (<see cref="Surroundings"/>), each model and material one sub-scene of its triangles, shared by every solid shaped
+/// and made alike, and each solid an instance of its sub-scene, moved as its transform moves. The simulation thread's
+/// alone, which brings it up to date before each simulation.
 /// <para>
 /// Steam Audio's space is right-handed, the engine's left-handed, so everything here is the world mirrored along Z: the
 /// listener and the sounds are mirrored the same way, so what is to the left stays to the left.
@@ -57,6 +57,11 @@ internal sealed class SoundWorld : IDisposable
     }
 
     /// <summary>
+    /// How many solids are in the scene.
+    /// </summary>
+    internal int Count => _instances.Count;
+
+    /// <summary>
     /// Takes every instance out and releases it, then every sub-scene, as the run ends, once nothing simulates.
     /// </summary>
     public unsafe void Dispose()
@@ -75,66 +80,6 @@ internal sealed class SoundWorld : IDisposable
         }
 
         _subScenes.Clear();
-    }
-
-    /// <summary>
-    /// How many solids are in the scene.
-    /// </summary>
-    internal int Count => _instances.Count;
-
-    /// <summary>
-    /// Takes <paramref name="solids"/>, newly gathered, for the updates from here on, in place of those before.
-    /// </summary>
-    internal void Take(List<Solid> solids)
-    {
-        _solids.Clear();
-        _solids.AddRange(solids);
-    }
-
-    /// <summary>
-    /// Brings the scene up to date with the solids last taken, nearest <paramref name="listener"/> first: a moved solid
-    /// moves, one whose model or material changed is made again, one no longer listed goes, and new ones come in for as
-    /// long as <paramref name="seconds"/> allows. True when anything changed, so the scene must be committed.
-    /// </summary>
-    internal unsafe bool Update(Vector3 listener, double seconds)
-    {
-        long start = Stopwatch.GetTimestamp();
-        _update++;
-        _listener = listener;
-        _solids.Sort(_byNearness);
-        bool isChanged = false;
-        foreach (Solid solid in _solids)
-        {
-            ref Instance held = ref CollectionsMarshal.GetValueRefOrNullRef(_instances, solid.Entity);
-            if (!System.Runtime.CompilerServices.Unsafe.IsNullRef(ref held) && held.Model == solid.Model && held.Material == solid.Material)
-            {
-                held.Seen = _update;
-                if (held.Transform == solid.Transform) continue;
-
-                IPL.InstancedMeshUpdateTransform(held.Mesh, _scene, ToMatrix(solid.Transform));
-                held.Transform = solid.Transform;
-                isChanged = true;
-                continue;
-            }
-
-            if (Stopwatch.GetElapsedTime(start).TotalSeconds > seconds) continue;
-
-            isChanged |= Remove(solid.Entity);
-            isChanged |= Add(solid);
-        }
-
-        foreach ((Entity entity, Instance instance) in _instances)
-        {
-            if (instance.Seen != _update) _gone.Add(entity);
-        }
-
-        foreach (Entity entity in _gone)
-        {
-            isChanged |= Remove(entity);
-        }
-
-        _gone.Clear();
-        return isChanged;
     }
 
     /// <summary>
@@ -166,9 +111,66 @@ internal sealed class SoundWorld : IDisposable
         return matrix;
     }
 
+    /// <summary>
+    /// Takes <paramref name="solids"/>, newly gathered, for the updates from here on, in place of those before.
+    /// </summary>
+    internal void Take(List<Solid> solids)
+    {
+        _solids.Clear();
+        _solids.AddRange(solids);
+    }
+
+    /// <summary>
+    /// Brings the scene up to date with the solids last taken, nearest <paramref name="listener"/> first: a moved solid
+    /// moves, one whose model or material changed is made again, one no longer listed goes, and new ones come in for as
+    /// long as <paramref name="seconds"/> allows. True when anything changed, so the scene must be committed.
+    /// </summary>
+    internal unsafe bool Update(Vector3 listener, double seconds)
+    {
+        long start = Stopwatch.GetTimestamp();
+        _update++;
+        _listener = listener;
+        _solids.Sort(_byNearness);
+        bool isChanged = false;
+        foreach (Solid solid in _solids)
+        {
+            ref Instance held = ref CollectionsMarshal.GetValueRefOrNullRef(_instances, solid.Entity);
+            if (!System.Runtime.CompilerServices.Unsafe.IsNullRef(ref held) && held.Model == solid.Model
+                && held.Material == solid.Material)
+            {
+                held.Seen = _update;
+                if (held.Transform == solid.Transform) continue;
+
+                IPL.InstancedMeshUpdateTransform(held.Mesh, _scene, ToMatrix(solid.Transform));
+                held.Transform = solid.Transform;
+                isChanged = true;
+                continue;
+            }
+
+            if (Stopwatch.GetElapsedTime(start).TotalSeconds > seconds) continue;
+
+            isChanged |= Remove(solid.Entity);
+            isChanged |= Add(solid);
+        }
+
+        foreach ((Entity entity, Instance instance) in _instances)
+        {
+            if (instance.Seen != _update) _gone.Add(entity);
+        }
+
+        foreach (Entity entity in _gone)
+        {
+            isChanged |= Remove(entity);
+        }
+
+        _gone.Clear();
+        return isChanged;
+    }
+
     private int CompareNearness(Solid a, Solid b)
     {
-        return Vector3.DistanceSquared(a.Transform.Position, _listener).CompareTo(Vector3.DistanceSquared(b.Transform.Position, _listener));
+        return Vector3.DistanceSquared(a.Transform.Position, _listener)
+            .CompareTo(Vector3.DistanceSquared(b.Transform.Position, _listener));
     }
 
     /// <summary>
@@ -194,7 +196,14 @@ internal sealed class SoundWorld : IDisposable
         }
 
         IPL.InstancedMeshAdd(instance, _scene);
-        _instances.Add(solid.Entity, new Instance { Mesh = instance, Model = solid.Model, Material = solid.Material, Transform = solid.Transform, Seen = _update });
+        _instances.Add(solid.Entity, new Instance
+        {
+            Mesh = instance,
+            Model = solid.Model,
+            Material = solid.Material,
+            Transform = solid.Transform,
+            Seen = _update
+        });
         return true;
     }
 
@@ -234,10 +243,14 @@ internal sealed class SoundWorld : IDisposable
         internal IPL.Scene* Scene { get; private set; }
 
         /// <summary>
-        /// The sub-scene of <paramref name="mesh"/>'s triangles, all made of <paramref name="material"/>, committed; null,
-        /// with the error logged, when Steam Audio cannot make it.
+        /// The sub-scene of <paramref name="mesh"/>'s triangles, all made of <paramref name="material"/>, committed;
+        /// null, with the error logged, when Steam Audio cannot make it.
         /// </summary>
-        internal static SubScene? Make(IPL.Context* context, IPL.SceneSettings settings, AcousticMesh mesh, AcousticMaterial material)
+        internal static SubScene? Make(
+            IPL.Context* context,
+            IPL.SceneSettings settings,
+            AcousticMesh mesh,
+            AcousticMaterial material)
         {
             IPL.Scene* scene;
             if (IPL.SceneCreate(context, &settings, &scene) != IPL.Error.Success)
@@ -269,7 +282,8 @@ internal sealed class SoundWorld : IDisposable
             if (error != IPL.Error.Success)
             {
                 IPL.SceneRelease(&scene);
-                Debugging.Error($"Steam Audio could not take a model's {mesh.Triangles.Length} triangles ({error}), so it is not heard against.");
+                Debugging.Error($"Steam Audio could not take a model's {mesh.Triangles.Length} triangles ({error}), "
+                    + "so it is not heard against.");
                 return null;
             }
 

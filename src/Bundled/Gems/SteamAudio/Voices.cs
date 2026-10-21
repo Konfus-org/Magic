@@ -9,6 +9,63 @@ using Magic.Services;
 namespace Magic.SteamAudio;
 
 /// <summary>
+/// What the main thread tells a slot.
+/// </summary>
+internal enum VoiceAction : byte
+{
+    /// <summary>
+    /// Play a sound, from a place in it.
+    /// </summary>
+    Start,
+
+    /// <summary>
+    /// Play on from another place.
+    /// </summary>
+    Seek,
+
+    /// <summary>
+    /// Stop, and let the slot go.
+    /// </summary>
+    Free,
+}
+
+/// <summary>
+/// One thing the main thread tells a slot, for the audio thread to take in at the start of its next frame: which slot,
+/// which start of it, and for a start the stream and the pinned samples it plays, which the main thread keeps until the
+/// audio thread lets the start go.
+/// </summary>
+internal readonly struct VoiceCommand
+{
+    internal VoiceAction Action { get; init; }
+
+    internal int Slot { get; init; }
+
+    internal int Generation { get; init; }
+
+    /// <summary>
+    /// Seconds into the sound to play from.
+    /// </summary>
+    internal double Seconds { get; init; }
+
+    internal nint Stream { get; init; }
+
+    internal nint Samples { get; init; }
+
+    /// <summary>
+    /// How many samples there are, every channel's.
+    /// </summary>
+    internal int Count { get; init; }
+
+    internal int Channels { get; init; }
+
+    internal int Rate { get; init; }
+
+    internal double Duration { get; init; }
+
+    internal bool IsEverywhere { get; init; }
+}
+
+/// <summary>
 /// What the device plays: a fixed table of slots, each a sound being heard, and the callback SDL's audio thread runs to
 /// fill the device a frame of samples at a time. Each slot pulls its sound through an SDL stream, which converts it to
 /// the device's rate and to mono for a sound in the world or stereo for one everywhere, and plays it faster or slower
@@ -30,8 +87,16 @@ internal sealed unsafe class Voices : IDisposable
     /// </summary>
     private const int Feed = 4096;
 
-    private static readonly Histogram<double> _renderDuration = SteamAudioGem.Meter.CreateHistogram("magic.gems.steam_audio.render.duration", "s", "How long the audio thread took to fill the device once, every sound and echo mixed.", tags: null, advice: SteamAudioGem.Buckets);
-    private static readonly Counter<int> _late = SteamAudioGem.Meter.CreateCounter<int>("magic.gems.steam_audio.render.late", "{fill}", "Fills of the device that took longer than the sound they made lasts, which the device hears as a gap.");
+    private static readonly Histogram<double> _renderDuration = SteamAudioGem.Meter.CreateHistogram(
+        "magic.gems.steam_audio.render.duration",
+        "s",
+        "How long the audio thread took to fill the device once, every sound and echo mixed.",
+        tags: null,
+        advice: SteamAudioGem.Buckets);
+    private static readonly Counter<int> _late = SteamAudioGem.Meter.CreateCounter<int>(
+        "magic.gems.steam_audio.render.late",
+        "{fill}",
+        "Fills of the device that took longer than the sound they made lasts, which the device hears as a gap.");
 
     private readonly IPL.Context* _context;
     private readonly IPL.HRTF* _hrtf;
@@ -74,7 +139,12 @@ internal sealed unsafe class Voices : IDisposable
         _irSize = (int)MathF.Ceiling(settings.ReverbSeconds * _sampleRate);
         _mixed = new float[_frameSize * 2];
         _stereo = new float[_frameSize * 2];
-        _commands = Channel.CreateBounded<VoiceCommand>(new BoundedChannelOptions(settings.Voices * 4) { SingleReader = true, SingleWriter = true, FullMode = BoundedChannelFullMode.Wait });
+        _commands = Channel.CreateBounded<VoiceCommand>(new BoundedChannelOptions(settings.Voices * 4)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait
+        });
 
         IPL.AudioSettings audio = new() { SamplingRate = _sampleRate, FrameSize = _frameSize };
         _slots = new Slot[settings.Voices];
@@ -83,56 +153,34 @@ internal sealed unsafe class Voices : IDisposable
             _slots[i] = new Slot(context, hrtf, simulator, &audio);
         }
 
-        IPL.ReflectionEffectSettings reflection = new() { Type = IPL.ReflectionEffectType.Convolution, IrSize = _irSize, NumChannels = _ambisonicChannels };
+        IPL.ReflectionEffectSettings reflection = new()
+        {
+            Type = IPL.ReflectionEffectType.Convolution,
+            IrSize = _irSize,
+            NumChannels = _ambisonicChannels
+        };
         _reflectors = new Reflector[settings.ReflectionSources];
         for (int i = 0; i < _reflectors.Length; i++)
         {
             _reflectors[i] = new Reflector(context, simulator, &audio, &reflection);
         }
 
-        if (_reflectors.Length > 0)
-        {
-            IPL.ReflectionMixer* mixer;
-            Check(IPL.ReflectionMixerCreate(context, &audio, &reflection, &mixer), "the reflection mixer");
-            _mixer = mixer;
-            IPL.AmbisonicsDecodeEffectSettings decode = new() { SpeakerLayout = new IPL.SpeakerLayout { Type = IPL.SpeakerLayoutType.Stereo }, Hrtf = hrtf, MaxOrder = _order };
-            IPL.AmbisonicsDecodeEffect* decoder;
-            Check(IPL.AmbisonicsDecodeEffectCreate(context, &audio, &decode, &decoder), "the echoes' decoder");
-            _decoder = decoder;
-            Check(Allocate(_ambisonicChannels, out _ambisonics), "the echoes' buffer");
-            Check(Allocate(2, out _decoded), "the echoes' buffer");
-        }
-    }
+        if (_reflectors.Length == 0) return;
 
-    /// <summary>
-    /// Releases every slot's and every reflector's effects and sources, then the mixer and the decoder. Once the device
-    /// is closed and nothing simulates.
-    /// </summary>
-    public void Dispose()
-    {
-        foreach (Slot slot in _slots)
+        IPL.ReflectionMixer* mixer;
+        Check(IPL.ReflectionMixerCreate(context, &audio, &reflection, &mixer), "the reflection mixer");
+        _mixer = mixer;
+        IPL.AmbisonicsDecodeEffectSettings decode = new()
         {
-            slot.Release(_context);
-        }
-
-        foreach (Reflector reflector in _reflectors)
-        {
-            reflector.Release();
-        }
-
-        if (_mixer is not null)
-        {
-            IPL.ReflectionMixer* mixer = _mixer;
-            IPL.ReflectionMixerRelease(&mixer);
-            IPL.AmbisonicsDecodeEffect* decoder = _decoder;
-            IPL.AmbisonicsDecodeEffectRelease(&decoder);
-            fixed (IPL.AudioBuffer* ambisonics = &_ambisonics)
-            fixed (IPL.AudioBuffer* decoded = &_decoded)
-            {
-                IPL.AudioBufferFree(_context, ambisonics);
-                IPL.AudioBufferFree(_context, decoded);
-            }
-        }
+            SpeakerLayout = new IPL.SpeakerLayout { Type = IPL.SpeakerLayoutType.Stereo },
+            Hrtf = hrtf,
+            MaxOrder = _order
+        };
+        IPL.AmbisonicsDecodeEffect* decoder;
+        Check(IPL.AmbisonicsDecodeEffectCreate(context, &audio, &decode, &decoder), "the echoes' decoder");
+        _decoder = decoder;
+        Check(Allocate(_ambisonicChannels, out _ambisonics), "the echoes' buffer");
+        Check(Allocate(2, out _decoded), "the echoes' buffer");
     }
 
     /// <summary>
@@ -164,12 +212,33 @@ internal sealed unsafe class Voices : IDisposable
     internal IReadOnlyList<Reflector> Reflectors => _reflectors;
 
     /// <summary>
-    /// Hands the audio thread <paramref name="command"/>, for the start of its next frame; false when it has not taken
-    /// in enough of those before, and the main thread tries again next frame.
+    /// Releases every slot's and every reflector's effects and sources, then the mixer and the decoder. Once the device
+    /// is closed and nothing simulates.
     /// </summary>
-    internal bool TryTell(in VoiceCommand command)
+    public void Dispose()
     {
-        return _commands.Writer.TryWrite(command);
+        foreach (Slot slot in _slots)
+        {
+            slot.Release(_context);
+        }
+
+        foreach (Reflector reflector in _reflectors)
+        {
+            reflector.Release();
+        }
+
+        if (_mixer is null) return;
+
+        IPL.ReflectionMixer* mixer = _mixer;
+        IPL.ReflectionMixerRelease(&mixer);
+        IPL.AmbisonicsDecodeEffect* decoder = _decoder;
+        IPL.AmbisonicsDecodeEffectRelease(&decoder);
+        fixed (IPL.AudioBuffer* ambisonics = &_ambisonics)
+        fixed (IPL.AudioBuffer* decoded = &_decoded)
+        {
+            IPL.AudioBufferFree(_context, ambisonics);
+            IPL.AudioBufferFree(_context, decoded);
+        }
     }
 
     /// <summary>
@@ -177,7 +246,11 @@ internal sealed unsafe class Voices : IDisposable
     /// logged once and the device hears silence, as an exception must not cross into SDL.
     /// </summary>
     [UnmanagedCallersOnly]
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Nothing may be thrown back into SDL's audio thread; a failure is logged once and the device hears silence.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Nothing may be thrown back into SDL's audio thread; a failure is logged once and the "
+            + "device hears silence.")]
     internal static void OnAudio(void* self, SDL.AudioStream* device, int additional, int _)
     {
         if (GCHandle.FromIntPtr((nint)self).Target is not Voices voices) return;
@@ -188,8 +261,21 @@ internal sealed unsafe class Voices : IDisposable
         }
         catch (Exception ex)
         {
-            if (Interlocked.Exchange(ref voices._hasFailed, 1) == 0) Debugging.Error($"Sound stopped: the audio thread failed: {ex}");
+            if (Interlocked.Exchange(ref voices._hasFailed, 1) == 0)
+            {
+                Debugging.Error(
+                $"Sound stopped: the audio thread failed: {ex}");
+            }
         }
+    }
+
+    /// <summary>
+    /// Hands the audio thread <paramref name="command"/>, for the start of its next frame; false when it has not taken
+    /// in enough of those before, and the main thread tries again next frame.
+    /// </summary>
+    internal bool TryTell(in VoiceCommand command)
+    {
+        return _commands.Writer.TryWrite(command);
     }
 
     private static IPL.Error Allocate(IPL.Context* context, int channels, int frameSize, out IPL.AudioBuffer buffer)
@@ -202,7 +288,9 @@ internal sealed unsafe class Voices : IDisposable
 
     private static void Check(IPL.Error error, string what)
     {
-        if (error != IPL.Error.Success) throw new InvalidOperationException($"Steam Audio could not make {what}: {error}.");
+        if (error == IPL.Error.Success) return;
+
+        throw new InvalidOperationException($"Steam Audio could not make {what}: {error}.");
     }
 
     private IPL.Error Allocate(int channels, out IPL.AudioBuffer buffer)
@@ -329,7 +417,13 @@ internal sealed unsafe class Voices : IDisposable
         IPL.DirectEffectParams direct = outputs.Direct;
         direct.Flags = slot.Flags;
         direct.TransmissionType = IPL.TransmissionType.Freqdependent;
-        IPL.BinauralEffectParams binaural = new() { Direction = slot.Direction, Interpolation = IPL.HRTFInterpolation.Bilinear, SpatialBlend = 1, Hrtf = _hrtf };
+        IPL.BinauralEffectParams binaural = new()
+        {
+            Direction = slot.Direction,
+            Interpolation = IPL.HRTFInterpolation.Bilinear,
+            SpatialBlend = 1,
+            Hrtf = _hrtf
+        };
         fixed (IPL.AudioBuffer* buffers = slot.Buffers)
         {
             IPL.DirectEffectApply(slot.Direct, &direct, &buffers[0], &buffers[1]);
@@ -371,8 +465,19 @@ internal sealed unsafe class Voices : IDisposable
     /// </summary>
     private void MixEchoes()
     {
-        IPL.ReflectionEffectParams mix = new() { Type = IPL.ReflectionEffectType.Convolution, NumChannels = _ambisonicChannels, IrSize = _irSize };
-        IPL.AmbisonicsDecodeEffectParams decode = new() { Order = _order, Hrtf = _hrtf, Orientation = Listener, Binaural = IPL.Bool.True };
+        IPL.ReflectionEffectParams mix = new()
+        {
+            Type = IPL.ReflectionEffectType.Convolution,
+            NumChannels = _ambisonicChannels,
+            IrSize = _irSize
+        };
+        IPL.AmbisonicsDecodeEffectParams decode = new()
+        {
+            Order = _order,
+            Hrtf = _hrtf,
+            Orientation = Listener,
+            Binaural = IPL.Bool.True
+        };
         fixed (IPL.AudioBuffer* ambisonics = &_ambisonics)
         fixed (IPL.AudioBuffer* decoded = &_decoded)
         {
@@ -579,8 +684,8 @@ internal sealed unsafe class Voices : IDisposable
         }
 
         /// <summary>
-        /// One frame of the sound into <paramref name="into"/>, <paramref name="channels"/> interleaved, at the device's
-        /// rate and the slot's pitch, the rest silence once it has run out. Audio thread.
+        /// One frame of the sound into <paramref name="into"/>, <paramref name="channels"/> interleaved, at the
+        /// device's rate and the slot's pitch, the rest silence once it has run out. Audio thread.
         /// </summary>
         internal void Pull(float* into, int frameSize, int channels, int sampleRate)
         {
@@ -667,7 +772,11 @@ internal sealed unsafe class Voices : IDisposable
     /// </summary>
     internal sealed class Reflector
     {
-        internal Reflector(IPL.Context* context, IPL.Simulator* simulator, IPL.AudioSettings* audio, IPL.ReflectionEffectSettings* reflection)
+        internal Reflector(
+            IPL.Context* context,
+            IPL.Simulator* simulator,
+            IPL.AudioSettings* audio,
+            IPL.ReflectionEffectSettings* reflection)
         {
             IPL.SourceSettings source = new() { Flags = IPL.SimulationFlags.Reflections };
             IPL.Source* made;
@@ -696,61 +805,4 @@ internal sealed unsafe class Voices : IDisposable
             IPL.ReflectionEffectRelease(&effect);
         }
     }
-}
-
-/// <summary>
-/// What the main thread tells a slot.
-/// </summary>
-internal enum VoiceAction : byte
-{
-    /// <summary>
-    /// Play a sound, from a place in it.
-    /// </summary>
-    Start,
-
-    /// <summary>
-    /// Play on from another place.
-    /// </summary>
-    Seek,
-
-    /// <summary>
-    /// Stop, and let the slot go.
-    /// </summary>
-    Free,
-}
-
-/// <summary>
-/// One thing the main thread tells a slot, for the audio thread to take in at the start of its next frame: which slot,
-/// which start of it, and for a start the stream and the pinned samples it plays, which the main thread keeps until the
-/// audio thread lets the start go.
-/// </summary>
-internal readonly struct VoiceCommand
-{
-    internal VoiceAction Action { get; init; }
-
-    internal int Slot { get; init; }
-
-    internal int Generation { get; init; }
-
-    /// <summary>
-    /// Seconds into the sound to play from.
-    /// </summary>
-    internal double Seconds { get; init; }
-
-    internal nint Stream { get; init; }
-
-    internal nint Samples { get; init; }
-
-    /// <summary>
-    /// How many samples there are, every channel's.
-    /// </summary>
-    internal int Count { get; init; }
-
-    internal int Channels { get; init; }
-
-    internal int Rate { get; init; }
-
-    internal double Duration { get; init; }
-
-    internal bool IsEverywhere { get; init; }
 }

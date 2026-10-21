@@ -61,7 +61,9 @@ internal sealed class WorldLights(GpuResources resources)
                 SpotScale = light.SpotScale,
                 Forward = light.Forward,
                 SpotOffset = light.SpotOffset,
-                Flags = (uint)(GpuWorldLightFlags.Live | (light.IsSpot ? GpuWorldLightFlags.Spot : GpuWorldLightFlags.None) | (light.Shadowless ? GpuWorldLightFlags.Shadowless : GpuWorldLightFlags.None)),
+                Flags = (uint)(GpuWorldLightFlags.Live
+                    | (light.IsSpot ? GpuWorldLightFlags.Spot : GpuWorldLightFlags.None)
+                    | (light.Shadowless ? GpuWorldLightFlags.Shadowless : GpuWorldLightFlags.None)),
             });
             _changed.Add(slot);
         }

@@ -12,8 +12,38 @@ using Magic.Services;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// The world as the GPU draws it, in two halves: the copy of it the render thread reads, and the rows the GPU reads made
-/// from that copy (<see cref="UpdateRows"/>), the instances' (<see cref="Instances"/>) and the lights'
+/// An instance: where it is and what it draws.
+/// </summary>
+internal readonly record struct InstanceCopy(Transform Transform, Renderer Renderer);
+
+/// <summary>
+/// A camera, with the entity it is on, which names its view from one frame to the next.
+/// </summary>
+internal readonly record struct CameraCopy(Entity Entity, Transform Transform, Camera Camera);
+
+/// <summary>
+/// A point or spot light: where it is, its intensity in candela times its colour, and for a spot its axis and the scale
+/// and offset of its cone's falloff; whether it casts shadows.
+/// </summary>
+internal readonly record struct LightCopy(
+    Vector3 Position,
+    Vector3 Forward,
+    Vector3 Intensity,
+    float Range,
+    float Radius,
+    float SpotScale,
+    float SpotOffset,
+    bool IsSpot,
+    bool Shadowless);
+
+/// <summary>
+/// The sun: the way its light travels, and its illuminance in lux times its colour.
+/// </summary>
+internal readonly record struct SunCopy(Vector3 Direction, Vector3 Illuminance);
+
+/// <summary>
+/// The world as the GPU draws it, in two halves: the copy of it the render thread reads, and the rows the GPU reads
+/// made from that copy (<see cref="UpdateRows"/>), the instances' (<see cref="Instances"/>) and the lights'
 /// (<see cref="Lights"/>).
 /// <para>
 /// The world is copied twice over: on the main thread in LateUpdate, into the copy Render is not reading
@@ -51,14 +81,6 @@ internal sealed class WorldProcessor : IDisposable
         _systems.Add(world.Add(new SpotLightCopier(_lights)));
     }
 
-    public void Dispose()
-    {
-        foreach (Subscription system in _systems)
-        {
-            system.Dispose();
-        }
-    }
-
     /// <summary>
     /// The copy Render reads: the frame LateUpdate last finished, swapped in by <see cref="Swap"/>. Render thread.
     /// </summary>
@@ -74,6 +96,14 @@ internal sealed class WorldProcessor : IDisposable
     /// </summary>
     internal WorldLights Lights { get; }
 
+    public void Dispose()
+    {
+        foreach (Subscription system in _systems)
+        {
+            system.Dispose();
+        }
+    }
+
     /// <summary>
     /// Ends a frame's copy, after the systems ran: takes in what outgrew the slots and finds what is gone. LateUpdate.
     /// </summary>
@@ -84,8 +114,8 @@ internal sealed class WorldProcessor : IDisposable
     }
 
     /// <summary>
-    /// Takes what changed in <see cref="Front"/> into the instances' and the lights' rows. <paramref name="time"/> is the
-    /// frame's, which a fade starts at; <paramref name="player"/> where detail is wanted first. Render thread.
+    /// Takes what changed in <see cref="Front"/> into the instances' and the lights' rows. <paramref name="time"/> is
+    /// the frame's, which a fade starts at; <paramref name="player"/> where detail is wanted first. Render thread.
     /// </summary>
     internal void UpdateRows(float time, Vector3 player)
     {
@@ -102,6 +132,9 @@ internal sealed class WorldProcessor : IDisposable
         (Front, _back) = (_back, Front);
     }
 
+    private static Vector3 GetIntensity(Color color, float intensity)
+        => new Vector3(color.R, color.G, color.B) * intensity;
+
     /// <summary>
     /// Starts a frame's copy, before the copiers run: the copy Render read two frames ago is written over.
     /// </summary>
@@ -113,13 +146,11 @@ internal sealed class WorldProcessor : IDisposable
         return _back;
     }
 
-    private static Vector3 GetIntensity(Color color, float intensity) => new Vector3(color.R, color.G, color.B) * intensity;
-
     /// <summary>
-    /// What the renderer needs that the world has one of, or a few: its cameras, the player, the sun, the sky, the weather
-    /// and the effects, read in one place, once a frame, after starting the frame's copy. The sun is the first directional
-    /// light tagged as the sun; one that is not tagged lights nothing, as there is one sun and the world says which it
-    /// is, and a world with directional lights but none tagged is told so once.
+    /// What the renderer needs that the world has one of, or a few: its cameras, the player, the sun, the sky, the
+    /// weather and the effects, read in one place, once a frame, after starting the frame's copy. The sun is the first
+    /// directional light tagged as the sun; one that is not tagged lights nothing, as there is one sun and the world
+    /// says which it is, and a world with directional lights but none tagged is told so once.
     /// </summary>
     private sealed class ReadWorld(WorldProcessor owner, World world) : ISystem
     {
@@ -141,16 +172,17 @@ internal sealed class WorldProcessor : IDisposable
             next.Sky = FindFirst<Sky>()?.Material;
             next.Weather = FindFirst<Weather>();
             next.Effects = FindFirst<PostProcessing>()?.Effects ?? Handle<Pipeline>.None;
-            if (next.Sun is null && !_hasWarnedOfSun && FindFirst<DirectionalLight>() is not null)
-            {
-                Debugging.Warn("The world has a directional light but none tagged \"sun\", so it has no sun: give the sun's entity \"tags\": [ \"sun\" ].");
-                _hasWarnedOfSun = true;
-            }
+            if (next.Sun is not null || _hasWarnedOfSun || FindFirst<DirectionalLight>() is null) return;
+
+            Debugging.Warn("The world has a directional light but none tagged \"sun\", so it has no sun: "
+                + "give the sun's entity \"tags\": [ \"sun\" ].");
+            _hasWarnedOfSun = true;
         }
 
         private void ReadCameras(List<CameraCopy> cameras)
         {
-            foreach ((ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Camera> found) in world.Query<Transform, Camera>())
+            foreach ((ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Camera> found) in world
+                .Query<Transform, Camera>())
             {
                 for (int i = 0; i < found.Length; i++)
                 {
@@ -179,7 +211,8 @@ internal sealed class WorldProcessor : IDisposable
         private (Transform Transform, T Value)? FindTagged<T>(Tag tag)
             where T : unmanaged, IComponent
         {
-            foreach ((_, Span<Transform> transforms, Span<T> found, Span<Tags> tags) in world.Query<Transform, T, Tags>())
+            foreach ((_, Span<Transform> transforms, Span<T> found, Span<Tags> tags) in world
+                .Query<Transform, T, Tags>())
             {
                 for (int i = 0; i < tags.Length; i++)
                 {
@@ -219,7 +252,19 @@ internal sealed class WorldProcessor : IDisposable
             for (int i = 0; i < found.Length; i++)
             {
                 PointLight light = found[i];
-                lights.Take(entities[i], new LightCopy(transforms[i].Position, Vector3.UnitZ, GetIntensity(light.Color, light.Intensity), light.Range, light.Radius, 0, 1, IsSpot: false, light.Shadowless), ref tally);
+                lights.Take(
+                    entities[i],
+                    new LightCopy(
+                        transforms[i].Position,
+                        Vector3.UnitZ,
+                        GetIntensity(light.Color, light.Intensity),
+                        light.Range,
+                        light.Radius,
+                        0,
+                        1,
+                        IsSpot: false,
+                        light.Shadowless),
+                    ref tally);
             }
 
             lights.Count(tally);
@@ -241,7 +286,19 @@ internal sealed class WorldProcessor : IDisposable
                 float cosInner = MathF.Cos(MathF.Min(light.InnerAngle, light.OuterAngle) * (MathF.PI / 180));
                 float scale = 1 / MathF.Max(cosInner - cosOuter, 1e-4f);
                 Vector3 forward = Vector3.Transform(Vector3.UnitZ, transforms[i].Rotation);
-                lights.Take(entities[i], new LightCopy(transforms[i].Position, forward, GetIntensity(light.Color, light.Intensity), light.Range, light.Radius, scale, -cosOuter * scale, IsSpot: true, light.Shadowless), ref tally);
+                lights.Take(
+                    entities[i],
+                    new LightCopy(
+                        transforms[i].Position,
+                        forward,
+                        GetIntensity(light.Color, light.Intensity),
+                        light.Range,
+                        light.Radius,
+                        scale,
+                        -cosOuter * scale,
+                        IsSpot: true,
+                        light.Shadowless),
+                    ref tally);
             }
 
             lights.Count(tally);
@@ -266,7 +323,8 @@ internal sealed class Renderables
     internal List<CameraCopy> Cameras { get; } = [];
 
     /// <summary>
-    /// Where the first camera tagged player is, which detail is kept nearest to when there is too much; none without one.
+    /// Where the first camera tagged player is, which detail is kept nearest to when there is too much; none without
+    /// one.
     /// </summary>
     internal Vector3? Player { get; set; }
 
@@ -402,7 +460,9 @@ internal sealed class Slots<T>(Delta<T> into)
         mirror.Stamp = _stamp;
         if (!mirror.IsLive) tally.New++;
 
-        if (mirror.IsLive && mirror.Version == entity.Version && MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in mirror.Value)).SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value))))
+        if (mirror.IsLive && mirror.Version == entity.Version
+            && MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in mirror.Value))
+                .SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in value))))
         {
             return;
         }
@@ -485,24 +545,3 @@ internal sealed class Slots<T>(Delta<T> into)
         internal bool IsLive;
     }
 }
-
-/// <summary>
-/// An instance: where it is and what it draws.
-/// </summary>
-internal readonly record struct InstanceCopy(Transform Transform, Renderer Renderer);
-
-/// <summary>
-/// A camera, with the entity it is on, which names its view from one frame to the next.
-/// </summary>
-internal readonly record struct CameraCopy(Entity Entity, Transform Transform, Camera Camera);
-
-/// <summary>
-/// A point or spot light: where it is, its intensity in candela times its colour, and for a spot its axis and the scale
-/// and offset of its cone's falloff; whether it casts shadows.
-/// </summary>
-internal readonly record struct LightCopy(Vector3 Position, Vector3 Forward, Vector3 Intensity, float Range, float Radius, float SpotScale, float SpotOffset, bool IsSpot, bool Shadowless);
-
-/// <summary>
-/// The sun: the way its light travels, and its illuminance in lux times its colour.
-/// </summary>
-internal readonly record struct SunCopy(Vector3 Direction, Vector3 Illuminance);

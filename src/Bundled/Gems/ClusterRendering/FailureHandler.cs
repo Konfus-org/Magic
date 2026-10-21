@@ -13,8 +13,8 @@ namespace Magic.ClusterRendering;
 /// (<see cref="Break"/>). What does not load, said in the log as it is found (<see cref="Report"/>). And what is shown:
 /// in words across each view, the passes that do not run and the pipelines that do not load, which the listing says
 /// (<see cref="Listing.Failures"/>), the world's own failures after them, and what only the GPU finds wrong, which a
-/// shader raises as a code (Include/Failure.hlsli), packed as glyphs a shader draws itself (<see cref="Text"/>, laid out
-/// as Include/FailureBanner.hlsli reads it, which the output draws over each view's finished image); and while the
+/// shader raises as a code (Include/Failure.hlsli), packed as glyphs a shader draws itself (<see cref="Text"/>, laid
+/// out as Include/FailureBanner.hlsli reads it, which the output draws over each view's finished image); and while the
 /// debug UI shows, at each instance drawn as the failure, why (<see cref="Label"/>). Render thread.
 /// </summary>
 internal sealed class FailureHandler
@@ -136,6 +136,14 @@ internal sealed class FailureHandler
     }
 
     /// <summary>
+    /// Says that <paramref name="what"/> does not load, and why: in the log, as it is found.
+    /// </summary>
+    internal static void Report(string what, string why)
+    {
+        Debugging.Error($"{what}: {why}");
+    }
+
+    /// <summary>
     /// The material drawn in a broken one's place when <paramref name="type"/> broke: what a model that does not load
     /// is drawn with in every slot, for the mesh failure.
     /// </summary>
@@ -148,20 +156,13 @@ internal sealed class FailureHandler
     internal bool IsMaterial(Handle<Material> material) => _materials.ContainsValue(material);
 
     /// <summary>
-    /// Says that <paramref name="what"/> does not load, and why: in the log, as it is found.
-    /// </summary>
-    internal static void Report(string what, string why)
-    {
-        Debugging.Error($"{what}: {why}");
-    }
-
-    /// <summary>
     /// A surface does not compile for <paramref name="pass"/>: said, and its materials drawn as the failure until its
     /// shader changes (<see cref="Repair"/>). None, the renderer's own surface, is said alone.
     /// </summary>
     internal void Break(Handle<Shader> surface, string pass, string why)
     {
-        Debugging.Error($"A surface does not compile for pass {pass}, so its materials are drawn as the failure: {why}");
+        Debugging.Error(
+            $"A surface does not compile for pass {pass}, so its materials are drawn as the failure: {why}");
         if (surface == Handle<Shader>.None) return;
 
         _broken.Add(surface);

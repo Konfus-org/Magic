@@ -7,12 +7,25 @@ using Magic.Interfaces;
 namespace Magic.ClusterRendering;
 
 /// <summary>
+/// A <see cref="GpuTable{T}"/> whatever its rows, as <see cref="GpuResources"/> sends every table in one loop and finds
+/// it as it stands.
+/// </summary>
+internal interface IGpuTable
+{
+    BoundResource Bound { get; }
+
+    void Upload();
+
+    void Release();
+}
+
+/// <summary>
 /// A GPU buffer of <typeparamref name="T"/> rows that grows, with a copy of every row on the CPU: rows are set on the
-/// copy, and <see cref="Upload"/> sends the rows that changed, a run of neighbours at a time, so a frame that moves a few
-/// instances of many sends those few, wherever they are. Growing makes the buffer again twice as big and uploads the
-/// whole copy into it, since uploads reach the GPU in the order they are made, where a copy on the GPU would run after
-/// every upload of its frame and undo them. Its handle changes as it grows, so whoever binds it asks for it each frame.
-/// Render thread.
+/// copy, and <see cref="Upload"/> sends the rows that changed, a run of neighbours at a time, so a frame that moves a
+/// few instances of many sends those few, wherever they are. Growing makes the buffer again twice as big and uploads
+/// the whole copy into it, since uploads reach the GPU in the order they are made, where a copy on the GPU would run
+/// after every upload of its frame and undo them. Its handle changes as it grows, so whoever binds it asks for it each
+/// frame. Render thread.
 /// </summary>
 internal sealed class GpuTable<T> : IGpuTable
     where T : unmanaged
@@ -24,8 +37,8 @@ internal sealed class GpuTable<T> : IGpuTable
     private const int Gap = 16;
 
     /// <summary>
-    /// Runs past which an upload sends everything from the first changed row to the last as one, as a frame that changed
-    /// that much changed most of it.
+    /// Runs past which an upload sends everything from the first changed row to the last as one, as a frame that
+    /// changed that much changed most of it.
     /// </summary>
     private const int MaxRuns = 256;
 
@@ -45,14 +58,6 @@ internal sealed class GpuTable<T> : IGpuTable
         Buffer = gpu.CreateBuffer(usage, Bytes);
     }
 
-    /// <summary>
-    /// Releases the buffer: the manager's, when what holds the table goes.
-    /// </summary>
-    public void Release()
-    {
-        _gpu.Release(Buffer);
-    }
-
     public BoundResource Bound => BoundResource.Of(Buffer, Bytes);
 
     internal static int RowBytes => Unsafe.SizeOf<T>();
@@ -69,8 +74,16 @@ internal sealed class GpuTable<T> : IGpuTable
     internal uint Bytes => (uint)(_rows.Length * RowBytes);
 
     /// <summary>
-    /// Sends the rows set since the last upload, a run of neighbours at a time; they reach the buffer at the start of the
-    /// next submit.
+    /// Releases the buffer: the manager's, when what holds the table goes.
+    /// </summary>
+    public void Release()
+    {
+        _gpu.Release(Buffer);
+    }
+
+    /// <summary>
+    /// Sends the rows set since the last upload, a run of neighbours at a time; they reach the buffer at the start of
+    /// the next submit.
     /// </summary>
     public void Upload()
     {
@@ -155,16 +168,4 @@ internal sealed class GpuTable<T> : IGpuTable
         _dirty.Clear();
         _isAllDirty = false;
     }
-}
-
-/// <summary>
-/// A <see cref="GpuTable{T}"/> whatever its rows, as <see cref="GpuResources"/> sends every table in one loop and finds it as it stands.
-/// </summary>
-internal interface IGpuTable
-{
-    BoundResource Bound { get; }
-
-    void Upload();
-
-    void Release();
 }

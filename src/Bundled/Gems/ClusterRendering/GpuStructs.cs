@@ -5,6 +5,53 @@ using System.Runtime.InteropServices;
 namespace Magic.ClusterRendering;
 
 /// <summary>
+/// What a <see cref="GpuInstance"/> carries besides its transform.
+/// </summary>
+[Flags]
+internal enum GpuInstanceFlags : uint
+{
+    None = 0,
+
+    /// <summary>
+    /// Its scale turns it inside out, so its triangles wind the other way.
+    /// </summary>
+    Mirrored = 1,
+
+    /// <summary>
+    /// It dissolves into view from <see cref="GpuInstance.FadeStart"/>.
+    /// </summary>
+    FadeIn = 2,
+}
+
+/// <summary>
+/// What a <see cref="GpuWorldLight"/> is.
+/// </summary>
+[Flags]
+internal enum GpuWorldLightFlags : uint
+{
+    None = 0,
+
+    /// <summary>
+    /// There is a light in the slot.
+    /// </summary>
+    Live = 1,
+
+    Spot = 2,
+
+    /// <summary>
+    /// It casts no shadow (Core's <c>PointLight.Shadowless</c>).
+    /// </summary>
+    Shadowless = 4,
+}
+
+/// <summary>
+/// One piece of up to 32 triangles to draw: its instance's slot, its cluster's row times four plus which piece of it,
+/// or a card's row with the top bit, and its slot among the view's pieces, which the visibility buffer names it by.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct GpuPiece(uint Instance, uint What, uint Slot);
+
+/// <summary>
 /// The one constant block every stage of every pass is pushed, <c>Frame</c> in Shaders/Include/Frame.hlsli, which
 /// mirrors it member for member: a view's constants, then the pass's own rows. Matrices go up untransposed, as the
 /// shaders apply them with <c>mul(M, v)</c>.
@@ -63,7 +110,7 @@ internal struct FrameConstants
     internal uint TileWords;
 
     /// <summary>
-    /// How the view's image is encoded as it is shown, a <see cref="Magic.Contexts.Gpu.TargetEncoding"/>: what the
+    /// How the view's image is encoded as it is shown, a <see cref="Contexts.Gpu.TargetEncoding"/>: what the
     /// target's image expects, decided by its format.
     /// </summary>
     internal uint TargetEncoding;
@@ -124,7 +171,7 @@ internal struct FrameConstants
     internal Vector2 OutputSize;
 
     /// <summary>
-    /// The world's weather, as its <see cref="Magic.Contexts.Components.Weather"/> says, or still and clear without one.
+    /// The world's weather, as its <see cref="Contexts.Components.Weather"/> says, or still and clear without one.
     /// </summary>
     internal WeatherConstants Weather;
 
@@ -201,28 +248,9 @@ internal struct MaterialRows
 }
 
 /// <summary>
-/// What a <see cref="GpuInstance"/> carries besides its transform.
-/// </summary>
-[Flags]
-internal enum GpuInstanceFlags : uint
-{
-    None = 0,
-
-    /// <summary>
-    /// Its scale turns it inside out, so its triangles wind the other way.
-    /// </summary>
-    Mirrored = 1,
-
-    /// <summary>
-    /// It dissolves into view from <see cref="GpuInstance.FadeStart"/>.
-    /// </summary>
-    FadeIn = 2,
-}
-
-/// <summary>
-/// A model on the GPU (<see cref="GpuResources"/>): its sphere about its origin, its clusters, levels and cards, the unit-scale
-/// distance its cards are drawn from, 0 for none, its grid's step, its distance field's slot in <c>MeshFields</c>,
-/// 0 for none, and how far from its sphere's middle its clusters' error spheres reach.
+/// A model on the GPU (<see cref="GpuResources"/>): its sphere about its origin, its clusters, levels and cards, the
+/// unit-scale distance its cards are drawn from, 0 for none, its grid's step, its distance field's slot in
+/// <c>MeshFields</c>, 0 for none, and how far from its sphere's middle its clusters' error spheres reach.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuModel
@@ -240,8 +268,9 @@ internal struct GpuModel
 
     /// <summary>
     /// How far from <see cref="Bounds"/>' middle, in the model's space, any cluster's error sphere or its parent's
-    /// reaches: past the bounds, as each group's sphere encloses its clusters'. An instance picks the levels of clusters
-    /// it hands on by how near and far this reaches, so it never passes over the level a cluster's own test wants.
+    /// reaches: past the bounds, as each group's sphere encloses its clusters'. An instance picks the levels of
+    /// clusters it hands on by how near and far this reaches, so it never passes over the level a cluster's own test
+    /// wants.
     /// </summary>
     internal float ClusterReach;
     internal uint Padding0;
@@ -263,8 +292,8 @@ internal struct GpuLevel
 
 /// <summary>
 /// One cluster of a model (Core's <c>Cluster</c>): its sphere, its group's sphere and error and its parent's, where its
-/// vertices and triangles start in the geometry's words, its counts, packed by <see cref="PackCounts"/>, and its model's
-/// grid step, which its vertices' positions are in.
+/// vertices and triangles start in the geometry's words, its counts, packed by <see cref="PackCounts"/>, and its
+/// model's grid step, which its vertices' positions are in.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuCluster
@@ -284,13 +313,14 @@ internal struct GpuCluster
     /// <summary>
     /// Triangles in the low 8 bits, vertices in the next 9, the material slot in the 3 after, the level in the 5 after.
     /// </summary>
-    internal static uint PackCounts(int triangles, int vertices, int slot, int level) => (uint)triangles | ((uint)vertices << 8) | ((uint)slot << 17) | ((uint)level << 20);
+    internal static uint PackCounts(int triangles, int vertices, int slot, int level)
+        => (uint)triangles | ((uint)vertices << 8) | ((uint)slot << 17) | ((uint)level << 20);
 }
 
 /// <summary>
 /// One card of a model (Core's <c>Card</c>): its centre, half width (less than 0 when it shows its mesh mirrored), half
-/// height and turn about +Y, its material slot, and its atlases' texture refs, <see cref="GpuContract.NoTexture"/> while they
-/// load.
+/// height and turn about +Y, its material slot, and its atlases' texture refs, <see cref="GpuContract.NoTexture"/>
+/// while they load.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuCard
@@ -351,8 +381,8 @@ internal struct GpuGi
     internal uint Padding0;
 
     /// <summary>
-    /// Where the camera the levels are placed about is, from the world's origin: a place is lit by each level by how far
-    /// from it it is, so where one level gives way to the next moves with the camera, never in a level's steps.
+    /// Where the camera the levels are placed about is, from the world's origin: a place is lit by each level by how
+    /// far from it it is, so where one level gives way to the next moves with the camera, never in a level's steps.
     /// </summary>
     internal Vector3 Camera;
 }
@@ -490,31 +520,3 @@ internal struct GpuWorldLight
     internal uint Padding0;
     internal uint Padding1;
 }
-
-/// <summary>
-/// What a <see cref="GpuWorldLight"/> is.
-/// </summary>
-[Flags]
-internal enum GpuWorldLightFlags : uint
-{
-    None = 0,
-
-    /// <summary>
-    /// There is a light in the slot.
-    /// </summary>
-    Live = 1,
-
-    Spot = 2,
-
-    /// <summary>
-    /// It casts no shadow (Core's <c>PointLight.Shadowless</c>).
-    /// </summary>
-    Shadowless = 4,
-}
-
-/// <summary>
-/// One piece of up to 32 triangles to draw: its instance's slot, its cluster's row times four plus which piece of it,
-/// or a card's row with the top bit, and its slot among the view's pieces, which the visibility buffer names it by.
-/// </summary>
-[StructLayout(LayoutKind.Sequential)]
-internal readonly record struct GpuPiece(uint Instance, uint What, uint Slot);

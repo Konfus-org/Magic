@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -26,11 +27,12 @@ namespace Magic.SteamAudio;
 /// sounds, as many as the settings' voices, are heard; the rest go on in silence, their time running, until they are
 /// near again. SDL's audio thread plays the heard ones (<see cref="Voices"/>).
 /// <para>
-/// Steam Audio's scene and simulator are a thread of the gem's own, the simulation thread: the main thread gathers, each
-/// frame, where the listener and each heard sound are and what is solid near the player (<see cref="Surroundings"/>), and hands
-/// it over whole; the simulation thread brings the acoustic scene up to date with it (<see cref="SoundWorld"/>),
-/// works out what reaches the listener straight from each sound, and, a few times a second, traces the echoes of the
-/// nearest few. So nothing of Steam Audio's runs on the main thread, and neither thread waits on the other.
+/// Steam Audio's scene and simulator are a thread of the gem's own, the simulation thread: the main thread gathers,
+/// each frame, where the listener and each heard sound are and what is solid near the player
+/// (<see cref="Surroundings"/>), and hands it over whole; the simulation thread brings the acoustic scene up to date
+/// with it (<see cref="SoundWorld"/>), works out what reaches the listener straight from each sound, and, a few times a
+/// second, traces the echoes of the nearest few. So nothing of Steam Audio's runs on the main thread, and neither
+/// thread waits on the other.
 /// </para>
 /// <para>
 /// With no window, or no audio device, nothing is played: every sound goes on in silence, as one out of reach does, so
@@ -67,19 +69,45 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private const float GatherSeconds = 0.1f;
 
-    internal static Meter Meter { get; } = new("Magic.Gems.SteamAudio");
+    [SuppressMessage(
+        "Style",
+        "IDE0032:Use auto property",
+        Justification = "The instruments below are made from it as the type starts, so it is a field, set first: an "
+            + "auto property goes after the fields and would be read before it is set.")]
+    private static readonly Meter _meter = new("Magic.Gems.SteamAudio");
 
-    /// <summary>
-    /// Buckets from a tenth of a millisecond to a second, as the audio thread's work is measured against a frame of
-    /// sound and the simulation's against a frame.
-    /// </summary>
-    internal static InstrumentAdvice<double> Buckets { get; } = new() { HistogramBucketBoundaries = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.125, 0.25, 0.5, 1] };
+    [SuppressMessage(
+        "Style",
+        "IDE0032:Use auto property",
+        Justification = "The instruments below are made from it as the type starts, so it is a field, set first: an "
+            + "auto property goes after the fields and would be read before it is set.")]
+    private static readonly InstrumentAdvice<double> _buckets = new()
+    {
+        HistogramBucketBoundaries =
+        [0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.004, 0.008, 0.016, 0.032, 0.064, 0.125, 0.25, 0.5, 1]
+    };
 
     private static readonly Comparison<Voice> _byNearness = CompareNearness;
-    private static readonly Gauge<int> _heard = Meter.CreateGauge<int>("magic.gems.steam_audio.voices", "{sound}", "Sounds heard this frame, of those playing.");
-    private static readonly Gauge<int> _solids = Meter.CreateGauge<int>("magic.gems.steam_audio.scene.solids", "{solid}", "Solids in the acoustic scene, which sound is muffled and echoed by.");
-    private static readonly Histogram<double> _simulateDuration = Meter.CreateHistogram("magic.gems.steam_audio.simulate.duration", "s", "How long the simulation thread took to bring the scene up to date and work out the direct sound.", tags: null, advice: Buckets);
-    private static readonly Histogram<double> _traceDuration = Meter.CreateHistogram("magic.gems.steam_audio.trace.duration", "s", "How long one trace of the echoes took, on the simulation thread.", tags: null, advice: Buckets);
+    private static readonly Gauge<int> _heard = _meter.CreateGauge<int>(
+        "magic.gems.steam_audio.voices",
+        "{sound}",
+        "Sounds heard this frame, of those playing.");
+    private static readonly Gauge<int> _solids = _meter.CreateGauge<int>(
+        "magic.gems.steam_audio.scene.solids",
+        "{solid}",
+        "Solids in the acoustic scene, which sound is muffled and echoed by.");
+    private static readonly Histogram<double> _simulateDuration = _meter.CreateHistogram(
+        "magic.gems.steam_audio.simulate.duration",
+        "s",
+        "How long the simulation thread took to bring the scene up to date and work out the direct sound.",
+        tags: null,
+        advice: _buckets);
+    private static readonly Histogram<double> _traceDuration = _meter.CreateHistogram(
+        "magic.gems.steam_audio.trace.duration",
+        "s",
+        "How long one trace of the echoes took, on the simulation thread.",
+        tags: null,
+        advice: _buckets);
 
     private readonly World _world;
     private readonly Assets _assets;
@@ -100,7 +128,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// <summary>
     /// Audio files loaded on workers, or why not, for the main thread to take in at the start of its hook.
     /// </summary>
-    private readonly Channel<(Handle<Audio> Handle, Result<Audio> Loaded)> _arrived = Channel.CreateUnbounded<(Handle<Audio> Handle, Result<Audio> Loaded)>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<(Handle<Audio> Handle, Result<Audio> Loaded)> _arrived =
+        Channel.CreateUnbounded<(Handle<Audio> Handle, Result<Audio> Loaded)>(
+            new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// The domains whose sounds and solids are being loaded before they spawn, checked every frame until all are.
@@ -145,7 +175,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     private readonly SimulationFrame[] _frames = [];
     private unsafe SDL.AudioStream* _device;
     private GCHandle _self;
-    private IPL.CoordinateSpace3 _listener = new() { Right = new IPL.Vector3 { X = 1 }, Up = new IPL.Vector3 { Y = 1 }, Ahead = new IPL.Vector3 { Z = -1 } };
+    private IPL.CoordinateSpace3 _listener = new()
+    {
+        Right = new IPL.Vector3 { X = 1 },
+        Up = new IPL.Vector3 { Y = 1 },
+        Ahead = new IPL.Vector3 { Z = -1 }
+    };
     private Vector3 _listenerPosition;
     private int _filling;
     private int _newest = 1;
@@ -178,18 +213,29 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         if (!SDL.InitSubSystem(SDL.InitAudio))
         {
-            Debugging.Warn($"Sound is not played, as SDL could not start this machine's audio: {CString.Read(SDL.GetError())}. Every sound goes on in silence.");
+            Debugging.Warn("Sound is not played, as SDL could not start this machine's audio: "
+                + $"{CString.Read(SDL.GetError())}. Every sound goes on in silence.");
             return;
         }
 
         _isAudioStarted = true;
-        IPL.ContextSettings contextSettings = new() { Version = IPL.VERSION, LogCallback = &OnLog, SimdLevel = IPL.SIMDLevel.Avx2 };
+        IPL.ContextSettings contextSettings = new()
+        {
+            Version = IPL.VERSION,
+            LogCallback = &OnLog,
+            SimdLevel = IPL.SIMDLevel.Avx2
+        };
         IPL.Context* context;
         Check(IPL.ContextCreate(&contextSettings, &context), "its context");
         _context = context;
 
         IPL.AudioSettings audio = new() { SamplingRate = settings.SampleRate, FrameSize = settings.FrameSize };
-        IPL.HRTFSettings hrtfSettings = new() { Type = IPL.HRTFType.Default, Volume = 1, NormType = IPL.HRTFNormType.None };
+        IPL.HRTFSettings hrtfSettings = new()
+        {
+            Type = IPL.HRTFType.Default,
+            Volume = 1,
+            NormType = IPL.HRTFNormType.None
+        };
         IPL.HRTF* hrtf;
         Check(IPL.HRTFCreate(context, &audio, &hrtfSettings, &hrtf), "the head the listener hears with");
         _hrtf = hrtf;
@@ -206,7 +252,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         IPL.SimulationSettings simulation = new()
         {
-            Flags = settings.ReflectionSources > 0 ? IPL.SimulationFlags.Direct | IPL.SimulationFlags.Reflections : IPL.SimulationFlags.Direct,
+            Flags = settings.ReflectionSources > 0
+                ? IPL.SimulationFlags.Direct | IPL.SimulationFlags.Reflections
+                : IPL.SimulationFlags.Direct,
             SceneType = sceneSettings.Type,
             ReflectionType = IPL.ReflectionEffectType.Convolution,
             MaxNumOcclusionSamples = OcclusionSamples,
@@ -229,11 +277,16 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         _self = GCHandle.Alloc(sounds);
         SDL.AudioSpec device = new() { Format = SDL.AudioFormat.F32, Channels = 2, Freq = settings.SampleRate };
-        _device = SDL.OpenAudioDeviceStream(SDL.AudioDeviceDefaultPlayback, &device, &Voices.OnAudio, (void*)GCHandle.ToIntPtr(_self));
+        _device = SDL.OpenAudioDeviceStream(
+            SDL.AudioDeviceDefaultPlayback,
+            &device,
+            &Voices.OnAudio,
+            (void*)GCHandle.ToIntPtr(_self));
         if (_device is null)
         {
             // With nothing to play them, the voices go, and every sound runs on in silence, as one out of reach does.
-            Debugging.Warn($"Sound is not played, as SDL could not open this machine's audio device: {CString.Read(SDL.GetError())}. Every sound goes on in silence.");
+            Debugging.Warn("Sound is not played, as SDL could not open this machine's audio device: "
+                + $"{CString.Read(SDL.GetError())}. Every sound goes on in silence.");
             _self.Free();
             sounds.Dispose();
             return;
@@ -255,8 +308,21 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         _isSimulating = true;
         threads.RunAsync("Audio simulation", RunSimulation).FireAndForget();
         string tracer = sceneSettings.Type == IPL.SceneType.Embree ? "Embree" : "its own tracer";
-        Debugging.Info($"Steam Audio {IPL.VersionMajor}.{IPL.VersionMinor}.{IPL.VersionPatch} is playing up to {settings.Voices} sounds at {settings.SampleRate} Hz, echoing the nearest {settings.ReflectionSources}, traced with {tracer}.");
+        Debugging.Info($"Steam Audio {IPL.VersionMajor}.{IPL.VersionMinor}.{IPL.VersionPatch} is playing up to "
+            + $"{settings.Voices} sounds at {settings.SampleRate} Hz, "
+            + $"echoing the nearest {settings.ReflectionSources}, traced with {tracer}.");
     }
+
+    /// <summary>
+    /// The gem's meter, which its parts record on (Core's README, Telemetry).
+    /// </summary>
+    internal static Meter Meter => _meter;
+
+    /// <summary>
+    /// Buckets from a tenth of a millisecond to a second, as the audio thread's work is measured against a frame of
+    /// sound and the simulation's against a frame.
+    /// </summary>
+    internal static InstrumentAdvice<double> Buckets => _buckets;
 
     /// <summary>
     /// Releases what the gem made of Steam Audio and SDL once Stop has closed the device and ended the simulation
@@ -339,8 +405,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
     /// <summary>
     /// Closes the device, which waits out the audio thread, and ends the simulation thread, waiting for it to finish
-    /// what it is working out: from here nothing plays or simulates, and Dispose releases the rest. The one wait the gem
-    /// makes, once the frames are over and nothing waits on the main thread.
+    /// what it is working out: from here nothing plays or simulates, and Dispose releases the rest. The one wait the
+    /// gem makes, once the frames are over and nothing waits on the main thread.
     /// </summary>
     public unsafe void Stop()
     {
@@ -356,11 +422,14 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// Loads every audio file a sound among <paramref name="prefabs"/> plays, and fits every model a solid among them is
-    /// shaped like, before they spawn, so each sound is heard, muffled and echoed, from its first frame. Done once all
-    /// are in; they are kept for the run, so what it hands back holds nothing.
+    /// Loads every audio file a sound among <paramref name="prefabs"/> plays, and fits every model a solid among them
+    /// is shaped like, before they spawn, so each sound is heard, muffled and echoed, from its first frame. Done once
+    /// all are in; they are kept for the run, so what it hands back holds nothing.
     /// </summary>
-    public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
+    public async Task<Subscription> PreloadAsync(
+        IReadOnlyList<Prefab> prefabs,
+        IProgress<float> progress,
+        CancellationToken cancel)
     {
         HashSet<Handle<Audio>> audios = [];
         HashSet<Handle<Model>> models = [];
@@ -399,7 +468,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
     private static void Check(IPL.Error error, string what)
     {
-        if (error != IPL.Error.Success) throw new InvalidOperationException($"Steam Audio could not make {what}: {error}.");
+        if (error == IPL.Error.Success) return;
+
+        throw new InvalidOperationException($"Steam Audio could not make {what}: {error}.");
     }
 
     private static void AddAudios(IReadOnlyList<PrefabPart> parts, HashSet<Handle<Audio>> audios)
@@ -509,7 +580,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             }
 
             _failed.Add(arrived.Handle);
-            Debugging.Error($"A sound cannot play its audio, which does not load, so it is silent: {arrived.Loaded.Error}");
+            Debugging.Error(
+                $"A sound cannot play its audio, which does not load, so it is silent: {arrived.Loaded.Error}");
         }
     }
 
@@ -608,7 +680,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             Voices.Slot slot = sounds.Slots[i];
             if (slot.Released != hold.Generation)
             {
-                if (hold.IsFreeing && !hold.IsFreeTold) hold.IsFreeTold = sounds.TryTell(new VoiceCommand { Action = VoiceAction.Free, Slot = i, Generation = hold.Generation });
+                if (hold.IsFreeing && !hold.IsFreeTold)
+                {
+                    hold.IsFreeTold = sounds.TryTell(
+                    new VoiceCommand { Action = VoiceAction.Free, Slot = i, Generation = hold.Generation });
+                }
+
                 continue;
             }
 
@@ -663,7 +740,14 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     {
         if (!_voices.TryGetValue(entity, out Voice? voice))
         {
-            voice = new Voice { Entity = entity, Sound = sound, Time = sound.Time, WrittenTime = sound.Time, WrittenPlayback = sound.Playback };
+            voice = new Voice
+            {
+                Entity = entity,
+                Sound = sound,
+                Time = sound.Time,
+                WrittenTime = sound.Time,
+                WrittenPlayback = sound.Playback
+            };
             _voices.Add(entity, voice);
         }
 
@@ -708,7 +792,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             RunSilently(voice, ref sound, audio, seconds);
         }
 
-        bool isAudible = sound.Playback == Playback.Playing && audio is not null && audio.Samples.Length > 0
+        bool isAudible = sound.Playback == Playback.Playing && audio?.Samples.Length > 0
             && (sound.Space == SoundSpace.Everywhere || voice.Distance < sound.Range);
         if (isAudible && _sounds is not null) _wanted.Add(voice);
 
@@ -754,11 +838,17 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         int index = _free.Peek();
         Hold hold = _holds[index];
         SDL.AudioSpec from = new() { Format = SDL.AudioFormat.F32, Channels = audio.Channels, Freq = audio.SampleRate };
-        SDL.AudioSpec to = new() { Format = SDL.AudioFormat.F32, Channels = voice.Sound.Space == SoundSpace.Everywhere ? 2 : 1, Freq = _settings.SampleRate };
+        SDL.AudioSpec to = new()
+        {
+            Format = SDL.AudioFormat.F32,
+            Channels = voice.Sound.Space == SoundSpace.Everywhere ? 2 : 1,
+            Freq = _settings.SampleRate
+        };
         SDL.AudioStream* stream = SDL.CreateAudioStream(&from, &to);
         if (stream is null)
         {
-            Debugging.Error($"Sounds that play an audio of {audio.Channels} channel(s) at {audio.SampleRate} Hz are silent: SDL cannot convert it to the device: {CString.Read(SDL.GetError())}");
+            Debugging.Error($"Sounds that play an audio of {audio.Channels} channel(s) at {audio.SampleRate} Hz are "
+                + $"silent: SDL cannot convert it to the device: {CString.Read(SDL.GetError())}");
             _audios[voice.Sound.Audio] = null;
             _failed.Add(voice.Sound.Audio);
             voice.Audio = null;
@@ -792,7 +882,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         voice.Slot = index;
         voice.Generation = command.Generation;
         voice.IsSeeking = false;
-        Debugging.Verbose($"Entity {voice.Entity.Id}'s sound is heard, {voice.Distance:0.#} m away, from {voice.Time:0.##} s in.");
+        Debugging.Verbose(
+            $"Entity {voice.Entity.Id}'s sound is heard, {voice.Distance:0.#} m away, from {voice.Time:0.##} s in.");
     }
 
     /// <summary>
@@ -806,16 +897,17 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         Hold hold = _holds[voice.Slot];
         hold.Voice = null;
         hold.IsFreeing = true;
-        hold.IsFreeTold = _sounds.TryTell(new VoiceCommand { Action = VoiceAction.Free, Slot = voice.Slot, Generation = hold.Generation });
+        hold.IsFreeTold = _sounds.TryTell(
+            new VoiceCommand { Action = VoiceAction.Free, Slot = voice.Slot, Generation = hold.Generation });
         _sounds.Slots[voice.Slot].Reflector = -1;
         voice.Slot = -1;
         Debugging.Verbose($"Entity {voice.Entity.Id}'s sound goes on in silence.");
     }
 
     /// <summary>
-    /// Writes each heard voice's volume, pitch and loop to its slot, and, for a sound in the world, which way it is from
-    /// the listener and what the simulation thread is to work out for it: its place, its focus, how it falls off, and
-    /// what is in the way unless it is unoccluded. A slot no sound is in is simulated for nothing.
+    /// Writes each heard voice's volume, pitch and loop to its slot, and, for a sound in the world, which way it is
+    /// from the listener and what the simulation thread is to work out for it: its place, its focus, how it falls off,
+    /// and what is in the way unless it is unoccluded. A slot no sound is in is simulated for nothing.
     /// </summary>
     private unsafe void Steer(Voices sounds, SimulationFrame filling)
     {
@@ -834,7 +926,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             slot.Loop = sound.Loop;
             if (voice.IsSeeking)
             {
-                voice.IsSeeking = !sounds.TryTell(new VoiceCommand { Action = VoiceAction.Seek, Slot = i, Generation = voice.Generation, Seconds = voice.Time });
+                voice.IsSeeking = !sounds.TryTell(new VoiceCommand
+                {
+                    Action = VoiceAction.Seek,
+                    Slot = i,
+                    Generation = voice.Generation,
+                    Seconds = voice.Time
+                });
             }
 
             if (!isWorld) continue;
@@ -843,8 +941,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             slot.Direction = voice.Distance < Closest
                 ? new IPL.Vector3 { Z = -1 }
                 : IPL.CalculateRelativeDirection(_context, position, listener, _listener.Ahead, _listener.Up);
-            IPL.DirectSimulationFlags simulated = IPL.DirectSimulationFlags.Distanceattenuation | IPL.DirectSimulationFlags.Airabsorption | IPL.DirectSimulationFlags.Directivity;
-            IPL.DirectEffectFlags applied = IPL.DirectEffectFlags.Applydistanceattenuation | IPL.DirectEffectFlags.Applyairabsorption | IPL.DirectEffectFlags.Applydirectivity;
+            IPL.DirectSimulationFlags simulated = IPL.DirectSimulationFlags.Distanceattenuation
+                | IPL.DirectSimulationFlags.Airabsorption
+                | IPL.DirectSimulationFlags.Directivity;
+            IPL.DirectEffectFlags applied = IPL.DirectEffectFlags.Applydistanceattenuation
+                | IPL.DirectEffectFlags.Applyairabsorption
+                | IPL.DirectEffectFlags.Applydirectivity;
             if (!sound.Unoccluded)
             {
                 simulated |= IPL.DirectSimulationFlags.Occlusion | IPL.DirectSimulationFlags.Transmission;
@@ -857,7 +959,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 Flags = IPL.SimulationFlags.Direct,
                 DirectFlags = simulated,
                 Source = ToSpace(voice.Position, voice.Rotation),
-                DistanceAttenuationModel = new IPL.DistanceAttenuationModel { Type = IPL.DistanceAttenuationModelType.Inversedistance, MinDistance = sound.Near },
+                DistanceAttenuationModel = new IPL.DistanceAttenuationModel
+                {
+                    Type = IPL.DistanceAttenuationModelType.Inversedistance,
+                    MinDistance = sound.Near
+                },
                 AirAbsorptionModel = new IPL.AirAbsorptionModel { Type = IPL.AirAbsorptionModelType.Default },
                 Directivity = new IPL.Directivity { DipoleWeight = Math.Clamp(sound.Focus, 0, 1), DipolePower = 1 },
                 OcclusionType = IPL.OcclusionType.Volumetric,
@@ -869,8 +975,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// Gives the reflectors to the nearest heard sounds in the world that echo, keeping each with the sound it has while
-    /// that is still among them, and writes where each reflector's sound is for the simulation thread.
+    /// Gives the reflectors to the nearest heard sounds in the world that echo, keeping each with the sound it has
+    /// while that is still among them, and writes where each reflector's sound is for the simulation thread.
     /// </summary>
     private void Reflect(Voices sounds, SimulationFrame filling)
     {
@@ -883,7 +989,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             foreach (Voice voice in _wanted)
             {
                 if (count == nearest.Length) break;
-                if (voice.Slot >= 0 && voice.Sound.Space == SoundSpace.World && !voice.Sound.Dry) nearest[count++] = voice.Slot;
+                if (voice.Slot >= 0 && voice.Sound.Space == SoundSpace.World
+                    && !voice.Sound.Dry)
+                {
+                    nearest[count++] = voice.Slot;
+                }
             }
         }
 
@@ -909,7 +1019,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         {
             int slot = _reflected[k];
             filling.IsEchoing[k] = slot >= 0 && _holds[slot].Voice is not null;
-            if (filling.IsEchoing[k] && _holds[slot].Voice is { } voice) filling.Echoes[k] = ToSpace(voice.Position, voice.Rotation);
+            if (filling.IsEchoing[k] && _holds[slot].Voice is { } voice)
+            {
+                filling.Echoes[k] =
+                ToSpace(voice.Position, voice.Rotation);
+            }
         }
     }
 
@@ -934,7 +1048,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 _reading = Interlocked.Exchange(ref _newest, _reading);
                 SimulationFrame frame = _frames[_reading];
                 Simulate(_sounds, _soundWorld, frame);
-                if (frame.IsReflecting && Array.IndexOf(frame.IsEchoing, true) >= 0 && Stopwatch.GetElapsedTime(traced).TotalSeconds >= frame.ReflectionPeriod)
+                if (frame.IsReflecting && Array.IndexOf(frame.IsEchoing, true) >= 0
+                    && Stopwatch.GetElapsedTime(traced).TotalSeconds >= frame.ReflectionPeriod)
                 {
                     traced = Stopwatch.GetTimestamp();
                     Trace(_sounds, frame);
@@ -1002,7 +1117,10 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             {
                 Flags = frame.IsEchoing[k] ? IPL.SimulationFlags.Reflections : default,
                 Source = frame.Echoes[k],
-                DistanceAttenuationModel = new IPL.DistanceAttenuationModel { Type = IPL.DistanceAttenuationModelType.Default },
+                DistanceAttenuationModel = new IPL.DistanceAttenuationModel
+                {
+                    Type = IPL.DistanceAttenuationModelType.Default
+                },
                 AirAbsorptionModel = new IPL.AirAbsorptionModel { Type = IPL.AirAbsorptionModelType.Default },
             };
             source.ReverbScale[0] = 1;
@@ -1149,7 +1267,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// A domain whose sounds and solids are being loaded before it spawns: which, how far that is as last told, the
     /// task whoever opens it awaits, and the token that cancels the open, checked each frame.
     /// </summary>
-    private sealed class Preload(HashSet<Handle<Audio>> audios, HashSet<Handle<Model>> models, IProgress<float> progress, CancellationToken cancel)
+    private sealed class Preload(
+        HashSet<Handle<Audio>> audios,
+        HashSet<Handle<Model>> models,
+        IProgress<float> progress,
+        CancellationToken cancel)
     {
         internal HashSet<Handle<Audio>> Audios { get; } = audios;
 

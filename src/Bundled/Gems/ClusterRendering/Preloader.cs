@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -16,7 +17,8 @@ namespace Magic.ClusterRendering;
 internal sealed class Preloader(GpuResources resources, PassGraph graph)
 {
     /// <summary>
-    /// The domains being taken in, each checked every frame until all it draws is in (<see cref="Check"/>). Render thread.
+    /// The domains being taken in, each checked every frame until all it draws is in (<see cref="Check"/>). Render
+    /// thread.
     /// </summary>
     private readonly List<Preload> _preloads = [];
 
@@ -24,7 +26,8 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     /// What other threads told the render thread, taken in as <see cref="Take"/> runs, in the order told: a domain to
     /// begin taking in, one taken in to let go, or one whose open was cancelled.
     /// </summary>
-    private readonly Channel<Told> _told = Channel.CreateUnbounded<Told>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<Told> _told = Channel.CreateUnbounded<Told>(
+        new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// The effects the latest domain taken in names; none once that domain is let go.
@@ -37,11 +40,15 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     /// name. Done once all of it is in, or failed, and so drawn as the failure; what it hands back keeps it
     /// until it is disposed.
     /// </summary>
-    internal async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
+    internal async Task<Subscription> PreloadAsync(
+        IReadOnlyList<Prefab> prefabs,
+        IProgress<float> progress,
+        CancellationToken cancel)
     {
         Preloaded preloaded = Preloaded.Of(prefabs);
         Preload preload = new(preloaded, progress);
-        using CancellationTokenRegistration cancelling = cancel.Register(() => _told.Writer.TryWrite(new Told(Cancelled: preload, Cancel: cancel)));
+        await using ConfiguredAsyncDisposable cancelling = cancel.Register(
+            () => _told.Writer.TryWrite(new Told(Cancelled: preload, Cancel: cancel))).ConfigureAwait(false);
         _told.Writer.TryWrite(new Told(Begun: preload));
         await preload.Done.Task.ConfigureAwait(false);
         return new Subscription(() => _told.Writer.TryWrite(new Told(Ended: preloaded)));
@@ -166,6 +173,16 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     }
 
     /// <summary>
+    /// One thing told to the render thread: a domain to begin taking in, one taken in to let go, or one whose open was
+    /// cancelled, with the token that cancelled it.
+    /// </summary>
+    private readonly record struct Told(
+        Preload? Begun = null,
+        Preloaded? Ended = null,
+        Preload? Cancelled = null,
+        CancellationToken Cancel = default);
+
+    /// <summary>
     /// A domain being taken in before it spawns: what it draws, how far that is as last told, and the task whoever
     /// opens it awaits.
     /// </summary>
@@ -179,19 +196,16 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
 
         internal float Reported { get; set; } = -1;
     }
-
-    /// <summary>
-    /// One thing told to the render thread: a domain to begin taking in, one taken in to let go, or one whose open was
-    /// cancelled, with the token that cancelled it.
-    /// </summary>
-    private readonly record struct Told(Preload? Begun = null, Preloaded? Ended = null, Preload? Cancelled = null, CancellationToken Cancel = default);
 }
 
 /// <summary>
 /// What the renderer takes in for a domain before it spawns: the models and materials its prefabs draw, the sky's among
 /// them, and the effects they name, none when they name none.
 /// </summary>
-internal sealed record Preloaded(HashSet<Handle<Model>> Models, HashSet<Handle<Material>> Materials, Handle<Pipeline> Effects)
+internal sealed record Preloaded(
+    HashSet<Handle<Model>> Models,
+    HashSet<Handle<Material>> Materials,
+    Handle<Pipeline> Effects)
 {
     /// <summary>
     /// What <paramref name="prefabs"/> draw, from their parts and the parts under them. Any thread.

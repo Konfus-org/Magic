@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.IO;
 using System.Numerics;
@@ -18,18 +19,17 @@ namespace Magic.ClusterRendering;
 /// transparent surfaces lit as they are drawn, and the world's effects. What runs is data: the frame pipeline the
 /// settings pick (<see cref="ClusterRenderingSettings.Pipeline"/>) and the effects the world's <c>PostProcessing</c>
 /// names, their passes run in their stages (<see cref="PassStage"/>). The CPU only keeps the GPU's tables in step with
-/// the world, a row for each thing that changed (<see cref="WorldProcessor"/>, <see cref="GpuResources"/>), and records a
-/// fixed list of passes; which clusters are drawn, how finely, which lights reach which pixels, all of it the GPU works
-/// out each frame.
+/// the world, a row for each thing that changed (<see cref="WorldProcessor"/>, <see cref="GpuResources"/>), and records
+/// a fixed list of passes; which clusters are drawn, how finely, which lights reach which pixels, all of it the GPU
+/// works out each frame.
 /// <para>
-/// The world is copied in LateUpdate (<see cref="WorldProcessor"/>), handed over in Sync, and drawn in Render from
-/// that copy, one frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is
-/// drawn whole in its first frame.
-/// While a debug view is named (<see cref="DebugViewChanged"/>), its pass (<c>Passes/Debug/Name.pass</c>) runs after the world's
-/// effects and what it draws is shown in place of the finished image, or the failure's magenta saying nothing draws while
-/// it is not ready; while the debug UI shows, each instance drawn as the failure says why where it is. Once every view
-/// is shown, the overlay stage runs once for each target, the window whether or not a view draws into it, with the
-/// overlay pipeline's passes, the debug UI's among them.
+/// The world is copied in LateUpdate (<see cref="WorldProcessor"/>), handed over in Sync, and drawn in Render from that
+/// copy, one frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is drawn
+/// whole in its first frame. While a debug view is named (<see cref="DebugViewChanged"/>), its pass
+/// (<c>Passes/Debug/Name.pass</c>) runs after the world's effects and what it draws is shown in place of the finished
+/// image, or the failure's magenta saying nothing draws while it is not ready; while the debug UI shows, each instance
+/// drawn as the failure says why where it is. Once every view is shown, the overlay stage runs once for each target,
+/// the window whether or not a view draws into it, with the overlay pipeline's passes, the debug UI's among them.
 /// </para>
 /// </summary>
 internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>, ICache<CompressedTexture>, IDisposable
@@ -45,14 +45,21 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private const string PipelinePath = "Pipelines/Clusters.pipeline";
 
-    /// <summary>
-    /// The gem's meter, which its parts record on (Core's README, Telemetry); before the instruments made on it, as
-    /// statics start in the order they are written.
-    /// </summary>
-    internal static Meter Meter { get; } = new("Magic.Gems.ClusterRendering");
+    [SuppressMessage(
+        "Style",
+        "IDE0032:Use auto property",
+        Justification = "The instruments below are made from it as the type starts, so it is a field, set first: an "
+            + "auto property goes after the fields and would be read before it is set.")]
+    private static readonly Meter _meter = new("Magic.Gems.ClusterRendering");
 
-    private static readonly Counter<int> _movedInstances = Meter.CreateCounter<int>("magic.gems.cluster_rendering.instances.moved", "{instance}", "Instances that moved, whose shadows and light are drawn again.");
-    private static readonly Counter<long> _giRays = Meter.CreateCounter<long>("magic.gems.cluster_rendering.gi.rays", "{ray}", "Rays the global illumination probes traced.");
+    private static readonly Counter<int> _movedInstances = _meter.CreateCounter<int>(
+        "magic.gems.cluster_rendering.instances.moved",
+        "{instance}",
+        "Instances that moved, whose shadows and light are drawn again.");
+    private static readonly Counter<long> _giRays = _meter.CreateCounter<long>(
+        "magic.gems.cluster_rendering.gi.rays",
+        "{ray}",
+        "Rays the global illumination probes traced.");
 
     private readonly IGpu _gpu;
     private readonly ClusterRenderingSettings _settings;
@@ -72,8 +79,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private readonly ResourceScope _target;
 
     /// <summary>
-    /// This frame's spheres where something moved, about the main camera, by which shadows and the field are made again:
-    /// the frame's <c>Moved</c>.
+    /// This frame's spheres where something moved, about the main camera, by which shadows and the field are made
+    /// again: the frame's <c>Moved</c>.
     /// </summary>
     private readonly GpuTable<Vector4> _moved;
     private readonly Dictionary<GpuTexture, ViewTarget> _targets = [];
@@ -83,10 +90,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private readonly HashSet<GpuTexture> _cleared = [];
 
     /// <summary>
-    /// What other threads tell the render thread, taken in as Render starts, in the order told (<see cref="TakeChanges"/>):
-    /// an asset made again, or the debug view named.
+    /// What other threads tell the render thread, taken in as Render starts, in the order told
+    /// (<see cref="TakeChanges"/>): an asset made again, or the debug view named.
     /// </summary>
-    private readonly Channel<Change> _changes = Channel.CreateUnbounded<Change>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<Change> _changes = Channel.CreateUnbounded<Change>(
+        new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// The debug view shown in place of the finished image, as last told (<see cref="DebugViewChanged"/>); empty for
@@ -99,7 +107,19 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private string _missingView = string.Empty;
 
-    public ClusterRenderingGem(IGpu gpu, IShaderCompiler compiler, Assets assets, Caches caches, World world, Events events, Threads threads, Lifetime lifetime, ClusterRenderingSettings settings, IWindow? window = null, IDebugUI? debug = null, IScripts? scripts = null)
+    public ClusterRenderingGem(
+        IGpu gpu,
+        IShaderCompiler compiler,
+        Assets assets,
+        Caches caches,
+        World world,
+        Events events,
+        Threads threads,
+        Lifetime lifetime,
+        ClusterRenderingSettings settings,
+        IWindow? window = null,
+        IDebugUI? debug = null,
+        IScripts? scripts = null)
     {
         _gpu = gpu;
         _settings = settings;
@@ -120,12 +140,24 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _watching.Add(events.Watch<AssetReloaded<Model>>(reloaded => Tell(new Change(Model: reloaded.Asset))));
         _watching.Add(events.Watch<AssetReloaded<Texture>>(reloaded => Tell(new Change(Texture: reloaded.Asset))));
         _watching.Add(events.Watch<AssetReloaded<Material>>(reloaded => Tell(new Change(Material: reloaded.Asset))));
-        _watching.Add(events.Watch<AssetReloaded<Shader>>(reloaded => Tell(new Change(Shader: reloaded.Asset, Invalidates: true))));
+        _watching.Add(
+            events.Watch<AssetReloaded<Shader>>(
+                reloaded => Tell(new Change(Shader: reloaded.Asset, Invalidates: true))));
         _watching.Add(events.Watch<AssetReloaded<Pipeline>>(_ => Tell(new Change(Invalidates: true))));
         _watching.Add(events.Watch<AssetReloaded<Curve>>(_ => Tell(new Change(Invalidates: true))));
         _watching.Add(events.Watch<AssetReloaded<Script>>(_ => Tell(new Change(Invalidates: true))));
         _watching.Add(events.Watch<DebugViewChanged>(changed => Tell(new Change(DebugView: changed.Name))));
     }
+
+    // The engine finds a cache's format only on a gem, so these forward to the types they keep.
+    public int Version => ModelField.CacheVersion;
+
+    int ICache<CompressedTexture>.Version => CompressedTexture.CacheVersion;
+
+    /// <summary>
+    /// The gem's meter, which its parts record on (Core's README, Telemetry).
+    /// </summary>
+    internal static Meter Meter => _meter;
 
     public void Dispose()
     {
@@ -141,14 +173,9 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _resources.Dispose();
     }
 
-    // The engine finds a cache's format only on a gem, so these forward to the types they keep.
-    public int Version => ModelField.CacheVersion;
-
     public void Write(ModelField value, Stream bytes) => value.Write(bytes);
 
     public Result<ModelField> Read(Stream bytes) => ModelField.Read(bytes);
-
-    int ICache<CompressedTexture>.Version => CompressedTexture.CacheVersion;
 
     void ICache<CompressedTexture>.Write(CompressedTexture value, Stream bytes) => value.Write(bytes);
 
@@ -172,10 +199,10 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// Takes in what changed, places the sun's shadow about the main camera, then for every camera with somewhere to draw
-    /// records the frame's stages once (probes), each view's stages, and the view shown in its target: up to the stage
-    /// the debug view names, and what that stage made shown in place of the finished image. A window nothing is drawn
-    /// into, with no camera on it or while the frame's passes first compile, is cleared to black.
+    /// Takes in what changed, places the sun's shadow about the main camera, then for every camera with somewhere to
+    /// draw records the frame's stages once (probes), each view's stages, and the view shown in its target: up to the
+    /// stage the debug view names, and what that stage made shown in place of the finished image. A window nothing is
+    /// drawn into, with no camera on it or while the frame's passes first compile, is cleared to black.
     /// </summary>
     public void Render(in Frame frame)
     {
@@ -213,7 +240,15 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         }
 
         _output.SendBanner(_failures);
-        RecordScope frameScope = new(_resources, null, shown.Constants, shown.Counts, [], GpuBuffer.None, skySurface, frame);
+        RecordScope frameScope = new(
+            _resources,
+            null,
+            shown.Constants,
+            shown.Counts,
+            [],
+            GpuBuffer.None,
+            skySurface,
+            frame);
         for (PassStage stage = PassStage.Probes; stage < PassStage.Cull; stage++)
         {
             _graph.Record(listing, stage, frameScope);
@@ -236,9 +271,47 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// compiled, and the frame built for the effects they name. Done once all of it is in, or failed, and so drawn as
     /// the failure; what it hands back keeps it in the pool until it is disposed.
     /// </summary>
-    public Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
+    public Task<Subscription> PreloadAsync(
+        IReadOnlyList<Prefab> prefabs,
+        IProgress<float> progress,
+        CancellationToken cancel)
     {
         return _preloader.PreloadAsync(prefabs, progress, cancel);
+    }
+
+    /// <summary>
+    /// The view's finished image: what the post stage made, else the lit scene as it is; none until either is made.
+    /// </summary>
+    private static BoundResource GetFinished(View view)
+    {
+        if (view.Resources.TryGet("Ldr", out BoundResource ldr)) return ldr;
+
+        return view.Resources.TryGet(GpuContract.Hdr.Name, out BoundResource hdr) ? hdr : default;
+    }
+
+    /// <summary>
+    /// What <paramref name="view"/> shows while a debug view is named: the texture its pass drew this frame, null while
+    /// the pass is not ready or does not run, so what is shown says that nothing draws, never an image from an earlier
+    /// frame.
+    /// </summary>
+    private static BoundResource? DebugImage(View view)
+    {
+        return view.Resources.TryGet("DebugView", out BoundResource drawn) && drawn.Texture != GpuTexture.None
+            ? drawn
+            : null;
+    }
+
+    /// <summary>
+    /// The camera drawing into the window, else the first; none without a camera.
+    /// </summary>
+    private static CameraCopy? GetMainCamera(Renderables copy)
+    {
+        foreach (CameraCopy camera in copy.Cameras)
+        {
+            if (camera.Camera.Target.IsWindow) return camera;
+        }
+
+        return copy.Cameras.Count > 0 ? copy.Cameras[0] : null;
     }
 
     /// <summary>
@@ -251,7 +324,13 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _movedInstances.Add(_world.Instances.Moved.Count);
         if (main is { } camera)
         {
-            _shadows.Plan(camera.Transform.Position, copy.Sun?.Direction ?? -Vector3.UnitY, _world.Lights.ChangedWords, _world.Instances.Moved.Count, frame.Index, _settings);
+            _shadows.Plan(
+                camera.Transform.Position,
+                copy.Sun?.Direction ?? -Vector3.UnitY,
+                _world.Lights.ChangedWords,
+                _world.Instances.Moved.Count,
+                frame.Index,
+                _settings);
         }
 
         _failures.Label(_world.Instances);
@@ -268,7 +347,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _raster.AddRange(GpuContract.FixedRasterKeys);
         _raster.AddRange(_resources.RasterBins);
         _graph.Append(DebugViewPass(_debugView));
-        _graph.Update(GetPipeline(), _preloader.GetEffects(copy.Effects), GetOverlay(), new SurfaceVariants(_raster, _resources.ResolveBins, _resources.TransparentSurfaces, skySurface));
+        _graph.Update(
+            GetPipeline(),
+            _preloader.GetEffects(copy.Effects),
+            GetOverlay(),
+            new SurfaceVariants(_raster, _resources.ResolveBins, _resources.TransparentSurfaces, skySurface));
         _preloader.Check(_preloader.GetEffects(copy.Effects));
     }
 
@@ -322,7 +405,15 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private void RenderView(View view, Listing listing, SurfaceKey skySurface, in Frame frame)
     {
         view.Resources.ReleaseUnlisted(listing);
-        RecordScope scope = new(_resources, view.Resources, view.Constants, view.Counts, view.TransparentRuns, view.TransparentPieces, skySurface, frame);
+        RecordScope scope = new(
+            _resources,
+            view.Resources,
+            view.Constants,
+            view.Counts,
+            view.TransparentRuns,
+            view.TransparentPieces,
+            skySurface,
+            frame);
         for (PassStage stage = PassStage.Cull; stage <= PassStage.Ui; stage++)
         {
             _graph.Record(listing, stage, scope);
@@ -349,7 +440,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         System.Drawing.Size size = window == GpuTexture.None ? System.Drawing.Size.Empty : _gpu.GetSize(window);
         if (!size.IsEmpty)
         {
-            _targets[window] = new ViewTarget(window, new System.Drawing.Rectangle(System.Drawing.Point.Empty, size), _gpu.GetFormat(window), true);
+            _targets[window] = new ViewTarget(
+                window,
+                new System.Drawing.Rectangle(System.Drawing.Point.Empty, size),
+                _gpu.GetFormat(window),
+                true);
         }
 
         foreach (View view in views)
@@ -359,7 +454,9 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
         foreach (ViewTarget target in _targets.Values)
         {
-            _target.Set(GpuContract.Target, BoundResource.Of(target.Texture, (uint)target.Area.Width, (uint)target.Area.Height));
+            _target.Set(
+                GpuContract.Target,
+                BoundResource.Of(target.Texture, (uint)target.Area.Width, (uint)target.Area.Height));
             FrameConstants constants = shown?.Constants ?? default;
             constants.ViewSize = new Vector2(target.Area.Width, target.Area.Height);
             constants.ViewTexel = new Vector2(1f / target.Area.Width, 1f / target.Area.Height);
@@ -367,7 +464,17 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             constants.TargetEncoding = (uint)target.Encoding;
             constants.Time = (float)frame.Seconds;
             constants.FrameIndex = (uint)(frame.Index % uint.MaxValue);
-            RecordScope scope = new(_resources, _target, constants, shown?.Counts ?? default, [], GpuBuffer.None, default, frame, target.Format, target.Encoding);
+            RecordScope scope = new(
+                _resources,
+                _target,
+                constants,
+                shown?.Counts ?? default,
+                [],
+                GpuBuffer.None,
+                default,
+                frame,
+                target.Format,
+                target.Encoding);
             _graph.Record(listing, PassStage.Overlay, scope);
         }
     }
@@ -382,8 +489,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// The pipeline the settings name, else the one at <see cref="PipelinePath"/>, else none; changed while running, the
-    /// next listing built runs it.
+    /// The pipeline the settings name, else the one at <see cref="PipelinePath"/>, else none; changed while running,
+    /// the next listing built runs it.
     /// </summary>
     private Handle<Pipeline> GetPipeline()
     {
@@ -420,8 +527,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private bool HasJitter() => _graph.Current?.HasPass("Taa") == true && _debugView.Length == 0;
 
     /// <summary>
-    /// The pass of the debug view <paramref name="name"/> names, <c>Passes/Debug/Name.pass</c>; none for no view, or for
-    /// a name no pass has, which is said once.
+    /// The pass of the debug view <paramref name="name"/> names, <c>Passes/Debug/Name.pass</c>; none for no view, or
+    /// for a name no pass has, which is said once.
     /// </summary>
     private Handle<Pass> DebugViewPass(string name)
     {
@@ -431,41 +538,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         if (pass == Handle<Pass>.None && !string.Equals(name, _missingView, StringComparison.Ordinal))
         {
             _missingView = name;
-            Debugging.Warn($"There is no debug view {name}: no pass is Passes/Debug/{name}.pass, so the frame is shown as it is.");
+            Debugging.Warn(
+                $"There is no debug view {name}: no pass is Passes/Debug/{name}.pass, so the frame is shown as it is.");
         }
 
         return pass;
-    }
-
-    /// <summary>
-    /// The view's finished image: what the post stage made, else the lit scene as it is; none until either is made.
-    /// </summary>
-    private static BoundResource GetFinished(View view)
-    {
-        return view.Resources.TryGet("Ldr", out BoundResource ldr) ? ldr : view.Resources.TryGet(GpuContract.Hdr.Name, out BoundResource hdr) ? hdr : default;
-    }
-
-    /// <summary>
-    /// What <paramref name="view"/> shows while a debug view is named: the texture its pass drew this frame, null while
-    /// the pass is not ready or does not run, so what is shown says that nothing draws, never an image from an earlier
-    /// frame.
-    /// </summary>
-    private static BoundResource? DebugImage(View view)
-    {
-        return view.Resources.TryGet("DebugView", out BoundResource drawn) && drawn.Texture != GpuTexture.None ? drawn : null;
-    }
-
-    /// <summary>
-    /// The camera drawing into the window, else the first; none without a camera.
-    /// </summary>
-    private static CameraCopy? GetMainCamera(Renderables copy)
-    {
-        foreach (CameraCopy camera in copy.Cameras)
-        {
-            if (camera.Camera.Target.IsWindow) return camera;
-        }
-
-        return copy.Cameras.Count > 0 ? copy.Cameras[0] : null;
     }
 
     /// <summary>
@@ -501,5 +578,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// One change told to the render thread: whichever of these it carries. An asset made again, to take in in place
     /// of what it had; that the frame's listing is to be built again; or the debug view named.
     /// </summary>
-    private readonly record struct Change(Model? Model = null, Texture? Texture = null, Material? Material = null, Shader? Shader = null, bool Invalidates = false, string? DebugView = null);
+    private readonly record struct Change(
+        Model? Model = null,
+        Texture? Texture = null,
+        Material? Material = null,
+        Shader? Shader = null,
+        bool Invalidates = false,
+        string? DebugView = null);
 }

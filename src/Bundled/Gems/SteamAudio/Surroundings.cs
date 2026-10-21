@@ -11,11 +11,21 @@ using Magic.Services;
 namespace Magic.SteamAudio;
 
 /// <summary>
+/// One solid as the main thread gathered it: its entity, what it is shaped like and made of, and where it is.
+/// </summary>
+internal readonly record struct Solid(
+    Entity Entity,
+    Handle<Model> Model,
+    AcousticMaterial Material,
+    AcousticMesh Mesh,
+    Transform Transform);
+
+/// <summary>
 /// What is solid near the player, as sound hears it: every entity with a <see cref="Transform"/> and a
-/// <see cref="Physics"/> that stays put or is moved by code, near the player's cameras, with the triangles of its model,
-/// fitted once per model on a worker, and the material its <see cref="Acoustics"/> says. Gathered a few times a second on
-/// the main thread, which reads the world, for the simulation thread to bring the acoustic scene up to date with
-/// (<see cref="SoundWorld"/>). A body that falls and is pushed is left out: it moves every step, and placing each
+/// <see cref="Physics"/> that stays put or is moved by code, near the player's cameras, with the triangles of its
+/// model, fitted once per model on a worker, and the material its <see cref="Acoustics"/> says. Gathered a few times a
+/// second on the main thread, which reads the world, for the simulation thread to bring the acoustic scene up to date
+/// with (<see cref="SoundWorld"/>). A body that falls and is pushed is left out: it moves every step, and placing each
 /// move in Steam Audio's scene costs far more than what a crate or a ball does to what is heard.
 /// </summary>
 internal sealed class Surroundings(Assets assets)
@@ -34,7 +44,8 @@ internal sealed class Surroundings(Assets assets)
     /// <summary>
     /// Models fitted on workers, for the main thread to take in at the start of its hook.
     /// </summary>
-    private readonly Channel<(Handle<Model> Model, AcousticMesh Mesh)> _fitted = Channel.CreateUnbounded<(Handle<Model> Model, AcousticMesh Mesh)>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<(Handle<Model> Model, AcousticMesh Mesh)> _fitted = Channel
+        .CreateUnbounded<(Handle<Model> Model, AcousticMesh Mesh)>(new UnboundedChannelOptions { SingleReader = true });
     private readonly AcousticMesh _unitCube = AcousticMesh.MakeCube();
 
     /// <summary>
@@ -48,6 +59,27 @@ internal sealed class Surroundings(Assets assets)
     /// bound on how far it could reach, which tells from its transform alone whether it could be near.
     /// </summary>
     internal float Longest { get; private set; } = 1;
+
+    /// <summary>
+    /// Adds every model a solid among <paramref name="parts"/>, and the parts under them, is shaped like.
+    /// </summary>
+    internal static void AddModels(IReadOnlyList<PrefabPart> parts, HashSet<Handle<Model>> models)
+    {
+        foreach (PrefabPart part in parts)
+        {
+            Handle<Model> model = Handle<Model>.None;
+            bool isSolid = false;
+            foreach (IComponent component in part.Components)
+            {
+                isSolid |= component is Physics { Motion: not Motion.Dynamic };
+                model = component is Renderer renderer ? renderer.Model : model;
+            }
+
+            if (isSolid && model != Handle<Model>.None) models.Add(model);
+
+            AddModels(part.Children, models);
+        }
+    }
 
     /// <summary>
     /// Takes in the models workers fitted since the last frame.
@@ -87,10 +119,18 @@ internal sealed class Surroundings(Assets assets)
                 if (physics[i].Motion == Motion.Dynamic || !CanBeNear(transforms[i], listeners, farthest)) continue;
 
                 Entity entity = entities[i];
-                Handle<Model> model = world.Has<Renderer>(entity) ? world.Get<Renderer>(entity).Model : Handle<Model>.None;
-                if (GetMesh(model) is not { } mesh || !IsNear(transforms[i], mesh, listeners, _wasNear.Contains(entity) ? farthest : range)) continue;
+                Handle<Model> model = world.Has<Renderer>(entity)
+                    ? world.Get<Renderer>(entity).Model
+                    : Handle<Model>.None;
+                if (GetMesh(model) is not { } mesh
+                    || !IsNear(transforms[i], mesh, listeners, _wasNear.Contains(entity) ? farthest : range))
+                {
+                    continue;
+                }
 
-                AcousticMaterial material = world.Has<Acoustics>(entity) ? world.Get<Acoustics>(entity).Material : AcousticMaterial.Generic;
+                AcousticMaterial material = world.Has<Acoustics>(entity)
+                    ? world.Get<Acoustics>(entity).Material
+                    : AcousticMaterial.Generic;
                 into.Add(new Solid(entity, model, material, mesh, transforms[i]));
                 _near.Add(entity);
             }
@@ -98,29 +138,9 @@ internal sealed class Surroundings(Assets assets)
     }
 
     /// <summary>
-    /// Adds every model a solid among <paramref name="parts"/>, and the parts under them, is shaped like.
-    /// </summary>
-    internal static void AddModels(IReadOnlyList<PrefabPart> parts, HashSet<Handle<Model>> models)
-    {
-        foreach (PrefabPart part in parts)
-        {
-            Handle<Model> model = Handle<Model>.None;
-            bool isSolid = false;
-            foreach (IComponent component in part.Components)
-            {
-                isSolid |= component is Physics { Motion: not Motion.Dynamic };
-                model = component is Renderer renderer ? renderer.Model : model;
-            }
-
-            if (isSolid && model != Handle<Model>.None) models.Add(model);
-
-            AddModels(part.Children, models);
-        }
-    }
-
-    /// <summary>
     /// Whether the entity's surface reaches within <paramref name="range"/> of a listener: its centre's distance less
-    /// how far its model reaches at its scale, so the ground is near from anywhere on it. With no listener, everything is.
+    /// how far its model reaches at its scale, so the ground is near from anywhere on it. With no listener, everything
+    /// is.
     /// </summary>
     private static bool IsNear(in Transform transform, AcousticMesh mesh, ReadOnlySpan<Vector3> listeners, float range)
     {
@@ -163,9 +183,9 @@ internal sealed class Surroundings(Assets assets)
     }
 
     /// <summary>
-    /// Whether the entity could be within <paramref name="range"/> of a listener, from its transform alone: its centre's
-    /// distance less the farthest any model reaches at its scale, so the many far off are passed over without a look at
-    /// their model. With no listener, everything could be.
+    /// Whether the entity could be within <paramref name="range"/> of a listener, from its transform alone: its
+    /// centre's distance less the farthest any model reaches at its scale, so the many far off are passed over without
+    /// a look at their model. With no listener, everything could be.
     /// </summary>
     private bool CanBeNear(in Transform transform, ReadOnlySpan<Vector3> listeners, float range)
     {
@@ -180,8 +200,3 @@ internal sealed class Surroundings(Assets assets)
         return false;
     }
 }
-
-/// <summary>
-/// One solid as the main thread gathered it: its entity, what it is shaped like and made of, and where it is.
-/// </summary>
-internal readonly record struct Solid(Entity Entity, Handle<Model> Model, AcousticMaterial Material, AcousticMesh Mesh, Transform Transform);

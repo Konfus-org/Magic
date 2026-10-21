@@ -7,8 +7,8 @@ namespace Magic.ClusterRendering;
 /// Where the world's field for global illumination lies this frame and what of it is made again: nested levels around
 /// the main camera, each <see cref="Resolution"/> voxels a side and twice the last one's voxel, stored wrapping around
 /// so a level that moves with the camera keeps what it already holds and makes only the slabs it moved into, and around
-/// what moved (<see cref="Instances.Moved"/>) the bricks it touched. Each level has a grid of <see cref="Probes"/> probes a
-/// side, a share of them traced each frame: all of the finest level's every
+/// what moved (<see cref="Instances.Moved"/>) the bricks it touched. Each level has a grid of <see cref="Probes"/>
+/// probes a side, a share of them traced each frame: all of the finest level's every
 /// <see cref="ClusterRenderingSettings.GiUpdateEvery"/> frames, and of each coarser level, whose probes light what is
 /// further and larger, half as often. A probe blends what it was traced with into what it held by how long it waited,
 /// so light everywhere follows a change in about the same time whatever the frame rate and however seldom a level is
@@ -27,14 +27,14 @@ internal sealed class GiVolume
     internal const int Brick = 8;
 
     /// <summary>
-    /// Probes a side of a level; the shaders' GiProbes.
-    /// </summary>
-    private const int Probes = 16;
-
-    /// <summary>
     /// The most levels, which the volumes the passes make hold.
     /// </summary>
     internal const int MaxLevels = 5;
+
+    /// <summary>
+    /// Probes a side of a level; the shaders' GiProbes.
+    /// </summary>
+    private const int Probes = 16;
 
     /// <summary>
     /// Voxels a distance reaches past a surface, beyond which the field says no more: what a voxel near something that
@@ -100,10 +100,14 @@ internal sealed class GiVolume
 
     /// <summary>
     /// Places the levels around <paramref name="camera"/>, marks what is made again, from where they moved and from
-    /// <paramref name="moved"/>, and uploads them with which probes are traced this frame and how much of what they held
-    /// they keep, from the frame's <paramref name="seconds"/>.
+    /// <paramref name="moved"/>, and uploads them with which probes are traced this frame and how much of what they
+    /// held they keep, from the frame's <paramref name="seconds"/>.
     /// </summary>
-    internal void Plan(Vector3 camera, IReadOnlyList<MovedSphere> moved, float seconds, ClusterRenderingSettings settings)
+    internal void Plan(
+        Vector3 camera,
+        IReadOnlyList<MovedSphere> moved,
+        float seconds,
+        ClusterRenderingSettings settings)
     {
         int levels = Math.Clamp(settings.GiLevels, 1, MaxLevels);
         float finest = Math.Clamp(settings.GiVoxel, 0.05f, 4);
@@ -126,7 +130,10 @@ internal sealed class GiVolume
 
             level.Voxel = voxel;
             level.Period = every << index;
-            level.Hysteresis = Math.Clamp(MathF.Exp(-level.Period * seconds / (Response * MathF.Pow(MathF.Sqrt(2), index))), LeastKept, MostKept);
+            level.Hysteresis = Math.Clamp(
+                MathF.Exp(-level.Period * seconds / (Response * MathF.Pow(MathF.Sqrt(2), index))),
+                LeastKept,
+                MostKept);
             level.IsHeld = true;
             foreach (MovedSphere sphere in moved)
             {
@@ -166,10 +173,11 @@ internal sealed class GiVolume
     }
 
     /// <summary>
-    /// The first voxel of a level around <paramref name="metres"/> along one axis, a whole brick, with the camera in its
-    /// middle brick.
+    /// The first voxel of a level around <paramref name="metres"/> along one axis, a whole brick, with the camera in
+    /// its middle brick.
     /// </summary>
-    private static int Snap(double metres, float voxel) => ((int)Math.Floor(metres / voxel / Brick) * Brick) - (Resolution / 2);
+    private static int Snap(double metres, float voxel)
+        => ((int)Math.Floor(metres / voxel / Brick) * Brick) - (Resolution / 2);
 
     /// <summary>
     /// One level: where it is, whether what it holds is whole, and the bricks made again this frame.
@@ -200,7 +208,8 @@ internal sealed class GiVolume
         /// </summary>
         private (int X, int Y, int Z) FirstBrick => (_origin.X / Brick, _origin.Y / Brick, _origin.Z / Brick);
 
-        private (int X, int Y, int Z) LastBrick => (FirstBrick.X + Bricks - 1, FirstBrick.Y + Bricks - 1, FirstBrick.Z + Bricks - 1);
+        private (int X, int Y, int Z) LastBrick
+            => (FirstBrick.X + Bricks - 1, FirstBrick.Y + Bricks - 1, FirstBrick.Z + Bricks - 1);
 
         internal void Clear()
         {
@@ -240,20 +249,20 @@ internal sealed class GiVolume
         }
 
         /// <summary>
-        /// Whether the brick was within the level when its origin was <paramref name="was"/>: one that was not is new to
-        /// the level and has to be traced.
-        /// </summary>
-        private static bool WasIn((int X, int Y, int Z) brick, (int X, int Y, int Z) was) => IsIn(brick.X * Brick, was.X) && IsIn(brick.Y * Brick, was.Y) && IsIn(brick.Z * Brick, was.Z);
-
-        /// <summary>
         /// Makes again the bricks of this level that a box, in metres, touches.
         /// </summary>
         internal void Mark(Vector3 min, Vector3 max)
         {
             (int X, int Y, int Z) first = FirstBrick;
             (int X, int Y, int Z) last = LastBrick;
-            (int X, int Y, int Z) low = (Math.Max(FloorToBrick(min.X), first.X), Math.Max(FloorToBrick(min.Y), first.Y), Math.Max(FloorToBrick(min.Z), first.Z));
-            (int X, int Y, int Z) high = (Math.Min(FloorToBrick(max.X), last.X), Math.Min(FloorToBrick(max.Y), last.Y), Math.Min(FloorToBrick(max.Z), last.Z));
+            (int X, int Y, int Z) low = (
+                Math.Max(FloorToBrick(min.X), first.X),
+                Math.Max(FloorToBrick(min.Y), first.Y),
+                Math.Max(FloorToBrick(min.Z), first.Z));
+            (int X, int Y, int Z) high = (
+                Math.Min(FloorToBrick(max.X), last.X),
+                Math.Min(FloorToBrick(max.Y), last.Y),
+                Math.Min(FloorToBrick(max.Z), last.Z));
             MarkBricks(low, high);
         }
 
@@ -279,11 +288,20 @@ internal sealed class GiVolume
         }
 
         /// <summary>
+        /// Whether the brick was within the level when its origin was <paramref name="was"/>: one that was not is new
+        /// to the level and has to be traced.
+        /// </summary>
+        private static bool WasIn((int X, int Y, int Z) brick, (int X, int Y, int Z) was)
+            => IsIn(brick.X * Brick, was.X) && IsIn(brick.Y * Brick, was.Y) && IsIn(brick.Z * Brick, was.Z);
+
+        private static bool IsIn(int voxel, int origin) => voxel >= origin && voxel < origin + Resolution;
+
+        private static int Wrap(int brick) => ((brick % Bricks) + Bricks) % Bricks;
+
+        /// <summary>
         /// The brick a place in metres is in, along one axis.
         /// </summary>
         private int FloorToBrick(float metres) => (int)MathF.Floor(metres / Voxel / Brick);
-
-        private static bool IsIn(int voxel, int origin) => voxel >= origin && voxel < origin + Resolution;
 
         private void MarkBricks((int X, int Y, int Z) low, (int X, int Y, int Z) high)
         {
@@ -309,7 +327,5 @@ internal sealed class GiVolume
             _low = (Math.Min(_low.X, x), Math.Min(_low.Y, y), Math.Min(_low.Z, z));
             _high = (Math.Max(_high.X, x), Math.Max(_high.Y, y), Math.Max(_high.Z, z));
         }
-
-        private static int Wrap(int brick) => ((brick % Bricks) + Bricks) % Bricks;
     }
 }

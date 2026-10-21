@@ -5,10 +5,10 @@ using Magic.Contexts.Gpu;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// Virtual shadow maps: every shadow is drawn into pages of one pool (<see cref="GpuContract.ShadowPool"/>), only the pages the views'
-/// pixels read, kept from frame to frame and drawn again only where what casts into them moved, so a shadow costs what
-/// is on screen, however far it reaches and however many lights cast it. The GPU marks, allocates and draws the pages
-/// (Shaders/VirtualShadows/); this keeps what only the CPU can: where the sun's clipmap stands.
+/// Virtual shadow maps: every shadow is drawn into pages of one pool (<see cref="GpuContract.ShadowPool"/>), only the
+/// pages the views' pixels read, kept from frame to frame and drawn again only where what casts into them moved, so a
+/// shadow costs what is on screen, however far it reaches and however many lights cast it. The GPU marks, allocates and
+/// draws the pages (Shaders/VirtualShadows/); this keeps what only the CPU can: where the sun's clipmap stands.
 /// <para>
 /// The sun's shadow is a clipmap: <see cref="ClusterRenderingSettings.ShadowLevels"/> levels about the camera, each
 /// twice as wide as the last, the finest <see cref="ClusterRenderingSettings.ShadowFinest"/> metres, each 64 pages a
@@ -30,8 +30,8 @@ namespace Magic.ClusterRendering;
 internal sealed class Shadows(GpuResources resources)
 {
     /// <summary>
-    /// Entries of the table point and spot lights' pages are found in: at least twice the pages the views read of them a
-    /// frame, which the largest pool there is leaves room for.
+    /// Entries of the table point and spot lights' pages are found in: at least twice the pages the views read of them
+    /// a frame, which the largest pool there is leaves room for.
     /// </summary>
     internal const int LightTableEntries = 65536;
 
@@ -119,11 +119,35 @@ internal sealed class Shadows(GpuResources resources)
     private int TableBytes => (Records + SunEntries + (2 * LightTableEntries)) * Row;
 
     /// <summary>
+    /// The levels the sun's clipmap has as the settings ask for them, 1 to the most it has room for: what the passes'
+    /// buffers are sized by too.
+    /// </summary>
+    internal static int GetLevelCount(ClusterRenderingSettings settings)
+        => Math.Clamp(settings.ShadowLevels, 1, MaxLevels);
+
+    /// <summary>
+    /// Texels a side of the largest pool the settings' budget holds, a power of two from 1024 to 16384: a texel of
+    /// depth is four bytes.
+    /// </summary>
+    internal static int GetPoolSize(ClusterRenderingSettings settings)
+    {
+        double texels = Math.Max(settings.ShadowBudget, 0) * 1024 * 1024 / sizeof(float);
+        int side = 1 << (int)Math.Floor(Math.Log2(Math.Sqrt(Math.Max(texels, 1))));
+        return Math.Clamp(side, 1024, 16384);
+    }
+
+    /// <summary>
     /// Places the sun's clipmap about <paramref name="camera"/> for <paramref name="sun"/>, the way its light travels,
     /// swaps the lights' tables, and makes the pool and the tables again when the settings size them otherwise;
     /// <paramref name="changedLightWords"/> is how many words the bitmask of the world's lights that changed has.
     /// </summary>
-    internal void Plan(Vector3 camera, Vector3 sun, int changedLightWords, int moved, ulong frame, ClusterRenderingSettings settings)
+    internal void Plan(
+        Vector3 camera,
+        Vector3 sun,
+        int changedLightWords,
+        int moved,
+        ulong frame,
+        ClusterRenderingSettings settings)
     {
         int poolSize = GetPoolSize(settings);
         int levels = GetLevelCount(settings);
@@ -171,23 +195,6 @@ internal sealed class Shadows(GpuResources resources)
         PlaceLevels(new Vector2(Vector3.Dot(camera, right), Vector3.Dot(camera, up)), finest, levels);
         resources.Upload(_clipmap, 0, MemoryMarshal.AsBytes(new ReadOnlySpan<GpuSunClipmap>(in clipmap)));
         resources.Upload(_clipmap, ClipmapBytes, MemoryMarshal.AsBytes(_levels.AsSpan(0, levels)));
-    }
-
-    /// <summary>
-    /// The levels the sun's clipmap has as the settings ask for them, 1 to the most it has room for: what the passes'
-    /// buffers are sized by too.
-    /// </summary>
-    internal static int GetLevelCount(ClusterRenderingSettings settings) => Math.Clamp(settings.ShadowLevels, 1, MaxLevels);
-
-    /// <summary>
-    /// Texels a side of the largest pool the settings' budget holds, a power of two from 1024 to 16384: a texel of
-    /// depth is four bytes.
-    /// </summary>
-    internal static int GetPoolSize(ClusterRenderingSettings settings)
-    {
-        double texels = Math.Max(settings.ShadowBudget, 0) * 1024 * 1024 / sizeof(float);
-        int side = 1 << (int)Math.Floor(Math.Log2(Math.Sqrt(Math.Max(texels, 1))));
-        return Math.Clamp(side, 1024, 16384);
     }
 
     /// <summary>

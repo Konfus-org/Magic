@@ -6,6 +6,11 @@ using Magic.Services;
 namespace Magic.ClusterRendering;
 
 /// <summary>
+/// A sphere around an instance where it was or is, where what is made from the instances and kept is made again.
+/// </summary>
+internal readonly record struct MovedSphere(Vector3 Centre, float Radius);
+
+/// <summary>
 /// The world's instances as the GPU draws them, kept up to date from the copy's changes
 /// rather than rebuilt: a row per entity slot (<see cref="GpuInstance"/>) naming its model's row and its material
 /// slots' rows, which are made the first time they are asked for and never change as what they name loads, so an
@@ -13,12 +18,12 @@ namespace Magic.ClusterRendering;
 /// else, which clusters of it to draw and how finely, whether it is seen at all, how far through a fade it is, the GPU
 /// works out each frame from these rows. Render thread.
 /// <para>
-/// An instance's row holds where it was the frame before as well, for velocity: when it changes the old place is kept as
-/// that, and the frame after, unless it changed again, its row is written once more with the two the same. A fade is
-/// written as the time it started, which the GPU dissolves it by. Transparent surfaces
-/// are drawn forward, farthest first, so the instances with any are kept apart for the views to sort
-/// (<see cref="Transparent"/>). A look holds its model and materials while an instance draws it
-/// (<see cref="GpuResources.Record(Handle{Model})"/>) and lets them go when none does, so what is not drawn is not kept.
+/// An instance's row holds where it was the frame before as well, for velocity: when it changes the old place is kept
+/// as that, and the frame after, unless it changed again, its row is written once more with the two the same. A fade is
+/// written as the time it started, which the GPU dissolves it by. Transparent surfaces are drawn forward, farthest
+/// first, so the instances with any are kept apart for the views to sort (<see cref="Transparent"/>). A look holds its
+/// model and materials while an instance draws it (<see cref="GpuResources.Record(Handle{Model})"/>) and lets them go
+/// when none does, so what is not drawn is not kept.
 /// </para>
 /// <para>
 /// The instances that draw the same model with the same materials share a <see cref="Look"/>, and what follows from it,
@@ -38,8 +43,8 @@ namespace Magic.ClusterRendering;
 internal sealed class Instances(GpuResources resources, FailureHandler failures, Assets assets)
 {
     /// <summary>
-    /// Rows changed in a frame past which they are worked out on the thread pool's threads, as a domain arriving changes
-    /// tens of thousands at once.
+    /// Rows changed in a frame past which they are worked out on the thread pool's threads, as a domain arriving
+    /// changes tens of thousands at once.
     /// </summary>
     private const int ParallelRows = 4096;
 
@@ -60,7 +65,8 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     private readonly HashSet<Look> _droppedLooks = [];
 
     /// <summary>
-    /// The slots written as moving last frame, whose last place is set to their place this frame unless they move again.
+    /// The slots written as moving last frame, whose last place is set to their place this frame unless they move
+    /// again.
     /// </summary>
     private readonly List<int> _moving = [];
     private readonly List<int> _stillMoving = [];
@@ -73,12 +79,12 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     /// </summary>
     private readonly List<(int Slot, bool KeepsLast)> _changed = [];
     private GpuInstance[] _rows = [];
-    private Action<int>? _workOut;
-
     /// <summary>
     /// The looks with an instance changed this frame, whose model's row is asked for once, as near as the nearest.
     /// </summary>
     private readonly List<LookEntry> _nearer = [];
+
+    private Action<int>? _workOut;
 
     /// <summary>
     /// The slots there are, a GPU thread each where culling runs over the instances.
@@ -91,9 +97,9 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     internal HashSet<int> Transparent { get; } = [];
 
     /// <summary>
-    /// This frame's spheres, each around an instance where it was or where it is, that moved, changed model, came, went,
-    /// could be drawn at last, or whose model or a material came in again: where what is made from the instances and kept,
-    /// shadows and the field global illumination traces, is made again.
+    /// This frame's spheres, each around an instance where it was or where it is, that moved, changed model, came,
+    /// went, could be drawn at last, or whose model or a material came in again: where what is made from the instances
+    /// and kept, shadows and the field global illumination traces, is made again.
     /// </summary>
     internal IReadOnlyList<MovedSphere> Moved => _moved;
 
@@ -148,6 +154,21 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         LetGo();
     }
 
+    /// <summary>
+    /// Whether <paramref name="look"/> draws any of <paramref name="drawn"/> in one of its slots.
+    /// </summary>
+    private static bool IsDrawingAnyOf(Look look, HashSet<Handle<Material>> drawn)
+    {
+        if (drawn.Count == 0) return false;
+
+        for (int i = 0; i < MaterialSlots.Capacity; i++)
+        {
+            if (drawn.Contains(look.Materials[i])) return true;
+        }
+
+        return false;
+    }
+
     private void Change(int slot, in InstanceCopy instance, float time, Vector3 player)
     {
         ref InstanceEntry entry = ref _entries[slot];
@@ -155,7 +176,8 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         Renderer renderer = instance.Renderer;
         bool wasLive = entry.IsLive;
         bool hasMoved = !wasLive || entry.Transform != transform;
-        bool isNewLook = !wasLive || entry.Renderer.Model != renderer.Model || entry.Renderer.Materials != renderer.Materials;
+        bool isNewLook = !wasLive || entry.Renderer.Model != renderer.Model
+            || entry.Renderer.Materials != renderer.Materials;
         if (wasLive && isNewLook) Forget(slot, ref entry);
 
         if (hasMoved) AddMoved(entry, transform, renderer.Model);
@@ -228,9 +250,9 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     }
 
     /// <summary>
-    /// An instance's row: its transform; where it was, the old row's place when it
-    /// moved, else its own; its model's row and its material slots', its look's; and how it fades, in from when its look
-    /// could be drawn when it waited for that. Empty while its look cannot be drawn yet.
+    /// An instance's row: its transform; where it was, the old row's place when it moved, else its own; its model's row
+    /// and its material slots', its look's; and how it fades, in from when its look could be drawn when it waited for
+    /// that. Empty while its look cannot be drawn yet.
     /// </summary>
     private GpuInstance MakeRow(int slot, in InstanceEntry entry, bool keepsLast)
     {
@@ -284,15 +306,18 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
 
     /// <summary>
     /// Works out what a look's instances share from its model and materials as they are now: its model's row and its
-    /// material slots', or the failure's when the model failed or a slot names a sky, which no mesh draws, whether any is
-    /// transparent, why they are drawn as the failure, and whether they can be drawn, from <paramref name="time"/> when
-    /// they could not before. Once they can, they are drawn for as long as the look is, as what it names loads again.
+    /// material slots', or the failure's when the model failed or a slot names a sky, which no mesh draws, whether any
+    /// is transparent, why they are drawn as the failure, and whether they can be drawn, from <paramref name="time"/>
+    /// when they could not before. Once they can, they are drawn for as long as the look is, as what it names loads
+    /// again.
     /// </summary>
     private void Resolve(LookEntry entry, float time)
     {
         Look look = entry.Look;
         bool hasFailed = resources.HasFailed(look.Model);
-        (string Why, string What)? failure = hasFailed ? ("Model does not load", assets.GetPath(look.Model) ?? string.Empty) : null;
+        (string Why, string What)? failure = hasFailed
+            ? ("Model does not load", assets.GetPath(look.Model) ?? string.Empty)
+            : null;
         bool isTransparent = false;
         bool areShown = true;
         MaterialRows rows = default;
@@ -300,7 +325,12 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         {
             Handle<Material> material = look.Materials[i];
             bool isSky = !hasFailed && resources.IsSky(material);
-            Handle<Material> drawn = hasFailed ? failures.GetMaterial(FailureType.Mesh) : isSky ? failures.GetMaterial(FailureType.Shader) : material;
+            Handle<Material> drawn = (hasFailed, isSky) switch
+            {
+                (true, _) => failures.GetMaterial(FailureType.Mesh),
+                (false, true) => failures.GetMaterial(FailureType.Shader),
+                _ => material,
+            };
             rows[i >> 1] |= (uint)resources.GetRow(drawn) << ((i & 1) * 16);
             areShown &= resources.IsShown(drawn);
             isTransparent |= !hasFailed && !isSky && resources.Get(material) is { Type: MaterialType.Transparent };
@@ -319,16 +349,15 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         entry.Rows = rows;
         entry.IsTransparent = isTransparent;
         entry.Failure = failure;
-        if (!entry.IsReady && areShown && resources.IsDrawable(look.Model))
-        {
-            entry.IsReady = true;
-            entry.ReadyAt = time;
-        }
+        if (entry.IsReady || !areShown || !resources.IsDrawable(look.Model)) return;
+
+        entry.IsReady = true;
+        entry.ReadyAt = time;
     }
 
     /// <summary>
-    /// Counts <paramref name="slot"/> among the transparent, once its look can be drawn, and the failed, as its look is;
-    /// it is in neither before.
+    /// Counts <paramref name="slot"/> among the transparent, once its look can be drawn, and the failed, as its look
+    /// is; it is in neither before.
     /// </summary>
     private void Classify(int slot, LookEntry look)
     {
@@ -363,7 +392,8 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         Vector4 bounds = resources.GetBounds(model);
         if (bounds.W <= 0) return null;
 
-        Vector3 centre = transform.Position + Vector3.Transform(new Vector3(bounds.X, bounds.Y, bounds.Z) * transform.Scale, transform.Rotation);
+        Vector3 centre = transform.Position
+            + Vector3.Transform(new Vector3(bounds.X, bounds.Y, bounds.Z) * transform.Scale, transform.Rotation);
         Vector3 scale = Vector3.Abs(transform.Scale);
         return new MovedSphere(centre, bounds.W * MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z)));
     }
@@ -371,21 +401,24 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     /// <summary>
     /// Works out again every look that draws a model or material that came in, failed or changed since the last frame,
     /// the failure model's looks among them when it did, and passes on what changed: its instances' rows when it can be
-    /// drawn at last, or its model failed or came back,
-    /// which of them are transparent or drawn as the failure when that changed, and spheres about them where shadows and
-    /// the field are made again, when they can be drawn at last or what they draw came in again. A model or material
-    /// that only came in changes no row of a look already drawn, as its row is the one they named all along. Everything
-    /// <see cref="Resolve"/> reads of a model or material counts it changed when it changes, so no other look can differ.
+    /// drawn at last, or its model failed or came back, which of them are transparent or drawn as the failure when that
+    /// changed, and spheres about them where shadows and the field are made again, when they can be drawn at last or
+    /// what they draw came in again. A model or material that only came in changes no row of a look already drawn, as
+    /// its row is the one they named all along. Everything <see cref="Resolve"/> reads of a model or material counts it
+    /// changed when it changes, so no other look can differ.
     /// </summary>
     private void Recheck(float time)
     {
         if (resources.ChangedModels.Count == 0 && resources.ChangedMaterials.Count == 0) return;
 
-        bool hasFailureChanged = resources.ChangedModels.Contains(failures.Model) || resources.ChangedMaterials.Contains(failures.GetMaterial(FailureType.Mesh));
+        bool hasFailureChanged = resources.ChangedModels.Contains(failures.Model)
+            || resources.ChangedMaterials.Contains(failures.GetMaterial(FailureType.Mesh));
         foreach (LookEntry entry in _looks.Values)
         {
-            // A look whose model failed draws the failure model and its material, so it is worked out again as they come in.
-            if (!resources.ChangedModels.Contains(entry.Look.Model) && !(entry.HasFailed && hasFailureChanged) && !IsDrawingAnyOf(entry.Look, resources.ChangedMaterials))
+            // A look whose model failed draws the failure model and its material, so it is worked out again as they
+            // come in.
+            if (!resources.ChangedModels.Contains(entry.Look.Model) && !(entry.HasFailed && hasFailureChanged)
+                && !IsDrawingAnyOf(entry.Look, resources.ChangedMaterials))
             {
                 continue;
             }
@@ -415,21 +448,6 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
 
         resources.ChangedModels.Clear();
         resources.ChangedMaterials.Clear();
-    }
-
-    /// <summary>
-    /// Whether <paramref name="look"/> draws any of <paramref name="drawn"/> in one of its slots.
-    /// </summary>
-    private static bool IsDrawingAnyOf(Look look, HashSet<Handle<Material>> drawn)
-    {
-        if (drawn.Count == 0) return false;
-
-        for (int i = 0; i < MaterialSlots.Capacity; i++)
-        {
-            if (drawn.Contains(look.Materials[i])) return true;
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -481,9 +499,22 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     }
 
     /// <summary>
-    /// What an instance draws, but not how it fades: the instances that share one share their rows' model and materials.
+    /// What an instance draws, but not how it fades: the instances that share one share their rows' model and
+    /// materials.
     /// </summary>
     private readonly record struct Look(Handle<Model> Model, MaterialSlots Materials);
+
+    /// <summary>
+    /// An instance as these hold it: where it is and what it draws, its look's entry, and when its fade started.
+    /// </summary>
+    private struct InstanceEntry
+    {
+        internal Transform Transform;
+        internal Renderer Renderer;
+        internal LookEntry? Look;
+        internal float FadeStart;
+        internal bool IsLive;
+    }
 
     /// <summary>
     /// What the instances drawing a look share: their slots, what <see cref="Resolve"/> worked out for them, and the
@@ -514,21 +545,4 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
 
         internal float ReadyAt { get; set; }
     }
-
-    /// <summary>
-    /// An instance as these hold it: where it is and what it draws, its look's entry, and when its fade started.
-    /// </summary>
-    private struct InstanceEntry
-    {
-        internal Transform Transform;
-        internal Renderer Renderer;
-        internal LookEntry? Look;
-        internal float FadeStart;
-        internal bool IsLive;
-    }
 }
-
-/// <summary>
-/// A sphere around an instance where it was or is, where what is made from the instances and kept is made again.
-/// </summary>
-internal readonly record struct MovedSphere(Vector3 Centre, float Radius);

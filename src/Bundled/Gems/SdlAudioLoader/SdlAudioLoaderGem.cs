@@ -32,7 +32,13 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
     {
         // SDL itself first, so SDL_mixer binds to the SDL every gem shares.
         _ = SDL.GetVersion();
-        if (!MIX.Init()) throw new InvalidOperationException($"SDL_mixer could not start: {CString.Read(SDL.GetError())}");
+        if (MIX
+            .Init())
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"SDL_mixer could not start: {CString.Read(SDL.GetError())}");
     }
 
     /// <summary>
@@ -54,12 +60,17 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
         _decoding.Dispose();
     }
 
-    public ValueTask<Result<Audio>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel)
+    public ValueTask<Result<Audio>> LoadAsync(
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        JsonElement settings,
+        CancellationToken cancel)
     {
         _decoding.EnterReadLock();
         try
         {
-            return new(_isStopped ? Result.Failure<Audio>("the audio loader has stopped.") : Decode(bytes.Span, cancel));
+            return new(
+                _isStopped ? Result.Failure<Audio>("the audio loader has stopped.") : Decode(bytes.Span, cancel));
         }
         finally
         {
@@ -78,13 +89,26 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
         {
             SDL.IOStream* io = SDL.IOFromConstMem(bytes, (ulong)file.Length);
             MIX.AudioDecoder* decoder = io == null ? null : MIX.CreateAudioDecoderIo(io, closeio: true, props: 0);
-            if (decoder == null) return Result.Failure<Audio>($"SDL_mixer could not read it: {CString.Read(SDL.GetError())}");
+            if (decoder == null)
+            {
+                return Result.Failure<Audio>(
+                $"SDL_mixer could not read it: {CString.Read(SDL.GetError())}");
+            }
 
             try
             {
                 SDL.AudioSpec spec;
-                if (!MIX.GetAudioDecoderFormat(decoder, &spec)) return Result.Failure<Audio>($"SDL_mixer could not tell its format: {CString.Read(SDL.GetError())}");
-                if (spec.Channels <= 0 || spec.Freq <= 0) return Result.Failure<Audio>($"it says it has {spec.Channels} channel(s) at {spec.Freq} Hz.");
+                if (!MIX.GetAudioDecoderFormat(decoder, &spec))
+                {
+                    return Result.Failure<Audio>(
+                    $"SDL_mixer could not tell its format: {CString.Read(SDL.GetError())}");
+                }
+
+                if (spec.Channels <= 0 || spec.Freq <= 0)
+                {
+                    return Result.Failure<Audio>(
+                    $"it says it has {spec.Channels} channel(s) at {spec.Freq} Hz.");
+                }
 
                 spec.Format = SDL.AudioFormat.F32;
                 float[] samples = new float[Chunk / sizeof(float)];
@@ -100,7 +124,12 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
                         read = MIX.DecodeAudio(decoder, into, Chunk, &spec);
                     }
 
-                    if (read < 0) return Result.Failure<Audio>($"SDL_mixer could not decode it: {CString.Read(SDL.GetError())}");
+                    if (read < 0)
+                    {
+                        return Result.Failure<Audio>(
+                        $"SDL_mixer could not decode it: {CString.Read(SDL.GetError())}");
+                    }
+
                     if (read == 0) break;
 
                     count += read / sizeof(float);

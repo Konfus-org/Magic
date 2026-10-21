@@ -4,13 +4,49 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Components;
 
 /// <summary>
+/// Whether a <see cref="Sound"/> plays.
+/// </summary>
+public enum Playback : byte
+{
+    Playing,
+
+    /// <summary>
+    /// Holds where it is, to go on from there when playing again.
+    /// </summary>
+    Paused,
+
+    /// <summary>
+    /// Silent, at the start: what a sound that does not loop is once it ends.
+    /// </summary>
+    Stopped,
+}
+
+/// <summary>
+/// Where a <see cref="Sound"/> is heard from.
+/// </summary>
+public enum SoundSpace : byte
+{
+    /// <summary>
+    /// From its entity's place in the world: from the side it is on, quieter the farther it is, muffled by what is
+    /// solid between it and the listener and echoed by what is around them. Played mono, as one point sounds.
+    /// </summary>
+    World,
+
+    /// <summary>
+    /// Everywhere alike, as it was recorded, stereo staying stereo: music, ambience, what the player hears in their
+    /// head.
+    /// </summary>
+    Everywhere,
+}
+
+/// <summary>
 /// Plays an <see cref="Assets.Audio"/>: in the world at its entity's <see cref="Transform"/>, heard from the player's
 /// camera, fading with distance and muffled and echoed by what is solid around it, or everywhere alike, for music and
 /// ambience. A zero reads as its default, so <c>{ "audio": { "id": 800 } }</c> in a file plays the sound once, at full
 /// volume, in the world, heard at full volume within a metre and not at all past 25; <c>"loop": true</c> plays it
 /// without end, and <c>"space": "everywhere"</c> plays it as music is. The gem that plays sounds writes back how far in
-/// it is (<see cref="Time"/>) and when a sound that does not loop has ended (<see cref="Playback"/>), and follows what a
-/// script writes: <see cref="Playback"/> to play, pause or stop it, <see cref="Time"/> to seek, and every other value
+/// it is (<see cref="Time"/>) and when a sound that does not loop has ended (<see cref="Playback"/>), and follows what
+/// a script writes: <see cref="Playback"/> to play, pause or stop it, <see cref="Time"/> to seek, and every other value
 /// as it changes.
 /// </summary>
 public record struct Sound : IComponent
@@ -94,39 +130,4 @@ public record struct Sound : IComponent
     /// Seconds into it, at its own pitch, as it was last heard. Set it to play from there.
     /// </summary>
     public float Time { get; set; }
-}
-
-/// <summary>
-/// Whether a <see cref="Sound"/> plays.
-/// </summary>
-public enum Playback : byte
-{
-    Playing,
-
-    /// <summary>
-    /// Holds where it is, to go on from there when playing again.
-    /// </summary>
-    Paused,
-
-    /// <summary>
-    /// Silent, at the start: what a sound that does not loop is once it ends.
-    /// </summary>
-    Stopped,
-}
-
-/// <summary>
-/// Where a <see cref="Sound"/> is heard from.
-/// </summary>
-public enum SoundSpace : byte
-{
-    /// <summary>
-    /// From its entity's place in the world: from the side it is on, quieter the farther it is, muffled by what is solid
-    /// between it and the listener and echoed by what is around them. Played mono, as one point sounds.
-    /// </summary>
-    World,
-
-    /// <summary>
-    /// Everywhere alike, as it was recorded, stereo staying stereo: music, ambience, what the player hears in their head.
-    /// </summary>
-    Everywhere,
 }

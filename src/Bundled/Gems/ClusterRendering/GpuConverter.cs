@@ -5,10 +5,10 @@ using Magic.Contexts.Assets;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// Turns an asset into what the GPU holds of it, one <c>Convert</c> overload a kind, each a pure function a worker runs:
-/// a model into packed clusters, levels and cards; a texture into a pool layer's compressed mips; a model's coarsest
-/// meshes into its distance field (the field starts from the meshes rather than the model, as the model's packing hands
-/// them over). The members of each conversion follow its <c>Convert</c>, in the order they run.
+/// Turns an asset into what the GPU holds of it, one <c>Convert</c> overload a kind, each a pure function a worker
+/// runs: a model into packed clusters, levels and cards; a texture into a pool layer's compressed mips; a model's
+/// coarsest meshes into its distance field (the field starts from the meshes rather than the model, as the model's
+/// packing hands them over). The members of each conversion follow its <c>Convert</c>, in the order they run.
 /// <para>
 /// A vertex is five words: its position in 20 bits an axis, steps of its model's grid; its normal and its tangent each
 /// folded onto an octahedron (Cigolle et al., "A Survey of Efficient Representations for Independent Unit Vectors",
@@ -34,8 +34,8 @@ internal static class GpuConverter
     private const int FieldResolution = GpuCache.FieldResolution;
 
     /// <summary>
-    /// Texels past a surface its distance is exact to, of the field's coarsest step; and the margin around the model. The
-    /// shaders' MeshFieldBand (Probes/GiJobs.hlsli).
+    /// Texels past a surface its distance is exact to, of the field's coarsest step; and the margin around the model.
+    /// The shaders' MeshFieldBand (Probes/GiJobs.hlsli).
     /// </summary>
     private const float FieldBand = 2.5f;
 
@@ -55,7 +55,16 @@ internal static class GpuConverter
         Add(hierarchy, packedVertex);
         List<PackedCard> packedCards = PackCards(model, ref bounds);
         float clusterReach = ComputeReach(bounds, clusters);
-        return new PackedModel([.. words], [.. clusters], [.. levels], [.. packedCards], bounds, clusterReach, step, model.Cards?.Distance ?? 0, hierarchy.Cut(float.MaxValue));
+        return new PackedModel(
+            [.. words],
+            [.. clusters],
+            [.. levels],
+            [.. packedCards],
+            bounds,
+            clusterReach,
+            step,
+            model.Cards?.Distance ?? 0,
+            hierarchy.Cut(float.MaxValue));
 
         // A level is a run of one level's clusters, with the least error and the most parent error of any in it.
         void Add(ClusterHierarchy added, Span<uint> packed)
@@ -79,7 +88,9 @@ internal static class GpuConverter
                     words.Add(corners[at] | ((uint)corners[at + 1] << 8) | ((uint)corners[at + 2] << 16));
                 }
 
-                float parentError = float.IsPositiveInfinity(cluster.ParentError) ? float.MaxValue : cluster.ParentError;
+                float parentError = float.IsPositiveInfinity(cluster.ParentError)
+                    ? float.MaxValue
+                    : cluster.ParentError;
                 if (cluster.Level != lastLevel)
                 {
                     levels.Add(new GpuLevel { FirstCluster = (uint)clusters.Count, MinError = float.MaxValue });
@@ -100,7 +111,11 @@ internal static class GpuConverter
                     ParentError = parentError,
                     Vertices = firstVertex,
                     Triangles = firstTriangle,
-                    Counts = GpuCluster.PackCounts(cluster.TriangleCount, cluster.VertexCount, cluster.MaterialSlot, cluster.Level),
+                    Counts = GpuCluster.PackCounts(
+                        cluster.TriangleCount,
+                        cluster.VertexCount,
+                        cluster.MaterialSlot,
+                        cluster.Level),
                     Step = step,
                 });
                 if (cluster.Level == 0) bounds = Enclose(bounds, cluster.Bounds);
@@ -113,7 +128,8 @@ internal static class GpuConverter
     /// <paramref name="levels"/> mips resampled from the texture's own (<see cref="Resample"/>), each compressed to
     /// BC7 (<see cref="Compress"/>).
     /// </summary>
-    internal static byte[][] Convert(Texture texture, uint size, int levels) => Compress(Resample(texture, size, levels), size);
+    internal static byte[][] Convert(Texture texture, uint size, int levels)
+        => Compress(Resample(texture, size, levels), size);
 
     /// <summary>
     /// A model's field from <paramref name="meshes"/>, its least detail: exact distances near each triangle, then which
@@ -132,7 +148,8 @@ internal static class GpuConverter
             max = Vector3.Max(max, corner);
         }
 
-        // A margin the band wide all round, so the field holds the space just outside the surface, even of a flat model.
+        // A margin the band wide all round, so the field holds the space just outside the surface, even of a flat
+        // model.
         float largest = MathF.Max(max.X - min.X, MathF.Max(max.Y - min.Y, max.Z - min.Z));
         float margin = MathF.Max(FieldBand * largest / (FieldResolution - 1 - (2 * FieldBand)), 1e-3f);
         min -= new Vector3(margin);
@@ -216,8 +233,14 @@ internal static class GpuConverter
         float clusterReach = bounds.W;
         foreach (GpuCluster cluster in clusters)
         {
-            clusterReach = MathF.Max(clusterReach, Vector3.Distance(middle, new Vector3(cluster.ErrorBounds.X, cluster.ErrorBounds.Y, cluster.ErrorBounds.Z)) + cluster.ErrorBounds.W);
-            clusterReach = MathF.Max(clusterReach, Vector3.Distance(middle, new Vector3(cluster.ParentErrorBounds.X, cluster.ParentErrorBounds.Y, cluster.ParentErrorBounds.Z)) + cluster.ParentErrorBounds.W);
+            Vector4 own = cluster.ErrorBounds;
+            Vector4 parent = cluster.ParentErrorBounds;
+            clusterReach = MathF.Max(
+                clusterReach,
+                Vector3.Distance(middle, new Vector3(own.X, own.Y, own.Z)) + own.W);
+            clusterReach = MathF.Max(
+                clusterReach,
+                Vector3.Distance(middle, new Vector3(parent.X, parent.Y, parent.Z)) + parent.W);
         }
 
         return clusterReach;
@@ -261,8 +284,10 @@ internal static class GpuConverter
             local.Clear();
             for (int t = 0; t + 2 < triangles.Length; t += 3)
             {
-                int added = (local.ContainsKey(triangles[t]) ? 0 : 1) + (local.ContainsKey(triangles[t + 1]) ? 0 : 1) + (local.ContainsKey(triangles[t + 2]) ? 0 : 1);
-                if ((indices.Count - firstIndex) / 3 == ClusterHierarchy.MaxTriangles || local.Count + added > ClusterHierarchy.MaxVertices)
+                int added = (local.ContainsKey(triangles[t]) ? 0 : 1) + (local.ContainsKey(triangles[t + 1]) ? 0 : 1)
+                    + (local.ContainsKey(triangles[t + 2]) ? 0 : 1);
+                if ((indices.Count - firstIndex) / 3 == ClusterHierarchy.MaxTriangles
+                    || local.Count + added > ClusterHierarchy.MaxVertices)
                 {
                     Close();
                 }
@@ -289,13 +314,23 @@ internal static class GpuConverter
             }
         }
 
-        return new ClusterHierarchy { Vertices = vertices.ToArray(), Indices = indices.ToArray(), Clusters = clusters.ToArray(), PositionStep = step };
+        return new ClusterHierarchy
+        {
+            Vertices = vertices.ToArray(),
+            Indices = indices.ToArray(),
+            Clusters = clusters.ToArray(),
+            PositionStep = step
+        };
     }
 
     /// <summary>
     /// The source vertex's index within the cluster being made, the vertex added to it the first time it is asked for.
     /// </summary>
-    private static byte IndexWithin(uint index, ReadOnlySpan<Vertex> source, Dictionary<uint, int> local, List<Vertex> vertices)
+    private static byte IndexWithin(
+        uint index,
+        ReadOnlySpan<Vertex> source,
+        Dictionary<uint, int> local,
+        List<Vertex> vertices)
     {
         if (local.TryGetValue(index, out int at)) return (byte)at;
 
@@ -342,10 +377,13 @@ internal static class GpuConverter
         words[2] = ToUnorm(normal.X, 16) | (ToUnorm(normal.Y, 16) << 16);
         Vector2 tangent = EncodeOctahedral(new Vector3(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z));
         words[3] = ToUnorm(tangent.X, 16) | (ToUnorm(tangent.Y, 15) << 16) | (vertex.Tangent.W < 0 ? 1u << 31 : 0);
-        words[4] = BitConverter.HalfToUInt16Bits((Half)vertex.Uv.X) | ((uint)BitConverter.HalfToUInt16Bits((Half)vertex.Uv.Y) << 16);
+        words[4] = BitConverter.HalfToUInt16Bits((Half)vertex.Uv.X)
+            | ((uint)BitConverter.HalfToUInt16Bits((Half)vertex.Uv.Y) << 16);
 
         // Two's complement in 20 bits: a negative step's high bits are cut off, and the shader sign-extends them back.
-        uint Steps(float value) => unchecked((uint)(int)Math.Clamp(Math.Round(value / (double)step), -PositionSteps, PositionSteps)) & 0xFFFFF;
+        uint Steps(float value)
+            => unchecked((uint)(int)Math.Clamp(Math.Round(value / (double)step), -PositionSteps, PositionSteps))
+                & 0xFFFFF;
     }
 
     /// <summary>
@@ -360,13 +398,16 @@ internal static class GpuConverter
         Vector2 square = new(folded.X, folded.Y);
         if (folded.Z < 0)
         {
-            square = new Vector2((1 - MathF.Abs(folded.Y)) * (folded.X >= 0 ? 1 : -1), (1 - MathF.Abs(folded.X)) * (folded.Y >= 0 ? 1 : -1));
+            square = new Vector2(
+                (1 - MathF.Abs(folded.Y)) * (folded.X >= 0 ? 1 : -1),
+                (1 - MathF.Abs(folded.X)) * (folded.Y >= 0 ? 1 : -1));
         }
 
         return (square * 0.5f) + new Vector2(0.5f);
     }
 
-    private static uint ToUnorm(float value, int bits) => (uint)MathF.Round(Math.Clamp(value, 0, 1) * ((1 << bits) - 1));
+    private static uint ToUnorm(float value, int bits)
+        => (uint)MathF.Round(Math.Clamp(value, 0, 1) * ((1 << bits) - 1));
 
     private static Vector4 ComputeSphere(List<Vertex> vertices, int first, int count)
     {
@@ -425,7 +466,11 @@ internal static class GpuConverter
                 if (candidate.Width >= side && candidate.Height >= side) source = candidate;
             }
 
-            levels[level] = ResampleLevel(texture.Pixels.Span.Slice(source.Offset, source.Size), source.Width, source.Height, side);
+            levels[level] = ResampleLevel(
+                texture.Pixels.Span.Slice(source.Offset, source.Size),
+                source.Width,
+                source.Height,
+                side);
         }
 
         return levels;
@@ -444,7 +489,8 @@ internal static class GpuConverter
                 int fromY = (int)((long)y * height / side);
                 for (int channel = 0; channel < 4; channel++)
                 {
-                    resampled[(((y * side) + x) * 4) + channel] = (byte)(SumBox(pixels, width, height, fromX, fromY, boxX, boxY, channel) / (boxX * boxY));
+                    resampled[(((y * side) + x) * 4) + channel] =
+                        (byte)(SumBox(pixels, width, height, fromX, fromY, boxX, boxY, channel) / (boxX * boxY));
                 }
             }
         }
@@ -456,7 +502,15 @@ internal static class GpuConverter
     /// The sum of one channel over the box of texels from (<paramref name="fromX"/>, <paramref name="fromY"/>), clamped
     /// to the image's edge.
     /// </summary>
-    private static int SumBox(ReadOnlySpan<byte> pixels, int width, int height, int fromX, int fromY, int boxX, int boxY, int channel)
+    private static int SumBox(
+        ReadOnlySpan<byte> pixels,
+        int width,
+        int height,
+        int fromX,
+        int fromY,
+        int boxX,
+        int boxY,
+        int channel)
     {
         int sum = 0;
         for (int dy = 0; dy < boxY; dy++)
@@ -496,14 +550,33 @@ internal static class GpuConverter
     /// The triangle as the nearest surface of every texel within <paramref name="band"/> of it where it is nearer than
     /// what the texel had: the squared distance, and which triangle.
     /// </summary>
-    private static void RecordNearest(ReadOnlySpan<Vector3> corners, int triangle, Vector3 min, Vector3 step, float band, float[] squared, int[] nearest)
+    private static void RecordNearest(
+        ReadOnlySpan<Vector3> corners,
+        int triangle,
+        Vector3 min,
+        Vector3 step,
+        float band,
+        float[] squared,
+        int[] nearest)
     {
         Vector3 a = corners[triangle * 3];
         Vector3 b = corners[(triangle * 3) + 1];
         Vector3 c = corners[(triangle * 3) + 2];
-        (int x0, int x1) = GetTexelRange(MathF.Min(a.X, MathF.Min(b.X, c.X)) - band, MathF.Max(a.X, MathF.Max(b.X, c.X)) + band, min.X, step.X);
-        (int y0, int y1) = GetTexelRange(MathF.Min(a.Y, MathF.Min(b.Y, c.Y)) - band, MathF.Max(a.Y, MathF.Max(b.Y, c.Y)) + band, min.Y, step.Y);
-        (int z0, int z1) = GetTexelRange(MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) - band, MathF.Max(a.Z, MathF.Max(b.Z, c.Z)) + band, min.Z, step.Z);
+        (int x0, int x1) = GetTexelRange(
+            MathF.Min(a.X, MathF.Min(b.X, c.X)) - band,
+            MathF.Max(a.X, MathF.Max(b.X, c.X)) + band,
+            min.X,
+            step.X);
+        (int y0, int y1) = GetTexelRange(
+            MathF.Min(a.Y, MathF.Min(b.Y, c.Y)) - band,
+            MathF.Max(a.Y, MathF.Max(b.Y, c.Y)) + band,
+            min.Y,
+            step.Y);
+        (int z0, int z1) = GetTexelRange(
+            MathF.Min(a.Z, MathF.Min(b.Z, c.Z)) - band,
+            MathF.Max(a.Z, MathF.Max(b.Z, c.Z)) + band,
+            min.Z,
+            step.Z);
         for (int z = z0; z <= z1; z++)
         {
             for (int y = y0; y <= y1; y++)
@@ -569,7 +642,8 @@ internal static class GpuConverter
         for (int index = 0; index < squared.Length; index++)
         {
             (int x, int y, int z) = GetTexel(index);
-            bool isFace = x == 0 || y == 0 || z == 0 || x == FieldResolution - 1 || y == FieldResolution - 1 || z == FieldResolution - 1;
+            bool isFace = x == 0 || y == 0 || z == 0 || x == FieldResolution - 1 || y == FieldResolution - 1
+                || z == FieldResolution - 1;
             if (isFace && squared[index] >= wall)
             {
                 outside[index] = true;
@@ -610,11 +684,14 @@ internal static class GpuConverter
     /// <summary>
     /// A field's texel by its index, x fastest.
     /// </summary>
-    private static (int X, int Y, int Z) GetTexel(int index) => (index % FieldResolution, index / FieldResolution % FieldResolution, index / (FieldResolution * FieldResolution));
+    private static (int X, int Y, int Z) GetTexel(int index) => (
+        index % FieldResolution,
+        index / FieldResolution % FieldResolution,
+        index / (FieldResolution * FieldResolution));
 
     /// <summary>
-    /// Whether <paramref name="point"/> is on the side of its nearest triangle its winding faces, as a texel the surface
-    /// passes through is told inside or out.
+    /// Whether <paramref name="point"/> is on the side of its nearest triangle its winding faces, as a texel the
+    /// surface passes through is told inside or out.
     /// </summary>
     private static bool IsInFront(Vector3 point, Vector3[] corners, int triangle)
     {

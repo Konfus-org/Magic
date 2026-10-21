@@ -11,9 +11,9 @@ namespace Magic.ClusterRendering;
 /// The one route to the GPU's memory: every buffer, texture, table and sampler the renderer uses is made, grown, sent
 /// and released here, and found here by the name passes read it by. A part asks for what it needs under its contract
 /// entry (<see cref="GpuContract"/>), which says its name, shape and use, and keeps what it is handed to write into;
-/// whoever records finds it in a scope (<see cref="ResourceScope"/>): the frame's, a view's, or a target's, each name as
-/// it stands now, a table's buffer however often it grew. Nothing else makes, uploads or releases GPU memory, so what is
-/// on the GPU, and how much of it each kind takes, is known in one place. Render thread.
+/// whoever records finds it in a scope (<see cref="ResourceScope"/>): the frame's, a view's, or a target's, each name
+/// as it stands now, a table's buffer however often it grew. Nothing else makes, uploads or releases GPU memory, so
+/// what is on the GPU, and how much of it each kind takes, is known in one place. Render thread.
 /// <para>
 /// Assets come the same way: a part asks for a model, material or render texture by its handle and is handed its row or
 /// texture, the asset loaded the first time and kept while anything holds it. Keeping what is held resident, loading it
@@ -54,7 +54,14 @@ internal sealed class GpuResources : IDisposable
 
     private GpuTexture _window;
 
-    internal GpuResources(IGpu gpu, Assets assets, Caches caches, PassGraph graph, FailureHandler failures, ClusterRenderingSettings settings, CancellationToken stopping)
+    internal GpuResources(
+        IGpu gpu,
+        Assets assets,
+        Caches caches,
+        PassGraph graph,
+        FailureHandler failures,
+        ClusterRenderingSettings settings,
+        CancellationToken stopping)
     {
         _gpu = gpu;
         Frame = MakeScope();
@@ -75,6 +82,33 @@ internal sealed class GpuResources : IDisposable
         MakeTable<uint>(GpuContract.Zeros, 16384);
         _cache = new GpuCache(this, assets, caches, graph, failures, settings, stopping);
     }
+
+    /// <summary>
+    /// The frame's scope: the frame-wide tables and buffers, the texture pools, the shadows, and what passes make for
+    /// the frame.
+    /// </summary>
+    internal ResourceScope Frame { get; }
+
+    /// <summary>
+    /// The indices 0 to <see cref="PieceIndexCount"/>, which a draw of pieces or tiles steps through an instance at a
+    /// time.
+    /// </summary>
+    internal GpuBuffer PieceIndices { get; }
+
+    /// <inheritdoc cref="GpuCache.ChangedModels"/>
+    internal HashSet<Handle<Model>> ChangedModels => _cache.ChangedModels;
+
+    /// <inheritdoc cref="GpuCache.ChangedMaterials"/>
+    internal HashSet<Handle<Material>> ChangedMaterials => _cache.ChangedMaterials;
+
+    /// <inheritdoc cref="GpuCache.RasterBins"/>
+    internal List<SurfaceKey> RasterBins => _cache.RasterBins;
+
+    /// <inheritdoc cref="GpuCache.ResolveBins"/>
+    internal List<SurfaceKey> ResolveBins => _cache.ResolveBins;
+
+    /// <inheritdoc cref="GpuCache.TransparentSurfaces"/>
+    internal HashSet<SurfaceKey> TransparentSurfaces => _cache.TransparentSurfaces;
 
     public void Dispose()
     {
@@ -101,32 +135,6 @@ internal sealed class GpuResources : IDisposable
 
         if (_window != GpuTexture.None) _gpu.Release(_window);
     }
-
-    /// <summary>
-    /// The frame's scope: the frame-wide tables and buffers, the texture pools, the shadows, and what passes make for
-    /// the frame.
-    /// </summary>
-    internal ResourceScope Frame { get; }
-
-    /// <summary>
-    /// The indices 0 to <see cref="PieceIndexCount"/>, which a draw of pieces or tiles steps through an instance at a time.
-    /// </summary>
-    internal GpuBuffer PieceIndices { get; }
-
-    /// <inheritdoc cref="GpuCache.ChangedModels"/>
-    internal HashSet<Handle<Model>> ChangedModels => _cache.ChangedModels;
-
-    /// <inheritdoc cref="GpuCache.ChangedMaterials"/>
-    internal HashSet<Handle<Material>> ChangedMaterials => _cache.ChangedMaterials;
-
-    /// <inheritdoc cref="GpuCache.RasterBins"/>
-    internal List<SurfaceKey> RasterBins => _cache.RasterBins;
-
-    /// <inheritdoc cref="GpuCache.ResolveBins"/>
-    internal List<SurfaceKey> ResolveBins => _cache.ResolveBins;
-
-    /// <inheritdoc cref="GpuCache.TransparentSurfaces"/>
-    internal HashSet<SurfaceKey> TransparentSurfaces => _cache.TransparentSurfaces;
 
     /// <inheritdoc cref="GpuCache.Record(Handle{Model})"/>
     internal int Record(Handle<Model> model) => _cache.Record(model);
@@ -250,8 +258,8 @@ internal sealed class GpuResources : IDisposable
     }
 
     /// <summary>
-    /// A buffer of <paramref name="bytes"/> under <paramref name="info"/>, in place of the one it had, which is released
-    /// at the next <see cref="Upload()"/>.
+    /// A buffer of <paramref name="bytes"/> under <paramref name="info"/>, in place of the one it had, which is
+    /// released at the next <see cref="Upload()"/>.
     /// </summary>
     internal GpuBuffer MakeBuffer(ResourceInfo info, uint bytes, ResourceScope? scope = null)
     {
@@ -275,9 +283,17 @@ internal sealed class GpuResources : IDisposable
     /// texels deep for a volume, read through <paramref name="sampler"/> wherever it is read when it has one; in place
     /// of the one it had, which is released at the next <see cref="Upload()"/>.
     /// </summary>
-    internal GpuTexture MakeTexture(ResourceInfo info, uint width, uint height, uint levels = 1, uint depth = 1, GpuSampler sampler = default, ResourceScope? scope = null)
+    internal GpuTexture MakeTexture(
+        ResourceInfo info,
+        uint width,
+        uint height,
+        uint levels = 1,
+        uint depth = 1,
+        GpuSampler sampler = default,
+        ResourceScope? scope = null)
     {
-        GpuTexture texture = _gpu.CreateTexture(new GpuTextureDescription(info.Format, info.TextureUsage, width, height, levels, depth, info.Shape));
+        GpuTexture texture = _gpu.CreateTexture(
+            new GpuTextureDescription(info.Format, info.TextureUsage, width, height, levels, depth, info.Shape));
         Retire((scope ?? Frame).Own(info, BoundResource.Of(texture, width, height, sampler)));
         return texture;
     }
@@ -471,20 +487,24 @@ internal sealed class ResourceScope(IGpu gpu)
 
     /// <summary>
     /// What a pass makes, made now unless it was made with the same key; returns whether it was made now, so whoever
-    /// fills it knows. One kept from frame to frame is made with its history, <see cref="ResourceInfo.GetHistoryName"/>.
+    /// fills it knows. One kept from frame to frame is made with its history,
+    /// <see cref="ResourceInfo.GetHistoryName"/>.
     /// </summary>
     internal bool MakeIfChanged(string name, in ResourceKey key)
     {
-        if (_made.TryGetValue(name, out (BoundResource Resource, ResourceKey Key) made) && made.Key == key) return false;
+        if (_made.TryGetValue(name, out (BoundResource Resource, ResourceKey Key) made)
+            && made.Key == key)
+        {
+            return false;
+        }
 
         ReleaseMade(name);
         Make(name, key);
-        if (key.HasHistory)
-        {
-            string history = ResourceInfo.GetHistoryName(name);
-            Make(history, key with { HasHistory = false });
-            _histories.Add((name, history));
-        }
+        if (!key.HasHistory) return true;
+
+        string history = ResourceInfo.GetHistoryName(name);
+        Make(history, key with { HasHistory = false });
+        _histories.Add((name, history));
 
         return true;
     }
@@ -517,7 +537,8 @@ internal sealed class ResourceScope(IGpu gpu)
         _kept = listing;
         foreach (string name in new List<string>(_made.Keys))
         {
-            if (_made.ContainsKey(name) && !listing.Created.ContainsKey(name) && !GpuContract.All.ContainsKey(name) && !IsHistoryOf(listing, name))
+            if (_made.ContainsKey(name) && !listing.Created.ContainsKey(name) && !GpuContract.All.ContainsKey(name)
+                && !IsHistoryOf(listing, name))
             {
                 ReleaseMade(name);
             }
@@ -564,14 +585,26 @@ internal sealed class ResourceScope(IGpu gpu)
 
     private static bool IsHistoryOf(Listing listing, string name)
     {
-        return name.EndsWith(ResourceInfo.HistorySuffix, StringComparison.Ordinal) && listing.Created.TryGetValue(name[..^ResourceInfo.HistorySuffix.Length], out CreatedResource? created) && created.Create.History;
+        return name.EndsWith(ResourceInfo.HistorySuffix, StringComparison.Ordinal)
+            && listing.Created.TryGetValue(name[..^ResourceInfo.HistorySuffix.Length], out CreatedResource? created)
+            && created.Create.History;
     }
 
     private void Make(string name, in ResourceKey key)
     {
         BoundResource resource = key.IsBuffer
             ? BoundResource.Of(gpu.CreateBuffer(key.BufferUsage, key.Bytes), key.Bytes)
-            : BoundResource.Of(gpu.CreateTexture(new GpuTextureDescription(key.Format, key.TextureUsage, key.Width, key.Height, key.Levels, key.Layers, key.Shape)), key.Width, key.Height);
+            : BoundResource.Of(
+                gpu.CreateTexture(new GpuTextureDescription(
+                    key.Format,
+                    key.TextureUsage,
+                    key.Width,
+                    key.Height,
+                    key.Levels,
+                    key.Layers,
+                    key.Shape)),
+                key.Width,
+                key.Height);
         _made[name] = (resource, key);
         _bound[name] = new Named(resource, null);
     }
@@ -593,7 +626,8 @@ internal sealed class ResourceScope(IGpu gpu)
     }
 
     /// <summary>
-    /// What a name stands for: what was made under it, or a table, read as it stands, as its buffer changes when it grows.
+    /// What a name stands for: what was made under it, or a table, read as it stands, as its buffer changes when it
+    /// grows.
     /// </summary>
     private sealed record Named(BoundResource Resource, IGpuTable? Table);
 }

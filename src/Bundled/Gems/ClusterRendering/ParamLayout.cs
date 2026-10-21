@@ -10,6 +10,41 @@ using Magic.Extensions;
 namespace Magic.ClusterRendering;
 
 /// <summary>
+/// The type of a <see cref="ParamField"/>.
+/// </summary>
+internal enum ParamType : byte
+{
+    Float,
+    Float2,
+    Float3,
+    Float4,
+    Int,
+    Int2,
+    Int3,
+    Int4,
+    Uint,
+    Uint2,
+    Uint3,
+    Uint4,
+    Bool,
+
+    /// <summary>
+    /// Four floats, written r, g, b, a.
+    /// </summary>
+    Color,
+
+    /// <summary>
+    /// A texture the renderer resolved into its pools, or <c>TextureNone</c>.
+    /// </summary>
+    TextureRef,
+
+    /// <summary>
+    /// A curve, as sixteen floats: where its first and last keys are, then its value at places evenly between.
+    /// </summary>
+    Curve,
+}
+
+/// <summary>
 /// A shader's param struct, a surface's <c>MaterialParams</c> or a pass's <c>PassParams</c>, as the renderer reads it
 /// from the HLSL, the compiler reporting counts and no names: its members, where each sits in the packed record, the
 /// HLSL that unpacks the record, and how values are packed into it. The CPU is the one place the layout exists: scalars
@@ -61,7 +96,13 @@ internal sealed partial class ParamLayout
     private readonly int _bodyStart;
     private readonly int _bodyEnd;
 
-    private ParamLayout(string hlsl, string structName, IReadOnlyList<ParamField> fields, int size, int bodyStart, int bodyEnd)
+    private ParamLayout(
+        string hlsl,
+        string structName,
+        IReadOnlyList<ParamField> fields,
+        int size,
+        int bodyStart,
+        int bodyEnd)
     {
         _hlsl = hlsl;
         StructName = structName;
@@ -71,8 +112,6 @@ internal sealed partial class ParamLayout
         _bodyEnd = bodyEnd;
     }
 
-    private string StructName { get; }
-
     internal IReadOnlyList<ParamField> Fields { get; }
 
     /// <summary>
@@ -80,12 +119,19 @@ internal sealed partial class ParamLayout
     /// </summary>
     internal int Size { get; }
 
+    private string StructName { get; }
+
     /// <summary>
-    /// <c>struct structName { ... };</c> in <paramref name="hlsl"/>, laid out; none when the text has no such struct, so a
-    /// pass with no params needs none. Why not, for a member of a type a param cannot be, or more than
+    /// <c>struct structName { ... };</c> in <paramref name="hlsl"/>, laid out; none when the text has no such struct,
+    /// so a pass with no params needs none. Why not, for a member of a type a param cannot be, or more than
     /// <paramref name="maxBytes"/> of them.
     /// </summary>
-    internal static Result<ParamLayout?> Parse(string hlsl, string structName, bool allowTextures, bool allowCurves, int maxBytes)
+    internal static Result<ParamLayout?> Parse(
+        string hlsl,
+        string structName,
+        bool allowTextures,
+        bool allowCurves,
+        int maxBytes)
     {
         Match match = StructPattern().Match(hlsl);
         while (match.Success && !string.Equals(match.Groups["name"].Value, structName, StringComparison.Ordinal))
@@ -106,24 +152,28 @@ internal sealed partial class ParamLayout
             Match member = MemberPattern().Match(declaration);
             if (!member.Success)
             {
-                return Result.Failure<ParamLayout?>($"{structName} has a member that is not 'type name [: Role] [= default]': '{declaration}'.");
+                return Result.Failure<ParamLayout?>(
+                    $"{structName} has a member that is not 'type name [: Role] [= default]': '{declaration}'.");
             }
 
             string name = member.Groups["name"].Value;
             string typeName = member.Groups["type"].Value;
             if (!_types.TryGetValue(typeName, out ParamType type))
             {
-                return Result.Failure<ParamLayout?>($"{structName}.{name} is a {typeName}; a param is float, int, uint or bool, a 2 to 4 vector of one, a Color, a TextureRef or a Curve.");
+                return Result.Failure<ParamLayout?>($"{structName}.{name} is a {typeName}; a param is float, int, "
+                    + "uint or bool, a 2 to 4 vector of one, a Color, a TextureRef or a Curve.");
             }
 
             if (type == ParamType.TextureRef && !allowTextures)
             {
-                return Result.Failure<ParamLayout?>($"{structName}.{name} is a TextureRef, which a pass's params cannot be.");
+                return Result.Failure<ParamLayout?>(
+                    $"{structName}.{name} is a TextureRef, which a pass's params cannot be.");
             }
 
             if (type == ParamType.Curve && !allowCurves)
             {
-                return Result.Failure<ParamLayout?>($"{structName}.{name} is a Curve, which a material's params cannot be.");
+                return Result.Failure<ParamLayout?>(
+                    $"{structName}.{name} is a Curve, which a material's params cannot be.");
             }
 
             if (fields.Exists(field => string.Equals(field.Name, name, StringComparison.Ordinal)))
@@ -134,7 +184,14 @@ internal sealed partial class ParamLayout
             ParamField field = new(name, type, 0, new MaterialParam());
             int align = field.Components switch { 1 => 4, 2 => 8, _ => 16 };
             offset = RoundUp(offset, align);
-            fields.Add(field with { Offset = offset, Default = GetDefault(field, member.Groups["default"].Success ? member.Groups["default"].Value.Trim() : null), Role = member.Groups["role"].Value });
+            fields.Add(field with
+            {
+                Offset = offset,
+                Default = GetDefault(
+                field,
+                member.Groups["default"].Success ? member.Groups["default"].Value.Trim() : null),
+                Role = member.Groups["role"].Value
+            });
             offset += field.Size;
         }
 
@@ -144,7 +201,8 @@ internal sealed partial class ParamLayout
             return Result.Failure<ParamLayout?>($"{structName} packs to {size} bytes, past the {maxBytes} it may.");
         }
 
-        return Result.Success<ParamLayout?>(new ParamLayout(hlsl, structName, fields, size, body.Index, body.Index + body.Length));
+        return Result.Success<ParamLayout?>(
+            new ParamLayout(hlsl, structName, fields, size, body.Index, body.Index + body.Length));
     }
 
     /// <summary>
@@ -192,10 +250,11 @@ internal sealed partial class ParamLayout
     }
 
     /// <summary>
-    /// What a material of <paramref name="values"/> gives global illumination: the colour of its <c>: GiColor</c> member,
-    /// white without one, and half of it when a <c>: GiColorMap</c> member names a texture, whose own colour is taken as
-    /// mid grey, less as much of it as its <c>: GiMetallic</c> member says it is metal, as a metal scatters no light the
-    /// way a matte surface does, only mirrors it; and the light of its <c>: GiEmissive</c> member, none without one.
+    /// What a material of <paramref name="values"/> gives global illumination: the colour of its <c>: GiColor</c>
+    /// member, white without one, and half of it when a <c>: GiColorMap</c> member names a texture, whose own colour is
+    /// taken as mid grey, less as much of it as its <c>: GiMetallic</c> member says it is metal, as a metal scatters no
+    /// light the way a matte surface does, only mirrors it; and the light of its <c>: GiEmissive</c> member, none
+    /// without one.
     /// </summary>
     internal (Vector3 Color, Vector3 Emission) GiOf(IReadOnlyDictionary<string, MaterialParam> values)
     {
@@ -206,7 +265,10 @@ internal sealed partial class ParamLayout
         foreach (ParamField field in Fields)
         {
             MaterialParam value = values.TryGetValue(field.Name, out MaterialParam? given) ? given : field.Default;
-            Vector3 rgb = new(GetComponent(field, value, 0), GetComponent(field, value, 1), GetComponent(field, value, 2));
+            Vector3 rgb = new(
+                GetComponent(field, value, 0),
+                GetComponent(field, value, 1),
+                GetComponent(field, value, 2));
             switch (field.Role)
             {
                 case "GiColor":
@@ -230,11 +292,15 @@ internal sealed partial class ParamLayout
     }
 
     /// <summary>
-    /// Packs each member into <paramref name="record"/> from the first of <paramref name="layers"/> that has it by name,
-    /// else its default, else zero; a texture as <paramref name="texture"/> resolves it, and a curve as
+    /// Packs each member into <paramref name="record"/> from the first of <paramref name="layers"/> that has it by
+    /// name, else its default, else zero; a texture as <paramref name="texture"/> resolves it, and a curve as
     /// <paramref name="curve"/> does, all zeros for none.
     /// </summary>
-    internal void Write(ReadOnlySpan<IReadOnlyDictionary<string, MaterialParam>?> layers, Func<MaterialParam, uint> texture, Func<MaterialParam, Curve?> curve, Span<byte> record)
+    internal void Write(
+        ReadOnlySpan<IReadOnlyDictionary<string, MaterialParam>?> layers,
+        Func<MaterialParam, uint> texture,
+        Func<MaterialParam, Curve?> curve,
+        Span<byte> record)
     {
         record.Clear();
         foreach (ParamField field in Fields)
@@ -270,47 +336,6 @@ internal sealed partial class ParamLayout
     }
 
     /// <summary>
-    /// HLSL that unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows:
-    /// <c>MaterialParams LoadMaterialParams(uint material) { ... }</c>. One line, so it shifts no line after it.
-    /// </summary>
-    private string MakeLoader(string signature, string prologue, string rows)
-    {
-        StringBuilder text = new();
-        text.Append(StructName).Append(' ').Append(signature).Append(" { ").Append(prologue).Append(' ').Append(StructName).Append(" loaded; ");
-        foreach (ParamField field in Fields)
-        {
-            if (field.Type == ParamType.Curve)
-            {
-                for (int row = 0; row < field.Size / 16; row++)
-                {
-                    text.Append(CultureInfo.InvariantCulture, $"loaded.{field.Name}.rows[{row}] = asfloat({rows}[{(field.Offset / 16) + row}]); ");
-                }
-
-                continue;
-            }
-
-            string raw = $"{rows}[{field.Offset / 16}].{"xyzw".Substring(field.Offset % 16 / 4, field.Components)}";
-            string value = field.Type == ParamType.Bool ? $"{raw} != 0u" : field.IsFloat ? $"asfloat({raw})" : field.IsInt ? $"asint({raw})" : raw;
-            text.Append("loaded.").Append(field.Name).Append(" = ").Append(value).Append("; ");
-        }
-
-        return text.Append("return loaded; }").ToString();
-    }
-
-    /// <summary>
-    /// The member called <paramref name="name"/>, or null.
-    /// </summary>
-    private ParamField? FindField(string name)
-    {
-        foreach (ParamField field in Fields)
-        {
-            if (string.Equals(field.Name, name, StringComparison.Ordinal)) return field;
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// A curve as Shaders/Include/Curve.hlsli reads it: where its first and last keys are, then its value at
     /// <see cref="CurveSamples"/> places evenly from the one to the other.
     /// </summary>
@@ -324,7 +349,9 @@ internal sealed partial class ParamLayout
         BinaryPrimitives.WriteSingleLittleEndian(destination[4..], end);
         for (int i = 0; i < CurveSamples; i++)
         {
-            BinaryPrimitives.WriteSingleLittleEndian(destination[(8 + (i * 4))..], curve.At(start + ((end - start) * i / (CurveSamples - 1))));
+            BinaryPrimitives.WriteSingleLittleEndian(
+                destination[(8 + (i * 4))..],
+                curve.At(start + ((end - start) * i / (CurveSamples - 1))));
         }
     }
 
@@ -379,7 +406,11 @@ internal sealed partial class ParamLayout
 
         // A whole number in hex, as HLSL writes a mask or a none (0xFFFFu), which the names below would take apart.
         if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-            && uint.TryParse(text.AsSpan(2).TrimEnd("uU"), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint hex))
+            && uint.TryParse(
+                text.AsSpan(2).TrimEnd("uU"),
+                NumberStyles.HexNumber,
+                CultureInfo.InvariantCulture,
+                out uint hex))
         {
             return new MaterialParam { X = hex };
         }
@@ -392,7 +423,10 @@ internal sealed partial class ParamLayout
             int index = numbers.Count == 1 ? 0 : i;
             if (index < numbers.Count)
             {
-                values[i] = float.Parse(numbers[index].Value.TrimEnd('f', 'F', 'u', 'U'), NumberStyles.Float, CultureInfo.InvariantCulture);
+                values[i] = float.Parse(
+                    numbers[index].Value.TrimEnd('f', 'F', 'u', 'U'),
+                    NumberStyles.Float,
+                    CultureInfo.InvariantCulture);
             }
         }
 
@@ -403,64 +437,100 @@ internal sealed partial class ParamLayout
 
     private static string StripComments(string text)
     {
-        return CommentPattern().Replace(text, comment => new string(Array.ConvertAll(comment.Value.ToCharArray(), c => c is '\n' or '\r' ? c : ' ')));
+        return CommentPattern().Replace(
+            text,
+            comment => new string(Array.ConvertAll(comment.Value.ToCharArray(), c => c is '\n' or '\r' ? c : ' ')));
     }
 
-    [GeneratedRegex(@"\bstruct\s+(?<name>\w+)\s*\{(?<body>[^}]*)\}", RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(
+        @"\bstruct\s+(?<name>\w+)\s*\{(?<body>[^}]*)\}",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture,
+        matchTimeoutMilliseconds: 1000)]
     private static partial Regex StructPattern();
 
-    [GeneratedRegex(@"^(?<type>\w+)\s+(?<name>\w+)\s*(?::\s*(?<role>\w+))?\s*(?:=\s*(?<default>.+))?$", RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(
+        @"^(?<type>\w+)\s+(?<name>\w+)\s*(?::\s*(?<role>\w+))?\s*(?:=\s*(?<default>.+))?$",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture,
+        matchTimeoutMilliseconds: 1000)]
     private static partial Regex MemberPattern();
 
     /// <summary>
     /// A member's <c>: Role</c> or <c>= default</c>, up to its <c>;</c>.
     /// </summary>
-    [GeneratedRegex(@":\s*\w+|=\s*[^;]*", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(
+        @":\s*\w+|=\s*[^;]*",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture,
+        matchTimeoutMilliseconds: 1000)]
     private static partial Regex TailPattern();
 
-    [GeneratedRegex(@"//[^\n]*|/\*.*?\*/", RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(
+        @"//[^\n]*|/\*.*?\*/",
+        RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture,
+        matchTimeoutMilliseconds: 1000)]
     private static partial Regex CommentPattern();
 
-    [GeneratedRegex(@"-?\d+(\.\d+)?([eE][-+]?\d+)?[fFuU]?", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(
+        @"-?\d+(\.\d+)?([eE][-+]?\d+)?[fFuU]?",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture,
+        matchTimeoutMilliseconds: 1000)]
     private static partial Regex NumberPattern();
 
-    [GeneratedRegex(@"[A-Za-z_]\w*", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(
+        @"[A-Za-z_]\w*",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture,
+        matchTimeoutMilliseconds: 1000)]
     private static partial Regex NamePattern();
-}
-
-/// <summary>
-/// The type of a <see cref="ParamField"/>.
-/// </summary>
-internal enum ParamType : byte
-{
-    Float,
-    Float2,
-    Float3,
-    Float4,
-    Int,
-    Int2,
-    Int3,
-    Int4,
-    Uint,
-    Uint2,
-    Uint3,
-    Uint4,
-    Bool,
 
     /// <summary>
-    /// Four floats, written r, g, b, a.
+    /// HLSL that unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows:
+    /// <c>MaterialParams LoadMaterialParams(uint material) { ... }</c>. One line, so it shifts no line after it.
     /// </summary>
-    Color,
+    private string MakeLoader(string signature, string prologue, string rows)
+    {
+        StringBuilder text = new();
+        text.Append(StructName).Append(' ').Append(signature).Append(" { ").Append(prologue).Append(' ')
+            .Append(StructName)
+            .Append(" loaded; ");
+        foreach (ParamField field in Fields)
+        {
+            if (field.Type == ParamType.Curve)
+            {
+                for (int row = 0; row < field.Size / 16; row++)
+                {
+                    text.Append(
+                        CultureInfo.InvariantCulture,
+                        $"loaded.{field.Name}.rows[{row}] = asfloat({rows}[{(field.Offset / 16) + row}]); ");
+                }
+
+                continue;
+            }
+
+            string raw = $"{rows}[{field.Offset / 16}].{"xyzw".Substring(field.Offset % 16 / 4, field.Components)}";
+            string value = field switch
+            {
+                { Type: ParamType.Bool } => $"{raw} != 0u",
+                { IsFloat: true } => $"asfloat({raw})",
+                { IsInt: true } => $"asint({raw})",
+                _ => raw,
+            };
+            text.Append("loaded.").Append(field.Name).Append(" = ").Append(value).Append("; ");
+        }
+
+        return text.Append("return loaded; }").ToString();
+    }
 
     /// <summary>
-    /// A texture the renderer resolved into its pools, or <c>TextureNone</c>.
+    /// The member called <paramref name="name"/>, or null.
     /// </summary>
-    TextureRef,
+    private ParamField? FindField(string name)
+    {
+        foreach (ParamField field in Fields)
+        {
+            if (string.Equals(field.Name, name, StringComparison.Ordinal)) return field;
+        }
 
-    /// <summary>
-    /// A curve, as sixteen floats: where its first and last keys are, then its value at places evenly between.
-    /// </summary>
-    Curve,
+        return null;
+    }
 }
 
 /// <summary>
@@ -484,7 +554,8 @@ internal sealed record ParamField(string Name, ParamType Type, int Offset, Mater
 
     internal int Size => Components * 4;
 
-    internal bool IsFloat => Type is ParamType.Float or ParamType.Float2 or ParamType.Float3 or ParamType.Float4 or ParamType.Color;
+    internal bool IsFloat
+        => Type is ParamType.Float or ParamType.Float2 or ParamType.Float3 or ParamType.Float4 or ParamType.Color;
 
     internal bool IsInt => Type is ParamType.Int or ParamType.Int2 or ParamType.Int3 or ParamType.Int4;
 }

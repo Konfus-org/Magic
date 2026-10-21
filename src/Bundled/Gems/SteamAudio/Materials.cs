@@ -28,7 +28,14 @@ internal static unsafe class Materials
         };
     }
 
-    private static IPL.Material Make(float absorbLow, float absorbMid, float absorbHigh, float scattering, float passLow, float passMid, float passHigh)
+    private static IPL.Material Make(
+        float absorbLow,
+        float absorbMid,
+        float absorbHigh,
+        float scattering,
+        float passLow,
+        float passMid,
+        float passHigh)
     {
         IPL.Material material = default;
         material.Absorption[0] = absorbLow;
