@@ -257,6 +257,14 @@ internal sealed class WorldProcessor : IDisposable
             return Math.Clamp((MathF.Sin(angle) + ((MathF.PI - angle) * cosAngle)) / MathF.PI, 0, 1);
         }
 
+        private static void WarnOnce(ref bool hasWarned, string message)
+        {
+            if (hasWarned) return;
+
+            Debugging.Warn(message);
+            hasWarned = true;
+        }
+
         /// <summary>
         /// Every directional light, by its mode: the first sun and the first moon are the sky's, each with a disc as
         /// wide as its entity's largest scale says, and the rest light the world alone, as many as the frame holds. A
@@ -304,14 +312,6 @@ internal sealed class WorldProcessor : IDisposable
                     }
                 }
             }
-        }
-
-        private static void WarnOnce(ref bool hasWarned, string message)
-        {
-            if (hasWarned) return;
-
-            Debugging.Warn(message);
-            hasWarned = true;
         }
 
         private void ReadCameras(List<CameraCopy> cameras)

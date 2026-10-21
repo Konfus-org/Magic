@@ -238,7 +238,7 @@ internal struct DirectionalLightConstants
 /// The directional lights a <see cref="FrameConstants"/> holds: as many as a world's are lit by besides its sun and
 /// moon.
 /// </summary>
-[InlineArray(DirectionalLights.Capacity)]
+[InlineArray(Capacity)]
 internal struct DirectionalLights
 {
     internal const int Capacity = 4;
