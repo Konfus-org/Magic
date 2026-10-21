@@ -1,0 +1,17 @@
+<!-- A Magic gem: a plugin Magic runs when a project lists GemName. It builds into the Magic folder the MagicDir
+     environment variable names, which Magic's tools/InstallTemplates.ps1 sets. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>What GemName does for a project.</Description>
+    <Version>1.0.0</Version>
+<!--#if (authors != "") -->
+    <Authors>GemAuthors</Authors>
+<!--#endif -->
+  </PropertyGroup>
+
+  <Import Project="$(MagicDir)/Sdk/Gem.props" />
+</Project>

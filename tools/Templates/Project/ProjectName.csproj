@@ -1,0 +1,12 @@
+<!-- A Magic project's own code: the scripts and components under Assets/. It builds into the Magic folder the
+     MagicDir environment variable names, which Magic's tools/InstallTemplates.ps1 sets, and its Run starts that Magic
+     on this project. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <Import Project="$(MagicDir)/Sdk/Project.props" />
+</Project>

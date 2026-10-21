@@ -25,4 +25,10 @@
   <ItemGroup>
     <AdditionalFiles Include="BannedSymbols.txt" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- What a gem or project built outside this repository imports to build for this Magic, beside it in every build
+         and release (Sdk/README.md). -->
+    <None Update="Sdk/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Magic",
+  "classifications": [ "Magic", "Game" ],
+  "identity": "Magic.Templates.Project",
+  "name": "Magic Project",
+  "description": "A game for Magic: its .magic file, its assets and scripts, built into and run by the Magic folder that MagicDir names.",
+  "shortName": "magic-project",
+  "sourceName": "ProjectName",
+  "preferNameDirectory": true,
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "symbols": {
+    "mainDomainId": {
+      "type": "generated",
+      "generator": "random",
+      "parameters": { "low": 100000000, "high": 2147483647 },
+      "replaces": "1111111111"
+    },
+    "globalsPrefabId": {
+      "type": "generated",
+      "generator": "random",
+      "parameters": { "low": 100000000, "high": 2147483647 },
+      "replaces": "2222222222"
+    },
+    "spinScriptId": {
+      "type": "generated",
+      "generator": "random",
+      "parameters": { "low": 100000000, "high": 2147483647 },
+      "replaces": "3333333333"
+    }
+  }
+}

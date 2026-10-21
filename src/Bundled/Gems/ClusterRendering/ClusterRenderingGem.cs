@@ -55,9 +55,10 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private const string OverlayPath = "Pipelines/Overlay.pipeline";
 
     /// <summary>
-    /// The pipeline a frame runs when the settings name none.
+    /// The pipeline a frame runs when the settings name none: the renderer's whole frame, whichever gem or project has
+    /// it.
     /// </summary>
-    private readonly Handle<Pipeline> _defaultPipeline;
+    private const string PipelinePath = "Pipelines/Clusters.pipeline";
     private readonly Snapshot _snapshot;
     private readonly TexturePools _textures;
     private readonly ClusterPool _models;
@@ -134,7 +135,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _textures = new TexturePools(gpu, assets, caches, settings, stopping);
         _fields = new MeshFields(gpu, assets, caches);
         _models = new ClusterPool(gpu, assets, _textures, _fields, settings, stopping);
-        _defaultPipeline = assets.Default<Pipeline>();
         _graph = new PassGraph(gpu, compiler, assets, scripts, threads, stopping);
         _materials = new Materials(gpu, assets, _textures, _graph, stopping);
         _scene = new Scene(gpu, assets, _models, _materials);
@@ -523,11 +523,12 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// The pipeline the settings name, or the default one; changed while running, the next listing built runs it.
+    /// The pipeline the settings name, else the one at <see cref="PipelinePath"/>, else none; changed while running, the
+    /// next listing built runs it.
     /// </summary>
     private Handle<Pipeline> GetPipeline()
     {
-        return _settings.Pipeline == Handle<Pipeline>.None ? _defaultPipeline : _settings.Pipeline;
+        return _settings.Pipeline == Handle<Pipeline>.None ? _assets.Find<Pipeline>(PipelinePath) : _settings.Pipeline;
     }
 
     /// <summary>

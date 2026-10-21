@@ -51,6 +51,13 @@ Then it starts Magic on them, passing it any options after `--`. Building `src/C
 `Release` build copies the engine's and the gems' assets beside Magic; the others read them where they are in the
 repository, so building stays fast and an edit to one reaches a running engine at once.
 
+### Your own gem or project
+
+A gem or a game of one's own lives anywhere on disk and builds for a Magic folder, this repository's build or a
+release ([Building for Magic](src/Core/Sdk/README.md)). `tools/InstallTemplates.ps1` installs the templates for both,
+`dotnet new magic-gem` and `dotnet new magic-project`, which an IDE's New Project lists too, and points them at this
+repository's build ([Tools](tools/README.md#templates)).
+
 ### Command line
 
 `Magic --help` lists the options. `--project` takes a `.magic` file or the folder holding one, and `--frames <n>`

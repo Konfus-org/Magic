@@ -17,8 +17,8 @@ are wanted, kept, given memory and drawn: all of it the GPU works out each frame
 Each setting is documented on `ClusterRenderingSettings` and shown in the settings window. They size what the renderer
 allocates, so they belong to the machine, and every one is read every frame: a newly named pipeline runs once it is
 built, a new anisotropy makes the material sampler again. The frame runs the pipeline the settings name, before the
-world's effects; the default pipeline runs nothing, and the whole frame described here is the clusters pipeline in
-the bundled resources, which a project's preset names.
+world's effects: by default the clusters pipeline in the bundled resources, the whole frame described here, so a
+project names a pipeline only to run another.
 
 ## Passes and pipelines
 

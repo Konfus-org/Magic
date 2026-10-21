@@ -1,0 +1,29 @@
+<Project>
+  <!-- A gem built outside Magic's repository, for the Magic in MagicDir (README.md beside this file): its csproj
+       imports this after its own properties. Magic loads a gem from Gems/<Name>/<Name>.dll, the name a project lists,
+       so the gem is named by its csproj and built there. -->
+  <Import Project="Magic.props" />
+
+  <PropertyGroup>
+    <OutputPath>$(MagicDir)Gems/$(MSBuildProjectName)/</OutputPath>
+    <!-- Its settings' doc comments are their descriptions wherever the settings are shown. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Its own assets. -->
+    <MagicResources>$(MSBuildProjectDirectory)/Resources</MagicResources>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Description and Version become assembly attributes on their own; Authors does not. -->
+    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" Condition="'$(Authors)' != ''" />
+  </ItemGroup>
+
+  <!-- A release copies the assets beside the gem; any other build records their folder in it, so they are read where
+       they are written, and an edit to one reaches a running engine at once. -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Content Include="$(MagicResources)/**" Exclude="$(MagicResources)/**/*.md" LinkBase="Resources" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' != 'Release'">
+    <AssemblyMetadata Include="Magic.Resources" Value="$([System.IO.Path]::GetFullPath('$(MagicResources)'))" />
+  </ItemGroup>
+</Project>

@@ -14,8 +14,9 @@ namespace Magic.ClusterRendering;
 internal sealed class ClusterRenderingSettings : ISettings
 {
     /// <summary>
-    /// The pipeline each frame runs before the world's effects; none for the default, <c>Pipelines/Default.pipeline</c>.
-    /// Changed while running, the frame runs the new one once it is built.
+    /// The pipeline each frame runs before the world's effects; none for <c>Pipelines/Clusters.pipeline</c>, the
+    /// renderer's whole frame, whichever gem or project has it. Changed while running, the frame runs the new one once
+    /// it is built.
     /// </summary>
     [Category("Render/Pipeline")]
     public Handle<Pipeline> Pipeline { get; set; }

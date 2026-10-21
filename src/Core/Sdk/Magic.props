@@ -1,0 +1,18 @@
+<Project>
+  <!-- What any code built outside Magic's repository for the Magic in MagicDir needs, a gem's or a project's
+       (README.md beside this file). Gem.props and Project.props import it; a csproj imports one of those. -->
+  <PropertyGroup>
+    <!-- A folder however it was written, with forward slashes as the paths made of it here. -->
+    <MagicDir>$([MSBuild]::EnsureTrailingSlash('$(MagicDir)').Replace('\', '/'))</MagicDir>
+    <!-- The output folder is the one Magic loads the code from, named for the code, never for its framework. -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- Copies the code's own NuGet dependencies, native ones included, beside it, where its load context finds
+         them. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compiled against, never copied: at run time the code uses the Magic that loaded it. -->
+    <Reference Include="Magic" HintPath="$(MagicDir)Magic.dll" Private="false" />
+  </ItemGroup>
+</Project>

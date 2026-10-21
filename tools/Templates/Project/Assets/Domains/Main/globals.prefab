@@ -1,0 +1,32 @@
+{
+    "entities": [
+        {
+            "name": "Sky",
+            "components": {
+                "Sky": {}
+            }
+        },
+        {
+            "name": "Camera",
+            "components": {
+                "Transform": { "position": { "x": 0, "y": 0, "z": -4.5 } },
+                "Camera": {}
+            }
+        },
+        {
+            "name": "Sun",
+            "components": {
+                "Transform": { "rotation": { "x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023 } },
+                "DirectionalLight": { "color": { "r": 1, "g": 1, "b": 1 }, "intensity": 3 }
+            }
+        },
+        {
+            "name": "Monkey",
+            "components": {
+                "Transform": {},
+                "Renderer": { "model": { "id": 516 }, "materials": [ { "id": 12045873320119837722 } ] }
+            },
+            "scripts": [ { "id": 3333333333, "degreesPerSecond": 45 } ]
+        }
+    ]
+}

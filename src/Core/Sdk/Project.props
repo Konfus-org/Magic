@@ -1,0 +1,15 @@
+<Project>
+  <!-- A project's own code built outside Magic's repository, for the Magic in MagicDir (README.md beside this file):
+       its csproj, beside its .magic file and named like the project, imports this after its own properties. Magic
+       loads the code from Projects/<Name>/<Name>.dll, so it is built there, and the project's Run, an IDE's or
+       dotnet run's, starts that Magic on the project. -->
+  <Import Project="Magic.props" />
+
+  <PropertyGroup>
+    <OutputPath>$(MagicDir)Projects/$(MSBuildProjectName)/</OutputPath>
+    <RunCommand>$(MagicDir)Magic</RunCommand>
+    <RunCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicDir)Magic.exe</RunCommand>
+    <RunArguments>--project "$(MSBuildProjectDirectory)"</RunArguments>
+    <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
+  </PropertyGroup>
+</Project>
