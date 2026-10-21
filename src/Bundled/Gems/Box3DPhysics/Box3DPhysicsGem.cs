@@ -230,7 +230,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         _shapes.Dispose();
     }
 
-    public RayHit? Cast(Vector3 from, Vector3 to, Motions motions = Motions.All)
+    public RayHit? RayCast(Vector3 from, Vector3 to, Motions motions = Motions.All)
     {
         WaitForStep();
         B3.RayResult result = B3.WorldCastRayClosest(_box3d, ToVec(from), ToVec(to - from), FilterOf(motions));
@@ -240,7 +240,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         return new RayHit(entity, FromVec(result.Point), FromVec(result.Normal), result.Fraction * Vector3.Distance(from, to));
     }
 
-    public unsafe int FindOverlapping(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
+    public unsafe int SphereCast(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
     {
         if (found.IsEmpty) return 0;
 

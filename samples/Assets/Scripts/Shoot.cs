@@ -76,7 +76,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
         {
             Vector2 pointer = new(input[Control.MouseX].Value, input[Control.MouseY].Value);
             Vector3 far = pointer.ToWorld(world.Get<Camera>(owner), camera, new Size(window.Width, window.Height), Reach);
-            if (physics.Cast(camera.Position, far) is { } hit) aim = Vector3.Normalize(hit.Point - at.Position);
+            if (physics.RayCast(camera.Position, far) is { } hit) aim = Vector3.Normalize(hit.Point - at.Position);
         }
 
         Renderer renderer = new() { Model = Model, Materials = new MaterialSlots { Material } };

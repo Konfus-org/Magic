@@ -19,12 +19,12 @@ public interface IPhysics
     /// The nearest body of the kinds asked for that the segment from <paramref name="from"/> to <paramref name="to"/>
     /// hits, or none. A body the segment starts inside is not hit.
     /// </summary>
-    RayHit? Cast(Vector3 from, Vector3 to, Motions motions = Motions.All);
+    RayHit? RayCast(Vector3 from, Vector3 to, Motions motions = Motions.All);
 
     /// <summary>
     /// The bodies of the kinds asked for whose shapes reach within <paramref name="radius"/> of
     /// <paramref name="center"/>, written into <paramref name="found"/> in no order, as many as fit: how many were
     /// written.
     /// </summary>
-    int FindOverlapping(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All);
+    int SphereCast(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All);
 }
