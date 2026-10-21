@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); case \"$input\" in *git*commit*|*git*merge*) if command -v pwsh >/dev/null 2>&1; then printf '%s' \"$input\" | pwsh -NoProfile -File \"$CLAUDE_PROJECT_DIR/tools/AgentTaskComplete.ps1\" -Hook; else printf '%s' \"$input\" | powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"$CLAUDE_PROJECT_DIR/tools/AgentTaskComplete.ps1\" -Hook; fi ;; *) exit 0 ;; esac",
+            "timeout": 60,
+            "statusMessage": "Checking that this state was validated"
+          }
+        ]
+      }
+    ]
+  }
+}

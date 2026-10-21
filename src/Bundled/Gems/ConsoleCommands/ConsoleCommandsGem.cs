@@ -38,23 +38,31 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     /// </summary>
     private static int _waiting;
 
+    /// <summary>
+    /// Whether the lines after a <c>wait loaded</c> are held back until the world has loaded: the process's, as the lines
+    /// are, so the wait goes on across a restart until the restarted world has loaded.
+    /// </summary>
+    private static bool _isWaitingForWorld;
+
     private readonly SortedDictionary<string, Command> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly IFileSystem _files;
+    private readonly World _world;
     private readonly Threads _threads;
     private readonly CancellationToken _stopping;
     private readonly IGpu? _gpu;
     private readonly IWindow? _window;
 
-    public ConsoleCommandsGem(Lifetime lifetime, Threads threads, IFileSystem files, IGpu? gpu = null, IWindow? window = null)
+    public ConsoleCommandsGem(Lifetime lifetime, Threads threads, IFileSystem files, World world, IGpu? gpu = null, IWindow? window = null)
     {
         _files = files;
+        _world = world;
         _threads = threads;
         _stopping = lifetime.Stopping;
         _gpu = gpu;
         _window = window;
         _commands.Add("help", new Command("Lists every command and what it does.", _ => Help()));
         _commands.Add("quit", new Command("Stops the run.", _ => lifetime.Stop("quit typed in the terminal")));
-        _commands.Add("wait", new Command("Holds the lines after it back for that many frames: wait 100.", Wait));
+        _commands.Add("wait", new Command("Holds the lines after it back for that many frames, or until the world has loaded: wait 100, wait loaded.", Wait));
         _commands.Add("screenshot", new Command("Saves the window's next image as Screenshots/<time>.png beside Magic.", _ => Screenshot()));
 
         // A thread of its own rather than a task, and a background one: a terminal read cannot be cancelled on every OS,
@@ -98,7 +106,14 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
             return;
         }
 
-        while (_waiting == 0 && _lines.Reader.TryRead(out string? line))
+        if (_isWaitingForWorld)
+        {
+            if (!_world.IsLoaded) return;
+
+            _isWaitingForWorld = false;
+        }
+
+        while (_waiting == 0 && !_isWaitingForWorld && _lines.Reader.TryRead(out string? line))
         {
             Run(line);
         }
@@ -180,14 +195,21 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     }
 
     /// <summary>
-    /// <c>wait 100</c>: holds the lines after it back for that many frames, so a piped script can let a scene load
-    /// before it takes a screenshot.
+    /// <c>wait 100</c>: holds the lines after it back for that many frames; <c>wait loaded</c>: until the world has
+    /// loaded (<see cref="World.IsLoaded"/>), every open domain spawned, so a piped script takes its screenshot of the
+    /// world rather than of the loading screen, however long the shaders take to compile.
     /// </summary>
     private void Wait(ReadOnlySpan<string> words)
     {
+        if (words.Length == 1 && string.Equals(words[0], "loaded", StringComparison.OrdinalIgnoreCase))
+        {
+            _isWaitingForWorld = true;
+            return;
+        }
+
         if (words.Length != 1 || !int.TryParse(words[0], NumberStyles.None, CultureInfo.InvariantCulture, out int frames))
         {
-            Debugging.Warn("wait takes a number of frames: wait 100");
+            Debugging.Warn("wait takes a number of frames, or loaded: wait 100, wait loaded");
             return;
         }
 

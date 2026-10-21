@@ -8,19 +8,27 @@ the code and docs follow. Most rules give their reason. When a case isn't covere
 The tools run under `pwsh` and Windows PowerShell. [Tools](tools/README.md) covers them in full, including where
 the `Magic` executable is built.
 
-- **Validate:** `tools/Validate.ps1` builds `Magic.slnx`, runs the tests, and runs the samples headless and with a
-  window. It reports each step's exit code. Every step must pass before work is done.
-- **Screenshot:** `tools/Screenshot.ps1` runs the samples with a window and prints the screenshot's path.
+- **Validate:** `tools/Validate.ps1` builds `Magic.slnx`, runs the tests, runs the samples headless until their
+  world has loaded, and runs them with a window until it has loaded, ending in a screenshot whose path it prints. It
+  reports each step's exit code. Every step must pass, and the screenshot must be looked at, before work is done.
+- **Task complete:** `tools/AgentTaskComplete.ps1` runs all of Validate and, when it passes, stamps the exact state
+  it validated. Run it on completing a task, and again after any later edit or rebase.
+- **Screenshot:** `tools/Screenshot.ps1` runs a project with a window until its world has loaded and prints the
+  screenshot's path; `-Project` and `-Commands` reach what the samples alone do not show.
 - **Review:** `plannotator review` opens the change in the user's browser as a diff they comment on line by line,
   and returns when they send their comments or approve ([Finish](#finish)).
+
+Validation means the app ran with the change and you looked at it working: a build, tests or a run that ends before
+the world has loaded prove nothing about what is drawn. A hook refuses an agent's `git commit` and `git merge` unless
+`tools/AgentTaskComplete.ps1` stamped that exact state ([Tools](tools/README.md#agenttaskcompleteps1)).
 
 What Validate runs, for when you need one step on its own:
 
 ```powershell
 dotnet build Magic.slnx
 dotnet test Magic.slnx
-Magic --project samples --frames 120 --fail-on-error
-Magic --project samples --frames 120 --fail-on-error --headless
+'wait loaded', 'quit' | Magic --project samples --frames 20000 --fail-on-error --headless
+tools/Screenshot.ps1
 ```
 
 `--fail-on-error` returns exit code `2` if anything was logged as an error during the run.
@@ -38,7 +46,7 @@ Read the document that covers what you are about to change:
 | [Code Standards](CODESTANDARDS.md) | Before editing any `.cs` file | C# coding standards, performance rules, and cross-platform guidelines enforced by the build system. |
 | [Contributing](CONTRIBUTING.md) | Before presenting a change for review | Code review processes and acceptance criteria. |
 | [Tests](tests/README.md) | Before running or touching tests | Test suites, conventions, and requirements for requested test coverage. |
-| [Tools](tools/README.md) | Before running a tool script | What `tools/Validate.ps1` and `tools/Screenshot.ps1` run, and where the `Magic` executable is built. |
+| [Tools](tools/README.md) | Before running a tool script | What `tools/Validate.ps1`, `tools/AgentTaskComplete.ps1` and `tools/Screenshot.ps1` run, and where the `Magic` executable is built. |
 
 Most gems, asset root folders and other large systems have their own `README.md` explaining how that area works
 and what must hold for it to work. Before changing anything in an area, read every `README.md` on the path from
@@ -104,10 +112,13 @@ want to question as you make it.
 
 ### Finish
 
-1. Run `tools/Validate.ps1`. A failing test is fixed at its cause, never loosened, skipped or deleted.
-2. For any visual or rendering change, run `tools/Screenshot.ps1` and look at the image.
-3. Summarize what changed and why, what you assumed, and anything you could not verify, with the fix told apart
-   from the cleanup.
+1. Run `tools/AgentTaskComplete.ps1`. A failing test is fixed at its cause, never loosened, skipped or deleted.
+2. Open the screenshot `tools/AgentTaskComplete.ps1` printed and look at it, for every change, not only visual ones: the app
+   ran with your change, and what it shows is the check. Where the change shows only somewhere the samples do not
+   reach, a failure path, a debug view or another project, screenshot that too, with `tools/Screenshot.ps1 -Project`
+   or `-Commands`, and look at it.
+3. Summarize what changed and why, what you assumed, anything you could not verify, and what the screenshots show,
+   with the fix told apart from the cleanup.
 4. Open the review: from the worktree, run `plannotator review --base <merge target>` in the background. Against
    the merge target it shows everything the merge would bring, the branch's commits and every uncommitted and
    untracked file, so nothing needs staging. It opens the user's browser on the diff, where they or another person
@@ -190,9 +201,9 @@ long as its task, or, when the task is dropped, until the user decides at the ne
   target.
 - **Finish:** as soon as the user approves the review:
   1. Commit on the worktree branch.
-  2. Rebase onto the merge target and run `tools/Validate.ps1` again, since other work may have landed since you
-     started. Resolve conflicts in your own changes only. If a conflict needs another agent's work changed, stop
-     and ask.
+  2. Rebase onto the merge target and run `tools/AgentTaskComplete.ps1` again, since other work may have landed
+     since you started, and look at its new screenshot: the rebased result is what merges, so it is what must be seen working.
+     Resolve conflicts in your own changes only. If a conflict needs another agent's work changed, stop and ask.
   3. Fast-forward the merge target to your branch, and push nothing ([Commits](#commits)).
   4. Remove the worktree (`git worktree remove`) and delete the branch with `git branch -d`, never `-D`. `-d`
      refuses to delete unmerged work, which is the point.

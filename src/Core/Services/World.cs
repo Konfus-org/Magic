@@ -88,6 +88,13 @@ public sealed class World : IDisposable
     public bool IsLoading => _domains?.IsLoading ?? false;
 
     /// <summary>
+    /// Whether the world has loaded: a domain is open, every open one is there, spawned, and none is opening in place of
+    /// the world. False while a domain is still being read, however it was opened, which <see cref="IsLoading"/> only
+    /// covers for one opening in place of the world.
+    /// </summary>
+    public bool IsLoaded => _domains?.IsLoaded ?? false;
+
+    /// <summary>
     /// The gems that take in what a domain spawns before it does (<see cref="IPreloader"/>), set by whoever made the
     /// gems once every one is, since the world is made while they are; none until then.
     /// </summary>

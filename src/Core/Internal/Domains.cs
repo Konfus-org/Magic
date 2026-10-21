@@ -102,6 +102,14 @@ internal sealed class Domains : IDisposable
     internal bool IsLoading => _replacing > 0;
 
     /// <summary>
+    /// Whether the world has loaded: a domain other than the loading domain is open, every open one is there, spawned,
+    /// and none is opening in place of the world.
+    /// </summary>
+    internal bool IsLoaded => _replacing == 0
+        && _domains.Exists(static open => !open.IsLoadingDomain)
+        && _domains.TrueForAll(static open => open.IsThere);
+
+    /// <summary>
     /// Opens <paramref name="domain"/> as <paramref name="mode"/> says, telling <paramref name="progress"/> how far it
     /// is, 0 to 1. The task ends once the domain is there, with it; with why not when its file does not load, before
     /// anything else is closed, or when it is closed before it is there. A prefab of it that does not load is an error,

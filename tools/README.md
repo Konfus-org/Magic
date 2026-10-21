@@ -14,10 +14,13 @@ first.
 
 `Validate.ps1` runs the checks [AGENTS.md](../AGENTS.md) asks of every change, in order, and stops at the first failure:
 builds the solution, where every warning is already an error; runs the tests against that build; runs the samples
-headless under `--fail-on-error`, which exits 2 when any error was logged; and runs them again with a window, which
-needs a display and a GPU. It ends with one line per step and its exit code, then `PASSED` or which step failed. `-Only`
-picks the steps when the rest already passed (`Test` alone needs a build to be there), `-Frames` how long each sample
-run lasts, `-Configuration` which build, and `-Project` another project than the samples.
+headless under `--fail-on-error`, which exits 2 when any error was logged, until their world has loaded; and runs them
+with a window through `Screenshot.ps1`, which needs a display and a GPU. Both runs wait for the world rather than for a
+number of frames, through the console's `wait loaded`, so they prove the shaders compile and the domain opens, and a
+world that never loads fails rather than passing on the loading screen; the frame count is only a ceiling. It ends
+with one line per step and its exit code, `PASSED` or which step failed, and the screenshot's path, which is to be
+opened and looked at: the run is the evidence that the change works, and the image is what shows it. Its parameters,
+documented in the script, pick the steps, the build and another project.
 
 The build is incremental and never starts over: what is built is reused, and the native libraries are built once
 per machine, in a folder every checkout and worktree shares
@@ -27,11 +30,25 @@ project ends, so which native library is building, and for how long, shows as it
 
 ## Screenshot.ps1
 
-`Screenshot.ps1` is the visual check: it runs the project with a window, pipes `wait` and `screenshot` into the
-console, and prints the PNG's path as its only output, so `$png = tools/Screenshot.ps1` keeps it. The scene is not
-drawn in the first frames, so `-Wait` holds the screenshot back well past them, and `-Frames` must reach past that.
-`-Commands` sends console lines before the screenshot, such as choosing a debug view, so what the image shows is
-chosen rather than found. It does not build: run the build step first.
+`Screenshot.ps1` is the visual check: it runs the project with a window, pipes console lines in, and prints the PNG's
+path as its only output, so `$png = tools/Screenshot.ps1` keeps it. It waits until the world has loaded, however long a
+cold shader cache takes, then a while longer for what fades in to settle, takes the screenshot and quits; a world that
+never loads within the frame ceiling fails the run. Console lines can be sent before the screenshot, such as choosing
+a debug view, so what the image shows is chosen rather than found. It does not build: run the build step first.
+
+## AgentTaskComplete.ps1
+
+What an agent runs on completing a task, and what makes "validation means the app ran" enforced rather than asked. It
+runs `Validate.ps1` in full, and when every step passes it stamps the state it validated: the git tree of every file in
+the checkout, new ones included, so the stamp names content, not a time, and any edit after the run, or a rebase onto
+new work, leaves the new state unstamped. A checkout whose files changed during the run is not stamped. It ends with
+the screenshot's path, to open and look at.
+
+The project's `.claude/settings.json` runs the same script with `-Hook` before an agent's `git commit` or `git merge`,
+and it refuses the command, with the reason, unless the checkout's state, or for a merge the merged branch's last
+commit, has a stamp. The stamps live in the repository's git folder, which every worktree shares, so the merge in the
+main checkout finds the stamp its branch's worktree wrote. The hook reads its input on stdin and the checkout from where
+the command runs, or the folder a `cd` or `git -C` in it names.
 
 ## Templates
 

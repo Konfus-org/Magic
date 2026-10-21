@@ -24,9 +24,13 @@ Cache/
 
 # Dot folders are tools' own state (.vs, .vscode, .idea, .claude, .cr, ...): none is source.
 # Dot files (.gitignore, .editorconfig, .gitattributes) are not folders, so they stay tracked.
+# The project's own agent settings are source: their hook enforces validation (tools/AgentTaskComplete.ps1).
 .*/
 !.github/
 !.template.config/
+!.claude/
+.claude/*
+!.claude/settings.json
 
 # IDE
 *.user

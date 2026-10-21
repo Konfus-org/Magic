@@ -15,10 +15,12 @@ word are dropped.
 A script piped in runs as if typed, so a run can be told what to do without anyone at the terminal. The lines are the
 process's rather than a run's, so a script goes on across a restart of the engine (a `set` of a setting marked
 `[RequireRestart]`, say), the lines after the restart running in the new run, and a `wait` counts on across it, the
-frames of the restart itself not counted. The frames before a scene is drawn go by quickly, so wait well past them:
+frames of the restart itself not counted. `wait loaded` holds the lines after it back until the world has loaded, the
+world not loading and a domain open, however long its shaders take to compile, so a script never acts on the loading
+screen; a short `wait` after it lets what fades in settle, and `quit` ends the run once the script is done:
 
 ```bash
-printf 'wait 1500\nwait 400\nscreenshot\n' | Magic --project samples --frames 2000
+printf 'wait loaded\nwait 600\nscreenshot\nquit\n' | Magic --project samples --frames 20000
 ```
 
 `screenshot` asks the GPU provider for the window's presented image ([Core's README](../../../Core/README.md#the-gpu))
