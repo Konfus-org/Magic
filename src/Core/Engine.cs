@@ -123,14 +123,8 @@ public static class Engine
             {
                 // On the main thread before the first frame, once every gem is made, so every gem's loaders are there
                 // to read the domain: the world as the run before left it, else the project's entry point.
-                if (state is { } saved)
-                {
-                    world.Restore(saved);
-                }
-                else
-                {
-                    world.OpenEntryPointAsync().FireAndForget();
-                }
+                if (state is { } saved) world.Restore(saved);
+                else world.OpenEntryPointAsync().FireAndForget();
 
                 frames.Run();
 
@@ -140,9 +134,7 @@ public static class Engine
                 // taken, so it may outlast the gems. Stopping is cancelled already, as the run is ending, so the
                 // save runs on no token.
                 if (lifetime.IsRestarting)
-                {
                     next = (settings.RestartArgs(), world.SaveAsync(null, CancellationToken.None), frames.Seconds);
-                }
 
                 // Still on the main thread: each gem ends what it owns of this thread's, the scripts among it, after
                 // the save took them and before the gems are disposed on the render thread.

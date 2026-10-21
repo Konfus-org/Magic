@@ -124,9 +124,9 @@ dotnet_diagnostic.IDE2005.severity = warning
 csharp_style_allow_blank_line_after_token_in_arrow_expression_clause_experimental = false
 dotnet_diagnostic.IDE2006.severity = warning
 
-# Braces always: an unbraced if is one added line away from a bug
-# An if whose body is one short statement is one line without braces (CODESTANDARDS Methods); a multi-line body
-# always has them. Loops always have them too, which no option can ask for, so the standard says it.
+# An if or an else whose body is one short statement is one line without braces (CODESTANDARDS Methods); a multi-line
+# body always has them, and so do the branches beside it. Loops always have them too, which no option can ask for, so
+# the standard says it.
 csharp_prefer_braces = when_multiline
 dotnet_diagnostic.IDE0011.severity = warning
 
@@ -405,7 +405,7 @@ dotnet_diagnostic.CA1724.severity = none
 dotnet_diagnostic.MA0008.severity = none
 # Data structs keep their public fields (CODESTANDARDS State), so an ECS component's can be written through a span.
 dotnet_code_quality.CA1051.exclude_structs = true
-# An if with one short statement is one line without braces, and loops, an else and a multi-line body always have
+# An if or an else with one short statement is one line without braces, and loops and a multi-line body always have
 # braces (CODESTANDARDS Methods): adding braces everywhere breaks the first, removing them the second. Braces in a case
 # are there to scope its locals, and none are asked of one with several statements.
 dotnet_diagnostic.RCS1002.severity = none
