@@ -1,7 +1,7 @@
 <!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Description>SDL3 and its image and font libraries' C APIs, generated, for the gems built on SDL.</Description>
+    <Description>SDL3 and its image, font and audio libraries' C APIs, generated, for the gems built on SDL.</Description>
     <Version>1.0.0</Version>
   </PropertyGroup>
 
@@ -10,9 +10,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- SDL is installed, so the two built on it find it there. SDL_image reads its formats itself, so none of its
-       vendored codecs is built, nor the submodules under theirs fetched; SDL_ttf brings FreeType and HarfBuzz with it.
-       Each of the two is its shared library alone. -->
+  <!-- SDL is installed, so the three built on it find it there. SDL_image reads its formats itself, so none of its
+       vendored codecs is built, nor the submodules under theirs fetched; SDL_ttf brings FreeType and HarfBuzz with it;
+       SDL_mixer decodes WAV itself and Ogg Vorbis, MP3 and FLAC with the single-file decoders in its own source, so it
+       needs no other library. Each of the three is its shared library alone. -->
   <ItemGroup>
     <NativeLibrary Include="SDL3" Repository="https://github.com/libsdl-org/SDL" Tag="release-3.4.18"
                    CMakeOptions="-DSDL_TEST_LIBRARY=OFF;-DSDL_EXAMPLES=OFF;-DSDL_INSTALL_TESTS=OFF"
@@ -26,5 +27,12 @@
                    DependsOn="SDL3" CMakeTarget="SDL3_ttf-shared"
                    CMakeOptions="-DSDLTTF_VENDORED=ON;-DSDLTTF_SAMPLES=OFF;-DSDLTTF_PLUTOSVG=OFF;-DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
                    Headers="include/SDL3_ttf/SDL_ttf.h;include/SDL3_ttf/SDL_textengine.h" IncludePath="include" Prefixes="SDL_TTF=TTF" />
+    <NativeLibrary Include="SDL3_mixer" Repository="https://github.com/libsdl-org/SDL_mixer" Tag="release-3.2.4"
+                   DependsOn="SDL3" CMakeTarget="SDL3_mixer-shared"
+                   CMakeOptions="-DSDLMIXER_VENDORED=OFF;-DSDLMIXER_EXAMPLES=OFF;-DSDLMIXER_TESTS=OFF;-DSDLMIXER_INSTALL=OFF;
+                                 -DSDLMIXER_VORBIS_STB=ON;-DSDLMIXER_VORBIS_VORBISFILE=OFF;-DSDLMIXER_MP3_DRMP3=ON;-DSDLMIXER_MP3_MPG123=OFF;
+                                 -DSDLMIXER_FLAC_DRFLAC=ON;-DSDLMIXER_FLAC_LIBFLAC=OFF;-DSDLMIXER_OPUS=OFF;-DSDLMIXER_WAVPACK=OFF;
+                                 -DSDLMIXER_MOD=OFF;-DSDLMIXER_MIDI=OFF;-DSDLMIXER_GME=OFF;-DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
+                   Headers="include/SDL3_mixer/SDL_mixer.h" IncludePath="include" Prefixes="SDL_MIXER=MIX" />
   </ItemGroup>
 </Project>

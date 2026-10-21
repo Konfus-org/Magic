@@ -520,6 +520,21 @@ static, dynamic or kinematic, all by default. It is the main thread's, in `Updat
 waiting for a step still running. Core turns a pixel into the world point under it at a depth in front of a camera,
 which with the camera's position is the pointer's ray: casting along it is what the pointer is over.
 
+## Audio
+
+What is heard is components too: an entity with a `Sound` plays the `Audio` it names, a sound decoded whole by the
+gem that reads audio files. A sound in the world is heard from the player's camera, from the side it is on and
+quieter the farther it is, out to the range it says, past which it costs nothing; what is solid, the bodies of
+[Physics](#physics), muffles it when it stands between the two and echoes it off what is around them. A sound
+everywhere is heard alike wherever the player is, as music and ambience are. `Sound` holds every value a sound plays
+with, and a script plays, pauses, stops, seeks or changes a sound by writing it, as it moves a body by writing a
+transform; the gem that plays sounds writes back how far in each is, and when one that does not loop has ended.
+
+An entity with a `Physics` sounds like what it is made of when an `Acoustics` beside it says, a material from hard and
+ringing to soft and dead, and generic otherwise: how much of a sound it soaks up, scatters and lets through. Nothing
+else about the world is said twice: what muffles and echoes is what collides and stays put or is moved by code, each as
+its model's surface at its transform; what falls and is pushed around is too small and too restless to be worth it.
+
 ## The debug UI
 
 What a gem or script shows the developer while the game runs is `IDebugUI`, which a UI gem provides and draws over

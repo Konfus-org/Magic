@@ -29,6 +29,12 @@ the values the prefab sets. Much of what is placed carries a `Physics` component
 the physics gem simulates only what is within its range of the player, so the whole world costs the bodies around the
 camera ([physics](../src/Core/README.md#physics)).
 
+A few things sound, each a `Sound` playing the engine's default audio on a loop: the glass sphere hums low as the
+camera flies past it, heard from the right and then behind; and, in front of the spawn, the bouncing ball and a small
+crate behind a brick wall, muffled while the wall is between it and the camera and clear once past it, which are heard
+by flying back to them. What stands still echoes them, the brick as brick
+([audio](../src/Core/README.md#audio)).
+
 The world's look is data too: an entity in `globals.prefab` with a `PostProcessing` names the effects pipeline the
 world is drawn with, `Assets/Pipelines/Daylight.pipeline`, the engine's effects with the exposure metered from the
 light its sun and sky shed rather than from what the view sees, so nearing a dark tower or the bright field never

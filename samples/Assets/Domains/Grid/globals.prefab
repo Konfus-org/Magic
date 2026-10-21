@@ -69,7 +69,26 @@
             "components": {
                 "Transform": { "position": { "x": 3, "y": 7, "z": -52 } },
                 "Renderer": { "model": { "id": 517 }, "materials": [ { "id": 3322 } ] },
-                "Physics": { "motion": "dynamic", "shape": "sphere", "bounce": 0.7 }
+                "Physics": { "motion": "dynamic", "shape": "sphere", "bounce": 0.7 },
+                "Sound": { "audio": { "id": 800 }, "loop": true, "range": 30 }
+            }
+        },
+        {
+            "name": "Wall",
+            "components": {
+                "Transform": { "position": { "x": 6, "y": 2, "z": -48 }, "scale": { "x": 0.25, "y": 2, "z": 3 } },
+                "Renderer": { "model": { "id": 514 }, "materials": [ { "id": 3320 } ] },
+                "Physics": {},
+                "Acoustics": { "material": "brick" }
+            }
+        },
+        {
+            "name": "Chime",
+            "components": {
+                "Transform": { "position": { "x": 9, "y": 0.5, "z": -48 }, "scale": { "x": 0.25, "y": 0.25, "z": 0.25 } },
+                "Renderer": { "model": { "id": 514 }, "materials": [ { "id": 3322 } ] },
+                "Physics": {},
+                "Sound": { "audio": { "id": 800 }, "loop": true, "pitch": 1.5, "range": 40 }
             }
         },
         {
@@ -92,7 +111,8 @@
             "name": "Glass",
             "components": {
                 "Transform": { "position": { "x": 16, "y": 4, "z": -24 }, "scale": { "x": 4, "y": 4, "z": 4 } },
-                "Renderer": { "model": { "id": 517 }, "materials": [ { "id": 3320 } ] }
+                "Renderer": { "model": { "id": 517 }, "materials": [ { "id": 3320 } ] },
+                "Sound": { "audio": { "id": 800 }, "loop": true, "pitch": 0.5, "near": 4, "range": 80 }
             }
         },
         {

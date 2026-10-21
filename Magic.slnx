@@ -23,11 +23,13 @@
     <Project Path="src/Bundled/Gems/PipelineLoader/PipelineLoader.csproj" />
     <Project Path="src/Bundled/Gems/PrefabLoader/PrefabLoader.csproj" />
     <Project Path="src/Bundled/Gems/Scripting/Scripting.csproj" />
+    <Project Path="src/Bundled/Gems/SdlAudioLoader/SdlAudioLoader.csproj" />
     <Project Path="src/Bundled/Gems/SdlBindings/SdlBindings.csproj" />
     <Project Path="src/Bundled/Gems/SdlFontLoader/SdlFontLoader.csproj" />
     <Project Path="src/Bundled/Gems/SdlGpu/SdlGpu.csproj" />
     <Project Path="src/Bundled/Gems/SdlPlatform/SdlPlatform.csproj" />
     <Project Path="src/Bundled/Gems/SdlTextureLoader/SdlTextureLoader.csproj" />
+    <Project Path="src/Bundled/Gems/SteamAudio/SteamAudio.csproj" />
   </Folder>
   <Project Path="src/Bundled/Resources/Resources.csproj" />
   <Folder Name="/Tests/">
