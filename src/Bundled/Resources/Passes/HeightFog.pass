@@ -1,9 +1,0 @@
-{
-    // The air between the camera and what it sees (Shaders/Sky/HeightFog.frag.hlsl), over the lit scene and the sky,
-    // its density by height its falloff curve's, Curves/HeightFog.curve unless the world's effects give it another.
-    "stage": "sky",
-    "kind": "fullscreen",
-    "shader": { "id": 11233 },
-    "writes": [ { "name": "Hdr", "contents": "keep", "blend": "premultiplied" } ],
-    "params": { "falloff": { "curve": { "id": 11401 } } }
-}

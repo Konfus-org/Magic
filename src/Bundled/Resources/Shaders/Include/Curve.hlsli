@@ -1,6 +1,6 @@
-// A curve, as a pass's Curve param packs it (Core's Curve, packed by the renderer's ParamLayout): where its first and
-// last keys are, then its value at CurveSamples places evenly from the one to the other, joined by straight lines and
-// held past either end, as the curve itself is.
+// A curve, as a pass's Curve param or the weather's fog packs it (Core's Curve, packed by the renderer's ParamLayout):
+// where its first and last keys are, then its value at CurveSamples places evenly from the one to the other, joined by
+// straight lines and held past either end, as the curve itself is.
 
 #ifndef MAGIC_CURVE_HLSLI
 #define MAGIC_CURVE_HLSLI

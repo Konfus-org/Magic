@@ -4,11 +4,12 @@
 // them, and defines SampleTextureGrad (Include/Surface.hlsli), so a sky can sample a texture, an image of a sky or of a
 // moon, at the derivatives it works out itself.
 //
-// A sky shader declares exactly three things:
+// A sky shader declares exactly four things:
 //
 //   struct MaterialParams { ... };                     // its parameters, as a surface's are; a .mat file gives values
 //   SkyLight EvaluateSky(SkyInputs input, MaterialParams material);
 //   float3 LightThrough(SkyInputs input, float3 position, float3 towardLight, MaterialParams material);
+//   AirLight EvaluateAir(SkyInputs input, float reach, MaterialParams material);
 //
 // It is drawn twice a frame: over what nothing was drawn on in each view, and into the cube the world's light from
 // everywhere and the reflections of the sky are made from (isCapture). So it lights the world as it looks. The sun's
@@ -21,6 +22,11 @@
 // around the camera for the light that casts the shadows and lights the world by it, so it must agree with what
 // EvaluateSky shows of the light: redder and dimmer as it nears the horizon, none below it, and clouds that hide its
 // disc darken the ground beneath them. A sky with no air and nothing in front of the light returns 1.
+//
+// EvaluateAir is the air between the camera and the world: what it scatters toward the camera along input.direction
+// for reach metres, and lets through of what is behind. The renderer draws it into a coarse volume over each view and
+// lays it over what the view drew, so a far mountain fades into the light the sky shows past it; it must agree with
+// EvaluateSky's own air. A sky with no air returns no light and all of it through.
 //
 // A sky never deals with failure: a material whose sky does not compile, or whose shader is a surface, is drawn with
 // Skies/Failure.sky.hlsl instead, chosen by the renderer, as a broken surface is drawn with the failure surface.
@@ -52,6 +58,13 @@ struct SkyInputs
     bool isCapture;          // drawn into the light from everywhere, coarse and blurred, so detail can be spared
     float dither;            // 0 to 1, another for each pixel and frame in the view, which the temporal upscale blends,
                              // so a sky that integrates by steps offsets them by it; the same everywhere otherwise
+};
+
+// What the air between the camera and a place hands back, in nits, not pre-exposed.
+struct AirLight
+{
+    float3 nits;             // the light it scatters toward the camera
+    float through;           // the share of what is behind that reaches the camera, 0 to 1
 };
 
 // What a sky hands back, in nits, not pre-exposed: it lights the world as the sky would.

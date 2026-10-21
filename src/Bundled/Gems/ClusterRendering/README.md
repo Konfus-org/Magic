@@ -290,17 +290,22 @@ wide. The rays are filtered across the surface, over a wider patch the rougher i
 frame's clipped toward the neighbours' colours in YCoCg, more of it kept the rougher the surface; and the lighting
 takes them in place of the sky's reflection.
 
-### Height fog
+### The air and the fog
 
-An effect a world adds when it wants it, tuned where its effects list it: its colour, the share of the light reaching
-it that it scatters; its intensity, how much fog there is a metre at the densest; where it starts, metres from the
-camera; and its falloff, a curve of how dense it is by height above the world's origin. How much fog each pixel's
-ray crosses is the falloff's integral over the heights the ray goes through, exact for a curve of straight lines, so
-it costs one fullscreen pass with no steps and no noise; the light it scatters is the sky's from everywhere and the
-sun's through the sky's shadow at the camera, forward more than back, so it follows the time of day and the weather and
-the far world takes the sky's colour. It is drawn
-over the lit scene and the sky, before transparent surfaces, which it does not fog, and before the scene the
-reflections read is kept, so they show it.
+Drawn over the lit scene and the sky in the renderer's own frame, before transparent surfaces, which they do not fog,
+and before the scene the reflections read is kept, so they show them. The air is the sky's: the sky shader says what the
+air between the camera and a place scatters toward it and lets through, and the renderer draws that, composed as the sky
+is, into a coarse volume over each view, a layer for each slice of distance, the slices closer together near the camera
+(the aerial perspective of Hillaire 2020). A drawn pixel takes the air in front of it from between the volume's texels
+and slices, so the far world fades into the light the sky shows past it; the sky, seen through its own air already,
+takes none. The air takes its look from the sky material and nowhere else.
+
+The fog is the weather's: how much there is, where it starts, its tint, and its falloff, a curve of its share by height
+above the world's origin, the renderer's own ground fog when the weather names none. How much fog each pixel's ray
+crosses is the falloff's integral over the heights the ray goes through, exact for a curve of straight lines, so it
+takes no steps and has no noise. It scatters the sky's light from everywhere and the key light's through the sky's
+shadow at the camera, forward more than back, tinted by the weather, so it follows the time of day, the clouds and the
+air's colour. The fog lies low and near, so it is taken to be in front of the air.
 
 ### Bloom
 
@@ -395,3 +400,7 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
   by the cloud over the edge, not its own. Its texels are metres across and read through a smooth filter, so a cloud's
   edge sharper than a few of them is softened rather than drawn sharp. A place above the clouds is shaded as if it were below them. Thin cloud dims the sun's shadows but does not
   soften them, as the sun's light seen through cloud spreads wider than its disc.
+- The air in front of the world leaves out the clouds: a mountain behind a cloud is seen through the air, not the cloud.
+  Its volume reaches some tens of kilometres, past which a place takes the last slice's air, and it is coarse across the
+  view, so the edge of a near thing against a far one shares their air for a texel. Transparent surfaces get neither air
+  nor fog.

@@ -206,6 +206,12 @@ public enum PassDrawn : byte
     SkyShadow,
 
     /// <summary>
+    /// The air between a view's camera and what it sees, from the world's sky: what it scatters toward the camera and
+    /// lets through, a froxel at a time, a slice of depth an iteration, which the air and fog over the view reads.
+    /// </summary>
+    SkyAir,
+
+    /// <summary>
     /// Which triangle each pixel sees, and its depth, a culling pass's pieces of the scene drawn into the view's
     /// visibility buffer: what a renderer that shades each pixel once draws first.
     /// </summary>

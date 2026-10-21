@@ -2,22 +2,11 @@
     // The grid's effects: the engine's own, but with its exposure metered from the light its sun, moon and sky shed
     // rather than from what the view sees, so a thing looks the same however much of the view something darker or
     // brighter fills as the camera nears it, and kept from opening up past EV 0, so a moonlit night stays dark as eyes
-    // see it rather than turning into a dim day as a long exposure would; a haze in the valleys that thins with height
-    // (Curves/Haze.curve); and a glow around what is bright (Bloom).
+    // see it rather than turning into a dim day as a long exposure would; and a glow around what is bright (Bloom).
     "entries": [
         { "pipeline": { "id": 11005 } },
         { "pipeline": { "id": 11006 } },
         { "pipeline": { "id": 11007 } },
-        {
-            "pipeline": { "id": 11011 },
-            "params": {
-                "HeightFog": {
-                    "color": { "r": 0.7, "g": 0.8, "b": 0.95, "a": 1 },
-                    "intensity": { "x": 0.0015 },
-                    "falloff": { "curve": { "id": 3363 } }
-                }
-            }
-        },
         { "pipeline": { "id": 11010 } },
         { "pipeline": { "id": 11008 }, "params": { "ExposureIncident": { "minEv": { "x": 0 } } } },
         { "pipeline": { "id": 11009 } },

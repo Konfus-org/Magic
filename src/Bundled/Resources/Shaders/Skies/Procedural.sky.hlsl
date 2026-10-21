@@ -3,14 +3,15 @@
 // and the red of its disc come from the light crossing more air, so the sky follows the sun wherever and whatever colour
 // it is, and the world it lights follows the sky.
 //
-// - The air scatters the sun's and the moon's light toward the camera once along the view ray (Nishita et al. 1993, "Display of the
-//   Earth Taking into Account Atmospheric Scattering"): molecules by Rayleigh's law, dust by a Henyey-Greenstein lobe,
-//   with Earth's coefficients as Hillaire 2020 lists them ("A Scalable and Production Ready Sky and Atmosphere
-//   Rendering Technique"). Light scattered more than once is close to the same every way, as that paper finds, so it
-//   is added as an even share of what each point scatters rather than traced. Each step's light is integrated across
-//   the step as its own transmittance falls (Hillaire 2015, "Physically Based and Unified Volumetric Rendering in
-//   Frostbite"), so few steps do not brighten or darken it. The moon's is only worked out while it is not lost beside
-//   the sun's, so it costs nothing by day.
+// - The air scatters the sun's and the moon's light toward the camera once along the view ray (Nishita et al. 1993,
+//   "Display of the Earth Taking into Account Atmospheric Scattering"): molecules by Rayleigh's law, dust by a
+//   Henyey-Greenstein lobe, with Earth's coefficients as Hillaire 2020 lists them ("A Scalable and Production Ready Sky
+//   and Atmosphere Rendering Technique"). Light scattered more than once is close to the same every way, as that paper
+//   finds, so it is added as an even share of what each point scatters rather than traced. Each step's light is
+//   integrated across the step as its own transmittance falls (Hillaire 2015, "Physically Based and Unified Volumetric
+//   Rendering in Frostbite"), so few steps do not brighten or darken it. The moon's is only worked out while it is not
+//   lost beside the sun's, so it costs nothing by day. The same air lies between the camera and the world, so a far
+//   mountain fades into the light the sky shows past it.
 // - The clouds fill a layer of the air between two heights, marched through along the view (Schneider 2015, "The
 //   Real-time Volumetric Cloudscapes of Horizon Zero Dawn"; Hillaire 2016, "Physically Based Sky, Atmosphere and Cloud
 //   Rendering in Frostbite"). How much cloud a place holds is the weather's cover over it, improved gradient noise
@@ -85,6 +86,10 @@ static const float MieHeight = 1200.0;
 static const uint ViewSteps = 16u;
 static const uint CaptureSteps = 8u;
 static const uint LightSteps = 4u;
+
+// Steps along the way to a place of the world, for the air in front of it, which the renderer draws coarse and many
+// times over.
+static const uint AirSteps = 8u;
 
 // Steps through the clouds' layer along the view and into the capture, which is seen coarser; taps toward the sun
 // from each step with cloud in it; and taps along the sun's way through the layer to a place, for its shadow.
@@ -520,6 +525,76 @@ float3 MoonDisc(SkyInputs input, MaterialParams material, MoonFace face, float2 
     return full * albedo * ((scatter + max(material.earthshine, 0.0)) * edge);
 }
 
+// The moon's light as its phase leaves it, while it is noticed beside the sun's: by night, and at dusk, but never by
+// day, when working it out would change nothing; none otherwise.
+float3 NoticedMoonLux(SkyInputs input, float3 towardSun, float3 towardMoon)
+{
+    float3 moonLux = input.moonIlluminance * MoonPhaseShare(towardSun, towardMoon, any(input.sunIlluminance > 0.0));
+    float sunShowing = Luminance(input.sunIlluminance) * saturate(towardSun.y * 10.0 + 1.0);
+    bool isNoticed = Luminance(moonLux) > MoonNoticed * sunShowing && Luminance(moonLux) > 0.0 && towardMoon.y > -0.2;
+    return isNoticed ? moonLux : float3(0.0, 0.0, 0.0);
+}
+
+// The air along a view ray from a place relative to the planet's centre, between two distances along it: the light it
+// scatters toward the start, and what it lets through, by colour.
+struct AirSpan
+{
+    float3 light;
+    float3 through;
+};
+
+// The air along a span of a view ray, in steps closer together near its start, where the air is thickest along most
+// rays, each step's light integrated across it as its own transmittance falls: the sun's, and the moon's where moonLux
+// has any, the haze's glow about it as strong as the material asks.
+AirSpan AirAlong(
+    float3 origin,
+    float3 direction,
+    float from,
+    float to,
+    uint steps,
+    float3 towardSun,
+    float3 sunLux,
+    float3 towardMoon,
+    float3 moonLux,
+    MaterialParams material)
+{
+    float haze = max(material.haze, 0.0);
+    float hazeLobe = clamp(material.hazeDirection, 0.0, 0.99);
+    float cosSun = dot(direction, towardSun);
+    float cosMoon = dot(direction, towardMoon);
+    float rayleighPhase = RayleighPhase(cosSun);
+    float miePhase = HenyeyGreenstein(cosSun, hazeLobe);
+    float moonRayleighPhase = RayleighPhase(cosMoon);
+    float moonMiePhase = HenyeyGreenstein(cosMoon, hazeLobe) * max(material.moonGlow, 0.0);
+    float evenPhase = 1.0 / (4.0 * Pi);
+    bool hasMoon = any(moonLux > 0.0);
+    AirSpan air;
+    air.light = float3(0.0, 0.0, 0.0);
+    air.through = float3(1.0, 1.0, 1.0);
+    float span = max(to - from, 0.0);
+    [loop] for (uint i = 0u; i < steps && span > 0.0; i++)
+    {
+        float stepStart = from + span * Pow2((float)i / (float)steps);
+        float stepEnd = from + span * Pow2((float)(i + 1u) / (float)steps);
+        float3 place = origin + direction * (0.5 * (stepStart + stepEnd));
+        float2 density = AirDensity(length(place) - PlanetRadius);
+        float3 rayleigh = RayleighScattering * density.x;
+        float3 mie = float3(1.0, 1.0, 1.0) * (MieScattering * haze * density.y);
+        float3 extinction = rayleigh + float3(1.0, 1.0, 1.0) * (MieExtinction * haze * density.y);
+        float3 scattered = AirTransmittance(place, towardSun, haze) * (rayleigh * rayleighPhase + mie * miePhase + (rayleigh + mie) * evenPhase) * sunLux;
+        [branch] if (hasMoon)
+        {
+            scattered += AirTransmittance(place, towardMoon, haze) * (rayleigh * moonRayleighPhase + mie * moonMiePhase + (rayleigh + mie) * evenPhase) * moonLux;
+        }
+
+        float3 stepThrough = exp(-extinction * (stepEnd - stepStart));
+        air.light += air.through * scattered * (1.0 - stepThrough) / max(extinction, 1e-12);
+        air.through *= stepThrough;
+    }
+
+    return air;
+}
+
 SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
 {
     float3 direction = input.direction;
@@ -537,11 +612,9 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
     float2 faceDdx = ddx(face.at);
     float2 faceDdy = ddy(face.at);
 
-    // The moon's light as its phase leaves it, and whether it is noticed beside the sun's: by night, and at dusk, but
-    // never by day, when working it out would change nothing.
-    float3 moonLux = input.moonIlluminance * MoonPhaseShare(towardSun, towardMoon, hasSun);
-    float sunShowing = Luminance(sunLux) * saturate(towardSun.y * 10.0 + 1.0);
-    bool isMoonNoticed = Luminance(moonLux) > MoonNoticed * sunShowing && Luminance(moonLux) > 0.0 && towardMoon.y > -0.2;
+    // The moon's light, while it is noticed beside the sun's.
+    float3 moonLux = NoticedMoonLux(input, towardSun, towardMoon);
+    bool isMoonNoticed = any(moonLux > 0.0);
 
     // Where the view ray is in the air: from the camera, or where it comes into the air from above, to where it leaves
     // it or meets the ground.
@@ -572,57 +645,15 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
 
     float splitAt = hasClouds ? clouds.distance : rayEnd;
 
-    // The air's light in front of the clouds and past them, each step's integrated across it, steps closer together
-    // near the camera, where the air is thickest along most rays: the sun's, and the moon's while it is noticed, the
-    // haze's glow about it as strong as the material asks.
+    // The air's light in front of the clouds and past them, the steps shared between the two where there are clouds.
     uint steps = input.isCapture ? CaptureSteps : ViewSteps;
-    float hazeLobe = clamp(material.hazeDirection, 0.0, 0.99);
-    float rayleighPhase = RayleighPhase(cosSun);
-    float miePhase = HenyeyGreenstein(cosSun, hazeLobe);
-    float moonRayleighPhase = RayleighPhase(cosMoon);
-    float moonMiePhase = HenyeyGreenstein(cosMoon, hazeLobe) * max(material.moonGlow, 0.0);
-    float evenPhase = 1.0 / (4.0 * Pi);
-    float3 front = float3(0.0, 0.0, 0.0);
-    float3 past = float3(0.0, 0.0, 0.0);
-    float3 through = float3(1.0, 1.0, 1.0);
-    float3 throughFront = float3(1.0, 1.0, 1.0);
-    float span = rayEnd - rayStart;
-    [loop] for (uint i = 0u; i < steps; i++)
-    {
-        float stepStart = rayStart + span * Pow2((float)i / (float)steps);
-        float stepEnd = rayStart + span * Pow2((float)(i + 1u) / (float)steps);
-        float at = 0.5 * (stepStart + stepEnd);
-        float3 place = origin + direction * at;
-        float2 density = AirDensity(length(place) - PlanetRadius);
-        float3 rayleigh = RayleighScattering * density.x;
-        float3 mie = float3(1.0, 1.0, 1.0) * (MieScattering * haze * density.y);
-        float3 extinction = rayleigh + float3(1.0, 1.0, 1.0) * (MieExtinction * haze * density.y);
-        float3 scattered = AirTransmittance(place, towardSun, haze) * (rayleigh * rayleighPhase + mie * miePhase + (rayleigh + mie) * evenPhase) * sunLux;
-        [branch] if (isMoonNoticed)
-        {
-            scattered += AirTransmittance(place, towardMoon, haze) * (rayleigh * moonRayleighPhase + mie * moonMiePhase + (rayleigh + mie) * evenPhase) * moonLux;
-        }
-
-        float3 stepThrough = exp(-extinction * (stepEnd - stepStart));
-        float3 gathered = through * scattered * (1.0 - stepThrough) / max(extinction, 1e-12);
-        if (at < splitAt)
-        {
-            front += gathered;
-        }
-        else
-        {
-            past += gathered;
-        }
-
-        through *= stepThrough;
-        if (at < splitAt)
-        {
-            throughFront = through;
-        }
-    }
+    uint frontSteps = hasClouds ? steps / 2u : steps;
+    AirSpan front = AirAlong(origin, direction, rayStart, splitAt, frontSteps, towardSun, sunLux, towardMoon, moonLux, material);
+    AirSpan past = AirAlong(origin, direction, splitAt, rayEnd, steps - frontSteps, towardSun, sunLux, towardMoon, moonLux, material);
+    float3 through = front.through * past.through;
 
     // What is past the clouds besides the air's light: the ground, or the night sky and its stars.
-    float3 beyond = past;
+    float3 beyond = front.through * past.light;
     if (isGround)
     {
         float3 landed = origin + direction * rayEnd;
@@ -637,7 +668,7 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
     }
 
     SkyLight light;
-    light.nits = front + throughFront * clouds.light + beyond * clouds.through;
+    light.nits = front.light + front.through * clouds.light + beyond * clouds.through;
     light.emissive = float3(0.0, 0.0, 0.0);
     light.discs = float3(0.0, 0.0, 0.0);
     if (isGround)
@@ -689,4 +720,19 @@ float3 LightThrough(SkyInputs input, float3 position, float3 towardLight, Materi
     }
 
     return air * (1.0 - (1.0 - exp(-depth * CloudExtinction(input, material))) * fade);
+}
+
+// The air between the camera and a place of the world along the view: the same air the sky is seen through, so a far
+// mountain fades into the light the sky shows past it. Clouds in front of the place are left out.
+AirLight EvaluateAir(SkyInputs input, float reach, MaterialParams material)
+{
+    float3 towardSun = -input.sunDirection;
+    float3 towardMoon = -input.moonDirection;
+    float3 origin = float3(0.0, PlanetRadius + max(input.cameraPosition.y, 0.0) + 1.0, 0.0);
+    float3 moonLux = NoticedMoonLux(input, towardSun, towardMoon);
+    AirSpan span = AirAlong(origin, input.direction, 0.0, reach, AirSteps, towardSun, input.sunIlluminance, towardMoon, moonLux, material);
+    AirLight air;
+    air.nits = span.light;
+    air.through = dot(span.through, float3(1.0, 1.0, 1.0) / 3.0);
+    return air;
 }

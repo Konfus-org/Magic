@@ -38,15 +38,15 @@ by flying back to them. What stands still echoes them, the brick as brick
 The world's look is data too: an entity in `globals.prefab` with a `PostProcessing` names the effects pipeline the
 world is drawn with, `Assets/Pipelines/Daylight.pipeline`, the engine's effects with the exposure metered from the
 light its sun and sky shed rather than from what the view sees, so nearing a dark tower or the bright field never
-changes how everything else looks, and with a height fog whose density by height is a curve, `Assets/Curves/Haze.curve`
-([Curves](../src/Bundled/Resources/Curves/README.md)). The sky is the engine's procedural one, drawn by the sun, the
-moon and the weather beside them: the weather's wind carries the clouds and its coverage says how much of the sky they
-cover, so changing the weather changes the sky and the light the world is lit by
-([Materials](../src/Bundled/Resources/Materials/README.md#writing-a-sky)). The sun and the moon are directional lights
-in sun and moon mode, at their real brightness, turned slowly about a tilted axis by a `Spin` each, so the world goes
-through a day of about twelve minutes: the sun crosses the sky and sets red, the moon rises, lit from wherever the sun
-is, and the field's and the street lamps' lights, lost in the day, show at night. The moon turns a little slower than
-the sun, so its phase moves on from one night to the next.
+changes how everything else looks. The sky is the engine's procedural one, drawn by the sun, the moon and the weather
+beside them: the weather's wind carries the clouds and its coverage says how much of the sky they cover, and its fog
+lies in the valleys, thinning with height as a curve says, `Assets/Curves/Haze.curve`
+([Curves](../src/Bundled/Resources/Curves/README.md)), so changing the weather changes the sky, the air and the light
+the world is lit by ([Materials](../src/Bundled/Resources/Materials/README.md#writing-a-sky)). The sun and the moon are
+directional lights in sun and moon mode, at their real brightness, turned slowly about a tilted axis by a `Spin` each,
+so the world goes through a day of about twelve minutes: the sun crosses the sky and sets red, the moon rises, lit from
+wherever the sun is, and the field's and the street lamps' lights, lost in the day, show at night. The moon turns a
+little slower than the sun, so its phase moves on from one night to the next.
 
 ## Scripts and components
 

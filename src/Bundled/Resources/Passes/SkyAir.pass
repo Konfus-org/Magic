@@ -1,0 +1,11 @@
+{
+    // The air in front of the view (Templates/SkyAir.frag.hlsl), what it scatters toward the camera and lets through, a
+    // slice of distance an iteration, which the air and fog over the view read by name (Include/SkyAir.hlsli).
+    "stage": "sky",
+    "kind": "draw",
+    "each": "32",
+    "creates": [
+        { "name": "SkyAir", "filter": "linear", "format": "rgba16_float", "scale": 0, "width": 32, "height": 32, "layers": 32 }
+    ],
+    "draw": { "drawn": "sky_air", "colors": [ "SkyAir" ], "contents": "discard" }
+}

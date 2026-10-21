@@ -8,6 +8,7 @@ using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -45,6 +46,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private const string PipelinePath = "Pipelines/Clusters.pipeline";
 
+    /// <summary>
+    /// The fog's falloff when the weather names none: a ground fog, whichever gem or project has it.
+    /// </summary>
+    private const string FogFalloffPath = "Curves/HeightFog.curve";
+
     [SuppressMessage(
         "Style",
         "IDE0032:Use auto property",
@@ -72,6 +78,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private readonly Output _output;
     private readonly FailureHandler _failures;
     private readonly Preloader _preloader;
+    private readonly CancellationToken _stopping;
 
     /// <summary>
     /// A target's names while its overlay stage records, the target itself among them; one scope, each target in turn.
@@ -107,6 +114,13 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private string _missingView = string.Empty;
 
+    /// <summary>
+    /// The weather's fog falloff last asked for, and the curve once it is in (<see cref="GetFogFalloff"/>). Render
+    /// thread.
+    /// </summary>
+    private Handle<Curve> _fogFalloffAsked;
+    private Curve? _fogFalloff;
+
     public ClusterRenderingGem(
         IGpu gpu,
         IShaderCompiler compiler,
@@ -125,6 +139,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _settings = settings;
         _assets = assets;
         CancellationToken stopping = lifetime.Stopping;
+        _stopping = stopping;
         _failures = new FailureHandler(assets, debug);
         _graph = new PassGraph(gpu, compiler, assets, scripts, threads, _failures, stopping);
         _resources = new GpuResources(gpu, assets, caches, _graph, _failures, settings, stopping);
@@ -144,7 +159,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             events.Watch<AssetReloaded<Shader>>(
                 reloaded => Tell(new Change(Shader: reloaded.Asset, Invalidates: true))));
         _watching.Add(events.Watch<AssetReloaded<Pipeline>>(_ => Tell(new Change(Invalidates: true))));
-        _watching.Add(events.Watch<AssetReloaded<Curve>>(_ => Tell(new Change(Invalidates: true))));
+        _watching.Add(
+            events.Watch<AssetReloaded<Curve>>(reloaded => Tell(new Change(Curve: reloaded.Asset, Invalidates: true))));
         _watching.Add(events.Watch<AssetReloaded<Script>>(_ => Tell(new Change(Invalidates: true))));
         _watching.Add(events.Watch<DebugViewChanged>(changed => Tell(new Change(DebugView: changed.Name))));
     }
@@ -215,7 +231,9 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         (SurfaceKey skySurface, int skyRow) = _resources.GetSky(copy.Sky);
         UpdateGraph(copy, skySurface);
         PlanGi(main, frame);
-        List<View> views = _views.Prepare(new ViewFrame(copy, frame, skyRow, MakeCounts(), player, HasJitter()));
+        Curve? fogFalloff = GetFogFalloff(copy.Weather?.FogFalloff ?? Handle<Curve>.None);
+        List<View> views = _views.Prepare(
+            new ViewFrame(copy, frame, skyRow, MakeCounts(), player, HasJitter(), fogFalloff));
         View? shown = views.Find(view => view.Target.IsWindow) ?? (views.Count > 0 ? views[0] : null);
         if (shown is not null) WriteMoved(main?.Transform.Position ?? shown.Position);
 
@@ -568,6 +586,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
             if (change.Shader is { } shader) _resources.Reload(shader);
 
+            if (change.Curve is { } curve && curve.Handle == _fogFalloffAsked) _fogFalloff = curve;
+
             if (change.Invalidates) _graph.Invalidate();
 
             if (change.DebugView is { } view) _debugView = view;
@@ -575,14 +595,45 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
+    /// The weather's fog falloff, the one at <see cref="FogFalloffPath"/> when it names none; none while it loads, or
+    /// when there is none to load: asked for again when the weather names another, its load told back as a change
+    /// (<see cref="TakeChanges"/>), as is its file made again.
+    /// </summary>
+    private Curve? GetFogFalloff(Handle<Curve> named)
+    {
+        Handle<Curve> asked = named == Handle<Curve>.None ? _assets.Find<Curve>(FogFalloffPath) : named;
+        if (asked == _fogFalloffAsked) return _fogFalloff;
+
+        _fogFalloffAsked = asked;
+        _fogFalloff = null;
+        if (asked != Handle<Curve>.None) LoadFogFalloffAsync(asked).FireAndForget();
+
+        return null;
+    }
+
+    private async Task LoadFogFalloffAsync(Handle<Curve> asked)
+    {
+        Result<Curve> loaded = await _assets.LoadAsync(asked, _stopping).ConfigureAwait(false);
+        if (loaded.Ok)
+        {
+            Tell(new Change(Curve: loaded.Value));
+        }
+        else
+        {
+            Debugging.Warn($"The weather's fog falloff cannot be loaded, so it has no fog: {loaded.Error}");
+        }
+    }
+
+    /// <summary>
     /// One change told to the render thread: whichever of these it carries. An asset made again, to take in in place
-    /// of what it had; that the frame's listing is to be built again; or the debug view named.
+    /// of what it had, or a curve in; that the frame's listing is to be built again; or the debug view named.
     /// </summary>
     private readonly record struct Change(
         Model? Model = null,
         Texture? Texture = null,
         Material? Material = null,
         Shader? Shader = null,
+        Curve? Curve = null,
         bool Invalidates = false,
         string? DebugView = null);
 }

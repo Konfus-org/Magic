@@ -249,7 +249,8 @@ internal struct DirectionalLights
 /// <summary>
 /// The world's weather in a <see cref="FrameConstants"/>, <c>WeatherConstants</c> in Shaders/Include/Frame.hlsli member
 /// for member: the wind in metres per second, how much of the sky the clouds cover and how thick they are, 0 to 1 each,
-/// and their linear colours where the sun lights them and in their own shade.
+/// and their linear colours where the sun lights them and in their own shade; how much fog there is a metre, its tint,
+/// the metres before it begins, and its share by height, a curve as <see cref="ParamLayout.WriteCurve"/> packs one.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct WeatherConstants
@@ -259,7 +260,19 @@ internal struct WeatherConstants
     internal Vector3 CloudColor;
     internal float Density;
     internal Vector3 CloudShadow;
-    internal float Padding;
+    internal float Fog;
+    internal Vector3 FogColor;
+    internal float FogStart;
+    internal CurveRows FogFalloff;
+}
+
+/// <summary>
+/// A curve's sixteen floats, Shaders/Include/Curve.hlsli's <c>Curve</c>.
+/// </summary>
+[InlineArray(16)]
+internal struct CurveRows
+{
+    private float _value;
 }
 
 /// <summary>

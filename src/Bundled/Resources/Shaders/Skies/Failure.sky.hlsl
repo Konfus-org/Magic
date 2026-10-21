@@ -33,3 +33,12 @@ float3 LightThrough(SkyInputs input, float3 position, float3 towardLight, Materi
 {
     return float3(1.0, 1.0, 1.0);
 }
+
+// No air, so the world is seen as it is.
+AirLight EvaluateAir(SkyInputs input, float reach, MaterialParams material)
+{
+    AirLight air;
+    air.nits = float3(0.0, 0.0, 0.0);
+    air.through = 1.0;
+    return air;
+}

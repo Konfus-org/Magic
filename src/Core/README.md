@@ -489,7 +489,7 @@ shader library in [Resources/Shaders](../Bundled/Resources/Shaders/README.md).
 
 What a renderer draws from the world is components: a `Camera` for each view, what each entity draws, the lights,
 among them the directional lights whose mode makes them the sun and the moon its sky draws, the sky, the `Weather`,
-which says the wind and the clouds as they are now, and
+which says the wind, the clouds and the fog as they are now, and
 `PostProcessing`, which names the world's effects as a `Pipeline`. A `Pipeline` is an ordered list of
 `Pass`es and other pipelines, and a `Pass` one step of a frame: the stage it runs in, its shader, and the resources it
 reads, writes and makes, by name. Both are plain JSON assets, so an effect is data a world names, and what a renderer

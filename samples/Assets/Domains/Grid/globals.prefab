@@ -15,7 +15,7 @@
         {
             "name": "Weather",
             "components": {
-                "Weather": { "wind": { "x": 6, "y": 0, "z": 3 }, "coverage": 0.45 }
+                "Weather": { "wind": { "x": 6, "y": 0, "z": 3 }, "coverage": 0.45, "fog": 0.0015, "fogFalloff": { "id": 3363 } }
             }
         },
         {

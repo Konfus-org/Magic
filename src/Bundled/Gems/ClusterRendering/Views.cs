@@ -13,7 +13,7 @@ namespace Magic.ClusterRendering;
 
 /// <summary>
 /// What every view is worked out from this frame: the copy of the world, the frame, the sky's row, the frame's counts,
-/// where the player is, and whether views jitter.
+/// where the player is, whether views jitter, and the weather's fog falloff once it is in.
 /// </summary>
 internal readonly record struct ViewFrame(
     Renderables Copy,
@@ -21,7 +21,8 @@ internal readonly record struct ViewFrame(
     int SkyMaterial,
     Counts Counts,
     Vector3? Player,
-    bool Jitters);
+    bool Jitters,
+    Curve? FogFalloff);
 
 /// <summary>
 /// Where a view draws: a texture, the rectangle of it, its format, and whether it is a window's.
@@ -283,6 +284,11 @@ internal sealed class View : IDisposable
             LightTileWords = tilesX * tilesY * tileWords
         };
         Weather weather = frame.Copy.Weather ?? new Weather();
+
+        // The fog is left out until its falloff is in, so it never shows first without its shape.
+        CurveRows falloff = default;
+        Span<float> falloffFloats = falloff;
+        ParamLayout.WriteCurve(frame.FogFalloff, MemoryMarshal.AsBytes(falloffFloats));
         Constants = new FrameConstants
         {
             ViewProj = viewProj,
@@ -324,6 +330,10 @@ internal sealed class View : IDisposable
                 CloudColor = new Vector3(weather.CloudColor.R, weather.CloudColor.G, weather.CloudColor.B),
                 Density = Math.Clamp(weather.Density, 0, 1),
                 CloudShadow = new Vector3(weather.CloudShadow.R, weather.CloudShadow.G, weather.CloudShadow.B),
+                Fog = frame.FogFalloff is null ? 0 : MathF.Max(weather.Fog, 0),
+                FogColor = new Vector3(weather.FogColor.R, weather.FogColor.G, weather.FogColor.B),
+                FogStart = MathF.Max(weather.FogStart, 0),
+                FogFalloff = falloff,
             },
             SkyLights = GetSkyLights(frame.Copy),
             Directional = GetDirectionalLights(frame.Copy.Directional),

@@ -350,7 +350,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     internal List<GpuFormat> ColorFormats { get; } = [];
 
     /// <summary>
-    /// A draw of surfaces, the sky or its shadow, whose pipelines are composed around them, one per variant.
+    /// A draw of surfaces, the sky, its shadow or its air, whose pipelines are composed around them, one per variant.
     /// </summary>
     internal bool DrawsSurfaces => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn != PassDrawn.Depth;
 
@@ -361,9 +361,10 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
         => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn is PassDrawn.Visibility or PassDrawn.Transparent;
 
     /// <summary>
-    /// A draw of the sky's shader over one triangle: the sky, or its shadow on the world.
+    /// A draw of the sky's shader over one triangle: the sky, its shadow on the world, or the air in front of the view.
     /// </summary>
-    internal bool DrawsSky => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn is PassDrawn.Sky or PassDrawn.SkyShadow;
+    internal bool DrawsSky
+        => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn is PassDrawn.Sky or PassDrawn.SkyShadow or PassDrawn.SkyAir;
 
     /// <summary>
     /// A draw from the arguments and instances a pass before it made: the visibility buffer's pieces or depth's, or the
@@ -519,7 +520,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// <summary>
     /// The surface variants a draw's pipelines are made for up front, those it draws: the raster bins' for a draw of
     /// the visibility buffer, the resolve bins' for a draw of surfaces, the transparent ones for a draw of transparent
-    /// surfaces, the sky's for a draw of the sky or its shadow, none for any other pass.
+    /// surfaces, the sky's for a draw of the sky, its shadow or its air, none for any other pass.
     /// </summary>
     internal IReadOnlyCollection<SurfaceKey> GetVariants(SurfaceVariants variants)
     {
@@ -528,7 +529,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
             PassDrawn.Visibility => variants.Raster,
             PassDrawn.Surfaces => variants.Resolve,
             PassDrawn.Transparent => variants.Transparent,
-            PassDrawn.Sky or PassDrawn.SkyShadow => [variants.Sky],
+            PassDrawn.Sky or PassDrawn.SkyShadow or PassDrawn.SkyAir => [variants.Sky],
             PassDrawn.Depth => [],
             _ => [],
         };

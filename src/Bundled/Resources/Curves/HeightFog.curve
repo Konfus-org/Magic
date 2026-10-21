@@ -1,6 +1,6 @@
 {
-    // Height fog's density by metres above the world's origin, of its intensity: thickest on the ground, thinning
-    // quickly over the first tens of metres and gone by a few hundred, as air holds haze.
+    // The fog's share by metres above the world's origin where the weather names no falloff: thickest on the ground,
+    // thinning quickly over the first tens of metres and gone by a few hundred, as air holds haze.
     "keys": [
         { "at": 0, "value": 1 },
         { "at": 20, "value": 0.65 },

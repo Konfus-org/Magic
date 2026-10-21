@@ -7,11 +7,13 @@
 #define MAGIC_FRAME_HLSLI
 
 #include "Include/Bindings.hlsli"
+#include "Include/Curve.hlsli"
 
 // Pixels a side of a light tile; the renderer's Views.TileSize.
 static const uint LightTileSize = 32u;
 
-// The world's weather, still and clear without one: the renderer's WeatherConstants (GpuStructs.cs), member for member.
+// The world's weather, still, clear and with no fog without one: the renderer's WeatherConstants (GpuStructs.cs),
+// member for member.
 struct WeatherConstants
 {
     float3 Wind;             // metres per second: its direction and strength
@@ -19,7 +21,10 @@ struct WeatherConstants
     float3 CloudColor;       // the clouds where the sun lights them, linear
     float Density;           // how thick they are, 0 wisps to 1 thick
     float3 CloudShadow;      // the clouds in their own shade and underneath, linear
-    float Padding;
+    float Fog;               // the share of the light the fog puts out a metre where its falloff is 1; 0, none
+    float3 FogColor;         // the fog's tint, times the light that reaches it, linear
+    float FogStart;          // metres from the camera before the fog begins
+    Curve FogFalloff;        // the fog's share by metres above the world's origin
 };
 
 // The sky's sun and moon, which the sky draws whether or not either lights the world now: the renderer's

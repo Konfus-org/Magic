@@ -207,8 +207,8 @@ internal readonly record struct CountName(PassCount Count, uint Number = 0)
 /// without (Templates/Visibility.frag.hlsl), over the pieces' vertex stage, whole or only their place
 /// (Templates/Pieces.vert.hlsl); the G-buffer's resolve bins (Templates/Resolve.frag.hlsl) over the tiles' quads
 /// (Templates/Tiles.vert.hlsl); transparent surfaces forward over the pieces (Templates/ForwardPieces.frag.hlsl); and
-/// the sky (Templates/Sky.frag.hlsl) and its shadow on the world (Templates/SkyShadow.frag.hlsl) over the fullscreen
-/// triangle.
+/// the sky (Templates/Sky.frag.hlsl), its shadow on the world (Templates/SkyShadow.frag.hlsl) and the air in front
+/// of a view (Templates/SkyAir.frag.hlsl) over the fullscreen triangle.
 /// </para>
 /// <para>
 /// A shader binds what it uses: each stage's is first compiled to SPIR-V with every name its pass can see declared, a
@@ -394,7 +394,7 @@ internal sealed class PassGraph(
                 PassDrawn.Visibility => isTransparent ? null : surface,
                 PassDrawn.Surfaces => isTransparent ? null : surface with { Masked = false },
                 PassDrawn.Transparent => isTransparent ? surface : null,
-                PassDrawn.Sky or PassDrawn.SkyShadow => null,
+                PassDrawn.Sky or PassDrawn.SkyShadow or PassDrawn.SkyAir => null,
                 PassDrawn.Depth => null,
                 _ => null,
             };
@@ -491,6 +491,7 @@ internal sealed class PassGraph(
             PassDrawn.Transparent => "ForwardPieces",
             PassDrawn.Sky => "Sky",
             PassDrawn.SkyShadow => "SkyShadow",
+            PassDrawn.SkyAir => "SkyAir",
             PassDrawn.Surfaces or PassDrawn.Depth => "Resolve",
             _ => "Resolve",
         };
@@ -1220,10 +1221,10 @@ internal sealed class PassGraph(
     /// <summary>
     /// What a draw of surfaces binds in its fragment stage: the union over its templates, each over the default
     /// surface, whose every value comes from the materials, so no path of the template folds away as it would over a
-    /// surface of constants, and the visibility buffer's also with no surface; the sky's and its shadow's with no sky
-    /// alone, as a sky reads only the frame's constants and what the contract offers; and what the surface contract
-    /// offers any surface or sky (Shaders/Include/SurfaceBindings.hlsli), the texture pools, the materials and, for a
-    /// forward surface, the scene behind, whether the probe used them or not.
+    /// surface of constants, and the visibility buffer's also with no surface; the sky's, its shadow's and its air's
+    /// with no sky alone, as a sky reads only the frame's constants and what the contract offers; and what the surface
+    /// contract offers any surface or sky (Shaders/Include/SurfaceBindings.hlsli), the texture pools, the materials
+    /// and, for a forward surface, the scene behind, whether the probe used them or not.
     /// </summary>
     private async Task<Result<StageBindings>> ProbeTemplatesAsync(ListedPass pass)
     {
@@ -1574,7 +1575,7 @@ internal sealed class PassGraph(
             case PassDrawn.Transparent:
                 Transparent(render, pass, scope);
                 break;
-            case PassDrawn.Sky or PassDrawn.SkyShadow:
+            case PassDrawn.Sky or PassDrawn.SkyShadow or PassDrawn.SkyAir:
                 Sky(render, pass, scope);
                 break;
             default:
@@ -1650,7 +1651,7 @@ internal sealed class PassGraph(
 
     /// <summary>
     /// The world's sky, its material's sky shader or the renderer's own, over what nothing was drawn on, or its shadow
-    /// over the whole target.
+    /// or its air over the whole target.
     /// </summary>
     private void Sky(GpuRenderPass render, ListedPass pass, in RecordScope scope)
     {

@@ -206,6 +206,26 @@ internal sealed partial class ParamLayout
     }
 
     /// <summary>
+    /// A curve as Shaders/Include/Curve.hlsli reads it: where its first and last keys are, then its value at
+    /// <see cref="CurveSamples"/> places evenly from the one to the other.
+    /// </summary>
+    internal static void WriteCurve(Curve? curve, Span<byte> destination)
+    {
+        if (curve is not { Keys.Count: > 0 }) return;
+
+        float start = curve.Keys[0].At;
+        float end = curve.Keys[^1].At;
+        BinaryPrimitives.WriteSingleLittleEndian(destination, start);
+        BinaryPrimitives.WriteSingleLittleEndian(destination[4..], end);
+        for (int i = 0; i < CurveSamples; i++)
+        {
+            BinaryPrimitives.WriteSingleLittleEndian(
+                destination[(8 + (i * 4))..],
+                curve.At(start + ((end - start) * i / (CurveSamples - 1))));
+        }
+    }
+
+    /// <summary>
     /// The text the struct was read from as HLSL takes it: the struct's defaults and roles blanked out, keeping every
     /// line where it was so the compiler's line numbers still hold, then, on the struct's last line, the loader that
     /// unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows, as
@@ -332,26 +352,6 @@ internal sealed partial class ParamLayout
             {
                 WriteComponents(field, value, destination);
             }
-        }
-    }
-
-    /// <summary>
-    /// A curve as Shaders/Include/Curve.hlsli reads it: where its first and last keys are, then its value at
-    /// <see cref="CurveSamples"/> places evenly from the one to the other.
-    /// </summary>
-    private static void WriteCurve(Curve? curve, Span<byte> destination)
-    {
-        if (curve is not { Keys.Count: > 0 }) return;
-
-        float start = curve.Keys[0].At;
-        float end = curve.Keys[^1].At;
-        BinaryPrimitives.WriteSingleLittleEndian(destination, start);
-        BinaryPrimitives.WriteSingleLittleEndian(destination[4..], end);
-        for (int i = 0; i < CurveSamples; i++)
-        {
-            BinaryPrimitives.WriteSingleLittleEndian(
-                destination[(8 + (i * 4))..],
-                curve.At(start + ((end - start) * i / (CurveSamples - 1))));
         }
     }
 
