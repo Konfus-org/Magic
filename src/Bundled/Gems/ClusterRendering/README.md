@@ -277,6 +277,16 @@ the far world takes the sky's colour. It is drawn
 over the lit scene and the sky, before transparent surfaces, which it does not fog, and before the scene the
 reflections read is kept, so they show it.
 
+### Bloom
+
+An effect a world adds when it wants it, listed before tonemapping: the light a lens scatters around what is bright,
+so a highlight or a lamp brighter than the display can show glows by how bright it is (Jimenez 2014). It is made from
+the view as it is shown, after the upscale, so it holds still as the view is jittered: halved, each texel weighed down
+by its brightness so one bright pixel does not flicker as it moves, then halved again and again, and every level blurred
+and averaged, a blur of each octave counted alike, which falls off as a lens's glare does. There is no threshold: every
+pixel gives the glow the share it is tuned to, and only what is bright shows it. Tonemapping lays the glow over the
+view, which keeps the rest of its light; a world that lists no bloom draws and loads none of it.
+
 ### Other effects
 
 Ambient occlusion, contact shadows, exposure and tonemapping are effects too, reading the view's targets by name.

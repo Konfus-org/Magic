@@ -1,0 +1,9 @@
+{
+    // Bloom's first level (Shaders/Post/BloomDownsample.frag.hlsl): the view as it is shown, at half its size, and its
+    // coarser levels made from it, each half the last, for Bloom to read.
+    "stage": "post",
+    "kind": "fullscreen",
+    "shader": { "id": 11264 },
+    "creates": [ { "name": "BloomChain", "format": "rgba16_float", "size": "output", "scale": 0.5, "levels": 6 } ],
+    "writes": [ { "name": "BloomChain", "mipmaps": true } ]
+}
