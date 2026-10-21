@@ -1991,9 +1991,10 @@ internal sealed record CompressedTexture(byte[][] Levels)
 internal sealed record ModelField(Vector3 Min, Vector3 Size, Half[] Distances)
 {
     /// <summary>
-    /// Raised whenever how a field is made or written changes, so the cache's older ones are made again.
+    /// Raised whenever how a field is made or written changes, or how the coarsest clusters it is made from are, so the
+    /// cache's older ones are made again: a field is kept by its model's version alone.
     /// </summary>
-    internal const int CacheVersion = 1;
+    internal const int CacheVersion = 2;
 
     internal static Result<ModelField> Read(Stream bytes)
     {

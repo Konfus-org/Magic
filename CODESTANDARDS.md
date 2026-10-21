@@ -407,8 +407,10 @@ on my machine": the other machines are the point.
 - All disk access goes through `IFileSystem`, never `File` or `Directory`.
 - The one exception is `Debugging`, the log: it writes crash files itself, so that it works before any service
   exists and after one has broken.
-- Engine output goes beside Magic, a folder per kind (`Logs`, `Cache`, `Screenshots`), never a hardcoded temp, home
-  or AppData path.
+- Engine output goes beside Magic, a folder per kind (`Logs`, `Screenshots`), never a hardcoded temp, home or AppData
+  path. The cache is the one exception, as what it holds serves every copy of Magic on the machine: one folder per
+  machine, under the folder .NET names as the user's local application data, unless `MagicCache` names another
+  ([The cache](src/Core/README.md#the-cache)).
 - File watch events differ per OS: duplicated, coalesced, out of order. Treat one as "something changed here",
   collect them in one place, and check what exists.
 

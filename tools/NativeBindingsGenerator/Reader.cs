@@ -748,7 +748,12 @@ internal sealed class Reader
 
     private void Enum(CppEnum cppEnum)
     {
-        string cName = GetName(cppEnum) ?? throw new UnsupportedException("an enum with neither a name nor a typedef");
+        if (GetName(cppEnum) is not { } cName)
+        {
+            Constants(cppEnum);
+            return;
+        }
+
         (string owner, string rest) = Names.Split(cName, _options.Prefixes);
         string name = Names.ToPascal(rest);
         string underlying = GetUnderlying(cppEnum);
@@ -791,6 +796,32 @@ internal sealed class Reader
         for (int i = 0; i < members.Length; i++)
         {
             _names.Add((memberNames[i], Qualify(cName) + "." + members[i]));
+        }
+    }
+
+    /// <summary>
+    /// An enum with neither a name nor a typedef names no type C could declare anything as: it is only its members,
+    /// each an integer constant (meshoptimizer's option bits), so each is a constant of its own, of the type the
+    /// enum's values need, named and owned as a macro's would be.
+    /// </summary>
+    private void Constants(CppEnum cppEnum)
+    {
+        string type = GetUnderlying(cppEnum);
+        foreach (CppEnumItem item in cppEnum.Items)
+        {
+            (string owner, string rest) = Names.Split(item.Name, _options.Prefixes);
+            string name = Names.ToPascal(rest);
+            string value = item.Value.ToString(CultureInfo.InvariantCulture);
+            _constants[item.Name] = Qualify(item.Name);
+            _constantParts[item.Name] = (type, value);
+            _declarations.Add(new(
+                DeclarationKind.Constant,
+                item.Name,
+                owner,
+                false,
+                name,
+                MakeConstantText(type, name, value)));
+            _names.Add((item.Name, Qualify(item.Name)));
         }
     }
 

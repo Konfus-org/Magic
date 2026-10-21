@@ -727,9 +727,10 @@ internal sealed class PassGraph(
 
     /// <summary>
     /// Loads the passes of the frame pipeline, the world's effects and the pipeline appended after them and their
-    /// shaders, fits them on the render thread, probes what every stage of each uses and what each thing made is used
-    /// for, then compiles every pass bound to that, and every draw's vertex stages and pipelines for the variants it
-    /// draws.
+    /// shaders, fits them on the render thread, probes what every stage of each uses, compiling each pass bound to that
+    /// as soon as its own probe is done, with every draw's vertex stages and pipelines for the variants it draws, and
+    /// once every pass is probed, what each thing made is used for. The listing goes live only once that is added and
+    /// every pipeline is back.
     /// </summary>
     private async Task BuildAsync(
         Listing listing,
@@ -744,49 +745,49 @@ internal sealed class PassGraph(
             .ConfigureAwait(false);
         await threads.InvokeAsync(EngineThread.Render, () => listing.Fit(loaded, failures, variants), stopping)
             .ConfigureAwait(false);
-        Task<Result<StageBindings>> piecesProbe = ProbeAsync(
-            _engineVisible,
-            [],
-            GpuStage.Vertex,
-            [(GetPiecesText(placeOnly: false), "Pieces")]);
-        List<Task> probes = [];
-        foreach (ListedPass pass in listing.Passes)
-        {
-            probes.Add(ProbePassAsync(pass, piecesProbe));
-        }
 
-        await Task.WhenAll(probes).ConfigureAwait(false);
-        await threads.InvokeAsync(EngineThread.Render, listing.Use, stopping).ConfigureAwait(false);
-
-        // The place-only pieces use a part of what the pieces do, and are bound as the pieces are, so a draw binds
-        // once.
-        Result<StageBindings> piecesBound = await piecesProbe.ConfigureAwait(false);
+        // What binds nothing compiles at once; the place-only pieces use a part of what the pieces do, and are bound as
+        // the pieces are, so a draw binds once.
         Task<Result<GpuShader>> fullscreen = compiler.CompileAsync(
             FullscreenPath,
             GpuStage.Vertex,
             gpu.ShaderFormat,
             stopping);
-        Task<Result<GpuShader>> pieces = CompileBoundAsync(
-            _engineVisible,
-            [],
-            piecesBound,
-            GpuStage.Vertex,
-            GetPiecesText(placeOnly: false),
-            "Pieces");
-        Task<Result<GpuShader>> places = CompileBoundAsync(
-            _engineVisible,
-            [],
-            piecesBound,
-            GpuStage.Vertex,
-            GetPiecesText(placeOnly: true),
-            "Pieces (place only)");
         Task<Result<GpuShader>> tiles = compiler.CompileAsync(TilesPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
+        Task<Result<StageBindings>> piecesProbe = ProbeAsync(
+            _engineVisible,
+            [],
+            GpuStage.Vertex,
+            [(GetPiecesText(placeOnly: false), "Pieces")]);
+        Task<Result<GpuShader>> pieces = CompilePiecesAsync(placeOnly: false, "Pieces");
+        Task<Result<GpuShader>> places = CompilePiecesAsync(placeOnly: true, "Pieces (place only)");
+        List<Task> probes = [];
         foreach (ListedPass pass in listing.Passes)
         {
-            CompileAsync(listing, pass, fullscreen, pieces, places, tiles).FireAndForget();
+            probes.Add(ProbeThenCompileAsync(pass));
         }
 
+        await Task.WhenAll(probes).ConfigureAwait(false);
+        await threads.InvokeAsync(EngineThread.Render, listing.Use, stopping).ConfigureAwait(false);
         listing.Done();
+
+        async Task<Result<GpuShader>> CompilePiecesAsync(bool placeOnly, string name)
+        {
+            Result<StageBindings> bound = await piecesProbe.ConfigureAwait(false);
+            return await CompileBoundAsync(
+                _engineVisible,
+                [],
+                bound,
+                GpuStage.Vertex,
+                GetPiecesText(placeOnly),
+                name).ConfigureAwait(false);
+        }
+
+        async Task ProbeThenCompileAsync(ListedPass pass)
+        {
+            await ProbePassAsync(pass, piecesProbe).ConfigureAwait(false);
+            CompileAsync(listing, pass, fullscreen, pieces, places, tiles).FireAndForget();
+        }
     }
 
     /// <summary>
@@ -1219,8 +1220,9 @@ internal sealed class PassGraph(
             return;
         }
 
+        Task<Result<StageBindings>> templates = ProbeTemplatesAsync(pass);
         Keep(pass, GpuStage.Vertex, pass.DrawsPieces ? await pieces.ConfigureAwait(false) : Result.Success(none));
-        Keep(pass, GpuStage.Fragment, await ProbeTemplatesAsync(pass).ConfigureAwait(false));
+        Keep(pass, GpuStage.Fragment, await templates.ConfigureAwait(false));
     }
 
     /// <summary>
@@ -1271,7 +1273,7 @@ internal sealed class PassGraph(
 
     /// <summary>
     /// What a stage's shaders use of what <paramref name="visible"/> and <paramref name="writes"/> declare: each
-    /// compiled to SPIR-V with every name declared, what it bound read back, and the union resolved
+    /// compiled to SPIR-V with every name declared, all at once, what it bound read back, and the union resolved
     /// (<see cref="StageBindings.TryCreate"/>) with whatever is <paramref name="also"/> bound.
     /// </summary>
     private async Task<Result<StageBindings>> ProbeAsync(
@@ -1282,15 +1284,15 @@ internal sealed class PassGraph(
         IReadOnlyList<GpuShaderBinding>? also = null)
     {
         string header = StageBindings.MakeHeader(stage, visible, writes, null);
-        List<GpuShaderBinding> used = [.. also ?? []];
+        List<Task<Result<GpuShader>>> probes = new(sources.Count);
         foreach ((string text, string name) in sources)
         {
-            Result<GpuShader> probe = await compiler.CompileAsync(
-                header + text,
-                name,
-                stage,
-                GpuShaderFormat.Spirv,
-                stopping).ConfigureAwait(false);
+            probes.Add(compiler.CompileAsync(header + text, name, stage, GpuShaderFormat.Spirv, stopping));
+        }
+
+        List<GpuShaderBinding> used = [.. also ?? []];
+        foreach (Result<GpuShader> probe in await Task.WhenAll(probes).ConfigureAwait(false))
+        {
             if (!probe.Ok) return Result.Failure<StageBindings>(probe.Error);
 
             used.AddRange(probe.Value.Bindings);

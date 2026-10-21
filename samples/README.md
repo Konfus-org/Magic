@@ -90,4 +90,5 @@ sounds, and the rest, the trees, the cabin, the other sounds, the forest's place
 made for the samples by scripts that are not kept, as their output is the asset. A model's materials are in the slots
 its file lists them in ([Models](../src/Bundled/Resources/Models/README.md)); a model exported from Blender keeps its
 slots when its faces are in slot order ([the model loader](../src/Bundled/Gems/AssimpModelLoader/README.md)). The
-first run makes every model's clusters and cards, the terrain's for minutes; every later run reads them from `Cache/`.
+first run on a machine makes every model's clusters and cards and compresses every texture, which takes minutes for
+the valley; every later run, from any checkout, reads them from the cache ([The cache](../src/Core/README.md#the-cache)).

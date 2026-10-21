@@ -53,10 +53,10 @@ a headless loading screen costs next to nothing to draw, so thousands of frames 
 compiles, and how many depends on the machine. Each run then opens every other domain the project's assets hold, all
 but its loading domain, in place of the world, one after another through the console's `open`, so a change that
 breaks any sample fails, and the windowed run takes a screenshot of each; the time limit is per domain, as a cold
-cache makes a large model's clusters again for minutes. It ends with one line per step and its exit code, `PASSED` or
-which step failed, and the screenshots' paths, the entry point's first, each to be opened and looked at: the run is
-the evidence that the change works, and the images are what show it. Its parameters, documented in the script, pick
-the steps, the build and another project.
+cache makes a large domain's models and textures again for minutes. It ends with one line per step and its exit
+code, `PASSED` or which step failed, and the screenshots' paths, the entry point's first, each to be opened and looked
+at: the run is the evidence that the change works, and the images are what show it. Its parameters, documented in the
+script, pick the steps, the build and another project.
 
 The build is incremental and never starts over: what is built is reused, and the native libraries are built once
 per machine, in a folder every checkout and worktree shares

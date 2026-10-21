@@ -49,7 +49,8 @@ default is right everywhere, and 32-bit x86 is not a target.
 - An enum keeps its values; it is an `int` unless they need more (what a C compiler picks for one that fits differs
   by ABI, so it is decided from the values alone), and `[Flags]` when every value is a bit or bits already named. The
   flags idiom some libraries use, a typedef to an integer named `X` beside an enum `X_` holding its values, types `X`
-  as that enum.
+  as that enum. An enum with neither a name nor a typedef names no type, so nothing can be declared as it: its members
+  are constants, each named and owned as a macro's would be, of the type the values need.
 - An object-like macro is a `const` when, after the macros it uses are expanded (function-like ones applied, `##`
   pasted), it is a literal, or arithmetic over literals, casts to integer types and constants already made, which it
   takes its type from; a string macro is a `byte*` to its UTF-8 bytes in the assembly's static data, handed to C as

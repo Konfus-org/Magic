@@ -349,20 +349,29 @@ compiled ahead of time, as gems load from disk at run time, so the reflection is
 
 What is slow to make is kept so that a later run reads it rather than making it again: a model's clusters, a
 compiled shader. It works as the assets do: Core holds the entries, and each type of thing kept has a gem that says
-how it is written. `Caches` holds the entries, beside Magic in `Cache/` as the log is in `Logs/`, and reads and
-writes them from any thread, each read and write given the key and the version below. How a `T` is written and read
-back, and its version, is an `ICache<T>`, provided by the gem that makes `T` as it provides any interface.
+how it is written. `Caches` holds the entries, and reads and writes them from any thread, each read and write given
+the key and the version below. How a `T` is written and read back, and its version, is an `ICache<T>`, provided by the
+gem that makes `T` as it provides any interface.
+
+The entries are in one folder per machine, `Magic/Cache/` under the user's local application data unless the
+`MagicCache` environment variable names another, as the native libraries are
+([Native libraries](../Bundled/Gems/README.md#native-libraries)): every checkout, worktree and copy of Magic that runs
+a project shares what any of them made, so a new worktree starts with what the last one made rather than making it
+all again, and a game installed where it cannot write beside itself still keeps what it made. Each project has a
+folder of its own in it, by its name, as two projects' assets can share an id.
 
 - **The key** is the id of what an entry was made from: an asset's id, so any asset can have one entry of each type,
   or a hash naming what is not an asset, such as a shader's source and stage, so each variant of a shader has its own.
 - **The version** is a hash of everything the entry was made from: the asset's version, which its post-processor is
   handed, and the settings it was made with. Read with another version, or written by another version of the type's
   `ICache<T>`, an entry is dirty: the read fails, and the caller makes it again and writes it over it. So an asset
-  that changes, while the engine runs or while it does not, has what was made from it made again.
-- An entry is a file under `Cache/`, in a folder per type: the version it was made from and the type's version, then
-  what the type's `ICache<T>` wrote. A write goes beside the entry first and is then moved over it, so a reader, or
-  the next run after a crash, never finds half an entry; one that fails is a warning, and it is made again next time.
-- Whoever reads an entry keeps what it needs of it: the cache holds nothing in memory. Deleting `Cache/` is always
+  that changes, while the engine runs or while it does not, has what was made from it made again, and two checkouts
+  that differ in an asset each make their own over the other's, never reading it.
+- An entry is a file in the project's folder, in a folder per type: the version it was made from and the type's
+  version, then what the type's `ICache<T>` wrote. A write goes beside the entry first and is then moved over it, so a
+  reader, in this process or another, or the next run after a crash, never finds half an entry; one that fails, as a
+  move over an entry another process is reading can, is a warning, and it is made again next time.
+- Whoever reads an entry keeps what it needs of it: the cache holds nothing in memory. Deleting the folder is always
   safe: whatever was in it is made again as it is needed. The entries of an asset whose file is gone stay until the
   folder is deleted.
 

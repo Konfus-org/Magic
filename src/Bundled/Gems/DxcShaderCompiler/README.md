@@ -46,7 +46,7 @@ uses. The gem provides the `ICache<T>` for a compiled shader, which writes its b
 
 - An entry is named by a hash of the source with its includes spliced in, and the shader's name, stage and format,
   so every source has its own: the variants of a shader a renderer compiles under one name keep an entry each. Editing
-  the shader, or any shader it includes, names another entry, so it compiles again; the old entry stays until `Cache/`
-  is deleted.
+  the shader, or any shader it includes, names another entry, so it compiles again; the old entry stays until the
+  cache's folder is deleted, and another checkout that still has the old source still reads it.
 - It is made with the debug-information setting, so changing it finds the entries dirty, and they compile again.
 - DXC's arguments are the gem's own, so changing them raises the cache's version, which makes every entry dirty.

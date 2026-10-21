@@ -14,8 +14,8 @@ using Magic.Services;
 namespace Magic.ClusterGenerator;
 
 /// <summary>
-/// Makes a <see cref="Model"/>'s clusters and cards as it loads (<see cref="ILoadPostProcessor{T}"/>): its clusters at
-/// every level (<see cref="ClusterBuilder"/>), then a card for each mesh (<see cref="Card"/>, drawn by
+/// Makes a <see cref="Model"/>'s clusters and cards as it loads (<see cref="ILoadPostProcessor{T}"/>), the two at once:
+/// its clusters at every level (<see cref="ClusterBuilder"/>), and a card for each mesh (<see cref="Card"/>, drawn by
 /// <see cref="CardBaker"/>), drawn from a distance that grows with the model's size. They are kept in the cache
 /// (<see cref="Caches"/>, which it writes them for as <see cref="ICache{T}"/> of <see cref="ClustersAndCards"/>)
 /// under the model's id, made from its version and where its cards start, so a model is made once, and again only when
@@ -31,7 +31,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// Raised whenever the clusters or the cards would come out otherwise or how they are written changes, so what was
     /// made before is made again.
     /// </summary>
-    private const int CacheVersion = 9;
+    private const int CacheVersion = 10;
 
     /// <summary>
     /// Half the vertical field of view the cards' distance is worked out for, in radians: half a camera's default 60
@@ -179,7 +179,10 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         }
         else
         {
-            made = new(MakeCards(asset, cardHeight), ClusterBuilder.Build(asset, cancel));
+            // The cards and the clusters only read the model, so they are made at once.
+            Task<ModelCards?> cards = Task.Run(() => MakeCards(asset, cardHeight), cancel);
+            ClusterHierarchy? clusters = ClusterBuilder.Build(asset, cancel);
+            made = new(await cards.ConfigureAwait(false), clusters);
             Debugging.Verbose($"Made {made.Clusters?.Clusters.Length ?? 0} clusters and "
                 + $"{made.Cards?.Meshes.Count ?? 0} cards of model {key}.");
             await _caches.WriteAsync(key, madeFrom, made, cancel).ConfigureAwait(false);
@@ -215,7 +218,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         if (radius <= 0 || size.Y < radius * 2 * FlatShare) return null;
 
         Mesh[] cards = new Mesh[model.Meshes.Count];
-        for (int i = 0; i < cards.Length; i++)
+        Parallel.For(0, cards.Length, i =>
         {
             (Vector3 centre, float half, byte[] surface, byte[] normals) = CardBaker.Bake(model.Meshes[i]);
             Card card = new()
@@ -224,7 +227,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
                 Normals = MakeAtlas(HandleOf(model.Handle, i, 2), normals),
             };
             cards[i] = MakeCardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
-        }
+        });
 
         return new ModelCards { Distance = radius / (cardHeight * MathF.Tan(HalfFieldOfView)), Meshes = cards };
     }

@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Numerics;
 using Magic.Contexts.Assets;
 
@@ -8,7 +9,7 @@ namespace Magic.ClusterGenerator;
 /// back at the mesh from that side, straight on (no perspective), into a cell of a <see cref="Card.Columns"/>-wide grid
 /// in two atlases <see cref="Card.Size"/> texels square. Each texel is drawn from four samples, for soft edges, and the
 /// colours of the texels the mesh covers are spread a few texels past its edge, so filtering at the edge reads the mesh
-/// rather than nothing.
+/// rather than nothing. The views share no texel, so they are drawn at once.
 /// </summary>
 internal static class CardBaker
 {
@@ -34,36 +35,44 @@ internal static class CardBaker
     /// </summary>
     internal static (Vector3 Centre, float Half, byte[] Surface, byte[] Normals) Bake(Mesh mesh)
     {
-        ReadOnlySpan<Vertex> vertices = mesh.Vertices.Span;
-        ReadOnlySpan<uint> indices = mesh.Indices.Span;
-        Vector4 sphere = ClusterBuilder.ComputeSphere(vertices);
-        Raster raster = new(new Vector3(sphere.X, sphere.Y, sphere.Z), MathF.Max(sphere.W, 1e-4f));
+        Vector4 sphere = ClusterBuilder.ComputeSphere(mesh.Vertices.Span);
+        Vector3 centre = new(sphere.X, sphere.Y, sphere.Z);
+        float half = MathF.Max(sphere.W, 1e-4f);
         byte[] surface = new byte[Card.Size * Card.Size * 4];
         byte[] normals = new byte[Card.Size * Card.Size * 4];
-        for (int view = 0; view < Card.Views; view++)
-        {
-            // Seen from this side, looking back at the centre: right is +X when it looks along +Z, and up is +Y.
-            float turn = view * MathF.Tau / Card.Views;
-            Vector3 side = new(MathF.Sin(turn), 0, MathF.Cos(turn));
-            Vector3 forward = -side;
-            Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, forward));
-            raster.Clear();
-            for (int t = 0; t + 2 < indices.Length; t += 3)
-            {
-                raster.Draw(
-                    vertices[(int)indices[t]],
-                    vertices[(int)indices[t + 1]],
-                    vertices[(int)indices[t + 2]],
-                    right,
-                    forward);
-            }
+        Parallel.For(0, Card.Views, view => BakeView(mesh, view, centre, half, surface, normals));
+        return (centre, half, surface, normals);
+    }
 
-            raster.Resolve(view % Card.Columns * CellSize, view / Card.Columns * CellSize, surface, normals);
+    /// <summary>
+    /// The <paramref name="view"/>th view into its cell of both atlases: drawn into a raster of its own, resolved, and
+    /// its colours spread past the mesh's edge within the cell.
+    /// </summary>
+    private static void BakeView(Mesh mesh, int view, Vector3 centre, float half, byte[] surface, byte[] normals)
+    {
+        // Seen from this side, looking back at the centre: right is +X when it looks along +Z, and up is +Y.
+        float turn = view * MathF.Tau / Card.Views;
+        Vector3 side = new(MathF.Sin(turn), 0, MathF.Cos(turn));
+        Vector3 forward = -side;
+        Vector3 right = Vector3.Normalize(Vector3.Cross(Vector3.UnitY, forward));
+        ReadOnlySpan<Vertex> vertices = mesh.Vertices.Span;
+        ReadOnlySpan<uint> indices = mesh.Indices.Span;
+        Raster raster = new(centre, half);
+        for (int t = 0; t + 2 < indices.Length; t += 3)
+        {
+            raster.Draw(
+                vertices[(int)indices[t]],
+                vertices[(int)indices[t + 1]],
+                vertices[(int)indices[t + 2]],
+                right,
+                forward);
         }
 
-        Dilate(surface);
-        Dilate(normals);
-        return (raster.Centre, raster.Half, surface, normals);
+        int cellX = view % Card.Columns * CellSize;
+        int cellY = view / Card.Columns * CellSize;
+        raster.Resolve(cellX, cellY, surface, normals);
+        Dilate(surface, cellX, cellY);
+        Dilate(normals, cellX, cellY);
     }
 
     /// <summary>
@@ -76,30 +85,38 @@ internal static class CardBaker
     private static byte ToByte(float value) => (byte)Math.Clamp((int)MathF.Round(value * 255), 0, 255);
 
     /// <summary>
-    /// Spreads the colours of the covered texels <see cref="Spread"/> texels past their edge, within each view's cell,
-    /// each uncovered texel taking the mean of its covered neighbours; the cover stays where it was.
+    /// Spreads the colours of the covered texels of the cell at (<paramref name="cellX"/>, <paramref name="cellY"/>)
+    /// <see cref="Spread"/> texels past their edge, within the cell, each uncovered texel taking the mean of its
+    /// covered neighbours; the cover stays where it was.
     /// </summary>
-    private static void Dilate(byte[] atlas)
+    private static void Dilate(byte[] atlas, int cellX, int cellY)
     {
-        bool[] filled = new bool[Card.Size * Card.Size];
-        for (int i = 0; i < filled.Length; i++)
+        bool[] filled = new bool[CellSize * CellSize];
+        for (int y = 0; y < CellSize; y++)
         {
-            filled[i] = atlas[(i * 4) + 3] > 0;
+            for (int x = 0; x < CellSize; x++)
+            {
+                filled[(y * CellSize) + x] = atlas[GetTexel(cellX, cellY, x, y) + 3] > 0;
+            }
         }
 
         for (int pass = 0; pass < Spread; pass++)
         {
             bool[] next = (bool[])filled.Clone();
-            for (int y = 0; y < Card.Size; y++)
+            for (int y = 0; y < CellSize; y++)
             {
-                for (int x = 0; x < Card.Size; x++)
+                for (int x = 0; x < CellSize; x++)
                 {
-                    int at = (y * Card.Size) + x;
-                    if (filled[at] || !TryAverageNeighbours(atlas, filled, x, y, out Vector3 mean)) continue;
+                    int at = (y * CellSize) + x;
+                    if (filled[at] || !TryAverageNeighbours(atlas, filled, cellX, cellY, x, y, out Vector3 mean))
+                    {
+                        continue;
+                    }
 
-                    atlas[at * 4] = (byte)mean.X;
-                    atlas[(at * 4) + 1] = (byte)mean.Y;
-                    atlas[(at * 4) + 2] = (byte)mean.Z;
+                    int texel = GetTexel(cellX, cellY, x, y);
+                    atlas[texel] = (byte)mean.X;
+                    atlas[texel + 1] = (byte)mean.Y;
+                    atlas[texel + 2] = (byte)mean.Z;
                     next[at] = true;
                 }
             }
@@ -109,10 +126,17 @@ internal static class CardBaker
     }
 
     /// <summary>
-    /// The mean colour of the covered texels among the eight around (<paramref name="x"/>, <paramref name="y"/>) within
-    /// its view's cell; false when none of them is covered.
+    /// The mean colour of the covered texels among the eight around (<paramref name="x"/>, <paramref name="y"/>) of
+    /// the cell at (<paramref name="cellX"/>, <paramref name="cellY"/>), within it; false when none of them is covered.
     /// </summary>
-    private static bool TryAverageNeighbours(byte[] atlas, bool[] filled, int x, int y, out Vector3 mean)
+    private static bool TryAverageNeighbours(
+        byte[] atlas,
+        bool[] filled,
+        int cellX,
+        int cellY,
+        int x,
+        int y,
+        out Vector3 mean)
     {
         int count = 0;
         Vector3 sum = Vector3.Zero;
@@ -122,11 +146,10 @@ internal static class CardBaker
             {
                 int nx = x + dx;
                 int ny = y + dy;
-                bool inCell = nx >= 0 && ny >= 0 && nx < Card.Size && ny < Card.Size && nx / CellSize == x / CellSize
-                    && ny / CellSize == y / CellSize;
-                if (!inCell || !filled[(ny * Card.Size) + nx]) continue;
+                bool inCell = nx >= 0 && ny >= 0 && nx < CellSize && ny < CellSize;
+                if (!inCell || !filled[(ny * CellSize) + nx]) continue;
 
-                int texel = ((ny * Card.Size) + nx) * 4;
+                int texel = GetTexel(cellX, cellY, nx, ny);
                 sum += new Vector3(atlas[texel], atlas[texel + 1], atlas[texel + 2]);
                 count++;
             }
@@ -137,6 +160,12 @@ internal static class CardBaker
     }
 
     /// <summary>
+    /// Where in an atlas's bytes texel (<paramref name="x"/>, <paramref name="y"/>) of the cell at
+    /// (<paramref name="cellX"/>, <paramref name="cellY"/>) starts.
+    /// </summary>
+    private static int GetTexel(int cellX, int cellY, int x, int y) => (((cellY + y) * Card.Size) + cellX + x) * 4;
+
+    /// <summary>
     /// One view's samples: the nearest depth, uv and normal the mesh put at each, <see cref="Samples"/> a side per
     /// texel of the view's cell, looking straight at the mesh from a side with its centre in the middle and its sphere
     /// filling the cell.
@@ -145,7 +174,10 @@ internal static class CardBaker
     {
         private const int Size = CellSize * Samples;
 
-        private readonly float[] _depths = new float[Size * Size];
+        /// <summary>
+        /// The nearest depth at each sample: none until a triangle covers it.
+        /// </summary>
+        private readonly float[] _depths = [.. Enumerable.Repeat(float.PositiveInfinity, Size * Size)];
 
         private readonly Vector2[] _uvs = new Vector2[Size * Size];
 
@@ -154,8 +186,6 @@ internal static class CardBaker
         internal Vector3 Centre { get; } = centre;
 
         internal float Half { get; } = half;
-
-        internal void Clear() => Array.Fill(_depths, float.PositiveInfinity);
 
         /// <summary>
         /// The triangle, seen from the side <paramref name="right"/> and <paramref name="forward"/> give, into the
@@ -205,7 +235,7 @@ internal static class CardBaker
             {
                 for (int x = 0; x < CellSize; x++)
                 {
-                    WriteTexel(x, y, (((cellY + y) * Card.Size) + cellX + x) * 4, surface, normals);
+                    WriteTexel(x, y, GetTexel(cellX, cellY, x, y), surface, normals);
                 }
             }
         }

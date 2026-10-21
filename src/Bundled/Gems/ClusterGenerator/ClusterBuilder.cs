@@ -1,23 +1,26 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
 
 namespace Magic.ClusterGenerator;
 
 /// <summary>
-/// Makes a model's <see cref="ClusterHierarchy"/>, after Karis, "Nanite: A Deep Dive" (SIGGRAPH 2021). The model's
-/// triangles are split into clusters, each of one material slot, grown greedily from triangle to neighbouring triangle
-/// so a cluster is compact and shares its vertices. Then, level after level, neighbouring clusters are grouped by how
-/// much border they share, each group is simplified to half its triangles with its border to the other groups kept
-/// where it is (<see cref="QuadricSimplifier.Reduce"/>), and split into clusters again. A group that can no longer
-/// simplify is drawn as it is from then on, so its border stays kept at every level after, and what is made beside it
-/// still meets it. A group's error is the most of what the simplification moved and what its clusters had, and its
-/// bounds enclose theirs, so neither ever shrinks from a level to the next, which is what lets a renderer pick each
-/// cluster alone.
+/// Makes a model's <see cref="ClusterHierarchy"/>, after Karis, "Nanite: A Deep Dive" (SIGGRAPH 2021), on
+/// meshoptimizer (<see cref="Meshopt"/>). Every level indexes one array of the model's own vertices, put on the grid
+/// once. The model's triangles are split into compact clusters, each of one material slot, a large mesh in chunks along
+/// a spatial sort, every chunk at once. Then, level after level, neighbouring clusters are grouped, each group is
+/// simplified to half its triangles with every place it shares with another group locked, and split into clusters
+/// again, every group at once. The simplifier keeps a subset of the vertices as they were, so every position stays on
+/// the grid and every vertex keeps its normal and uv. A group that can no longer simplify is drawn as it is from then
+/// on, so its border stays locked at every level after, and what is made beside it still meets it. A group's error is
+/// the most of what the simplification moved and what its clusters had, and its bounds enclose theirs, so neither ever
+/// shrinks from a level to the next, which is what lets a renderer pick each cluster alone.
 /// </summary>
 internal static class ClusterBuilder
 {
     /// <summary>
-    /// The most clusters simplified together: about four come out, as the group is simplified to half.
+    /// The clusters grouped to be simplified together: about four come out, as the group is simplified to half.
+    /// meshoptimizer makes a group up to a third larger where that keeps it whole.
     /// </summary>
     private const int GroupSize = 8;
 
@@ -36,6 +39,24 @@ internal static class ClusterBuilder
     private const int PositionSteps = (1 << 19) - 1;
 
     /// <summary>
+    /// The fewest triangles a cluster is cut to when its triangles spread too far for one, so one cut for its spread is
+    /// still a third full.
+    /// </summary>
+    private const int MinTriangles = ClusterHierarchy.MaxTriangles / 3;
+
+    /// <summary>
+    /// How far past the size of the clusters made so far a cluster may spread before it is cut, in meshoptimizer's
+    /// terms.
+    /// </summary>
+    private const float SplitFactor = 2;
+
+    /// <summary>
+    /// The most triangles of a mesh split into its finest clusters on one worker: a larger mesh is cut into chunks of
+    /// this many along a spatial sort, so each chunk is one piece of it, and the chunks are split at once.
+    /// </summary>
+    private const int ChunkTriangles = 1 << 16;
+
+    /// <summary>
     /// <paramref name="model"/>'s clusters at every level, finest to coarsest; null when it has no triangles.
     /// </summary>
     internal static ClusterHierarchy? Build(Model model, CancellationToken cancel)
@@ -43,62 +64,29 @@ internal static class ClusterBuilder
         float step = StepOf(model);
         if (step <= 0) return null;
 
-        List<Part> current = [];
-        foreach (Mesh mesh in model.Meshes)
-        {
-            if (mesh.Indices.Length < 3) continue;
-
-            Vertex[] vertices = mesh.Vertices.ToArray();
-            for (int i = 0; i < vertices.Length; i++)
-            {
-                vertices[i].Position = Snap(vertices[i].Position, step);
-            }
-
-            // A triangle whose corners the grid puts in one place has no area left: it is dropped.
-            ReadOnlySpan<uint> source = mesh.Indices.Span;
-            List<int> indices = [];
-            for (int t = 0; t + 2 < source.Length; t += 3)
-            {
-                (int a, int b, int c) = ((int)source[t], (int)source[t + 1], (int)source[t + 2]);
-                if (vertices[a].Position != vertices[b].Position && vertices[b].Position != vertices[c].Position
-                    && vertices[a].Position != vertices[c].Position)
-                {
-                    indices.Add(a);
-                    indices.Add(b);
-                    indices.Add(c);
-                }
-            }
-
-            int[] slots = new int[indices.Count / 3];
-            Array.Fill(slots, mesh.MaterialSlot);
-            current.AddRange(Split(vertices, [.. indices], slots, 0, 0, null));
-        }
-
+        (Vertex[] vertices, int[] slots, List<uint[]> meshes) = Gather(model, step);
+        List<Part> current = SplitFinest(vertices, slots, meshes, cancel);
         if (current.Count == 0) return null;
 
         // The border of a group that stops simplifying is frozen: its clusters are drawn as they are from then on, so
         // what is made beside them at every later level must still meet them there.
+        uint[] places = Weld(vertices);
+        bool[] frozen = new bool[vertices.Length];
         List<Part> all = [];
-        HashSet<Vector3> frozen = [];
         for (int level = 0; ; level++)
         {
             cancel.ThrowIfCancellationRequested();
             all.AddRange(current);
             if (current.Count <= 1 || level + 1 >= MaxLevels) break;
 
-            List<List<Part>> groups = Group(current);
-            HashSet<Vector3>[] borders = FindBorders(groups);
-            foreach (HashSet<Vector3> border in borders)
-            {
-                border.UnionWith(frozen);
-            }
-
+            List<List<Part>> groups = Group(current, vertices, places);
+            byte[] locks = LockBorders(groups, places, frozen);
             List<Part>?[] made = new List<Part>?[groups.Count];
             Parallel.For(
                 0,
                 groups.Count,
                 new ParallelOptions { CancellationToken = cancel },
-                g => made[g] = Simplify(groups[g], borders[g], level + 1, step));
+                g => made[g] = Simplify(groups[g], vertices, slots, locks, level + 1));
             current = [];
             for (int g = 0; g < made.Length; g++)
             {
@@ -108,14 +96,14 @@ internal static class ClusterBuilder
                 }
                 else
                 {
-                    frozen.UnionWith(borders[g]);
+                    Freeze(groups[g], places, locks, frozen);
                 }
             }
 
             if (current.Count == 0) break;
         }
 
-        return BuildHierarchy(all, step);
+        return BuildHierarchy(all, vertices, step);
     }
 
     /// <summary>
@@ -142,14 +130,68 @@ internal static class ClusterBuilder
     }
 
     /// <summary>
-    /// <paramref name="position"/> on the grid <paramref name="step"/> metres apart from the model's origin.
+    /// The model's vertices as the one array every level indexes, on the grid <paramref name="step"/> metres apart,
+    /// with each one's material slot, and each mesh's triangles into it. A triangle whose corners the grid puts in one
+    /// place has no area left: it is dropped.
+    /// </summary>
+    private static (Vertex[] Vertices, int[] Slots, List<uint[]> Meshes) Gather(Model model, float step)
+    {
+        int count = 0;
+        foreach (Mesh mesh in model.Meshes)
+        {
+            count += mesh.Vertices.Length;
+        }
+
+        Vertex[] vertices = new Vertex[count];
+        int[] slots = new int[count];
+        List<uint[]> meshes = [];
+        int first = 0;
+        foreach (Mesh mesh in model.Meshes)
+        {
+            ReadOnlySpan<Vertex> own = mesh.Vertices.Span;
+            for (int i = 0; i < own.Length; i++)
+            {
+                vertices[first + i] = own[i] with { Position = Snap(own[i].Position, step) };
+                slots[first + i] = mesh.MaterialSlot;
+            }
+
+            ReadOnlySpan<uint> source = mesh.Indices.Span;
+            List<uint> triangles = new(source.Length);
+            for (int t = 0; t + 2 < source.Length; t += 3)
+            {
+                uint a = (uint)first + source[t];
+                uint b = (uint)first + source[t + 1];
+                uint c = (uint)first + source[t + 2];
+                if (vertices[a].Position != vertices[b].Position && vertices[b].Position != vertices[c].Position
+                    && vertices[a].Position != vertices[c].Position)
+                {
+                    triangles.Add(a);
+                    triangles.Add(b);
+                    triangles.Add(c);
+                }
+            }
+
+            if (triangles.Count > 0) meshes.Add([.. triangles]);
+
+            first += own.Length;
+        }
+
+        return (vertices, slots, meshes);
+    }
+
+    /// <summary>
+    /// <paramref name="position"/> on the grid <paramref name="step"/> metres apart from the model's origin. A zero is
+    /// always +0, so two vertices at one place have the same bits, which is how meshoptimizer matches places.
     /// </summary>
     private static Vector3 Snap(Vector3 position, float step)
     {
-        return new Vector3(
-            (float)(Math.Round(position.X / (double)step) * step),
-            (float)(Math.Round(position.Y / (double)step) * step),
-            (float)(Math.Round(position.Z / (double)step) * step));
+        return new Vector3(SnapAxis(position.X), SnapAxis(position.Y), SnapAxis(position.Z));
+
+        float SnapAxis(float value)
+        {
+            float snapped = (float)(Math.Round(value / (double)step) * step);
+            return snapped == 0 ? 0 : snapped;
+        }
     }
 
     /// <summary>
@@ -175,313 +217,420 @@ internal static class ClusterBuilder
     }
 
     /// <summary>
-    /// Triangles split into clusters of one material slot each, at most <see cref="ClusterHierarchy.MaxTriangles"/>
-    /// triangles and <see cref="ClusterHierarchy.MaxVertices"/> vertices. Each starts from the first triangle left in
-    /// Morton order and takes, next, the triangle beside it that brings the fewest new vertices, nearest its middle, so
-    /// it stays compact; when none is beside it, the next left in Morton order, which is near.
+    /// For each vertex, the first vertex at its place, so what meets only by place (two material slots, two chunks, a
+    /// uv seam) is grouped and locked as what shares a vertex is.
     /// </summary>
-    private static List<Part> Split(
-        Vertex[] vertices,
-        int[] indices,
-        int[] slots,
-        int level,
-        float error,
-        Vector4? errorBounds)
+    private static unsafe uint[] Weld(Vertex[] vertices)
     {
-        Growth growth = new(vertices, indices, slots);
-        List<Part> parts = [];
-        while (growth.TryGrow(out List<int> chosen, out Dictionary<int, int> local, out int slot))
+        uint[] places = new uint[vertices.Length];
+        fixed (uint* destination = places)
+        fixed (Vertex* first = vertices)
         {
-            parts.Add(MakePart(vertices, indices, chosen, local, slot, level, error, errorBounds));
+            Meshopt.GeneratePositionRemap(destination, (float*)first, (ulong)vertices.Length, Vertex.Size);
+        }
+
+        return places;
+    }
+
+    /// <summary>
+    /// The finest clusters: each mesh split on its own, one larger than <see cref="ChunkTriangles"/> in chunks along a
+    /// spatial sort, every chunk at once, the clusters in the meshes' order.
+    /// </summary>
+    private static unsafe List<Part> SplitFinest(
+        Vertex[] vertices,
+        int[] slots,
+        List<uint[]> meshes,
+        CancellationToken cancel)
+    {
+        List<uint[]> chunks = [];
+        foreach (uint[] mesh in meshes)
+        {
+            if (mesh.Length <= ChunkTriangles * 3)
+            {
+                chunks.Add(mesh);
+                continue;
+            }
+
+            uint[] sorted = new uint[mesh.Length];
+            fixed (uint* destination = sorted)
+            fixed (uint* indices = mesh)
+            fixed (Vertex* first = vertices)
+            {
+                Meshopt.SpatialSortTriangles(
+                    destination,
+                    indices,
+                    (ulong)mesh.Length,
+                    (float*)first,
+                    (ulong)vertices.Length,
+                    Vertex.Size);
+            }
+
+            for (int start = 0; start < sorted.Length; start += ChunkTriangles * 3)
+            {
+                chunks.Add(sorted[start..Math.Min(start + (ChunkTriangles * 3), sorted.Length)]);
+            }
+        }
+
+        List<Part>[] made = new List<Part>[chunks.Count];
+        Parallel.For(0, chunks.Count, new ParallelOptions { CancellationToken = cancel }, c =>
+        {
+            (Vertex[] own, uint[] triangles, uint[] sources) = Localize(chunks[c], vertices);
+            made[c] = Split(own, triangles, sources, slots[chunks[c][0]], 0, 0, null);
+        });
+        List<Part> parts = [];
+        foreach (List<Part> chunk in made)
+        {
+            parts.AddRange(chunk);
         }
 
         return parts;
     }
 
     /// <summary>
-    /// One cluster: the chosen triangles with their vertices numbered from 0 in the order they were met.
+    /// <paramref name="triangles"/>, into <paramref name="vertices"/>, as triangles into a copy of the vertices they
+    /// use alone, with the vertex each copy is: what meshoptimizer works on, so its work is the size of the piece and
+    /// not of the model.
     /// </summary>
-    private static Part MakePart(
-        Vertex[] vertices,
-        int[] indices,
-        List<int> chosen,
-        Dictionary<int, int> local,
+    private static (Vertex[] Own, uint[] Triangles, uint[] Sources) Localize(
+        ReadOnlySpan<uint> triangles,
+        Vertex[] vertices)
+    {
+        Dictionary<uint, uint> local = [];
+        List<uint> sources = [];
+        uint[] localTriangles = new uint[triangles.Length];
+        for (int i = 0; i < triangles.Length; i++)
+        {
+            if (!local.TryGetValue(triangles[i], out uint index))
+            {
+                index = (uint)sources.Count;
+                local[triangles[i]] = index;
+                sources.Add(triangles[i]);
+            }
+
+            localTriangles[i] = index;
+        }
+
+        Vertex[] own = new Vertex[sources.Count];
+        for (int i = 0; i < own.Length; i++)
+        {
+            own[i] = vertices[sources[i]];
+        }
+
+        return (own, localTriangles, [.. sources]);
+    }
+
+    /// <summary>
+    /// <paramref name="triangles"/> of one material slot, into <paramref name="own"/>, split by meshoptimizer into
+    /// compact clusters of at most <see cref="ClusterHierarchy.MaxTriangles"/> triangles and
+    /// <see cref="ClusterHierarchy.MaxVertices"/> vertices, each holding the model's vertices <paramref name="sources"/>
+    /// says its own are.
+    /// </summary>
+    private static unsafe List<Part> Split(
+        Vertex[] own,
+        uint[] triangles,
+        uint[] sources,
         int slot,
         int level,
         float error,
         Vector4? errorBounds)
     {
-        Vertex[] own = new Vertex[local.Count];
-        foreach ((int vertex, int index) in local)
+        ulong bound = Meshopt.BuildMeshletsBound((ulong)triangles.Length, ClusterHierarchy.MaxVertices, MinTriangles);
+        Meshopt.Meshlet[] meshlets = new Meshopt.Meshlet[bound];
+        uint[] meshletVertices = new uint[triangles.Length];
+        byte[] meshletTriangles = new byte[triangles.Length];
+        int count;
+        fixed (Meshopt.Meshlet* made = meshlets)
+        fixed (uint* madeVertices = meshletVertices)
+        fixed (byte* madeTriangles = meshletTriangles)
+        fixed (uint* indices = triangles)
+        fixed (Vertex* first = own)
         {
-            own[index] = vertices[vertex];
+            count = (int)Meshopt.BuildMeshletsFlex(
+                made,
+                madeVertices,
+                madeTriangles,
+                indices,
+                (ulong)triangles.Length,
+                (float*)first,
+                (ulong)own.Length,
+                Vertex.Size,
+                ClusterHierarchy.MaxVertices,
+                MinTriangles,
+                ClusterHierarchy.MaxTriangles,
+                0,
+                SplitFactor);
         }
 
-        byte[] corners = new byte[chosen.Count * 3];
-        for (int t = 0; t < chosen.Count; t++)
+        List<Part> parts = new(count);
+        for (int i = 0; i < count; i++)
         {
-            for (int corner = 0; corner < 3; corner++)
+            Meshopt.Meshlet meshlet = meshlets[i];
+            fixed (uint* vertices = &meshletVertices[meshlet.VertexOffset])
+            fixed (byte* corners = &meshletTriangles[meshlet.TriangleOffset])
             {
-                corners[(t * 3) + corner] = (byte)local[indices[(chosen[t] * 3) + corner]];
+                Meshopt.OptimizeMeshlet(vertices, corners, meshlet.TriangleCount, meshlet.VertexCount);
             }
+
+            uint[] held = new uint[meshlet.VertexCount];
+            Vertex[] placed = new Vertex[meshlet.VertexCount];
+            for (int v = 0; v < held.Length; v++)
+            {
+                uint local = meshletVertices[meshlet.VertexOffset + v];
+                held[v] = sources[local];
+                placed[v] = own[local];
+            }
+
+            Vector4 bounds = ComputeSphere(placed);
+            Vector4 errorSphere = errorBounds ?? bounds;
+            int offset = (int)meshlet.TriangleOffset;
+            parts.Add(new Part
+            {
+                Vertices = held,
+                Indices = meshletTriangles[offset..(offset + ((int)meshlet.TriangleCount * 3))],
+                Slot = slot,
+                Level = level,
+                Bounds = bounds,
+                ErrorBounds = errorSphere,
+                ParentErrorBounds = errorSphere,
+                Error = error,
+            });
         }
 
-        Vector4 bounds = ComputeSphere(own);
-        Vector4 errorSphere = errorBounds ?? bounds;
-        return new Part
-        {
-            Vertices = own,
-            Indices = corners,
-            Slot = slot,
-            Level = level,
-            Bounds = bounds,
-            ErrorBounds = errorSphere,
-            ParentErrorBounds = errorSphere,
-            Error = error,
-        };
+        return parts;
     }
 
     /// <summary>
-    /// Clusters grouped with their neighbours: each group starts from the first cluster left in Morton order and takes,
-    /// next, the cluster left that shares the most border with it, up to <see cref="GroupSize"/>; with none beside it,
-    /// the next left in Morton order when it is near.
+    /// Clusters grouped with their neighbours by meshoptimizer: by the places they share, so a group's border with the
+    /// rest is short, and by where they are, so clusters that are near but do not meet go together.
     /// </summary>
-    private static List<List<Part>> Group(List<Part> parts)
+    private static unsafe List<List<Part>> Group(List<Part> parts, Vertex[] vertices, uint[] places)
     {
-        Dictionary<int, int>[] shared = CountSharedBorders(parts);
-        Vector3[] centres = new Vector3[parts.Count];
+        uint[] counts = new uint[parts.Count];
+        int total = 0;
         for (int p = 0; p < parts.Count; p++)
         {
-            centres[p] = new Vector3(parts[p].Bounds.X, parts[p].Bounds.Y, parts[p].Bounds.Z);
+            counts[p] = (uint)parts[p].Indices.Length;
+            total += parts[p].Indices.Length;
         }
 
-        int[] order = ComputeMortonOrder(centres);
-        bool[] grouped = new bool[parts.Count];
-        List<List<Part>> groups = [];
-        for (int o = 0; o < order.Length; o++)
+        uint[] corners = new uint[total];
+        int at = 0;
+        foreach (Part part in parts)
         {
-            if (grouped[order[o]]) continue;
-
-            List<int> members = [order[o]];
-            grouped[order[o]] = true;
-            Dictionary<int, int> beside = new(shared[order[o]]);
-            while (members.Count < GroupSize)
+            foreach (byte index in part.Indices)
             {
-                int best = -1;
-                int most = 0;
-                foreach ((int part, int border) in beside)
-                {
-                    if (!grouped[part] && border > most) (best, most) = (part, border);
-                }
-
-                best = best >= 0 ? best : NearNext(o, members[^1]);
-                if (best < 0) break;
-
-                members.Add(best);
-                grouped[best] = true;
-                foreach ((int part, int border) in shared[best])
-                {
-                    beside[part] = beside.GetValueOrDefault(part) + border;
-                }
+                corners[at++] = places[part.Vertices[index]];
             }
+        }
 
-            List<Part> group = new(members.Count);
-            foreach (int member in members)
-            {
-                group.Add(parts[member]);
-            }
+        uint[] partition = new uint[parts.Count];
+        int count;
+        fixed (uint* destination = partition)
+        fixed (uint* clusterIndices = corners)
+        fixed (uint* clusterCounts = counts)
+        fixed (Vertex* first = vertices)
+        {
+            count = (int)Meshopt.PartitionClusters(
+                destination,
+                clusterIndices,
+                (ulong)total,
+                clusterCounts,
+                (ulong)parts.Count,
+                (float*)first,
+                (ulong)vertices.Length,
+                Vertex.Size,
+                GroupSize);
+        }
 
-            groups.Add(group);
+        List<List<Part>> groups = new(count);
+        for (int g = 0; g < count; g++)
+        {
+            groups.Add([]);
+        }
+
+        for (int p = 0; p < parts.Count; p++)
+        {
+            groups[(int)partition[p]].Add(parts[p]);
         }
 
         return groups;
-
-        // The next cluster left in Morton order, when it is within the two clusters' sizes of the last one taken.
-        int NearNext(int from, int last)
-        {
-            for (int o = from + 1; o < order.Length; o++)
-            {
-                int part = order[o];
-                if (grouped[part]) continue;
-
-                float reach = (parts[part].Bounds.W + parts[last].Bounds.W) * 2;
-                return Vector3.DistanceSquared(centres[part], centres[last]) <= reach * reach ? part : -1;
-            }
-
-            return -1;
-        }
     }
 
     /// <summary>
-    /// For each cluster, how many vertices it shares with each other cluster: the length of the border between them,
-    /// which is what grouping keeps together, so a group's border with the rest is short.
+    /// For each vertex, whether the simplifier must leave it where it is: at a place two groups share, or at one
+    /// frozen at an earlier level.
     /// </summary>
-    private static Dictionary<int, int>[] CountSharedBorders(List<Part> parts)
+    private static byte[] LockBorders(List<List<Part>> groups, uint[] places, bool[] frozen)
     {
-        Dictionary<Vector3, List<int>> touching = [];
-        for (int p = 0; p < parts.Count; p++)
-        {
-            foreach (Vertex vertex in parts[p].Vertices)
-            {
-                if (!touching.TryGetValue(vertex.Position, out List<int>? owners))
-                {
-                    owners = [];
-                    touching[vertex.Position] = owners;
-                }
-
-                if (owners.Count == 0 || owners[^1] != p) owners.Add(p);
-            }
-        }
-
-        Dictionary<int, int>[] shared = new Dictionary<int, int>[parts.Count];
-        for (int p = 0; p < parts.Count; p++)
-        {
-            shared[p] = [];
-        }
-
-        foreach (List<int> owners in touching.Values)
-        {
-            for (int i = 0; i < owners.Count; i++)
-            {
-                for (int j = i + 1; j < owners.Count; j++)
-                {
-                    shared[owners[i]][owners[j]] = shared[owners[i]].GetValueOrDefault(owners[j]) + 1;
-                    shared[owners[j]][owners[i]] = shared[owners[j]].GetValueOrDefault(owners[i]) + 1;
-                }
-            }
-        }
-
-        return shared;
-    }
-
-    /// <summary>
-    /// For each group, the places its clusters share with another group's: its border, which it keeps as it simplifies.
-    /// </summary>
-    private static HashSet<Vector3>[] FindBorders(List<List<Part>> groups)
-    {
+        const int None = -2;
         const int Shared = -1;
-        Dictionary<Vector3, int> groupAt = [];
+        int[] groupAt = new int[places.Length];
+        Array.Fill(groupAt, None);
         for (int g = 0; g < groups.Count; g++)
         {
             foreach (Part part in groups[g])
             {
-                foreach (Vertex vertex in part.Vertices)
+                foreach (uint vertex in part.Vertices)
                 {
-                    if (!groupAt.TryGetValue(vertex.Position, out int at))
-                    {
-                        groupAt[vertex.Position] = g;
-                    }
-                    else if (at != g)
-                    {
-                        groupAt[vertex.Position] = Shared;
-                    }
+                    uint place = places[vertex];
+                    groupAt[place] = groupAt[place] == None || groupAt[place] == g ? g : Shared;
                 }
             }
         }
 
-        HashSet<Vector3>[] borders = new HashSet<Vector3>[groups.Count];
-        for (int g = 0; g < groups.Count; g++)
+        byte[] locks = new byte[places.Length];
+        foreach (List<Part> group in groups)
         {
-            borders[g] = [];
-            foreach (Part part in groups[g])
+            foreach (Part part in group)
             {
-                foreach (Vertex vertex in part.Vertices)
+                foreach (uint vertex in part.Vertices)
                 {
-                    if (groupAt[vertex.Position] == Shared) borders[g].Add(vertex.Position);
+                    uint place = places[vertex];
+                    if (groupAt[place] == Shared || frozen[place]) locks[vertex] = SimplifyVertex.Lock;
                 }
             }
         }
 
-        return borders;
+        return locks;
     }
 
     /// <summary>
-    /// A group simplified to half its triangles with <paramref name="border"/> kept, and split into the clusters of the
-    /// next level; its clusters take what they were simplified into as their parent. Null when it would keep too much
-    /// (<see cref="MinReduction"/>): its clusters stay the coarsest there are of their part of the model.
+    /// A group that stopped simplifying has its border frozen: every place of it it was locked at.
     /// </summary>
-    private static List<Part>? Simplify(List<Part> group, HashSet<Vector3> border, int level, float step)
+    private static void Freeze(List<Part> group, uint[] places, byte[] locks, bool[] frozen)
     {
-        List<Vertex> vertices = [];
-        List<uint> indices = [];
-        List<int> slotOf = [];
+        foreach (Part part in group)
+        {
+            foreach (uint vertex in part.Vertices)
+            {
+                if (locks[vertex] != 0) frozen[places[vertex]] = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A group simplified by meshoptimizer to half its triangles with its locked vertices kept, and split into the
+    /// clusters of the next level, each material slot's triangles on their own; its clusters take what they were
+    /// simplified into as their parent. Null when it would keep too much (<see cref="MinReduction"/>), or nothing: its
+    /// clusters stay the coarsest there are of their part of the model.
+    /// </summary>
+    private static unsafe List<Part>? Simplify(
+        List<Part> group,
+        Vertex[] vertices,
+        int[] slots,
+        byte[] locks,
+        int level)
+    {
+        List<uint> corners = [];
         float error = 0;
         Vector4 bounds = group[0].ErrorBounds;
         foreach (Part part in group)
         {
-            uint first = (uint)vertices.Count;
-            vertices.AddRange(part.Vertices);
             foreach (byte index in part.Indices)
             {
-                indices.Add(first + index);
-            }
-
-            for (int i = 0; i < part.Vertices.Length; i++)
-            {
-                slotOf.Add(part.Slot);
+                corners.Add(part.Vertices[index]);
             }
 
             error = MathF.Max(error, part.Error);
             bounds = Enclose(bounds, part.ErrorBounds);
         }
 
-        int triangles = indices.Count / 3;
-        Mesh soup = new() { Vertices = vertices.ToArray(), Indices = indices.ToArray() };
-        QuadricSimplifier.Reduced reduced = QuadricSimplifier.Reduce(soup, triangles / 2, border);
-        ReadOnlySpan<uint> kept = reduced.Mesh.Indices.Span;
-        if (kept.Length / 3 > triangles * MinReduction) return null;
+        (Vertex[] own, uint[] triangles, uint[] sources) = Localize(CollectionsMarshal.AsSpan(corners), vertices);
+        byte[] ownLocks = new byte[own.Length];
+        for (int i = 0; i < own.Length; i++)
+        {
+            ownLocks[i] = locks[sources[i]];
+        }
 
-        error = MathF.Max(error, reduced.Error);
+        int triangleCount = triangles.Length / 3;
+        uint[] kept = new uint[triangles.Length];
+        int keptCount;
+        float moved;
+        fixed (uint* destination = kept)
+        fixed (uint* indices = triangles)
+        fixed (Vertex* first = own)
+        fixed (byte* locked = ownLocks)
+        {
+            keptCount = (int)Meshopt.SimplifyWithAttributes(
+                destination,
+                indices,
+                (ulong)triangles.Length,
+                (float*)first,
+                (ulong)own.Length,
+                Vertex.Size,
+                null,
+                0,
+                null,
+                0,
+                locked,
+                (ulong)(triangleCount / 2 * 3),
+                float.MaxValue,
+                SimplifyOptions.ErrorAbsolute,
+                &moved);
+        }
+
+        if (keptCount == 0 || keptCount / 3 > triangleCount * MinReduction) return null;
+
+        error = MathF.Max(error, moved);
         foreach (Part part in group)
         {
             part.ParentError = error;
             part.ParentErrorBounds = bounds;
         }
 
-        // Back on the grid: where a collapse put a point is off it, and two clusters that share it snap it alike.
-        Vertex[] made = reduced.Mesh.Vertices.ToArray();
-        for (int i = 0; i < made.Length; i++)
+        // A kept triangle's slot is its corners': slots never share a vertex, and the simplifier only moves a corner
+        // to another of the triangles around it.
+        List<(int Slot, List<uint> Triangles)> bySlot = [];
+        for (int t = 0; t < keptCount; t += 3)
         {
-            made[i].Position = Snap(made[i].Position, step);
-        }
-
-        List<int> madeIndices = [];
-        List<int> slots = [];
-        for (int t = 0; t + 2 < kept.Length; t += 3)
-        {
-            (int a, int b, int c) = ((int)kept[t], (int)kept[t + 1], (int)kept[t + 2]);
-            if (made[a].Position == made[b].Position || made[b].Position == made[c].Position
-                || made[a].Position == made[c].Position)
+            int slot = slots[sources[kept[t]]];
+            int found = bySlot.FindIndex(entry => entry.Slot == slot);
+            if (found < 0)
             {
-                continue;
+                found = bySlot.Count;
+                bySlot.Add((slot, []));
             }
 
-            madeIndices.Add(a);
-            madeIndices.Add(b);
-            madeIndices.Add(c);
-            slots.Add(slotOf[reduced.Sources[a]]);
+            bySlot[found].Triangles.AddRange(kept.AsSpan(t, 3));
         }
 
-        return Split(made, [.. madeIndices], [.. slots], level, error, bounds);
+        List<Part> made = [];
+        foreach ((int slot, List<uint> slotTriangles) in bySlot)
+        {
+            made.AddRange(Split(own, [.. slotTriangles], sources, slot, level, error, bounds));
+        }
+
+        return made;
     }
 
     /// <summary>
-    /// The parts as Core's hierarchy, coarsest level last; those never simplified into anything have no parent.
+    /// The parts as Core's hierarchy, coarsest level last, each cluster's vertices a run of its own; those never
+    /// simplified into anything have no parent.
     /// </summary>
-    private static ClusterHierarchy BuildHierarchy(List<Part> parts, float step)
+    private static ClusterHierarchy BuildHierarchy(List<Part> parts, Vertex[] vertices, float step)
     {
         parts.Sort(static (left, right) => left.Level.CompareTo(right.Level));
-        List<Vertex> vertices = [];
-        List<byte> indices = [];
+        int vertexCount = 0;
+        int indexCount = 0;
+        foreach (Part part in parts)
+        {
+            vertexCount += part.Vertices.Length;
+            indexCount += part.Indices.Length;
+        }
+
+        Vertex[] held = new Vertex[vertexCount];
+        byte[] indices = new byte[indexCount];
         Cluster[] clusters = new Cluster[parts.Count];
+        int firstVertex = 0;
+        int firstIndex = 0;
         for (int i = 0; i < parts.Count; i++)
         {
             Part part = parts[i];
             clusters[i] = new Cluster
             {
-                FirstVertex = vertices.Count,
+                FirstVertex = firstVertex,
                 VertexCount = part.Vertices.Length,
-                FirstIndex = indices.Count,
+                FirstIndex = firstIndex,
                 TriangleCount = part.Indices.Length / 3,
                 MaterialSlot = part.Slot,
                 Level = part.Level,
@@ -491,14 +640,20 @@ internal static class ClusterBuilder
                 ParentErrorBounds = part.ParentErrorBounds,
                 ParentError = part.ParentError,
             };
-            vertices.AddRange(part.Vertices);
-            indices.AddRange(part.Indices);
+            for (int v = 0; v < part.Vertices.Length; v++)
+            {
+                held[firstVertex + v] = vertices[part.Vertices[v]];
+            }
+
+            part.Indices.CopyTo(indices, firstIndex);
+            firstVertex += part.Vertices.Length;
+            firstIndex += part.Indices.Length;
         }
 
         return new ClusterHierarchy
         {
-            Vertices = vertices.ToArray(),
-            Indices = indices.ToArray(),
+            Vertices = held,
+            Indices = indices,
             Clusters = clusters,
             PositionStep = step
         };
@@ -522,50 +677,18 @@ internal static class ClusterBuilder
     }
 
     /// <summary>
-    /// The indices of <paramref name="points"/> in Morton order: along a curve through their box that keeps what is
-    /// near in space near in the order.
-    /// </summary>
-    private static int[] ComputeMortonOrder(Vector3[] points)
-    {
-        Vector3 min = new(float.MaxValue);
-        Vector3 max = new(float.MinValue);
-        foreach (Vector3 point in points)
-        {
-            min = Vector3.Min(min, point);
-            max = Vector3.Max(max, point);
-        }
-
-        Vector3 scale = new Vector3(1023) / Vector3.Max(max - min, new Vector3(1e-12f));
-        ulong[] codes = new ulong[points.Length];
-        int[] order = new int[points.Length];
-        for (int i = 0; i < points.Length; i++)
-        {
-            Vector3 cell = (points[i] - min) * scale;
-            codes[i] = (Spread((uint)cell.X) << 2) | (Spread((uint)cell.Y) << 1) | Spread((uint)cell.Z);
-            order[i] = i;
-        }
-
-        Array.Sort(codes, order);
-        return order;
-
-        // Ten bits spread two apart, so three axes interleave.
-        static ulong Spread(uint value)
-        {
-            ulong bits = value & 1023;
-            bits = (bits | (bits << 16)) & 0x030000FF;
-            bits = (bits | (bits << 8)) & 0x0300F00F;
-            bits = (bits | (bits << 4)) & 0x030C30C3;
-            return (bits | (bits << 2)) & 0x09249249;
-        }
-    }
-
-    /// <summary>
-    /// A cluster being made: its own vertices and triangles, and what picking it takes.
+    /// A cluster being made: the model's vertices it holds, its triangles into them, and what picking it takes.
     /// </summary>
     private sealed class Part
     {
-        internal required Vertex[] Vertices { get; init; }
+        /// <summary>
+        /// The model's vertices it holds, by where they are in the one array every level indexes.
+        /// </summary>
+        internal required uint[] Vertices { get; init; }
 
+        /// <summary>
+        /// Three a triangle, into <see cref="Vertices"/>.
+        /// </summary>
         internal required byte[] Indices { get; init; }
 
         internal required int Slot { get; init; }
@@ -584,156 +707,5 @@ internal static class ClusterBuilder
         internal required Vector4 ParentErrorBounds { get; set; }
 
         internal float ParentError { get; set; } = float.PositiveInfinity;
-    }
-
-    /// <summary>
-    /// Grows clusters over a mesh's triangles, one at a time: each starts at the first triangle left in Morton order
-    /// and takes, of the triangles beside it in its material slot, the one adding the fewest new vertices and nearest
-    /// its middle, until it is full (<see cref="ClusterHierarchy.MaxTriangles"/>,
-    /// <see cref="ClusterHierarchy.MaxVertices"/>) or nothing beside it is left.
-    /// </summary>
-    private sealed class Growth
-    {
-        private readonly Vertex[] _vertices;
-        private readonly int[] _indices;
-        private readonly int[] _slots;
-        private readonly Vector3[] _centres;
-        private readonly Dictionary<Vector3, List<int>> _touching = [];
-        private readonly int[] _order;
-        private readonly bool[] _taken;
-        private List<int> _chosen = [];
-        private Dictionary<int, int> _local = [];
-        private readonly HashSet<int> _frontier = [];
-        private Vector3 _sum;
-        private int _slot;
-        private int _cursor;
-
-        public Growth(Vertex[] vertices, int[] indices, int[] slots)
-        {
-            _vertices = vertices;
-            _indices = indices;
-            _slots = slots;
-            int count = indices.Length / 3;
-            _centres = new Vector3[count];
-            for (int t = 0; t < count; t++)
-            {
-                Vector3 a = vertices[indices[t * 3]].Position;
-                Vector3 b = vertices[indices[(t * 3) + 1]].Position;
-                Vector3 c = vertices[indices[(t * 3) + 2]].Position;
-                _centres[t] = (a + b + c) / 3;
-                foreach (Vector3 corner in (ReadOnlySpan<Vector3>)[a, b, c])
-                {
-                    if (!_touching.TryGetValue(corner, out List<int>? triangles))
-                    {
-                        triangles = [];
-                        _touching[corner] = triangles;
-                    }
-
-                    triangles.Add(t);
-                }
-            }
-
-            _order = ComputeMortonOrder(_centres);
-            _taken = new bool[count];
-        }
-
-        /// <summary>
-        /// The next cluster: its triangles, each of its vertices' index within it, and its material slot. False once
-        /// every triangle is in one.
-        /// </summary>
-        internal bool TryGrow(out List<int> chosen, out Dictionary<int, int> local, out int slot)
-        {
-            while (_cursor < _order.Length && _taken[_order[_cursor]])
-            {
-                _cursor++;
-            }
-
-            _chosen = [];
-            _local = [];
-            chosen = _chosen;
-            local = _local;
-            slot = 0;
-            if (_cursor == _order.Length) return false;
-
-            _slot = _slots[_order[_cursor]];
-            slot = _slot;
-            _frontier.Clear();
-            _sum = Vector3.Zero;
-            int next = _order[_cursor];
-            while (next >= 0)
-            {
-                Take(next);
-                if (_chosen.Count == ClusterHierarchy.MaxTriangles) break;
-
-                next = FindBest();
-            }
-
-            return true;
-        }
-
-        private void Take(int triangle)
-        {
-            _taken[triangle] = true;
-            _chosen.Add(triangle);
-            _sum += _centres[triangle];
-            _frontier.Remove(triangle);
-            for (int corner = 0; corner < 3; corner++)
-            {
-                int vertex = _indices[(triangle * 3) + corner];
-                _local.TryAdd(vertex, _local.Count);
-                foreach (int beside in _touching[_vertices[vertex].Position])
-                {
-                    if (!_taken[beside] && _slots[beside] == _slot) _frontier.Add(beside);
-                }
-            }
-        }
-
-        /// <summary>
-        /// The triangle to take next: on the frontier, the one adding the fewest vertices, nearest the middle of those
-        /// taken; with nothing beside the cluster, the next triangle left in Morton order of its slot that fits; -1
-        /// when none does.
-        /// </summary>
-        private int FindBest()
-        {
-            Vector3 middle = _sum / _chosen.Count;
-            int best = -1;
-            (int Added, float Distance) bestScore = (int.MaxValue, float.MaxValue);
-            foreach (int triangle in _frontier)
-            {
-                int added = CountNewVertices(triangle);
-                if (_local.Count + added > ClusterHierarchy.MaxVertices) continue;
-
-                float distance = Vector3.DistanceSquared(_centres[triangle], middle);
-                if (added < bestScore.Added || (added == bestScore.Added && distance < bestScore.Distance))
-                {
-                    (best, bestScore) = (triangle, (added, distance));
-                }
-            }
-
-            if (best >= 0 || _frontier.Count > 0) return best;
-
-            for (int i = _cursor; i < _order.Length; i++)
-            {
-                int triangle = _order[i];
-                if (!_taken[triangle] && _slots[triangle] == _slot
-                    && _local.Count + CountNewVertices(triangle) <= ClusterHierarchy.MaxVertices)
-                {
-                    return triangle;
-                }
-            }
-
-            return -1;
-        }
-
-        private int CountNewVertices(int triangle)
-        {
-            int added = 0;
-            for (int corner = 0; corner < 3; corner++)
-            {
-                added += _local.ContainsKey(_indices[(triangle * 3) + corner]) ? 0 : 1;
-            }
-
-            return added;
-        }
     }
 }

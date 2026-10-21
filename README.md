@@ -74,8 +74,9 @@ verbose lines, detail that is usually noise.
 Exit codes: 0 clean, 1 bad arguments or a project that cannot be opened, 2 an error was logged under
 `--fail-on-error`. A crash ends the process with the OS's crash code and leaves a `.crash` file in `Logs/` beside
 Magic ([Crashes](src/Core/README.md#crashes)). What is slow to make, such as a compiled shader or a model's clusters,
-is kept in `Cache/` beside Magic and made again when what it was made from changes; deleting the folder is always
-safe ([The cache](src/Core/README.md#the-cache)).
+is kept in one folder per machine, shared by every checkout and worktree, `Magic/Cache/` under the user's local
+application data unless `MagicCache` names another, and made again when what it was made from changes; deleting the
+folder is always safe ([The cache](src/Core/README.md#the-cache)).
 
 ## How it works
 

@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
+using Magic.Contexts.Assets;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Internal;
@@ -16,11 +17,14 @@ namespace Magic.Services;
 /// make it come out otherwise); read with another, it is dirty: the read fails, and the caller makes it again and
 /// writes it over it. Any thread.
 /// <para>
-/// Entries are files beside Magic, in <c>Cache/</c>, as the log's are in <c>Logs/</c>:
-/// <c>Cache/&lt;Type&gt;/&lt;key&gt;</c>, the version it was made from and its type's <see cref="ICache{T}.Version"/>,
-/// then the bytes the type's <see cref="ICache{T}"/> wrote, which a gem provides and which is asked for through
-/// <see cref="IServiceProvider"/> on every read and write. Nothing is kept in memory: whoever reads an entry keeps what
-/// it needs of it.
+/// Entries are files in one folder per machine, shared by every checkout and copy of Magic that runs the project, so
+/// what one made the others read: <c>Magic/Cache/</c> under the user's local application data, or the folder the
+/// <c>MagicCache</c> environment variable names, then <c>&lt;project&gt;/&lt;Type&gt;/&lt;key&gt;</c>. A project has
+/// its own, as two projects' assets can share an id. An entry holds the version it was made from and its type's
+/// <see cref="ICache{T}.Version"/>, then the bytes the type's <see cref="ICache{T}"/> wrote, which a gem provides and
+/// which is asked for through <see cref="IServiceProvider"/> on every read and write. As an entry is read only at the
+/// version it was made from, a run that changed what it is made from makes its own over it, and a reader in another
+/// process never finds half of one. Nothing is kept in memory: whoever reads an entry keeps what it needs of it.
 /// </para>
 /// </summary>
 public sealed class Caches
@@ -33,10 +37,20 @@ public sealed class Caches
     private readonly IFileSystem _files;
     private readonly IServiceProvider _services;
 
-    internal Caches(IFileSystem files, IServiceProvider services)
+    /// <summary>
+    /// Where the project's entries are, a folder per type under it.
+    /// </summary>
+    private readonly string _folder;
+
+    internal Caches(IFileSystem files, IServiceProvider services, Project project)
     {
         _files = files;
         _services = services;
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string machine = Environment.GetEnvironmentVariable("MagicCache") is { Length: > 0 } named
+            ? named
+            : files.Combine(local, "Magic", "Cache");
+        _folder = files.Combine(machine, project.Name);
     }
 
     /// <summary>
@@ -126,14 +140,10 @@ public sealed class Caches
     }
 
     /// <summary>
-    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is: beside Magic, in <c>Cache/</c>.
+    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is: in the project's folder.
     /// </summary>
     private string GetFile<T>(ulong key)
     {
-        return _files.Combine(
-            AppContext.BaseDirectory,
-            "Cache",
-            typeof(T).Name,
-            key.ToString(CultureInfo.InvariantCulture));
+        return _files.Combine(_folder, typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
     }
 }

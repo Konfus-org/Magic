@@ -179,7 +179,7 @@ public static class Engine
         services.AddSingleton(args);
         services.AddSingleton(
             provider => new Settings(provider.GetRequiredService<Assets>(), files, events, project, args, lifetime));
-        services.AddSingleton(provider => new Caches(files, provider));
+        services.AddSingleton(provider => new Caches(files, provider, project));
         services.AddSingleton(provider => new World(
             provider.GetService<IEcs>(),
             provider.GetService<IScripts>(),
