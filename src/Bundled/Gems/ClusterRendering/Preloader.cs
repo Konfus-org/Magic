@@ -9,10 +9,12 @@ namespace Magic.ClusterRendering;
 
 /// <summary>
 /// Domains taken in before they spawn (<see cref="IPreloader"/>), so each is drawn whole in its first frame: its models
-/// and materials held from when it begins, the models as the nearest, and the frame built for the effects it
-/// names while the world names none, so the loading domain is drawn with them and nothing is built again at the switch.
-/// Whoever opens the domain waits until all of it is in, or failed and so drawn as the failure, and its holds go when
-/// what it was handed is disposed. Asked from any thread; what it is told is taken in on the render thread.
+/// with their fields and its materials held from when it begins, the models as the nearest, and the frame built for the
+/// effects it names while the world names none, so the loading domain is drawn with them and nothing is built again at
+/// the switch. Whoever opens the domain waits until all of it is in, or failed and so drawn as the failure, and its
+/// holds go when what it was handed is disposed. One that replaces the world is then readied: drawn out of sight, the
+/// window holding the loading domain's last image, until what builds up over frames has settled
+/// (<see cref="Settle"/>). Asked from any thread; what it is told is taken in on the render thread.
 /// </summary>
 internal sealed class Preloader(GpuResources resources, PassGraph graph)
 {
@@ -24,7 +26,8 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
 
     /// <summary>
     /// What other threads told the render thread, taken in as <see cref="Take"/> runs, in the order told: a domain to
-    /// begin taking in, one taken in to let go, or one whose open was cancelled.
+    /// begin taking in, one taken in to let go, or one whose open was cancelled; a domain spawned to begin readying, or
+    /// one whose readying was cancelled.
     /// </summary>
     private readonly Channel<Told> _told = Channel.CreateUnbounded<Told>(
         new UnboundedChannelOptions { SingleReader = true });
@@ -33,6 +36,24 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     /// The effects the latest domain taken in names; none once that domain is let go.
     /// </summary>
     private Handle<Pipeline> _effects;
+
+    /// <summary>
+    /// The domain being readied, spawned in place of the world, until it has settled; none when none is. Render thread.
+    /// </summary>
+    private Readying? _readying;
+
+    /// <summary>
+    /// Whether the window shows the image kept as the world loaded rather than the world: from when a domain replacing
+    /// the world begins being readied until the world is shown (<see cref="Show"/>), or its readying is cancelled.
+    /// Render thread.
+    /// </summary>
+    internal bool IsHolding { get; private set; }
+
+    /// <summary>
+    /// How many frames the domain being readied has been drawn so far, from its first; none while none is, or once it
+    /// has settled. What builds up over frames reads it to take its first frames faster. Render thread.
+    /// </summary>
+    internal int? Settling => _readying?.Frames;
 
     /// <summary>
     /// Takes in what <paramref name="prefabs"/> draw before they spawn: their models in, their materials
@@ -55,6 +76,20 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     }
 
     /// <summary>
+    /// Readies the domain taken in, spawned in place of the world: from the next frame drawn, the window holds the
+    /// image kept as the world loaded, and the world is drawn out of sight until it has settled (<see cref="Settle"/>),
+    /// when the task ends; the window shows the world once it is shown (<see cref="Show"/>).
+    /// </summary>
+    internal async Task ReadyAsync(CancellationToken cancel)
+    {
+        Readying readying = new();
+        await using ConfiguredAsyncDisposable cancelling = cancel.Register(
+            () => _told.Writer.TryWrite(new Told(Unready: readying, Cancel: cancel))).ConfigureAwait(false);
+        _told.Writer.TryWrite(new Told(Ready: readying));
+        await readying.Done.Task.ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Takes in what other threads told since the last frame, in the order told. Render thread.
     /// </summary>
     internal void Take()
@@ -66,7 +101,35 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
             if (told.Ended is { } ended) End(ended);
 
             if (told.Cancelled is { } cancelled) Cancel(cancelled, told.Cancel);
+
+            if (told.Ready is { } ready) BeginReadying(ready);
+
+            if (told.Unready is { } unready) CancelReadying(unready, told.Cancel);
         }
+    }
+
+    /// <summary>
+    /// The frame drawn of the domain being readied is counted, and once <paramref name="isSettled"/>, all that builds up
+    /// over frames having settled, it is ready: whoever waits for it goes on, while the window holds the kept image
+    /// until the world is shown. Render thread, each frame once it is drawn.
+    /// </summary>
+    internal void Settle(bool isSettled)
+    {
+        if (_readying is not { } readying) return;
+
+        readying.Frames++;
+        if (!isSettled) return;
+
+        readying.Done.TrySetResult();
+        _readying = null;
+    }
+
+    /// <summary>
+    /// The world is shown: the window shows it from this frame, no longer the kept image. Render thread.
+    /// </summary>
+    internal void Show()
+    {
+        IsHolding = false;
     }
 
     /// <summary>
@@ -79,15 +142,15 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     }
 
     /// <summary>
-    /// Checks each domain being taken in: each model that can be drawn, or failed and is drawn as the failure cube,
-    /// each material shown, and the frame built for <paramref name="effects"/>, tell how far it is; once all are in,
-    /// whoever waits for it goes on and spawns it. Render thread.
+    /// Checks each domain being taken in: each model that can be drawn, its field in, or failed and is drawn as the
+    /// failure cube, each material shown, and the frame built for <paramref name="effects"/>, tell how far it is; once
+    /// all are in, whoever waits for it goes on and spawns it. Render thread.
     /// </summary>
     internal void Check(Handle<Pipeline> effects)
     {
         if (_preloads.Count == 0) return;
 
-        bool isBuilt = graph.Current is not null && !graph.IsBuilding && graph.Effects == effects;
+        bool isBuilt = graph.IsBuiltFor(effects);
         for (int i = _preloads.Count - 1; i >= 0; i--)
         {
             Preload preload = _preloads[i];
@@ -96,7 +159,7 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
             int done = isBuilt ? 1 : 0;
             foreach (Handle<Model> model in preloaded.Models)
             {
-                if (resources.IsDrawable(model)) done++;
+                if (resources.IsDrawable(model) && resources.HasField(model)) done++;
             }
 
             foreach (Handle<Material> material in preloaded.Materials)
@@ -173,13 +236,40 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     }
 
     /// <summary>
+    /// A domain spawned in place of the world begins being readied, from this frame, in place of one being readied
+    /// still, which can no longer settle as it is gone; the window holds the kept image.
+    /// </summary>
+    private void BeginReadying(Readying readying)
+    {
+        _readying?.Done.TrySetCanceled(CancellationToken.None);
+        _readying = readying;
+        IsHolding = true;
+    }
+
+    /// <summary>
+    /// The readying of a domain was cancelled, as it closed: whoever waited is told, and the window shows what is drawn
+    /// in it, as the loading domain is again, once it is there.
+    /// </summary>
+    private void CancelReadying(Readying readying, CancellationToken cancel)
+    {
+        readying.Done.TrySetCanceled(cancel);
+        if (_readying != readying) return;
+
+        _readying = null;
+        IsHolding = false;
+    }
+
+    /// <summary>
     /// One thing told to the render thread: a domain to begin taking in, one taken in to let go, or one whose open was
-    /// cancelled, with the token that cancelled it.
+    /// cancelled; or a domain spawned to begin readying, or one whose readying was cancelled; with the token that
+    /// cancelled it.
     /// </summary>
     private readonly record struct Told(
         Preload? Begun = null,
         Preloaded? Ended = null,
         Preload? Cancelled = null,
+        Readying? Ready = null,
+        Readying? Unready = null,
         CancellationToken Cancel = default);
 
     /// <summary>
@@ -195,6 +285,17 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
         internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         internal float Reported { get; set; } = -1;
+    }
+
+    /// <summary>
+    /// A domain spawned in place of the world being readied: how many frames it has been drawn, and the task whoever
+    /// opens it awaits.
+    /// </summary>
+    private sealed class Readying
+    {
+        internal int Frames { get; set; }
+
+        internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 }
 

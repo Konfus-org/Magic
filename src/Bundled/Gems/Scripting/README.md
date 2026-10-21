@@ -27,13 +27,18 @@ while the entity names it:
 2. **Given its values**: each of the prefab's values is set on its property, so a property's initialiser is its default
    and a prefab's value replaces it.
 3. **Started**: its `Start()` runs, with its values set and its entity's components there to read, and a system is added
-   to the ECS, as the kind of system it is (each, when it is several).
+   to the ECS, as the kind of system it is (each, when it is several), at once or, while the world loads, once it is
+   shown.
 
-A script starts in the frame after it is attached, so whatever spawned with its entity is all there, and not while
-a domain loads in place of the world, until the domain is there, unless its class is `[Impatient]`
-([Core's README](../../../Core/README.md#the-world)). A handle whose `.cs` asset does not load, or whose script cannot
-be made or started, is an error once, and the entity goes without that script until it is attached again. A pipeline
-script is made for no entity, with services alone, and asking for an `Entity` is the error.
+A script starts in the frame after it is attached, so whatever spawned with its entity is all there. While a domain
+loads in place of the world, unless its class is `[Impatient]`, it waits until the domain is there, then starts as
+this gem readies the domain (it is one of the gems that ready a domain before it is shown,
+[Core's README](../../../Core/README.md#the-world)), so what it spawns as it starts is readied with it. Held, its hooks
+are not called and its systems are not added until this gem hears the loading is over, the frame after the world is
+first shown, so that frame draws it as it loaded. The readying is done once an update finds nothing left to start,
+what the started scripts attached among it. A handle whose `.cs` asset does not load, or whose script cannot be made
+or started, is an error once, and the entity goes without that script until it is attached again. A pipeline script
+is made for no entity, with services alone, and asking for an `Entity` is the error.
 
 When Core loads a new build of a project's code, this gem ends each live copy of a script read again and starts a new
 one of its class as it is now, made for the same entity with the same values, so the entity and its components stay

@@ -14,7 +14,8 @@ namespace Magic.ClusterRendering;
 /// a stage that makes no image for the view, that nothing draws to it, in the failure's magenta. Over the image, the
 /// failure banner: what the failures said, as glyphs (<see cref="FailureHandler.Text"/>), and the codes the frame's
 /// shaders raised (<see cref="Raised"/>). A pipeline per target format and shader, made the first time one is drawn
-/// into. Render thread.
+/// into. It also keeps a copy of the window's image as the world loads (<see cref="Keep"/>), shown while the world that
+/// replaces it is readied out of sight. Render thread.
 /// </summary>
 internal sealed class Output : IDisposable
 {
@@ -45,6 +46,11 @@ internal sealed class Output : IDisposable
     /// </summary>
     private volatile Compiled? _shaders;
 
+    /// <summary>
+    /// The format <see cref="Kept"/> was made in.
+    /// </summary>
+    private GpuFormat _keptFormat;
+
     internal Output(IGpu gpu, GpuResources resources, IShaderCompiler compiler, CancellationToken stopping)
     {
         _gpu = gpu;
@@ -60,6 +66,12 @@ internal sealed class Output : IDisposable
     /// A word per code, 1 once a shader raised it this frame: the frame's <c>Failures</c>.
     /// </summary>
     internal GpuBuffer Raised { get; }
+
+    /// <summary>
+    /// The finished image last kept (<see cref="Keep"/>), the window's as the world loaded, which the window shows in
+    /// place of the world while it is readied out of sight; none until one is kept, and once it is let go.
+    /// </summary>
+    internal BoundResource Kept { get; private set; }
 
     public void Dispose()
     {
@@ -128,6 +140,40 @@ internal sealed class Output : IDisposable
     internal void Clear(GpuTexture target)
     {
         _gpu.Commands.RenderPass([new GpuTextureLevel(target)], GpuContents.Clear).Dispose();
+    }
+
+    /// <summary>
+    /// Copies <paramref name="image"/>, the finished image of the view shown in the window, into <see cref="Kept"/>,
+    /// made again when its size or format changes; nothing when it is not made yet.
+    /// </summary>
+    internal void Keep(BoundResource image)
+    {
+        if (image.Texture == GpuTexture.None) return;
+
+        GpuFormat format = _gpu.GetFormat(image.Texture);
+        if (Kept.Width != image.Width || Kept.Height != image.Height || format != _keptFormat)
+        {
+            Forget();
+            GpuTexture kept = _resources.MakeTexture(
+                new GpuTextureDescription(format, GpuTextureUsage.Sampled, image.Width, image.Height));
+            Kept = BoundResource.Of(kept, image.Width, image.Height);
+            _keptFormat = format;
+        }
+
+        _resources.Copy(
+            new GpuTextureRegion(image.Texture, Width: image.Width, Height: image.Height),
+            new GpuTextureRegion(Kept.Texture, Width: image.Width, Height: image.Height));
+    }
+
+    /// <summary>
+    /// Lets the kept image go, once the world it stood in for is shown.
+    /// </summary>
+    internal void Forget()
+    {
+        if (Kept.Texture == GpuTexture.None) return;
+
+        _resources.Release(Kept.Texture);
+        Kept = default;
     }
 
     /// <summary>

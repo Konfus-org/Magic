@@ -185,6 +185,9 @@ internal sealed class GpuResources : IDisposable
     /// <inheritdoc cref="GpuCache.IsDrawable(Handle{Model})"/>
     internal bool IsDrawable(Handle<Model> model) => _cache.IsDrawable(model);
 
+    /// <inheritdoc cref="GpuCache.HasField"/>
+    internal bool HasField(Handle<Model> model) => _cache.HasField(model);
+
     /// <inheritdoc cref="GpuCache.Prioritize"/>
     internal void Prioritize(Handle<Model> model, float distance) => _cache.Prioritize(model, distance);
 

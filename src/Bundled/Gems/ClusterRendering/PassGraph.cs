@@ -294,11 +294,6 @@ internal sealed class PassGraph(
     /// </summary>
     internal Handle<Pipeline> Effects { get; private set; }
 
-    /// <summary>
-    /// Whether a listing is being built, which the frame swaps in once it is compiled.
-    /// </summary>
-    internal bool IsBuilding => _next is not null;
-
     public void Dispose()
     {
         Current?.Dispose();
@@ -377,27 +372,36 @@ internal sealed class PassGraph(
     }
 
     /// <summary>
-    /// Whether the frame can draw a material of <paramref name="surface"/> as <paramref name="type"/> says, every
-    /// pipeline it is drawn with compiled: the raster bins' for its clusters, which clip as it fades or its cards take
-    /// over, and the resolve bin's for its pixels, or the forward one for a transparent material. Those not asked for
-    /// yet start compiling, for the listing being built while there is one, as that is the one that will draw it: it is
-    /// drawable once that listing is swapped in. A material waits for this (<see cref="GpuResources"/>), so nothing is
-    /// drawn black, left out, or drawn without the world's effects for a while.
+    /// Whether the frame draws with a listing built for <paramref name="effects"/>, and none is being built, which the
+    /// frame would swap in once it is compiled.
     /// </summary>
-    internal bool IsDrawable(SurfaceKey surface, MaterialType type)
+    internal bool IsBuiltFor(Handle<Pipeline> effects) => Current is not null && _next is null && Effects == effects;
+
+    /// <summary>
+    /// Whether the frame can draw <paramref name="drawn"/>, a material packed, every pipeline it is drawn with compiled:
+    /// the raster bins' for its clusters, which clip as it fades or its cards take over, and the resolve bin's for its
+    /// pixels, or the forward one for a transparent material; for a sky, the sky's, its capture's, its shadow's and its
+    /// air's. Those not asked for yet start compiling, for the listing being built while there is one, as that is the
+    /// one that will draw it: it is drawable once that listing is swapped in. A material waits for this
+    /// (<see cref="GpuResources"/>), so nothing is drawn black, left out, or drawn without the world's effects for a
+    /// while.
+    /// </summary>
+    internal bool IsDrawable(DrawnMaterial drawn)
     {
         if ((_next ?? Current) is not { } listing) return false;
 
-        bool isTransparent = type == MaterialType.Transparent;
+        SurfaceKey surface = drawn.Surface;
+        bool isSurface = !drawn.IsSky && drawn.Type != MaterialType.Transparent;
+        bool isTransparent = !drawn.IsSky && drawn.Type == MaterialType.Transparent;
         bool isDrawable = true;
         foreach (ListedPass pass in listing.Passes)
         {
             SurfaceKey? variant = pass.Pass.Kind != PassKind.Draw ? null : pass.Pass.Draw.Drawn switch
             {
-                PassDrawn.Visibility => isTransparent ? null : surface,
-                PassDrawn.Surfaces => isTransparent ? null : surface with { Masked = false },
+                PassDrawn.Visibility => isSurface ? surface : null,
+                PassDrawn.Surfaces => isSurface ? surface with { Masked = false } : null,
                 PassDrawn.Transparent => isTransparent ? surface : null,
-                PassDrawn.Sky or PassDrawn.SkyShadow or PassDrawn.SkyAir => null,
+                PassDrawn.Sky or PassDrawn.SkyShadow or PassDrawn.SkyAir => drawn.IsSky ? surface : null,
                 PassDrawn.Depth => null,
                 _ => null,
             };

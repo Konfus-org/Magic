@@ -26,7 +26,9 @@ namespace Magic.ClusterRendering;
 /// <para>
 /// The world is copied in LateUpdate (<see cref="WorldProcessor"/>), handed over in Sync, and drawn in Render from that
 /// copy, one frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is drawn
-/// whole in its first frame. While a debug view is named (<see cref="DebugViewChanged"/>), its pass
+/// whole in its first frame, and one that replaces the world is readied, drawn out of sight while the window keeps the
+/// loading domain's last image, until its light, its shadows and its exposure have settled, so it is shown as it should
+/// be from its first frame shown. While a debug view is named (<see cref="DebugViewChanged"/>), its pass
 /// (<c>Passes/Debug/Name.pass</c>) runs after the world's effects and what it draws is shown in place of the finished
 /// image, or the failure's magenta saying nothing draws while it is not ready; while the debug UI shows, each instance
 /// drawn as the failure says why where it is. Once every view is shown, the overlay stage runs once for each target,
@@ -218,13 +220,21 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// Takes in what changed, places the key light's shadow about the main camera, then for every camera with somewhere
     /// to draw records the frame's stages once (probes), each view's stages, and the view shown in its target: up to
     /// the stage the debug view names, and what that stage made shown in place of the finished image. A window nothing
-    /// is drawn into, with no camera on it or while the frame's passes first compile, is cleared to black.
+    /// is drawn into, with no camera on it or while the frame's passes first compile, is cleared to black. While a
+    /// domain that replaces the world is readied, the world is drawn as ever but the window shows the image kept as it
+    /// loaded, until the world is shown.
     /// </summary>
     public void Render(in Frame frame)
     {
         TakeChanges();
         _preloader.Take();
         Renderables copy = _world.Front;
+        if (!copy.IsLoading)
+        {
+            _preloader.Show();
+            _output.Forget();
+        }
+
         CameraCopy? main = GetMainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
         UpdateRows(copy, main, player, frame);
@@ -232,6 +242,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         UpdateGraph(copy, skySurface);
         PlanGi(main, frame);
         Curve? fogFalloff = GetFogFalloff(copy.Weather?.FogFalloff ?? Handle<Curve>.None);
+        Settle(copy, fogFalloff);
         List<View> views = _views.Prepare(
             new ViewFrame(copy, frame, skyRow, MakeCounts(), player, HasJitter(), fogFalloff));
         View? shown = views.Find(view => view.Target.IsWindow) ?? (views.Count > 0 ? views[0] : null);
@@ -277,10 +288,29 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             RenderView(view, listing, skySurface, frame);
         }
 
+        if (_preloader.IsHolding)
+        {
+            DrawKept(shown);
+        }
+        else if (copy.IsLoading && shown.Target.IsWindow)
+        {
+            _output.Keep(GetFinished(shown));
+        }
+
         _resources.Frame.ReleaseUnlisted(listing);
         ClearWindow();
         RecordOverlays(listing, views, shown, frame);
         _resources.EndFrame();
+    }
+
+    /// <summary>
+    /// Readies the domain taken in, spawned in place of the world: drawn out of sight, the window showing the image kept
+    /// as the world loaded, until all that builds up over frames has settled (<see cref="Settle"/>), the window showing
+    /// it once the world is shown.
+    /// </summary>
+    public Task ReadyAsync(CancellationToken cancel)
+    {
+        return _preloader.ReadyAsync(cancel);
     }
 
     /// <summary>
@@ -338,7 +368,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private void UpdateRows(Renderables copy, CameraCopy? main, Vector3? player, in Frame frame)
     {
-        _world.UpdateRows((float)frame.Seconds, player ?? default);
+        _world.UpdateRows((float)frame.Seconds, player ?? default, _preloader.IsHolding);
         _movedInstances.Add(_world.Instances.Moved.Count);
         if (main is { } camera)
         {
@@ -386,6 +416,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
                 _world.Instances.Moved,
                 _world.Instances.Recoloured,
                 frame.DeltaSeconds,
+                _preloader.Settling,
                 _settings);
             _giRays.Add(_gi.Rays);
             return;
@@ -442,12 +473,53 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             _graph.Record(listing, stage, scope);
         }
 
-        BoundResource? image = _debugView.Length > 0 ? DebugImage(view) : GetFinished(view);
-        bool clears = _cleared.Add(view.Target.Texture);
-        GpuFilter filter = _settings.Upscale ? GpuFilter.Linear : GpuFilter.Nearest;
-        _output.Draw(view.Target, view.Constants, image, filter, clears);
+        // While the world is readied out of sight, the window shows the image kept in its place (DrawKept).
+        if (!_preloader.IsHolding || !view.Target.IsWindow)
+        {
+            BoundResource? image = _debugView.Length > 0 ? DebugImage(view) : GetFinished(view);
+            bool clears = _cleared.Add(view.Target.Texture);
+            GpuFilter filter = _settings.Upscale ? GpuFilter.Linear : GpuFilter.Nearest;
+            _output.Draw(view.Target, view.Constants, image, filter, clears);
+        }
 
         view.Resources.Swap();
+    }
+
+    /// <summary>
+    /// The window while the world is readied out of sight: the image kept as it loaded, in <paramref name="shown"/>'s
+    /// place, as the view shown in the window is drawn but not shown; black when none was kept, as nothing was shown.
+    /// </summary>
+    private void DrawKept(View shown)
+    {
+        if (_output.Kept.Texture == GpuTexture.None || !shown.Target.IsWindow) return;
+
+        _output.Draw(shown.Target, shown.Constants, _output.Kept, GpuFilter.Linear, _cleared.Add(shown.Target.Texture));
+    }
+
+    /// <summary>
+    /// Counts the frame of a domain being readied, which is ready once what builds up over frames has settled: drawn
+    /// for as many frames as the slowest of it takes from nothing (<see cref="GetSettleFrames"/>), the frame built for
+    /// the world's effects, every instance's look in and <paramref name="fogFalloff"/>, the fog's, in when the weather
+    /// asks for one (<see cref="Preloader.Settle"/>). Whether or not anything is drawn, so a run with no window loads.
+    /// </summary>
+    private void Settle(Renderables copy, Curve? fogFalloff)
+    {
+        _preloader.Settle(_preloader.Settling >= GetSettleFrames()
+            && _graph.IsBuiltFor(_preloader.GetEffects(copy.Effects))
+            && !_world.Instances.HasWaiting()
+            && (fogFalloff is not null || _fogFalloffAsked == Handle<Curve>.None));
+    }
+
+    /// <summary>
+    /// Frames a domain being readied is drawn at the least: what the slowest of what builds up over frames takes from
+    /// nothing, global illumination's settling tracings, two turns of the upscale's jitter, or twice the frames the
+    /// shadows' pool takes to draw whole at the pages a frame may draw, as a frame whose casters overflow draws half.
+    /// </summary>
+    private int GetSettleFrames()
+    {
+        int pages = Math.Max(_settings.ShadowUpdates, 1);
+        int shadows = 2 * ((_shadows.WholePages + pages - 1) / pages);
+        return Math.Max(GiVolume.SettleTracings, Math.Max(2 * View.JitterPhases, shadows));
     }
 
     /// <summary>

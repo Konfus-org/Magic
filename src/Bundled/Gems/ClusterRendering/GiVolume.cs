@@ -13,7 +13,9 @@ namespace Magic.ClusterRendering;
 /// <see cref="ClusterRenderingSettings.GiUpdateEvery"/> frames, and of each coarser level, whose probes light what is
 /// further and larger, half as often. A probe blends what it was traced with into what it held by how long it waited,
 /// so light everywhere follows a change in about the same time whatever the frame rate and however seldom a level is
-/// traced (<see cref="Response"/>). Render thread.
+/// traced (<see cref="Response"/>). While a domain is readied out of sight, every probe is traced every frame and holds
+/// the plain mean of its tracings, for <see cref="SettleTracings"/> frames, so the world is shown lit as it settles to
+/// rather than gathering its light over seconds. Render thread.
 /// </summary>
 internal sealed class GiVolume
 {
@@ -21,6 +23,12 @@ internal sealed class GiVolume
     /// Voxels a side of a level; the shaders' GiResolution.
     /// </summary>
     internal const int Resolution = 64;
+
+    /// <summary>
+    /// Tracings each probe takes, one a frame, while a domain is readied: enough for their mean to hold a few rays'
+    /// noise and for light to have bounced as many times, each tracing seeing what the last held.
+    /// </summary>
+    internal const int SettleTracings = 16;
 
     /// <summary>
     /// Voxels a side of a brick, what is made again at once; a level moves a brick at a time.
@@ -102,19 +110,27 @@ internal sealed class GiVolume
     /// <summary>
     /// Places the levels around <paramref name="camera"/>, marks what is made again, from where they moved, from
     /// <paramref name="moved"/> and from <paramref name="recoloured"/>, and uploads them with which probes are traced
-    /// this frame and how much of what they held they keep, from the frame's <paramref name="seconds"/>.
+    /// this frame and how much of what they held they keep, from the frame's <paramref name="seconds"/>; or, while a
+    /// domain is readied, its <paramref name="settling"/>-th frame drawn, every probe, keeping that frame's share of the
+    /// mean of its tracings.
     /// </summary>
     internal void Plan(
         Vector3 camera,
         IReadOnlyList<MovedSphere> moved,
         IReadOnlyList<MovedSphere> recoloured,
         float seconds,
+        int? settling,
         ClusterRenderingSettings settings)
     {
         int levels = Math.Clamp(settings.GiLevels, 1, MaxLevels);
         float finest = Math.Clamp(settings.GiVoxel, 0.05f, 4);
         uint every = BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(settings.GiUpdateEvery, 1, 64));
         uint rays = (uint)Math.Clamp(settings.GiRays, 8, 256);
+
+        // While a domain is readied, the n-th frame's tracing keeps n of n + 1 shares, the mean of every one so far, up
+        // to what the level keeps at its own pace.
+        bool isSettling = settling < SettleTracings;
+        float settled = isSettling ? settling.GetValueOrDefault() / (settling.GetValueOrDefault() + 1f) : 1;
         for (int index = 0; index < levels; index++)
         {
             Level level = _levels[index];
@@ -131,11 +147,14 @@ internal sealed class GiVolume
             }
 
             level.Voxel = voxel;
-            level.Period = every << index;
-            level.Hysteresis = Math.Clamp(
-                MathF.Exp(-level.Period * seconds / (Response * MathF.Pow(MathF.Sqrt(2), index))),
-                LeastKept,
-                MostKept);
+            uint period = every << index;
+            level.Period = isSettling ? 1 : period;
+            level.Hysteresis = MathF.Min(
+                settled,
+                Math.Clamp(
+                    MathF.Exp(-period * seconds / (Response * MathF.Pow(MathF.Sqrt(2), index))),
+                    LeastKept,
+                    MostKept));
             level.IsHeld = true;
             Mark(level, moved, voxel);
             Mark(level, recoloured, voxel);
@@ -151,6 +170,7 @@ internal sealed class GiVolume
             Levels = (uint)levels,
             Rays = rays,
             Seed = _frame,
+            Steadies = isSettling ? 0u : 1u,
             Camera = camera,
         };
         _rows.Set(0, Unsafe.As<GpuGi, GpuGiLevel>(ref header));

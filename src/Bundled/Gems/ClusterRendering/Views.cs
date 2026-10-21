@@ -156,7 +156,7 @@ internal sealed class View : IDisposable
     /// <summary>
     /// The sub-pixel offsets a jittering view cycles through, Halton's (2, 3) sequence, which covers a pixel evenly.
     /// </summary>
-    private const int JitterPhases = 8;
+    internal const int JitterPhases = 8;
 
     private readonly GpuResources _resources;
     private readonly Instances _instances;
@@ -178,6 +178,8 @@ internal sealed class View : IDisposable
         _instances = instances;
         Resources = resources.MakeScope();
         _exposure = resources.MakeTable<Vector4>(GpuContract.Exposure, 1, Resources);
+
+        // Exposure 1, not metered yet: its first metering is taken whole (Post/ExposureAdapt).
         _exposure.Set(0, new Vector4(1, 0, 0, 0));
         _transparentPieces = resources.MakeTable<GpuPiece>(GpuBufferUsage.Vertex, 64, Resources);
     }

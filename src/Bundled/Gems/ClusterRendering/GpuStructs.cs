@@ -456,7 +456,11 @@ internal struct GpuGi
     /// </summary>
     internal uint Seed;
 
-    internal uint Padding0;
+    /// <summary>
+    /// 1 when a probe keeps more of what it held through a change no larger than its rays' noise, so the light does not
+    /// waver; 0 while the world is readied, when each probe holds the plain mean of its tracings so it settles fast.
+    /// </summary>
+    internal uint Steadies;
 
     /// <summary>
     /// Where the camera the levels are placed about is, from the world's origin: a place is lit by each level by how

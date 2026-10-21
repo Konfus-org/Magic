@@ -25,17 +25,19 @@ namespace Magic.Services;
 /// its corner, <see cref="Domain.CellSize"/> metres a side, and any other at the domain's origin. Nothing is streamed:
 /// whatever draws the world picks each thing's detail by its distance. Opening a domain in place of the others
 /// (<see cref="DomainOpenMode.Replace"/>) closes them and shows the project's loading domain
-/// (<see cref="Project.Loading"/>) until the new one is there; it then appears in the frame the loading domain closes,
-/// with the project's player (<see cref="Project.Player"/>) at its spawn (<see cref="Tag.Spawn"/>). Opening one beside
-/// them (<see cref="DomainOpenMode.Additive"/>) shows no loading domain and puts no player. Closing a domain destroys
-/// what it spawned. While it is open, a prefab of it read again is spawned again as it is now, and prefabs added, moved
-/// or removed in its folder are spawned or destroyed.
+/// (<see cref="Project.Loading"/>) until the new one is there, spawned with the project's player
+/// (<see cref="Project.Player"/>) at its spawn (<see cref="Tag.Spawn"/>) in the frame the loading domain closes; the
+/// window keeps the loading domain's last image while every gem that needs to readies the new one out of sight
+/// (<see cref="IPreloader.ReadyAsync"/>), and it is shown once they all have, drawn as it loaded, before anything moves
+/// it. Opening one beside them (<see cref="DomainOpenMode.Additive"/>) shows no loading domain and puts no player.
+/// Closing a domain destroys what it spawned. While it is open, a prefab of it read again is spawned again as it is now,
+/// and prefabs added, moved or removed in its folder are spawned or destroyed.
 /// </para>
 /// <para>
 /// A script attached to an entity (<see cref="Attach"/>) joins its <see cref="Scripts"/>, and the gem that runs
-/// scripts makes and starts it in the next frame, so it never sees half a prefab or half a domain; while a domain loads
-/// in place of the world, once the domain is there, unless its class is
-/// <see cref="Attributes.ImpatientAttribute">[Impatient]</see>.
+/// scripts makes and starts it in the next frame, so it never sees half a prefab or half a domain. While a domain loads
+/// in place of the world, it starts as the domain is readied, so what it spawns is readied with it, and runs from the
+/// frame after the world is first shown, unless its class is <see cref="Attributes.ImpatientAttribute">[Impatient]</see>.
 /// </para>
 /// <para>
 /// The whole world can be saved as data (<see cref="SaveAsync"/>) and put back from it (<see cref="Restore"/>): the
@@ -86,20 +88,23 @@ public sealed class World : IDisposable
 
     /// <summary>
     /// Whether a domain is opening in place of the world (<see cref="DomainOpenMode.Replace"/>): from when the open
-    /// domains close until the new one is there, or is not coming, while the loading domain is shown.
+    /// domains close until the new one is shown, or is not coming, while the loading domain is shown, then its last
+    /// image while the new one is readied. False from the frame the world is first shown, which whatever draws it reads
+    /// as it copies the frame; what runs the world hears it the frame after (<see cref="WorldLoading"/>).
     /// </summary>
     public bool IsLoading => _domains?.IsLoading ?? false;
 
     /// <summary>
     /// Whether the world has loaded: a domain is open, every open one is there, spawned, and none is opening in place
-    /// of the world. False while a domain is still being read, however it was opened, which <see cref="IsLoading"/>
-    /// only covers for one opening in place of the world.
+    /// of the world, so one that replaced it is shown. False while a domain is still being read, however it was opened,
+    /// which <see cref="IsLoading"/> only covers for one opening in place of the world.
     /// </summary>
     public bool IsLoaded => _domains?.IsLoaded ?? false;
 
     /// <summary>
-    /// The gems that take in what a domain spawns before it does (<see cref="IPreloader"/>), set by whoever made the
-    /// gems once every one is, since the world is made while they are; none until then.
+    /// The gems that take in what a domain spawns before it does, and ready one that replaces the world before it is
+    /// shown (<see cref="IPreloader"/>), set by whoever made the gems once every one is, since the world is made while
+    /// they are; none until then.
     /// </summary>
     internal IReadOnlyList<IPreloader> Preloaders { get; set; } = [];
 
@@ -110,10 +115,10 @@ public sealed class World : IDisposable
 
     /// <summary>
     /// Opens <paramref name="domain"/> as <paramref name="mode"/> says, telling <paramref name="progress"/> how far it
-    /// is, 0 to 1. The task ends once the domain is there, with it; with why not when its file does not load, before
-    /// anything else is closed, or when it is closed before it is there. A prefab of it that does not load is an error,
-    /// and it opens without it. Opening one already open keeps it, and closes the others when it replaces them. Without
-    /// a gem that provides the ECS, nothing opens. Any thread.
+    /// is, 0 to 1. The task ends once the domain is there, and shown when it replaces the world, with it; with why not
+    /// when its file does not load, before anything else is closed, or when it is closed before then. A prefab of it
+    /// that does not load is an error, and it opens without it. Opening one already open keeps it, and closes the
+    /// others when it replaces them. Without a gem that provides the ECS, nothing opens. Any thread.
     /// </summary>
     public Task<Result<Domain>> OpenAsync(
         Handle<Domain> domain,

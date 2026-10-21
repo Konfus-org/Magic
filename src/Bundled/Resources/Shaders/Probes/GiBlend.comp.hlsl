@@ -6,9 +6,11 @@
 // it holds nothing yet. How much of what it held a texel keeps follows how much it changed, as DDGI's implementations
 // do (Majercik et al. 2019): a change no larger than its rays' own noise keeps a steadier share, so the noise of a few
 // dozen rays drawn anew each tracing does not show as the light's brightness wavering, while a change larger than that,
-// a cloud's shadow crossing, a lamp turned on, is taken in by the level's own hysteresis, as fast as ever. A probe given
-// the next coarser level's light until it was traced (Probes/GiClassify) blends its first tracing into that at least
-// halfway, and takes what it sees whole. A probe that lights nothing this frame is left as it is.
+// a cloud's shadow crossing, a lamp turned on, is taken in by the level's own hysteresis, as fast as ever. While the
+// world is readied out of sight nothing is steadied: each probe keeps the level's hysteresis, which then makes it the
+// plain mean of its tracings so far, so it settles in a few frames. A probe given the next coarser level's light until
+// it was traced (Probes/GiClassify) blends its first tracing into that at least halfway, and takes what it sees whole.
+// A probe that lights nothing this frame is left as it is.
 
 #include "Lighting/Gi.hlsli"
 
@@ -25,10 +27,11 @@ float GiChange(float3 traced, float3 held)
 }
 
 // The share of what it held a texel keeps: a steadier one than its level's while it changes no more than noise does,
-// the level's own once it changes as much as the light does, and between the two between.
-float GiKept(float hysteresis, float change)
+// the level's own once it changes as much as the light does, and between the two between; the level's own whatever it
+// changes while nothing is steadied.
+float GiKept(float hysteresis, float change, uint steadies)
 {
-    float steady = 1.0 - (1.0 - hysteresis) * SteadyShare;
+    float steady = steadies != 0u ? 1.0 - (1.0 - hysteresis) * SteadyShare : hysteresis;
     return lerp(steady, hysteresis, smoothstep(NoiseChange, RealChange, change));
 }
 
@@ -94,7 +97,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         {
             float2 held = GiUnpackHalf(uint2(GiHistory.Load(slot * 4u), 0u)).xy;
             float change = abs(moments.x - held.x) / max(max(moments.x, held.x), 1e-4);
-            moments = lerp(moments, held, GiKept(level.hysteresis, change));
+            moments = lerp(moments, held, GiKept(level.hysteresis, change, header.steadies));
         }
 
         GiHistory.Store(slot * 4u, GiPackHalf(float4(moments, 0.0, 0.0)).x);
@@ -118,7 +121,9 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         if (isTraced || isSeeded)
         {
             float3 held = GiUnpackHalf(GiHistory.Load2(slot * 4u)).rgb;
-            float kept = isTraced ? GiKept(level.hysteresis, GiChange(irradiance, held)) : min(level.hysteresis, 0.5);
+            float kept = isTraced
+                ? GiKept(level.hysteresis, GiChange(irradiance, held), header.steadies)
+                : min(level.hysteresis, 0.5);
             irradiance = lerp(irradiance, held, kept);
         }
 

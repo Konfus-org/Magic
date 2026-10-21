@@ -63,7 +63,10 @@ scene costs about a millisecond, so a domain's thousands come in over a moment, 
 the direct sound.
 
 The audio files and models a domain's sounds and solids name are loaded and fitted before it spawns (Core's
-`IPreloader`), so its sounds are heard, muffled and echoed, from its first frame.
+`IPreloader`), so its sounds are heard, muffled and echoed, from its first frame. A domain that replaces the world is
+then readied out of sight: its sounds are held, none heard and none's time running, until the loading is told over,
+the frame after the world is first shown, while the solids near the listener are placed with no limit on how long an
+update takes, as no sound waits on it then; it is ready once every one is in the scene.
 
 ## Threads
 

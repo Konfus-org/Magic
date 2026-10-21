@@ -405,16 +405,18 @@ the ECS while its entity lives; the entity it is made for holds it and is no ent
 records part of a frame: a pass of kind `script` names it, and the renderer makes it for each listing of the frame it
 builds and calls it on the render thread to draw into the pass's target, with pipelines of its own, never on an entity;
 it is the hook at a point of the frame for code that is no gem, a HUD or an overlay. A class marked `[Impatient]` starts
-even while a domain loads in place of the world; any other waits until the domain is there, so it never sees a world
-half loaded. The loading domain's own scripts, such as a progress bar, are impatient, or never run. The samples' scripts
-are the examples of each kind.
+and runs even while a domain loads in place of the world. Any other starts only as the new domain is readied, all of it
+there, so it never sees a world half loaded and what its start spawns is readied with the domain; its hooks and its
+systems run from the frame after the world is first shown, so that frame draws the world as it loaded
+([The world](#the-world)). The loading domain's own scripts, such as a progress bar, are impatient, or never run. The
+samples' scripts are the examples of each kind.
 
 The `Scripts` component says which scripts an entity has, by their `.cs` assets: the gem that runs scripts makes a
 copy of each named and has no copy of, and ends a copy whose handle is gone or whose entity is destroyed, disposing
 it when it is `IDisposable`. Adding a handle attaches a script with its defaults; removing one detaches it. The world
 gives an entity its own copy of a script with a prefab's values through `IScripts`: its handle joins the entity's
 `Scripts`, and in the next frame, once whatever spawned with it is all there, the copy is made for the entity, given
-the values and started, on the main thread. `IScripts` also makes a script of a class that runs on no entity, as a
+the values and started, on the main thread, or while a domain loads in place of the world, as it is readied. `IScripts` also makes a script of a class that runs on no entity, as a
 pipeline script does, with the services its constructor asks for, from any thread.
 
 ## The world
@@ -447,14 +449,22 @@ from the player's camera, so the whole world is there at once.
 
 - The project's entry point opens at start-up, or the default domain when it does not.
 - Opening a domain in place of the open ones closes them and shows the project's loading domain until the new one
-  is there, which is once every gem has taken it in. It appears in the frame the loading domain closes, with the
+  is there, which is once every gem has taken it in. It spawns in the frame the loading domain closes, with the
   project's player put at its spawn: the first entity tagged as the spawn in its prefabs that are not cells, else in
-  its cells. The world says it is loading from when the open domains close until then. The loading domain itself is
-  not taken in first, so it shows as soon as it can.
+  its cells. The loading domain itself is not taken in first, so it shows as soon as it can.
+- What spawned is then readied out of sight: the window keeps the loading domain's last image while each preloader
+  readies the domain, all at once. The gem that runs scripts starts them, so what they spawn as they start is readied
+  with it; a renderer draws it until what builds up over frames, its light, its shadows, the eye's exposure, has
+  settled. Nothing else runs the world meanwhile: no script's hooks or systems, no physics step, no sound. The world is
+  shown once every preloader has readied it, and the first frame shown draws it as it loaded, as what runs it hears
+  only the frame after that the loading is over. The world says it is loading from when the open domains close until
+  it is shown; a gem that cannot take the world hears both on [Events](#events).
 - A gem is a preloader by implementing `IPreloader`. It is handed the prefabs about to spawn, the player among them,
   and the task it returns ends once everything they name is taken in, or cannot be, and hands back what keeps that
-  taken in, which the domain holds while it is open. The reads are the first half of an open's progress, the gems'
-  taking in the second.
+  taken in, which the domain holds while it is open. It readies the domain once it has spawned, and that task ends
+  once it can draw, simulate or play it as it should; one that fails is an error, and the domain is shown without it.
+  The reads are the first half of an open's progress, the gems' taking in the second; readying shows on no progress,
+  as the loading domain's image is held.
 - Opening one beside them shows no loading domain and puts no player.
 - Closing a domain destroys what it spawned.
 - While a domain is open, a prefab of it that is read again, as its file or a prefab it places changed, is spawned

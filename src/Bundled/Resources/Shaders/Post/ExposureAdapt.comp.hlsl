@@ -5,8 +5,8 @@
 // - the world's light (SkySh): the EV100 a mid-grey level surface in the open reads, lit by the key light through the
 //   sky's shadow at the camera, the other directional lights and the sky, as an incident meter reads it, so what fills
 //   the view never changes it, only the light does: for a world its sun or moon, its weather and its sky light.
-// Either is eased towards at a rate that brightens slower than it darkens, as eyes do. The view's lighting is
-// pre-exposed with it from the next frame on.
+// Either is eased towards at a rate that brightens slower than it darkens, as eyes do, but by a view's first metering,
+// which is taken whole. The view's lighting is pre-exposed with it from the next frame on.
 
 #include "Include/Color.hlsli"
 #include "Include/SkyShadow.hlsli"
@@ -86,9 +86,12 @@ void main()
 {
     PassParams params = LoadPassParams();
     float targetEv = clamp(MeteredEv(params), params.minEv, params.maxEv) - params.compensation;
-    float current = LOAD(Exposure, float4, 0u).x;
-    float currentEv = current > 0.0 ? log2(1.0 / (1.2 * current)) : targetEv;
+
+    // The row is the exposure, its EV100, and whether it was ever metered: a view not metered yet, as it first draws,
+    // takes what it meters whole rather than easing in from the default it starts with.
+    float4 held = LOAD(Exposure, float4, 0u);
+    float currentEv = held.z > 0.0 ? log2(1.0 / (1.2 * held.x)) : targetEv;
     float rate = targetEv > currentEv ? params.darkening : params.brightening;
     float ev = currentEv + (targetEv - currentEv) * (1.0 - exp(-DeltaSeconds * rate));
-    STORE(Exposure, float4, 0u, float4(1.0 / (1.2 * exp2(ev)), ev, 0.0, 0.0));
+    STORE(Exposure, float4, 0u, float4(1.0 / (1.2 * exp2(ev)), ev, 1.0, 0.0));
 }

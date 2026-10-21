@@ -24,5 +24,6 @@ Every [prefab](../Prefabs/README.md) in the domain's folder is spawned while it 
 the project's player is put, and which way it faces, when the domain opens in place of the world. With none, the player
 is put at the domain's origin.
 
-How a domain is opened, read and spawned whole in one frame, replaced or opened beside another, and what happens when
-a prefab of it changes on disk while it is open, is the world's ([Core's README](../../../Core/README.md#the-world)).
+How a domain is opened, read and spawned whole in one frame, replaced or opened beside another, readied out of sight
+before it is shown in place of the world, and what happens when a prefab of it changes on disk while it is open, is
+the world's ([Core's README](../../../Core/README.md#the-world)).

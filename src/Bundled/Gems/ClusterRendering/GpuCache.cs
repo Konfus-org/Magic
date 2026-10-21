@@ -267,6 +267,12 @@ internal sealed class GpuCache
     /// </summary>
     private Handle<Material> _sky;
 
+    /// <summary>
+    /// The sky material drawn, held while it is: the world's once it is shown, until then the one shown before, so a
+    /// sky that changes is drawn the old way until the new one can be drawn, never as the renderer's own meanwhile.
+    /// </summary>
+    private Handle<Material> _shownSky;
+
     internal GpuCache(
         GpuResources resources,
         Assets assets,
@@ -551,6 +557,14 @@ internal sealed class GpuCache
             && (entry.HasFailed && model != _failures.Model ? IsDrawable(_failures.Model) : CanDraw(entry));
 
     /// <summary>
+    /// Whether the model's distance field is in, or it has none for good, so global illumination's field holds it and
+    /// is not made again around its instances once it comes in; the failure model's, when the model did not load.
+    /// </summary>
+    internal bool HasField(Handle<Model> model)
+        => _models.Entries.TryGetValue(model, out ModelEntry? entry)
+            && (entry.HasFailed && model != _failures.Model ? HasField(_failures.Model) : entry.IsFieldMade);
+
+    /// <summary>
     /// Takes the model in no later than one an instance of which is <paramref name="distance"/> from the player: the
     /// nearest are taken in first.
     /// </summary>
@@ -630,25 +644,33 @@ internal sealed class GpuCache
 
     /// <summary>
     /// What the sky is drawn with this frame, and the row its params are loaded from: the world's sky material's sky
-    /// shader once it is in, the material held while it is the world's; the renderer's own sky without one, or while it
-    /// loads; and the sky failure material when the material is no sky, its shader a surface or a sky that does not
-    /// compile, as a broken material is drawn as the failure (<see cref="FailureType.Sky"/>). Why is said where
-    /// failures are (<see cref="FailureHandler.SayBrokenSky"/>).
+    /// shader once it is shown, its pipelines compiled, the material held while it is the world's, and the sky shown
+    /// before it until then; the renderer's own sky without one, or before any is shown; and the sky failure material
+    /// when the material is no sky, its shader a surface or a sky that does not compile, as a broken material is drawn
+    /// as the failure (<see cref="FailureType.Sky"/>). Why is said where failures are
+    /// (<see cref="FailureHandler.SayBrokenSky"/>).
     /// </summary>
     internal (SurfaceKey Surface, int Row) GetSky(Handle<Material>? world)
     {
         Handle<Material> material = world ?? Handle<Material>.None;
         if (material != _sky)
         {
-            if (material != Handle<Material>.None) Record(material);
+            if (material != Handle<Material>.None && material != _shownSky) Record(material);
 
-            if (_sky != Handle<Material>.None) Release(_sky);
+            if (_sky != Handle<Material>.None && _sky != _shownSky) Release(_sky);
 
             _sky = material;
         }
 
-        DrawnMaterial? drawn = material == Handle<Material>.None ? null : Get(material);
-        Handle<Material> broken = drawn is { IsSky: false } ? material : Handle<Material>.None;
+        if (_sky != _shownSky && (_sky == Handle<Material>.None || Get(_sky) is not null))
+        {
+            if (_shownSky != Handle<Material>.None) Release(_shownSky);
+
+            _shownSky = _sky;
+        }
+
+        DrawnMaterial? drawn = _shownSky == Handle<Material>.None ? null : Get(_shownSky);
+        Handle<Material> broken = drawn is { IsSky: false } ? _shownSky : Handle<Material>.None;
         _failures.SayBrokenSky(
             broken,
             broken == Handle<Material>.None ? string.Empty : GetFailure(broken) ?? "a surface, not a sky");
@@ -854,6 +876,7 @@ internal sealed class GpuCache
         if (!_models.IsCurrent(entry.Handle, entry) || entry.In != packed) return;
 
         entry.Field = PlaceField(entry.Handle, field);
+        entry.IsFieldMade = true;
         WriteRow(entry);
         ChangedModels.Add(entry.Handle);
     }
@@ -887,6 +910,7 @@ internal sealed class GpuCache
         entry.FirstWord = words;
         WriteClusters(entry, packed);
         entry.Field = 0;
+        entry.IsFieldMade = false;
         WriteCards(entry);
         WriteRow(entry);
         ChangedModels.Add(entry.Handle);
@@ -980,12 +1004,24 @@ internal sealed class GpuCache
 
     /// <summary>
     /// Reads or makes the model's field on a worker, from its coarsest clusters, for the render thread to take in
-    /// (<see cref="TakeField"/>).
+    /// (<see cref="TakeField"/>); one that throws is an error, and the model has none, so a domain that waits for its
+    /// fields is never held up by it (<see cref="HasField"/>).
     /// </summary>
     private async Task MakeFieldAsync(ModelEntry entry, PackedModel packed)
     {
-        ModelField? field = await Task.Run(() => ReadOrMakeFieldAsync(entry.Handle, packed.Coarsest), _stopping)
-            .ConfigureAwait(false);
+        ModelField? field = null;
+        try
+        {
+            field = await Task.Run(() => ReadOrMakeFieldAsync(entry.Handle, packed.Coarsest), _stopping)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Debugging
+                .Error($"{_assets.GetPath(entry.Handle) ?? "A model"} has no distance field, so global illumination "
+                    + $"does not see it: making it threw {ex}");
+        }
+
         _fieldsMade.Writer.TryWrite((entry, packed, field));
     }
 
@@ -1192,7 +1228,7 @@ internal sealed class GpuCache
                 continue;
             }
 
-            if (!IsDrawable(waiting.Drawn)) continue;
+            if (!_graph.IsDrawable(waiting.Drawn)) continue;
 
             Show(_waiting[i], entry, waiting);
             _waiting.RemoveAt(i);
@@ -1383,18 +1419,13 @@ internal sealed class GpuCache
     }
 
     /// <summary>
-    /// Whether a material packed can be drawn as it is packed: a surface once every pipeline it is drawn with is
-    /// compiled, a sky at once, as the sky draw compiles its own and draws nothing until then.
-    /// </summary>
-    private bool IsDrawable(DrawnMaterial drawn) => drawn.IsSky || _graph.IsDrawable(drawn.Surface, drawn.Type);
-
-    /// <summary>
-    /// Draws a material packed as soon as its pipelines are compiled: now, or once they are
-    /// (<see cref="TakeMaterials"/>), drawn as it was until then.
+    /// Draws a material packed as soon as every pipeline it is drawn with is compiled, a surface's or a sky's
+    /// (<see cref="PassGraph.IsDrawable"/>): now, or once they are (<see cref="TakeMaterials"/>), drawn as it was until
+    /// then.
     /// </summary>
     private void ShowWhenDrawable(Handle<Material> handle, MaterialEntry entry, PackedMaterial packed)
     {
-        if (IsDrawable(packed.Drawn))
+        if (_graph.IsDrawable(packed.Drawn))
         {
             Show(handle, entry, packed);
             return;
@@ -1742,6 +1773,11 @@ internal sealed class GpuCache
         internal int FirstCard { get; set; }
 
         internal uint Field { get; set; }
+
+        /// <summary>
+        /// Its field for what is in was read or made, or cannot be: none in <see cref="Field"/> is then none for good.
+        /// </summary>
+        internal bool IsFieldMade { get; set; }
 
         internal bool AreCardsIn { get; set; }
 

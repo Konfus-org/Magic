@@ -62,6 +62,11 @@ internal sealed class SoundWorld : IDisposable
     internal int Count => _instances.Count;
 
     /// <summary>
+    /// Whether the last update placed every solid last taken, none left for a later one for want of time.
+    /// </summary>
+    internal bool IsWhole { get; private set; }
+
+    /// <summary>
     /// Takes every instance out and releases it, then every sub-scene, as the run ends, once nothing simulates.
     /// </summary>
     public unsafe void Dispose()
@@ -132,6 +137,7 @@ internal sealed class SoundWorld : IDisposable
         _listener = listener;
         _solids.Sort(_byNearness);
         bool isChanged = false;
+        IsWhole = true;
         foreach (Solid solid in _solids)
         {
             ref Instance held = ref CollectionsMarshal.GetValueRefOrNullRef(_instances, solid.Entity);
@@ -147,7 +153,11 @@ internal sealed class SoundWorld : IDisposable
                 continue;
             }
 
-            if (Stopwatch.GetElapsedTime(start).TotalSeconds > seconds) continue;
+            if (Stopwatch.GetElapsedTime(start).TotalSeconds > seconds)
+            {
+                IsWhole = false;
+                continue;
+            }
 
             isChanged |= Remove(solid.Entity);
             isChanged |= Add(solid);

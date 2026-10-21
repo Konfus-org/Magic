@@ -57,7 +57,7 @@ struct GpuGi
     uint levels;
     uint rays;
     uint seed;
-    uint padding0;
+    uint steadies;
     float3 camera;
     uint padding1;
     uint4 padding[5];

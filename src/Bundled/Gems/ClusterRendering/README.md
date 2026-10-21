@@ -239,6 +239,9 @@ from showing where they meet or lagging behind a change:
   second at the finest level, a little longer each coarser one, at any frame rate. A change no larger than its rays'
   own noise is blended in more slowly, so the noise of rays drawn anew each tracing does not show as the light in a
   shadow wavering, while a change of the light itself is taken in as fast.
+- While a domain that replaces the world is readied out of sight ([Nothing pops](#nothing-pops)), every probe is
+  traced every frame and holds the plain mean of its tracings, for as many frames as their mean takes to hold their
+  noise and light to bounce, so the world is shown with its light settled rather than gathering it over seconds.
 - A probe that comes into use, as a level moves on, starts from the next coarser level's light where it is, the sky's
   at the coarsest, rather than from nothing, and keeps what it holds while it is out of use.
 - A ray that runs out of steps creeping along a surface takes it as hit rather than letting the sky in, and a model
@@ -274,7 +277,10 @@ clouds in a few steps offsets them by it, and the upscale blends them; the captu
 same one everywhere.
 
 A sky material is a row of the materials as a surface's is, its params packed the same way, but no mesh draws it, so
-it has no bins and no pipelines but the sky's: a mesh that names one is drawn as the shader failure. A sky whose
+it has no bins and no pipelines but the sky's: a mesh that names one is drawn as the shader failure. It is drawn once
+the sky's pipelines are compiled for it, the sky's, its capture's, its shadow's and its air's, as a surface waits for
+its own, and the sky drawn before it is drawn until then, so a sky never shows black or as the renderer's own while
+its shaders compile. A sky whose
 material is no sky, a surface's or a sky's that does not compile, is drawn with the sky failure material in its place,
 as a broken material is drawn with a failure material: magenta in the view, and a plain grey sky in the light it sheds,
 so the world it lights stays lit. Why is said in the log once and on the failure banner for as long as it stays broken.
@@ -376,6 +382,8 @@ Ambient occlusion, contact shadows, exposure and tonemapping are effects too, re
 Exposure is metered one of two ways, by which effect a world names: from the view's pixels, so it follows what the
 view sees and a dark wall filling it brightens everything; or from the light its sun, through the sky's shadow, and its
 sky shed on an open, level surface at the camera, so what fills the view never changes it, for a world they light.
+Either eases toward what it meters, but a view's first metering, which it takes whole, so a camera that comes into
+the world sees it exposed from its first frame rather than adapting from a default.
 
 ### Textures
 
@@ -396,11 +404,20 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
   and the field are made again where it stands; one whose model and materials are drawn already appears at once, as a
   script spawning it means it to.
 - A dissolve is a dither that moves each frame, so the upscale blends it.
-- A domain is taken in before it spawns (Core's `IPreloader`): its models into the pool, its materials with their
-  textures and every surface's pipelines, and the frame built for the effects it names while the world names none,
-  so the loading domain is drawn with them and nothing is built again at the switch. The world spawns it once all of
-  that is in, so a domain appears whole in its first frame, and only what a script spawns later dissolves in. What was
-  taken in is held while the domain is open, so nothing of it is let go between coming in and being drawn.
+- A domain is taken in before it spawns (Core's `IPreloader`): its models into the pool with their fields, its
+  materials with their textures and every surface's and the sky's pipelines, and the frame built for the effects it
+  names while the world names none, so the loading domain is drawn with them and nothing is built again at the switch.
+  The world spawns it once all of that is in, so a domain appears whole in its first frame, and only what a script
+  spawns later dissolves in. What was taken in is held while the domain is open, so nothing of it is let go between
+  coming in and being drawn.
+- A domain that replaces the world is then readied: from the frame it spawns, the window shows a copy of the loading
+  domain's last image, kept each frame while the world loads, while the world is drawn as ever out of sight, the
+  scripts' starts and what they spawned among it, so what builds up over frames settles before anyone sees it. The
+  view's exposure is metered whole, global illumination's probes are all traced each frame, the shadows' pages drawn
+  and the upscale's history filled, for as many frames as the slowest of those takes from nothing; a look that comes
+  in meanwhile appears at once rather than dissolving, as nobody sees it come in. It is ready once that many frames
+  are drawn, every instance can be drawn and the fog's falloff is in, and the window shows the world from the frame
+  the world is first shown.
 
 ## Debugging
 

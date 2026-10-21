@@ -38,6 +38,12 @@ namespace Magic.SteamAudio;
 /// With no window, or no audio device, nothing is played: every sound goes on in silence, as one out of reach does, so
 /// a script sees the same either way.
 /// </para>
+/// <para>
+/// A domain that replaces the world is readied before it is shown (<see cref="ReadyAsync"/>): its sounds are held,
+/// none played and none's time running, until the loading is told over, the frame after the world is first shown, and
+/// the solids near the listener are all placed meanwhile, with no limit on how long an update of the scene takes, as no
+/// sound waits on it, so the first sound heard is muffled and echoed as it should be.
+/// </para>
 /// </summary>
 internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 {
@@ -118,6 +124,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     private readonly List<Entity> _gone = [];
     private readonly List<Vector3> _players = [];
     private readonly Surroundings _surroundings;
+    private readonly Subscription _watching;
 
     /// <summary>
     /// Each audio file once it has loaded; null while it loads, or when it did not.
@@ -198,13 +205,44 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private uint _frame;
 
-    public unsafe SteamAudioGem(World world, Assets assets, Threads threads, Args run, SteamAudioSettings settings)
+    /// <summary>
+    /// A domain replacing the world is being readied, and no sound plays nor has its time run until the loading is
+    /// told over (<see cref="ReadyAsync"/>). Main thread.
+    /// </summary>
+    private bool _isHeld;
+
+    /// <summary>
+    /// How many times the solids have been gathered, each frame handed over stamped with it. Main thread.
+    /// </summary>
+    private int _gathered;
+
+    /// <summary>
+    /// The gathering whose solids, all placed, end the readying, and what ends it; none when nothing is being readied.
+    /// Main thread.
+    /// </summary>
+    private int _readyAt;
+    private TaskCompletionSource? _readied;
+
+    /// <summary>
+    /// The gathering last taken whose solids the scene held every one of after an update, written by the simulation
+    /// thread for the main thread.
+    /// </summary>
+    private int _placed;
+
+    public unsafe SteamAudioGem(
+        World world,
+        Assets assets,
+        Threads threads,
+        Events events,
+        Args run,
+        SteamAudioSettings settings)
     {
         _world = world;
         _assets = assets;
         _threads = threads;
         _settings = settings;
         _surroundings = new Surroundings(assets);
+        _watching = events.Watch<WorldLoading>(loading => _isHeld &= loading.IsLoading);
         if (run.Headless)
         {
             Debugging.Info("Sound is not played headless: every sound goes on in silence.");
@@ -331,6 +369,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     public unsafe void Dispose()
     {
+        _watching.Dispose();
         if (_self.IsAllocated) _self.Free();
 
         foreach (Hold hold in _holds)
@@ -377,16 +416,18 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             TakeReleased(_sounds);
         }
 
-        FollowSounds(frame.DeltaSeconds);
+        FollowSounds(_isHeld ? 0 : frame.DeltaSeconds);
         if (_sounds is null) return;
 
-        Assign();
+        if (!_isHeld) Assign();
+
         SimulationFrame filling = _frames[_filling];
         filling.Listener = _listener;
         filling.ListenerPosition = _listenerPosition;
         filling.Bounces = _settings.Bounces;
         filling.IsReflecting = _sounds.IsReflecting;
         filling.ReflectionPeriod = 1 / Math.Clamp(_settings.ReflectionRate, 1, 60);
+        filling.PlacingSeconds = _isHeld ? double.PositiveInfinity : PlacingSeconds;
         Steer(_sounds, filling);
         Reflect(_sounds, filling);
         _sinceGathered += frame.DeltaSeconds;
@@ -394,13 +435,19 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         if (filling.HasSolids)
         {
             _sinceGathered = 0;
+            _gathered++;
             _surroundings.Gather(_world, CollectionsMarshal.AsSpan(_players), _settings.Range, filling.Solids);
         }
 
+        filling.Gathered = _gathered;
         _filling = Interlocked.Exchange(ref _newest, _filling);
         Volatile.Write(ref _isNewest, 1);
         _wake.Set();
         _heard.Record(_holds.Length - _free.Count);
+        if (_readied is null || Volatile.Read(ref _placed) < _readyAt) return;
+
+        _readied.TrySetResult();
+        _readied = null;
     }
 
     /// <summary>
@@ -452,6 +499,25 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         await preload.Done.Task.ConfigureAwait(false);
 
         return Subscription.None;
+    }
+
+    /// <summary>
+    /// Holds every sound from now until the loading is told over (<see cref="WorldLoading"/>), the frame after the world
+    /// is first shown: none is played and none's time runs. The solids around the listener are gathered at once and
+    /// placed with no limit on time, and the task ends once the scene holds every one of them; at once with nothing to
+    /// play sound on, as there is no scene.
+    /// </summary>
+    public Task ReadyAsync(CancellationToken cancel)
+    {
+        _isHeld = true;
+        if (_sounds is null) return Task.CompletedTask;
+
+        _sinceGathered = GatherSeconds;
+        _readyAt = _gathered + 1;
+        TaskCompletionSource readied = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _readied?.TrySetCanceled(CancellationToken.None);
+        _readied = readied;
+        return readied.Task.WaitAsync(cancel);
     }
 
     /// <summary>
@@ -1038,6 +1104,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             if (_sounds is null || _soundWorld is null) return;
 
             long traced = 0;
+            int taken = 0;
             while (!stopping.IsCancellationRequested)
             {
                 _wake.Wait(CancellationToken.None);
@@ -1047,7 +1114,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
                 _reading = Interlocked.Exchange(ref _newest, _reading);
                 SimulationFrame frame = _frames[_reading];
+                if (frame.HasSolids) taken = frame.Gathered;
+
                 Simulate(_sounds, _soundWorld, frame);
+                if (_soundWorld.IsWhole) Volatile.Write(ref _placed, taken);
+
                 if (frame.IsReflecting && Array.IndexOf(frame.IsEchoing, true) >= 0
                     && Stopwatch.GetElapsedTime(traced).TotalSeconds >= frame.ReflectionPeriod)
                 {
@@ -1072,7 +1143,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         long start = Stopwatch.GetTimestamp();
         if (frame.HasSolids) soundWorld.Take(frame.Solids);
 
-        if (soundWorld.Update(frame.ListenerPosition, PlacingSeconds))
+        if (soundWorld.Update(frame.ListenerPosition, frame.PlacingSeconds))
         {
             IPL.SceneCommit(_scene);
             IPL.SimulatorCommit(_simulator);
@@ -1255,6 +1326,16 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         /// The solids were gathered this frame; otherwise the scene goes on from those it took last.
         /// </summary>
         internal bool HasSolids { get; set; }
+
+        /// <summary>
+        /// Which gathering of the solids is the latest as of this frame (<see cref="HasSolids"/>).
+        /// </summary>
+        internal int Gathered { get; set; }
+
+        /// <summary>
+        /// How long the scene's update may spend placing new solids (<see cref="SoundWorld.Update"/>).
+        /// </summary>
+        internal double PlacingSeconds { get; set; }
 
         internal int Bounces { get; set; }
 

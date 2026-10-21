@@ -88,6 +88,12 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     private Action<int>? _workOut;
 
     /// <summary>
+    /// Whether this frame's world is drawn out of sight, as it is readied: a look that can be drawn at last then shows
+    /// at once rather than dissolving in, as nobody sees it come in.
+    /// </summary>
+    private bool _isHidden;
+
+    /// <summary>
     /// The slots there are, a GPU thread each where culling runs over the instances.
     /// </summary>
     internal int Capacity => _table.Capacity;
@@ -123,11 +129,26 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     internal Renderer GetRenderer(int slot) => _entries[slot].Renderer;
 
     /// <summary>
-    /// Takes in what changed since the last frame into the instances' table. <paramref name="time"/> is the frame's,
-    /// which a fade starts at; <paramref name="player"/> where detail is wanted first.
+    /// Whether an instance waits for its look to be drawn at last: its model, cards or a material not in yet.
     /// </summary>
-    internal void Update(Renderables copy, float time, Vector3 player)
+    internal bool HasWaiting()
     {
+        foreach (LookEntry entry in _looks.Values)
+        {
+            if (!entry.IsReady) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Takes in what changed since the last frame into the instances' table. <paramref name="time"/> is the frame's,
+    /// which a fade starts at; <paramref name="player"/> where detail is wanted first; <paramref name="isHidden"/>
+    /// while the world is drawn out of sight.
+    /// </summary>
+    internal void Update(Renderables copy, float time, Vector3 player, bool isHidden)
+    {
+        _isHidden = isHidden;
         Delta<InstanceCopy> instances = copy.Instances;
         if (_entries.Length < instances.Length) Array.Resize(ref _entries, instances.Length);
 
@@ -363,7 +384,9 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         if (entry.IsReady || !areShown || !resources.IsDrawable(look.Model)) return;
 
         entry.IsReady = true;
-        entry.ReadyAt = time;
+
+        // Before every instance's fade start, so none dissolves in, when nobody sees the look come in.
+        entry.ReadyAt = _isHidden ? float.NegativeInfinity : time;
     }
 
     /// <summary>

@@ -133,11 +133,12 @@ internal sealed class WorldProcessor : IDisposable
 
     /// <summary>
     /// Takes what changed in <see cref="Front"/> into the instances' and the lights' rows. <paramref name="time"/> is
-    /// the frame's, which a fade starts at; <paramref name="player"/> where detail is wanted first. Render thread.
+    /// the frame's, which a fade starts at; <paramref name="player"/> where detail is wanted first;
+    /// <paramref name="isHidden"/> while the world is drawn out of sight. Render thread.
     /// </summary>
-    internal void UpdateRows(float time, Vector3 player)
+    internal void UpdateRows(float time, Vector3 player, bool isHidden)
     {
-        Instances.Update(Front, time, player);
+        Instances.Update(Front, time, player, isHidden);
         Lights.Update(Front);
     }
 
@@ -200,6 +201,7 @@ internal sealed class WorldProcessor : IDisposable
             next.Sky = FindFirst<Sky>()?.Material;
             next.Weather = FindFirst<Weather>();
             next.Effects = FindFirst<PostProcessing>()?.Effects ?? Handle<Pipeline>.None;
+            next.IsLoading = world.IsLoading;
         }
 
         /// <summary>
@@ -506,6 +508,12 @@ internal sealed class Renderables
     /// </summary>
     internal Handle<Pipeline> Effects { get; set; }
 
+    /// <summary>
+    /// Whether a domain is opening in place of the world (Core's <c>World.IsLoading</c>): false from the frame the world
+    /// is first shown, the first the window shows it in rather than the image kept as it loaded.
+    /// </summary>
+    internal bool IsLoading { get; set; }
+
     internal void Clear()
     {
         Instances.Clear();
@@ -519,6 +527,7 @@ internal sealed class Renderables
         Sky = null;
         Weather = null;
         Effects = Handle<Pipeline>.None;
+        IsLoading = false;
     }
 }
 

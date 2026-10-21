@@ -30,7 +30,8 @@ namespace Magic.Box3DPhysics;
 /// one that has gone farther from every player camera than the settings' range, so a world full of bodies is simulated
 /// only around the player; an entity past the range waits where it is, body or no body, until the player comes back.
 /// The models a domain's bodies are shaped like are fitted before it spawns (<see cref="IPreloader"/>), so its bodies
-/// are there from its first step.
+/// are there from its first step; one that replaces the world has them made as it is readied, but takes no step until
+/// the loading is over (<see cref="WorldLoading"/>), so nothing moves before the world is shown.
 /// <para>
 /// It answers <see cref="IPhysics"/> from the bodies as the last step left them, waiting for a step still running,
 /// and after each step writes what every body that listens, one whose entity has a <see cref="Contacts"/>, is
@@ -48,7 +49,7 @@ namespace Magic.Box3DPhysics;
 [SuppressMessage(
     "Design",
     "CA1001:Types that own disposable fields should be disposable",
-    Justification = "The shapes are the main thread's, the world's, and end in Stop there; "
+    Justification = "The shapes and the watch are the main thread's, the world's, and end in Stop there; "
         + "Dispose would run on the render thread. The step's event and semaphore hold no OS handle and outlive the "
         + "physics thread, which may still be waking as the run ends.")]
 internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
@@ -92,6 +93,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     private readonly Threads _threads;
     private readonly Box3DPhysicsSettings _settings;
     private readonly ModelShapes _shapes;
+    private readonly Subscription _watching;
     private readonly List<Body> _bodies = [];
     private readonly Dictionary<Entity, int> _slots = [];
     private readonly Stack<int> _free = [];
@@ -150,16 +152,34 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     private bool _isApplied = true;
 
     /// <summary>
+    /// A domain replacing the world is being readied, and its bodies are made but no step is taken until the loading is
+    /// told over (<see cref="ReadyAsync"/>). Main thread.
+    /// </summary>
+    private bool _isHeld;
+
+    /// <summary>
+    /// Ends the readying once a fixed step has made the domain's bodies; none when nothing is being readied. Main
+    /// thread.
+    /// </summary>
+    private TaskCompletionSource? _readied;
+
+    /// <summary>
     /// The run is ending: the physics thread returns when next woken.
     /// </summary>
     private volatile bool _isEnding;
 
-    public unsafe Box3DPhysicsGem(World world, Assets assets, Threads threads, Box3DPhysicsSettings settings)
+    public unsafe Box3DPhysicsGem(
+        World world,
+        Assets assets,
+        Threads threads,
+        Events events,
+        Box3DPhysicsSettings settings)
     {
         _world = world;
         _threads = threads;
         _settings = settings;
         _shapes = new ModelShapes(assets);
+        _watching = events.Watch<WorldLoading>(loading => _isHeld &= loading.IsLoading);
 
         B3.SetAssertFcn(&OnAssert);
         B3.SetLogFcn(&OnLog);
@@ -234,7 +254,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         }
 
         _gone.Clear();
-        Kick(frame.DeltaSeconds);
+        if (!_isHeld)
+        {
+            Kick(frame.DeltaSeconds);
+            return;
+        }
+
+        // The domain's bodies are made, so its first step, once it is shown, has only to step them.
+        _readied?.TrySetResult();
+        _readied = null;
     }
 
     /// <summary>
@@ -243,6 +271,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     public void Stop()
     {
+        _watching.Dispose();
         WaitForStep();
         _isEnding = true;
         _kick.Release();
@@ -313,6 +342,20 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         await preload.Done.Task.ConfigureAwait(false);
 
         return Subscription.None;
+    }
+
+    /// <summary>
+    /// Makes the domain's bodies at the next fixed step, their shapes fitted before it spawned, and takes no step from
+    /// now until the loading is told over (<see cref="WorldLoading"/>), the frame after the world is first shown, so
+    /// nothing has fallen or moved by then, and the first step has only to step them. Ready once they are made.
+    /// </summary>
+    public Task ReadyAsync(CancellationToken cancel)
+    {
+        _isHeld = true;
+        TaskCompletionSource readied = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        _readied?.TrySetCanceled(CancellationToken.None);
+        _readied = readied;
+        return readied.Task.WaitAsync(cancel);
     }
 
     internal static B3.Vec3 ToVec(Vector3 vector)
