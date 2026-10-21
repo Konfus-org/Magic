@@ -2,7 +2,10 @@
     "stage": "reflections",
     "kind": "compute",
     "shader": { "id": 11286 },
-    "creates": [ { "name": "ReflectionTraced", "filter": "nearest", "format": "rgba16_float" } ],
-    "writes": [ { "name": "ReflectionTraced" } ],
+    "creates": [
+        { "name": "ReflectionTraced", "filter": "nearest", "format": "rgba16_float" },
+        { "name": "ReflectionDistance", "filter": "nearest", "format": "r16_float" }
+    ],
+    "writes": [ { "name": "ReflectionTraced" }, { "name": "ReflectionDistance" } ],
     "dispatch": { "per": "view" }
 }

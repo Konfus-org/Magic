@@ -7,7 +7,9 @@
 // camera or hidden behind something as much as what is in sight, only as coarsely as the field holds it. A surface
 // rougher than `rough` draws two rays and takes their mean, as its lobe is wide. Written in nits with how much of it
 // the lighting takes in place of the sky alone: all for a smooth surface, none past roughest, where the sky's blur is
-// as good. Reflections/ReflectionResolve.comp.hlsl filters what the rays find in space and time.
+// as good; and, apart (ReflectionDistance), how far the first ray went to what it reflects, which tells where the
+// reflection's image stands behind the surface. Reflections/ReflectionResolve.comp.hlsl filters what the rays find in
+// space and time.
 
 #include "Include/Brdf.hlsli"
 #include "Include/Noise.hlsli"
@@ -25,10 +27,14 @@ struct PassParams
     float rough = 0.25;      // roughness past which two rays are traced
 };
 
-// What one ray from the lobe reflects, in nits: ray tells the rays of a pixel apart, and sky is what the surface
-// reflects of the sky past everything.
-float3 TraceRay(float2 pixel, float3 position, float3 normal, float3 toEye, float roughness, uint ray, float3 sky)
+// Metres a reflection of the sky is taken to be from the surface: far enough that its image moves as the sky does.
+static const float SkyDistance = 10000.0;
+
+// What one ray from the lobe reflects, in nits, and how far from the surface what it reflects is: ray tells the rays of
+// a pixel apart, and sky is what the surface reflects of the sky past everything.
+float3 TraceReflection(float2 pixel, float3 position, float3 normal, float3 toEye, float roughness, uint ray, float3 sky, out float distance)
 {
+    distance = SkyDistance;
     float2 apart = float2(23.0, 47.0) * (float)ray;
 
     // A ray from the lobe: the half vector drawn by GGX, reflected about; one that would go under the surface is the
@@ -76,11 +82,13 @@ float3 TraceRay(float2 pixel, float3 position, float3 normal, float3 toEye, floa
     GiHit hit = GiTrace(origin + direction * level.voxel, direction, first, header.levels, GiLevel(header.levels - 1u).voxel * (float)GiResolution * 0.5);
     [branch] if (hit.isHit && !hit.isInside)
     {
+        distance = length(hit.position - surface);
         return GiHitRadiance(hit, header.levels, sh);
     }
 
     [branch] if (hit.isInside)
     {
+        distance = 1.5 * level.voxel;
         float held;
         float3 arriving = GiIrradianceAt(origin, direction, direction, held);
         return lerp(sky, arriving, held);
@@ -107,6 +115,7 @@ void main(uint3 id : SV_DispatchThreadID)
     [branch] if (depth <= 0.0 || share <= 0.0)
     {
         ReflectionTraced[id.xy] = float4(0.0, 0.0, 0.0, 0.0);
+        ReflectionDistance[id.xy] = 0.0;
         return;
     }
 
@@ -122,11 +131,14 @@ void main(uint3 id : SV_DispatchThreadID)
     float3 dominant = SpecularDominantDirection(normal, reflect(-toEye, normal), roughness);
     float3 sky = SkySpecular.SampleLevel(SkySpecularSampler, dominant, PrefilteredLevel(roughness, levels)).rgb;
 
-    float3 reflected = TraceRay(pixel, position, normal, toEye, roughness, 0u, sky);
+    float distance;
+    float3 reflected = TraceReflection(pixel, position, normal, toEye, roughness, 0u, sky, distance);
     [branch] if (roughness > params.rough)
     {
-        reflected = 0.5 * (reflected + TraceRay(pixel, position, normal, toEye, roughness, 1u, sky));
+        float second;
+        reflected = 0.5 * (reflected + TraceReflection(pixel, position, normal, toEye, roughness, 1u, sky, second));
     }
 
     ReflectionTraced[id.xy] = float4(reflected, share);
+    ReflectionDistance[id.xy] = distance;
 }

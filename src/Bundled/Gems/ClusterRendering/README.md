@@ -213,7 +213,9 @@ from showing where they meet or lagging behind a change:
   where one level gives way to the next moves with the camera, never in the steps a level moves by; a level whose
   probes cannot see a place hands it on by as much, smoothly.
 - A probe blends each tracing into what it held by how long it waited, so light follows a change in a fraction of a
-  second at the finest level, a little longer each coarser one, at any frame rate.
+  second at the finest level, a little longer each coarser one, at any frame rate. A change no larger than its rays'
+  own noise is blended in more slowly, so the noise of rays drawn anew each tracing does not show as the light in a
+  shadow wavering, while a change of the light itself is taken in as fast.
 - A probe that comes into use, as a level moves on, starts from the next coarser level's light where it is, the sky's
   at the coarsest, rather than from nothing, and keeps what it holds while it is out of use.
 - A ray that runs out of steps creeping along a surface takes it as hit rather than letting the sky in, and a model
@@ -286,9 +288,13 @@ surface, a voxel and a half of that level off it, so a far surface's ray does no
 moved out of the field along its gradient where it starts inside another surface's fattened band, the foot of a wall
 within the floor's; and a voxel along the ray, past the field's rounding of its own corners, which a ray leaving a
 corner at a grazing angle would otherwise meet. A rough surface traces two rays and takes their mean, as its lobe is
-wide. The rays are filtered across the surface, over a wider patch the rougher it is, and blended over frames, last
-frame's clipped toward the neighbours' colours in YCoCg, more of it kept the rougher the surface; and the lighting
-takes them in place of the sky's reflection.
+wide. The rays are filtered across the surface, over a wider patch the rougher it is, and blended over frames, more of
+the last kept the rougher the surface: last frame's is looked for where the reflection's image was, behind the surface
+by as far as the ray went, so a reflection sliding across a mirror or a ball as the camera moves is followed rather
+than smeared, a rough surface's by the surface's own motion; it is clipped toward the colours of the neighbours on the
+same surface, in YCoCg; and the further outside them it was, the less of it is kept, so what changed in a reflection,
+a ball shot across it, is replaced at once rather than trailing. The lighting takes them in place of the sky's
+reflection.
 
 ### The air and the fog
 

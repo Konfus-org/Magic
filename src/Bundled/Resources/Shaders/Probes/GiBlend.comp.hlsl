@@ -2,12 +2,35 @@
 // distance tile's then its irradiance tile's, which every thread then writes out, a texel of the distance tile each and
 // the first 64 one of the irradiance tile as well, a border texel the inside one across the octahedron's fold.
 // Irradiance is the rays' light weighted by the cosine to the texel's direction, distance the rays' lengths and their
-// squares by a sharp lobe around it (the cosine to the 50th); each blended into what the probe held (GiHistory) by its
-// level's hysteresis, unless it holds nothing yet. A probe given the next coarser level's light until it was traced
-// (Probes/GiClassify) blends its first tracing into that at least halfway, and takes what it sees whole. A probe that
-// lights nothing this frame is left as it is.
+// squares by a sharp lobe around it (the cosine to the 50th); each blended into what the probe held (GiHistory), unless
+// it holds nothing yet. How much of what it held a texel keeps follows how much it changed, as DDGI's implementations
+// do (Majercik et al. 2019): a change no larger than its rays' own noise keeps a steadier share, so the noise of a few
+// dozen rays drawn anew each tracing does not show as the light's brightness wavering, while a change larger than that,
+// a cloud's shadow crossing, a lamp turned on, is taken in by the level's own hysteresis, as fast as ever. A probe given
+// the next coarser level's light until it was traced (Probes/GiClassify) blends its first tracing into that at least
+// halfway, and takes what it sees whole. A probe that lights nothing this frame is left as it is.
 
 #include "Lighting/Gi.hlsli"
+
+// A texel's change, as a share of what it was, within which it is taken for its rays' noise, and past which for a
+// change of the light; and the share of the level's hysteresis' room to change a texel within its noise is given.
+static const float NoiseChange = 0.15;
+static const float RealChange = 0.5;
+static const float SteadyShare = 0.25;
+
+// How much a texel's new value differs from what it held, as a share of the larger: the most of its components'.
+float GiChange(float3 traced, float3 held)
+{
+    return Max3(abs(traced - held)) / max(max(Max3(traced), Max3(held)), 1e-6);
+}
+
+// The share of what it held a texel keeps: a steadier one than its level's while it changes no more than noise does,
+// the level's own once it changes as much as the light does, and between the two between.
+float GiKept(float hysteresis, float change)
+{
+    float steady = 1.0 - (1.0 - hysteresis) * SteadyShare;
+    return lerp(steady, hysteresis, smoothstep(NoiseChange, RealChange, change));
+}
 
 // The probe's rays and their directions, read once for the group rather than by each texel; as many as a probe has.
 groupshared float4 SharedRays[256];
@@ -69,7 +92,9 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         uint slot = GiDistanceHistory(probeIndex, thread);
         if (isTraced)
         {
-            moments = lerp(moments, GiUnpackHalf(uint2(GiHistory.Load(slot * 4u), 0u)).xy, level.hysteresis);
+            float2 held = GiUnpackHalf(uint2(GiHistory.Load(slot * 4u), 0u)).xy;
+            float change = abs(moments.x - held.x) / max(max(moments.x, held.x), 1e-4);
+            moments = lerp(moments, held, GiKept(level.hysteresis, change));
         }
 
         GiHistory.Store(slot * 4u, GiPackHalf(float4(moments, 0.0, 0.0)).x);
@@ -92,7 +117,9 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         uint slot = GiIrradianceHistory(probeIndex, inside);
         if (isTraced || isSeeded)
         {
-            irradiance = lerp(irradiance, GiUnpackHalf(GiHistory.Load2(slot * 4u)).rgb, isTraced ? level.hysteresis : min(level.hysteresis, 0.5));
+            float3 held = GiUnpackHalf(GiHistory.Load2(slot * 4u)).rgb;
+            float kept = isTraced ? GiKept(level.hysteresis, GiChange(irradiance, held)) : min(level.hysteresis, 0.5);
+            irradiance = lerp(irradiance, held, kept);
         }
 
         GiHistory.Store2(slot * 4u, GiPackHalf(float4(irradiance, 0.0)));
