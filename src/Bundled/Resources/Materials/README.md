@@ -53,8 +53,10 @@ captured, is handed back apart too: the failure sky shows its magenta that way, 
 magenta. The shadow lights the world, the sun reaching each place only by what gets through, so it must agree with what
 the sky shows in front of the sun's disc: clouds that hide the disc darken the ground beneath them, and a sky with
 nothing in front of the sun lets it all through. The weather is the world's state and the params are the sky's look: a
-sky reads the clouds' coverage, colours and wind from its inputs and keeps its params for how it draws them. The
-engine's procedural sky, under `Shaders/Skies/`, is the example.
+sky reads the clouds' coverage, colours and wind from its inputs and keeps its params for how it draws them. A sky that
+integrates along the view in steps, through air or clouds, can afford few of them: its inputs hand each pixel of the
+view a dither that moves each frame, and steps offset by it are blended by the view's temporal upscale into many more.
+The engine's procedural sky, under `Shaders/Skies/`, is the example.
 
 ## What must agree
 

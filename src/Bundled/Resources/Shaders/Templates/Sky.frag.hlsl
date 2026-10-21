@@ -4,12 +4,14 @@
 // gives is the sky's luminance in nits, not pre-exposed, so it lights the world as the sky would. The sun's disc it
 // hands back apart is shown in the view and left out of the capture, which the sun's own light stands for. Without a
 // sky (SKY_FALLBACK) it is the renderer's own: a clear sky as bright as the sun makes it, with the sun's disc. What a
-// sky gives off pre-exposed is added in the view as it is, and never captured.
+// sky gives off pre-exposed is added in the view as it is, and never captured. In the view each pixel's dither moves
+// each frame, interleaved gradient noise, for a sky that integrates by steps; a capture's is the same everywhere.
 
 #include "Include/Color.hlsli"
 #include "Include/Cube.hlsli"
 #include "Include/Fullscreen.hlsli"
 #include "Include/Math.hlsli"
+#include "Include/Noise.hlsli"
 #include "Include/Sky.hlsli"
 #include "Include/SkyFrame.hlsli"
 
@@ -57,7 +59,12 @@ float4 main(PassVaryings input) : SV_Target0
 #if SKY_FALLBACK
     SkyLight light = FallbackSky(direction);
 #else
-    SkyLight light = EvaluateSky(SkyInputsOf(direction, SKY_CUBE != 0), LoadMaterialParams(SkyMaterial));
+#if SKY_CUBE
+    float dither = 0.5;
+#else
+    float dither = InterleavedGradientNoise(input.position.xy, FrameIndex);
+#endif
+    SkyLight light = EvaluateSky(SkyInputsOf(direction, SKY_CUBE != 0, dither), LoadMaterialParams(SkyMaterial));
 #endif
 
 #if SKY_CUBE

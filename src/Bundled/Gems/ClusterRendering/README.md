@@ -226,6 +226,9 @@ The world's sky material names a sky shader, drawn along each direction over wha
 and the weather the frame's constants hold. The sun is the directional light tagged as the sun: there is one, and the
 world says which it is, so a directional light that is not tagged lights nothing, which the log says once. The weather,
 still air and a clear sky without one, reaches every pass the same way, so whatever the wind should move can read it.
+In the view each pixel hands the sky a dither that moves each frame, so a sky that marches through its air or its
+clouds in a few steps offsets them by it, and the upscale blends them; the capture and the sky's shadow are handed the
+same one everywhere.
 
 A sky material is a row of the materials as a surface's is, its params packed the same way, but no mesh draws it, so
 it has no bins and no pipelines but the sky's: a mesh that names one is drawn as the shader failure. A sky whose

@@ -44,6 +44,8 @@ struct SkyInputs
     float3 cloudColor;       // linear, the clouds where the sun lights them, times the sun's light
     float3 cloudShadow;      // linear, the clouds in their own shade and underneath, times the sky's light
     bool isCapture;          // drawn into the light from everywhere, coarse and blurred, so detail can be spared
+    float dither;            // 0 to 1, another for each pixel and frame in the view, which the temporal upscale blends,
+                             // so a sky that integrates by steps offsets them by it; the same everywhere otherwise
 };
 
 // What a sky hands back, in nits, not pre-exposed: it lights the world as the sky would.

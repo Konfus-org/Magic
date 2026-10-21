@@ -7,8 +7,8 @@
 #include "Include/Frame.hlsli"
 #include "Include/Sky.hlsli"
 
-// The sky's inputs along a direction; a capture is drawn coarser.
-SkyInputs SkyInputsOf(float3 direction, bool isCapture)
+// The sky's inputs along a direction; a capture is drawn coarser. dither is the pixel's (Include/Sky.hlsli).
+SkyInputs SkyInputsOf(float3 direction, bool isCapture, float dither)
 {
     SkyInputs inputs;
     inputs.direction = direction;
@@ -23,6 +23,7 @@ SkyInputs SkyInputsOf(float3 direction, bool isCapture)
     inputs.cloudColor = Weather.CloudColor;
     inputs.cloudShadow = Weather.CloudShadow;
     inputs.isCapture = isCapture;
+    inputs.dither = dither;
     return inputs;
 }
 

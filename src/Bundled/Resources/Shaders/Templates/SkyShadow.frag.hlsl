@@ -13,6 +13,6 @@ float main(PassVaryings input) : SV_Target0
     return 1.0;
 #else
     float2 place = SkyShadowPlace(input.uv);
-    return SunThrough(SkyInputsOf(-SunDirection, false), float3(place.x, CameraPosition.y, place.y), LoadMaterialParams(SkyMaterial));
+    return SunThrough(SkyInputsOf(-SunDirection, false, 0.5), float3(place.x, CameraPosition.y, place.y), LoadMaterialParams(SkyMaterial));
 #endif
 }
