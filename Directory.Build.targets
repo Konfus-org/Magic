@@ -1,18 +1,20 @@
 <Project>
-  <!-- Native libraries. A project declares what it binds with a NativeLibrary item: the library's logical name (what
-       DllImport names and the gem load context resolves), the headers to read and how C names map to C# ones. How
-       each library is had is natives/CMakeLists.txt's: one CMake superbuild for every library, which this file runs
-       (natives/README.md), and which puts them under one folder per machine (MagicNativeLibs), shared by every
-       checkout. From there the build generates the C# API from the headers (tools/NativeBindingsGenerator) into the
-       intermediate folder and compiles it in, and copies the library beside the assembly under runtimes/<rid>/native/,
-       where the gem load context finds it. Every item's include folder serves every generation in the project, so a
-       library whose headers include another's declares that one too; an item with no Headers is bound by hand and
-       declared for its binary alone, and one declared HeadersOnly is read for its headers alone. -->
+  <!-- Native libraries. A project declares each C library it binds with a NativeLibrary item, and the item says all of
+       it: where the library comes from, how CMake builds it, and what is bound of it, its headers and how C names map
+       to C# ones (src/Bundled/Gems/README.md#native-libraries). The build writes the project's items as one CMake
+       superbuild, an ExternalProject each, and builds what is not built yet into one folder per machine
+       (MagicNativeLibs), shared by every checkout. From there it generates the C# API from the headers
+       (tools/NativeBindingsGenerator) into the intermediate folder and compiles it in, and copies the library beside
+       the assembly under runtimes/<rid>/native/, where the gem load context finds it. Every item's include folder
+       serves every generation in the project, so a library whose headers include another's declares that one too; an
+       item with no Headers is bound by hand and declared for its binary alone, and one declared HeadersOnly is fetched
+       for its headers and sources alone. -->
   <PropertyGroup>
     <MagicNativeLibs Condition="'$(MagicNativeLibs)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))/Magic/NativeLibs/</MagicNativeLibs>
+    <!-- With forward slashes, as CMake writes paths, so an option a project makes of it reads as CMake recorded it. -->
+    <MagicNativeLibs>$([MSBuild]::EnsureTrailingSlash('$(MagicNativeLibs)').Replace('\', '/'))</MagicNativeLibs>
     <MagicNativeRid>$(NETCoreSdkRuntimeIdentifier)</MagicNativeRid>
-    <MagicNativeSuperbuild>$(MSBuildThisFileDirectory)natives/</MagicNativeSuperbuild>
-    <MagicNativeSuperbuildOutput>$(MSBuildThisFileDirectory)Build/natives/</MagicNativeSuperbuildOutput>
+    <MagicNativeSuperbuild>$(IntermediateOutputPath)natives/</MagicNativeSuperbuild>
     <MagicNativeBindingsGenerator>$(MSBuildThisFileDirectory)tools/NativeBindingsGenerator/NativeBindingsGenerator.csproj</MagicNativeBindingsGenerator>
     <MagicNativeBindingsGeneratorDll>$(MSBuildThisFileDirectory)Build/bin/$(Configuration)/Tools/NativeBindingsGenerator/NativeBindingsGenerator.dll</MagicNativeBindingsGeneratorDll>
     <MagicNativeSysroot>$(MSBuildThisFileDirectory)tools/NativeBindingsGenerator/Sysroot/</MagicNativeSysroot>
@@ -23,8 +25,23 @@
     <MagicNativeSuffix Condition="'$(MagicNativeSuffix)' == ''">.so</MagicNativeSuffix>
   </PropertyGroup>
 
+  <!-- Where a library comes from: a Repository at a Tag, or the archive at Url its author publishes, verified by
+       Sha256, with the shared library at Library in it. How it is built: in Release with its CMakeOptions, one CMake
+       argument each, installed unless CMakeTarget names the one target to build, after the libraries it DependsOn; or,
+       for a library with no build of its own, compiled from its Sources. What is bound of it: the rest, read by the
+       bindings generator. -->
   <ItemDefinitionGroup>
     <NativeLibrary>
+      <Repository />
+      <Tag />
+      <RecurseSubmodules>true</RecurseSubmodules>
+      <Url />
+      <Sha256 />
+      <Library />
+      <CMakeOptions />
+      <CMakeTarget />
+      <DependsOn />
+      <Sources />
       <Namespace>$(RootNamespace)</Namespace>
       <Headers />
       <IncludePath />
@@ -47,7 +64,6 @@
       </NativeLibrary>
     </ItemGroup>
     <ItemGroup>
-      <_NativeBinary Include="@(NativeLibrary)" Condition="'%(NativeLibrary.HeadersOnly)' != 'true'" />
       <_NativeInclude Include="@(NativeLibrary)" Condition="'%(NativeLibrary.IncludePath)' != ''" />
       <_NativeGenerated Include="@(NativeLibrary)" Condition="'%(NativeLibrary.Headers)' != ''" />
     </ItemGroup>
@@ -56,39 +72,43 @@
     </PropertyGroup>
   </Target>
 
-  <!-- Runs the superbuild: CMake configures it from natives/ into Build/natives/ and builds it one library at a time,
-       each library's own build on the cores the caller allows, below normal priority, so a long native build never
-       makes the machine unusable. A hash of the superbuild's files names a ready marker in the shared folder, so the
-       superbuild runs again only when one of them changed or a library is missing, and a build cut short leaves no
-       marker; CMake's own stamps then resume it at the step that did not finish. One build at a time, machine-wide:
-       several checkouts share the folder, so all native work holds one named mutex, and whoever comes second finds
-       the marker. On Windows CMake runs inside Visual Studio's developer environment, which brings its compiler, CMake
-       and Ninja; elsewhere they come from the PATH. -->
+  <!-- Builds the project's libraries that are not built yet. Each library is had through CMake's ExternalProject: the
+       build writes the project's items as one superbuild in its intermediate folder, an ExternalProject call each, and
+       for a library declared by its Sources the CMake project that compiles them, beside the library. A hash of what
+       CMake is told of a library, and of the libraries it depends on, names a ready marker in its folder, so a library
+       is built when its declaration changed or it is missing, and a build cut short leaves no marker; CMake's own stamps
+       then resume it at the step that did not finish. When every library is ready nothing runs. The superbuild builds
+       one library at a time, in the order declared, each library's own build on the cores the caller allows, below
+       normal priority, so a long native build never makes the machine unusable. One build at a time, machine-wide:
+       several checkouts share the folder, so all native work holds one named mutex, and whoever comes second finds the
+       markers. On Windows CMake runs inside Visual Studio's developer environment, which brings its compiler, CMake and
+       Ninja; elsewhere they come from the PATH. What the build is doing is logged as it happens: a line as each library
+       starts and ends, and what CMake, git and the compilers print one verbosity down. -->
   <UsingTask TaskName="BuildNativeLibraries" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>
+      <Libraries ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
       <Natives ParameterType="System.String" Required="true" />
       <Superbuild ParameterType="System.String" Required="true" />
-      <Output ParameterType="System.String" Required="true" />
+      <Project ParameterType="System.String" Required="true" />
       <Rid ParameterType="System.String" Required="true" />
       <Cores ParameterType="System.Int32" />
-      <Files ParameterType="System.String" />
       <Built ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
     </ParameterGroup>
     <Task>
       <Using Namespace="System.IO" />
       <Using Namespace="System.Linq" />
+      <Using Namespace="System.Text" />
       <Using Namespace="System.Threading" />
       <Using Namespace="System.Runtime.InteropServices" />
       <Code Type="Fragment" Language="cs"><![CDATA[
 string natives = Natives.Replace('\\', '/').TrimEnd('/');
 string superbuild = Superbuild.Replace('\\', '/').TrimEnd('/');
-string output = Output.Replace('\\', '/').TrimEnd('/');
-string[] files = (Files ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
 bool windows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 int cores = Cores > 0 ? Cores : Math.Max(1, Environment.ProcessorCount / 2);
 
-// Runs a command, after the developer environment where there is one, and keeps what it printed. The lines that say
-// error come first in a failure's message, then the last ones: a compiler's error is rarely among the last lines.
+// Runs a command, after the developer environment where there is one, and logs what it prints as it prints it, from
+// this thread. The lines that say error come first in a failure's message, then the last ones: a compiler's error is
+// rarely among the last lines.
 bool Run(string environment, string file, string arguments, System.Collections.Generic.List<string> lines, string code)
 {
     System.Diagnostics.ProcessStartInfo start = environment == null
@@ -119,16 +139,29 @@ bool Run(string environment, string file, string arguments, System.Collections.G
             {
             }
 
-            process.OutputDataReceived += (sender, e) => { if (e.Data != null) { lock (lines) { lines.Add(e.Data); } } };
-            process.ErrorDataReceived += (sender, e) => { if (e.Data != null) { lock (lines) { lines.Add(e.Data); } } };
+            System.Collections.Concurrent.ConcurrentQueue<string> received = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            process.OutputDataReceived += (sender, e) => { if (e.Data != null) { received.Enqueue(e.Data); } };
+            process.ErrorDataReceived += (sender, e) => { if (e.Data != null) { received.Enqueue(e.Data); } };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
-            process.WaitForExit();
-            foreach (string line in lines)
+            void Drain()
             {
-                Log.LogMessage(MessageImportance.Low, line);
+                string line;
+                while (received.TryDequeue(out line))
+                {
+                    lines.Add(line);
+                    Log.LogMessage(MessageImportance.Normal, line);
+                }
             }
 
+            while (!process.WaitForExit(250))
+            {
+                Drain();
+            }
+
+            // Without a timeout, the wait also lasts until both streams are read to their end.
+            process.WaitForExit();
+            Drain();
             if (process.ExitCode == 0)
             {
                 return true;
@@ -141,7 +174,7 @@ bool Run(string environment, string file, string arguments, System.Collections.G
     }
     catch (System.ComponentModel.Win32Exception)
     {
-        Log.LogError("", code, "", "", 0, 0, 0, 0, "{0} was not found: building the native libraries needs git, CMake, Ninja, Python 3 and a C++ toolchain (README).", file);
+        Log.LogError("", code, "", "", 0, 0, 0, 0, "{0} was not found: building the native libraries needs git, CMake, Ninja and a C++ toolchain (README).", file);
         return false;
     }
 }
@@ -164,31 +197,182 @@ string DeveloperEnvironment()
     return "call \"" + devCmd + "\" -arch=" + arch + " -host_arch=" + host + " -no_logo";
 }
 
-// The superbuild's files, its README aside, name the marker: a change to any of them is a build again.
-string hash;
-using (System.Security.Cryptography.SHA256 sha256 = System.Security.Cryptography.SHA256.Create())
-using (MemoryStream all = new MemoryStream())
+// One CMake argument, quoted, so that a path with spaces stays one; CMake's escapes keep a backslash, quote or dollar
+// sign as it was written.
+string Quote(string value)
 {
-    foreach (string path in Directory.GetFiles(superbuild, "*", SearchOption.AllDirectories).Where(path => !path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)).OrderBy(path => path, StringComparer.Ordinal))
-    {
-        byte[] name = System.Text.Encoding.UTF8.GetBytes(path.Substring(superbuild.Length).Replace('\\', '/'));
-        all.Write(name, 0, name.Length);
-        byte[] content = File.ReadAllBytes(path);
-        all.Write(content, 0, content.Length);
-    }
-
-    hash = BitConverter.ToString(sha256.ComputeHash(all.ToArray())).Replace("-", "").Substring(0, 16);
+    return "\"" + value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("$", "\\$") + "\"";
 }
 
-string marker = Path.Combine(natives, "ready." + hash);
-Func<bool> ready = () => File.Exists(marker) && files.All(File.Exists);
-if (!ready())
+// A list in an item's metadata: an entry per semicolon, trimmed, so a long list can be written over several lines.
+string[] Split(string value)
+{
+    return value.Split(';').Select(entry => entry.Trim()).Where(entry => entry.Length > 0).ToArray();
+}
+
+// A folder of a library's source, as an item names it relative to the source's root.
+string Under(string folder, string relative)
+{
+    return relative == "." || relative.Length == 0 ? folder + "/source" : folder + "/source/" + relative.Replace('\\', '/');
+}
+
+// Writes a file only when what it holds changes, so CMake and Ninja see it change only then.
+void WriteWhenChanged(string path, string text)
+{
+    if (!File.Exists(path) || File.ReadAllText(path) != text)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path));
+        File.WriteAllText(path, text);
+    }
+}
+
+// Each library as CMake is told it. A library is had from its repository at a tag, or from its author's archive; its
+// own steps run with the terminal, so Ninja passes each one's output on as it comes rather than when the step ends.
+int count = Libraries.Length;
+string[] names = Libraries.Select(library => library.ItemSpec).ToArray();
+string[] folders = names.Select(name => natives + "/" + name).ToArray();
+string[] calls = new string[count];
+string[] projects = new string[count];
+string[] markers = new string[count];
+System.Collections.Generic.Dictionary<string, string> hashes = new System.Collections.Generic.Dictionary<string, string>(StringComparer.Ordinal);
+for (int i = 0; i < count; i++)
+{
+    ITaskItem library = Libraries[i];
+    string name = names[i];
+    string folder = folders[i];
+    string repository = library.GetMetadata("Repository");
+    string url = library.GetMetadata("Url");
+    string target = library.GetMetadata("CMakeTarget");
+    string[] dependsOn = Split(library.GetMetadata("DependsOn"));
+    string[] sources = Split(library.GetMetadata("Sources"));
+    foreach (string dependency in dependsOn.Where(dependency => !hashes.ContainsKey(dependency)))
+    {
+        Log.LogError("", "BND018", "", "", 0, 0, 0, 0, "{0} depends on {1}, which {2} does not declare before it.", name, dependency, Project);
+    }
+
+    StringBuilder call = new StringBuilder("ExternalProject_Add(" + name + "\n");
+    if (repository.Length > 0)
+    {
+        call.Append("  GIT_REPOSITORY " + Quote(repository) + " GIT_TAG " + Quote(library.GetMetadata("Tag")) + " GIT_SHALLOW ON GIT_PROGRESS OFF UPDATE_DISCONNECTED ON");
+        if (library.GetMetadata("RecurseSubmodules") == "false")
+        {
+            call.Append(" GIT_SUBMODULES_RECURSE OFF");
+        }
+    }
+    else if (url.Length > 0)
+    {
+        call.Append("  URL " + Quote(url) + " URL_HASH " + Quote("SHA256=" + library.GetMetadata("Sha256")));
+    }
+    else
+    {
+        Log.LogError("", "BND019", "", "", 0, 0, 0, 0, "{0} in {1} says neither the Repository nor the Url it comes from.", name, Project);
+    }
+
+    call.Append("\n  PREFIX " + Quote(folder) + " SOURCE_DIR " + Quote(folder + "/source") + " BINARY_DIR " + Quote(folder + "/build") + " INSTALL_DIR " + Quote(folder + "/built"));
+    call.Append("\n  STAMP_DIR " + Quote(folder + "/stamp") + " TMP_DIR " + Quote(folder + "/tmp") + " DOWNLOAD_DIR " + Quote(folder + "/download"));
+    string arguments = string.Join(" ", new[] { "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_PREFIX=" + folder + "/built" }.Concat(Split(library.GetMetadata("CMakeOptions"))).Select(Quote));
+    if (sources.Length > 0)
+    {
+        // A library with no build of its own: one shared library of its sources, a path relative to its source's root
+        // or absolute, compiled with the defines its headers are read with and the include folders of it and of what
+        // it depends on. On Windows its functions are exported without a dllexport of their own, as Linux and macOS
+        // export them by default. Its project is built every time the library is, so a changed list is compiled.
+        string[] includes = new[] { i }.Concat(dependsOn.Select(dependency => Array.IndexOf(names, dependency)).Where(index => index >= 0))
+            .Where(index => Libraries[index].GetMetadata("IncludePath").Length > 0)
+            .Select(index => Quote(Under(folders[index], Libraries[index].GetMetadata("IncludePath")))).ToArray();
+        string[] defines = Split(library.GetMetadata("Defines")).Select(Quote).ToArray();
+        projects[i] = "# Written by the build from " + Project + "'s " + name + " item: edit the item, never this file.\n"
+            + "cmake_minimum_required(VERSION 3.28)\n"
+            + "project(" + name + " C CXX)\n"
+            + "add_library(" + name + " SHARED " + string.Join(" ", sources.Select(source => Quote(Path.IsPathRooted(source) ? source.Replace('\\', '/') : Under(folder, source)))) + ")\n"
+            + (includes.Length > 0 ? "target_include_directories(" + name + " PRIVATE " + string.Join(" ", includes) + ")\n" : "")
+            + (defines.Length > 0 ? "target_compile_definitions(" + name + " PRIVATE " + string.Join(" ", defines) + ")\n" : "")
+            + "set_target_properties(" + name + " PROPERTIES CXX_STANDARD 17 WINDOWS_EXPORT_ALL_SYMBOLS ON)\n";
+        call.Append("\n  CONFIGURE_COMMAND \"${CMAKE_COMMAND}\" -G \"${CMAKE_GENERATOR}\" -S " + Quote(folder + "/project") + " -B <BINARY_DIR> " + arguments);
+        call.Append("\n  BUILD_COMMAND \"${CMAKE_COMMAND}\" --build <BINARY_DIR> --target " + name + " INSTALL_COMMAND \"\" BUILD_ALWAYS ON");
+    }
+    else if (url.Length > 0 || library.GetMetadata("HeadersOnly") == "true")
+    {
+        call.Append("\n  CONFIGURE_COMMAND \"\" BUILD_COMMAND \"\" INSTALL_COMMAND \"\"");
+    }
+    else
+    {
+        call.Append("\n  CMAKE_ARGS " + arguments);
+        if (target.Length > 0)
+        {
+            call.Append("\n  BUILD_COMMAND \"${CMAKE_COMMAND}\" --build <BINARY_DIR> --target " + target + " INSTALL_COMMAND \"\"");
+        }
+    }
+
+    call.Append("\n  USES_TERMINAL_DOWNLOAD ON USES_TERMINAL_UPDATE ON USES_TERMINAL_PATCH ON USES_TERMINAL_CONFIGURE ON USES_TERMINAL_BUILD ON USES_TERMINAL_INSTALL ON");
+    if (dependsOn.Length > 0)
+    {
+        call.Append("\n  DEPENDS " + string.Join(" ", dependsOn));
+    }
+
+    calls[i] = call.Append(")\n").ToString();
+    using (System.Security.Cryptography.SHA256 sha256 = System.Security.Cryptography.SHA256.Create())
+    {
+        byte[] made = Encoding.UTF8.GetBytes(calls[i] + projects[i] + string.Concat(dependsOn.Where(hashes.ContainsKey).Select(dependency => hashes[dependency])));
+        hashes[name] = BitConverter.ToString(sha256.ComputeHash(made)).Replace("-", "").Substring(0, 16);
+    }
+
+    markers[i] = folder + "/ready." + hashes[name];
+}
+
+if (Log.HasLoggedErrors)
+{
+    return false;
+}
+
+// The library's one shared library, taken to built/native/, where the project's build copies it from: at Library in
+// what was downloaded, else found by name in what was installed, then in CMake's working folder (a target built
+// alone). It is read through its name, so where Linux and macOS install the name as a link to the versioned file, what
+// is copied is the file. A working folder can be gone, as CI drops them before caching, and then nothing was rebuilt
+// and what was taken last time stands.
+bool Take(int i)
+{
+    string native = Libraries[i].GetMetadata("Native");
+    string file = Path.GetFileName(native);
+    string library = Libraries[i].GetMetadata("Library");
+    string found = library.Length > 0
+        ? folders[i] + "/source/" + library
+        : new[] { "/built", "/build" }.Select(sub => folders[i] + sub).Where(Directory.Exists)
+            .SelectMany(folder => Directory.GetFiles(folder, file, SearchOption.AllDirectories))
+            .FirstOrDefault(candidate => !Path.GetDirectoryName(candidate).Replace('\\', '/').EndsWith("/built/native", StringComparison.Ordinal));
+    if (found == null || !File.Exists(found))
+    {
+        if (library.Length == 0 && File.Exists(native))
+        {
+            return true;
+        }
+
+        Log.LogError("", "BND016", "", "", 0, 0, 0, 0, "{0} built, but there is no {1} in {2}: the item's name, CMakeTarget or Library does not name the library it makes.", names[i], library.Length > 0 ? library : file, folders[i]);
+        return false;
+    }
+
+    Directory.CreateDirectory(Path.GetDirectoryName(native));
+    using (FileStream from = File.OpenRead(found))
+    using (FileStream to = File.Create(native))
+    {
+        from.CopyTo(to);
+    }
+
+    return true;
+}
+
+Func<int, bool> ready = i => File.Exists(markers[i]) && (Libraries[i].GetMetadata("HeadersOnly") == "true" || File.Exists(Libraries[i].GetMetadata("Native")));
+if (!Enumerable.Range(0, count).All(ready))
 {
     using (Mutex mutex = new Mutex(false, "Magic.Natives"))
     {
         try
         {
-            mutex.WaitOne();
+            if (!mutex.WaitOne(0))
+            {
+                Log.LogMessage(MessageImportance.High, "{0} is waiting for another build of the native libraries on this machine to finish.", Project);
+                mutex.WaitOne();
+            }
         }
         catch (AbandonedMutexException)
         {
@@ -196,24 +380,50 @@ if (!ready())
 
         try
         {
-            if (!ready())
+            int[] pending = Enumerable.Range(0, count).Where(i => !ready(i)).ToArray();
+            // Every command runs in the shared folder.
+            Directory.CreateDirectory(natives);
+            string environment = pending.Length > 0 && windows ? DeveloperEnvironment() : null;
+            if (pending.Length > 0 && (!windows || environment != null))
             {
-                Directory.CreateDirectory(natives);
-                Directory.CreateDirectory(output);
-                string environment = windows ? DeveloperEnvironment() : null;
-                if (!windows || environment != null)
+                Log.LogMessage(MessageImportance.High, "Building {0}'s native libraries under {1}/, each once per machine and again when its item changes: {2}.", Project, natives, string.Join(", ", pending.Select(i => names[i])));
+                for (int i = 0; i < count; i++)
                 {
-                    Log.LogMessage(MessageImportance.High, "Building the native libraries under {0}: each once per machine, again when its pin or options change.", natives);
-                    System.Collections.Generic.List<string> lines = new System.Collections.Generic.List<string>();
-                    if (Run(environment, "cmake", "-S \"" + superbuild + "\" -B \"" + output + "\" -G Ninja \"-DMAGIC_NATIVES=" + natives + "\" -DMAGIC_RID=" + Rid, lines, "BND015")
-                        && Run(environment, "cmake", "--build \"" + output + "\" --parallel 1", lines, "BND015"))
+                    if (projects[i] != null)
                     {
-                        foreach (string old in Directory.GetFiles(natives, "ready.*"))
+                        WriteWhenChanged(folders[i] + "/project/CMakeLists.txt", projects[i]);
+                    }
+                }
+
+                WriteWhenChanged(superbuild + "/CMakeLists.txt",
+                    "# Written by the build from " + Project + "'s NativeLibrary items: edit those, never this file. Each library is an\n"
+                    + "# ExternalProject, built into its folder under the one every checkout on the machine shares.\n"
+                    + "cmake_minimum_required(VERSION 3.28)\n"
+                    + "project(MagicNatives NONE)\n"
+                    + "include(ExternalProject)\n\n"
+                    + string.Join("\n", calls));
+                System.Collections.Generic.List<string> lines = new System.Collections.Generic.List<string>();
+                bool built = Run(environment, "cmake", "-S \"" + superbuild + "\" -B \"" + superbuild + "/build\" -G Ninja", lines, "BND015");
+                for (int step = 0; built && step < pending.Length; step++)
+                {
+                    int i = pending[step];
+                    ITaskItem library = Libraries[i];
+                    string from = library.GetMetadata("Repository").Length > 0 ? library.GetMetadata("Tag") + " from " + library.GetMetadata("Repository") : library.GetMetadata("Url");
+                    Log.LogMessage(MessageImportance.High, "{0} ({1} of {2}): {3}", names[i], step + 1, pending.Length, from);
+                    System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                    lines.Clear();
+                    built = Run(environment, "cmake", "--build \"" + superbuild + "/build\" --target " + names[i] + " --parallel 1", lines, "BND015")
+                        && (library.GetMetadata("HeadersOnly") == "true" || Take(i));
+                    if (built)
+                    {
+                        foreach (string old in Directory.GetFiles(folders[i], "ready.*"))
                         {
                             File.Delete(old);
                         }
 
-                        File.WriteAllText(marker, "");
+                        File.WriteAllText(markers[i], "");
+                        // Formatted here: a message's arguments reach the logger as text, their format lost on the way.
+                        Log.LogMessage(MessageImportance.High, "{0}: ready in {1} s", names[i], Math.Round(watch.Elapsed.TotalSeconds).ToString("0"));
                     }
                 }
             }
@@ -225,24 +435,14 @@ if (!ready())
     }
 }
 
-if (Log.HasLoggedErrors)
-{
-    return false;
-}
-
-foreach (string file in files.Where(file => !File.Exists(file)))
-{
-    Log.LogError("", "BND016", "", "", 0, 0, 0, 0, "The native libraries built, but there is no {0}: natives/CMakeLists.txt makes no such library.", file);
-}
-
-Built = files.Select(file => (ITaskItem)new TaskItem(file)).ToArray();
+Built = Enumerable.Range(0, count).Where(i => Libraries[i].GetMetadata("HeadersOnly") != "true").Select(i => (ITaskItem)new TaskItem(Libraries[i].GetMetadata("Native"))).ToArray();
 ]]></Code>
     </Task>
   </UsingTask>
 
   <Target Name="PrepareNativeLibraries" DependsOnTargets="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != ''">
-    <BuildNativeLibraries Natives="$(MagicNativeLibs)" Superbuild="$(MagicNativeSuperbuild)" Output="$(MagicNativeSuperbuildOutput)"
-                          Rid="$(MagicNativeRid)" Cores="$(MagicNativeCores)" Files="@(_NativeBinary->'%(Native)')">
+    <BuildNativeLibraries Libraries="@(NativeLibrary)" Natives="$(MagicNativeLibs)" Superbuild="$(MagicNativeSuperbuild)"
+                          Project="$(MSBuildProjectName)" Rid="$(MagicNativeRid)" Cores="$(MagicNativeCores)">
       <Output TaskParameter="Built" ItemName="_NativeBuilt" />
     </BuildNativeLibraries>
   </Target>

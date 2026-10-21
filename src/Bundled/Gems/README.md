@@ -8,21 +8,31 @@ gem's own choices, its limits and what must hold for it.
 
 ## Native libraries
 
-A gem that calls a C library declares what it binds, in its project, and the build does the rest: it has the
-library fetched and built for this machine ([Natives](../../../natives/README.md)), generates the library's C# API
-from its headers and compiles it in, and puts the library beside the gem. Every library is pinned to a tag, and comes
-from its own source, built here, or from the build its author publishes for the platform; nothing comes from a third
-party. No binding is written by hand, except where the generator cannot express the API, a COM interface; the gem
-whose library needs that says so in its own README.
+A gem that calls a C library declares it in its project, and the build does the rest: it has the library fetched
+and built for this machine, generates the library's C# API from its headers and compiles it in, and puts the library
+beside the gem. Every library is pinned, and comes from its own source, built here, or from what its author
+publishes for the platform; nothing comes from a third party. No binding is written by hand, except where the
+generator cannot express the API, a COM interface; the gem whose library needs that says so in its own README.
 
 ### Declaring a library
 
-A library is one `NativeLibrary` item in the gem's project. Its `Include` is the library's logical name: what the
-generated `DllImport`s name, what the load context resolves, and the name of the library's block in the superbuild
-under `natives/`, which is where its repository, pin, options and anything platform-specific live, never the gem's
-project; a gem declares the same library the same way on every platform. An item with no `Headers` is bound by hand
-and declared for its binary alone; one declared `HeadersOnly` is read for its headers alone, as a generator's input
-is.
+A library is one `NativeLibrary` item in the gem's project, and the item says all of it, so a gem carries its
+libraries with it when it is added or removed. Its `Include` is the library's logical name: what the generated
+`DllImport`s name, what the load context resolves, and the name of the library's folder. The item says where the
+library comes from, a repository at a tag or the archive its author publishes with the archive's SHA-256; how CMake
+builds it, the options it is given and the one target to build where it is not installed; the libraries it is built
+after and against; and what is bound of it. The metadata are declared, with what each means, beside the build that
+reads them, in `Directory.Build.targets`. Where a platform needs something else, the gem's project says so with a
+condition, as the shader compiler's does, which comes prebuilt where its author publishes a build and from source
+elsewhere. An item with no `Headers` is bound by hand and declared for its binary alone; one declared `HeadersOnly`
+is fetched for its headers and sources alone, as another library's input is.
+
+A library with no build of its own, written to be compiled into its user, is declared by its sources: the build
+writes the CMake project that compiles them into one shared library, with the defines its headers are read with, so
+what is compiled is what is bound, and the include folders it and the libraries it depends on declare. On Windows its
+functions are exported as Linux and macOS export them, without a declaration of their own. No CMake file is kept in
+the repository: the superbuild, in the project's intermediate folder, and the project of a library declared by its
+sources, beside it, are what the build writes from the items, to read when a library misbehaves and never to edit.
 
 How its API is generated: `Headers` are the root headers to read, relative to the checkout; `IncludePath` the folder
 their includes are found in; `Defines` what to define first. Every item's include folder serves every generation in
@@ -38,8 +48,44 @@ comments are the header's. A gem that hands the library callbacks of its own (`[
 them blittable, as runtime marshalling is off for every project that declares a library. How C names become C# ones,
 how the headers are read, and what the generator refuses and why, is in the
 [generator](../../../tools/NativeBindingsGenerator/README.md): it fails rather than guess, naming the header line,
-and each refusal gets a rule in the generator, never a hand edit. The machine needs git, CMake and a C++ toolchain
-([README](../../../README.md#requirements)).
+and each refusal gets a rule in the generator, never a hand edit.
+
+### Building a library
+
+Each library is had through CMake's ExternalProject: the build writes the project's items as one superbuild, a call
+each, and builds the libraries that are not ready, one at a time, in the order the project declares them, so a
+library is declared after those it depends on. What must hold:
+
+- **One folder per machine.** Every library lands under `MagicNativeLibs`, the user's local application data folder
+  (`Magic/NativeLibs/` under it) unless the variable says otherwise, shared by every checkout and worktree, since a
+  library built once serves them all. Under it each library has `source/` (what was fetched), `build/` (CMake's
+  working folder), `built/` (what it installed) and `built/native/<file>`, the one shared library the build copies
+  beside each gem that binds it, read through the links Linux and macOS install it as. A library declared by its
+  sources has `project/`, the CMake project written for it, there too, since CMake ties a build folder to one source
+  path and that path must not be a checkout's. A gem's project may name these folders in an option, as a library
+  built against another names that one's `built/`.
+- **Pinned, then fetched or downloaded.** A library is fetched shallow from its repository at a tag, with its
+  submodules, or downloaded as the archive its author publishes, verified against the SHA-256 the item pins. A changed
+  tag fetches afresh; nothing else touches the network.
+- **Built once per machine.** A hash of what CMake is told of a library, and of the libraries it depends on, names a
+  ready marker in its folder: a library is built again when its item changes, or one it depends on does, and the
+  marker is written when it built. When every library a project declares is ready, nothing runs, not even CMake.
+  CMake's ExternalProject stamps record each step done, so a build cut short resumes at the step that did not finish.
+  One build at a time, machine-wide, under a named mutex, since the folder is shared.
+- **Bounded.** One library at a time, each library's own build on half the machine's cores unless `MagicNativeCores`
+  names how many, below normal priority, so a long build never makes the machine unusable and the memory it takes, a
+  few hundred MB per compiler, is bounded with the cores. Ninja is the generator everywhere: on Windows CMake runs
+  inside Visual Studio's developer environment, found through vswhere, which brings its compiler, CMake and Ninja;
+  elsewhere CMake and Ninja come from the PATH ([requirements](../../../README.md#requirements)).
+- **Named plainly.** Each library's shared library is `<name>.dll`, `lib<name>.so` or `lib<name>.dylib`, found under
+  `built/` then `build/`, or where the item names it in an archive that holds several; a library whose build would
+  name it otherwise is told not to (the model importer's compiler suffix). The name is what the gem's `DllImport`s name and what
+  the gem load context resolves.
+- **Said as it happens.** The build logs a line as each library starts, with where it comes from, and as it is
+  ready, and what CMake, git and the compilers print one verbosity down (normal), as they print it. A logger that
+  shows a build's messages shows them live: an IDE's build output, CI's log, `dotnet build` with its output
+  redirected or with `-tl:off`. The terminal logger `dotnet build` uses in a terminal shows only the target running
+  and its time while a task runs, and a task's messages at detailed verbosity alone, after its project ends.
 
 ### Sharing a library
 

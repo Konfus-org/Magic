@@ -63,9 +63,11 @@ at a size and gets the asset's, scaled from the size the asset was drawn at.
 
 ## Natives
 
-Dear ImGui is built from its own repository at a pinned release ([Natives](../../../../natives/README.md)), with the
-C API that dear_bindings, the Dear ImGui team's binding generator, makes from its public and internal headers at build
-time; the two are compiled into one library with wide characters and without the obsolete API. Dear ImGui's
+Dear ImGui is C++ and ships no build, so the gem binds the C API that dear_bindings, the Dear ImGui team's binding
+generator, makes from its public and internal headers, as it publishes it for each ImGui release; that and ImGui's own
+sources, from its repository at the same release, are compiled into one library with wide characters and without
+the obsolete API ([Declaring a library](../README.md#declaring-a-library)). The two pins move together: the C API is
+generated for one ImGui release and compiled with that release's sources. Dear ImGui's
 constructors are not in the C API, so a font configuration is set up field by field as ImGui's own constructor would.
 The gem hands ImGui its text as the C strings it reads: every label and line goes into a per-frame arena of unmanaged
 memory, good until the next frame starts, and a literal is read straight from the assembly's data.

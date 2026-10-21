@@ -6,16 +6,24 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <!-- Dear ImGui is a C API: its context, draw lists, fonts and textures are pointers. -->
+    <!-- Dear ImGui's C API: its context, draw lists, fonts and textures are pointers. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- Dear ImGui through the C API dear_bindings makes of its headers (natives/CMakeLists.txt): the public API and
-       the internal one, in their own files, which lie in dear_bindings' own checkout. ImGui's folder is on the include
-       path for the imconfig.h the generated header includes; the defines are the ones the library is compiled with. -->
+  <!-- Dear ImGui is C++, which C# cannot call, and ships no build of its own, so it is bound through the C API that
+       dear_bindings, the Dear ImGui team's generator, makes of its headers, which it publishes generated for each ImGui
+       release: the public API and the internal one, in their own files. Those and ImGui's own sources are compiled into
+       one library, with the defines the headers are read with. ImGui itself is fetched for its sources and for the
+       imconfig.h the generated header includes, and the two pins name the same ImGui release. -->
   <ItemGroup>
-    <NativeLibrary Include="imgui" IncludePath="." HeadersOnly="true" />
-    <NativeLibrary Include="dcimgui" Headers="dcimgui.h;dcimgui_internal.h" IncludePath="."
+    <NativeLibrary Include="imgui" Repository="https://github.com/ocornut/imgui" Tag="v1.92.9b-docking" IncludePath="." HeadersOnly="true" />
+    <NativeLibrary Include="dcimgui" DependsOn="imgui"
+                   Url="https://github.com/dearimgui/dear_bindings/releases/download/DearBindings_v0.24_ImGui_v1.92.9b-docking/DearBindings_v0.24_ImGui_v1.92.9b-docking.zip"
+                   Sha256="ee7a51d4220b5ba28672253dc95e287d9e00ae9f9a5321725d8c3b978789694b"
+                   Sources="dcimgui.cpp;dcimgui_internal.cpp;
+                            $(MagicNativeLibs)imgui/source/imgui.cpp;$(MagicNativeLibs)imgui/source/imgui_draw.cpp;$(MagicNativeLibs)imgui/source/imgui_tables.cpp;
+                            $(MagicNativeLibs)imgui/source/imgui_widgets.cpp;$(MagicNativeLibs)imgui/source/imgui_demo.cpp"
+                   Headers="dcimgui.h;dcimgui_internal.h" IncludePath="."
                    Defines="IMGUI_USE_WCHAR32;IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1"
                    Prefixes="IMGUI=ImGui;cImFontAtlas=ImFontAtlas" Class="ImGui" />
   </ItemGroup>

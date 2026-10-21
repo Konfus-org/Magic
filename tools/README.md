@@ -20,8 +20,10 @@ picks the steps when the rest already passed (`Test` alone needs a build to be t
 run lasts, `-Configuration` which build, and `-Project` another project than the samples.
 
 The build is incremental and never starts over: what is built is reused, and the native libraries are built once
-per machine, in a folder every checkout and worktree shares ([Natives](../natives/README.md)), so a fresh worktree
-builds in minutes.
+per machine, in a folder every checkout and worktree shares
+([Native libraries](../src/Bundled/Gems/README.md#native-libraries)), so a fresh worktree builds in minutes. It builds
+with MSBuild's plain console logger rather than the terminal one, which shows a task's messages only after its
+project ends, so which native library is building, and for how long, shows as it happens in a terminal too.
 
 ## Screenshot.ps1
 

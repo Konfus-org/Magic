@@ -5,8 +5,9 @@ Runs the checks a change must pass: a clean build, the tests, and the samples he
 .DESCRIPTION
 The steps run in order and the first failure ends the run with that step's exit code; a run that passes exits 0.
 The build is incremental, so what is built already is reused, and the native libraries are built once per machine,
-shared by every checkout (natives/README.md). The build already treats every warning as an error, so a clean build is
-one that exits 0.
+shared by every checkout (src/Bundled/Gems/README.md, Native libraries). The build already treats every warning as an
+error, so a clean build is one that exits 0. It logs with MSBuild's plain console logger, so the native libraries'
+progress shows as it happens, which the terminal logger holds back until each project ends.
 The tests run against that build, so running them alone (-Only Test) needs one. The sample runs pass
 --fail-on-error, so an error logged during a run exits 2. The Window step needs a display and a GPU; the others do
 not. Runs from any current directory.
@@ -53,7 +54,7 @@ $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Confi
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 
 $steps = @(
-    @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration } }
+    @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration -tl:off } }
     @{ Name = 'Test'; Run = { dotnet test $solution --configuration $Configuration --no-build } }
     @{ Name = 'Headless'; Run = { & $magic --project $projectPath --frames $Frames --fail-on-error --headless } }
     @{ Name = 'Window'; Run = { & $magic --project $projectPath --frames $Frames --fail-on-error } }

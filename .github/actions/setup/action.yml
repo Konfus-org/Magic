@@ -1,5 +1,5 @@
-# What a job needs before it builds Magic: the SDK global.json names, Python with ply for the C API the build generates
-# for Dear ImGui, SDL's build dependencies on Linux, Ninja where the OS does not bring it, and the two caches. The native
+# What a job needs before it builds Magic: the SDK global.json names, Python where the shader compiler is built from
+# source, SDL's build dependencies on Linux, Ninja where the OS does not bring it, and the two caches. The native
 # libraries' cache is only restored here: the job saves it with save-natives as its last step, so a cold native build
 # survives a failure later in the job. README.md beside the workflows explains the whole.
 name: Set up Magic's build
@@ -20,13 +20,12 @@ runs:
       with:
         global-json-file: global.json
 
+    # The shader compiler comes prebuilt on Windows and Linux; on macOS it is built from source, and its build runs
+    # Python.
     - uses: actions/setup-python@v7
+      if: runner.os == 'macOS'
       with:
         python-version: '3.x'
-
-    - name: Install ply
-      shell: pwsh
-      run: python -m pip install --quiet ply
 
     # The Linux runner has no GPU, and the headless samples still render: Mesa's software Vulkan driver (lavapipe)
     # is the device they open.
@@ -67,11 +66,12 @@ runs:
         key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
         restore-keys: nuget-${{ runner.os }}-
 
-    # Keyed on the superbuild, which pins and builds the libraries. A cache from an older key still serves: CMake's
-    # stamps tell the build which libraries match and which one changed, and it rebuilds that one alone.
+    # Keyed on what declares the libraries, the gems' projects, and on the build that reads them. A cache from an older
+    # key still serves: each library's ready marker tells the build which libraries match, and it builds the ones that
+    # changed alone.
     - id: natives
       uses: actions/cache/restore@v6
       with:
         path: Build/NativeLibs
-        key: natives-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('natives/**') }}
+        key: natives-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/Bundled/Gems/*/*.csproj', 'Directory.Build.targets') }}
         restore-keys: natives-${{ runner.os }}-${{ runner.arch }}-

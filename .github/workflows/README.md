@@ -34,14 +34,15 @@ job's name alone, whatever workflow it is in, so every job here carries a name n
 
 ## The native libraries
 
-The native libraries are fetched and built by the first build ([Natives](../../natives/README.md)); the shader
-compiler, a whole compiler toolchain, comes prebuilt on Windows and Linux and is built on macOS, so a cold build is
-short on the first two and long on the third, while a warm one does nothing. The build puts the libraries in a
-folder per machine, which the setup action pins to `Build/NativeLibs/` in the workspace, cached per OS and
-architecture and keyed on the superbuild's files under `natives/`. CMake's own stamps make a restored cache a no-op,
-and a cache restored under an older key still serves: the build sees which library's pin changed and rebuilds that
-one alone. CMake's
-working folders are dropped before the save, as nothing reads them again, and the save runs whether the job passed or
+The native libraries are fetched and built by the first build
+([Native libraries](../../src/Bundled/Gems/README.md#native-libraries)); the shader compiler, a whole compiler
+toolchain, comes prebuilt on Windows and Linux and is built on macOS, so a cold build is short on the first two and
+long on the third, while a warm one does nothing. The build puts the libraries in a folder per machine, which the
+setup action pins to `Build/NativeLibs/` in the workspace, cached per OS and architecture and keyed on the gems'
+projects, which declare the libraries, and the build that reads them. The libraries' ready markers make a restored
+cache a no-op, and a cache restored under an older key still serves: the build sees which library's item changed and
+builds that one alone. CMake's working folders are dropped before the save, as nothing reads them again (the build
+keeps the library it took last when a working folder is gone), and the save runs whether the job passed or
 failed, so a cold native build is never lost to a managed error after it. It never runs for a cancelled job: a key is
 saved once and never overwritten, so a snapshot cut short would be restored and rebuilt from on every run, and never
 completed, until the key next changes. Both are in the two composite actions beside

@@ -10,9 +10,21 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!-- SDL is installed, so the two built on it find it there. SDL_image reads its formats itself, so none of its
+       vendored codecs is built, nor the submodules under theirs fetched; SDL_ttf brings FreeType and HarfBuzz with it.
+       Each of the two is its shared library alone. -->
   <ItemGroup>
-    <NativeLibrary Include="SDL3" Headers="include/SDL3/SDL.h" IncludePath="include" />
-    <NativeLibrary Include="SDL3_image" Headers="include/SDL3_image/SDL_image.h" IncludePath="include" Prefixes="SDL_IMAGE=IMG" />
-    <NativeLibrary Include="SDL3_ttf" Headers="include/SDL3_ttf/SDL_ttf.h;include/SDL3_ttf/SDL_textengine.h" IncludePath="include" Prefixes="SDL_TTF=TTF" />
+    <NativeLibrary Include="SDL3" Repository="https://github.com/libsdl-org/SDL" Tag="release-3.4.18"
+                   CMakeOptions="-DSDL_TEST_LIBRARY=OFF;-DSDL_EXAMPLES=OFF;-DSDL_INSTALL_TESTS=OFF"
+                   Headers="include/SDL3/SDL.h" IncludePath="include" />
+    <NativeLibrary Include="SDL3_image" Repository="https://github.com/libsdl-org/SDL_image" Tag="release-3.4.8" RecurseSubmodules="false"
+                   DependsOn="SDL3" CMakeTarget="SDL3_image-shared"
+                   CMakeOptions="-DSDLIMAGE_VENDORED=OFF;-DSDLIMAGE_SAMPLES=OFF;-DSDLIMAGE_AVIF=OFF;-DSDLIMAGE_WEBP=OFF;-DSDLIMAGE_TIF=OFF;-DSDLIMAGE_JXL=OFF;
+                                 -DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
+                   Headers="include/SDL3_image/SDL_image.h" IncludePath="include" Prefixes="SDL_IMAGE=IMG" />
+    <NativeLibrary Include="SDL3_ttf" Repository="https://github.com/libsdl-org/SDL_ttf" Tag="release-3.2.2"
+                   DependsOn="SDL3" CMakeTarget="SDL3_ttf-shared"
+                   CMakeOptions="-DSDLTTF_VENDORED=ON;-DSDLTTF_SAMPLES=OFF;-DSDLTTF_PLUTOSVG=OFF;-DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
+                   Headers="include/SDL3_ttf/SDL_ttf.h;include/SDL3_ttf/SDL_textengine.h" IncludePath="include" Prefixes="SDL_TTF=TTF" />
   </ItemGroup>
 </Project>

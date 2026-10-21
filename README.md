@@ -13,11 +13,12 @@ rules are in the [code standards](CODESTANDARDS.md).
 ### Requirements
 
 - The .NET 10 SDK; `global.json` names the version, and a later feature band of it serves.
-- git, CMake, Ninja, Python 3 with the `ply` package (`pip install ply`) and a C++ toolchain: the native libraries
-  are fetched and built by the first build, from their repositories or their authors' published builds
-  ([Natives](natives/README.md)). On Windows the toolchain is Visual Studio with its "Desktop development with C++"
-  workload, which brings CMake and Ninja with it; on Linux, gcc or clang with the platform library's build dependencies
-  (the X11 and Wayland development packages); on macOS, the Xcode command line tools.
+- git, CMake, Ninja and a C++ toolchain: the native libraries are fetched and built by the first build, from their
+  repositories or what their authors publish ([Native libraries](src/Bundled/Gems/README.md#native-libraries)). On
+  Windows the toolchain is Visual Studio with its "Desktop development with C++" workload, which brings CMake and Ninja
+  with it; on Linux, gcc or clang with the platform library's build dependencies (the X11 and Wayland development
+  packages); on macOS, the Xcode command line tools, and Python 3, which the shader compiler's own build needs there,
+  as it is built from source.
 - A GPU with a driver for Vulkan 1.1, Direct3D 12 or Metal, which the engine renders through.
 - PowerShell for the scripts under `tools/`: `pwsh` on Linux and macOS, and Windows PowerShell 5.1 serves on Windows.
 - For reviewing an agent's change ([AGENTS.md](AGENTS.md#finish)), the `plannotator` command
@@ -37,8 +38,10 @@ Build/bin/Debug/Magic --project samples
 
 The first build fetches the native libraries into one folder per machine, under the user's local application data
 (`MagicNativeLibs` moves it), builds them for this machine, on half its cores unless `MagicNativeCores` says how
-many, and generates their C# from the headers ([Natives](natives/README.md)); after that a build touches them only
-when one's pin or options change, and every checkout and worktree on the machine shares them. Building `src/Core` alone builds the bundled gems and resources with it, so `dotnet run --project src/Core`
+many, and generates their C# from the headers ([Native libraries](src/Bundled/Gems/README.md#native-libraries));
+after that a build touches them only when one's item changes, and every checkout and worktree on the machine shares
+them. The build says which library it is on as it goes; in a terminal, `dotnet build -tl:off` shows it, since the
+terminal logger shows a task's messages only after its project ends. Building `src/Core` alone builds the bundled gems and resources with it, so `dotnet run --project src/Core`
 or a run from an IDE never loads a gem left stale against a new Magic; the solution build adds the samples' own code.
 Run from an IDE or with `dotnet run --project src/Core`, Magic opens the samples project. Only a `Release` build
 copies the engine's and the gems' assets beside Magic; the others read them where they are in the repository, so
