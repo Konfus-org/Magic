@@ -10,7 +10,8 @@ namespace Magic.DebugTools;
 /// </summary>
 internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? input, IWindow? window)
 {
-    private readonly string _title = $"{name} ({(key == Control.KeyGrave ? "`" : key.ToString()["Key".Length..])} to toggle)";
+    private readonly string _title
+        = $"{name} ({(key == Control.KeyGrave ? "`" : key.ToString()["Key".Length..])} to toggle)";
 
     /// <summary>
     /// Toggled by the key, and cleared by the close button while the window is begun.

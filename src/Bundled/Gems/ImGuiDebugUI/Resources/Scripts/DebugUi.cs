@@ -34,10 +34,10 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
 
     private readonly IGpu _gpu;
     private readonly DrawLists _lists;
-    private GpuSampler _sampler;
     private readonly Dictionary<uint, (GpuTexture Texture, int Width, int Height, uint Version)> _textures = [];
     private readonly List<uint> _gone = [];
     private readonly Dictionary<GpuFormat, GpuPipeline> _pipelines = [];
+    private GpuSampler _sampler;
     private GpuBuffer _vertexBuffer;
     private GpuBuffer _indexBuffer;
     private uint _vertexBytes;
@@ -55,7 +55,9 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     public DebugUi(IDebugUI ui, IGpu gpu, IShaderCompiler compiler, Lifetime lifetime)
     {
         _gpu = gpu;
-        _lists = ui is ImGuiDebugUIGem imgui ? imgui.DrawLists : throw new InvalidOperationException("The debug UI is not ImGui's, so it has no draw lists to draw.");
+        _lists = ui is ImGuiDebugUIGem imgui
+            ? imgui.DrawLists
+            : throw new InvalidOperationException("The debug UI is not ImGui's, so it has no draw lists to draw.");
         CompileAsync(compiler, lifetime.Stopping).FireAndForget();
     }
 
@@ -131,7 +133,11 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
             if (known.Texture == GpuTexture.None || known.Width != texture.Width || known.Height != texture.Height)
             {
                 _gpu.Release(known.Texture);
-                known.Texture = _gpu.CreateTexture(new GpuTextureDescription(GpuFormat.Rgba8Unorm, GpuTextureUsage.Sampled, (uint)texture.Width, (uint)texture.Height));
+                known.Texture = _gpu.CreateTexture(new GpuTextureDescription(
+                    GpuFormat.Rgba8Unorm,
+                    GpuTextureUsage.Sampled,
+                    (uint)texture.Width,
+                    (uint)texture.Height));
             }
 
             _gpu.Upload(new GpuTextureRegion(known.Texture), texture.Pixels);
@@ -175,7 +181,8 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     /// </summary>
     private GpuPipeline GetPipeline(GpuFormat format)
     {
-        if (_pipelines.TryGetValue(format, out GpuPipeline pipeline) || format == GpuFormat.Invalid || _shaders is not { } shaders)
+        if (_pipelines.TryGetValue(format, out GpuPipeline pipeline) || format == GpuFormat.Invalid
+            || _shaders is not { } shaders)
         {
             return pipeline;
         }
@@ -202,15 +209,18 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
 
     private async Task CompileAsync(IShaderCompiler compiler, CancellationToken stopping)
     {
-        Result<GpuShader> vertex = await compiler.CompileAsync(VertexShader, GpuStage.Vertex, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
-        Result<GpuShader> fragment = await compiler.CompileAsync(FragmentShader, GpuStage.Fragment, _gpu.ShaderFormat, stopping).ConfigureAwait(false);
+        Result<GpuShader> vertex = await compiler.CompileAsync(
+            VertexShader,
+            GpuStage.Vertex,
+            _gpu.ShaderFormat,
+            stopping).ConfigureAwait(false);
+        Result<GpuShader> fragment = await compiler.CompileAsync(
+            FragmentShader,
+            GpuStage.Fragment,
+            _gpu.ShaderFormat,
+            stopping).ConfigureAwait(false);
         _shaders = new Compiled(vertex, fragment);
     }
-
-    /// <summary>
-    /// The two stages as compiled, or why each did not.
-    /// </summary>
-    private sealed record Compiled(Result<GpuShader> Vertex, Result<GpuShader> Fragment);
 
     /// <summary>
     /// The fragment stage's constant block, laid out as <c>Overlay.frag.hlsl</c>'s <c>cbuffer Overlay</c>: the
@@ -225,4 +235,9 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
         public readonly uint Pad1;
         public readonly uint Pad2;
     }
+
+    /// <summary>
+    /// The two stages as compiled, or why each did not.
+    /// </summary>
+    private sealed record Compiled(Result<GpuShader> Vertex, Result<GpuShader> Fragment);
 }

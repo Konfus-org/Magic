@@ -3,6 +3,24 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
+/// How a <see cref="Material"/> is blended, which picks the pipeline it is drawn with.
+/// </summary>
+public enum MaterialType : byte
+{
+    Opaque,
+
+    /// <summary>
+    /// Opaque, but pixels the surface makes less opaque than its alpha cutoff are not drawn.
+    /// </summary>
+    Masked,
+
+    /// <summary>
+    /// Blended over what is behind it, drawn after everything opaque.
+    /// </summary>
+    Transparent,
+}
+
+/// <summary>
 /// What a surface looks like: a surface shader (<c>.surf.hlsl</c>), values for the parameters its
 /// <c>MaterialParams</c> declares, and how it is blended. A <c>.mat</c> file is this class as JSON:
 /// <c>{ "shader": { "id": 10001 }, "params": { "roughness": { "x": 0.8 } } }</c>.
@@ -26,25 +44,8 @@ public sealed class Material : IJsonAsset<Material>
     /// Values by the names of the shader's <c>MaterialParams</c> members, matched as HLSL does, case and all; one left
     /// out takes the shader's default.
     /// </summary>
-    public IReadOnlyDictionary<string, MaterialParam> Params { get; set; } = new Dictionary<string, MaterialParam>(StringComparer.Ordinal);
-}
-
-/// <summary>
-/// How a <see cref="Material"/> is blended, which picks the pipeline it is drawn with.
-/// </summary>
-public enum MaterialType : byte
-{
-    Opaque,
-
-    /// <summary>
-    /// Opaque, but pixels the surface makes less opaque than its alpha cutoff are not drawn.
-    /// </summary>
-    Masked,
-
-    /// <summary>
-    /// Blended over what is behind it, drawn after everything opaque.
-    /// </summary>
-    Transparent,
+    public IReadOnlyDictionary<string, MaterialParam> Params { get; set; }
+        = new Dictionary<string, MaterialParam>(StringComparer.Ordinal);
 }
 
 /// <summary>

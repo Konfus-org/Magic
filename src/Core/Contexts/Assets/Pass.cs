@@ -4,83 +4,10 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// One step of a renderer's frame, as data: a <c>.pass</c> file. It says when in the frame it runs
-/// (<see cref="Stage"/>), what it is (<see cref="Kind"/>), the shader it runs or the script that records it, the
-/// textures and buffers it writes by name, those it makes for itself and the passes after it, and values for its
-/// shader's <c>PassParams</c>. A
-/// <see cref="Pipeline"/> lists passes; the renderer runs each in its stage, in the order listed. What a pass reads its
-/// shader says: the renderer declares to it, ahead of it, every name the frame has by then, the renderer's own and what
-/// the passes before it made, and binds whichever the shader uses:
-/// <c>{ "stage": "post", "kind": "fullscreen", "shader": { "id": 10230 },
-/// "creates": [ { "name": "Ldr", "format": "rgba16_float" } ], "writes": [ { "name": "Ldr" } ] }</c>.
-/// </summary>
-public sealed class Pass : IJsonAsset<Pass>
-{
-    public static IReadOnlyList<string> Extensions { get; } = [".pass"];
-
-    public Handle<Pass> Handle { get; init; }
-
-    /// <summary>
-    /// What it shows, in a sentence, for a debug view to say on screen beside its name; empty for a pass that is no
-    /// view.
-    /// </summary>
-    public string Description { get; set; } = string.Empty;
-
-    public required PassStage Stage { get; init; }
-
-    public PassKind Kind { get; set; }
-
-    /// <summary>
-    /// A compute pass's <c>.comp.hlsl</c>, a fullscreen pass's <c>.frag.hlsl</c>, or a depth draw's <c>.vert.hlsl</c>,
-    /// whose fragment stage is the renderer's empty one that only writes depth; a draw of surfaces has none, the renderer
-    /// composing its shaders around them.
-    /// </summary>
-    public Handle<Shader> Shader { get; set; }
-
-    /// <summary>
-    /// A script pass's <see cref="IPipelineScript"/>, which records it, into the one texture it writes.
-    /// </summary>
-    public Handle<Script> Script { get; set; }
-
-    /// <summary>
-    /// A count the renderer knows, such as <c>hizLevels</c>, or a number: the pass runs once for each, its shader told
-    /// which (<c>PassIteration()</c>), writing the layer of a texture array or cube its iteration is. Empty runs it once.
-    /// </summary>
-    public string Each { get; set; } = string.Empty;
-
-    /// <summary>
-    /// What it writes: a compute pass's storage textures and buffers, a fullscreen pass's one target.
-    /// </summary>
-    public IReadOnlyList<PassWrite> Writes { get; set; } = [];
-
-    /// <summary>
-    /// What it makes, for itself and every pass after it: in a stage that runs once a frame once for the frame, in any
-    /// other once for each view.
-    /// </summary>
-    public IReadOnlyList<PassCreate> Creates { get; set; } = [];
-
-    /// <summary>
-    /// How many groups a compute pass runs.
-    /// </summary>
-    public PassDispatch Dispatch { get; set; } = new();
-
-    /// <summary>
-    /// What a draw pass draws, and into what.
-    /// </summary>
-    public PassDraw Draw { get; set; } = new();
-
-    /// <summary>
-    /// Values by the names of the shader's <c>PassParams</c> members, in the forms a material's take; one left out takes
-    /// the shader's default.
-    /// </summary>
-    public IReadOnlyDictionary<string, MaterialParam> Params { get; set; } = new Dictionary<string, MaterialParam>(StringComparer.Ordinal);
-}
-
-/// <summary>
 /// When in a frame a <see cref="Pass"/> runs, in this order, each stage one job: a pass goes in the stage whose job it
-/// does, and the stages order the passes of every pipeline the frame runs (the renderer's own, each effect a world adds)
-/// together, so a pass lands where what it reads is made and what reads it comes after, whatever a pipeline lists it
-/// with. The stages before <see cref="Cull"/> run once a frame, for every view to read; <see cref="Cull"/> to
+/// does, and the stages order the passes of every pipeline the frame runs (the renderer's own, each effect a world
+/// adds) together, so a pass lands where what it reads is made and what reads it comes after, whatever a pipeline lists
+/// it with. The stages before <see cref="Cull"/> run once a frame, for every view to read; <see cref="Cull"/> to
 /// <see cref="Ui"/> once for each view, a camera drawing into its target; <see cref="Overlay"/> once for each target,
 /// after every view drawn into it.
 /// </summary>
@@ -88,8 +15,8 @@ public enum PassStage : byte
 {
     /// <summary>
     /// Light gathered once a frame for every view to read: what sees the world rather than a view, the sky captured and
-    /// its spherical harmonics, probes of the light about the camera, and the tables lighting looks up. Here because it is
-    /// the same for every view, and every stage of a view may read it.
+    /// its spherical harmonics, probes of the light about the camera, and the tables lighting looks up. Here because it
+    /// is the same for every view, and every stage of a view may read it.
     /// </summary>
     Probes,
 
@@ -100,15 +27,15 @@ public enum PassStage : byte
     Cull,
 
     /// <summary>
-    /// Which surface each pixel sees, drawn before anything is shaded: a depth pre-pass or a visibility buffer, and what
-    /// is built from it, a depth pyramid and the culling that tests against it. Here so every stage after it knows what
-    /// is in front, and nothing is shaded that is then covered.
+    /// Which surface each pixel sees, drawn before anything is shaded: a depth pre-pass or a visibility buffer, and
+    /// what is built from it, a depth pyramid and the culling that tests against it. Here so every stage after it knows
+    /// what is in front, and nothing is shaded that is then covered.
     /// </summary>
     Visibility,
 
     /// <summary>
-    /// What each pixel's surface is made of, shaded once a pixel into the view's G-buffer, every target at once; not yet
-    /// lit, so lighting and everything that informs it read one description of the pixel.
+    /// What each pixel's surface is made of, shaded once a pixel into the view's G-buffer, every target at once; not
+    /// yet lit, so lighting and everything that informs it read one description of the pixel.
     /// </summary>
     GBuffer,
 
@@ -119,8 +46,8 @@ public enum PassStage : byte
     LightCulling,
 
     /// <summary>
-    /// What blocks each light, drawn for lighting to read: the shadow maps, or the pages of them the view's pixels read.
-    /// After light culling, as which shadows a pixel needs follows from which lights reach it.
+    /// What blocks each light, drawn for lighting to read: the shadow maps, or the pages of them the view's pixels
+    /// read. After light culling, as which shadows a pixel needs follows from which lights reach it.
     /// </summary>
     Shadows,
 
@@ -144,8 +71,8 @@ public enum PassStage : byte
     Lighting,
 
     /// <summary>
-    /// What fills the view wherever nothing was drawn, and what lies between the camera and what was: the sky, fog. Over
-    /// the lit scene, before anything transparent, which is drawn over it.
+    /// What fills the view wherever nothing was drawn, and what lies between the camera and what was: the sky, fog.
+    /// Over the lit scene, before anything transparent, which is drawn over it.
     /// </summary>
     Sky,
 
@@ -155,8 +82,8 @@ public enum PassStage : byte
     Transparency,
 
     /// <summary>
-    /// The finished scene made ready to show: exposure, upscaling, tonemapping, any effect over the whole image. After it
-    /// the view's image is in the colours it is shown in.
+    /// The finished scene made ready to show: exposure, upscaling, tonemapping, any effect over the whole image. After
+    /// it the view's image is in the colours it is shown in.
     /// </summary>
     Post,
 
@@ -222,6 +149,145 @@ public enum PassFilter : byte
 }
 
 /// <summary>
+/// What a <see cref="PassCreate"/> makes.
+/// </summary>
+public enum PassResource : byte
+{
+    Texture,
+    Buffer,
+}
+
+/// <summary>
+/// Which of its view's sizes a <see cref="PassCreate"/>'s texture follows.
+/// </summary>
+public enum PassSize : byte
+{
+    /// <summary>
+    /// The size the view is drawn at, its target's scaled by the renderer's render scale.
+    /// </summary>
+    View,
+
+    /// <summary>
+    /// The size the view is shown at, its target's: what upscales the view, and what follows it. The drawn size instead
+    /// while the renderer's output filter is nearest, which leaves the scaling to the output pass.
+    /// </summary>
+    Output,
+}
+
+/// <summary>
+/// What a draw <see cref="Pass"/> draws.
+/// </summary>
+public enum PassDrawn : byte
+{
+    /// <summary>
+    /// Opaque and masked surfaces, each with its material's surface shader, into the G-buffer.
+    /// </summary>
+    Surfaces,
+
+    /// <summary>
+    /// Transparent surfaces, farthest first, each lit as it is drawn over what is behind it.
+    /// </summary>
+    Transparent,
+
+    /// <summary>
+    /// Opaque surfaces' depth alone, with the pass's own shaders: shadow maps.
+    /// </summary>
+    Depth,
+
+    /// <summary>
+    /// The world's sky, wherever nothing was drawn.
+    /// </summary>
+    Sky,
+
+    /// <summary>
+    /// The world's sky's shadow on the ground around the camera: the share of the sun's light that gets through it,
+    /// into a single-channel target, which whatever the sun lights reads.
+    /// </summary>
+    SkyShadow,
+
+    /// <summary>
+    /// Which triangle each pixel sees, and its depth, a culling pass's pieces of the scene drawn into the view's
+    /// visibility buffer: what a renderer that shades each pixel once draws first.
+    /// </summary>
+    Visibility,
+}
+
+/// <summary>
+/// One step of a renderer's frame, as data: a <c>.pass</c> file. It says when in the frame it runs
+/// (<see cref="Stage"/>), what it is (<see cref="Kind"/>), the shader it runs or the script that records it, the
+/// textures and buffers it writes by name, those it makes for itself and the passes after it, and values for its
+/// shader's <c>PassParams</c>. A
+/// <see cref="Pipeline"/> lists passes; the renderer runs each in its stage, in the order listed. What a pass reads its
+/// shader says: the renderer declares to it, ahead of it, every name the frame has by then, the renderer's own and what
+/// the passes before it made, and binds whichever the shader uses:
+/// <c>{ "stage": "post", "kind": "fullscreen", "shader": { "id": 10230 },
+/// "creates": [ { "name": "Ldr", "format": "rgba16_float" } ], "writes": [ { "name": "Ldr" } ] }</c>.
+/// </summary>
+public sealed class Pass : IJsonAsset<Pass>
+{
+    public static IReadOnlyList<string> Extensions { get; } = [".pass"];
+
+    public Handle<Pass> Handle { get; init; }
+
+    /// <summary>
+    /// What it shows, in a sentence, for a debug view to say on screen beside its name; empty for a pass that is no
+    /// view.
+    /// </summary>
+    public string Description { get; set; } = string.Empty;
+
+    public required PassStage Stage { get; init; }
+
+    public PassKind Kind { get; set; }
+
+    /// <summary>
+    /// A compute pass's <c>.comp.hlsl</c>, a fullscreen pass's <c>.frag.hlsl</c>, or a depth draw's <c>.vert.hlsl</c>,
+    /// whose fragment stage is the renderer's empty one that only writes depth; a draw of surfaces has none, the
+    /// renderer composing its shaders around them.
+    /// </summary>
+    public Handle<Shader> Shader { get; set; }
+
+    /// <summary>
+    /// A script pass's <see cref="IPipelineScript"/>, which records it, into the one texture it writes.
+    /// </summary>
+    public Handle<Script> Script { get; set; }
+
+    /// <summary>
+    /// A count the renderer knows, such as <c>hizLevels</c>, or a number: the pass runs once for each, its shader told
+    /// which (<c>PassIteration()</c>), writing the layer of a texture array or cube its iteration is. Empty runs it
+    /// once.
+    /// </summary>
+    public string Each { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What it writes: a compute pass's storage textures and buffers, a fullscreen pass's one target.
+    /// </summary>
+    public IReadOnlyList<PassWrite> Writes { get; set; } = [];
+
+    /// <summary>
+    /// What it makes, for itself and every pass after it: in a stage that runs once a frame once for the frame, in any
+    /// other once for each view.
+    /// </summary>
+    public IReadOnlyList<PassCreate> Creates { get; set; } = [];
+
+    /// <summary>
+    /// How many groups a compute pass runs.
+    /// </summary>
+    public PassDispatch Dispatch { get; set; } = new();
+
+    /// <summary>
+    /// What a draw pass draws, and into what.
+    /// </summary>
+    public PassDraw Draw { get; set; } = new();
+
+    /// <summary>
+    /// Values by the names of the shader's <c>PassParams</c> members, in the forms a material's take; one left out
+    /// takes the shader's default.
+    /// </summary>
+    public IReadOnlyDictionary<string, MaterialParam> Params { get; set; }
+        = new Dictionary<string, MaterialParam>(StringComparer.Ordinal);
+}
+
+/// <summary>
 /// One texture or buffer a <see cref="Pass"/> writes: a texture at a mip <see cref="Level"/> and a <see cref="Layer"/>,
 /// or a buffer. A fullscreen pass's one target says what happens to what was there (<see cref="Contents"/>,
 /// <see cref="Blend"/>).
@@ -251,10 +317,10 @@ public sealed class PassWrite
 /// <summary>
 /// A texture or buffer a <see cref="Pass"/> makes, by name, for itself and every pass after it. A texture follows its
 /// view's size by <see cref="Scale"/>, or is <see cref="Width"/> by <see cref="Height"/> when it is 0, and
-/// <see cref="Depth"/> deep when it is a volume; a buffer holds
-/// <see cref="Rows"/>, or as many as a count the renderer knows (<see cref="Per"/>), of <see cref="Stride"/> bytes each,
-/// as its shader reads them as <see cref="Type"/>. What it is used for (sampled, drawn into, written by compute, read as
-/// draw arguments or instances) follows from the passes whose shaders name it.
+/// <see cref="Depth"/> deep when it is a volume; a buffer holds <see cref="Rows"/>, or as many as a count the renderer
+/// knows (<see cref="Per"/>), of <see cref="Stride"/> bytes each, as its shader reads them as <see cref="Type"/>. What
+/// it is used for (sampled, drawn into, written by compute, read as draw arguments or instances) follows from the
+/// passes whose shaders name it.
 /// </summary>
 public sealed class PassCreate
 {
@@ -278,15 +344,15 @@ public sealed class PassCreate
     public float Scale { get; set; } = 1;
 
     /// <summary>
-    /// Which of the view's sizes a texture follows: the size it is drawn at, or the size it is shown at, which upscaling
-    /// fills.
+    /// Which of the view's sizes a texture follows: the size it is drawn at, or the size it is shown at, which
+    /// upscaling fills.
     /// </summary>
     public PassSize Size { get; set; }
 
     /// <summary>
-    /// It is kept from frame to frame as two: what the passes write this frame by its name, and what they wrote the frame
-    /// before as <c>NameHistory</c>, which they read; the two swap each frame, and the history starts empty whenever
-    /// the texture is made again, as when the view changes size.
+    /// It is kept from frame to frame as two: what the passes write this frame by its name, and what they wrote the
+    /// frame before as <c>NameHistory</c>, which they read; the two swap each frame, and the history starts empty
+    /// whenever the texture is made again, as when the view changes size.
     /// </summary>
     public bool History { get; set; }
 
@@ -331,8 +397,8 @@ public sealed class PassCreate
     public string Per { get; set; } = string.Empty;
 
     /// <summary>
-    /// A count the renderer knows: the buffer holds a copy of its rows for each, one per iteration of the passes that run
-    /// for each of that count, or room for every one of them at once.
+    /// A count the renderer knows: the buffer holds a copy of its rows for each, one per iteration of the passes that
+    /// run for each of that count, or room for every one of them at once.
     /// </summary>
     public string Copies { get; set; } = string.Empty;
 
@@ -344,36 +410,10 @@ public sealed class PassCreate
 }
 
 /// <summary>
-/// What a <see cref="PassCreate"/> makes.
-/// </summary>
-public enum PassResource : byte
-{
-    Texture,
-    Buffer,
-}
-
-/// <summary>
-/// Which of its view's sizes a <see cref="PassCreate"/>'s texture follows.
-/// </summary>
-public enum PassSize : byte
-{
-    /// <summary>
-    /// The size the view is drawn at, its target's scaled by the renderer's render scale.
-    /// </summary>
-    View,
-
-    /// <summary>
-    /// The size the view is shown at, its target's: what upscales the view, and what follows it. The drawn size instead
-    /// while the renderer's output filter is nearest, which leaves the scaling to the output pass.
-    /// </summary>
-    Output,
-}
-
-/// <summary>
 /// How many groups a compute <see cref="Pass"/> runs: enough for one thread per pixel of the view (<c>view</c>), per
 /// texel of a texture it writes (<c>output:Name</c>), or per one of a count the renderer knows (<c>lights</c>); with a
-/// <see cref="Tile"/>, one group per tile of that many pixels a side instead; <see cref="Groups"/>, fixed; or as many as
-/// a pass before it worked out on the GPU (<see cref="Args"/>).
+/// <see cref="Tile"/>, one group per tile of that many pixels a side instead; <see cref="Groups"/>, fixed; or as many
+/// as a pass before it worked out on the GPU (<see cref="Args"/>).
 /// </summary>
 public sealed class PassDispatch
 {
@@ -385,8 +425,8 @@ public sealed class PassDispatch
 
     /// <summary>
     /// A buffer a pass before it filled with the groups to run, three <c>uint</c>s, x, y and z: work whose amount only
-    /// the GPU knows, such as one group for each cluster a cull kept. With <see cref="Pass.Each"/>, each iteration's are
-    /// the three after the last's.
+    /// the GPU knows, such as one group for each cluster a cull kept. With <see cref="Pass.Each"/>, each iteration's
+    /// are the three after the last's.
     /// </summary>
     public string Args { get; set; } = string.Empty;
 
@@ -397,8 +437,8 @@ public sealed class PassDispatch
 }
 
 /// <summary>
-/// What a draw <see cref="Pass"/> draws: its colour targets in <c>SV_Target</c> order, its depth target, what happens to
-/// what they held, and, for meshes, the draw arguments and instances a culling pass made.
+/// What a draw <see cref="Pass"/> draws: its colour targets in <c>SV_Target</c> order, its depth target, what happens
+/// to what they held, and, for meshes, the draw arguments and instances a culling pass made.
 /// </summary>
 public sealed class PassDraw
 {
@@ -426,8 +466,8 @@ public sealed class PassDraw
     public string Instances { get; set; } = string.Empty;
 
     /// <summary>
-    /// A depth draw's bias, in the depth format's smallest steps and as a factor of the slope, and the most the slope may
-    /// move depth (reverse-Z: negative pushes away from the light); 0 for none.
+    /// A depth draw's bias, in the depth format's smallest steps and as a factor of the slope, and the most the slope
+    /// may move depth (reverse-Z: negative pushes away from the light); 0 for none.
     /// </summary>
     public float DepthBias { get; set; }
 
@@ -444,42 +484,4 @@ public sealed class PassDraw
     /// Its colour targets' levels past the first are made from what it drew, once it has run.
     /// </summary>
     public bool Mipmaps { get; set; }
-}
-
-/// <summary>
-/// What a draw <see cref="Pass"/> draws.
-/// </summary>
-public enum PassDrawn : byte
-{
-    /// <summary>
-    /// Opaque and masked surfaces, each with its material's surface shader, into the G-buffer.
-    /// </summary>
-    Surfaces,
-
-    /// <summary>
-    /// Transparent surfaces, farthest first, each lit as it is drawn over what is behind it.
-    /// </summary>
-    Transparent,
-
-    /// <summary>
-    /// Opaque surfaces' depth alone, with the pass's own shaders: shadow maps.
-    /// </summary>
-    Depth,
-
-    /// <summary>
-    /// The world's sky, wherever nothing was drawn.
-    /// </summary>
-    Sky,
-
-    /// <summary>
-    /// The world's sky's shadow on the ground around the camera: the share of the sun's light that gets through it,
-    /// into a single-channel target, which whatever the sun lights reads.
-    /// </summary>
-    SkyShadow,
-
-    /// <summary>
-    /// Which triangle each pixel sees, and its depth, a culling pass's pieces of the scene drawn into the view's
-    /// visibility buffer: what a renderer that shades each pixel once draws first.
-    /// </summary>
-    Visibility,
 }

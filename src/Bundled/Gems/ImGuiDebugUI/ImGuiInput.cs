@@ -18,10 +18,22 @@ internal static unsafe class ImGuiInput
             FeedKey(io, key, input[control]);
         }
 
-        ImGuiIO.AddKeyEvent(io, ImGuiKey.ImGuiModCtrl, input[Control.KeyLeftCtrl].IsDown || input[Control.KeyRightCtrl].IsDown);
-        ImGuiIO.AddKeyEvent(io, ImGuiKey.ImGuiModShift, input[Control.KeyLeftShift].IsDown || input[Control.KeyRightShift].IsDown);
-        ImGuiIO.AddKeyEvent(io, ImGuiKey.ImGuiModAlt, input[Control.KeyLeftAlt].IsDown || input[Control.KeyRightAlt].IsDown);
-        ImGuiIO.AddKeyEvent(io, ImGuiKey.ImGuiModSuper, input[Control.KeyLeftSuper].IsDown || input[Control.KeyRightSuper].IsDown);
+        ImGuiIO.AddKeyEvent(
+            io,
+            ImGuiKey.ImGuiModCtrl,
+            input[Control.KeyLeftCtrl].IsDown || input[Control.KeyRightCtrl].IsDown);
+        ImGuiIO.AddKeyEvent(
+            io,
+            ImGuiKey.ImGuiModShift,
+            input[Control.KeyLeftShift].IsDown || input[Control.KeyRightShift].IsDown);
+        ImGuiIO.AddKeyEvent(
+            io,
+            ImGuiKey.ImGuiModAlt,
+            input[Control.KeyLeftAlt].IsDown || input[Control.KeyRightAlt].IsDown);
+        ImGuiIO.AddKeyEvent(
+            io,
+            ImGuiKey.ImGuiModSuper,
+            input[Control.KeyLeftSuper].IsDown || input[Control.KeyRightSuper].IsDown);
 
         ImGuiIO.AddMousePosEvent(io, input[Control.MouseX].Value, input[Control.MouseY].Value);
         FeedButton(io, (int)ImGuiMouseButton.Left, input[Control.MouseLeft]);

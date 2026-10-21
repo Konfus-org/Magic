@@ -8,17 +8,57 @@ using System.Text.Json;
 namespace Magic.DebugTools;
 
 /// <summary>
+/// One line of the telemetry: an instrument's numbers over the last second, its name above a line per set of tags, or
+/// one of those, under its tab and its header, as the cells of a row:
+/// its name, its value (a histogram's mean, a counter's total, a gauge's latest), how many or how much a second, and a
+/// histogram's most, each empty where the instrument has none. <see cref="Description"/> is the instrument's own: what
+/// it measures.
+/// </summary>
+internal readonly record struct TelemetryLine(
+    string Tab,
+    string Header,
+    string Name,
+    string Value,
+    string Rate,
+    string Max,
+    string? Description)
+{
+    /// <summary>
+    /// The row as one line of text, for Copy: the name, then the cells it has.
+    /// </summary>
+    internal string Text
+    {
+        get
+        {
+            StringBuilder text = new(Name);
+            string between = ": ";
+            foreach (string cell in (ReadOnlySpan<string>)[Value, Rate, Max.Length == 0 ? string.Empty : $"max {Max}"])
+            {
+                if (cell.Length > 0)
+                {
+                    text.Append(between).Append(cell);
+                    between = ", ";
+                }
+            }
+
+            return text.ToString();
+        }
+    }
+}
+
+/// <summary>
 /// What the meters listened to measure, summed up each second as rows laid out as the instruments are named, as an
 /// exporter shows them: a tab per entry of the settings' tabs, holding the meters under its prefix, a meter's rows
 /// together and, in one, an area's. An area is the part of an instrument's name after its meter's, so
 /// <c>magic.core.frame.duration</c> is <c>duration</c> in the area <c>frame</c> of <c>Magic.Core</c>, and a name that
 /// does not start with its meter's, as .NET's <c>dotnet.gc.collections</c>, loses its first part instead; a name with
 /// nothing after its area is its own area. An instrument measured without tags is one row; with tags, a row of its
-/// name, then one per set of tags, showing their values. A row's cells are the name, the value, how many or how much
-/// a second, and the most: a histogram's are its mean, how many a second and its most, so the frame's duration says
-/// the frame time, the frame rate and the slowest frame; a counter's its total over the second and its rate; a running
-/// total's, such as the garbage collector's, the total and how fast it rose; a gauge's its latest value alone. Seconds are shown as milliseconds, bytes as megabytes, and a count's unit, such as
-/// <c>{collection}</c>, not at all, as the name says what is counted.
+/// name, then one per set of tags, showing their values. A row's cells are the name, the value, how many or how much a
+/// second, and the most: a histogram's are its mean, how many a second and its most, so the frame's duration says the
+/// frame time, the frame rate and the slowest frame; a counter's its total over the second and its rate; a running
+/// total's, such as the garbage collector's, the total and how fast it rose; a gauge's its latest value alone. Seconds
+/// are shown as milliseconds, bytes as megabytes, and a count's unit, such as <c>{collection}</c>, not at all, as the
+/// name says what is counted.
 /// <para>
 /// It listens only between <see cref="Listen"/> on and off. Measurements are added up on the thread that records
 /// them, without allocating after a series' first, so listening is cheap in the frame loop; the lines are made on the
@@ -158,7 +198,8 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// </summary>
     private static bool IsUnder(string meter, string prefix)
     {
-        return meter.StartsWith(prefix, StringComparison.Ordinal) && (meter.Length == prefix.Length || meter[prefix.Length] == '.');
+        return meter.StartsWith(prefix, StringComparison.Ordinal)
+            && (meter.Length == prefix.Length || meter[prefix.Length] == '.');
     }
 
     /// <summary>
@@ -176,8 +217,8 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     }
 
     /// <summary>
-    /// <paramref name="value"/> in <paramref name="unit"/>, with seconds shown as milliseconds, as most of what is timed
-    /// in a frame takes far less than one, bytes as megabytes, and a count's unit, in braces, left out.
+    /// <paramref name="value"/> in <paramref name="unit"/>, with seconds shown as milliseconds, as most of what is
+    /// timed in a frame takes far less than one, bytes as megabytes, and a count's unit, in braces, left out.
     /// </summary>
     private static string FormatAmount(double value, string? unit) => unit switch
     {
@@ -190,7 +231,11 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// <summary>
     /// One measurement into its instrument's series for its tags, on the thread that recorded it.
     /// </summary>
-    private static void Add<T>(Instrument instrument, T measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
+    private static void Add<T>(
+        Instrument instrument,
+        T measurement,
+        ReadOnlySpan<KeyValuePair<string, object?>> tags,
+        object? state)
         where T : struct, INumber<T>
     {
         if (state is Measured measured) measured.Add(double.CreateTruncating(measurement), tags);
@@ -223,8 +268,8 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     }
 
     /// <summary>
-    /// Where <paramref name="added"/> goes among the instruments listened to, to keep their order: after the last of its
-    /// meter and area, else after the last of its meter, else before the first whose tab the settings list later.
+    /// Where <paramref name="added"/> goes among the instruments listened to, to keep their order: after the last of
+    /// its meter and area, else after the last of its meter, else before the first whose tab the settings list later.
     /// </summary>
     private int PlaceOf(Measured added)
     {
@@ -337,7 +382,14 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
                     if (series.Tags.Length > 0 && !isNamed)
                     {
-                        lines.Add(new TelemetryLine(Tab, _parts.Header, _parts.Name, string.Empty, string.Empty, string.Empty, instrument.Description));
+                        lines.Add(new TelemetryLine(
+                            Tab,
+                            _parts.Header,
+                            _parts.Name,
+                            string.Empty,
+                            string.Empty,
+                            string.Empty,
+                            instrument.Description));
                         isNamed = true;
                     }
 
@@ -355,7 +407,9 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
             if (kind == typeof(Counter<>) || kind == typeof(UpDownCounter<>)) return Summary.Total;
 
-            return kind == typeof(ObservableCounter<>) || kind == typeof(ObservableUpDownCounter<>) ? Summary.Running : Summary.Latest;
+            return kind == typeof(ObservableCounter<>) || kind == typeof(ObservableUpDownCounter<>)
+                ? Summary.Running
+                : Summary.Latest;
         }
 
         /// <summary>
@@ -369,11 +423,17 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         {
             string meter = instrument.Meter.Name;
             string name = instrument.Name;
-            string own = string.Join('.', Array.ConvertAll(meter.Split('.'), JsonNamingPolicy.SnakeCaseLower.ConvertName)) + ".";
-            string rest = name.StartsWith(own, StringComparison.Ordinal) ? name[own.Length..] : name[(name.IndexOf('.', StringComparison.Ordinal) + 1)..];
+            string[] parts = Array.ConvertAll(meter.Split('.'), JsonNamingPolicy.SnakeCaseLower.ConvertName);
+            string own = string.Join('.', parts) + ".";
+            string rest = name.StartsWith(own, StringComparison.Ordinal)
+                ? name[own.Length..]
+                : name[(name.IndexOf('.', StringComparison.Ordinal) + 1)..];
             int dot = rest.IndexOf('.', StringComparison.Ordinal);
             string area = dot < 0 ? rest : rest[..dot];
-            return (area, dot < 0 ? rest : rest[(dot + 1)..], meter.Length == prefix.Length ? area : $"{meter[(prefix.Length + 1)..]} {area}");
+            return (
+                area,
+                dot < 0 ? rest : rest[(dot + 1)..],
+                meter.Length == prefix.Length ? area : $"{meter[(prefix.Length + 1)..]} {area}");
         }
 
         /// <summary>
@@ -407,9 +467,20 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
             (string value, string rate, string max) = _summary switch
             {
-                Summary.Distribution => (FormatAmount(series.Sum / series.Count, unit), string.Create(CultureInfo.InvariantCulture, $"{series.Count / seconds:0.#}/s"), FormatAmount(series.Max, unit)),
-                Summary.Total => (FormatAmount(series.Sum, unit), $"{FormatAmount(series.Sum / seconds, unit)}/s", string.Empty),
-                Summary.Running => (FormatAmount(series.Last, unit), series.Previous is { } previous ? $"{FormatAmount((series.Last - previous) / seconds, unit)}/s" : string.Empty, string.Empty),
+                Summary.Distribution => (
+                    FormatAmount(series.Sum / series.Count, unit),
+                    string.Create(CultureInfo.InvariantCulture, $"{series.Count / seconds:0.#}/s"),
+                    FormatAmount(series.Max, unit)),
+                Summary.Total => (
+                    FormatAmount(series.Sum, unit),
+                    $"{FormatAmount(series.Sum / seconds, unit)}/s",
+                    string.Empty),
+                Summary.Running => (
+                    FormatAmount(series.Last, unit),
+                    series.Previous is { } previous
+                        ? $"{FormatAmount((series.Last - previous) / seconds, unit)}/s"
+                        : string.Empty,
+                    string.Empty),
                 Summary.Latest or _ => (FormatAmount(series.Last, unit), string.Empty, string.Empty),
             };
             return new TelemetryLine(Tab, _parts.Header, name.ToString(), value, rate, max, instrument.Description);
@@ -452,8 +523,8 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         }
 
         /// <summary>
-        /// Whether <paramref name="other"/> are this series' tags, in the same order: an instrument is recorded with its
-        /// tags in one order.
+        /// Whether <paramref name="other"/> are this series' tags, in the same order: an instrument is recorded with
+        /// its tags in one order.
         /// </summary>
         internal bool Matches(ReadOnlySpan<KeyValuePair<string, object?>> other)
         {
@@ -461,45 +532,14 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
             for (int i = 0; i < other.Length; i++)
             {
-                if (!string.Equals(other[i].Key, tags[i].Key, StringComparison.Ordinal) || !Equals(other[i].Value, tags[i].Value))
+                if (!string.Equals(other[i].Key, tags[i].Key, StringComparison.Ordinal)
+                    || !Equals(other[i].Value, tags[i].Value))
                 {
                     return false;
                 }
             }
 
             return true;
-        }
-    }
-}
-
-/// <summary>
-/// One line of the telemetry: an instrument's numbers over the last second, its name above a line per set of tags, or
-/// one of those, under its tab and its header, as the cells of a row:
-/// its name, its value (a histogram's mean, a counter's total, a gauge's latest), how many or how much a second, and a
-/// histogram's most, each empty where the instrument has none. <see cref="Description"/> is the instrument's own: what
-/// it measures.
-/// </summary>
-internal readonly record struct TelemetryLine(string Tab, string Header, string Name, string Value, string Rate, string Max, string? Description)
-{
-    /// <summary>
-    /// The row as one line of text, for Copy: the name, then the cells it has.
-    /// </summary>
-    internal string Text
-    {
-        get
-        {
-            StringBuilder text = new(Name);
-            string between = ": ";
-            foreach (string cell in (ReadOnlySpan<string>)[Value, Rate, Max.Length == 0 ? string.Empty : $"max {Max}"])
-            {
-                if (cell.Length > 0)
-                {
-                    text.Append(between).Append(cell);
-                    between = ", ";
-                }
-            }
-
-            return text.ToString();
         }
     }
 }

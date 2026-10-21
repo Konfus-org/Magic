@@ -75,7 +75,8 @@ public sealed class Mesh
     public int MaterialSlot { get; init; }
 
     /// <summary>
-    /// What it shows when it is a card, a quad facing the camera in place of a mesh far away; null for a mesh of triangles.
+    /// What it shows when it is a card, a quad facing the camera in place of a mesh far away; null for a mesh of
+    /// triangles.
     /// </summary>
     public Card? Card { get; init; }
 }

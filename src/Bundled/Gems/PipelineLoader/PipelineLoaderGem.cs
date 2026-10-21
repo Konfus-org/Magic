@@ -10,9 +10,9 @@ namespace Magic.PipelineLoader;
 
 /// <summary>
 /// Pipelines as they load: the post-processor that gives every loaded <see cref="Pipeline"/> its
-/// <see cref="Pipeline.Passes"/>: each entry in order, a nested pipeline's passes in its place, each pass with its params
-/// merged and what the settings turn off left out. What it loads to make
-/// one, its passes and nested pipelines, is what the assets make it from again when one of them changes.
+/// <see cref="Pipeline.Passes"/>: each entry in order, a nested pipeline's passes in its place, each pass with its
+/// params merged and what the settings turn off left out. What it loads to make one, its passes and nested pipelines,
+/// is what the assets make it from again when one of them changes.
 /// </summary>
 internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings) : IGem, ILoadPostProcessor<Pipeline>
 {
@@ -41,7 +41,8 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
         foreach (PipelineEntry entry in asset.Entries)
         {
             bool isPass = entry.Pass != Handle<Pass>.None;
-            string name = Path.GetFileNameWithoutExtension((isPass ? assets.GetPath(entry.Pass) : assets.GetPath(entry.Pipeline)) ?? string.Empty);
+            string name = Path.GetFileNameWithoutExtension(
+                (isPass ? assets.GetPath(entry.Pass) : assets.GetPath(entry.Pipeline)) ?? string.Empty);
             if (IsOff(name)) continue;
 
             if (isPass)
@@ -75,11 +76,25 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
         return Result.Success(new Pipeline { Entries = asset.Entries, Passes = passes });
     }
 
+    private static void Add(Dictionary<string, MaterialParam> merged, IReadOnlyDictionary<string, MaterialParam>? layer)
+    {
+        if (layer is null) return;
+
+        foreach ((string param, MaterialParam value) in layer)
+        {
+            merged.TryAdd(param, value);
+        }
+    }
+
     /// <summary>
     /// Pass <paramref name="name"/>'s params: the settings' first, then <paramref name="entry"/>'s, then
-    /// <paramref name="inner"/>, the pass's own or what a nested pipeline made of them, the first to set a param winning.
+    /// <paramref name="inner"/>, the pass's own or what a nested pipeline made of them, the first to set a param
+    /// winning.
     /// </summary>
-    private Dictionary<string, MaterialParam> Merge(string name, PipelineEntry entry, IReadOnlyDictionary<string, MaterialParam> inner)
+    private Dictionary<string, MaterialParam> Merge(
+        string name,
+        PipelineEntry entry,
+        IReadOnlyDictionary<string, MaterialParam> inner)
     {
         Dictionary<string, MaterialParam> merged = new(StringComparer.Ordinal);
         Add(merged, settings.Params.GetValueOrDefault(name));
@@ -96,15 +111,5 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
         }
 
         return false;
-    }
-
-    private static void Add(Dictionary<string, MaterialParam> merged, IReadOnlyDictionary<string, MaterialParam>? layer)
-    {
-        if (layer is null) return;
-
-        foreach ((string param, MaterialParam value) in layer)
-        {
-            merged.TryAdd(param, value);
-        }
     }
 }

@@ -25,7 +25,8 @@ public record struct SpotLight : IComponent
     }
 
     /// <summary>
-    /// Metres it reaches: its light fades to nothing there, so whatever draws it can leave it out of everything farther.
+    /// Metres it reaches: its light fades to nothing there, so whatever draws it can leave it out of everything
+    /// farther.
     /// </summary>
     public float Range
     {

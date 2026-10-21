@@ -12,10 +12,10 @@ namespace Magic.Services;
 /// <summary>
 /// The one JSON dialect, for whatever reads a file: camelCase keys matched exactly, enums by their names in snake_case
 /// (<c>"clamp"</c>, <c>"masked"</c>), comments and trailing commas allowed, public fields read as properties are (a
-/// component's), a float that is infinite or not a number written and read as <c>"Infinity"</c>, <c>"-Infinity"</c>
-/// or <c>"NaN"</c>, and a key the type does not have, or a null where it allows none, refused, so a misspelt or broken
-/// file fails loudly. Any type reads in it as it is, Core's, a gem's or a game's: .NET's serializer finds its members by
-/// reflection, so nothing is declared for it. Safe from any thread.
+/// component's), a float that is infinite or not a number written and read as <c>"Infinity"</c>, <c>"-Infinity"</c> or
+/// <c>"NaN"</c>, and a key the type does not have, or a null where it allows none, refused, so a misspelt or broken
+/// file fails loudly. Any type reads in it as it is, Core's, a gem's or a game's: .NET's serializer finds its members
+/// by reflection, so nothing is declared for it. Safe from any thread.
 /// </summary>
 public static class Json
 {
@@ -92,7 +92,8 @@ public static class Json
         {
             return Result.Success(JsonSerializer.SerializeToElement(value, type, Options));
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or NotSupportedException or JsonException)
+        catch (Exception ex)
+            when (ex is ArgumentException or InvalidOperationException or NotSupportedException or JsonException)
         {
             return Result.Failure<JsonElement>(ex.Message);
         }
@@ -117,8 +118,8 @@ public static class Json
     }
 
     /// <summary>
-    /// Leaves an asset's <see cref="IAsset{TSelf}.Handle"/> out of its JSON: which asset it is, its provider gives it, so a
-    /// file never says, and one that tries has a key its type does not.
+    /// Leaves an asset's <see cref="IAsset{TSelf}.Handle"/> out of its JSON: which asset it is, its provider gives it,
+    /// so a file never says, and one that tries has a key its type does not.
     /// </summary>
     private static void WithoutAssetHandle(JsonTypeInfo type)
     {

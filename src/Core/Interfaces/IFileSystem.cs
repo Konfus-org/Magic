@@ -39,9 +39,9 @@ public interface IFileSystem
     Task<Result<byte[]>> ReadAsync(string path, CancellationToken cancel);
 
     /// <summary>
-    /// Writes <paramref name="bytes"/> as the whole file at <paramref name="path"/>, making the folders it is in. They are
-    /// written beside it, then moved over it, so whoever reads the file meanwhile, or after a crash, finds it whole: as it
-    /// was or as it is now.
+    /// Writes <paramref name="bytes"/> as the whole file at <paramref name="path"/>, making the folders it is in. They
+    /// are written beside it, then moved over it, so whoever reads the file meanwhile, or after a crash, finds it
+    /// whole: as it was or as it is now.
     /// </summary>
     Task<Result> WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancel);
 

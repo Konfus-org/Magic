@@ -14,14 +14,16 @@ internal sealed class Options
     /// <summary>The namespace the API is declared in.</summary>
     internal string Namespace { get; private set; } = "";
 
-    /// <summary>The extracted archive; the headers and include paths are relative to it, and only declarations from under it are generated.</summary>
+    /// <summary>The extracted archive; the headers and include paths are relative to it, and only declarations from
+    /// under it are generated.</summary>
     internal string Root { get; private set; } = "";
 
     internal IReadOnlyList<string> Headers { get; private set; } = [];
 
     internal IReadOnlyList<string> IncludePaths { get; private set; } = [];
 
-    /// <summary>Include folders of other libraries' archives, absolute: headers this library's include but which are not its own.</summary>
+    /// <summary>Include folders of other libraries' archives, absolute: headers this library's include but which are
+    /// not its own.</summary>
     internal IReadOnlyList<string> AbsoluteIncludePaths { get; private set; } = [];
 
     /// <summary>
@@ -41,7 +43,8 @@ internal sealed class Options
     /// <summary>The class a name with no owner is declared in; the library's name unless the item says.</summary>
     internal string Class { get; private set; } = "";
 
-    /// <summary>The standard headers the parse sees instead of the machine's, so every machine parses the same.</summary>
+    /// <summary>The standard headers the parse sees instead of the machine's, so every machine parses the
+    /// same.</summary>
     internal string Sysroot { get; private set; } = "";
 
     internal string Output { get; private set; } = "";
@@ -100,9 +103,14 @@ internal sealed class Options
             }
         }
 
-        if (options.Library.Length == 0 || options.Namespace.Length == 0 || options.Root.Length == 0 || options.Headers.Count == 0 || options.Output.Length == 0 || options.Sysroot.Length == 0)
+        if (options.Library.Length == 0 || options.Namespace.Length == 0 || options.Root.Length == 0
+            || options.Headers.Count == 0
+            || options.Output.Length == 0
+            || options.Sysroot.Length == 0)
         {
-            throw new ArgumentException("--library, --namespace, --root, --headers, --sysroot and --output are required.", nameof(lines));
+            throw new ArgumentException(
+                "--library, --namespace, --root, --headers, --sysroot and --output are required.",
+                nameof(lines));
         }
 
         if (options.Class.Length == 0) options.Class = Names.ToPascal(options.Library);
@@ -113,7 +121,9 @@ internal sealed class Options
     private static List<string> ParseList(string value)
     {
         List<string> items = [];
-        foreach (string item in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (string item in value.Split(
+            ',',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             items.Add(item);
         }

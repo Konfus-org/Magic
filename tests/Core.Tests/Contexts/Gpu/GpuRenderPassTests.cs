@@ -24,7 +24,9 @@ public sealed class GpuRenderPassTests
 
         pass.Draw(3, instances: 2, firstVertex: 1, firstInstance: 4);
 
-        Assert.Equal(new GpuCommand(GpuCommandType.Draw, Count: 3, Instances: 2, First: 1, FirstInstance: 4), commands.Commands[^1]);
+        Assert.Equal(
+            new GpuCommand(GpuCommandType.Draw, Count: 3, Instances: 2, First: 1, FirstInstance: 4),
+            commands.Commands[^1]);
     }
 
     [Fact]
@@ -35,7 +37,15 @@ public sealed class GpuRenderPassTests
 
         pass.DrawIndexed(6, firstIndex: 3, vertexOffset: -1, instances: 2, firstInstance: 5);
 
-        Assert.Equal(new GpuCommand(GpuCommandType.DrawIndexed, Count: 6, First: 3, VertexOffset: -1, Instances: 2, FirstInstance: 5), commands.Commands[^1]);
+        Assert.Equal(
+            new GpuCommand(
+                GpuCommandType.DrawIndexed,
+                Count: 6,
+                First: 3,
+                VertexOffset: -1,
+                Instances: 2,
+                FirstInstance: 5),
+            commands.Commands[^1]);
     }
 
     [Fact]
@@ -47,7 +57,9 @@ public sealed class GpuRenderPassTests
 
         pass.DrawIndexedFromBuffer(arguments, 40, 2);
 
-        Assert.Equal(new GpuCommand(GpuCommandType.DrawIndexedFromBuffer, Buffer: arguments, Offset: 40, Count: 2), commands.Commands[^1]);
+        Assert.Equal(
+            new GpuCommand(GpuCommandType.DrawIndexedFromBuffer, Buffer: arguments, Offset: 40, Count: 2),
+            commands.Commands[^1]);
     }
 
     [Fact]

@@ -9,8 +9,8 @@ namespace Magic.DxcShaderCompiler;
 /// What a SPIR-V module binds, read from its words: each resource variable's name (OpName), what it is (the type its
 /// pointer points to: an image sampled or not, or of integers, which no GPU samples, a sampler, a block in the uniform
 /// or the storage class) and where it is (its DescriptorSet and Binding decorations), in the binding model of
-/// Shaders/Include/Bindings.hlsli. A set is a stage's read, write or uniform space, and a binding is a register of it. A
-/// sampler is the sampled texture's at its binding, and is not listed. A compute module's group size comes with them.
+/// Shaders/Include/Bindings.hlsli. A set is a stage's read, write or uniform space, and a binding is a register of it.
+/// A sampler is the sampled texture's at its binding, and is not listed. A compute module's group size comes with them.
 /// </summary>
 internal static class SpirvBindings
 {
@@ -38,15 +38,6 @@ internal static class SpirvBindings
     private const uint ClassUniformConstant = 0;
     private const uint ClassUniform = 2;
     private const uint ClassStorageBuffer = 12;
-
-    private enum Resource : byte
-    {
-        Texture,
-        StorageImage,
-        Sampler,
-        Buffer,
-        Block,
-    }
 
     /// <summary>
     /// The shader <paramref name="spirv"/> is, compiled for <paramref name="stage"/>, with what it binds; why not, when
@@ -92,7 +83,9 @@ internal static class SpirvBindings
                     break;
                 case OpTypeImage when operands.Length >= 7:
                     // An image of integers cannot be sampled, so the binding model reads it as a storage texture.
-                    types[operands[0]] = operands[6] == 2 || integers.Contains(operands[1]) ? Resource.StorageImage : Resource.Texture;
+                    types[operands[0]] = operands[6] == 2 || integers.Contains(operands[1])
+                        ? Resource.StorageImage
+                        : Resource.Texture;
                     break;
                 case OpTypeSampler when operands.Length >= 1:
                     types[operands[0]] = Resource.Sampler;
@@ -123,7 +116,8 @@ internal static class SpirvBindings
         HashSet<uint> samplers = [];
         foreach ((uint id, uint pointer) in variables)
         {
-            if (!pointers.TryGetValue(pointer, out (uint Class, uint Type) pointee) || pointee.Class is not (ClassUniformConstant or ClassUniform or ClassStorageBuffer))
+            if (!pointers.TryGetValue(pointer, out (uint Class, uint Type) pointee)
+                || pointee.Class is not (ClassUniformConstant or ClassUniform or ClassStorageBuffer))
             {
                 continue;
             }
@@ -133,7 +127,8 @@ internal static class SpirvBindings
 
             if (arrays.Contains(pointee.Type))
             {
-                return Result.Failure<GpuShader>($"{name} is an array of resources, which the binding model does not bind.");
+                return Result.Failure<GpuShader>(
+                    $"{name} is an array of resources, which the binding model does not bind.");
             }
 
             if (!types.TryGetValue(pointee.Type, out Resource resource))
@@ -149,9 +144,12 @@ internal static class SpirvBindings
                 continue;
             }
 
-            // A struct is a buffer in the storage class, or a uniform block in the uniform class; nothing else is bound.
-            bool isBuffer = resource == Resource.Block && (pointee.Class == ClassStorageBuffer || bufferBlocks.Contains(pointee.Type));
-            bool isUniform = resource == Resource.Block && pointee.Class == ClassUniform && blocks.Contains(pointee.Type);
+            // A struct is a buffer in the storage class, or a uniform block in the uniform class; nothing else is
+            // bound.
+            bool isBuffer = resource == Resource.Block
+                && (pointee.Class == ClassStorageBuffer || bufferBlocks.Contains(pointee.Type));
+            bool isUniform = resource == Resource.Block && pointee.Class == ClassUniform
+                && blocks.Contains(pointee.Type);
             if (resource == Resource.Block && !isBuffer && !isUniform)
             {
                 return Result.Failure<GpuShader>($"{name} is a struct that is neither a buffer nor a constant block.");
@@ -167,7 +165,8 @@ internal static class SpirvBindings
         {
             if (!found.Exists(texture => texture.Kind == GpuBindingKind.Sampled && texture.Register == binding))
             {
-                return Result.Failure<GpuShader>($"a sampler at {binding} has no sampled texture at {binding}, whose it would be.");
+                return Result.Failure<GpuShader>(
+                    $"a sampler at {binding} has no sampled texture at {binding}, whose it would be.");
             }
         }
 
@@ -183,7 +182,12 @@ internal static class SpirvBindings
         });
     }
 
-    private static void Decorate(ReadOnlySpan<uint> operands, Dictionary<uint, uint> bindings, Dictionary<uint, uint> sets, HashSet<uint> blocks, HashSet<uint> bufferBlocks)
+    private static void Decorate(
+        ReadOnlySpan<uint> operands,
+        Dictionary<uint, uint> bindings,
+        Dictionary<uint, uint> sets,
+        HashSet<uint> blocks,
+        HashSet<uint> bufferBlocks)
     {
         uint target = operands[0];
         switch (operands[1])
@@ -228,7 +232,8 @@ internal static class SpirvBindings
                 Resource.Texture => Result.Success(GpuBindingKind.Sampled),
                 Resource.StorageImage => Result.Success(GpuBindingKind.StorageTexture),
                 Resource.Buffer => Result.Success(GpuBindingKind.StorageBuffer),
-                Resource.Sampler or Resource.Block => Result.Failure<GpuBindingKind>($"{name} is read as what the binding model does not read."),
+                Resource.Sampler or Resource.Block => Result.Failure<GpuBindingKind>(
+                    $"{name} is read as what the binding model does not read."),
                 _ => Result.Failure<GpuBindingKind>($"{name} is read as what the binding model does not read."),
             };
         }
@@ -239,7 +244,8 @@ internal static class SpirvBindings
             {
                 Resource.StorageImage => Result.Success(GpuBindingKind.ReadWriteStorageTexture),
                 Resource.Buffer => Result.Success(GpuBindingKind.ReadWriteStorageBuffer),
-                Resource.Texture or Resource.Sampler or Resource.Block => Result.Failure<GpuBindingKind>($"{name} is written as what the binding model does not write."),
+                Resource.Texture or Resource.Sampler or Resource.Block => Result.Failure<GpuBindingKind>(
+                    $"{name} is written as what the binding model does not write."),
                 _ => Result.Failure<GpuBindingKind>($"{name} is written as what the binding model does not write."),
             };
         }
@@ -255,5 +261,14 @@ internal static class SpirvBindings
         ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(words);
         int end = bytes.IndexOf((byte)0);
         return Encoding.UTF8.GetString(end < 0 ? bytes : bytes[..end]);
+    }
+
+    private enum Resource : byte
+    {
+        Texture,
+        StorageImage,
+        Sampler,
+        Buffer,
+        Block,
     }
 }

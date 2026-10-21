@@ -14,7 +14,13 @@ internal enum DeclarationKind
 /// to (<c>AttachesToStruct</c>, as <c>ImGuiIO_AddKeyEvent</c> does), empty at the namespace; <c>Name</c> is its C#
 /// name, by which two declarations that would become one are found.
 /// </summary>
-internal sealed record Declaration(DeclarationKind Kind, string CName, string Owner, bool AttachesToStruct, string Name, string Text);
+internal sealed record Declaration(
+    DeclarationKind Kind,
+    string CName,
+    string Owner,
+    bool AttachesToStruct,
+    string Name,
+    string Text);
 
 /// <summary>A construct the generator does not emit, with where it is, for the build log.</summary>
 internal sealed record Skip(string What, string Where);

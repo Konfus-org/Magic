@@ -19,7 +19,8 @@ internal sealed class SpinSystem : IParallelSystemScript<Transform, Spin>
         for (int i = 0; i < transforms.Length; i++)
         {
             float radians = spins[i].DegreesPerSecond * frame.DeltaSeconds * (MathF.PI / 180);
-            transforms[i].Rotation = Quaternion.Normalize(Quaternion.CreateFromAxisAngle(Vector3.UnitY, radians) * transforms[i].Rotation);
+            transforms[i].Rotation = Quaternion.Normalize(
+                Quaternion.CreateFromAxisAngle(Vector3.UnitY, radians) * transforms[i].Rotation);
         }
     }
 }

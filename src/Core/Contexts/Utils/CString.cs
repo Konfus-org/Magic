@@ -12,7 +12,8 @@ public static class CString
     /// <summary>
     /// The text at a C string, or empty for a null one.
     /// </summary>
-    public static unsafe string Read(byte* text) => text is null ? string.Empty : Marshal.PtrToStringUTF8((nint)text) ?? string.Empty;
+    public static unsafe string Read(byte* text)
+        => text is null ? string.Empty : Marshal.PtrToStringUTF8((nint)text) ?? string.Empty;
 
     /// <summary>
     /// The text as a zero-terminated UTF-8 string, to pin (<c>fixed</c>) for as long as the C call reads it.

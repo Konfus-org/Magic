@@ -59,7 +59,15 @@ public sealed class World : IDisposable
     /// </summary>
     private readonly Domains? _domains;
 
-    internal World(IEcs? ecs, IScripts? scripts, Assemblies assemblies, Assets assets, Threads threads, Events events, Project project, Lifetime lifetime)
+    internal World(
+        IEcs? ecs,
+        IScripts? scripts,
+        Assemblies assemblies,
+        Assets assets,
+        Threads threads,
+        Events events,
+        Project project,
+        Lifetime lifetime)
     {
         _ecs = ecs;
         _scripts = scripts;
@@ -69,11 +77,6 @@ public sealed class World : IDisposable
         _project = project;
         _lifetime = lifetime;
         _domains = ecs is null ? null : new Domains(this, ecs, assets, threads, events, project, lifetime);
-    }
-
-    public void Dispose()
-    {
-        _domains?.Dispose();
     }
 
     /// <summary>
@@ -88,9 +91,9 @@ public sealed class World : IDisposable
     public bool IsLoading => _domains?.IsLoading ?? false;
 
     /// <summary>
-    /// Whether the world has loaded: a domain is open, every open one is there, spawned, and none is opening in place of
-    /// the world. False while a domain is still being read, however it was opened, which <see cref="IsLoading"/> only
-    /// covers for one opening in place of the world.
+    /// Whether the world has loaded: a domain is open, every open one is there, spawned, and none is opening in place
+    /// of the world. False while a domain is still being read, however it was opened, which <see cref="IsLoading"/>
+    /// only covers for one opening in place of the world.
     /// </summary>
     public bool IsLoaded => _domains?.IsLoaded ?? false;
 
@@ -100,6 +103,11 @@ public sealed class World : IDisposable
     /// </summary>
     internal IReadOnlyList<IPreloader> Preloaders { get; set; } = [];
 
+    public void Dispose()
+    {
+        _domains?.Dispose();
+    }
+
     /// <summary>
     /// Opens <paramref name="domain"/> as <paramref name="mode"/> says, telling <paramref name="progress"/> how far it
     /// is, 0 to 1. The task ends once the domain is there, with it; with why not when its file does not load, before
@@ -107,10 +115,15 @@ public sealed class World : IDisposable
     /// and it opens without it. Opening one already open keeps it, and closes the others when it replaces them. Without
     /// a gem that provides the ECS, nothing opens. Any thread.
     /// </summary>
-    public Task<Result<Domain>> OpenAsync(Handle<Domain> domain, DomainOpenMode mode, IProgress<float>? progress = null, CancellationToken cancel = default)
+    public Task<Result<Domain>> OpenAsync(
+        Handle<Domain> domain,
+        DomainOpenMode mode,
+        IProgress<float>? progress = null,
+        CancellationToken cancel = default)
     {
         return _domains?.OpenAsync(domain, mode, progress, cancel)
-            ?? Task.FromResult(Result.Failure<Domain>("The domain does not open: no gem the project lists provides the ECS."));
+            ?? Task.FromResult(
+                Result.Failure<Domain>("The domain does not open: no gem the project lists provides the ECS."));
     }
 
     /// <summary>
@@ -130,13 +143,13 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
-    /// The world as data (<see cref="WorldState"/>), to put back with <see cref="Restore"/>: the domains open, and every
-    /// entity with its components and its scripts (<see cref="IScripts.Save"/>). It is taken on the main thread in one
-    /// go, so it is the world as of one moment: now, on the main thread, else when the main thread next runs what it is
-    /// handed; each entity's components copied out and its scripts' values read. The components are then written as
-    /// JSON on a worker, which tells <paramref name="progress"/> how far it is, 0 to 1. The loading domain's entities
-    /// are left out, as it is shown again as a domain opens anew. A component JSON cannot hold is an error, logged once
-    /// per type, and left out. Any thread. Without a gem that provides the ECS, an empty one.
+    /// The world as data (<see cref="WorldState"/>), to put back with <see cref="Restore"/>: the domains open, and
+    /// every entity with its components and its scripts (<see cref="IScripts.Save"/>). It is taken on the main thread
+    /// in one go, so it is the world as of one moment: now, on the main thread, else when the main thread next runs
+    /// what it is handed; each entity's components copied out and its scripts' values read. The components are then
+    /// written as JSON on a worker, which tells <paramref name="progress"/> how far it is, 0 to 1. The loading domain's
+    /// entities are left out, as it is shown again as a domain opens anew. A component JSON cannot hold is an error,
+    /// logged once per type, and left out. Any thread. Without a gem that provides the ECS, an empty one.
     /// </summary>
     public async Task<WorldState> SaveAsync(IProgress<float>? progress = null, CancellationToken cancel = default)
     {
@@ -151,73 +164,16 @@ public sealed class World : IDisposable
         (List<DomainState> Domains, List<Saving> Entities) taken = _threads.IsCurrent(EngineThread.Main)
             ? Take(ecs, domains)
             : await _threads.InvokeAsync(EngineThread.Main, () => Take(ecs, domains), cancel).ConfigureAwait(false);
-        List<EntityState> entities = await Task.Run(() => Write(taken.Entities, progress, cancel), cancel).ConfigureAwait(false);
+        List<EntityState> entities = await Task.Run(() => Write(taken.Entities, progress, cancel), cancel)
+            .ConfigureAwait(false);
         return new WorldState { Domains = taken.Domains, Entities = entities };
     }
 
     /// <summary>
-    /// The world as it is now, as <see cref="SaveAsync"/> takes it: the domains, and every entity but the loading
-    /// domain's with its components copied out and its scripts' values read. Main thread.
-    /// </summary>
-    private (List<DomainState> Domains, List<Saving> Entities) Take(IEcs ecs, Domains domains)
-    {
-        List<Saving> entities = [];
-        HashSet<Entity> loading = domains.GetLoadingEntities();
-        List<ScriptState> scripts = [];
-        foreach (EcsChunk chunk in ecs.Query())
-        {
-            foreach (Entity entity in chunk.Entities)
-            {
-                if (loading.Contains(entity)) continue;
-
-                _scripts?.Save(entity, scripts);
-                entities.Add(new Saving(entity.Id, ecs.GetComponents(entity), scripts.Count == 0 ? [] : [.. scripts]));
-                scripts.Clear();
-            }
-        }
-
-        return (domains.Save(), entities);
-    }
-
-    /// <summary>
-    /// Each of <paramref name="entities"/> as the saved world holds it, its components written as JSON, telling
-    /// <paramref name="progress"/> how far it is. Any thread: it touches nothing of the world.
-    /// </summary>
-    private static List<EntityState> Write(List<Saving> entities, IProgress<float>? progress, CancellationToken cancel)
-    {
-        List<EntityState> written = new(entities.Count);
-        HashSet<string> failed = new(StringComparer.Ordinal);
-        foreach (Saving entity in entities)
-        {
-            cancel.ThrowIfCancellationRequested();
-            List<ComponentState> components = new(entity.Components.Length);
-            foreach (IComponent component in entity.Components)
-            {
-                Type type = component.GetType();
-                Result<JsonElement> values = Json.Write(component, type);
-                if (values.Ok)
-                {
-                    components.Add(new ComponentState(type.Name, values.Value));
-                }
-                else if (failed.Add(type.Name))
-                {
-                    Debugging.Error($"{type.Name} components are not saved, as JSON cannot hold them, so entities put back go without them: {values.Error}");
-                }
-            }
-
-            written.Add(new EntityState(entity.Id, components, entity.Scripts));
-            progress?.Report((float)written.Count / entities.Count);
-        }
-
-        progress?.Report(1);
-        return written;
-    }
-
-    /// <summary>
-    /// Puts the world back as <paramref name="state"/> holds it (<see cref="SaveAsync"/>), in place of whatever is open:
-    /// closes what is open, makes every entity empty first, so that whichever is made earlier, a reference to one in a
-    /// component or a script maps to it, then gives each its components and its scripts, put back as they were and not
-    /// started (<see cref="IScripts.Restore"/>), and opens each domain again around the entities its prefabs had
+    /// Puts the world back as <paramref name="state"/> holds it (<see cref="SaveAsync"/>), in place of whatever is
+    /// open: closes what is open, makes every entity empty first, so that whichever is made earlier, a reference to one
+    /// in a component or a script maps to it, then gives each its components and its scripts, put back as they were and
+    /// not started (<see cref="IScripts.Restore"/>), and opens each domain again around the entities its prefabs had
     /// spawned, so closing one and a prefab read again still find them. Each domain's folder is read on workers after,
     /// as when it opens, so a prefab added since is spawned and one gone has its entities destroyed, and the models its
     /// prefabs draw are held as they would be; until then they come in as anything spawned at run time does. No player
@@ -291,7 +247,8 @@ public sealed class World : IDisposable
     {
         Result<T> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
         return loaded.Ok
-            ? Result.Success(await _threads.InvokeAsync(EngineThread.Main, () => Spawn(loaded.Value, at), cancel).ConfigureAwait(false))
+            ? Result.Success(await _threads.InvokeAsync(EngineThread.Main, () => Spawn(loaded.Value, at), cancel)
+                .ConfigureAwait(false))
             : Result.Failure<Entity[]>(loaded.Error);
     }
 
@@ -524,21 +481,87 @@ public sealed class World : IDisposable
     {
         if (_domains is null)
         {
-            Debugging.Warn("No gem the project lists provides the ECS, so the world holds no entities, and no domain opens.");
+            Debugging.Warn(
+                "No gem the project lists provides the ECS, so the world holds no entities, and no domain opens.");
             return;
         }
 
-        Result<Domain> opened = await OpenAsync(_project.EntryPoint, DomainOpenMode.Replace, null, _lifetime.Stopping).ConfigureAwait(false);
+        Result<Domain> opened = await OpenAsync(_project.EntryPoint, DomainOpenMode.Replace, null, _lifetime.Stopping)
+            .ConfigureAwait(false);
         if (opened.Ok) return;
 
         Debugging.Error($"The entry point does not open, so the default domain does. {opened.Error}");
-        Result<Domain> fallback = await OpenAsync(_assets.Default<Domain>(), DomainOpenMode.Replace, null, _lifetime.Stopping).ConfigureAwait(false);
+        Result<Domain> fallback = await OpenAsync(
+            _assets.Default<Domain>(),
+            DomainOpenMode.Replace,
+            null,
+            _lifetime.Stopping).ConfigureAwait(false);
         if (!fallback.Ok) Debugging.Error($"The default domain does not open either: {fallback.Error}");
     }
 
     /// <summary>
-    /// A saved component read back as the type its name names (<see cref="Assemblies.Get{T}"/>); null, and an error logged once
-    /// per name in <paramref name="failed"/>, when no code loaded declares it or its values no longer fit it.
+    /// Each of <paramref name="entities"/> as the saved world holds it, its components written as JSON, telling
+    /// <paramref name="progress"/> how far it is. Any thread: it touches nothing of the world.
+    /// </summary>
+    private static List<EntityState> Write(List<Saving> entities, IProgress<float>? progress, CancellationToken cancel)
+    {
+        List<EntityState> written = new(entities.Count);
+        HashSet<string> failed = new(StringComparer.Ordinal);
+        foreach (Saving entity in entities)
+        {
+            cancel.ThrowIfCancellationRequested();
+            List<ComponentState> components = new(entity.Components.Length);
+            foreach (IComponent component in entity.Components)
+            {
+                Type type = component.GetType();
+                Result<JsonElement> values = Json.Write(component, type);
+                if (values.Ok)
+                {
+                    components.Add(new ComponentState(type.Name, values.Value));
+                }
+                else if (failed.Add(type.Name))
+                {
+                    Debugging.Error($"{type.Name} components are not saved, as JSON cannot hold them, "
+                        + $"so entities put back go without them: {values.Error}");
+                }
+            }
+
+            written.Add(new EntityState(entity.Id, components, entity.Scripts));
+            progress?.Report((float)written.Count / entities.Count);
+        }
+
+        progress?.Report(1);
+        return written;
+    }
+
+    /// <summary>
+    /// The world as it is now, as <see cref="SaveAsync"/> takes it: the domains, and every entity but the loading
+    /// domain's with its components copied out and its scripts' values read. Main thread.
+    /// </summary>
+    private (List<DomainState> Domains, List<Saving> Entities) Take(IEcs ecs, Domains domains)
+    {
+        List<Saving> entities = [];
+        HashSet<Entity> loading = domains.GetLoadingEntities();
+        List<ScriptState> scripts = [];
+        foreach (EcsChunk chunk in ecs.Query())
+        {
+            foreach (Entity entity in chunk.Entities)
+            {
+                if (loading.Contains(entity)) continue;
+
+                _scripts?.Save(entity, scripts);
+                entities.Add(new Saving(entity.Id, ecs.GetComponents(entity), scripts.Count == 0 ? [] : [.. scripts]));
+                scripts.Clear();
+            }
+        }
+
+        return (domains.Save(), entities);
+    }
+
+    /// <summary>
+    /// A saved component read back as the type its name names (<see cref="Assemblies.Get{T}"/>); null, and an error
+    /// logged once per name in <paramref name="failed"/>, when no code loaded declares it or its values no longer fit
+    /// it.
     /// </summary>
     private IComponent? ReadComponent(ComponentState saved, HashSet<string> failed)
     {
@@ -548,7 +571,8 @@ public sealed class World : IDisposable
 
         if (failed.Add(saved.Type))
         {
-            Debugging.Error($"Saved {saved.Type} components are not put back, so entities go without them: {read.Error}");
+            Debugging.Error(
+                $"Saved {saved.Type} components are not put back, so entities go without them: {read.Error}");
         }
 
         return null;
@@ -560,12 +584,13 @@ public sealed class World : IDisposable
     /// </summary>
     private IEcs GetEcs()
     {
-        return _ecs ?? throw new InvalidOperationException("No gem the project lists provides the ECS, so the world holds no entities.");
+        return _ecs ?? throw new InvalidOperationException(
+            "No gem the project lists provides the ECS, so the world holds no entities.");
     }
 
     /// <summary>
-    /// An entity as <see cref="SaveAsync"/> takes it from the world: its components, each a boxed copy, and its scripts'
-    /// values, which is all it needs of the world, so the JSON can be written anywhere afterwards.
+    /// An entity as <see cref="SaveAsync"/> takes it from the world: its components, each a boxed copy, and its
+    /// scripts' values, which is all it needs of the world, so the JSON can be written anywhere afterwards.
     /// </summary>
     private sealed record Saving(int Id, IComponent[] Components, ScriptState[] Scripts);
 }

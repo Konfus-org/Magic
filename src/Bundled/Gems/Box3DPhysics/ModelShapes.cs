@@ -26,8 +26,16 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
     /// <summary>
     /// Shapes fitted on workers, for the main thread to take in as a step starts.
     /// </summary>
-    private readonly Channel<(Handle<Model> Model, ModelShape Shape)> _fitted = Channel.CreateUnbounded<(Handle<Model> Model, ModelShape Shape)>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<(Handle<Model> Model, ModelShape Shape)> _fitted = Channel
+        .CreateUnbounded<(Handle<Model> Model, ModelShape Shape)>(new UnboundedChannelOptions { SingleReader = true });
     private bool _disposed;
+
+    /// <summary>
+    /// The farthest any shape here reaches from its model's origin at scale 1 (<see cref="ModelShape.Reach"/>), and
+    /// at least 1, which a shape still loading is taken to reach: at an entity's scale, a bound on how far its shape
+    /// could reach, whatever its model, that tells from the transform alone whether it could be near.
+    /// </summary>
+    internal float Longest { get; private set; } = 1;
 
     /// <summary>
     /// Frees every shape, and every one still to arrive as it does. On the main thread, as the run ends.
@@ -63,13 +71,6 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
     }
 
     /// <summary>
-    /// The farthest any shape here reaches from its model's origin at scale 1 (<see cref="ModelShape.Reach"/>), and
-    /// at least 1, which a shape still loading is taken to reach: at an entity's scale, a bound on how far its shape
-    /// could reach, whatever its model, that tells from the transform alone whether it could be near.
-    /// </summary>
-    internal float Longest { get; private set; } = 1;
-
-    /// <summary>
     /// The shape of <paramref name="model"/>, or null while it loads.
     /// </summary>
     internal ModelShape? Get(Handle<Model> model)
@@ -98,7 +99,8 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
         }
         else
         {
-            Debugging.Error($"A body cannot be shaped like its model, which does not load, so it is a unit cube: {loaded.Error}");
+            Debugging.Error(
+                $"A body cannot be shaped like its model, which does not load, so it is a unit cube: {loaded.Error}");
             shape = _unitCube;
         }
 
@@ -129,10 +131,10 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
     internal B3.MeshData* Mesh { get; private set; }
 
     /// <summary>
-    /// The shape fitted to <paramref name="model"/>: its bounds to every mesh's vertices, and one Box3D mesh of all their
-    /// triangles, in the model's own space, unscaled: a shape scales it as its entity is scaled, with the triangles as
-    /// the model winds them, which Box3D takes as their front, the side things rest on. Null for a model with no
-    /// triangles, which takes the unit cube's.
+    /// The shape fitted to <paramref name="model"/>: its bounds to every mesh's vertices, and one Box3D mesh of all
+    /// their triangles, in the model's own space, unscaled: a shape scales it as its entity is scaled, with the
+    /// triangles as the model winds them, which Box3D takes as their front, the side things rest on. Null for a model
+    /// with no triangles, which takes the unit cube's.
     /// </summary>
     internal static ModelShape? Of(Model model)
     {

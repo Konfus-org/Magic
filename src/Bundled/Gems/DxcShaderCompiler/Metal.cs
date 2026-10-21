@@ -35,9 +35,17 @@ internal static unsafe class Metal
                 Spvc.Compiler* compiler;
                 Spvc.CompilerOptions* options;
                 if (Spvc.ContextParseSpirv(context, (uint*)code, (ulong)(spirv.Length / 4), &ir) != Spvc.Result.Success
-                    || Spvc.ContextCreateCompiler(context, Spvc.Backend.Msl, ir, Spvc.CaptureMode.TakeOwnership, &compiler) != Spvc.Result.Success
+                    || Spvc.ContextCreateCompiler(
+                        context,
+                        Spvc.Backend.Msl,
+                        ir,
+                        Spvc.CaptureMode.TakeOwnership,
+                        &compiler) != Spvc.Result.Success
                     || Spvc.CompilerCreateCompilerOptions(compiler, &options) != Spvc.Result.Success
-                    || Spvc.CompilerOptionsSetUint(options, Spvc.CompilerOption.MslVersion, Version) != Spvc.Result.Success)
+                    || Spvc.CompilerOptionsSetUint(
+                        options,
+                        Spvc.CompilerOption.MslVersion,
+                        Version) != Spvc.Result.Success)
                 {
                     return GetFailure(context, name);
                 }
@@ -46,7 +54,8 @@ internal static unsafe class Metal
                 if (!bound.Ok) return Result.Failure<byte[]>($"{name}: {bound.Error}");
 
                 byte* source;
-                if (Spvc.CompilerInstallCompilerOptions(compiler, options) != Spvc.Result.Success || Spvc.CompilerCompile(compiler, &source) != Spvc.Result.Success)
+                if (Spvc.CompilerInstallCompilerOptions(compiler, options) != Spvc.Result.Success
+                    || Spvc.CompilerCompile(compiler, &source) != Spvc.Result.Success)
                 {
                     return GetFailure(context, name);
                 }
@@ -63,7 +72,8 @@ internal static unsafe class Metal
 
     private static Result<byte[]> GetFailure(Spvc.Context* context, string name)
     {
-        return Result.Failure<byte[]>($"{name}: SPIR-V could not be translated to Metal: {CString.Read(Spvc.ContextGetLastErrorString(context))}");
+        string error = CString.Read(Spvc.ContextGetLastErrorString(context));
+        return Result.Failure<byte[]>($"{name}: SPIR-V could not be translated to Metal: {error}");
     }
 
     /// <summary>
@@ -75,11 +85,16 @@ internal static unsafe class Metal
     private static Result Bind(Spvc.Compiler* compiler, GpuStage stage)
     {
         bool compute = stage == GpuStage.Compute;
-        Spv.ExecutionModel model = compute ? Spv.ExecutionModel.GLCompute : stage == GpuStage.Vertex ? Spv.ExecutionModel.Vertex : Spv.ExecutionModel.Fragment;
+        Spv.ExecutionModel model = compute
+            ? Spv.ExecutionModel.GLCompute
+            : stage == GpuStage.Vertex ? Spv.ExecutionModel.Vertex : Spv.ExecutionModel.Fragment;
         Spvc.Set* active;
         Spvc.Resources* resources;
         if (Spvc.CompilerGetActiveInterfaceVariables(compiler, &active) != Spvc.Result.Success
-            || Spvc.CompilerCreateShaderResourcesForActiveVariables(compiler, &resources, active) != Spvc.Result.Success)
+            || Spvc.CompilerCreateShaderResourcesForActiveVariables(
+                compiler,
+                &resources,
+                active) != Spvc.Result.Success)
         {
             return Result.Failure("SPIRV-Cross could not reflect the shader's resources.");
         }
@@ -98,25 +113,60 @@ internal static unsafe class Metal
         }
 
         uint[] storageSets = compute ? [0u, 1u] : [0u, 2u];
-        Result collected = Collect(compiler, resources, samplers, 0, textures, compute ? [0u] : [0u, 2u], "texture-sampler");
+        Result collected = Collect(
+            compiler,
+            resources,
+            samplers,
+            0,
+            textures,
+            compute ? [0u] : [0u, 2u],
+            "texture-sampler");
         if (collected.Ok)
         {
-            collected = Collect(compiler, resources, Spvc.ResourceType.StorageImage, 0, textures, storageSets, "storage texture");
+            collected = Collect(
+                compiler,
+                resources,
+                Spvc.ResourceType.StorageImage,
+                0,
+                textures,
+                storageSets,
+                "storage texture");
         }
 
         if (collected.Ok)
         {
-            collected = Collect(compiler, resources, Spvc.ResourceType.SeparateImage, separateSamplers, textures, storageSets, "storage texture");
+            collected = Collect(
+                compiler,
+                resources,
+                Spvc.ResourceType.SeparateImage,
+                separateSamplers,
+                textures,
+                storageSets,
+                "storage texture");
         }
 
         if (collected.Ok)
         {
-            collected = Collect(compiler, resources, Spvc.ResourceType.UniformBuffer, 0, buffers, compute ? [2u] : [1u, 3u], "uniform buffer");
+            collected = Collect(
+                compiler,
+                resources,
+                Spvc.ResourceType.UniformBuffer,
+                0,
+                buffers,
+                compute ? [2u] : [1u, 3u],
+                "uniform buffer");
         }
 
         if (collected.Ok)
         {
-            collected = Collect(compiler, resources, Spvc.ResourceType.StorageBuffer, 0, buffers, storageSets, "storage buffer");
+            collected = Collect(
+                compiler,
+                resources,
+                Spvc.ResourceType.StorageBuffer,
+                0,
+                buffers,
+                storageSets,
+                "storage buffer");
         }
 
         if (!collected.Ok) return collected;
@@ -202,13 +252,21 @@ internal static unsafe class Metal
     /// Adds the set and binding of each resource of <paramref name="type"/> from the <paramref name="first"/> on,
     /// refusing one outside the <paramref name="sets"/> its kind may be in.
     /// </summary>
-    private static Result Collect(Spvc.Compiler* compiler, Spvc.Resources* resources, Spvc.ResourceType type, ulong first, List<(uint Set, uint Binding)> into, uint[] sets, string kind)
+    private static Result Collect(
+        Spvc.Compiler* compiler,
+        Spvc.Resources* resources,
+        Spvc.ResourceType type,
+        ulong first,
+        List<(uint Set, uint Binding)> into,
+        uint[] sets,
+        string kind)
     {
         Spvc.ReflectedResource* list = ListOf(resources, type, out ulong count);
         for (ulong i = first; i < count; i++)
         {
             uint id = list[i].Id;
-            if (Spvc.CompilerHasDecoration(compiler, id, Spv.Decoration.DescriptorSet) == 0 || Spvc.CompilerHasDecoration(compiler, id, Spv.Decoration.Binding) == 0)
+            if (Spvc.CompilerHasDecoration(compiler, id, Spv.Decoration.DescriptorSet) == 0
+                || Spvc.CompilerHasDecoration(compiler, id, Spv.Decoration.Binding) == 0)
             {
                 return Result.Failure($"its {kind} {CString.Read(list[i].Name)} has no descriptor set and binding.");
             }
@@ -216,7 +274,8 @@ internal static unsafe class Metal
             uint set = Spvc.CompilerGetDecoration(compiler, id, Spv.Decoration.DescriptorSet);
             if (Array.IndexOf(sets, set) < 0)
             {
-                return Result.Failure($"its {kind} {CString.Read(list[i].Name)} is in descriptor set {set}, where Metal's layout has no {kind}.");
+                return Result.Failure($"its {kind} {CString.Read(list[i].Name)} is in descriptor set {set}, "
+                    + $"where Metal's layout has no {kind}.");
             }
 
             into.Add((set, Spvc.CompilerGetDecoration(compiler, id, Spv.Decoration.Binding)));
@@ -225,7 +284,13 @@ internal static unsafe class Metal
         return Result.Success();
     }
 
-    private static bool Add(Spvc.Compiler* compiler, Spv.ExecutionModel model, uint set, uint binding, uint texture, uint buffer)
+    private static bool Add(
+        Spvc.Compiler* compiler,
+        Spv.ExecutionModel model,
+        uint set,
+        uint binding,
+        uint texture,
+        uint buffer)
     {
         Spvc.MslResourceBinding2 resource;
         Spvc.MslResourceBindingInit2(&resource);

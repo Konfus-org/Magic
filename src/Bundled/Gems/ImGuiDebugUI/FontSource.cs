@@ -6,8 +6,8 @@ namespace Magic.ImGuiDebugUI;
 /// <summary>
 /// A <see cref="Font"/> asset as ImGui's default font: ImGui asks the loader set up here for each character it first
 /// draws at a size, and gets the asset's, scaled from the size it was drawn at. The callbacks find the asset through a
-/// handle ImGui keeps as the font's data. Made on the main thread between frames, and disposed once the ImGui context is
-/// gone.
+/// handle ImGui keeps as the font's data. Made on the main thread between frames, and disposed once the ImGui context
+/// is gone.
 /// </summary>
 internal sealed unsafe class FontSource : IDisposable
 {
@@ -17,8 +17,8 @@ internal sealed unsafe class FontSource : IDisposable
     private readonly ImFont* _added;
 
     /// <summary>
-    /// Adds <paramref name="font"/> to the current context's atlas, as its default font, at <paramref name="size"/>: the
-    /// height of a line, ImGui's meaning of a font's size.
+    /// Adds <paramref name="font"/> to the current context's atlas, as its default font, at <paramref name="size"/>:
+    /// the height of a line, ImGui's meaning of a font's size.
     /// </summary>
     internal FontSource(Font font, float size)
     {
@@ -33,7 +33,8 @@ internal sealed unsafe class FontSource : IDisposable
         // own, but only once it first reads the font, so the original must outlive this call.
         _handle = (nint*)ImGui.MemAlloc((ulong)sizeof(nint));
         *_handle = GCHandle.ToIntPtr(_font);
-        // The C API has no constructor for a config, so the defaults ImGui's sets are set here, and the atlas copies it.
+        // The C API has no constructor for a config, so the defaults ImGui's sets are set here, and the atlas copies
+        // it.
         ImFontConfig config = default;
         config.ExtraSizeScale = 1f;
         config.GlyphMaxAdvanceX = float.MaxValue;
@@ -96,7 +97,14 @@ internal sealed unsafe class FontSource : IDisposable
     /// Drawn at the asset's size its pixels land one to one; at any other size ImGui stretches them.
     /// </summary>
     [UnmanagedCallersOnly]
-    private static bool TryLoadGlyph(ImFontAtlas* atlas, ImFontConfig* source, ImFontBaked* baked, void* loaderData, uint codepoint, ImFontGlyph* glyph, float* advance)
+    private static bool TryLoadGlyph(
+        ImFontAtlas* atlas,
+        ImFontConfig* source,
+        ImFontBaked* baked,
+        void* loaderData,
+        uint codepoint,
+        ImFontGlyph* glyph,
+        float* advance)
     {
         if (GetFont(source) is not { } font || !font.Glyphs.TryGetValue(codepoint, out Glyph loaded)) return false;
 
@@ -124,7 +132,15 @@ internal sealed unsafe class FontSource : IDisposable
         ReadOnlySpan<byte> pixels = font.Pixels.Span[(((loaded.Y * font.Width) + loaded.X) * 4)..];
         fixed (byte* first = pixels)
         {
-            ImFontAtlas.BakedSetFontGlyphBitmap(atlas, baked, source, glyph, ImFontAtlas.PackGetRect(atlas, rectangle), first, ImTextureFormat.Rgba32, font.Width * 4);
+            ImFontAtlas.BakedSetFontGlyphBitmap(
+                atlas,
+                baked,
+                source,
+                glyph,
+                ImFontAtlas.PackGetRect(atlas, rectangle),
+                first,
+                ImTextureFormat.Rgba32,
+                font.Width * 4);
         }
 
         return true;

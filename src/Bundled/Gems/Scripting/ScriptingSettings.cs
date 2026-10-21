@@ -11,8 +11,8 @@ namespace Magic.Scripting;
 internal sealed class ScriptingSettings : ISettings
 {
     /// <summary>
-    /// Metres from the nearest of the player's cameras within which a behaviour is updated every frame; up to n times as far, every nth
-    /// frame.
+    /// Metres from the nearest of the player's cameras within which a behaviour is updated every frame; up to n times
+    /// as far, every nth frame.
     /// </summary>
     public float FullRateDistance { get; set; } = 64;
 

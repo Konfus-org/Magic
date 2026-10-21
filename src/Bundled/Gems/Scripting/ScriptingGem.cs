@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
-using System.Numerics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading.Channels;
@@ -35,9 +35,10 @@ namespace Magic.Scripting;
 /// kept for itself, as JSON, and put back from them without being started, as it is as it was.
 /// <para>
 /// A behaviour far from the player's cameras, those tagged <see cref="Tag.Player"/>, is updated less often: Update and
-/// LateUpdate run every frame within <see cref="ScriptingSettings.FullRateDistance"/> of the nearest, and up to n times as
-/// far every nth frame, up to every <see cref="ScriptingSettings.MaxInterval"/>th, with the time since the last call as
-/// its frame's delta. FixedUpdate is never held back, nor is an entity without a <see cref="Transform"/>, which is nowhere.
+/// LateUpdate run every frame within <see cref="ScriptingSettings.FullRateDistance"/> of the nearest, and up to n times
+/// as far every nth frame, up to every <see cref="ScriptingSettings.MaxInterval"/>th, with the time since the last call
+/// as its frame's delta. FixedUpdate is never held back, nor is an entity without a <see cref="Transform"/>, which is
+/// nowhere.
 /// </para>
 /// </summary>
 internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisposable
@@ -47,19 +48,31 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// that interface is a system of that kind.
     /// </summary>
     private static readonly (MethodInfo Add, Type Taken)[] _adds = Array.ConvertAll(
-        Array.FindAll(typeof(IEcs).GetMethods(), method => string.Equals(method.Name, nameof(IEcs.Add), StringComparison.Ordinal) && method.GetParameters().Length == 1),
+        Array.FindAll(
+            typeof(IEcs).GetMethods(),
+            method => string.Equals(method.Name, nameof(IEcs.Add), StringComparison.Ordinal)
+                && method.GetParameters().Length == 1),
         method => (method, method.GetParameters()[0].ParameterType));
 
     private static readonly Meter _meter = new("Magic.Gems.Scripting");
-    private static readonly Counter<int> _calls = _meter.CreateCounter<int>("magic.gems.scripting.behavior.calls", "{call}", "Behaviour hooks called, tagged with the phase.");
-    private static readonly Gauge<int> _behaviors = _meter.CreateGauge<int>("magic.gems.scripting.behaviors", "{behavior}", "Scripts attached to live entities, behaviours or not.");
+    private static readonly Counter<int> _calls = _meter.CreateCounter<int>(
+        "magic.gems.scripting.behavior.calls",
+        "{call}",
+        "Behaviour hooks called, tagged with the phase.");
+    private static readonly Gauge<int> _behaviors = _meter.CreateGauge<int>(
+        "magic.gems.scripting.behaviors",
+        "{behavior}",
+        "Scripts attached to live entities, behaviours or not.");
     private static readonly string[] _phases = Enum.GetNames<Phase>();
 
     private readonly ScriptingSettings _settings;
     private readonly IEcs _ecs;
     private readonly Assets _assets;
     private readonly Assemblies _assemblies;
-    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "Core's, which Core ends after every gem.")]
+    [SuppressMessage(
+        "Usage",
+        "CA2213:Disposable fields should be disposed",
+        Justification = "Core's, which Core ends after every gem.")]
     private readonly IServiceProvider _services;
     private readonly SubscriptionList _watching = new();
 
@@ -71,7 +84,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// <summary>
     /// The values given for scripts not started yet (<see cref="Attach"/>), by entity and script asset. Main thread.
     /// </summary>
-    private readonly Dictionary<(Entity Entity, Handle<Script> Script), IReadOnlyDictionary<string, object?>> _pending = [];
+    private readonly Dictionary<(Entity Entity, Handle<Script> Script), IReadOnlyDictionary<string, object?>> _pending
+        = [];
 
     /// <summary>
     /// Every script asset named: as the prefab that attached it loaded it, or fetched when nothing gave values for it
@@ -85,7 +99,9 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// Scripts fetched on workers, loaded or not, for the main thread to take into <see cref="_loaded"/> as Update
     /// starts.
     /// </summary>
-    private readonly Channel<(Handle<Script> Handle, Result<Script> Loaded)> _fetched = Channel.CreateUnbounded<(Handle<Script> Handle, Result<Script> Loaded)>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<(Handle<Script> Handle, Result<Script> Loaded)> _fetched =
+        Channel.CreateUnbounded<(Handle<Script> Handle, Result<Script> Loaded)>(
+            new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// Scripts that could not be started, or whose asset did not load, each said once, so an entity naming one is not
@@ -116,7 +132,13 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private bool _isLoading;
 
-    public ScriptingGem(ScriptingSettings settings, IEcs ecs, Assets assets, Assemblies assemblies, Events events, IServiceProvider services)
+    public ScriptingGem(
+        ScriptingSettings settings,
+        IEcs ecs,
+        Assets assets,
+        Assemblies assemblies,
+        Events events,
+        IServiceProvider services)
     {
         _settings = settings;
         _ecs = ecs;
@@ -138,11 +160,16 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// class is compiled with the project's code, or the gem's; why not, when no code loaded declares the class, or
     /// its <c>.meta</c> holds settings, which a script takes none of. Any thread.
     /// </summary>
-    public ValueTask<Result<Script>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel)
+    public ValueTask<Result<Script>> LoadAsync(
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        JsonElement settings,
+        CancellationToken cancel)
     {
         if (settings.GetPropertyCount() != 0)
         {
-            return new(Result.Failure<Script>($"its .meta holds settings, {settings.GetRawText()}, which a script file does not take."));
+            return new(Result.Failure<Script>(
+                $"its .meta holds settings, {settings.GetRawText()}, which a script file does not take."));
         }
 
         return new(TryGetClass(path, Handle<Script>.None));
@@ -163,7 +190,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         {
             if (!scripts.Add(handle))
             {
-                Debugging.Error($"Script {script.Script.Type.Name} is left off entity {entity.Id}: an entity has at most {Scripts.Capacity} scripts.");
+                Debugging.Error($"Script {script.Script.Type.Name} is left off entity {entity.Id}: "
+                    + $"an entity has at most {Scripts.Capacity} scripts.");
                 return;
             }
 
@@ -217,7 +245,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             _loaded[fetched.Handle] = fetched.Loaded;
             if (!fetched.Loaded.Ok)
             {
-                Debugging.Error($"Script {GetName(fetched.Handle)} is left off the entities naming it: {fetched.Loaded.Error}");
+                Debugging.Error(
+                    $"Script {GetName(fetched.Handle)} is left off the entities naming it: {fetched.Loaded.Error}");
             }
         }
 
@@ -279,7 +308,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// <summary>
     /// Takes <paramref name="attached"/>'s systems off the ECS, and disposes it when it is disposable.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a script throws as it ends, it is logged and the others still end.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a script throws as it ends, it is logged and the others still end.")]
     private static void End(Attached attached)
     {
         attached.Systems.Dispose();
@@ -292,67 +324,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         }
         catch (Exception ex)
         {
-            Debugging.Error($"Script {attached.Instance.GetType().Name} on entity {attached.Entity.Id} threw as it ended: {ex}");
-        }
-    }
-
-    /// <summary>
-    /// A new <paramref name="type"/> for <paramref name="entity"/>, or for none: its one public constructor given the
-    /// entity first, when there is one, then a service for each parameter, and a parameter's default when nothing
-    /// provides it. Why not, when it has no such constructor, its first parameter is not the entity it is made for, it
-    /// asks for an entity when it is made for none or anywhere but first, asks for what nothing provides, or throws.
-    /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a script throws as it is made, it is not made, and the others are.")]
-    private Result<IScript> MakeOf(Type type, Entity? entity)
-    {
-        ConstructorInfo[] constructors = type.GetConstructors();
-        if (constructors.Length != 1)
-        {
-            return Result.Failure<IScript>($"it must have exactly one public constructor; it has {constructors.Length}.");
-        }
-
-        ParameterInfo[] parameters = constructors[0].GetParameters();
-        if (entity is not null && parameters.Length > 0 && parameters[0].ParameterType != typeof(Entity))
-        {
-            return Result.Failure<IScript>("it has an invalid constructor: a script's first parameter is the Entity it is attached to, before the services it asks for.");
-        }
-
-        object?[] arguments = new object?[parameters.Length];
-        for (int i = 0; i < parameters.Length; i++)
-        {
-            Type wanted = parameters[i].ParameterType;
-            if (wanted == typeof(Entity))
-            {
-                if (i != 0 || entity is null)
-                {
-                    return Result.Failure<IScript>("its constructor asks for an Entity where none is given: a script takes the entity it is attached to first and once, and one made for no entity, such as a pipeline script, never takes one.");
-                }
-
-                arguments[i] = entity.Value;
-            }
-            else if (_services.GetService(wanted) is { } service)
-            {
-                arguments[i] = service;
-            }
-            else if (parameters[i].HasDefaultValue)
-            {
-                arguments[i] = parameters[i].DefaultValue;
-            }
-            else
-            {
-                return Result.Failure<IScript>($"its constructor asks for a {wanted.Name}, which no gem the project lists provides.");
-            }
-        }
-
-        try
-        {
-            return constructors[0].Invoke(arguments) is IScript made
-                ? Result.Success(made)
-                : Result.Failure<IScript>("it is no IScript.");
-        }
-        catch (Exception ex)
-        {
-            return Result.Failure<IScript>($"it threw as it was made: {Unwrap(ex)}");
+            Debugging.Error(
+                $"Script {attached.Instance.GetType().Name} on entity {attached.Entity.Id} threw as it ended: {ex}");
         }
     }
 
@@ -386,7 +359,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         List<PropertyInfo> values = [];
         foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            if (property.GetMethod is { IsPublic: true } && property.SetMethod is { IsPublic: true } && property.GetIndexParameters().Length == 0)
+            if (property.GetMethod is { IsPublic: true } && property.SetMethod is { IsPublic: true }
+                && property.GetIndexParameters().Length == 0)
             {
                 values.Add(property);
             }
@@ -403,7 +377,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     private static FieldInfo? FindField(Type type, string name)
     {
         const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-        return type.GetField(name, Any) ?? type.GetField($"<{name}>k__BackingField", Any) ?? type.GetField($"<{name}>P", Any);
+        return type.GetField(name, Any)
+            ?? type.GetField($"<{name}>k__BackingField", Any) ?? type.GetField($"<{name}>P", Any);
     }
 
     /// <summary>
@@ -425,6 +400,74 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     }
 
     /// <summary>
+    /// A new <paramref name="type"/> for <paramref name="entity"/>, or for none: its one public constructor given the
+    /// entity first, when there is one, then a service for each parameter, and a parameter's default when nothing
+    /// provides it. Why not, when it has no such constructor, its first parameter is not the entity it is made for, it
+    /// asks for an entity when it is made for none or anywhere but first, asks for what nothing provides, or throws.
+    /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a script throws as it is made, it is not made, and the others are.")]
+    private Result<IScript> MakeOf(Type type, Entity? entity)
+    {
+        ConstructorInfo[] constructors = type.GetConstructors();
+        if (constructors.Length != 1)
+        {
+            return Result.Failure<IScript>(
+                $"it must have exactly one public constructor; it has {constructors.Length}.");
+        }
+
+        ParameterInfo[] parameters = constructors[0].GetParameters();
+        if (entity is not null && parameters.Length > 0 && parameters[0].ParameterType != typeof(Entity))
+        {
+            return Result.Failure<IScript>("it has an invalid constructor: a script's first parameter is the Entity it "
+                + "is attached to, before the services it asks for.");
+        }
+
+        object?[] arguments = new object?[parameters.Length];
+        for (int i = 0; i < parameters.Length; i++)
+        {
+            Type wanted = parameters[i].ParameterType;
+            if (wanted == typeof(Entity))
+            {
+                if (i != 0 || entity is null)
+                {
+                    return Result.Failure<IScript>("its constructor asks for an Entity where none is given: "
+                        + "a script takes the entity it is attached to first and once, and one made for no entity, "
+                        + "such as a pipeline script, never takes one.");
+                }
+
+                arguments[i] = entity.Value;
+            }
+            else if (_services.GetService(wanted) is { } service)
+            {
+                arguments[i] = service;
+            }
+            else if (parameters[i].HasDefaultValue)
+            {
+                arguments[i] = parameters[i].DefaultValue;
+            }
+            else
+            {
+                return Result.Failure<IScript>(
+                    $"its constructor asks for a {wanted.Name}, which no gem the project lists provides.");
+            }
+        }
+
+        try
+        {
+            return constructors[0].Invoke(arguments) is IScript made
+                ? Result.Success(made)
+                : Result.Failure<IScript>("it is no IScript.");
+        }
+        catch (Exception ex)
+        {
+            return Result.Failure<IScript>($"it threw as it was made: {Unwrap(ex)}");
+        }
+    }
+
+    /// <summary>
     /// A script asset's path, for messages; its id when no asset has it.
     /// </summary>
     private string GetName(Handle<Script> script)
@@ -440,7 +483,9 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     private Result<Script> TryGetClass(string path, Handle<Script> handle)
     {
         Result<Type> type = _assemblies.Get<IScript>(Path.GetFileNameWithoutExtension(path));
-        return type.Ok ? Result.Success(new Script { Handle = handle, Type = type.Value }) : Result.Failure<Script>(type.Error);
+        return type.Ok
+            ? Result.Success(new Script { Handle = handle, Type = type.Value })
+            : Result.Failure<Script>(type.Error);
     }
 
     /// <summary>
@@ -462,7 +507,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// </summary>
     private bool IsHanded(Type type)
     {
-        return typeof(Delegate).IsAssignableFrom(type) || typeof(Task).IsAssignableFrom(type) || typeof(IDisposable).IsAssignableFrom(type)
+        return typeof(Delegate).IsAssignableFrom(type) || typeof(Task).IsAssignableFrom(type)
+            || typeof(IDisposable).IsAssignableFrom(type)
             || (!type.IsValueType && _services.GetService(type) is not null);
     }
 
@@ -479,7 +525,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         for (int i = 0; i < _attached.Count; i++)
         {
             Attached attached = _attached.GetAt(i).Value;
-            if (!_ecs.IsAlive(attached.Entity) || !_ecs.Has<Scripts>(attached.Entity) || !_ecs.Get<Scripts>(attached.Entity).Has(attached.Script))
+            if (!_ecs.IsAlive(attached.Entity) || !_ecs.Has<Scripts>(attached.Entity)
+                || !_ecs.Get<Scripts>(attached.Entity).Has(attached.Script))
             {
                 Drop(attached);
                 i--;
@@ -510,7 +557,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
 
             if (_isLoading && !script.Type.IsDefined(typeof(ImpatientAttribute), inherit: false)) continue;
 
-            IReadOnlyDictionary<string, object?> values = _pending.Remove((entity, handle), out IReadOnlyDictionary<string, object?>? given) ? given : ReadOnlyDictionary<string, object?>.Empty;
+            IReadOnlyDictionary<string, object?> values =
+                _pending.Remove((entity, handle), out IReadOnlyDictionary<string, object?>? given)
+                    ? given
+                    : ReadOnlyDictionary<string, object?>.Empty;
             Keep(entity, script, Start(entity, script, values));
         }
 
@@ -564,10 +614,14 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
 
     /// <summary>
     /// <paramref name="entity"/>'s own copy of <paramref name="script"/>: a new one made for the entity, given each of
-    /// <paramref name="values"/>, the ones the prefab holds for it, started, and added to the ECS as each kind of system
-    /// it is. Why not, when it cannot be made or throws as it starts.
+    /// <paramref name="values"/>, the ones the prefab holds for it, started, and added to the ECS as each kind of
+    /// system it is. Why not, when it cannot be made or throws as it starts.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a script throws as it starts, the entity goes without it, and the others are started.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a script throws as it starts, the entity goes without it, "
+            + "and the others are started.")]
     private Result<Attached> Start(Entity entity, Script script, IReadOnlyDictionary<string, object?> values)
     {
         Type type = script.Type;
@@ -621,7 +675,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             }
             else
             {
-                WarnOnce(type, name, $"Script {type.Name}'s saved {name} is not put back, as its class no longer has it.");
+                WarnOnce(
+                    type,
+                    name,
+                    $"Script {type.Name}'s saved {name} is not put back, as its class no longer has it.");
             }
         }
 
@@ -632,9 +689,20 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// Adds <paramref name="made"/> to the ECS as each kind of system it is, and hands back the whole, to run until
     /// its entity goes; why not, when adding one throws.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever adding a script's system throws, the entity goes without the script, and the others are started.")]
-    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "The script owns its systems, which end with it; when it is not added, they end here.")]
-    private Result<Attached> Schedule(Entity entity, Handle<Script> script, IReadOnlyDictionary<string, object?> values, IScript made)
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever adding a script's system throws, the entity goes without the script, "
+            + "and the others are started.")]
+    [SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "The script owns its systems, which end with it; when it is not added, they end here.")]
+    private Result<Attached> Schedule(
+        Entity entity,
+        Handle<Script> script,
+        IReadOnlyDictionary<string, object?> values,
+        IScript made)
     {
         SubscriptionList systems = new();
         try
@@ -669,7 +737,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             Write(values, type, GetName(property), property.PropertyType, property.GetValue(script));
         }
 
-        foreach (FieldInfo field in type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+        foreach (FieldInfo field in type.GetFields(
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
         {
             if (!backing.Contains(field.Name) && !IsHanded(field.FieldType))
             {
@@ -694,7 +763,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         }
         else
         {
-            WarnOnce(type, name, $"Script {type.Name}'s {name} is not saved, so a copy put back starts over without it: {json.Error}");
+            WarnOnce(
+                type,
+                name,
+                $"Script {type.Name}'s {name} is not saved, so a copy put back starts over without it: {json.Error}");
         }
     }
 
@@ -781,8 +853,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// Whether <paramref name="entity"/>'s behaviours are called in frame <paramref name="index"/>'s Update and
     /// LateUpdate: every frame within <see cref="ScriptingSettings.FullRateDistance"/> of the nearest of the player's
     /// cameras, and up to n times as far every nth, as what is twice as far moves half as far on screen, up to every
-    /// <see cref="ScriptingSettings.MaxInterval"/>th. Entities take turns by their id, so the far ones do not all fall on
-    /// one frame. Every frame with no player camera, or for an entity without a <see cref="Transform"/>.
+    /// <see cref="ScriptingSettings.MaxInterval"/>th. Entities take turns by their id, so the far ones do not all fall
+    /// on one frame. Every frame with no player camera, or for an entity without a <see cref="Transform"/>.
     /// </summary>
     private bool IsDue(Entity entity, ulong index)
     {
@@ -796,17 +868,22 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         }
 
         // Not a number when there is no distance to divide (a camera's own script, with a full-rate distance of 0).
-        float interval = MathF.Min(MathF.Ceiling(MathF.Sqrt(nearest) / _settings.FullRateDistance), _settings.MaxInterval);
+        float interval = MathF.Min(
+            MathF.Ceiling(MathF.Sqrt(nearest) / _settings.FullRateDistance),
+            _settings.MaxInterval);
         return interval < 2 || float.IsNaN(interval) || (index + (ulong)entity.Id) % (ulong)interval == 0;
     }
 
     /// <summary>
-    /// Calls each behaviour's hook for <paramref name="phase"/>, in the order they were made: FixedUpdate every step, and
-    /// Update and LateUpdate when the behaviour is due, decided once a frame in Update (<see cref="IsDue"/>), with the
-    /// time since the behaviour's last call as the frame's delta. A script whose entity is gone ends first; a behaviour
-    /// that throws is logged and ends, and the others go on.
+    /// Calls each behaviour's hook for <paramref name="phase"/>, in the order they were made: FixedUpdate every step,
+    /// and Update and LateUpdate when the behaviour is due, decided once a frame in Update (<see cref="IsDue"/>), with
+    /// the time since the behaviour's last call as the frame's delta. A script whose entity is gone ends first; a
+    /// behaviour that throws is logged and ends, and the others go on.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a behaviour throws, it is logged and the behaviour ends; the others go on.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a behaviour throws, it is logged and the behaviour ends; the others go on.")]
     private void Run(Phase phase, in Frame frame)
     {
         int calls = 0;
@@ -828,7 +905,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
             }
             catch (Exception ex)
             {
-                Debugging.Error($"Script {behavior.GetType().Name} on entity {attached.Entity.Id} threw in {phase} and was taken off: {ex}");
+                Debugging.Error($"Script {behavior.GetType().Name} on entity {attached.Entity.Id} threw in {phase} "
+                    + $"and was taken off: {ex}");
                 _failed.Add((attached.Entity, attached.Script));
                 Drop(attached);
                 i--;
@@ -872,13 +950,21 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
     /// <summary>
     /// Whether the entity's script has yet to start: named, not attached and not failed.
     /// </summary>
-    private bool IsUnstarted(Entity entity, Handle<Script> handle) => handle != Handle<Script>.None && !_attached.ContainsKey((entity, handle)) && !_failed.Contains((entity, handle));
+    private bool IsUnstarted(Entity entity, Handle<Script> handle)
+        => handle != Handle<Script>.None
+            && !_attached.ContainsKey((entity, handle))
+            && !_failed.Contains((entity, handle));
 
     /// <summary>
     /// A script made for <see cref="Entity"/>: which script asset, the values it was given, which a copy started in its
     /// place on a build is given too, the copy itself, and its places on the ECS, one for each kind of system it is.
     /// </summary>
-    private sealed record Attached(Entity Entity, Handle<Script> Script, IReadOnlyDictionary<string, object?> Values, IScript Instance, SubscriptionList Systems)
+    private sealed record Attached(
+        Entity Entity,
+        Handle<Script> Script,
+        IReadOnlyDictionary<string, object?> Values,
+        IScript Instance,
+        SubscriptionList Systems)
     {
         /// <summary>
         /// The script as a behaviour, when it is one: the one kind whose hooks this gem calls.
@@ -886,8 +972,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         internal IBehavior? Behavior { get; } = Instance as IBehavior;
 
         /// <summary>
-        /// Whether its Update and LateUpdate are called this frame, decided in Update; a script attached after that runs
-        /// its first LateUpdate.
+        /// Whether its Update and LateUpdate are called this frame, decided in Update; a script attached after that
+        /// runs its first LateUpdate.
         /// </summary>
         internal bool IsDue { get; set; } = true;
 

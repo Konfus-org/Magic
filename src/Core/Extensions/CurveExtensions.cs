@@ -27,7 +27,9 @@ public static class CurveExtensions
                 if (place <= after.At)
                 {
                     float span = after.At - before.At;
-                    return span > 0 ? before.Value + ((after.Value - before.Value) * ((place - before.At) / span)) : after.Value;
+                    return span > 0
+                        ? before.Value + ((after.Value - before.Value) * ((place - before.At) / span))
+                        : after.Value;
                 }
             }
 

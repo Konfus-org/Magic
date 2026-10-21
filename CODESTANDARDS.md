@@ -24,7 +24,8 @@ matches its folder. New code follows every rule here; existing code is brought t
 - **Conventions.** These rules first, then .NET's own conventions (the Framework Design Guidelines) where these are
   silent, so the code reads as any C# developer expects. One word for one thing across the code base: what is
   `Cached` here is not `FromCache` there.
-- **Modern C#.** Use current C# and .NET, and follow the `.editorconfig` (the build enforces most of it). The target
+- **Modern C#.** Use current C# and .NET, and follow the `.editorconfig`: the build and Validate's format check
+  enforce it, and `tools/Format.ps1` applies what has one right answer ([Tools](tools/README.md#formatps1)). The target
   moves with `global.json`, so what is current is what
   [.NET's](https://learn.microsoft.com/en-us/dotnet/core/whats-new) and
   [C#'s](https://learn.microsoft.com/en-us/dotnet/csharp/whats-new) what's-new pages say it is.
@@ -240,19 +241,21 @@ hitch and so is where a hitch is measured. Inside the loop:
 
 ### Type layout
 
-Members go in this order, with one blank line between members and between groups:
+Members go in this order, with one blank line between members and between groups. It is StyleCop's order, which the
+build checks and `tools/Format.ps1` puts a changed file's members in, so where a member goes is never a judgement call:
 
-1. Constants and static fields
-2. Instance fields
-3. Constructors and finalizer
-4. `Dispose`
-5. Events, then properties
-6. Public and internal methods
-7. Private methods
-8. Nested types
+1. Fields, constants first
+2. Constructors and finalizer
+3. Events, then properties and indexers, then extension blocks
+4. Operators
+5. Methods
+6. Nested types: delegates, enums, interfaces, structs, then classes
 
-`Dispose` sits directly under the last constructor, so setup and teardown read together. A type with no
-constructor of its own (a primary-constructor type included) has it as its first method, above all the others.
+Within each kind, public comes before internal, and internal before private, and at each of those static comes before
+instance. Types that share a file are in the nested types' order, so a small enum or record struct that goes with the
+main type sits above it.
+
+`Dispose` is the first public method, so the teardown is found where the type's methods start.
 
 An interface's members are public members, placed with the other public ones of their kind: properties with
 properties, methods with methods. `IX.Member` is only for a member that can't be public because it would share a name
@@ -262,8 +265,8 @@ member it stands in for.
 A primary constructor when the constructor only keeps its parameters; an explicit one when it does work (builds a
 query, makes a delegate, subscribes).
 
-Within a group, public comes before internal, and internal before private. Keep related members next to
-each other.
+Within what the order leaves free, keep related members next to each other, and fields that belong together under the
+comment that says what they are for.
 
 ### State
 
@@ -344,6 +347,8 @@ requires braces around any multi-line body (`IDE0011`).
   ```
 
   Not `/// <summary>Where Assets live.</summary>`.
+- A comment wraps at `.editorconfig`'s `max_line_length` like the code around it, at a word. No tool wraps or checks
+  a comment, so this one is the writer's to keep.
 - No divider comments (`// ---- Section ----`, `// ====`) and no `#region`.
 
 ## Shaders

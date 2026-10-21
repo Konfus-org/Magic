@@ -29,7 +29,8 @@ internal sealed class PrefabFileEntity
 
     public IReadOnlyList<string> Tags { get; set; } = [];
 
-    public IReadOnlyDictionary<string, JsonElement> Components { get; set; } = ReadOnlyDictionary<string, JsonElement>.Empty;
+    public IReadOnlyDictionary<string, JsonElement> Components { get; set; }
+        = ReadOnlyDictionary<string, JsonElement>.Empty;
 
     /// <summary>
     /// Each <c>{ "id": N, ... }</c>: a script by its id, and every other key a property of the script it sets.

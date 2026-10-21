@@ -9,15 +9,15 @@ public sealed class Subscription(Action end) : IDisposable
     private Action? _end = end;
 
     /// <summary>
+    /// One with nothing to end, for whatever must hand one out and has nothing of its own to stop.
+    /// </summary>
+    public static Subscription None { get; } = new(static () => { });
+
+    /// <summary>
     /// Ends it; only the first call does anything.
     /// </summary>
     public void Dispose()
     {
         Interlocked.Exchange(ref _end, null)?.Invoke();
     }
-
-    /// <summary>
-    /// One with nothing to end, for whatever must hand one out and has nothing of its own to stop.
-    /// </summary>
-    public static Subscription None { get; } = new(static () => { });
 }

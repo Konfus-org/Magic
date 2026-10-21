@@ -41,9 +41,9 @@ public interface IEcs
         where T1 : unmanaged, IComponent;
 
     /// <summary>
-    /// A new entity with <paramref name="components"/>, each of its own type, known only as the program runs: a prefab's
-    /// part's, as a file names them. They go in at once, boxed, so it is slower than a typed batch; for spawning what a
-    /// file holds, not for the frame loop.
+    /// A new entity with <paramref name="components"/>, each of its own type, known only as the program runs: a
+    /// prefab's part's, as a file names them. They go in at once, boxed, so it is slower than a typed batch; for
+    /// spawning what a file holds, not for the frame loop.
     /// </summary>
     Entity Create(ReadOnlySpan<IComponent> components);
 

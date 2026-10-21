@@ -9,17 +9,18 @@ using Magic.Internal;
 namespace Magic.Services;
 
 /// <summary>
-/// What is slow to make, kept so that a later run reads it rather than making it again: a model's clusters, a
-/// compiled shader. Each entry is a type of thing under a key, the id of what it was made from: an asset's, so any asset
-/// can have one of each type, or a hash naming what is not an asset, such as a shader's source and stage. An entry was
-/// made from one version of its source (a hash of the asset's file, of the settings it was made with, of whatever else
-/// would make it come out otherwise); read with another, it is dirty: the read fails, and the caller makes it again and
+/// What is slow to make, kept so that a later run reads it rather than making it again: a model's clusters, a compiled
+/// shader. Each entry is a type of thing under a key, the id of what it was made from: an asset's, so any asset can
+/// have one of each type, or a hash naming what is not an asset, such as a shader's source and stage. An entry was made
+/// from one version of its source (a hash of the asset's file, of the settings it was made with, of whatever else would
+/// make it come out otherwise); read with another, it is dirty: the read fails, and the caller makes it again and
 /// writes it over it. Any thread.
 /// <para>
-/// Entries are files beside Magic, in <c>Cache/</c>, as the log's are in <c>Logs/</c>: <c>Cache/&lt;Type&gt;/&lt;key&gt;</c>,
-/// the version it was made from and its type's <see cref="ICache{T}.Version"/>, then the bytes the type's
-/// <see cref="ICache{T}"/> wrote, which a gem provides and which is asked for through <see cref="IServiceProvider"/> on
-/// every read and write. Nothing is kept in memory: whoever reads an entry keeps what it needs of it.
+/// Entries are files beside Magic, in <c>Cache/</c>, as the log's are in <c>Logs/</c>:
+/// <c>Cache/&lt;Type&gt;/&lt;key&gt;</c>, the version it was made from and its type's <see cref="ICache{T}.Version"/>,
+/// then the bytes the type's <see cref="ICache{T}"/> wrote, which a gem provides and which is asked for through
+/// <see cref="IServiceProvider"/> on every read and write. Nothing is kept in memory: whoever reads an entry keeps what
+/// it needs of it.
 /// </para>
 /// </summary>
 public sealed class Caches
@@ -39,8 +40,9 @@ public sealed class Caches
     }
 
     /// <summary>
-    /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>; why
-    /// not when nothing is, or when what is was made from another version, or by another <see cref="ICache{T}.Version"/>.
+    /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>;
+    /// why not when nothing is, or when what is was made from another version, or by another
+    /// <see cref="ICache{T}.Version"/>.
     /// </summary>
     public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, CancellationToken cancel)
     {
@@ -62,10 +64,10 @@ public sealed class Caches
     }
 
     /// <summary>
-    /// Keeps <paramref name="value"/> as what is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from
-    /// <paramref name="version"/>, in place of what was. It is written beside the entry, then moved over it, so a reader,
-    /// or the next run after a crash, never finds half an entry. One that cannot be kept is a warning: it is made again
-    /// next time.
+    /// Keeps <paramref name="value"/> as what is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made
+    /// from <paramref name="version"/>, in place of what was. It is written beside the entry, then moved over it, so a
+    /// reader, or the next run after a crash, never finds half an entry. One that cannot be kept is a warning: it is
+    /// made again next time.
     /// </summary>
     public async Task WriteAsync<T>(ulong key, ulong version, T value, CancellationToken cancel)
     {
@@ -78,14 +80,6 @@ public sealed class Caches
         string file = GetFile<T>(key);
         Result written = await _files.WriteAsync(file, ToBytes(cache, version, value), cancel).ConfigureAwait(false);
         if (!written.Ok) Debugging.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
-    }
-
-    /// <summary>
-    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is: beside Magic, in <c>Cache/</c>.
-    /// </summary>
-    private string GetFile<T>(ulong key)
-    {
-        return _files.Combine(AppContext.BaseDirectory, "Cache", typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
     }
 
     /// <summary>
@@ -106,7 +100,11 @@ public sealed class Caches
     /// What the entry <paramref name="bytes"/> holds, read by <paramref name="cache"/>, when it was made from
     /// <paramref name="version"/> by the cache's version; why not otherwise.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Bytes a type's cache cannot read, whatever it throws, are dirty: they are deleted and made again.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Bytes a type's cache cannot read, whatever it throws, are dirty: "
+            + "they are deleted and made again.")]
     private static Result<T> Read<T>(ICache<T> cache, byte[] bytes, ulong version)
     {
         if (bytes.Length < HeaderSize
@@ -125,5 +123,17 @@ public sealed class Caches
         {
             return Result.Failure<T>($"its bytes are not a {typeof(T).Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is: beside Magic, in <c>Cache/</c>.
+    /// </summary>
+    private string GetFile<T>(ulong key)
+    {
+        return _files.Combine(
+            AppContext.BaseDirectory,
+            "Cache",
+            typeof(T).Name,
+            key.ToString(CultureInfo.InvariantCulture));
     }
 }

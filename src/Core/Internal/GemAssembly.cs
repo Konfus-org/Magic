@@ -23,7 +23,17 @@ namespace Magic.Internal;
 /// number of gems can be sinks or preloaders.</param>
 /// <param name="Assembly">Its assembly, which holds the components and scripts it declares.</param>
 /// <param name="Resources">The folder of its own assets (<see cref="GetResources"/>).</param>
-internal readonly record struct GemAssembly(string Name, string Path, string Author, string Description, Version Version, Type Type, Type? Settings, List<Type> Provides, Assembly Assembly, string Resources)
+internal readonly record struct GemAssembly(
+    string Name,
+    string Path,
+    string Author,
+    string Description,
+    Version Version,
+    Type Type,
+    Type? Settings,
+    List<Type> Provides,
+    Assembly Assembly,
+    string Resources)
 {
     /// <summary>
     /// The assembly metadata a build records the folder of its part's assets in, where it does not copy them beside it
@@ -62,14 +72,16 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
 
         if (gems.Count != 1)
         {
-            return Result.Failure<GemAssembly>($"Gem {name} must hold exactly one class that implements IGem; it holds {gems.Count}.");
+            return Result.Failure<GemAssembly>(
+                $"Gem {name} must hold exactly one class that implements IGem; it holds {gems.Count}.");
         }
 
         Type gem = gems[0];
         ConstructorInfo[] constructors = gem.GetConstructors();
         if (constructors.Length != 1)
         {
-            return Result.Failure<GemAssembly>($"Gem {name}: {gem.Name} must have exactly one public constructor; it has {constructors.Length}.");
+            return Result.Failure<GemAssembly>(
+                $"Gem {name}: {gem.Name} must have exactly one public constructor; it has {constructors.Length}.");
         }
 
         Type? settings = null;
@@ -80,7 +92,8 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
 
             if (settings is not null)
             {
-                return Result.Failure<GemAssembly>($"Gem {name}: {gem.Name} takes two settings objects, {settings.Name} and {type.Name}; a gem has one.");
+                return Result.Failure<GemAssembly>($"Gem {name}: {gem.Name} takes two settings objects, "
+                    + $"{settings.Name} and {type.Name}; a gem has one.");
             }
 
             settings = type;
@@ -89,7 +102,8 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
         List<Type> provides = [];
         foreach (Type contract in gem.GetInterfaces())
         {
-            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink) && contract != typeof(IPreloader))
+            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink)
+                && contract != typeof(IPreloader))
             {
                 provides.Add(contract);
             }
@@ -98,7 +112,17 @@ internal readonly record struct GemAssembly(string Name, string Path, string Aut
         string author = GetMetadata(assembly, AuthorKey) ?? name;
         string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
-        return Result.Success(new GemAssembly(name, path, author, description, version, gem, settings, provides, assembly, GetResources(files, assembly)));
+        return Result.Success(new GemAssembly(
+            name,
+            path,
+            author,
+            description,
+            version,
+            gem,
+            settings,
+            provides,
+            assembly,
+            GetResources(files, assembly)));
     }
 
     /// <summary>

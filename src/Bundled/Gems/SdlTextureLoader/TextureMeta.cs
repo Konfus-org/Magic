@@ -4,6 +4,27 @@ using Magic.Contexts.Gpu;
 namespace Magic.SdlTextureLoader;
 
 /// <summary>
+/// What a texture's pixels are, which picks its colour space.
+/// </summary>
+internal enum TextureUsage : byte
+{
+    /// <summary>
+    /// Colour, in sRGB.
+    /// </summary>
+    Color,
+
+    /// <summary>
+    /// A normal map: linear.
+    /// </summary>
+    Normal,
+
+    /// <summary>
+    /// Data, such as roughness, metalness or occlusion: linear.
+    /// </summary>
+    Mask,
+}
+
+/// <summary>
 /// What a texture's <c>.meta</c> holds beside its id: how its image is made into a <see cref="Texture"/>,
 /// <c>{ "usage": "normal", "mipmaps": false, "wrap": "clamp" }</c>.
 /// </summary>
@@ -26,25 +47,4 @@ internal sealed class TextureMeta
     public GpuWrap Wrap { get; set; } = GpuWrap.Repeat;
 
     public GpuFilter Filter { get; set; } = GpuFilter.Linear;
-}
-
-/// <summary>
-/// What a texture's pixels are, which picks its colour space.
-/// </summary>
-internal enum TextureUsage : byte
-{
-    /// <summary>
-    /// Colour, in sRGB.
-    /// </summary>
-    Color,
-
-    /// <summary>
-    /// A normal map: linear.
-    /// </summary>
-    Normal,
-
-    /// <summary>
-    /// Data, such as roughness, metalness or occlusion: linear.
-    /// </summary>
-    Mask,
 }

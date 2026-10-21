@@ -18,7 +18,7 @@ public sealed class PrefabTests
 
         Transform? place = prefab.PlaceOf(spawn);
 
-        Assert.Equal<Vector3?>(new Vector3(1, 2, 3), place?.Position);
+        Assert.Equal(new Vector3(1, 2, 3), place?.Position);
     }
 
     [Fact]
@@ -39,7 +39,7 @@ public sealed class PrefabTests
 
         Transform? place = prefab.PlaceOf(spawn);
 
-        Assert.Equal<Vector3?>(new Vector3(11, 0, 0), place?.Position);
+        Assert.Equal(new Vector3(11, 0, 0), place?.Position);
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class PrefabTests
 
         Transform? place = prefab.PlaceOf(spawn);
 
-        Assert.Equal<Vector3?>(new Vector3(10, 0, 0), place?.Position);
+        Assert.Equal(new Vector3(10, 0, 0), place?.Position);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public sealed class PrefabTests
 
         Transform? place = prefab.PlaceOf(spawn);
 
-        Assert.Equal<Vector3?>(new Vector3(10, 0, 0), place?.Position);
+        Assert.Equal(new Vector3(10, 0, 0), place?.Position);
     }
 
     [Fact]

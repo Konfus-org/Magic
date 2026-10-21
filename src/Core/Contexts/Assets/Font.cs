@@ -3,9 +3,22 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
+/// One character of a <see cref="Font"/>: its rectangle in the atlas, and where it is drawn from the pen, all in
+/// pixels. One that draws nothing, a space, has an empty rectangle and still moves the pen.
+/// </summary>
+/// <param name="X">The rectangle's left edge in the atlas.</param>
+/// <param name="Y">The rectangle's top edge in the atlas.</param>
+/// <param name="Width">The rectangle's width.</param>
+/// <param name="Height">The rectangle's height.</param>
+/// <param name="BearingX">From the pen to the rectangle's left edge.</param>
+/// <param name="BearingY">From the baseline up to the rectangle's top edge.</param>
+/// <param name="Advance">How far the pen moves after it.</param>
+public readonly record struct Glyph(int X, int Y, int Width, int Height, int BearingX, int BearingY, int Advance);
+
+/// <summary>
 /// A font, drawn once at the pixel size its <c>.meta</c> asks for: an atlas of its characters, white RGBA8 whose alpha
-/// is coverage, tightly packed, and where each character is in it. Whatever draws text uploads the atlas once and draws a
-/// quad per character, moving the pen by its <see cref="Glyph.Advance"/>.
+/// is coverage, tightly packed, and where each character is in it. Whatever draws text uploads the atlas once and draws
+/// a quad per character, moving the pen by its <see cref="Glyph.Advance"/>.
 /// </summary>
 public sealed class Font : IAsset<Font>
 {
@@ -45,16 +58,3 @@ public sealed class Font : IAsset<Font>
     /// </summary>
     public required IReadOnlyDictionary<uint, Glyph> Glyphs { get; init; }
 }
-
-/// <summary>
-/// One character of a <see cref="Font"/>: its rectangle in the atlas, and where it is drawn from the pen, all in pixels.
-/// One that draws nothing, a space, has an empty rectangle and still moves the pen.
-/// </summary>
-/// <param name="X">The rectangle's left edge in the atlas.</param>
-/// <param name="Y">The rectangle's top edge in the atlas.</param>
-/// <param name="Width">The rectangle's width.</param>
-/// <param name="Height">The rectangle's height.</param>
-/// <param name="BearingX">From the pen to the rectangle's left edge.</param>
-/// <param name="BearingY">From the baseline up to the rectangle's top edge.</param>
-/// <param name="Advance">How far the pen moves after it.</param>
-public readonly record struct Glyph(int X, int Y, int Width, int Height, int BearingX, int BearingY, int Advance);

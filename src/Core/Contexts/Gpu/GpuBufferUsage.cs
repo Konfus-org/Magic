@@ -11,7 +11,8 @@ public enum GpuBufferUsage : byte
     Index = 1 << 1,
 
     /// <summary>
-    /// The arguments of draws and dispatches the GPU reads from a buffer (<see cref="GpuRenderPass.DrawIndexedFromBuffer"/>, <see cref="GpuComputePass.DispatchFromBuffer"/>).
+    /// The arguments of draws and dispatches the GPU reads from a buffer
+    /// (<see cref="GpuRenderPass.DrawIndexedFromBuffer"/>, <see cref="GpuComputePass.DispatchFromBuffer"/>).
     /// </summary>
     Arguments = 1 << 2,
 

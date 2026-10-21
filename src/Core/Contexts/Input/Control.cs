@@ -4,18 +4,6 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Input;
 
 /// <summary>
-/// One control this frame. Every control has a value: a key or button is 0 or 1, a trigger 0 to 1, a stick axis -1
-/// to 1, and the mouse's position, motion and wheel are pixels and notches. A key, button, trigger or stick is down
-/// while its value is at least half way, and pressed or released when that changed this frame, so a tap that starts
-/// and ends between two frames still shows as both.
-/// </summary>
-/// <param name="Value">How far, how much, or where.</param>
-/// <param name="IsDown">Held now.</param>
-/// <param name="WasPressed">Went down this frame.</param>
-/// <param name="WasReleased">Came up this frame.</param>
-public readonly record struct ControlState(float Value, bool IsDown, bool WasPressed, bool WasReleased);
-
-/// <summary>
 /// Every control Magic knows, on every kind of device, read through <see cref="IInput"/>. Each
 /// <see cref="DeviceKind"/> has a block of 256 values, so a control's value says its device kind and its number
 /// within it (<see cref="ControlExtensions"/>). The names are what an input map binds to in data: "KeySpace",
@@ -296,3 +284,15 @@ public enum Control
     /// </summary>
     GamepadRightTrigger,
 }
+
+/// <summary>
+/// One control this frame. Every control has a value: a key or button is 0 or 1, a trigger 0 to 1, a stick axis -1
+/// to 1, and the mouse's position, motion and wheel are pixels and notches. A key, button, trigger or stick is down
+/// while its value is at least half way, and pressed or released when that changed this frame, so a tap that starts
+/// and ends between two frames still shows as both.
+/// </summary>
+/// <param name="Value">How far, how much, or where.</param>
+/// <param name="IsDown">Held now.</param>
+/// <param name="WasPressed">Went down this frame.</param>
+/// <param name="WasReleased">Came up this frame.</param>
+public readonly record struct ControlState(float Value, bool IsDown, bool WasPressed, bool WasReleased);

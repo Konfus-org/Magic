@@ -54,7 +54,11 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
         return PlaceIn(Parts, new Transform(), tag);
     }
 
-    private static void Make(World world, IReadOnlyList<PrefabPart> parts, Transform parent, List<(Entity Entity, PrefabPart Part)> made)
+    private static void Make(
+        World world,
+        IReadOnlyList<PrefabPart> parts,
+        Transform parent,
+        List<(Entity Entity, PrefabPart Part)> made)
     {
         foreach (PrefabPart part in parts)
         {
@@ -88,16 +92,17 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
 }
 
 /// <summary>
-/// A script as a <see cref="PrefabPart"/> holds it: the <see cref="Script"/> that declares it, and the values the prefab gives it, each a public property's
-/// name and its value read as the property's type. A script is made for an entity, so a part cannot hold one made
-/// (<see cref="IScript"/>); it holds what each entity spawned from it has its own copy made from.
+/// A script as a <see cref="PrefabPart"/> holds it: the <see cref="Script"/> that declares it, and the values the
+/// prefab gives it, each a public property's name and its value read as the property's type. A script is made for an
+/// entity, so a part cannot hold one made (<see cref="IScript"/>); it holds what each entity spawned from it has its
+/// own copy made from.
 /// </summary>
 public sealed record PrefabScript(Script Script, IReadOnlyDictionary<string, object?> Values);
 
 /// <summary>
 /// One part of a <see cref="Prefab"/>, spawned as one entity: its components, its scripts and the parts under it, whose
-/// transforms are relative to its own. Each entity spawned from it is given a copy of its components and of its scripts,
-/// and nothing changes a part once it is made, as a prefab is shared by everything that spawns it.
+/// transforms are relative to its own. Each entity spawned from it is given a copy of its components and of its
+/// scripts, and nothing changes a part once it is made, as a prefab is shared by everything that spawns it.
 /// </summary>
 public sealed class PrefabPart
 {
@@ -107,7 +112,7 @@ public sealed class PrefabPart
     public string Name { get; init; } = string.Empty;
 
     /// <summary>
-    /// Its components, each of its own type, its tags among them as a <see cref="Components.Tags"/>.
+    /// Its components, each of its own type, its tags among them as a <see cref="Tags"/>.
     /// </summary>
     public IReadOnlyList<IComponent> Components { get; init; } = [];
 

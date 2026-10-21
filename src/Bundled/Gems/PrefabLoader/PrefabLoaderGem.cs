@@ -13,11 +13,11 @@ namespace Magic.PrefabLoader;
 
 /// <summary>
 /// Reads <c>.prefab</c> files into <see cref="Prefab"/>s (<see cref="IAssetLoader{T}"/>), what the engine spawns: each
-/// entity a <see cref="PrefabPart"/>, with its components read as their types by name (<see cref="Assemblies.Get{T}"/>),
-/// its scripts named by the id of their <see cref="Script"/> and their values read as its properties' types
-/// (<see cref="PrefabScript"/>), its tags as a <see cref="Tags"/> and its scripts as a <see cref="Scripts"/> among its
-/// components, and the entities under it, a prefab it places among them. What it loads as it reads one is what that
-/// one is made from, so it is read again when one of them changes.
+/// entity a <see cref="PrefabPart"/>, with its components read as their types by name
+/// (<see cref="Assemblies.Get{T}"/>), its scripts named by the id of their <see cref="Script"/> and their values read
+/// as its properties' types (<see cref="PrefabScript"/>), its tags as a <see cref="Tags"/> and its scripts as a
+/// <see cref="Scripts"/> among its components, and the entities under it, a prefab it places among them. What it loads
+/// as it reads one is what that one is made from, so it is read again when one of them changes.
 /// </summary>
 internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IGem, IAssetLoader<Prefab>
 {
@@ -34,11 +34,16 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     /// </summary>
     private readonly ConcurrentDictionary<string, bool> _unread = new(StringComparer.Ordinal);
 
-    public async ValueTask<Result<Prefab>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel)
+    public async ValueTask<Result<Prefab>> LoadAsync(
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        JsonElement settings,
+        CancellationToken cancel)
     {
         if (settings.GetPropertyCount() != 0)
         {
-            return Result.Failure<Prefab>($"its .meta holds settings, {settings.GetRawText()}, which a prefab does not take.");
+            return Result.Failure<Prefab>(
+                $"its .meta holds settings, {settings.GetRawText()}, which a prefab does not take.");
         }
 
         Result<PrefabFile> read = Json.Read<PrefabFile>(bytes.Span);
@@ -48,7 +53,84 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         return parts.Ok ? Result.Success(new Prefab { Parts = parts.Value }) : Result.Failure<Prefab>(parts.Error);
     }
 
-    private async Task<Result<List<PrefabPart>>> PartsOfAsync(IReadOnlyList<PrefabFileEntity> entities, string path, CancellationToken cancel)
+    /// <summary>
+    /// The entity's tags, or null when it has none. Past <see cref="Tags.Capacity"/>, and an empty name, are warned
+    /// about and left out.
+    /// </summary>
+    private static Tags? ParseTags(PrefabFileEntity entity, string name, string path)
+    {
+        if (entity.Tags.Count == 0) return null;
+
+        Tags tags = default;
+        foreach (string tag in entity.Tags)
+        {
+            Tag named = string.IsNullOrEmpty(tag) ? default : Tag.Of(tag);
+            if (!tags.Add(named) && !tags.Has(named))
+            {
+                Debugging.Warn($"{path}'s {name} is tagged \"{tag}\", which is left out: a tag needs a name, and an "
+                    + $"entity has at most {Tags.Capacity}.");
+            }
+        }
+
+        return tags;
+    }
+
+    /// <summary>
+    /// The entity's <see cref="Scripts"/>, naming each of its part's <paramref name="scripts"/>, or null when it has
+    /// none. One named twice, or past <see cref="Scripts.Capacity"/>, is warned about and left out of the part.
+    /// </summary>
+    private static Scripts? ParseScripts(List<PrefabScript> scripts, string name, string path)
+    {
+        if (scripts.Count == 0) return null;
+
+        Scripts held = default;
+        for (int i = 0; i < scripts.Count; i++)
+        {
+            if (!held.Add(scripts[i].Script.Handle))
+            {
+                Debugging.Warn($"{path}'s {name} goes without script {scripts[i].Script.Type.Name}: it is named twice, "
+                    + $"or an entity has at most {Scripts.Capacity} scripts.");
+                scripts.RemoveAt(i--);
+            }
+        }
+
+        return held;
+    }
+
+    /// <summary>
+    /// <paramref name="type"/>'s public property with a setter that a file names <paramref name="key"/>, in Core's
+    /// dialect; null when it has none.
+    /// </summary>
+    private static PropertyInfo? FindProperty(Type type, string key)
+    {
+        foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+        {
+            if (property.SetMethod is { IsPublic: true } && property.GetIndexParameters().Length == 0
+                && string.Equals(JsonNamingPolicy.CamelCase.ConvertName(property.Name), key, StringComparison.Ordinal))
+            {
+                return property;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The script a script entry names by its id; null when it names none.
+    /// </summary>
+    private static Handle<Script>? HandleOf(IReadOnlyDictionary<string, JsonElement> entry)
+    {
+        return entry.TryGetValue(Id, out JsonElement id) && id.ValueKind == JsonValueKind.Number
+            && id.TryGetUInt64(out ulong value)
+            && value != 0
+            ? new Handle<Script>(value)
+            : null;
+    }
+
+    private async Task<Result<List<PrefabPart>>> PartsOfAsync(
+        IReadOnlyList<PrefabFileEntity> entities,
+        string path,
+        CancellationToken cancel)
     {
         List<PrefabPart> parts = [];
         foreach (PrefabFileEntity entity in entities)
@@ -96,13 +178,15 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         {
             if (HandleOf(entry) is not { } handle)
             {
-                return Result.Failure<PrefabPart>($"{name} has a script that is not named by its id, {{ \"{Id}\": N }}, a whole number above 0.");
+                return Result.Failure<PrefabPart>(
+                    $"{name} has a script that is not named by its id, {{ \"{Id}\": N }}, a whole number above 0.");
             }
 
             Result<PrefabScript> script = await ScriptAsync(handle, entry, cancel).ConfigureAwait(false);
             if (!script.Ok)
             {
-                Debugging.Error($"{path}'s {name} goes without script {_assets.GetPath(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture)}: {script.Error}");
+                string named = _assets.GetPath(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture);
+                Debugging.Error($"{path}'s {name} goes without script {named}: {script.Error}");
                 continue;
             }
 
@@ -127,7 +211,8 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         if (!under.Ok) return Result.Failure<PrefabPart>(under.Error);
 
         children.AddRange(under.Value);
-        return Result.Success(new PrefabPart { Name = entity.Name, Components = components, Scripts = scripts, Children = children });
+        return Result.Success(
+            new PrefabPart { Name = entity.Name, Components = components, Scripts = scripts, Children = children });
     }
 
     /// <summary>
@@ -135,7 +220,10 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     /// as the value of its public property of that name, read as the property's type; why not, when it does not load,
     /// declares no script, or is given a key it has no property for or a value that is not one.
     /// </summary>
-    private async Task<Result<PrefabScript>> ScriptAsync(Handle<Script> handle, IReadOnlyDictionary<string, JsonElement> entry, CancellationToken cancel)
+    private async Task<Result<PrefabScript>> ScriptAsync(
+        Handle<Script> handle,
+        IReadOnlyDictionary<string, JsonElement> entry,
+        CancellationToken cancel)
     {
         Result<Script> loaded = await _assets.LoadAsync(handle, cancel).ConfigureAwait(false);
         if (!loaded.Ok) return Result.Failure<PrefabScript>(loaded.Error);
@@ -153,7 +241,8 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
 
             if (FindProperty(type, key) is not { } property)
             {
-                return Result.Failure<PrefabScript>($"it is given {key}, which it has no public property with a setter for.");
+                return Result.Failure<PrefabScript>(
+                    $"it is given {key}, which it has no public property with a setter for.");
             }
 
             try
@@ -167,75 +256,5 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         }
 
         return Result.Success(new PrefabScript(loaded.Value, values));
-    }
-
-    /// <summary>
-    /// The entity's tags, or null when it has none. Past <see cref="Tags.Capacity"/>, and an empty name, are warned
-    /// about and left out.
-    /// </summary>
-    private static Tags? ParseTags(PrefabFileEntity entity, string name, string path)
-    {
-        if (entity.Tags.Count == 0) return null;
-
-        Tags tags = default;
-        foreach (string tag in entity.Tags)
-        {
-            Tag named = string.IsNullOrEmpty(tag) ? default : Tag.Of(tag);
-            if (!tags.Add(named) && !tags.Has(named))
-            {
-                Debugging.Warn($"{path}'s {name} is tagged \"{tag}\", which is left out: a tag needs a name, and an entity has at most {Tags.Capacity}.");
-            }
-        }
-
-        return tags;
-    }
-
-    /// <summary>
-    /// The entity's <see cref="Scripts"/>, naming each of its part's <paramref name="scripts"/>, or null when it has
-    /// none. One named twice, or past <see cref="Scripts.Capacity"/>, is warned about and left out of the part.
-    /// </summary>
-    private static Scripts? ParseScripts(List<PrefabScript> scripts, string name, string path)
-    {
-        if (scripts.Count == 0) return null;
-
-        Scripts held = default;
-        for (int i = 0; i < scripts.Count; i++)
-        {
-            if (!held.Add(scripts[i].Script.Handle))
-            {
-                Debugging.Warn($"{path}'s {name} goes without script {scripts[i].Script.Type.Name}: it is named twice, or an entity has at most {Scripts.Capacity} scripts.");
-                scripts.RemoveAt(i--);
-            }
-        }
-
-        return held;
-    }
-
-    /// <summary>
-    /// <paramref name="type"/>'s public property with a setter that a file names <paramref name="key"/>, in Core's
-    /// dialect; null when it has none.
-    /// </summary>
-    private static PropertyInfo? FindProperty(Type type, string key)
-    {
-        foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-        {
-            if (property.SetMethod is { IsPublic: true } && property.GetIndexParameters().Length == 0
-                && string.Equals(JsonNamingPolicy.CamelCase.ConvertName(property.Name), key, StringComparison.Ordinal))
-            {
-                return property;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The script a script entry names by its id; null when it names none.
-    /// </summary>
-    private static Handle<Script>? HandleOf(IReadOnlyDictionary<string, JsonElement> entry)
-    {
-        return entry.TryGetValue(Id, out JsonElement id) && id.ValueKind == JsonValueKind.Number && id.TryGetUInt64(out ulong value) && value != 0
-            ? new Handle<Script>(value)
-            : null;
     }
 }

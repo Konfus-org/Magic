@@ -71,9 +71,9 @@ public sealed class Settings : IDisposable
     private Layers _layers;
 
     /// <summary>
-    /// Reads the default preset, the project's <c>Presets/Default.preset</c> else the engine's, and the one <c>--preset</c>
-    /// names, before any gem is made, as each is made from them. A name no preset has is an error, and only the default is
-    /// applied.
+    /// Reads the default preset, the project's <c>Presets/Default.preset</c> else the engine's, and the one
+    /// <c>--preset</c> names, before any gem is made, as each is made from them. A name no preset has is an error, and
+    /// only the default is applied.
     /// </summary>
     internal Settings(Assets assets, IFileSystem files, Events events, Project project, Args args, Lifetime lifetime)
     {
@@ -87,7 +87,8 @@ public sealed class Settings : IDisposable
         Handle<Preset> applied = args.Preset.Length == 0 ? _default : assets.Find<Preset>(GetPath(args.Preset));
         if (applied == Handle<Preset>.None)
         {
-            Debugging.Error($"There is no preset {args.Preset}: no asset is {GetPath(args.Preset)}, so only the default is applied.");
+            Debugging.Error($"There is no preset {args.Preset}: no asset is {GetPath(args.Preset)}, "
+                + "so only the default is applied.");
             applied = _default;
         }
 
@@ -101,11 +102,6 @@ public sealed class Settings : IDisposable
         {
             return $"{PresetFolder}/{preset}{Contexts.Assets.Preset.Extensions[0]}";
         }
-    }
-
-    public void Dispose()
-    {
-        _reloads.Dispose();
     }
 
     /// <summary>
@@ -138,6 +134,11 @@ public sealed class Settings : IDisposable
                 return all;
             }
         }
+    }
+
+    public void Dispose()
+    {
+        _reloads.Dispose();
     }
 
     /// <summary>
@@ -281,7 +282,13 @@ public sealed class Settings : IDisposable
             foreach (PropertyInfo property in GetSettings(type))
             {
                 // Its own attributes first, then its class's, so one on the class marks every setting in it.
-                Setting setting = new(GetName(property), _docs.GetSummary(property), gem, property.PropertyType, null, [.. property.GetCustomAttributes(), .. type.GetCustomAttributes()]);
+                Setting setting = new(
+                    GetName(property),
+                    _docs.GetSummary(property),
+                    gem,
+                    property.PropertyType,
+                    null,
+                    [.. property.GetCustomAttributes(), .. type.GetCustomAttributes()]);
                 _all.Add((setting, property, values.Value));
             }
 
@@ -291,8 +298,8 @@ public sealed class Settings : IDisposable
 
     /// <summary>
     /// Copies every change since the last time into the objects the gems hold, and when one changes a setting marked
-    /// <see cref="RequireRestartAttribute"/> to a value it did not hold, ends the run to start it again. Main thread, at
-    /// the frame's sync point.
+    /// <see cref="RequireRestartAttribute"/> to a value it did not hold, ends the run to start it again. Main thread,
+    /// at the frame's sync point.
     /// </summary>
     internal void ApplyChanges()
     {
@@ -306,7 +313,8 @@ public sealed class Settings : IDisposable
                 if (!_changes.TryGetValue(held, out ISettings? changed)) continue;
 
                 object? value = property.GetValue(changed);
-                if (restart is null && setting.Attributes.OfType<RequireRestartAttribute>().Any() && !Equals(property.GetValue(held), value))
+                if (restart is null && setting.Attributes.OfType<RequireRestartAttribute>().Any()
+                    && !Equals(property.GetValue(held), value))
                 {
                     restart = $"{setting.Key} changed";
                 }
@@ -335,7 +343,14 @@ public sealed class Settings : IDisposable
             }
 
             string preset = Preset == _default ? string.Empty : Path.GetFileNameWithoutExtension(GetName(Preset));
-            return new Args { ProjectPath = _args.ProjectPath, FrameLimit = _args.FrameLimit, Headless = _args.Headless, Settings = lines, Preset = preset };
+            return new Args
+            {
+                ProjectPath = _args.ProjectPath,
+                FrameLimit = _args.FrameLimit,
+                Headless = _args.Headless,
+                Settings = lines,
+                Preset = preset
+            };
         }
     }
 
@@ -373,7 +388,8 @@ public sealed class Settings : IDisposable
     /// </summary>
     private static IEnumerable<PropertyInfo> GetSettings(Type type)
     {
-        return type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Where(property => property.CanRead && property.CanWrite);
+        return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.CanRead && property.CanWrite);
     }
 
     /// <summary>
@@ -418,7 +434,8 @@ public sealed class Settings : IDisposable
             (string key, JsonNode? value) = parsed.Value;
             if (!project.Gems.Contains(GetGem(key), StringComparer.OrdinalIgnoreCase))
             {
-                Debugging.Error($"--set {key} names {GetGem(key)}, which {project.Name} does not list as a gem; it is ignored.");
+                Debugging.Error(
+                    $"--set {key} names {GetGem(key)}, which {project.Name} does not list as a gem; it is ignored.");
                 continue;
             }
 
@@ -493,7 +510,8 @@ public sealed class Settings : IDisposable
             Result remade = Remake(layers);
             if (!remade.Ok)
             {
-                Debugging.Error($"Preset {GetName(preset)} was changed, but {remade.Error}; the settings stay as they were.");
+                Debugging.Error(
+                    $"Preset {GetName(preset)} was changed, but {remade.Error}; the settings stay as they were.");
                 return;
             }
         }
@@ -578,7 +596,11 @@ public sealed class Settings : IDisposable
     /// <paramref name="preset"/>'s settings, read as the run starts, before any gem is made, as each is made from them;
     /// none when it cannot be read, which is logged.
     /// </summary>
-    [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "The gems are made from the presets, so the run waits for them once, before any gem is made; they are read on a worker and need neither engine thread, so the wait cannot deadlock.")]
+    [SuppressMessage(
+        "Usage",
+        "VSTHRD002:Avoid problematic synchronous waits",
+        Justification = "The gems are made from the presets, so the run waits for them once, before any gem is made; "
+            + "they are read on a worker and need neither engine thread, so the wait cannot deadlock.")]
     private JsonObject ReadNow(Handle<Preset> preset)
     {
         // A missing default has been logged already.
@@ -597,7 +619,9 @@ public sealed class Settings : IDisposable
     private async Task<Result<JsonObject>> ReadAsync(Handle<Preset> preset, CancellationToken cancel)
     {
         Result<Preset> loaded = await _assets.LoadAsync(preset, cancel).ConfigureAwait(false);
-        return loaded.Ok ? GetSettings(loaded.Value, GetName(preset)) : Result.Failure<JsonObject>($"Preset {GetName(preset)} could not be read: {loaded.Error}");
+        return loaded.Ok
+            ? GetSettings(loaded.Value, GetName(preset))
+            : Result.Failure<JsonObject>($"Preset {GetName(preset)} could not be read: {loaded.Error}");
     }
 
     private string GetName(Handle<Preset> preset)

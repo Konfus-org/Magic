@@ -93,10 +93,12 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
         Vector2 mouse = _input[Control.MouseRight].IsDown
             ? new Vector2(_input[Control.MouseMotionX].Value, _input[Control.MouseMotionY].Value) * MouseTurn
             : Vector2.Zero;
-        Vector2 turn = mouse + (new Vector2(_input[Control.GamepadRightX].Value, -_input[Control.GamepadRightY].Value) * (StickTurn * frame.DeltaSeconds));
+        Vector2 turn = mouse + (new Vector2(_input[Control.GamepadRightX].Value, -_input[Control.GamepadRightY].Value)
+            * (StickTurn * frame.DeltaSeconds));
         float right = ReadAxis(Control.KeyD, Control.KeyA) + _input[Control.GamepadLeftX].Value;
         float forward = ReadAxis(Control.KeyW, Control.KeyS) + _input[Control.GamepadLeftY].Value;
-        float up = ReadAxis(Control.KeyE, Control.KeyQ) + ReadAxis(Control.GamepadRightTrigger, Control.GamepadLeftTrigger);
+        float up = ReadAxis(Control.KeyE, Control.KeyQ)
+            + ReadAxis(Control.GamepadRightTrigger, Control.GamepadLeftTrigger);
 
         // Out from the middle, then around it, turning to look at it no faster than TurnToMiddle.
         ref Transform transform = ref _world.Get<Transform>(owner);
@@ -107,7 +109,9 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
         float cruise = _isFlyingItself && fromMiddle < Radius ? Cruise * frame.DeltaSeconds : 0;
         if (isOrbiting)
         {
-            at = Vector3.Transform(at, Quaternion.CreateFromAxisAngle(Vector3.UnitY, Orbit * frame.DeltaSeconds * (MathF.PI / 180)));
+            at = Vector3.Transform(
+                at,
+                Quaternion.CreateFromAxisAngle(Vector3.UnitY, Orbit * frame.DeltaSeconds * (MathF.PI / 180)));
             float most = TurnToMiddle * frame.DeltaSeconds;
             turn.X = Math.Clamp(MathF.IEEERemainder(MathF.Atan2(-at.X, -at.Z) - _yaw, MathF.Tau), -most, most);
             turn.Y = Math.Clamp(MathF.Atan2(at.Y, fromMiddle) - _pitch, -most, most);
@@ -123,7 +127,8 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
 
         bool isFast = _input[Control.KeyLeftShift].IsDown || _input[Control.GamepadLeftShoulder].IsDown;
         transform.Rotation = rotation;
-        transform.Position = at + (move * (Speed * (isFast ? FastFactor : 1) * frame.DeltaSeconds)) + (Vector3.Transform(Vector3.UnitZ, rotation) * cruise);
+        transform.Position = at + (move * (Speed * (isFast ? FastFactor : 1) * frame.DeltaSeconds))
+            + (Vector3.Transform(Vector3.UnitZ, rotation) * cruise);
     }
 
     /// <summary>

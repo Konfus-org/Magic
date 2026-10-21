@@ -1,6 +1,7 @@
 # Code style and analyzer rules. The build enforces them (EnforceCodeStyleInBuild) and treats every warning as an
-# error, so "warning" below means "the build fails". Every code-quality rule is on (AnalysisMode All); the few that
-# are off say why.
+# error, so "warning" below means "the build fails", or, for what a build cannot check (IDE0001, and a file's line
+# endings, charset and final newline), Validate's format check fails. tools/Format.ps1 applies the fixes these settings
+# describe. Every code-quality rule is on (AnalysisMode All); the few that are off say why.
 root = true
 
 [*]
@@ -69,6 +70,43 @@ csharp_space_between_square_brackets = false
 csharp_preserve_single_line_statements = true
 csharp_preserve_single_line_blocks = true
 dotnet_style_operator_placement_when_wrapping = beginning_of_line
+
+# Line length: a line of code longer than max_line_length fails the build (RCS0056), and tools/Format.ps1 wraps it.
+# Roslynator reads its own key rather than max_line_length, so both say the same. Its wrap puts operators, ?: and =>
+# at the start of the line and = at the end, as the rest of the code does, and the build holds the first three there.
+# Comments and string literals it neither checks nor wraps.
+roslynator_max_line_length = 120
+dotnet_diagnostic.RCS0056.severity = warning
+roslynator_binary_operator_new_line = before
+dotnet_diagnostic.RCS0027.severity = warning
+roslynator_conditional_operator_new_line = before
+dotnet_diagnostic.RCS0028.severity = warning
+roslynator_arrow_token_new_line = before
+dotnet_diagnostic.RCS0032.severity = warning
+roslynator_equals_token_new_line = after
+
+# Layout: the order of a type's members (CODESTANDARDS Type layout) and of the usings, which StyleCop's ordering rules
+# check. They are the only StyleCop rules on: the others repeat the rules here or contradict them. The member order,
+# which tools/Format.ps1 puts right: by kind (SA1201), with nested types last, as types in a file are ordered; then by
+# access (SA1202); constants first (SA1203); static before instance (SA1204).
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.DocumentationRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.LayoutRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.MaintainabilityRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.NamingRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.ReadabilityRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.SpacingRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.OrderingRules.severity = warning
+stylecop.ordering.memberKindOrder = field, constructor, destructor, event, property, indexer, extension, conversionOperator, operator, method, delegate, enum, interface, struct, class
+stylecop.ordering.usingDirectivesPlacement = outsideNamespace
+dotnet_diagnostic.SA1201.severity = warning
+dotnet_diagnostic.SA1202.severity = warning
+dotnet_diagnostic.SA1203.severity = warning
+dotnet_diagnostic.SA1204.severity = warning
+# Repeats IDE0036.
+dotnet_diagnostic.SA1206.severity = none
+# Fields are grouped by what they are for, with the comment that says so, which readonly ones first would split; and
+# moving a static field can change what its initializer reads.
+dotnet_diagnostic.SA1214.severity = none
 
 # Blank lines: one between members and between the steps of a method, never two
 dotnet_style_allow_multiple_blank_lines_experimental = false

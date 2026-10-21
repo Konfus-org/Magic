@@ -3,12 +3,64 @@ using System.Numerics;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// A model's triangles in clusters of up to <see cref="MaxTriangles"/>, at every level at once, after Karis,
-/// "Nanite: A Deep Dive" (2021). The finest clusters are the model's own triangles; then neighbouring clusters are
-/// grouped, each group simplified to about half with its border kept where it is, and split into clusters again, level
-/// after level, until a few are left. A renderer draws a cut through them: each cluster whose error is small enough from
-/// where it is seen and whose parent's is not. So the parts of one model nearer the camera are finer than those farther
-/// away, and as two clusters that meet were made either side of the same kept border, the cut has no cracks.
+/// One cluster of a <see cref="ClusterHierarchy"/>: a run of its vertices and triangles, all drawn with one material
+/// slot, and what a renderer needs to cull it and to pick it.
+/// </summary>
+public readonly record struct Cluster
+{
+    public required int FirstVertex { get; init; }
+
+    public required int VertexCount { get; init; }
+
+    /// <summary>
+    /// Its first triangle's first corner in <see cref="ClusterHierarchy.Indices"/>.
+    /// </summary>
+    public required int FirstIndex { get; init; }
+
+    public required int TriangleCount { get; init; }
+
+    public required int MaterialSlot { get; init; }
+
+    /// <summary>
+    /// 0 for the model's own triangles, one more for each time they were simplified.
+    /// </summary>
+    public required int Level { get; init; }
+
+    /// <summary>
+    /// The sphere around its triangles, centre and radius, for culling.
+    /// </summary>
+    public required Vector4 Bounds { get; init; }
+
+    /// <summary>
+    /// The sphere its error is measured from, centre and radius: its group's, around every cluster the group was made
+    /// from, so it is never nearer the camera than what it stands for.
+    /// </summary>
+    public required Vector4 ErrorBounds { get; init; }
+
+    /// <summary>
+    /// Metres it may be from the model's own triangles: 0 for those, and never less than what it was simplified from.
+    /// </summary>
+    public required float Error { get; init; }
+
+    /// <summary>
+    /// <see cref="ErrorBounds"/> of the clusters it was simplified into; its own when it is of the coarsest.
+    /// </summary>
+    public required Vector4 ParentErrorBounds { get; init; }
+
+    /// <summary>
+    /// <see cref="Error"/> of the clusters it was simplified into: infinity when it is of the coarsest, so it is drawn
+    /// however far away the model is.
+    /// </summary>
+    public required float ParentError { get; init; }
+}
+
+/// <summary>
+/// A model's triangles in clusters of up to <see cref="MaxTriangles"/>, at every level at once, after Karis, "Nanite: A
+/// Deep Dive" (2021). The finest clusters are the model's own triangles; then neighbouring clusters are grouped, each
+/// group simplified to about half with its border kept where it is, and split into clusters again, level after level,
+/// until a few are left. A renderer draws a cut through them: each cluster whose error is small enough from where it is
+/// seen and whose parent's is not. So the parts of one model nearer the camera are finer than those farther away, and
+/// as two clusters that meet were made either side of the same kept border, the cut has no cracks.
 /// <para>
 /// A cluster's <see cref="Cluster.Error"/> and <see cref="Cluster.ErrorBounds"/> are its group's, the same for every
 /// cluster made from that group, and its parent's are those of the group it was simplified into, never smaller, so
@@ -83,61 +135,10 @@ public sealed class ClusterHierarchy
         List<Mesh> meshes = new(bySlot.Count);
         foreach ((int slot, (List<Vertex> Vertices, List<uint> Indices) mesh) in bySlot)
         {
-            meshes.Add(new Mesh { Vertices = mesh.Vertices.ToArray(), Indices = mesh.Indices.ToArray(), MaterialSlot = slot });
+            meshes.Add(
+                new Mesh { Vertices = mesh.Vertices.ToArray(), Indices = mesh.Indices.ToArray(), MaterialSlot = slot });
         }
 
         return meshes;
     }
-}
-
-/// <summary>
-/// One cluster of a <see cref="ClusterHierarchy"/>: a run of its vertices and triangles, all drawn with one material
-/// slot, and what a renderer needs to cull it and to pick it.
-/// </summary>
-public readonly record struct Cluster
-{
-    public required int FirstVertex { get; init; }
-
-    public required int VertexCount { get; init; }
-
-    /// <summary>
-    /// Its first triangle's first corner in <see cref="ClusterHierarchy.Indices"/>.
-    /// </summary>
-    public required int FirstIndex { get; init; }
-
-    public required int TriangleCount { get; init; }
-
-    public required int MaterialSlot { get; init; }
-
-    /// <summary>
-    /// 0 for the model's own triangles, one more for each time they were simplified.
-    /// </summary>
-    public required int Level { get; init; }
-
-    /// <summary>
-    /// The sphere around its triangles, centre and radius, for culling.
-    /// </summary>
-    public required Vector4 Bounds { get; init; }
-
-    /// <summary>
-    /// The sphere its error is measured from, centre and radius: its group's, around every cluster the group was made
-    /// from, so it is never nearer the camera than what it stands for.
-    /// </summary>
-    public required Vector4 ErrorBounds { get; init; }
-
-    /// <summary>
-    /// Metres it may be from the model's own triangles: 0 for those, and never less than what it was simplified from.
-    /// </summary>
-    public required float Error { get; init; }
-
-    /// <summary>
-    /// <see cref="ErrorBounds"/> of the clusters it was simplified into; its own when it is of the coarsest.
-    /// </summary>
-    public required Vector4 ParentErrorBounds { get; init; }
-
-    /// <summary>
-    /// <see cref="Error"/> of the clusters it was simplified into: infinity when it is of the coarsest, so it is drawn
-    /// however far away the model is.
-    /// </summary>
-    public required float ParentError { get; init; }
 }

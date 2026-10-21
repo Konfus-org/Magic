@@ -21,7 +21,8 @@ internal sealed class LogMetricsSettings : ISettings
     public double IntervalSeconds { get; set; } = 30;
 
     /// <summary>
-    /// The meters listened to, each with the meters under it: "Magic" is Core's "Magic.Core" and every gem's "Magic.Gems.&lt;Gem&gt;".
+    /// The meters listened to, each with the meters under it: "Magic" is Core's "Magic.Core" and every gem's
+    /// "Magic.Gems.&lt;Gem&gt;".
     /// </summary>
     public IReadOnlyList<string> Meters { get; set; } = ["Magic"];
 }

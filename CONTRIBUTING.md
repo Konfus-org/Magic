@@ -13,8 +13,9 @@ and a change to how it works updates it in the same change.
 
 ## Building
 
-The [README](README.md) has the requirements, the build and the command line. `tools/Validate.ps1` runs what every
-change must pass ([Tools](tools/README.md)).
+The [README](README.md) has the requirements, the build and the command line. `tools/Format.ps1` formats the C# a
+change touches by `.editorconfig`, and `tools/Validate.ps1` runs what every change must pass, a format check of the
+whole tree among it ([Tools](tools/README.md)).
 
 ## Reviewing and merging
 

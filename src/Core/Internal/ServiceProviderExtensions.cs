@@ -9,8 +9,8 @@ internal static class ServiceProviderExtensions
     extension(IServiceProvider services)
     {
         /// <summary>
-        /// The <typeparamref name="T"/> a gem provides; null when none does, or when the gem that does was not made, which
-        /// Core has said why and <paramref name="isMade"/> tells apart.
+        /// The <typeparamref name="T"/> a gem provides; null when none does, or when the gem that does was not made,
+        /// which Core has said why and <paramref name="isMade"/> tells apart.
         /// </summary>
         internal T? GetProvided<T>(out bool isMade)
             where T : class

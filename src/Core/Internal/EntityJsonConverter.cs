@@ -12,7 +12,10 @@ namespace Magic.Internal;
 /// reads as none. Anywhere else, reading one is an error: a file names no entity, as its slot is nothing outside the
 /// run that gave it.
 /// </summary>
-[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "The serializer makes it, as Entity's [JsonConverter] names it.")]
+[SuppressMessage(
+    "Performance",
+    "CA1812:Avoid uninstantiated internal classes",
+    Justification = "The serializer makes it, as Entity's [JsonConverter] names it.")]
 internal sealed class EntityJsonConverter : JsonConverter<Entity>
 {
     /// <summary>

@@ -8,7 +8,8 @@ public sealed class ClusterHierarchyTests
     [Fact]
     public void Cut_takes_a_cluster_within_the_error_whose_parent_is_not()
     {
-        ClusterHierarchy hierarchy = Triangles([ClusterOf(first: 0, slot: 0, error: 0, parentError: float.PositiveInfinity)]);
+        ClusterHierarchy hierarchy = Triangles(
+            [ClusterOf(first: 0, slot: 0, error: 0, parentError: float.PositiveInfinity)]);
 
         IReadOnlyList<Mesh> meshes = hierarchy.Cut(0.1f);
 
@@ -28,7 +29,8 @@ public sealed class ClusterHierarchyTests
     [Fact]
     public void Cut_leaves_out_a_cluster_past_the_error()
     {
-        ClusterHierarchy hierarchy = Triangles([ClusterOf(first: 0, slot: 0, error: 1, parentError: float.PositiveInfinity)]);
+        ClusterHierarchy hierarchy = Triangles(
+            [ClusterOf(first: 0, slot: 0, error: 1, parentError: float.PositiveInfinity)]);
 
         IReadOnlyList<Mesh> meshes = hierarchy.Cut(0.1f);
 
@@ -123,7 +125,13 @@ public sealed class ClusterHierarchyTests
             indices[i] = (byte)(i % 3);
         }
 
-        return new ClusterHierarchy { Vertices = vertices, Indices = indices, Clusters = clusters, PositionStep = 0.001f };
+        return new ClusterHierarchy
+        {
+            Vertices = vertices,
+            Indices = indices,
+            Clusters = clusters,
+            PositionStep = 0.001f
+        };
     }
 
     /// <summary>

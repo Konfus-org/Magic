@@ -44,22 +44,30 @@ internal sealed class Domains : IDisposable
     private readonly List<Open> _domains = [];
 
     /// <summary>
+    /// What workers finished for the main thread to take in at the start of a frame (<see cref="TakeArrived"/>): a
+    /// prefab read for a placement, or a domain whose reading failed, which closes.
+    /// </summary>
+    private readonly Channel<Arrived> _arrived = Channel.CreateUnbounded<Arrived>(
+        new UnboundedChannelOptions { SingleReader = true });
+
+    /// <summary>
     /// The loading domain while it is shown.
     /// </summary>
     private Open? _loading;
-
-    /// <summary>
-    /// What workers finished for the main thread to take in at the start of a frame (<see cref="TakeArrived"/>): a prefab
-    /// read for a placement, or a domain whose reading failed, which closes.
-    /// </summary>
-    private readonly Channel<Arrived> _arrived = Channel.CreateUnbounded<Arrived>(new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// Domains opening in place of the world and not there yet: the loading domain is shown while there is one.
     /// </summary>
     private int _replacing;
 
-    internal Domains(World world, IEcs ecs, Assets assets, Threads threads, Events events, Project project, Lifetime lifetime)
+    internal Domains(
+        World world,
+        IEcs ecs,
+        Assets assets,
+        Threads threads,
+        Events events,
+        Project project,
+        Lifetime lifetime)
     {
         _world = world;
         _ecs = ecs;
@@ -71,11 +79,6 @@ internal sealed class Domains : IDisposable
         _watching.Add(events.Watch<AssetReloaded<Domain>>(DomainReloaded));
         _watching.Add(events.Watch<AssetReloaded<Prefab>>(PrefabReloaded));
         _watching.Add(events.Watch<AssetsChanged>(FilesChanged));
-    }
-
-    public void Dispose()
-    {
-        _watching.Dispose();
     }
 
     /// <summary>
@@ -109,6 +112,11 @@ internal sealed class Domains : IDisposable
         && _domains.Exists(static open => !open.IsLoadingDomain)
         && _domains.TrueForAll(static open => open.IsThere);
 
+    public void Dispose()
+    {
+        _watching.Dispose();
+    }
+
     /// <summary>
     /// Opens <paramref name="domain"/> as <paramref name="mode"/> says, telling <paramref name="progress"/> how far it
     /// is, 0 to 1. The task ends once the domain is there, with it; with why not when its file does not load, before
@@ -116,19 +124,31 @@ internal sealed class Domains : IDisposable
     /// and it opens without it. Opening one already open keeps it, and closes the others when it replaces them.
     /// Any thread.
     /// </summary>
-    internal async Task<Result<Domain>> OpenAsync(Handle<Domain> domain, DomainOpenMode mode, IProgress<float>? progress = null, CancellationToken cancel = default)
+    internal async Task<Result<Domain>> OpenAsync(
+        Handle<Domain> domain,
+        DomainOpenMode mode,
+        IProgress<float>? progress = null,
+        CancellationToken cancel = default)
     {
         Result<Domain> file = await _assets.LoadAsync(domain, cancel).ConfigureAwait(false);
         if (!file.Ok) return Result.Failure<Domain>($"The domain does not open: {file.Error}");
 
-        Open open = new(domain, _assets.GetPath(domain) ?? "A domain", file.Value, mode, isLoadingDomain: false, isReplacing: mode == DomainOpenMode.Replace);
+        Open open = new(
+            domain,
+            _assets.GetPath(domain) ?? "A domain",
+            file.Value,
+            mode,
+            isLoadingDomain: false,
+            isReplacing: mode == DomainOpenMode.Replace);
         Open? already = await _threads.InvokeAsync(EngineThread.Main, () => Begin(open), cancel).ConfigureAwait(false);
-        return already is not null ? Result.Success(already.Domain) : await ArriveAsync(open, progress, cancel).ConfigureAwait(false);
+        return already is not null
+            ? Result.Success(already.Domain)
+            : await ArriveAsync(open, progress, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Takes in what workers finished since the last frame: a prefab read for a placement is spawned, and a domain whose
-    /// reading failed is closed. On the main thread, at the start of each frame.
+    /// Takes in what workers finished since the last frame: a prefab read for a placement is spawned, and a domain
+    /// whose reading failed is closed. On the main thread, at the start of each frame.
     /// </summary>
     internal void TakeArrived()
     {
@@ -261,6 +281,42 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
+    /// Where <paramref name="open"/>'s player is put: at its first entity tagged <see cref="Tag.Spawn"/>, in its
+    /// prefabs that are not cells, then in its cells, turned as that entity is; else its origin, which is warned about.
+    /// </summary>
+    private static Transform SpawnOf(Open open)
+    {
+        foreach (bool cells in (ReadOnlySpan<bool>)[false, true])
+        {
+            foreach (Placed placed in open.Prefabs.Values)
+            {
+                if (placed.Placement.IsCell == cells && placed.Prefab?.PlaceOf(Tag.Spawn) is { } spawn)
+                {
+                    Transform at = spawn.Under(new Transform { Position = placed.Placement.Corner });
+                    return new Transform { Position = at.Position, Rotation = at.Rotation };
+                }
+            }
+        }
+
+        Debugging.Warn($"{open.Name} has no entity tagged spawn, so the player is put at its origin.");
+        return new Transform();
+    }
+
+    /// <summary>
+    /// The entities made for the saved <paramref name="ids"/>, those the save held.
+    /// </summary>
+    private static Entity[] GetEntities(IReadOnlyList<int> ids, Dictionary<int, Entity> made)
+    {
+        List<Entity> entities = new(ids.Count);
+        foreach (int id in ids)
+        {
+            if (made.TryGetValue(id, out Entity entity)) entities.Add(entity);
+        }
+
+        return [.. entities];
+    }
+
+    /// <summary>
     /// Starts opening <paramref name="open"/>, its file loaded: when it replaces the world, the open domains close and
     /// the loading domain is shown. The domain already open with its handle when there is one, which is kept.
     /// </summary>
@@ -304,7 +360,8 @@ internal sealed class Domains : IDisposable
             throw;
         }
 
-        return await _threads.InvokeAsync(EngineThread.Main, () => Arrive(open, read), CancellationToken.None).ConfigureAwait(false);
+        return await _threads.InvokeAsync(EngineThread.Main, () => Arrive(open, read), CancellationToken.None)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -365,7 +422,9 @@ internal sealed class Domains : IDisposable
             if (model.Ok) models.Add(model.Value);
         }
 
-        SubscriptionList holds = open.IsLoadingDomain ? new SubscriptionList() : await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
+        SubscriptionList holds = open.IsLoadingDomain
+            ? new SubscriptionList()
+            : await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
         progress?.Report(1);
         return new Read(placements, prefabs, player, models) { Holds = holds };
 
@@ -383,7 +442,10 @@ internal sealed class Domains : IDisposable
     /// <paramref name="progress"/>; what they hand back, which keeps it taken in, is let go together when one of them
     /// fails or the open is cancelled. On a worker.
     /// </summary>
-    private async Task<SubscriptionList> PreloadAsync(List<Prefab> spawning, IProgress<float>? progress, CancellationToken cancel)
+    private async Task<SubscriptionList> PreloadAsync(
+        List<Prefab> spawning,
+        IProgress<float>? progress,
+        CancellationToken cancel)
     {
         IReadOnlyList<IPreloader> preloaders = _world.Preloaders;
         float[] shares = new float[preloaders.Count];
@@ -430,7 +492,8 @@ internal sealed class Domains : IDisposable
             if (prefab == Handle<Prefab>.None) continue;
 
             Vector3? cell = ParseCell(file);
-            placements.Add(new Placement(prefab, cell is { } at ? at * open.Domain.CellSize : Vector3.Zero, cell.HasValue));
+            placements.Add(
+                new Placement(prefab, cell is { } at ? at * open.Domain.CellSize : Vector3.Zero, cell.HasValue));
         }
 
         return placements;
@@ -476,7 +539,8 @@ internal sealed class Domains : IDisposable
             }
             else
             {
-                Debugging.Error($"{_assets.GetPath(placement.File) ?? "A prefab"} of {open.Name} is left out: {read.Prefabs[i].Error}");
+                Debugging.Error($"{_assets.GetPath(placement.File) ?? "A prefab"} of {open.Name} is left out: "
+                    + $"{read.Prefabs[i].Error}");
             }
         }
 
@@ -492,28 +556,6 @@ internal sealed class Domains : IDisposable
         if (open.IsReplacing) Replaced();
 
         return Result.Success(open.Domain);
-    }
-
-    /// <summary>
-    /// Where <paramref name="open"/>'s player is put: at its first entity tagged <see cref="Tag.Spawn"/>, in its
-    /// prefabs that are not cells, then in its cells, turned as that entity is; else its origin, which is warned about.
-    /// </summary>
-    private static Transform SpawnOf(Open open)
-    {
-        foreach (bool cells in (ReadOnlySpan<bool>)[false, true])
-        {
-            foreach (Placed placed in open.Prefabs.Values)
-            {
-                if (placed.Placement.IsCell == cells && placed.Prefab?.PlaceOf(Tag.Spawn) is { } spawn)
-                {
-                    Transform at = spawn.Under(new Transform { Position = placed.Placement.Corner });
-                    return new Transform { Position = at.Position, Rotation = at.Rotation };
-                }
-            }
-        }
-
-        Debugging.Warn($"{open.Name} has no entity tagged spawn, so the player is put at its origin.");
-        return new Transform();
     }
 
     /// <summary>
@@ -541,20 +583,6 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// The entities made for the saved <paramref name="ids"/>, those the save held.
-    /// </summary>
-    private static Entity[] GetEntities(IReadOnlyList<int> ids, Dictionary<int, Entity> made)
-    {
-        List<Entity> entities = new(ids.Count);
-        foreach (int id in ids)
-        {
-            if (made.TryGetValue(id, out Entity entity)) entities.Add(entity);
-        }
-
-        return [.. entities];
-    }
-
-    /// <summary>
     /// Puts the saved domain <paramref name="saved"/> back (<see cref="Restore"/>): its file loaded, it opens around
     /// <paramref name="kept"/>, the entities made for the ones each of its prefabs had spawned, by file, and
     /// <paramref name="player"/>, the player's, then is read and arrives as a domain opening does. One that had
@@ -569,7 +597,13 @@ internal sealed class Domains : IDisposable
             return;
         }
 
-        Open open = new(saved.Domain, _assets.GetPath(saved.Domain) ?? "A domain", file.Value, saved.Mode, isLoadingDomain: false, isReplacing: kept is null && saved.Mode == DomainOpenMode.Replace);
+        Open open = new(
+            saved.Domain,
+            _assets.GetPath(saved.Domain) ?? "A domain",
+            file.Value,
+            saved.Mode,
+            isLoadingDomain: false,
+            isReplacing: kept is null && saved.Mode == DomainOpenMode.Replace);
         bool isOpening = await _threads.InvokeAsync(EngineThread.Main, () =>
         {
             if (kept is null) return Begin(open) is null;
@@ -661,7 +695,13 @@ internal sealed class Domains : IDisposable
             return;
         }
 
-        Open loading = new(handle, _assets.GetPath(handle) ?? "The loading domain", file.Value, DomainOpenMode.Additive, isLoadingDomain: true, isReplacing: false);
+        Open loading = new(
+            handle,
+            _assets.GetPath(handle) ?? "The loading domain",
+            file.Value,
+            DomainOpenMode.Additive,
+            isLoadingDomain: true,
+            isReplacing: false);
         bool isShown = await _threads.InvokeAsync(EngineThread.Main, () =>
         {
             if (!IsLoading || _loading is not null) return false;
@@ -746,7 +786,8 @@ internal sealed class Domains : IDisposable
             foreach (Placement placement in GetPlacements(open))
             {
                 present.Add(placement.File);
-                if (open.Prefabs.TryGetValue(placement.File, out Placed? placed) && placed.Placement == placement && placed.Entities is not null)
+                if (open.Prefabs.TryGetValue(placement.File, out Placed? placed) && placed.Placement == placement
+                    && placed.Entities is not null)
                 {
                     continue;
                 }
@@ -781,13 +822,14 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private async Task AddAsync(Open open, Placed placed)
     {
-        Result<Prefab> prefab = await _assets.LoadAsync(placed.Placement.File, _lifetime.Stopping).ConfigureAwait(false);
+        Result<Prefab> prefab = await _assets.LoadAsync(placed.Placement.File, _lifetime.Stopping)
+            .ConfigureAwait(false);
         _arrived.Writer.TryWrite(new Arrived(open, placed, prefab));
     }
 
     /// <summary>
-    /// Spawns <paramref name="placed"/>'s prefab, read as <paramref name="prefab"/>, unless its domain closed, or another
-    /// took its place, by then.
+    /// Spawns <paramref name="placed"/>'s prefab, read as <paramref name="prefab"/>, unless its domain closed, or
+    /// another took its place, by then.
     /// </summary>
     private void Add(Open open, Placed placed, Result<Prefab> prefab)
     {
@@ -799,7 +841,8 @@ internal sealed class Domains : IDisposable
         }
         else
         {
-            Debugging.Error($"{_assets.GetPath(placed.Placement.File) ?? "A prefab"} of {open.Name} is left out: {prefab.Error}");
+            Debugging.Error(
+                $"{_assets.GetPath(placed.Placement.File) ?? "A prefab"} of {open.Name} is left out: {prefab.Error}");
         }
     }
 
@@ -829,7 +872,13 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// A domain open in the world, or opening.
     /// </summary>
-    private sealed class Open(Handle<Domain> handle, string name, Domain domain, DomainOpenMode mode, bool isLoadingDomain, bool isReplacing)
+    private sealed class Open(
+        Handle<Domain> handle,
+        string name,
+        Domain domain,
+        DomainOpenMode mode,
+        bool isLoadingDomain,
+        bool isReplacing)
     {
         internal Handle<Domain> Handle { get; } = handle;
 

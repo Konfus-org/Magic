@@ -48,7 +48,8 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         }
         else if (settings.IntervalSeconds <= 0)
         {
-            Debugging.Error($"LogMetrics's intervalSeconds must be more than 0, not {settings.IntervalSeconds}; metrics are not logged.");
+            Debugging.Error($"LogMetrics's intervalSeconds must be more than 0, not {settings.IntervalSeconds}; "
+                + "metrics are not logged.");
         }
 
         Follow();
@@ -68,6 +69,28 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             Report();
         }
     }
+
+    /// <summary>
+    /// Which part of the slowest frame an instrument feeds, by the name Core records it under.
+    /// </summary>
+    private static Role GetRole(Instrument instrument) => instrument.Name switch
+    {
+        Metrics.FrameDuration => Role.Frame,
+        Metrics.HookDuration => Role.Hook,
+        Metrics.WorkDuration => Role.Work,
+        _ => Role.Other,
+    };
+
+    /// <summary>
+    /// <paramref name="value"/> in <paramref name="unit"/>, with seconds shown as milliseconds: most of what is timed
+    /// in a frame takes far less than one.
+    /// </summary>
+    private static string FormatAmount(double value, string? unit) => unit switch
+    {
+        "s" => string.Create(CultureInfo.InvariantCulture, $"{value * 1000:0.###} ms"),
+        null or "" => value.ToString("0.###", CultureInfo.InvariantCulture),
+        _ => string.Create(CultureInfo.InvariantCulture, $"{value:0.###} {unit}"),
+    };
 
     /// <summary>
     /// Listens as the settings say: starts when they turn logging on, stops when they turn it off, and starts over
@@ -130,7 +153,11 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// Adds one measurement to its instrument's series for its tags, and Core's frame, hook and handed-work times to
     /// the slowest frame. Runs on the thread that recorded it, often the main thread in the middle of a frame.
     /// </summary>
-    private void Add<T>(Instrument instrument, T measurement, ReadOnlySpan<KeyValuePair<string, object?>> tags, object? state)
+    private void Add<T>(
+        Instrument instrument,
+        T measurement,
+        ReadOnlySpan<KeyValuePair<string, object?>> tags,
+        object? state)
         where T : struct, INumber<T>
     {
         if (state is not Measured measured) return;
@@ -212,7 +239,8 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     {
         foreach (string name in _meters)
         {
-            if (meter.StartsWith(name, StringComparison.Ordinal) && (meter.Length == name.Length || meter[name.Length] == '.'))
+            if (meter.StartsWith(name, StringComparison.Ordinal)
+                && (meter.Length == name.Length || meter[name.Length] == '.'))
             {
                 return true;
             }
@@ -220,28 +248,6 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
         return false;
     }
-
-    /// <summary>
-    /// Which part of the slowest frame an instrument feeds, by the name Core records it under.
-    /// </summary>
-    private static Role GetRole(Instrument instrument) => instrument.Name switch
-    {
-        Metrics.FrameDuration => Role.Frame,
-        Metrics.HookDuration => Role.Hook,
-        Metrics.WorkDuration => Role.Work,
-        _ => Role.Other,
-    };
-
-    /// <summary>
-    /// <paramref name="value"/> in <paramref name="unit"/>, with seconds shown as milliseconds: most of what is timed in
-    /// a frame takes far less than one.
-    /// </summary>
-    private static string FormatAmount(double value, string? unit) => unit switch
-    {
-        "s" => string.Create(CultureInfo.InvariantCulture, $"{value * 1000:0.###} ms"),
-        null or "" => value.ToString("0.###", CultureInfo.InvariantCulture),
-        _ => string.Create(CultureInfo.InvariantCulture, $"{value:0.###} {unit}"),
-    };
 
     /// <summary>
     /// What an instrument is to the slowest frame, besides its own line.
@@ -366,10 +372,13 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             switch (_summary)
             {
                 case Summary.Distribution:
-                    text.Append(CultureInfo.InvariantCulture, $"{series.Count} in {seconds:0.##} s, mean {FormatAmount(series.Sum / series.Count, unit)}, min {FormatAmount(series.Min, unit)}, max {FormatAmount(series.Max, unit)}");
+                    text.Append(CultureInfo.InvariantCulture, $"{series.Count} in {seconds:0.##} s, "
+                        + $"mean {FormatAmount(series.Sum / series.Count, unit)}, "
+                        + $"min {FormatAmount(series.Min, unit)}, max {FormatAmount(series.Max, unit)}");
                     break;
                 case Summary.Total:
-                    text.Append(CultureInfo.InvariantCulture, $"{FormatAmount(series.Sum, unit)} in {seconds:0.##} s, {FormatAmount(series.Sum / seconds, unit)}/s");
+                    text.Append(CultureInfo.InvariantCulture, $"{FormatAmount(series.Sum, unit)} in {seconds:0.##} s, "
+                        + $"{FormatAmount(series.Sum / seconds, unit)}/s");
                     break;
                 case Summary.Latest:
                 default:
@@ -432,7 +441,8 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
             for (int i = 0; i < other.Length; i++)
             {
-                if (!string.Equals(other[i].Key, tags[i].Key, StringComparison.Ordinal) || !Equals(other[i].Value, tags[i].Value))
+                if (!string.Equals(other[i].Key, tags[i].Key, StringComparison.Ordinal)
+                    || !Equals(other[i].Value, tags[i].Value))
                 {
                     return false;
                 }
@@ -445,8 +455,8 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// <summary>
     /// The slowest frame since the last report, and where its time went: the gem hooks Core timed in it, the time
     /// outside them (the frame loop, waiting for the render thread, listeners, the first call's JIT), and how long the
-    /// garbage collector paused it, which counts in whichever of those it paused. The render thread's hooks count in the
-    /// main thread's frame they ran beside, and are recorded from that thread, so it is locked.
+    /// garbage collector paused it, which counts in whichever of those it paused. The render thread's hooks count in
+    /// the main thread's frame they ran beside, and are recorded from that thread, so it is locked.
     /// </summary>
     private sealed class SlowestFrame
     {
@@ -478,7 +488,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         private TimeSpan _pausedBefore = GC.GetTotalPauseDuration();
 
         /// <summary>
-        /// The frame whose time Core records next: the one whose <see cref="LogMetricsGem.Update"/> ran last.
+        /// The frame whose time Core records next: the one whose <see cref="Update"/> ran last.
         /// </summary>
         internal ulong Current { get; set; }
 
@@ -553,7 +563,8 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
                 _slowestHooks.Sort(static (first, second) => second.Seconds.CompareTo(first.Seconds));
                 StringBuilder text = new();
-                text.Append(CultureInfo.InvariantCulture, $"Slowest frame f{_index} took {FormatAmount(_seconds, "s")}, {_seconds * _count / _sum:0.#}x the mean:");
+                text.Append(CultureInfo.InvariantCulture, $"Slowest frame f{_index} took "
+                    + $"{FormatAmount(_seconds, "s")}, {_seconds * _count / _sum:0.#}x the mean:");
                 double hooked = 0;
                 for (int i = 0; i < _slowestHooks.Count; i++)
                 {
@@ -563,7 +574,9 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
                     if (i < HooksShown)
                     {
-                        text.Append(CultureInfo.InvariantCulture, $" {hook.Gem}.{hook.Phase} {FormatAmount(hook.Seconds, "s")},");
+                        text.Append(
+                            CultureInfo.InvariantCulture,
+                            $" {hook.Gem}.{hook.Phase} {FormatAmount(hook.Seconds, "s")},");
                     }
                 }
 

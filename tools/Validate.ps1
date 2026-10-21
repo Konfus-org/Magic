@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-Runs the checks a change must pass: a clean build, the tests, the samples headless until their world has loaded, and the
-samples with a window until their world has loaded, ending in a screenshot to look at.
+Runs the checks a change must pass: a clean build, a format check, the tests, the samples headless until their world
+has loaded, and the samples with a window until their world has loaded, ending in a screenshot to look at.
 
 .DESCRIPTION
 The steps run in order and the first failure ends the run with that step's exit code; a run that passes exits 0.
@@ -9,6 +9,9 @@ The build is incremental, so what is built already is reused, and the native lib
 shared by every checkout (src/Bundled/Gems/README.md, Native libraries). The build already treats every warning as an
 error, so a clean build is one that exits 0. It logs with MSBuild's plain console logger, so the native libraries'
 progress shows as it happens, which the terminal logger holds back until each project ends.
+The Format step checks the whole tree against .editorconfig with dotnet format and writes nothing: it fails on what
+tools/Format.ps1 would change, what a build cannot check among it, such as a file's line endings. It reads the
+restore and the generated code of the configuration built, so running it alone (-Only Format) needs a build.
 The tests run against that build, so running them alone (-Only Test) needs one. Both sample runs pass --fail-on-error,
 so an error logged during a run exits 2, and both wait until the world has loaded (the console's wait loaded), shaders
 compiled and the domain open, so a world that never loads fails rather than passing on the loading screen. The
@@ -25,7 +28,8 @@ The most frames each sample run may last before it counts as never having loaded
 The project the sample runs open: a .magic file or the folder holding one, relative to the repository root.
 
 .PARAMETER Only
-The steps to run when not all of them: Build, Test, Headless, Screenshot, in that order whatever order they are given.
+The steps to run when not all of them: Build, Format, Test, Headless, Screenshot, in that order whatever order they are
+given.
 
 .EXAMPLE
 tools/Validate.ps1
@@ -40,8 +44,8 @@ param(
     [ValidateRange(1, [int]::MaxValue)]
     [int] $Frames = 20000,
     [string] $Project = 'samples',
-    [ValidateSet('Build', 'Test', 'Headless', 'Screenshot')]
-    [string[]] $Only = @('Build', 'Test', 'Headless', 'Screenshot')
+    [ValidateSet('Build', 'Format', 'Test', 'Headless', 'Screenshot')]
+    [string[]] $Only = @('Build', 'Format', 'Test', 'Headless', 'Screenshot')
 )
 
 Set-StrictMode -Version Latest
@@ -56,6 +60,18 @@ $solution = Join-Path $root 'Magic.slnx'
 $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 $screenshot = $null
+
+# Checks the whole tree and writes nothing. dotnet format takes no MSBuild properties, so the configuration built
+# reaches its project load through the environment, where MSBuild reads it, and the caller's value is put back after.
+function Invoke-FormatCheck {
+    $saved = $env:Configuration
+    $env:Configuration = $Configuration
+    try {
+        dotnet format $solution --verify-no-changes --no-restore
+    } finally {
+        $env:Configuration = $saved
+    }
+}
 
 # Runs the project headless until its world has loaded, then quits; a run that reaches -Frames first never loaded.
 function Invoke-Headless {
@@ -78,6 +94,7 @@ function Invoke-Screenshot {
 
 $steps = @(
     @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration -tl:off } }
+    @{ Name = 'Format'; Run = { Invoke-FormatCheck } }
     @{ Name = 'Test'; Run = { dotnet test $solution --configuration $Configuration --no-build } }
     @{ Name = 'Headless'; Run = { Invoke-Headless } }
     @{ Name = 'Screenshot'; Run = { Invoke-Screenshot } }
@@ -88,7 +105,7 @@ $failed = $null
 $summary = @()
 foreach ($step in $steps) {
     if ($Only -notcontains $step.Name) { continue }
-    if ($step.Name -ne 'Build' -and $step.Name -ne 'Test') {
+    if ($step.Name -in 'Headless', 'Screenshot') {
         # Named here rather than at the start: on Windows it is Magic.exe, which the Build step may have just made.
         if (Test-Path "$magic.exe") { $magic = "$magic.exe" }
         if (-not (Test-Path $magic)) {

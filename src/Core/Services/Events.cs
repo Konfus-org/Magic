@@ -5,10 +5,10 @@ using Magic.Contexts.Subscriptions;
 namespace Magic.Services;
 
 /// <summary>
-/// Messages between gems, by type: anything publishes one, from any thread, and every watcher of its type hears it on the
-/// main thread at the start of the next frame, after the work handed to the main thread and before Update, in the order
-/// the messages were published. A message is a struct, and publishing one allocates nothing: it goes into a queue of its
-/// type, and one nobody watches goes nowhere. Safe from any thread.
+/// Messages between gems, by type: anything publishes one, from any thread, and every watcher of its type hears it on
+/// the main thread at the start of the next frame, after the work handed to the main thread and before Update, in the
+/// order the messages were published. A message is a struct, and publishing one allocates nothing: it goes into a queue
+/// of its type, and one nobody watches goes nowhere. Safe from any thread.
 /// </summary>
 public sealed class Events
 {
@@ -27,13 +27,14 @@ public sealed class Events
     private int _waiting;
 
     /// <summary>
-    /// Hands <paramref name="message"/> to every watcher of <typeparamref name="T"/>, on the main thread at the start of
-    /// the next frame. With none, it goes nowhere.
+    /// Hands <paramref name="message"/> to every watcher of <typeparamref name="T"/>, on the main thread at the start
+    /// of the next frame. With none, it goes nowhere.
     /// </summary>
     public void Publish<T>(in T message)
         where T : struct
     {
-        if (!_mailboxes.TryGetValue(typeof(T), out Mailbox? found) || found is not Mailbox<T> { IsWatched: true } mailbox)
+        if (!_mailboxes.TryGetValue(typeof(T), out Mailbox? found)
+            || found is not Mailbox<T> { IsWatched: true } mailbox)
         {
             return;
         }
@@ -60,7 +61,10 @@ public sealed class Events
     /// </summary>
     internal void Deliver()
     {
-        for (int waiting = Interlocked.Exchange(ref _waiting, 0); waiting > 0 && _published.TryDequeue(out Mailbox? mailbox); waiting--)
+        for (
+            int waiting = Interlocked.Exchange(ref _waiting, 0);
+            waiting > 0 && _published.TryDequeue(out Mailbox? mailbox);
+            waiting--)
         {
             mailbox.DeliverOldest();
         }
@@ -109,7 +113,10 @@ public sealed class Events
             }
         }
 
-        [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a watcher throws, it is logged and the others still hear the message.")]
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "Whatever a watcher throws, it is logged and the others still hear the message.")]
         public override void DeliverOldest()
         {
             if (!Messages.TryDequeue(out T message)) return;

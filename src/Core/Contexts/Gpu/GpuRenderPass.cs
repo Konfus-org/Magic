@@ -43,7 +43,8 @@ public readonly record struct GpuRenderPass : IDisposable
     }
 
     /// <summary>
-    /// The vertex buffers, from slot 0, as the pipeline's <see cref="GpuPipelineDescription.VertexBuffers"/> number them.
+    /// The vertex buffers, from slot 0, as the pipeline's <see cref="GpuPipelineDescription.VertexBuffers"/> number
+    /// them.
     /// </summary>
     public GpuRenderPass VertexBuffers(ReadOnlySpan<GpuBuffer> buffers)
     {
@@ -107,7 +108,12 @@ public readonly record struct GpuRenderPass : IDisposable
         return this;
     }
 
-    public GpuRenderPass DrawIndexed(uint indices, uint firstIndex = 0, int vertexOffset = 0, uint instances = 1, uint firstInstance = 0)
+    public GpuRenderPass DrawIndexed(
+        uint indices,
+        uint firstIndex = 0,
+        int vertexOffset = 0,
+        uint instances = 1,
+        uint firstInstance = 0)
     {
         _commands.DrawIndexed(indices, firstIndex, vertexOffset, instances, firstInstance);
         return this;

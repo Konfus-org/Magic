@@ -3,10 +3,42 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A shader as <see cref="IShaderCompiler.CompileAsync(string, string, GpuStage, GpuShaderFormat, System.Threading.CancellationToken)"/> made it: bytecode in a GPU's format, and what it binds, read
-/// from the code: every resource it uses, by name, at its register in the binding model of
-/// Shaders/Include/Bindings.hlsli. The counts of each kind are what a GPU needs to make a pipeline of it; the names are
-/// what a renderer binds by.
+/// The kinds of resource the binding model (Shaders/Include/Bindings.hlsli) binds: what a stage reads, its one constant
+/// block, and for compute what it writes.
+/// </summary>
+public enum GpuBindingKind : byte
+{
+    /// <summary>
+    /// A texture read through a sampler, bound as the pair.
+    /// </summary>
+    Sampled,
+
+    /// <summary>
+    /// A texture read texel by texel, with no sampler: one of integers, which no GPU samples.
+    /// </summary>
+    StorageTexture,
+
+    StorageBuffer,
+
+    Uniform,
+
+    ReadWriteStorageTexture,
+
+    ReadWriteStorageBuffer,
+}
+
+/// <summary>
+/// One resource a shader uses: its name in the HLSL, what it is, and its register in its stage's space, as
+/// Shaders/Include/Bindings.hlsli numbers them: <c>READ(n)</c> for what is read, <c>WRITE(n)</c> for what compute
+/// writes, <c>UNIFORM(n)</c> for a constant block.
+/// </summary>
+public readonly record struct GpuShaderBinding(string Name, GpuBindingKind Kind, uint Register);
+
+/// <summary>
+/// A shader as <see cref="IShaderCompiler.CompileAsync(string, string, GpuStage, GpuShaderFormat, CancellationToken)"/>
+/// made it: bytecode in a GPU's format, and what it binds, read from the code: every resource it uses, by name, at its
+/// register in the binding model of Shaders/Include/Bindings.hlsli. The counts of each kind are what a GPU needs to
+/// make a pipeline of it; the names are what a renderer binds by.
 /// </summary>
 public sealed record GpuShader
 {
@@ -62,9 +94,9 @@ public sealed record GpuShader
 
     /// <summary>
     /// One past the highest register a kind uses, or past the kinds before it in its space when it uses none: a space's
-    /// registers run sampled textures, then storage textures, then storage buffers (and compute's written textures, then
-    /// written buffers), so a kind's count is this less the counts of those before it, and a GPU binds every register
-    /// up to it.
+    /// registers run sampled textures, then storage textures, then storage buffers (and compute's written textures,
+    /// then written buffers), so a kind's count is this less the counts of those before it, and a GPU binds every
+    /// register up to it.
     /// </summary>
     private uint CountPast(GpuBindingKind kind)
     {
@@ -83,36 +115,4 @@ public sealed record GpuShader
 
         return past;
     }
-}
-
-/// <summary>
-/// One resource a shader uses: its name in the HLSL, what it is, and its register in its stage's space, as
-/// Shaders/Include/Bindings.hlsli numbers them: <c>READ(n)</c> for what is read, <c>WRITE(n)</c> for what compute
-/// writes, <c>UNIFORM(n)</c> for a constant block.
-/// </summary>
-public readonly record struct GpuShaderBinding(string Name, GpuBindingKind Kind, uint Register);
-
-/// <summary>
-/// The kinds of resource the binding model (Shaders/Include/Bindings.hlsli) binds: what a stage reads, its one constant
-/// block, and for compute what it writes.
-/// </summary>
-public enum GpuBindingKind : byte
-{
-    /// <summary>
-    /// A texture read through a sampler, bound as the pair.
-    /// </summary>
-    Sampled,
-
-    /// <summary>
-    /// A texture read texel by texel, with no sampler: one of integers, which no GPU samples.
-    /// </summary>
-    StorageTexture,
-
-    StorageBuffer,
-
-    Uniform,
-
-    ReadWriteStorageTexture,
-
-    ReadWriteStorageBuffer,
 }

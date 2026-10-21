@@ -4,37 +4,6 @@ using Rectangle = System.Drawing.Rectangle;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// One GPU command, as <see cref="GpuCommands"/> records it: plain data whose <see cref="Type"/> says which fields mean
-/// something; the rest are default. A run (of texture levels, sampled textures, textures, buffers, regions or bytes)
-/// is a slice of the list's own, which the list hands back by the command (<see cref="GpuCommands.GetLevels"/> and
-/// the others like it).
-/// </summary>
-public readonly record struct GpuCommand(
-    GpuCommandType Type,
-    GpuStage Stage = GpuStage.Vertex,
-    GpuPipeline Pipeline = default,
-    GpuBuffer Buffer = default,
-    GpuTexture Texture = default,
-    GpuTextureLevel Depth = default,
-    GpuContents Contents = GpuContents.Keep,
-    Color Clear = default,
-    Rectangle Area = default,
-    GpuIndexSize IndexSize = GpuIndexSize.Bits16,
-    int RunStart = 0,
-    int RunLength = 0,
-    int SecondRunStart = 0,
-    int SecondRunLength = 0,
-    uint Count = 0,
-    uint Instances = 1,
-    uint First = 0,
-    int VertexOffset = 0,
-    uint FirstInstance = 0,
-    uint Offset = 0,
-    uint GroupsX = 0,
-    uint GroupsY = 0,
-    uint GroupsZ = 0);
-
-/// <summary>
 /// What a <see cref="GpuCommand"/> does; each says which fields and which run it uses.
 /// </summary>
 public enum GpuCommandType : byte
@@ -183,3 +152,34 @@ public enum GpuIndexSize : byte
     Bits16,
     Bits32,
 }
+
+/// <summary>
+/// One GPU command, as <see cref="GpuCommands"/> records it: plain data whose <see cref="Type"/> says which fields mean
+/// something; the rest are default. A run (of texture levels, sampled textures, textures, buffers, regions or bytes)
+/// is a slice of the list's own, which the list hands back by the command (<see cref="GpuCommands.GetLevels"/> and
+/// the others like it).
+/// </summary>
+public readonly record struct GpuCommand(
+    GpuCommandType Type,
+    GpuStage Stage = GpuStage.Vertex,
+    GpuPipeline Pipeline = default,
+    GpuBuffer Buffer = default,
+    GpuTexture Texture = default,
+    GpuTextureLevel Depth = default,
+    GpuContents Contents = GpuContents.Keep,
+    Color Clear = default,
+    Rectangle Area = default,
+    GpuIndexSize IndexSize = GpuIndexSize.Bits16,
+    int RunStart = 0,
+    int RunLength = 0,
+    int SecondRunStart = 0,
+    int SecondRunLength = 0,
+    uint Count = 0,
+    uint Instances = 1,
+    uint First = 0,
+    int VertexOffset = 0,
+    uint FirstInstance = 0,
+    uint Offset = 0,
+    uint GroupsX = 0,
+    uint GroupsY = 0,
+    uint GroupsZ = 0);

@@ -5,6 +5,33 @@ using Magic.Contexts.Assets;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
+/// How a report reads on screen.
+/// </summary>
+internal enum ReportKind : byte
+{
+    /// <summary>
+    /// As it is.
+    /// </summary>
+    Plain,
+
+    /// <summary>
+    /// As it is, with how often it was reported while it showed.
+    /// </summary>
+    Counted,
+
+    /// <summary>
+    /// Between <c>!!!</c>s, a warning or an error.
+    /// </summary>
+    Alarm,
+}
+
+/// <summary>
+/// A report as it shows this frame: its text as it reads, where it is in the world (when it has a place), and what
+/// shows while the mouse rests on it.
+/// </summary>
+internal readonly record struct ShownReport(string Label, Color Color, Vector3 Position, string? Tooltip, long Order);
+
+/// <summary>
 /// What is reported to show for a while: lines on screen, and text at places in the world, each until its seconds after
 /// it was last reported are up. The same text at the same place again while it shows keeps it up rather than adding
 /// another. Any thread reports; the main thread takes what shows each frame. Time is the caller's, in seconds.
@@ -21,7 +48,14 @@ internal sealed class Reports
     /// text was not showing anywhere, which is when a warning or error logs: looked up for those alone, the kind whose
     /// answer is read.
     /// </summary>
-    internal bool Add(string text, ReportKind kind, Color color, Vector3? position, string? tooltip, float seconds, double now)
+    internal bool Add(
+        string text,
+        ReportKind kind,
+        Color color,
+        Vector3? position,
+        string? tooltip,
+        float seconds,
+        double now)
     {
         lock (_lock)
         {
@@ -75,7 +109,12 @@ internal sealed class Reports
                 }
 
                 report.IsFresh = false;
-                ShownReport shown = new(report.Label, report.Color, position ?? default, report.Tooltip, report.Kind == ReportKind.Plain ? long.MinValue + report.Order : report.Order);
+                ShownReport shown = new(
+                    report.Label,
+                    report.Color,
+                    position ?? default,
+                    report.Tooltip,
+                    report.Kind == ReportKind.Plain ? long.MinValue + report.Order : report.Order);
                 (position is null ? lines : world).Add(shown);
             }
         }
@@ -119,30 +158,3 @@ internal sealed class Reports
         internal long Order { get; init; }
     }
 }
-
-/// <summary>
-/// How a report reads on screen.
-/// </summary>
-internal enum ReportKind : byte
-{
-    /// <summary>
-    /// As it is.
-    /// </summary>
-    Plain,
-
-    /// <summary>
-    /// As it is, with how often it was reported while it showed.
-    /// </summary>
-    Counted,
-
-    /// <summary>
-    /// Between <c>!!!</c>s, a warning or an error.
-    /// </summary>
-    Alarm,
-}
-
-/// <summary>
-/// A report as it shows this frame: its text as it reads, where it is in the world (when it has a place), and what shows
-/// while the mouse rests on it.
-/// </summary>
-internal readonly record struct ShownReport(string Label, Color Color, Vector3 Position, string? Tooltip, long Order);

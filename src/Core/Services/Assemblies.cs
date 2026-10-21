@@ -17,7 +17,10 @@ namespace Magic.Services;
 public sealed class Assemblies
 {
     private readonly Lock _adding = new();
-    private readonly Dictionary<string, Assembly> _loaded = new(StringComparer.OrdinalIgnoreCase) { ["Magic"] = typeof(Assemblies).Assembly };
+    private readonly Dictionary<string, Assembly> _loaded = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Magic"] = typeof(Assemblies).Assembly
+    };
 
     /// <summary>
     /// The assemblies loaded and what each name resolved to among them, replaced whole as assemblies are added, so a
@@ -29,19 +32,6 @@ public sealed class Assemblies
     public Assemblies()
     {
         _code = new Code([.. _loaded.Values]);
-    }
-
-    /// <summary>
-    /// Takes in <paramref name="assembly"/>, loaded from <paramref name="path"/>, in place of the one last loaded from
-    /// there.
-    /// </summary>
-    internal void Add(string path, Assembly assembly)
-    {
-        lock (_adding)
-        {
-            _loaded[path] = assembly;
-            _code = new Code([.. _loaded.Values]);
-        }
     }
 
     /// <summary>
@@ -79,12 +69,16 @@ public sealed class Assemblies
     }
 
     /// <summary>
-    /// The one top-level type named <paramref name="name"/> in the code loaded, whatever it is.
+    /// Takes in <paramref name="assembly"/>, loaded from <paramref name="path"/>, in place of the one last loaded from
+    /// there.
     /// </summary>
-    private Result<Type> Get(string name)
+    internal void Add(string path, Assembly assembly)
     {
-        Code code = _code;
-        return code.Named.GetOrAdd(name, Search, code.All);
+        lock (_adding)
+        {
+            _loaded[path] = assembly;
+            _code = new Code([.. _loaded.Values]);
+        }
     }
 
     private static Result<Type> Search(string name, IReadOnlyList<Assembly> all)
@@ -94,7 +88,8 @@ public sealed class Assemblies
         {
             foreach (Type type in From(assembly))
             {
-                if (!type.IsNested && !type.ContainsGenericParameters && string.Equals(type.Name, name, StringComparison.Ordinal))
+                if (!type.IsNested && !type.ContainsGenericParameters
+                    && string.Equals(type.Name, name, StringComparison.Ordinal))
                 {
                     found.Add(type);
                 }
@@ -103,10 +98,22 @@ public sealed class Assemblies
 
         return found.Count switch
         {
-            0 => Result.Failure<Type>($"no code loaded declares a type named {name}: the project's code, or the gem that compiles it, is to be built, or the gem listed."),
+            0 => Result.Failure<Type>($"no code loaded declares a type named {name}: the project's code, "
+                + "or the gem that compiles it, is to be built, or the gem listed."),
             1 => Result.Success(found[0]),
-            _ => Result.Failure<Type>($"{found.Count} types are named {name} ({string.Join(", ", found.ConvertAll(type => type.FullName))}); a type a file names has a name of its own."),
+            _ => Result.Failure<Type>($"{found.Count} types are named {name} "
+                + $"({string.Join(", ", found.ConvertAll(type => type.FullName))}); "
+                + "a type a file names has a name of its own."),
         };
+    }
+
+    /// <summary>
+    /// The one top-level type named <paramref name="name"/> in the code loaded, whatever it is.
+    /// </summary>
+    private Result<Type> Get(string name)
+    {
+        Code code = _code;
+        return code.Named.GetOrAdd(name, Search, code.All);
     }
 
     /// <summary>

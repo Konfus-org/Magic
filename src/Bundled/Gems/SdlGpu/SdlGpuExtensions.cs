@@ -1,13 +1,16 @@
 using System.Diagnostics.CodeAnalysis;
-using Magic.SdlBindings;
 using Magic.Contexts.Gpu;
+using Magic.SdlBindings;
 
 namespace Magic.SdlGpu;
 
 /// <summary>
 /// Magic's GPU types and this gem's settings as SDL's, and the one way back: the format of the window's images.
 /// </summary>
-[SuppressMessage("Style", "IDE0072:Add missing cases", Justification = "SDL has far more texture formats than Magic renders with; the rest are no format of Magic's.")]
+[SuppressMessage(
+    "Style",
+    "IDE0072:Add missing cases",
+    Justification = "SDL has far more texture formats than Magic renders with; the rest are no format of Magic's.")]
 internal static class SdlGpuExtensions
 {
     extension(GpuDriver driver)
@@ -204,8 +207,14 @@ internal static class SdlGpuExtensions
         internal SDL.GPUColorTargetBlendState ToSdl() => blend switch
         {
             GpuBlend.None => default,
-            GpuBlend.Alpha => MakeBlending(SDL.GPUBlendFactor.SrcAlpha, SDL.GPUBlendFactor.OneMinusSrcAlpha, SDL.GPUBlendOp.Add),
-            GpuBlend.Premultiplied => MakeBlending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.OneMinusSrcAlpha, SDL.GPUBlendOp.Add),
+            GpuBlend.Alpha => MakeBlending(
+                SDL.GPUBlendFactor.SrcAlpha,
+                SDL.GPUBlendFactor.OneMinusSrcAlpha,
+                SDL.GPUBlendOp.Add),
+            GpuBlend.Premultiplied => MakeBlending(
+                SDL.GPUBlendFactor.One,
+                SDL.GPUBlendFactor.OneMinusSrcAlpha,
+                SDL.GPUBlendOp.Add),
             GpuBlend.Add => MakeBlending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.One, SDL.GPUBlendOp.Add),
             GpuBlend.Max => MakeBlending(SDL.GPUBlendFactor.One, SDL.GPUBlendFactor.One, SDL.GPUBlendOp.Max),
             _ => throw new ArgumentOutOfRangeException(nameof(blend), blend, "There is no such blend."),
@@ -216,14 +225,17 @@ internal static class SdlGpuExtensions
     /// Colour blends <paramref name="source"/> and <paramref name="destination"/> with <paramref name="operation"/>;
     /// alpha does the same, except that straight alpha keeps its own: one of src, one minus src of dst.
     /// </summary>
-    private static SDL.GPUColorTargetBlendState MakeBlending(SDL.GPUBlendFactor source, SDL.GPUBlendFactor destination, SDL.GPUBlendOp operation) => new()
-    {
-        EnableBlend = true,
-        SrcColorBlendfactor = source,
-        DstColorBlendfactor = destination,
-        ColorBlendOp = operation,
-        SrcAlphaBlendfactor = source == SDL.GPUBlendFactor.SrcAlpha ? SDL.GPUBlendFactor.One : source,
-        DstAlphaBlendfactor = destination,
-        AlphaBlendOp = operation,
-    };
+    private static SDL.GPUColorTargetBlendState MakeBlending(
+        SDL.GPUBlendFactor source,
+        SDL.GPUBlendFactor destination,
+        SDL.GPUBlendOp operation) => new()
+        {
+            EnableBlend = true,
+            SrcColorBlendfactor = source,
+            DstColorBlendfactor = destination,
+            ColorBlendOp = operation,
+            SrcAlphaBlendfactor = source == SDL.GPUBlendFactor.SrcAlpha ? SDL.GPUBlendFactor.One : source,
+            DstAlphaBlendfactor = destination,
+            AlphaBlendOp = operation,
+        };
 }

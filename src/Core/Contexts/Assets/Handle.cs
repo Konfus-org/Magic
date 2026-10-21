@@ -15,6 +15,9 @@ public readonly record struct Handle<T>(ulong Id)
     /// <summary>
     /// No asset: what an empty material slot holds, or a camera drawing into the window.
     /// </summary>
-    [SuppressMessage("Design", "CA1000:Do not declare static members on generic types", Justification = "Every nothing value is .None, and Handle<Material>.None names the type it is none of.")]
+    [SuppressMessage(
+        "Design",
+        "CA1000:Do not declare static members on generic types",
+        Justification = "Every nothing value is .None, and Handle<Material>.None names the type it is none of.")]
     public static Handle<T> None => default;
 }

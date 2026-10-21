@@ -15,7 +15,9 @@ namespace Magic.Internal;
 /// is found by the gem's dependency file, which lists what its packages brought, or else under the gem's
 /// <c>runtimes/&lt;rid&gt;/native/</c>, where the build puts the binaries a gem declares itself.
 /// </summary>
-internal sealed class GemLoadContext(string gemPath, IFileSystem files) : AssemblyLoadContext(Path.GetFileNameWithoutExtension(gemPath))
+internal sealed class GemLoadContext(
+    string gemPath,
+    IFileSystem files) : AssemblyLoadContext(Path.GetFileNameWithoutExtension(gemPath))
 {
     /// <summary>
     /// Native libraries by the name gems bind them by. Two copies of one library would each keep state of their own: a
@@ -36,7 +38,8 @@ internal sealed class GemLoadContext(string gemPath, IFileSystem files) : Assemb
         {
             if (_natives.TryGetValue(unmanagedDllName, out nint loaded)) return loaded;
 
-            if ((_resolver.ResolveUnmanagedDllToPath(unmanagedDllName) ?? FindCarried(unmanagedDllName)) is not { } path)
+            if ((_resolver.ResolveUnmanagedDllToPath(unmanagedDllName)
+                ?? FindCarried(unmanagedDllName)) is not { } path)
             {
                 return 0;
             }
@@ -54,13 +57,18 @@ internal sealed class GemLoadContext(string gemPath, IFileSystem files) : Assemb
     /// </summary>
     private string? FindCarried(string name)
     {
-        string folder = files.Combine(files.GetParent(gemPath), "runtimes", RuntimeInformation.RuntimeIdentifier, "native");
+        string folder = files.Combine(
+            files.GetParent(gemPath),
+            "runtimes",
+            RuntimeInformation.RuntimeIdentifier,
+            "native");
         if (!files.FolderExists(folder)) return null;
 
         foreach (string file in files.Find(folder, ""))
         {
             string stem = Path.GetFileNameWithoutExtension(file);
-            if (string.Equals(stem, name, StringComparison.OrdinalIgnoreCase) || string.Equals(stem, "lib" + name, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(stem, name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(stem, "lib" + name, StringComparison.OrdinalIgnoreCase))
             {
                 return file;
             }

@@ -27,10 +27,11 @@ internal sealed class DebugToolsSettings : ISettings
     /// it. "Magic.Core" is Core's meter and "Magic.Gems" every gem's, "Magic.Gems.&lt;Gem&gt;"; "System.Runtime" is
     /// .NET's own: garbage collection, memory, the JIT and the thread pool.
     /// </summary>
-    public IReadOnlyDictionary<string, string> Tabs { get; set; } = new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-        ["Magic.Core"] = "Magic.Core",
-        ["Magic.Gems"] = "Magic.Gems",
-        [".NET"] = "System.Runtime",
-    };
+    public IReadOnlyDictionary<string, string> Tabs { get; set; }
+        = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Magic.Core"] = "Magic.Core",
+            ["Magic.Gems"] = "Magic.Gems",
+            [".NET"] = "System.Runtime",
+        };
 }

@@ -53,7 +53,11 @@ public readonly ref struct EcsChunk<T1, T2>(ReadOnlySpan<Entity> entities, Span<
 /// <summary>
 /// <see cref="EcsChunk{T1}"/> of entities that have all three components.
 /// </summary>
-public readonly ref struct EcsChunk<T1, T2, T3>(ReadOnlySpan<Entity> entities, Span<T1> first, Span<T2> second, Span<T3> third)
+public readonly ref struct EcsChunk<T1, T2, T3>(
+    ReadOnlySpan<Entity> entities,
+    Span<T1> first,
+    Span<T2> second,
+    Span<T3> third)
     where T1 : unmanaged, IComponent
     where T2 : unmanaged, IComponent
     where T3 : unmanaged, IComponent
@@ -66,7 +70,11 @@ public readonly ref struct EcsChunk<T1, T2, T3>(ReadOnlySpan<Entity> entities, S
 
     public Span<T3> Third { get; } = third;
 
-    public void Deconstruct(out ReadOnlySpan<Entity> entities, out Span<T1> first, out Span<T2> second, out Span<T3> third)
+    public void Deconstruct(
+        out ReadOnlySpan<Entity> entities,
+        out Span<T1> first,
+        out Span<T2> second,
+        out Span<T3> third)
     {
         entities = Entities;
         first = First;
@@ -78,7 +86,12 @@ public readonly ref struct EcsChunk<T1, T2, T3>(ReadOnlySpan<Entity> entities, S
 /// <summary>
 /// <see cref="EcsChunk{T1}"/> of entities that have all four components.
 /// </summary>
-public readonly ref struct EcsChunk<T1, T2, T3, T4>(ReadOnlySpan<Entity> entities, Span<T1> first, Span<T2> second, Span<T3> third, Span<T4> fourth)
+public readonly ref struct EcsChunk<T1, T2, T3, T4>(
+    ReadOnlySpan<Entity> entities,
+    Span<T1> first,
+    Span<T2> second,
+    Span<T3> third,
+    Span<T4> fourth)
     where T1 : unmanaged, IComponent
     where T2 : unmanaged, IComponent
     where T3 : unmanaged, IComponent
@@ -94,7 +107,12 @@ public readonly ref struct EcsChunk<T1, T2, T3, T4>(ReadOnlySpan<Entity> entitie
 
     public Span<T4> Fourth { get; } = fourth;
 
-    public void Deconstruct(out ReadOnlySpan<Entity> entities, out Span<T1> first, out Span<T2> second, out Span<T3> third, out Span<T4> fourth)
+    public void Deconstruct(
+        out ReadOnlySpan<Entity> entities,
+        out Span<T1> first,
+        out Span<T2> second,
+        out Span<T3> third,
+        out Span<T4> fourth)
     {
         entities = Entities;
         first = First;

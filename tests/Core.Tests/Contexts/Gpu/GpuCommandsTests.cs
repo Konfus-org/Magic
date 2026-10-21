@@ -10,7 +10,9 @@ public sealed class GpuCommandsTests
     public void RenderPass_records_its_colour_targets()
     {
         GpuCommands commands = new();
-        GpuTextureLevel[] colors = [new GpuTextureLevel(new GpuTexture(1)), new GpuTextureLevel(new GpuTexture(2), Level: 1)];
+        GpuTextureLevel[] colors = [new GpuTextureLevel(new GpuTexture(1)), new GpuTextureLevel(
+            new GpuTexture(2),
+            Level: 1)];
 
         commands.RenderPass(colors, GpuContents.Keep).Dispose();
 

@@ -25,7 +25,8 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     /// (<see cref="Lifetime.Restart"/>) goes on from where the last left off, so what is piped in is one script for the
     /// whole process.
     /// </summary>
-    private static readonly Channel<string> _lines = Channel.CreateUnbounded<string>(new() { SingleReader = true, SingleWriter = true });
+    private static readonly Channel<string> _lines = Channel.CreateUnbounded<string>(
+        new() { SingleReader = true, SingleWriter = true });
 
     /// <summary>
     /// Whether the thread reading the terminal has been started, which the first gem made does.
@@ -33,14 +34,14 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     private static bool _isReading;
 
     /// <summary>
-    /// Frames left before the lines after a <c>wait</c> run: the process's, as the lines are, so a wait goes on across a
-    /// restart, the frames of the restart itself not counted.
+    /// Frames left before the lines after a <c>wait</c> run: the process's, as the lines are, so a wait goes on across
+    /// a restart, the frames of the restart itself not counted.
     /// </summary>
     private static int _waiting;
 
     /// <summary>
-    /// Whether the lines after a <c>wait loaded</c> are held back until the world has loaded: the process's, as the lines
-    /// are, so the wait goes on across a restart until the restarted world has loaded.
+    /// Whether the lines after a <c>wait loaded</c> are held back until the world has loaded: the process's, as the
+    /// lines are, so the wait goes on across a restart until the restarted world has loaded.
     /// </summary>
     private static bool _isWaitingForWorld;
 
@@ -52,7 +53,13 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     private readonly IGpu? _gpu;
     private readonly IWindow? _window;
 
-    public ConsoleCommandsGem(Lifetime lifetime, Threads threads, IFileSystem files, World world, IGpu? gpu = null, IWindow? window = null)
+    public ConsoleCommandsGem(
+        Lifetime lifetime,
+        Threads threads,
+        IFileSystem files,
+        World world,
+        IGpu? gpu = null,
+        IWindow? window = null)
     {
         _files = files;
         _world = world;
@@ -62,11 +69,15 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         _window = window;
         _commands.Add("help", new Command("Lists every command and what it does.", _ => Help()));
         _commands.Add("quit", new Command("Stops the run.", _ => lifetime.Stop("quit typed in the terminal")));
-        _commands.Add("wait", new Command("Holds the lines after it back for that many frames, or until the world has loaded: wait 100, wait loaded.", Wait));
-        _commands.Add("screenshot", new Command("Saves the window's next image as Screenshots/<time>.png beside Magic.", _ => Screenshot()));
+        _commands.Add("wait", new Command(
+            "Holds the lines after it back for that many frames, or until the world has loaded: wait 100, wait loaded.",
+            Wait));
+        _commands.Add(
+            "screenshot",
+            new Command("Saves the window's next image as Screenshots/<time>.png beside Magic.", _ => Screenshot()));
 
-        // A thread of its own rather than a task, and a background one: a terminal read cannot be cancelled on every OS,
-        // so the thread waits in it until a line comes or the process ends, through every run of the process.
+        // A thread of its own rather than a task, and a background one: a terminal read cannot be cancelled on every
+        // OS, so the thread waits in it until a line comes or the process ends, through every run of the process.
         if (!_isReading)
         {
             _isReading = true;
@@ -174,6 +185,15 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         return [.. words];
     }
 
+    private static void ReadLines()
+    {
+        while (Console.ReadLine() is { } line)
+        {
+            // Input piped from some shells starts with a byte order mark.
+            _lines.Writer.TryWrite(line.TrimStart('\uFEFF'));
+        }
+    }
+
     /// <summary>
     /// <c>help</c>: every command's name and what it does, a line each, in order.
     /// </summary>
@@ -207,7 +227,8 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
             return;
         }
 
-        if (words.Length != 1 || !int.TryParse(words[0], NumberStyles.None, CultureInfo.InvariantCulture, out int frames))
+        if (words.Length != 1
+            || !int.TryParse(words[0], NumberStyles.None, CultureInfo.InvariantCulture, out int frames))
         {
             Debugging.Warn("wait takes a number of frames, or loaded: wait 100, wait loaded");
             return;
@@ -233,7 +254,10 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
 
     private async Task SaveAsync(IGpu gpu, IWindow window, string path)
     {
-        Task<Result<GpuImage>> capture = await _threads.InvokeAsync(EngineThread.Render, () => gpu.CaptureAsync(gpu.GetWindowTarget(window)), _stopping).ConfigureAwait(false);
+        Task<Result<GpuImage>> capture = await _threads.InvokeAsync(
+            EngineThread.Render,
+            () => gpu.CaptureAsync(gpu.GetWindowTarget(window)),
+            _stopping).ConfigureAwait(false);
         Result<GpuImage> image = await capture.ConfigureAwait(false);
         if (!image.Ok)
         {
@@ -249,15 +273,6 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         else
         {
             Debugging.Error($"The screenshot was not saved: {written.Error}");
-        }
-    }
-
-    private static void ReadLines()
-    {
-        while (Console.ReadLine() is { } line)
-        {
-            // Input piped from some shells starts with a byte order mark.
-            _lines.Writer.TryWrite(line.TrimStart('\uFEFF'));
         }
     }
 

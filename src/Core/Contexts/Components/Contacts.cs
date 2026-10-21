@@ -6,6 +6,29 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Components;
 
 /// <summary>
+/// Where a <see cref="Contact"/> is in its life; <see cref="None"/> is an empty slot.
+/// </summary>
+public enum ContactPhase : byte
+{
+    None,
+
+    /// <summary>
+    /// The two began to touch this step.
+    /// </summary>
+    Enter,
+
+    /// <summary>
+    /// Still touching, after the step they began to.
+    /// </summary>
+    Stay,
+
+    /// <summary>
+    /// They parted this step: held for this one step, then gone.
+    /// </summary>
+    Exit,
+}
+
+/// <summary>
 /// What an entity's body touched, for gameplay: an entity with a <see cref="Physics"/> and this hears, after every
 /// step, each body in contact with it as an entry, inline so the component stays plain unmanaged data, up to
 /// <see cref="Capacity"/> of them and the rest dropped. An entry is <see cref="ContactPhase.Enter"/> the step the two
@@ -70,27 +93,4 @@ public record struct Contact
     public float Impulse;
 
     public ContactPhase Phase;
-}
-
-/// <summary>
-/// Where a <see cref="Contact"/> is in its life; <see cref="None"/> is an empty slot.
-/// </summary>
-public enum ContactPhase : byte
-{
-    None,
-
-    /// <summary>
-    /// The two began to touch this step.
-    /// </summary>
-    Enter,
-
-    /// <summary>
-    /// Still touching, after the step they began to.
-    /// </summary>
-    Stay,
-
-    /// <summary>
-    /// They parted this step: held for this one step, then gone.
-    /// </summary>
-    Exit,
 }

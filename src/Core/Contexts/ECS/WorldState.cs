@@ -28,7 +28,11 @@ public sealed record WorldState
 /// what is theirs. One that had spawned nothing yet, as one still opening, has neither, and opens again from the
 /// start.
 /// </summary>
-public sealed record DomainState(Handle<Domain> Domain, DomainOpenMode Mode, IReadOnlyDictionary<Handle<Prefab>, IReadOnlyList<int>> Prefabs, IReadOnlyList<int> Player);
+public sealed record DomainState(
+    Handle<Domain> Domain,
+    DomainOpenMode Mode,
+    IReadOnlyDictionary<Handle<Prefab>, IReadOnlyList<int>> Prefabs,
+    IReadOnlyList<int> Player);
 
 /// <summary>
 /// An entity of the saved world: its id, its own within the save and what a component or a script refers to it by

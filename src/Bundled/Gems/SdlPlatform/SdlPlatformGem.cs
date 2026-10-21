@@ -2,7 +2,6 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Channels;
-using Magic.SdlBindings;
 using Magic.Contexts.Assets;
 using Magic.Contexts.CmdLine;
 using Magic.Contexts.Frames;
@@ -11,6 +10,7 @@ using Magic.Contexts.Input;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
+using Magic.SdlBindings;
 using Magic.Services;
 
 namespace Magic.SdlPlatform;
@@ -36,7 +36,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// <summary>
     /// What the render thread's pump saw, in the order it happened, for the main thread to apply.
     /// </summary>
-    private readonly Channel<Change> _changes = Channel.CreateUnbounded<Change>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+    private readonly Channel<Change> _changes = Channel.CreateUnbounded<Change>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
 
     /// <summary>
     /// The main thread's devices, and their controls by <see cref="ControlExtensions"/>' Index, at the same indexes.
@@ -45,8 +46,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     private readonly List<ControlState[]> _controls = [];
 
     /// <summary>
-    /// The render thread's keyboards and mice the main thread has been told of: input can arrive before its device does,
-    /// and some from no device at all (id 0).
+    /// The render thread's keyboards and mice the main thread has been told of: input can arrive before its device
+    /// does, and some from no device at all (id 0).
     /// </summary>
     private readonly HashSet<(DeviceKind Kind, uint Id)> _announced = [];
 
@@ -93,7 +94,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     private int _askedWidth;
     private int _askedHeight;
 
-    public unsafe SdlPlatformGem(SdlPlatformSettings settings, Args run, Lifetime lifetime, Project project, Assets assets)
+    public unsafe SdlPlatformGem(
+        SdlPlatformSettings settings,
+        Args run,
+        Lifetime lifetime,
+        Project project,
+        Assets assets)
     {
         _lifetime = lifetime;
         _settings = settings;
@@ -122,14 +128,19 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         int version = SDL.GetVersion();
         if (version < SDL.VERSION)
         {
-            throw new InvalidOperationException($"SDL {version / 1000000}.{version / 1000 % 1000}.{version % 1000} is older than the {SDL.MajorVersion}.{SDL.MinorVersion}.{SDL.MicroVersion} Magic was built against.");
+            throw new InvalidOperationException($"SDL {version / 1000000}.{version / 1000 % 1000}.{version % 1000} is "
+                + $"older than the {SDL.MajorVersion}.{SDL.MinorVersion}.{SDL.MicroVersion} Magic was built against.");
         }
 
         if (run.Headless) return;
 
         fixed (byte* title = CString.ToBytes(project.Name))
         {
-            _window = SDL.CreateWindow(title, settings.Width, settings.Height, SDL.WindowResizable | SDL.WindowHighPixelDensity);
+            _window = SDL.CreateWindow(
+                title,
+                settings.Width,
+                settings.Height,
+                SDL.WindowResizable | SDL.WindowHighPixelDensity);
         }
 
         if (_window == null)
@@ -173,18 +184,6 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         SDL.Free(mice);
     }
 
-    public unsafe void Dispose()
-    {
-        foreach (nint gamepad in _gamepads.Values)
-        {
-            SDL.CloseGamepad((SDL.Gamepad*)gamepad);
-        }
-
-        if (_window != null) SDL.DestroyWindow(_window);
-
-        SDL.Quit();
-    }
-
     /// <summary>
     /// Set on the main thread, it reaches the window once the render thread gets to it.
     /// </summary>
@@ -199,7 +198,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// Set on the main thread, it reaches the window once it and its image have loaded and the render thread gets to it.
+    /// Set on the main thread, it reaches the window once it and its image have loaded and the render thread gets to
+    /// it.
     /// </summary>
     public unsafe Handle<Icon> Icon
     {
@@ -276,6 +276,18 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         }
     }
 
+    public unsafe void Dispose()
+    {
+        foreach (nint gamepad in _gamepads.Values)
+        {
+            SDL.CloseGamepad((SDL.Gamepad*)gamepad);
+        }
+
+        if (_window != null) SDL.DestroyWindow(_window);
+
+        SDL.Quit();
+    }
+
     /// <summary>
     /// Applies what the render thread's pump saw since the last frame. Main thread.
     /// </summary>
@@ -305,7 +317,10 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// <summary>
     /// Pumps SDL's events into changes for the main thread. Render thread.
     /// </summary>
-    [SuppressMessage("Style", "IDE0010:Add missing cases", Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose.")]
+    [SuppressMessage(
+        "Style",
+        "IDE0010:Add missing cases",
+        Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose.")]
     public unsafe void Render(in Frame frame)
     {
         ApplyWanted();
@@ -390,7 +405,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                 case SDL.EventType.GamepadButtonDown:
                 case SDL.EventType.GamepadButtonUp:
                     // Only a pad that is open: one that could not be opened is no device.
-                    if (_gamepads.ContainsKey(sdlEvent.Gbutton.Which) && ((SDL.GamepadButton)sdlEvent.Gbutton.Button).Control is { } gamepadButton)
+                    if (_gamepads.ContainsKey(sdlEvent.Gbutton.Which)
+                        && ((SDL.GamepadButton)sdlEvent.Gbutton.Button).Control is { } gamepadButton)
                     {
                         Set(DeviceKind.Gamepad, sdlEvent.Gbutton.Which, gamepadButton, sdlEvent.Gbutton.Down ? 1 : 0);
                     }
@@ -404,6 +420,50 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         {
             ReadAxes(id, (SDL.Gamepad*)gamepad);
         }
+    }
+
+    /// <summary>
+    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
+    /// </summary>
+    private static void StartFrame(DeviceKind kind, ControlState[] states)
+    {
+        for (int i = 0; i < states.Length; i++)
+        {
+            states[i] = states[i] with { WasPressed = false, WasReleased = false };
+        }
+
+        if (kind != DeviceKind.Mouse) return;
+
+        states[Control.MouseMotionX.Index] = default;
+        states[Control.MouseMotionY.Index] = default;
+        states[Control.MouseWheelX.Index] = default;
+        states[Control.MouseWheelY.Index] = default;
+    }
+
+    /// <summary>
+    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
+    /// within a frame, so a tap between two frames shows as both.
+    /// </summary>
+    private static void SetState(ControlState[] states, Control control, float value)
+    {
+        ref ControlState state = ref states[control.Index];
+        bool isDown = MathF.Abs(value) >= 0.5f;
+        state = new ControlState(
+            value,
+            isDown,
+            state.WasPressed || (isDown && !state.IsDown),
+            state.WasReleased || (!isDown && state.IsDown));
+    }
+
+    /// <summary>
+    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
+    /// </summary>
+    private static unsafe string ReadClipboard()
+    {
+        byte* text = SDL.GetClipboardText();
+        string value = CString.Read(text);
+        SDL.Free(text);
+        return value;
     }
 
     /// <summary>
@@ -447,35 +507,6 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
-    /// </summary>
-    private static void StartFrame(DeviceKind kind, ControlState[] states)
-    {
-        for (int i = 0; i < states.Length; i++)
-        {
-            states[i] = states[i] with { WasPressed = false, WasReleased = false };
-        }
-
-        if (kind != DeviceKind.Mouse) return;
-
-        states[Control.MouseMotionX.Index] = default;
-        states[Control.MouseMotionY.Index] = default;
-        states[Control.MouseWheelX.Index] = default;
-        states[Control.MouseWheelY.Index] = default;
-    }
-
-    /// <summary>
-    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
-    /// within a frame, so a tap between two frames shows as both.
-    /// </summary>
-    private static void SetState(ControlState[] states, Control control, float value)
-    {
-        ref ControlState state = ref states[control.Index];
-        bool isDown = MathF.Abs(value) >= 0.5f;
-        state = new ControlState(value, isDown, state.WasPressed || (isDown && !state.IsDown), state.WasReleased || (!isDown && state.IsDown));
-    }
-
-    /// <summary>
     /// An SDL axis, -32768 to 32767, as -1 to 1: 0 inside the settings' dead zone, and past it growing from 0 to 1 at
     /// full deflection, so the zone's edge is no step. Triggers only reach the positive half.
     /// </summary>
@@ -500,7 +531,10 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                 if (index < 0)
                 {
                     // A device that gives no name is shown as what it is.
-                    _devices.Add(new InputDevice(change.Device, change.Id, string.IsNullOrEmpty(change.Name) ? change.Device.ToString() : change.Name));
+                    _devices.Add(new InputDevice(
+                        change.Device,
+                        change.Id,
+                        string.IsNullOrEmpty(change.Name) ? change.Device.ToString() : change.Name));
                     _controls.Add(new ControlState[256]);
                 }
 
@@ -562,8 +596,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// A control's new value. A keyboard or mouse is announced first if this is the first the main thread hears of it; a
-    /// gamepad was as it opened.
+    /// A control's new value. A keyboard or mouse is announced first if this is the first the main thread hears of it;
+    /// a gamepad was as it opened.
     /// </summary>
     private void Set(DeviceKind kind, uint id, Control control, float value)
     {
@@ -588,18 +622,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         if (!_announced.Add((kind, id))) return;
 
-        Write(new Change(ChangeKind.Added, kind, id, Name: CString.Read(kind == DeviceKind.Keyboard ? SDL.GetKeyboardNameForID(id) : SDL.GetMouseNameForID(id))));
-    }
-
-    /// <summary>
-    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
-    /// </summary>
-    private static unsafe string ReadClipboard()
-    {
-        byte* text = SDL.GetClipboardText();
-        string value = CString.Read(text);
-        SDL.Free(text);
-        return value;
+        byte* named = kind == DeviceKind.Keyboard ? SDL.GetKeyboardNameForID(id) : SDL.GetMouseNameForID(id);
+        Write(new Change(ChangeKind.Added, kind, id, Name: CString.Read(named)));
     }
 
     private void Forget(DeviceKind kind, uint id)
@@ -638,11 +662,31 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         // SDL's stick y grows downward; Magic's is up positive, unless the settings invert it.
         float up = _settings.InvertStickY ? 1 : -1;
         Set(DeviceKind.Gamepad, id, Control.GamepadLeftX, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Leftx)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadLeftY, up * ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Lefty)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadRightX, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Rightx)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadRightY, up * ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Righty)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadLeftTrigger, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.LeftTrigger)));
-        Set(DeviceKind.Gamepad, id, Control.GamepadRightTrigger, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.RightTrigger)));
+        Set(
+            DeviceKind.Gamepad,
+            id,
+            Control.GamepadLeftY,
+            up * ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Lefty)));
+        Set(
+            DeviceKind.Gamepad,
+            id,
+            Control.GamepadRightX,
+            ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Rightx)));
+        Set(
+            DeviceKind.Gamepad,
+            id,
+            Control.GamepadRightY,
+            up * ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Righty)));
+        Set(
+            DeviceKind.Gamepad,
+            id,
+            Control.GamepadLeftTrigger,
+            ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.LeftTrigger)));
+        Set(
+            DeviceKind.Gamepad,
+            id,
+            Control.GamepadRightTrigger,
+            ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.RightTrigger)));
     }
 
     /// <summary>
@@ -696,7 +740,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         TextureLevel level = image.Levels[0];
         fixed (byte* pixels = image.Pixels.Span)
         {
-            SDL.Surface* surface = SDL.CreateSurfaceFrom(level.Width, level.Height, SDL.PixelFormat.Rgba32, pixels + level.Offset, level.Width * 4);
+            SDL.Surface* surface = SDL.CreateSurfaceFrom(
+                level.Width,
+                level.Height,
+                SDL.PixelFormat.Rgba32,
+                pixels + level.Offset,
+                level.Width * 4);
             if (surface == null || !SDL.SetWindowIcon(_window, surface))
             {
                 Debugging.Error($"The window's icon is not shown: {CString.Read(SDL.GetError())}");
@@ -748,7 +797,16 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// One thing the pump saw, as plain data for the main thread: which fields mean something depends on
     /// <see cref="Kind"/>.
     /// </summary>
-    private readonly record struct Change(ChangeKind Kind, DeviceKind Device = default, uint Id = 0, Control Control = default, float Value = 0, string? Name = null, int Width = 0, int Height = 0, string? Text = null);
+    private readonly record struct Change(
+        ChangeKind Kind,
+        DeviceKind Device = default,
+        uint Id = 0,
+        Control Control = default,
+        float Value = 0,
+        string? Name = null,
+        int Width = 0,
+        int Height = 0,
+        string? Text = null);
 
     /// <summary>
     /// A size the settings ask the window to be, in screen points, set whole for the render thread.

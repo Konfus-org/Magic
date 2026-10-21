@@ -6,7 +6,8 @@ using Size = System.Drawing.Size;
 namespace Magic.Extensions;
 
 /// <summary>
-/// Where a <see cref="ScreenSection"/> is in a window, so whatever draws a camera and whatever draws over its view agree.
+/// Where a <see cref="ScreenSection"/> is in a window, so whatever draws a camera and whatever draws over its view
+/// agree.
 /// </summary>
 public static class ScreenSectionExtensions
 {
@@ -25,7 +26,11 @@ public static class ScreenSectionExtensions
                 ScreenSection.TopLeft => new Rectangle(0, 0, halfWidth, halfHeight),
                 ScreenSection.TopRight => new Rectangle(halfWidth, 0, size.Width - halfWidth, halfHeight),
                 ScreenSection.BottomLeft => new Rectangle(0, halfHeight, halfWidth, size.Height - halfHeight),
-                ScreenSection.BottomRight => new Rectangle(halfWidth, halfHeight, size.Width - halfWidth, size.Height - halfHeight),
+                ScreenSection.BottomRight => new Rectangle(
+                    halfWidth,
+                    halfHeight,
+                    size.Width - halfWidth,
+                    size.Height - halfHeight),
                 ScreenSection.Top => new Rectangle(0, 0, size.Width, halfHeight),
                 ScreenSection.Bottom => new Rectangle(0, halfHeight, size.Width, size.Height - halfHeight),
                 ScreenSection.Left => new Rectangle(0, 0, halfWidth, size.Height),

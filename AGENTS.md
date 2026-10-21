@@ -8,11 +8,15 @@ the code and docs follow. Most rules give their reason. When a case isn't covere
 The tools run under `pwsh` and Windows PowerShell. [Tools](tools/README.md) covers them in full, including where
 the `Magic` executable is built.
 
-- **Validate:** `tools/Validate.ps1` builds `Magic.slnx`, runs the tests, runs the samples headless until their
-  world has loaded, and runs them with a window until it has loaded, ending in a screenshot whose path it prints. It
-  reports each step's exit code. Every step must pass, and the screenshot must be looked at, before work is done.
-- **Task complete:** `tools/AgentTaskComplete.ps1` runs all of Validate and, when it passes, stamps the exact state
-  it validated. Run it on completing a task, and again after any later edit or rebase.
+- **Format:** `tools/Format.ps1` formats the C# a change touches by `.editorconfig`: it wraps lines that are too
+  long, orders the members and the usings, applies the code style and fixes the whitespace. Agents never need to run
+  it on its own, as the next command does.
+- **Validate:** `tools/Validate.ps1` builds `Magic.slnx`, checks the whole tree's formatting, runs the tests, runs the
+  samples headless until their world has loaded, and runs them with a window until it has loaded, ending in a
+  screenshot whose path it prints. It reports each step's exit code. Every step must pass, and the screenshot must be
+  looked at, before work is done.
+- **Task complete:** `tools/AgentTaskComplete.ps1` formats the change, runs all of Validate and, when it passes,
+  stamps the exact state it validated. Run it on completing a task, and again after any later edit or rebase.
 - **Screenshot:** `tools/Screenshot.ps1` runs a project with a window until its world has loaded and prints the
   screenshot's path; `-Project` and `-Commands` reach what the samples alone do not show.
 - **Review:** `plannotator review` opens the change in the user's browser as a diff they comment on line by line,
@@ -26,6 +30,7 @@ What Validate runs, for when you need one step on its own:
 
 ```powershell
 dotnet build Magic.slnx
+dotnet format Magic.slnx --verify-no-changes --no-restore
 dotnet test Magic.slnx
 'wait loaded', 'quit' | Magic --project samples --frames 20000 --fail-on-error --headless
 tools/Screenshot.ps1
@@ -34,7 +39,8 @@ tools/Screenshot.ps1
 `--fail-on-error` returns exit code `2` if anything was logged as an error during the run.
 
 The build must finish with no warnings or errors. Fix a warning at its cause. If you believe a warning does not
-apply, say so in your summary rather than suppressing it.
+apply, say so in your summary rather than suppressing it. A wrap the formatter makes that reads badly is reshaped by
+hand: it breaks a line at the first place that fits, which is not always where a person would.
 
 ## Before You Edit
 
@@ -112,7 +118,8 @@ want to question as you make it.
 
 ### Finish
 
-1. Run `tools/AgentTaskComplete.ps1`. A failing test is fixed at its cause, never loosened, skipped or deleted.
+1. Run `tools/AgentTaskComplete.ps1`, which formats the change before it validates it, so the review shows the
+   formatted code. A failing test is fixed at its cause, never loosened, skipped or deleted.
 2. Open the screenshot `tools/AgentTaskComplete.ps1` printed and look at it, for every change, not only visual ones: the app
    ran with your change, and what it shows is the check. Where the change shows only somewhere the samples do not
    reach, a failure path, a debug view or another project, screenshot that too, with `tools/Screenshot.ps1 -Project`

@@ -6,9 +6,10 @@ namespace Magic.ClusterGenerator;
 
 /// <summary>
 /// Sven Forstmann's fast quadric mesh simplification: Garland and Heckbert's quadric error metrics, but instead of a
-/// priority queue of edge collapses each pass collapses every edge whose error is under a threshold that grows from pass
-/// to pass, so it runs in near linear time. Reference: https://github.com/sp4cerat/Fast-Quadric-Mesh-Simplification
-/// (MIT), and Garland and Heckbert, "Surface Simplification Using Quadric Error Metrics", SIGGRAPH 1997.
+/// priority queue of edge collapses each pass collapses every edge whose error is under a threshold that grows from
+/// pass to pass, so it runs in near linear time. Reference:
+/// https://github.com/sp4cerat/Fast-Quadric-Mesh-Simplification (MIT), and Garland and Heckbert, "Surface
+/// Simplification Using Quadric Error Metrics", SIGGRAPH 1997.
 /// <para>
 /// The collapses work on positions only: vertices at the same place are welded first, so a uv or normal seam (a
 /// cylinder's cap, a cube's edges) is not a border that cannot move. A corner keeps the uv of the vertex it had, so the
@@ -30,10 +31,10 @@ internal static class QuadricSimplifier
 
     /// <summary>
     /// The mesh brought down to about <paramref name="target"/> triangles, however far that moves it, with every vertex
-    /// at a place in <paramref name="locked"/> kept where it is: a group of clusters simplified with its border kept, so
-    /// it still meets the clusters around it. The mesh's material slot means nothing here; each vertex made says which
-    /// of the mesh's it carries (<see cref="Reduced.Sources"/>), so a caller that keeps a material by vertex keeps it by
-    /// triangle. The error is how far the surface may have moved, in the mesh's units.
+    /// at a place in <paramref name="locked"/> kept where it is: a group of clusters simplified with its border kept,
+    /// so it still meets the clusters around it. The mesh's material slot means nothing here; each vertex made says
+    /// which of the mesh's it carries (<see cref="Reduced.Sources"/>), so a caller that keeps a material by vertex
+    /// keeps it by triangle. The error is how far the surface may have moved, in the mesh's units.
     /// </summary>
     internal static Reduced Reduce(Mesh mesh, int target, IReadOnlySet<Vector3> locked)
     {
@@ -44,10 +45,86 @@ internal static class QuadricSimplifier
     }
 
     /// <summary>
-    /// A mesh <see cref="Reduce"/> brought down, the source vertex each of its vertices carries everything but its place
-    /// from, and how far its surface may have moved.
+    /// A mesh <see cref="Reduce"/> brought down, the source vertex each of its vertices carries everything but its
+    /// place from, and how far its surface may have moved.
     /// </summary>
     internal readonly record struct Reduced(Mesh Mesh, int[] Sources, float Error);
+
+    /// <summary>
+    /// A 4x4 symmetric matrix as its 10 distinct entries: the quadric of a plane, summed.
+    /// </summary>
+    private readonly record struct SymmetricMatrix(
+        double M0,
+        double M1,
+        double M2,
+        double M3,
+        double M4,
+        double M5,
+        double M6,
+        double M7,
+        double M8,
+        double M9)
+    {
+        /// <summary>
+        /// The quadric of the plane ax + by + cz + d = 0.
+        /// </summary>
+        public SymmetricMatrix(double a, double b, double c, double d)
+            : this(a * a, a * b, a * c, a * d, b * b, b * c, b * d, c * c, c * d, d * d)
+        {
+        }
+
+        private double this[int entry] => entry switch
+        {
+            0 => M0,
+            1 => M1,
+            2 => M2,
+            3 => M3,
+            4 => M4,
+            5 => M5,
+            6 => M6,
+            7 => M7,
+            8 => M8,
+            _ => M9,
+        };
+
+        public static SymmetricMatrix operator +(SymmetricMatrix left, SymmetricMatrix right)
+        {
+            return new(
+                left.M0 + right.M0,
+                left.M1 + right.M1,
+                left.M2 + right.M2,
+                left.M3 + right.M3,
+                left.M4 + right.M4,
+                left.M5 + right.M5,
+                left.M6 + right.M6,
+                left.M7 + right.M7,
+                left.M8 + right.M8,
+                left.M9 + right.M9);
+        }
+
+        /// <summary>
+        /// The determinant of the 3x3 matrix the nine entries make.
+        /// </summary>
+        internal double Det(int a11, int a12, int a13, int a21, int a22, int a23, int a31, int a32, int a33)
+        {
+            return (this[a11] * this[a22] * this[a33]) + (this[a13] * this[a21] * this[a32])
+                + (this[a12] * this[a23] * this[a31])
+                - (this[a13] * this[a22] * this[a31]) - (this[a11] * this[a23] * this[a32]) - (this[a12] * this[a21]
+                    * this[a33]);
+        }
+
+        /// <summary>
+        /// The squared distance of the point from the planes summed into the matrix.
+        /// </summary>
+        internal double VertexError(Vector3 point)
+        {
+            double x = point.X;
+            double y = point.Y;
+            double z = point.Z;
+            return (M0 * x * x) + (2 * M1 * x * y) + (2 * M2 * x * z) + (2 * M3 * x) + (M4 * y * y)
+                + (2 * M5 * y * z) + (2 * M6 * y) + (M7 * z * z) + (2 * M8 * z) + M9;
+        }
+    }
 
     /// <summary>
     /// One mesh being simplified: its welded points, its triangles, and each point's references to the triangle corners
@@ -68,8 +145,8 @@ internal static class QuadricSimplifier
         /// <summary>
         /// Which source vertices are shaded smoothly across each other, as sets (union-find, each entry its parent):
         /// two at one place with one normal, a uv seam, from the start, and the two ends of every triangle a collapse
-        /// deletes, which was one smooth triangle (<see cref="JoinAcross"/>). Those across a hard edge are never joined,
-        /// as no triangle has both. A vertex that moved takes its normal from its set (<see cref="ToMesh"/>).
+        /// deletes, which was one smooth triangle (<see cref="JoinAcross"/>). Those across a hard edge are never
+        /// joined, as no triangle has both. A vertex that moved takes its normal from its set (<see cref="ToMesh"/>).
         /// </summary>
         private readonly int[] _smooth;
         private bool[] _keptDeleted = [];
@@ -107,8 +184,13 @@ internal static class QuadricSimplifier
                 int first = (int)indices[i];
                 int second = (int)indices[i + 1];
                 int third = (int)indices[i + 2];
-                Triangle triangle = new() { Points = [weld[first], weld[second], weld[third]], Source = [first, second, third] };
-                if (triangle.Points[0] != triangle.Points[1] && triangle.Points[1] != triangle.Points[2] && triangle.Points[0] != triangle.Points[2])
+                Triangle triangle = new()
+                {
+                    Points = [weld[first], weld[second], weld[third]],
+                    Source = [first, second, third]
+                };
+                if (triangle.Points[0] != triangle.Points[1] && triangle.Points[1] != triangle.Points[2]
+                    && triangle.Points[0] != triangle.Points[2])
                 {
                     _triangles.Add(triangle);
                 }
@@ -159,10 +241,84 @@ internal static class QuadricSimplifier
         }
 
         /// <summary>
-        /// Collapses the triangle's edge when the collapse is sound: its first end stays, at the place the collapse puts
-        /// it, and its second goes into it; <paramref name="deleted"/> is how many triangles went with it. An edge along
-        /// a border collapses along it, one across would pull the border in, and a collapse that flips a triangle is
-        /// refused.
+        /// The mesh as it is now: one vertex per (point, source vertex) pair a corner uses, the source vertex at the
+        /// point's place, and which source vertex each is. At a point that is not locked where a corner has come from
+        /// elsewhere, the vertices of each smooth set (<see cref="_smooth"/>) take the normal of the triangles the set
+        /// is the corners of, summed by their area, and their tangent is laid flat to it; a locked point keeps its
+        /// source normals, as the clusters either side of a border must carry the same normals along it.
+        /// </summary>
+        internal Mesh ToMesh(out int[] sources)
+        {
+            ReadOnlySpan<Vertex> sourceVertices = _source.Vertices.Span;
+            Dictionary<(int Point, int Source), uint> made = [];
+            List<Vertex> vertices = [];
+            List<int> madeFrom = [];
+            List<(int Point, int Set)> madeAt = [];
+            List<uint> indices = [];
+            Dictionary<(int Point, int Set), (Vector3 Normal, bool Moved)> sets = [];
+            foreach (Triangle triangle in _triangles)
+            {
+                if (triangle.Deleted) continue;
+
+                Vector3 first = _points[triangle.Points[0]].Position;
+                Vector3 area = Vector3.Cross(
+                    _points[triangle.Points[1]].Position - first,
+                    _points[triangle.Points[2]].Position - first);
+                for (int corner = 0; corner < 3; corner++)
+                {
+                    (int point, int source) = (triangle.Points[corner], triangle.Source[corner]);
+                    (int, int) key = (point, Find(source));
+                    if (!made.TryGetValue((point, source), out uint index))
+                    {
+                        index = (uint)vertices.Count;
+                        vertices.Add(sourceVertices[source] with { Position = _points[point].Position });
+                        madeFrom.Add(source);
+                        madeAt.Add(key);
+                        made[(point, source)] = index;
+                    }
+
+                    (Vector3 normal, bool moved) = sets.GetValueOrDefault(key);
+                    sets[key] = (normal + area, moved || sourceVertices[source].Position != _points[point].Position);
+                    indices.Add(index);
+                }
+            }
+
+            for (int i = 0; i < vertices.Count; i++)
+            {
+                (Vector3 sum, bool moved) = sets[madeAt[i]];
+                if (!moved || _points[madeAt[i].Point].Locked || sum.Length() <= 0) continue;
+
+                Vector3 normal = Vector3.Normalize(sum);
+                Vertex vertex = vertices[i];
+                Vector3 along = new(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z);
+                along -= normal * Vector3.Dot(normal, along);
+                Vector4 tangent = along.LengthSquared() > 0
+                    ? new Vector4(Vector3.Normalize(along), vertex.Tangent.W)
+                    : vertex.Tangent;
+                vertices[i] = vertex with { Normal = normal, Tangent = tangent };
+            }
+
+            sources = [.. madeFrom];
+            return new Mesh { Vertices = vertices.ToArray(), Indices = indices.ToArray() };
+        }
+
+        private static (int, int) EdgeKey(int from, int to) => from < to ? (from, to) : (to, from);
+
+        /// <summary>
+        /// A unit vector along <paramref name="vector"/>, or zero for a zero one: a degenerate triangle's normal, whose
+        /// plane then adds nothing to a quadric.
+        /// </summary>
+        private static Vector3 Normalized(Vector3 vector)
+        {
+            float length = vector.Length();
+            return length > 0 ? vector / length : Vector3.Zero;
+        }
+
+        /// <summary>
+        /// Collapses the triangle's edge when the collapse is sound: its first end stays, at the place the collapse
+        /// puts it, and its second goes into it; <paramref name="deleted"/> is how many triangles went with it. An edge
+        /// along a border collapses along it, one across would pull the border in, and a collapse that flips a triangle
+        /// is refused.
         /// </summary>
         private bool TryCollapseEdge(Triangle triangle, int edge, out int deleted)
         {
@@ -222,64 +378,6 @@ internal static class QuadricSimplifier
         }
 
         /// <summary>
-        /// The mesh as it is now: one vertex per (point, source vertex) pair a corner uses, the source vertex at the
-        /// point's place, and which source vertex each is. At a point that is not locked where a corner has come from
-        /// elsewhere, the vertices of each smooth set (<see cref="_smooth"/>) take the normal of the triangles the set
-        /// is the corners of, summed by their area, and their tangent is laid flat to it; a locked point keeps its
-        /// source normals, as the clusters either side of a border must carry the same normals along it.
-        /// </summary>
-        internal Mesh ToMesh(out int[] sources)
-        {
-            ReadOnlySpan<Vertex> sourceVertices = _source.Vertices.Span;
-            Dictionary<(int Point, int Source), uint> made = [];
-            List<Vertex> vertices = [];
-            List<int> madeFrom = [];
-            List<(int Point, int Set)> madeAt = [];
-            List<uint> indices = [];
-            Dictionary<(int Point, int Set), (Vector3 Normal, bool Moved)> sets = [];
-            foreach (Triangle triangle in _triangles)
-            {
-                if (triangle.Deleted) continue;
-
-                Vector3 first = _points[triangle.Points[0]].Position;
-                Vector3 area = Vector3.Cross(_points[triangle.Points[1]].Position - first, _points[triangle.Points[2]].Position - first);
-                for (int corner = 0; corner < 3; corner++)
-                {
-                    (int point, int source) = (triangle.Points[corner], triangle.Source[corner]);
-                    (int, int) key = (point, Find(source));
-                    if (!made.TryGetValue((point, source), out uint index))
-                    {
-                        index = (uint)vertices.Count;
-                        vertices.Add(sourceVertices[source] with { Position = _points[point].Position });
-                        madeFrom.Add(source);
-                        madeAt.Add(key);
-                        made[(point, source)] = index;
-                    }
-
-                    (Vector3 normal, bool moved) = sets.GetValueOrDefault(key);
-                    sets[key] = (normal + area, moved || sourceVertices[source].Position != _points[point].Position);
-                    indices.Add(index);
-                }
-            }
-
-            for (int i = 0; i < vertices.Count; i++)
-            {
-                (Vector3 sum, bool moved) = sets[madeAt[i]];
-                if (!moved || _points[madeAt[i].Point].Locked || sum.Length() <= 0) continue;
-
-                Vector3 normal = Vector3.Normalize(sum);
-                Vertex vertex = vertices[i];
-                Vector3 along = new(vertex.Tangent.X, vertex.Tangent.Y, vertex.Tangent.Z);
-                along -= normal * Vector3.Dot(normal, along);
-                Vector4 tangent = along.LengthSquared() > 0 ? new Vector4(Vector3.Normalize(along), vertex.Tangent.W) : vertex.Tangent;
-                vertices[i] = vertex with { Normal = normal, Tangent = tangent };
-            }
-
-            sources = [.. madeFrom];
-            return new Mesh { Vertices = vertices.ToArray(), Indices = indices.ToArray() };
-        }
-
-        /// <summary>
         /// The set of source vertex <paramref name="vertex"/> in <see cref="_smooth"/>, flattening the path to it.
         /// </summary>
         private int Find(int vertex)
@@ -317,9 +415,9 @@ internal static class QuadricSimplifier
         }
 
         /// <summary>
-        /// Whether moving the point at the other end of <paramref name="other"/>'s edge to <paramref name="place"/> would
-        /// turn one of <paramref name="point"/>'s triangles over (or make it a sliver); marks those that would lose the
-        /// edge, which the collapse deletes.
+        /// Whether moving the point at the other end of <paramref name="other"/>'s edge to <paramref name="place"/>
+        /// would turn one of <paramref name="point"/>'s triangles over (or make it a sliver); marks those that would
+        /// lose the edge, which the collapse deletes.
         /// </summary>
         private bool IsFlipped(Vector3 place, int other, Point point, bool[] deleted)
         {
@@ -350,8 +448,8 @@ internal static class QuadricSimplifier
         }
 
         /// <summary>
-        /// When an edge collapses onto one of its ends, the corners of the other end are moved to where that end is, and
-        /// should carry what it carries there: across each triangle the collapse deletes (which has both ends), the
+        /// When an edge collapses onto one of its ends, the corners of the other end are moved to where that end is,
+        /// and should carry what it carries there: across each triangle the collapse deletes (which has both ends), the
         /// moving end's source vertex is mapped to the staying end's, into <see cref="_sources"/>. Without it a corner
         /// keeps its own uv where it has moved to, and the texture stretches over the triangles it is part of.
         /// <paramref name="ontoPoint"/> when the collapse is onto <paramref name="point"/>, rather than onto
@@ -381,7 +479,8 @@ internal static class QuadricSimplifier
         /// <summary>
         /// Points <paramref name="point"/>'s triangles at <paramref name="into"/>, deleting those the collapse removed;
         /// the references go on the end of the list. When <paramref name="moved"/>, the point's corners now stand where
-        /// the other end stood and take its source vertices (<see cref="SharedSources"/>). Answers how many were deleted.
+        /// the other end stood and take its source vertices (<see cref="SharedSources"/>). Answers how many were
+        /// deleted.
         /// </summary>
         private int Retarget(int into, Point point, bool[] deleted, bool moved)
         {
@@ -514,7 +613,9 @@ internal static class QuadricSimplifier
             foreach (Triangle triangle in _triangles)
             {
                 Vector3 firstCorner = _points[triangle.Points[0]].Position;
-                Vector3 normal = Normalized(Vector3.Cross(_points[triangle.Points[1]].Position - firstCorner, _points[triangle.Points[2]].Position - firstCorner));
+                Vector3 normal = Normalized(Vector3.Cross(
+                    _points[triangle.Points[1]].Position - firstCorner,
+                    _points[triangle.Points[2]].Position - firstCorner));
                 triangle.Normal = normal;
                 SymmetricMatrix plane = new(normal.X, normal.Y, normal.Z, -Vector3.Dot(normal, firstCorner));
                 _points[triangle.Points[0]].Quadric += plane;
@@ -531,9 +632,10 @@ internal static class QuadricSimplifier
         }
 
         /// <summary>
-        /// Garland and Heckbert's border planes: through each border edge, standing up from its triangle. A flat panel's
-        /// corners sit on two of them, so sliding one along the other edge costs its distance from the first, and the
-        /// error cap keeps the corner; points along a straight border still collapse into each other for nothing.
+        /// Garland and Heckbert's border planes: through each border edge, standing up from its triangle. A flat
+        /// panel's corners sit on two of them, so sliding one along the other edge costs its distance from the first,
+        /// and the error cap keeps the corner; points along a straight border still collapse into each other for
+        /// nothing.
         /// </summary>
         private void AddBorderPlanes(Dictionary<(int, int), int> edgeUses)
         {
@@ -554,8 +656,6 @@ internal static class QuadricSimplifier
             }
         }
 
-        private static (int, int) EdgeKey(int from, int to) => from < to ? (from, to) : (to, from);
-
         /// <summary>
         /// The error of collapsing each of the triangle's edges, and the least of them.
         /// </summary>
@@ -563,15 +663,16 @@ internal static class QuadricSimplifier
         {
             for (int edge = 0; edge < 3; edge++)
             {
-                triangle.Error[edge] = ComputeCollapseError(triangle.Points[edge], triangle.Points[(edge + 1) % 3], out _);
+                triangle.Error[edge]
+                    = ComputeCollapseError(triangle.Points[edge], triangle.Points[(edge + 1) % 3], out _);
             }
 
             triangle.Error[3] = Math.Min(triangle.Error[0], Math.Min(triangle.Error[1], triangle.Error[2]));
         }
 
         /// <summary>
-        /// The error of collapsing the edge, and the place the point goes: where the summed quadric is least, or the best
-        /// of the two ends and their middle when that cannot be solved (or an end is on a border).
+        /// The error of collapsing the edge, and the place the point goes: where the summed quadric is least, or the
+        /// best of the two ends and their middle when that cannot be solved (or an end is on a border).
         /// </summary>
         private double ComputeCollapseError(int firstId, int secondId, out Vector3 place)
         {
@@ -603,16 +704,6 @@ internal static class QuadricSimplifier
             double least = Math.Min(atFirst, Math.Min(atSecond, atMiddle));
             place = least == atFirst ? first.Position : least == atSecond ? second.Position : middle;
             return least;
-        }
-
-        /// <summary>
-        /// A unit vector along <paramref name="vector"/>, or zero for a zero one: a degenerate triangle's normal, whose
-        /// plane then adds nothing to a quadric.
-        /// </summary>
-        private static Vector3 Normalized(Vector3 vector)
-        {
-            float length = vector.Length();
-            return length > 0 ? vector / length : Vector3.Zero;
         }
     }
 
@@ -666,59 +757,5 @@ internal static class QuadricSimplifier
         /// It stays where it is: on the border of a group of clusters, which the clusters around it meet.
         /// </summary>
         internal bool Locked { get; set; }
-    }
-
-    /// <summary>
-    /// A 4x4 symmetric matrix as its 10 distinct entries: the quadric of a plane, summed.
-    /// </summary>
-    private readonly record struct SymmetricMatrix(double M0, double M1, double M2, double M3, double M4, double M5, double M6, double M7, double M8, double M9)
-    {
-        /// <summary>
-        /// The quadric of the plane ax + by + cz + d = 0.
-        /// </summary>
-        public SymmetricMatrix(double a, double b, double c, double d)
-            : this(a * a, a * b, a * c, a * d, b * b, b * c, b * d, c * c, c * d, d * d)
-        {
-        }
-
-        private double this[int entry] => entry switch
-        {
-            0 => M0,
-            1 => M1,
-            2 => M2,
-            3 => M3,
-            4 => M4,
-            5 => M5,
-            6 => M6,
-            7 => M7,
-            8 => M8,
-            _ => M9,
-        };
-
-        public static SymmetricMatrix operator +(SymmetricMatrix left, SymmetricMatrix right)
-        {
-            return new(left.M0 + right.M0, left.M1 + right.M1, left.M2 + right.M2, left.M3 + right.M3, left.M4 + right.M4, left.M5 + right.M5, left.M6 + right.M6, left.M7 + right.M7, left.M8 + right.M8, left.M9 + right.M9);
-        }
-
-        /// <summary>
-        /// The determinant of the 3x3 matrix the nine entries make.
-        /// </summary>
-        internal double Det(int a11, int a12, int a13, int a21, int a22, int a23, int a31, int a32, int a33)
-        {
-            return (this[a11] * this[a22] * this[a33]) + (this[a13] * this[a21] * this[a32]) + (this[a12] * this[a23] * this[a31])
-                - (this[a13] * this[a22] * this[a31]) - (this[a11] * this[a23] * this[a32]) - (this[a12] * this[a21] * this[a33]);
-        }
-
-        /// <summary>
-        /// The squared distance of the point from the planes summed into the matrix.
-        /// </summary>
-        internal double VertexError(Vector3 point)
-        {
-            double x = point.X;
-            double y = point.Y;
-            double z = point.Z;
-            return (M0 * x * x) + (2 * M1 * x * y) + (2 * M2 * x * z) + (2 * M3 * x) + (M4 * y * y)
-                + (2 * M5 * y * z) + (2 * M6 * y) + (M7 * z * z) + (2 * M8 * z) + M9;
-        }
     }
 }

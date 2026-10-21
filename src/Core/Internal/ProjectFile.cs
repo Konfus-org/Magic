@@ -42,7 +42,8 @@ internal static class ProjectFile
         IReadOnlyList<string> found = files.Find(path, ".magic");
         if (found.Count != 1)
         {
-            return Result.Failure<string>($"The project folder {path} must hold exactly one .magic file; it holds {found.Count}.");
+            return Result.Failure<string>(
+                $"The project folder {path} must hold exactly one .magic file; it holds {found.Count}.");
         }
 
         return Result.Success(found[0]);

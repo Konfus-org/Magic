@@ -2,8 +2,10 @@
 
 What GitHub runs on a change and what must hold for it to pass. The Build and Test workflows run the same script a
 developer runs, `tools/Validate.ps1` ([Tools](../../tools/README.md)), a step at a time: Build runs its Build and
-Headless steps on every OS Magic targets, Test its Build and Test steps on Linux. The Window step and `Screenshot.ps1`
-need a display, which no runner has, so those stay on developer machines. The Headless step still needs a GPU device,
+Headless steps on every OS Magic targets, Test its Build, Format and Test steps on Linux. Every build already fails on
+any analyzer rule, so the format check adds what no build can check, such as a file's line endings, and it runs once, as
+formatting is the same on every OS. The Screenshot step needs a display, which no runner has, so it stays on developer
+machines. The Headless step still needs a GPU device,
 since the samples render offscreen: macOS runners have a virtual one, and Linux gets Mesa's software Vulkan driver
 and runs the platform library's offscreen video driver, both from the setup action. Two checks have no local
 equivalent: Docs follows every link in the Markdown, to files, their headings and the web, so a moved file or a renamed

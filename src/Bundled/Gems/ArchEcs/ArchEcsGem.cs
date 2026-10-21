@@ -29,8 +29,14 @@ namespace Magic.ArchEcs;
 internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 {
     private static readonly Meter _meter = new("Magic.Gems.ArchEcs");
-    private static readonly Gauge<int> _entities = _meter.CreateGauge<int>("magic.gems.arch_ecs.entities", "{entity}", "Entities alive.");
-    private static readonly Gauge<int> _archetypes = _meter.CreateGauge<int>("magic.gems.arch_ecs.archetypes", "{archetype}", "Archetypes, one per set of component types entities have.");
+    private static readonly Gauge<int> _entities = _meter.CreateGauge<int>(
+        "magic.gems.arch_ecs.entities",
+        "{entity}",
+        "Entities alive.");
+    private static readonly Gauge<int> _archetypes = _meter.CreateGauge<int>(
+        "magic.gems.arch_ecs.archetypes",
+        "{archetype}",
+        "Archetypes, one per set of component types entities have.");
 
     private readonly ArchWorld _world;
     private readonly Threads _threads;
@@ -42,8 +48,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private readonly Scheduled[][] _systems = [[], [], []];
 
     /// <summary>
-    /// Each query's walk over its chunks, by the type of chunk it hands out: made the first time the query is asked for,
-    /// and reused.
+    /// Each query's walk over its chunks, by the type of chunk it hands out: made the first time the query is asked
+    /// for, and reused.
     /// </summary>
     private readonly Dictionary<Type, object> _walks = [];
 
@@ -67,7 +73,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// Arch's job threads, which run parallel systems; made as the main thread's first Update starts, since Arch
     /// schedules only from the thread that made them, and so before any system runs, and ended in Stop, on that thread.
     /// </summary>
-    [SuppressMessage("Usage", "CA2213:Disposable fields should be disposed", Justification = "Stop disposes it on the main thread, the only one it can be disposed on.")]
+    [SuppressMessage(
+        "Usage",
+        "CA2213:Disposable fields should be disposed",
+        Justification = "Stop disposes it on the main thread, the only one it can be disposed on.")]
     private JobScheduler? _jobs;
 
     /// <summary>
@@ -82,7 +91,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         ArchEntity probe = Unsafe.BitCast<Entity, ArchEntity>(new Entity(1, 2, 3));
         if (probe.Id != 1 || probe.WorldId != 2 || probe.Version != 3)
         {
-            throw new InvalidOperationException($"Arch lays out its entity as {probe}, not as Magic's (Id, EcsWorld, Version).");
+            throw new InvalidOperationException(
+                $"Arch lays out its entity as {probe}, not as Magic's (Id, EcsWorld, Version).");
         }
 
         _threads = threads;
@@ -159,7 +169,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         if (second.Length != first.Length)
         {
-            throw new ArgumentException($"A batch's spans are the same length: {first.Length} {typeof(T1).Name}, {second.Length} {typeof(T2).Name}.", nameof(second));
+            throw new ArgumentException(
+                $"A batch's spans are the same length: {first.Length} {typeof(T1).Name}, "
+                    + $"{second.Length} {typeof(T2).Name}.",
+                nameof(second));
         }
 
         Span<ArchEntity> created = CreateBatch(first.Length, All<T1, T2>.Signature);
@@ -233,7 +246,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         IComponent[] components = new IComponent[held.Length];
         for (int i = 0; i < held.Length; i++)
         {
-            components[i] = held[i] as IComponent ?? throw new InvalidOperationException($"{entity} holds a {held[i]?.GetType().Name ?? "null"}, which is no component.");
+            components[i] = held[i] as IComponent ?? throw new InvalidOperationException(
+                $"{entity} holds a {held[i]?.GetType().Name ?? "null"}, which is no component.");
         }
 
         return components;
@@ -313,34 +327,55 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         => Schedule(system, system.Phase, frame => system.Run(frame, Query<T1, T2, T3, T4>()));
 
     public Subscription Add(IParallelSystem system)
-        => AddParallel(system, system.Phase, All.Description, (in Frame frame, in Chunk chunk) => system.Run(frame, All.Cut(chunk)));
+        => AddParallel(
+            system,
+            system.Phase,
+            All.Description,
+            (in Frame frame, in Chunk chunk) => system.Run(frame, All.Cut(chunk)));
 
     public Subscription Add<T1>(IParallelSystem<T1> system)
         where T1 : unmanaged, IComponent
-        => AddParallel(system, system.Phase, All<T1>.Description, (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1>.Cut(chunk)));
+        => AddParallel(
+            system,
+            system.Phase,
+            All<T1>.Description,
+            (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1>.Cut(chunk)));
 
     public Subscription Add<T1, T2>(IParallelSystem<T1, T2> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        => AddParallel(system, system.Phase, All<T1, T2>.Description, (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2>.Cut(chunk)));
+        => AddParallel(
+            system,
+            system.Phase,
+            All<T1, T2>.Description,
+            (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2>.Cut(chunk)));
 
     public Subscription Add<T1, T2, T3>(IParallelSystem<T1, T2, T3> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        => AddParallel(system, system.Phase, All<T1, T2, T3>.Description, (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2, T3>.Cut(chunk)));
+        => AddParallel(
+            system,
+            system.Phase,
+            All<T1, T2, T3>.Description,
+            (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2, T3>.Cut(chunk)));
 
     public Subscription Add<T1, T2, T3, T4>(IParallelSystem<T1, T2, T3, T4> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent
-        => AddParallel(system, system.Phase, All<T1, T2, T3, T4>.Description, (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2, T3, T4>.Cut(chunk)));
+        => AddParallel(
+            system,
+            system.Phase,
+            All<T1, T2, T3, T4>.Description,
+            (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2, T3, T4>.Cut(chunk)));
 
     /// <summary>
     /// A chunk's live entities as Magic's: Arch's arrays run to the chunk's capacity, past its last entity.
     /// </summary>
-    private static ReadOnlySpan<Entity> GetEntities(Chunk chunk) => MemoryMarshal.Cast<ArchEntity, Entity>(chunk.Entities.AsSpan(0, chunk.Count));
+    private static ReadOnlySpan<Entity> GetEntities(Chunk chunk)
+        => MemoryMarshal.Cast<ArchEntity, Entity>(chunk.Entities.AsSpan(0, chunk.Count));
 
     /// <summary>
     /// A chunk's <typeparamref name="T"/> components, at its live entities' indexes.
@@ -348,9 +383,26 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private static Span<T> GetComponents<T>(Chunk chunk) => chunk.GetArray<T>().AsSpan(0, chunk.Count);
 
     /// <summary>
+    /// The ECS's type of <paramref name="type"/>, a component known only as the program runs, from Arch's registry, or
+    /// from its typed registration the first time, so a struct is measured as the typed calls measure it.
+    /// </summary>
+    private static ComponentType GetComponentType(Type type)
+    {
+        if (ComponentRegistry.TryGet(type, out ComponentType registered)) return registered;
+
+        return typeof(Component<>).MakeGenericType(type).GetField(nameof(Component<int>.ComponentType))?
+            .GetValue(null) is ComponentType found
+            ? found
+            : throw new InvalidOperationException($"The ECS has no type for {type.Name}.");
+    }
+
+    /// <summary>
     /// Runs the phase's systems. One that throws is logged and taken off, and the phase goes on without it.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a system throws, it is logged and the system is taken off; the others go on.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a system throws, it is logged and the system is taken off; the others go on.")]
     private void Run(Phase phase, in Frame frame)
     {
         foreach (Scheduled scheduled in _systems[(int)phase])
@@ -376,7 +428,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         ThrowIfNotMain();
         if (phase > Phase.LateUpdate)
         {
-            throw new ArgumentException($"System {system.GetType().Name} runs in {phase}; a system runs in Update, FixedUpdate or LateUpdate, the phases in which the main thread moves the world on.", nameof(system));
+            throw new ArgumentException(
+                $"System {system.GetType().Name} runs in {phase}; a system runs in Update, FixedUpdate or LateUpdate, "
+                    + "the phases in which the main thread moves the world on.",
+                nameof(system));
         }
 
         int index = (int)phase;
@@ -426,19 +481,6 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
             ThreadCount = Math.Max(1, Environment.ProcessorCount - 2),
         });
         ArchWorld.SharedJobScheduler = _jobs;
-    }
-
-    /// <summary>
-    /// The ECS's type of <paramref name="type"/>, a component known only as the program runs, from Arch's registry, or
-    /// from its typed registration the first time, so a struct is measured as the typed calls measure it.
-    /// </summary>
-    private static ComponentType GetComponentType(Type type)
-    {
-        if (ComponentRegistry.TryGet(type, out ComponentType registered)) return registered;
-
-        return typeof(Component<>).MakeGenericType(type).GetField(nameof(Component<int>.ComponentType))?.GetValue(null) is ComponentType found
-            ? found
-            : throw new InvalidOperationException($"The ECS has no type for {type.Name}.");
     }
 
     /// <summary>
@@ -492,7 +534,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         if (!_threads.IsCurrent(EngineThread.Main))
         {
-            throw new InvalidOperationException("The world is the main thread's: hand the work to it (Threads.InvokeAsync).");
+            throw new InvalidOperationException(
+                "The world is the main thread's: hand the work to it (Threads.InvokeAsync).");
         }
     }
 
@@ -508,7 +551,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         if (_querying > 0)
         {
-            throw new InvalidOperationException("An entity's components cannot change during a query's loop or a parallel system: collect what to change, and change it after.");
+            throw new InvalidOperationException("An entity's components cannot change during a query's loop or a "
+                + "parallel system: collect what to change, and change it after.");
         }
     }
 
@@ -521,6 +565,29 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// A system added to a phase: the system, which names it in the log and takes it off, and how to run it.
     /// </summary>
     private readonly record struct Scheduled(object System, Action<Frame> Run);
+
+    /// <summary>
+    /// A parallel system's run over one chunk, on one of Arch's job threads. What it throws is kept for the main
+    /// thread, rather than ending the job thread and the process with it.
+    /// </summary>
+    private readonly struct ChunkJob(ArchEcsGem ecs, Frame frame, ChunkRun run) : IChunkJob
+    {
+        [SuppressMessage(
+            "Design",
+            "CA1031:Do not catch general exception types",
+            Justification = "What a chunk throws is thrown on the main thread once the system is done.")]
+        public void Execute(ref Chunk chunk)
+        {
+            try
+            {
+                run(in frame, in chunk);
+            }
+            catch (Exception ex)
+            {
+                Interlocked.CompareExchange(ref ecs._thrown, ex, null);
+            }
+        }
+    }
 
     /// <summary>
     /// The query over every entity, described once, and how a chunk is cut down to its entities.
@@ -557,7 +624,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         internal static readonly Signature Signature = new(Component<T1>.ComponentType, Component<T2>.ComponentType);
 
-        internal static EcsChunk<T1, T2> Cut(Chunk chunk) => new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk));
+        internal static EcsChunk<T1, T2> Cut(Chunk chunk)
+            => new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk));
     }
 
     /// <summary>
@@ -570,7 +638,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3>();
 
-        internal static EcsChunk<T1, T2, T3> Cut(Chunk chunk) => new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk), GetComponents<T3>(chunk));
+        internal static EcsChunk<T1, T2, T3> Cut(Chunk chunk)
+            => new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk), GetComponents<T3>(chunk));
     }
 
     /// <summary>
@@ -584,7 +653,12 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         internal static readonly QueryDescription Description = new QueryDescription().WithAll<T1, T2, T3, T4>();
 
-        internal static EcsChunk<T1, T2, T3, T4> Cut(Chunk chunk) => new(GetEntities(chunk), GetComponents<T1>(chunk), GetComponents<T2>(chunk), GetComponents<T3>(chunk), GetComponents<T4>(chunk));
+        internal static EcsChunk<T1, T2, T3, T4> Cut(Chunk chunk) => new(
+            GetEntities(chunk),
+            GetComponents<T1>(chunk),
+            GetComponents<T2>(chunk),
+            GetComponents<T3>(chunk),
+            GetComponents<T4>(chunk));
     }
 
     /// <summary>
@@ -600,6 +674,11 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         private int _index;
         private bool _isWalking;
 
+        public TChunk Current => cut(_chunks[_index]);
+
+        object IEnumerator.Current
+            => throw new NotSupportedException("A chunk is spans over storage, which cannot be boxed.");
+
         public void Dispose()
         {
             if (!_isWalking) return;
@@ -607,10 +686,6 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
             _isWalking = false;
             ecs._querying--;
         }
-
-        public TChunk Current => cut(_chunks[_index]);
-
-        object IEnumerator.Current => throw new NotSupportedException("A chunk is spans over storage, which cannot be boxed.");
 
         public IEnumerator<TChunk> GetEnumerator()
         {
@@ -623,7 +698,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         public bool MoveNext() => ++_index < _chunks.Count;
 
-        public void Reset() => throw new NotSupportedException("A walk runs once per loop: start another loop to walk again.");
+        public void Reset()
+            => throw new NotSupportedException("A walk runs once per loop: start another loop to walk again.");
 
         private void Start()
         {
@@ -636,26 +712,6 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
             _index = -1;
             _isWalking = true;
             ecs._querying++;
-        }
-    }
-
-    /// <summary>
-    /// A parallel system's run over one chunk, on one of Arch's job threads. What it throws is kept for the main thread,
-    /// rather than ending the job thread and the process with it.
-    /// </summary>
-    private readonly struct ChunkJob(ArchEcsGem ecs, Frame frame, ChunkRun run) : IChunkJob
-    {
-        [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "What a chunk throws is thrown on the main thread once the system is done.")]
-        public void Execute(ref Chunk chunk)
-        {
-            try
-            {
-                run(in frame, in chunk);
-            }
-            catch (Exception ex)
-            {
-                Interlocked.CompareExchange(ref ecs._thrown, ex, null);
-            }
         }
     }
 }

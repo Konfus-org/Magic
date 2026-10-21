@@ -12,7 +12,8 @@ namespace Magic.Interfaces;
 public interface ICache<T>
 {
     /// <summary>
-    /// Raised whenever what it writes, or how what it caches is made, changes, so that what an older one wrote is dirty.
+    /// Raised whenever what it writes, or how what it caches is made, changes, so that what an older one wrote is
+    /// dirty.
     /// </summary>
     int Version { get; }
 

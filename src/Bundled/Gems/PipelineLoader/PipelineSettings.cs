@@ -23,5 +23,6 @@ internal sealed class PipelineSettings : ISettings
     /// Pass params that win over every pipeline's and the pass's own, by the pass's file name, then the param's:
     /// <c>{ "Tonemap": { "exposureBias": { "x": -0.5 } } }</c>.
     /// </summary>
-    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> Params { get; set; } = ReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>>.Empty;
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> Params { get; set; }
+        = ReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>>.Empty;
 }

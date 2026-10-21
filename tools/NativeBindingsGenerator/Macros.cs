@@ -13,7 +13,20 @@ namespace Magic.Tools.NativeBindingsGenerator;
 /// </summary>
 internal sealed class Macros
 {
-    private static readonly HashSet<string> _operators = new(StringComparer.Ordinal) { "(", ")", "+", "-", "*", "/", "%", "<<", ">>", "|", "&", "^", "~" };
+    private static readonly HashSet<string> _operators = new(StringComparer.Ordinal) {
+        "(",
+        ")",
+        "+",
+        "-",
+        "*",
+        "/",
+        "%",
+        "<<",
+        ">>",
+        "|",
+        "&",
+        "^",
+        "~" };
     private static readonly Dictionary<string, string> _keywordCasts = new(StringComparer.Ordinal)
     {
         ["int"] = "int",
@@ -39,7 +52,8 @@ internal sealed class Macros
     private readonly Dictionary<string, CppMacro> _known = new(StringComparer.Ordinal);
     private readonly Func<string, string?> _typedefType;
 
-    /// <param name="compilation">The parse, every macro of which, the compiler's and the system headers' included, can be expanded.</param>
+    /// <param name="compilation">The parse, every macro of which, the compiler's and the system headers' included, can
+    /// be expanded.</param>
     /// <param name="typedefType">The C# primitive a typedef name stands for, or null when it is no primitive.</param>
     internal Macros(CppCompilation compilation, Func<string, string?> typedefType)
     {
@@ -54,9 +68,6 @@ internal sealed class Macros
             _known.TryAdd(macro.Name, macro);
         }
     }
-
-    /// <summary>A constant's C# type and expression.</summary>
-    internal sealed record Value(string Type, string Expression);
 
     /// <summary>
     /// The constant <paramref name="macro"/> makes, with <paramref name="constants"/> giving each constant already
@@ -94,7 +105,8 @@ internal sealed class Macros
             if (kind == CppTokenKind.Comment) continue;
 
             bool value = false;
-            if (kind == CppTokenKind.Punctuation && string.Equals(text, "(", StringComparison.Ordinal) && TryCast(tokens, i, out string? castType, out int castEnd))
+            if (kind == CppTokenKind.Punctuation && string.Equals(text, "(", StringComparison.Ordinal)
+                && TryCast(tokens, i, out string? castType, out int castEnd))
             {
                 cast ??= castType;
                 expression.Append("unchecked((").Append(castType).Append(")(");
@@ -131,7 +143,8 @@ internal sealed class Macros
                     value = depth == 0;
                 }
             }
-            else if ((kind == CppTokenKind.Identifier || kind == CppTokenKind.Keyword) && constants(text) is { } constant)
+            else if ((kind == CppTokenKind.Identifier || kind == CppTokenKind.Keyword)
+                && constants(text) is { } constant)
             {
                 if (string.Equals(constant.Type, "string", StringComparison.Ordinal))
                 {
@@ -212,7 +225,159 @@ internal sealed class Macros
         return new(type, expression.ToString());
     }
 
-    /// <summary>The tokens with every macro among them expanded, function-like ones applied to their arguments.</summary>
+    /// <summary>The arguments of a call whose <c>(</c> is at <paramref name="open"/>, split at its commas;
+    /// <paramref name="close"/> is its <c>)</c>.</summary>
+    private static List<List<(CppTokenKind Kind, string Text)>> Arguments(
+        List<(CppTokenKind Kind, string Text)> tokens,
+        int open,
+        out int close)
+    {
+        List<List<(CppTokenKind Kind, string Text)>> arguments = [[]];
+        int depth = 0;
+        for (int i = open; i < tokens.Count; i++)
+        {
+            string text = tokens[i].Text;
+            if (string.Equals(text, "(", StringComparison.Ordinal))
+            {
+                depth++;
+                if (depth > 1) arguments[^1].Add(tokens[i]);
+            }
+            else if (string.Equals(text, ")", StringComparison.Ordinal))
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    close = i;
+                    return arguments;
+                }
+
+                arguments[^1].Add(tokens[i]);
+            }
+            else if (depth == 1 && string.Equals(text, ",", StringComparison.Ordinal))
+            {
+                arguments.Add([]);
+            }
+            else
+            {
+                arguments[^1].Add(tokens[i]);
+            }
+        }
+
+        throw new UnsupportedException("has an unclosed call");
+    }
+
+    /// <summary>A function-like macro's body with its parameters replaced, <c>#</c> stringized and <c>##</c>
+    /// pasted.</summary>
+    private static List<(CppTokenKind Kind, string Text)> Substitute(
+        CppMacro macro,
+        List<string> parameters,
+        List<List<(CppTokenKind Kind, string Text)>> arguments)
+    {
+        List<(CppTokenKind Kind, string Text)> replaced = [];
+        for (int i = 0; i < macro.Tokens.Count; i++)
+        {
+            CppToken token = macro.Tokens[i];
+            if (token.Kind == CppTokenKind.Punctuation && string.Equals(token.Text, "#", StringComparison.Ordinal)
+                && i + 1 < macro.Tokens.Count
+                && parameters.IndexOf(macro.Tokens[i + 1].Text) is >= 0 and int stringized)
+            {
+                StringBuilder text = new("\"");
+                foreach ((_, string part) in arguments[stringized])
+                {
+                    text.Append(part);
+                }
+
+                replaced.Add((CppTokenKind.Literal, text.Append('"').ToString()));
+                i++;
+            }
+            else if (token.Kind == CppTokenKind.Identifier && parameters.IndexOf(token.Text) is >= 0 and int index)
+            {
+                replaced.AddRange(arguments[index]);
+            }
+            else
+            {
+                replaced.Add((token.Kind, token.Text));
+            }
+        }
+
+        List<(CppTokenKind Kind, string Text)> pasted = [];
+        for (int i = 0; i < replaced.Count; i++)
+        {
+            if (replaced[i].Kind == CppTokenKind.Punctuation
+                && string.Equals(replaced[i].Text, "##", StringComparison.Ordinal)
+                && pasted.Count > 0
+                && i + 1 < replaced.Count)
+            {
+                string text = pasted[^1].Text + replaced[i + 1].Text;
+                CppTokenKind kind = char.IsAsciiDigit(text[0]) || text[0] == '"' || text[0] == '\'' || text[0] == '.'
+                    ? CppTokenKind.Literal
+                    : CppTokenKind.Identifier;
+                pasted[^1] = (kind, text);
+                i++;
+            }
+            else
+            {
+                pasted.Add(replaced[i]);
+            }
+        }
+
+        return pasted;
+    }
+
+    /// <summary>A C number literal as C# text with its kind, or null for one C# has no literal for (octal, a
+    /// char).</summary>
+    private static (string Text, bool Unsigned, bool Long, bool Float, bool Double)? ParseNumber(string literal)
+    {
+        if (literal.Length == 0 || (!char.IsAsciiDigit(literal[0]) && literal[0] != '.')) return null;
+
+        bool hex = literal.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
+        int end = literal.Length;
+        while (end > 0 && char.IsAsciiLetter(literal[end - 1]) && (!hex || !char.IsAsciiHexDigit(literal[end - 1])
+            || "uUlL".Contains(literal[end - 1], StringComparison.Ordinal)))
+        {
+            end--;
+        }
+
+        string digits = literal[..end];
+        string suffix = literal[end..].ToUpperInvariant();
+        bool floating = !hex && (digits.Contains('.', StringComparison.Ordinal)
+            || digits.Contains('E', StringComparison.OrdinalIgnoreCase));
+        if (floating)
+        {
+            bool isFloat = string.Equals(suffix, "F", StringComparison.Ordinal);
+            return (digits + (isFloat ? "f" : ""), false, false, isFloat, !isFloat);
+        }
+
+        if (!hex && digits.Length > 1 && digits[0] == '0') return null;
+
+        bool isUnsigned = suffix.Contains('U', StringComparison.Ordinal);
+        bool isLong = suffix.Contains('L', StringComparison.Ordinal);
+
+        // As C types a literal with no suffix by its value: past int, a hexadecimal or octal one is unsigned, a decimal
+        // one is long; past that, long or unsigned long.
+        bool octal = !hex && digits.Length > 1 && digits[0] == '0';
+        if (ulong.TryParse(
+            hex ? digits[2..] : digits,
+            hex ? NumberStyles.AllowHexSpecifier : NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out ulong value) && value > int.MaxValue)
+        {
+            if ((hex || octal) && value <= uint.MaxValue)
+            {
+                isUnsigned = true;
+            }
+            else
+            {
+                isLong = true;
+                isUnsigned |= value > long.MaxValue;
+            }
+        }
+
+        return (digits + (isUnsigned ? "u" : "") + (isLong ? "L" : ""), isUnsigned, isLong, false, false);
+    }
+
+    /// <summary>The tokens with every macro among them expanded, function-like ones applied to their
+    /// arguments.</summary>
     private List<(CppTokenKind Kind, string Text)> Expand(IReadOnlyList<CppToken> tokens, int depth)
     {
         List<(CppTokenKind Kind, string Text)> input = [];
@@ -251,7 +416,8 @@ internal sealed class Macros
                 List<List<(CppTokenKind Kind, string Text)>> arguments = Arguments(tokens, i + 1, out int end);
                 if (arguments.Count != parameters.Count)
                 {
-                    throw new UnsupportedException($"calls {text} with {arguments.Count} arguments, not {parameters.Count}");
+                    throw new UnsupportedException(
+                        $"calls {text} with {arguments.Count} arguments, not {parameters.Count}");
                 }
 
                 output.AddRange(Expand(Substitute(macro, parameters, arguments), depth + 1));
@@ -266,90 +432,8 @@ internal sealed class Macros
         return output;
     }
 
-    /// <summary>The arguments of a call whose <c>(</c> is at <paramref name="open"/>, split at its commas; <paramref name="close"/> is its <c>)</c>.</summary>
-    private static List<List<(CppTokenKind Kind, string Text)>> Arguments(List<(CppTokenKind Kind, string Text)> tokens, int open, out int close)
-    {
-        List<List<(CppTokenKind Kind, string Text)>> arguments = [[]];
-        int depth = 0;
-        for (int i = open; i < tokens.Count; i++)
-        {
-            string text = tokens[i].Text;
-            if (string.Equals(text, "(", StringComparison.Ordinal))
-            {
-                depth++;
-                if (depth > 1) arguments[^1].Add(tokens[i]);
-            }
-            else if (string.Equals(text, ")", StringComparison.Ordinal))
-            {
-                depth--;
-                if (depth == 0)
-                {
-                    close = i;
-                    return arguments;
-                }
-
-                arguments[^1].Add(tokens[i]);
-            }
-            else if (depth == 1 && string.Equals(text, ",", StringComparison.Ordinal))
-            {
-                arguments.Add([]);
-            }
-            else
-            {
-                arguments[^1].Add(tokens[i]);
-            }
-        }
-
-        throw new UnsupportedException("has an unclosed call");
-    }
-
-    /// <summary>A function-like macro's body with its parameters replaced, <c>#</c> stringized and <c>##</c> pasted.</summary>
-    private static List<(CppTokenKind Kind, string Text)> Substitute(CppMacro macro, List<string> parameters, List<List<(CppTokenKind Kind, string Text)>> arguments)
-    {
-        List<(CppTokenKind Kind, string Text)> replaced = [];
-        for (int i = 0; i < macro.Tokens.Count; i++)
-        {
-            CppToken token = macro.Tokens[i];
-            if (token.Kind == CppTokenKind.Punctuation && string.Equals(token.Text, "#", StringComparison.Ordinal) && i + 1 < macro.Tokens.Count && parameters.IndexOf(macro.Tokens[i + 1].Text) is >= 0 and int stringized)
-            {
-                StringBuilder text = new("\"");
-                foreach ((_, string part) in arguments[stringized])
-                {
-                    text.Append(part);
-                }
-
-                replaced.Add((CppTokenKind.Literal, text.Append('"').ToString()));
-                i++;
-            }
-            else if (token.Kind == CppTokenKind.Identifier && parameters.IndexOf(token.Text) is >= 0 and int index)
-            {
-                replaced.AddRange(arguments[index]);
-            }
-            else
-            {
-                replaced.Add((token.Kind, token.Text));
-            }
-        }
-
-        List<(CppTokenKind Kind, string Text)> pasted = [];
-        for (int i = 0; i < replaced.Count; i++)
-        {
-            if (replaced[i].Kind == CppTokenKind.Punctuation && string.Equals(replaced[i].Text, "##", StringComparison.Ordinal) && pasted.Count > 0 && i + 1 < replaced.Count)
-            {
-                string text = pasted[^1].Text + replaced[i + 1].Text;
-                pasted[^1] = (char.IsAsciiDigit(text[0]) || text[0] == '"' || text[0] == '\'' || text[0] == '.' ? CppTokenKind.Literal : CppTokenKind.Identifier, text);
-                i++;
-            }
-            else
-            {
-                pasted.Add(replaced[i]);
-            }
-        }
-
-        return pasted;
-    }
-
-    /// <summary>Whether the <c>(</c> at <paramref name="open"/> starts a cast to a primitive, and to which C# type.</summary>
+    /// <summary>Whether the <c>(</c> at <paramref name="open"/> starts a cast to a primitive, and to which C#
+    /// type.</summary>
     private bool TryCast(List<(CppTokenKind Kind, string Text)> tokens, int open, out string type, out int close)
     {
         type = "";
@@ -368,7 +452,9 @@ internal sealed class Macros
                 if (!operand) return false;
 
                 string spelled = words.ToString();
-                string? mapped = _keywordCasts.TryGetValue(spelled, out string? keyword) ? keyword : _typedefType(spelled);
+                string? mapped = _keywordCasts.TryGetValue(spelled, out string? keyword)
+                    ? keyword
+                    : _typedefType(spelled);
                 if (mapped is null) return false;
 
                 // A constant has no pointer-sized type in C#: a size_t cast makes a 64-bit one.
@@ -392,48 +478,6 @@ internal sealed class Macros
         return false;
     }
 
-    /// <summary>A C number literal as C# text with its kind, or null for one C# has no literal for (octal, a char).</summary>
-    private static (string Text, bool Unsigned, bool Long, bool Float, bool Double)? ParseNumber(string literal)
-    {
-        if (literal.Length == 0 || (!char.IsAsciiDigit(literal[0]) && literal[0] != '.')) return null;
-
-        bool hex = literal.StartsWith("0x", StringComparison.OrdinalIgnoreCase);
-        int end = literal.Length;
-        while (end > 0 && char.IsAsciiLetter(literal[end - 1]) && (!hex || !char.IsAsciiHexDigit(literal[end - 1]) || "uUlL".Contains(literal[end - 1], StringComparison.Ordinal)))
-        {
-            end--;
-        }
-
-        string digits = literal[..end];
-        string suffix = literal[end..].ToUpperInvariant();
-        bool floating = !hex && (digits.Contains('.', StringComparison.Ordinal) || digits.Contains('E', StringComparison.OrdinalIgnoreCase));
-        if (floating)
-        {
-            bool isFloat = string.Equals(suffix, "F", StringComparison.Ordinal);
-            return (digits + (isFloat ? "f" : ""), false, false, isFloat, !isFloat);
-        }
-
-        if (!hex && digits.Length > 1 && digits[0] == '0') return null;
-
-        bool isUnsigned = suffix.Contains('U', StringComparison.Ordinal);
-        bool isLong = suffix.Contains('L', StringComparison.Ordinal);
-
-        // As C types a literal with no suffix by its value: past int, a hexadecimal or octal one is unsigned, a decimal
-        // one is long; past that, long or unsigned long.
-        bool octal = !hex && digits.Length > 1 && digits[0] == '0';
-        if (ulong.TryParse(hex ? digits[2..] : digits, hex ? NumberStyles.AllowHexSpecifier : NumberStyles.None, CultureInfo.InvariantCulture, out ulong value) && value > int.MaxValue)
-        {
-            if ((hex || octal) && value <= uint.MaxValue)
-            {
-                isUnsigned = true;
-            }
-            else
-            {
-                isLong = true;
-                isUnsigned |= value > long.MaxValue;
-            }
-        }
-
-        return (digits + (isUnsigned ? "u" : "") + (isLong ? "L" : ""), isUnsigned, isLong, false, false);
-    }
+    /// <summary>A constant's C# type and expression.</summary>
+    internal sealed record Value(string Type, string Expression);
 }

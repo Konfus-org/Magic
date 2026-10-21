@@ -63,7 +63,12 @@ public static class Metrics
     /// </summary>
     internal static InstrumentAdvice<double> FrameBuckets { get; } = new()
     {
-        HistogramBucketBoundaries = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30, 0.05, 0.1, 0.25, 0.5, 1],
+        HistogramBucketBoundaries =
+        [
+            0.0001, 0.00025, 0.0005, 0.001, 0.002,
+            1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30,
+            0.05, 0.1, 0.25, 0.5, 1,
+        ],
     };
 
     /// <summary>

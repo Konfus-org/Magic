@@ -16,8 +16,8 @@ namespace Magic;
 /// <summary>
 /// Runs a project: opens it, makes its gems and its <see cref="World"/>, opens the project's entry point in the world,
 /// runs frames until something stops them, and ends the gems. That is all Core does; everything else is a gem. The
-/// frames run on two threads (<see cref="FrameLoop"/>), and are measured on the meter <c>Magic.Core</c>, which any gem can
-/// listen to.
+/// frames run on two threads (<see cref="FrameLoop"/>), and are measured on the meter <c>Magic.Core</c>, which any gem
+/// can listen to.
 /// </summary>
 public static class Engine
 {
@@ -63,8 +63,18 @@ public static class Engine
     /// again with at once when the run restarts (<see cref="Lifetime.Restart"/>), the command line with every setting
     /// as it is now, the world as it is and its frame clock, else null.
     /// </summary>
-    [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "The saved world is waited for once the run's threads have both ended: its main-thread part ran before they did, and the rest is written on a worker, which needs neither, so the wait cannot deadlock.")]
-    private static (Args Args, WorldState? State, double Seconds)? Run(FileSystem files, Project project, Args args, WorldState? state, double seconds)
+    [SuppressMessage(
+        "Usage",
+        "VSTHRD002:Avoid problematic synchronous waits",
+        Justification = "The saved world is waited for once the run's threads have both ended: "
+            + "its main-thread part ran before they did, and the rest is written on a worker, which needs neither, "
+            + "so the wait cannot deadlock.")]
+    private static (Args Args, WorldState? State, double Seconds)? Run(
+        FileSystem files,
+        Project project,
+        Args args,
+        WorldState? state,
+        double seconds)
     {
         using Lifetime lifetime = new();
         using Threads threads = new(lifetime);
@@ -125,8 +135,8 @@ public static class Engine
                     next = (settings.RestartArgs(), world.SaveAsync(null, CancellationToken.None), frames.Seconds);
                 }
 
-                // Still on the main thread: each gem ends what it owns of this thread's, the scripts among it, after the
-                // save took them and before the gems are disposed on the render thread.
+                // Still on the main thread: each gem ends what it owns of this thread's, the scripts among it, after
+                // the save took them and before the gems are disposed on the render thread.
                 frames.Stop();
             },
             () =>
@@ -149,7 +159,14 @@ public static class Engine
     /// loaded, <paramref name="assemblies"/>, is a service too: the gem that reads <c>.cs</c> files finds a script's
     /// class in it.
     /// </summary>
-    private static ServiceCollection CreateCoreServices(IFileSystem files, Lifetime lifetime, Threads threads, Events events, Project project, Args args, Assemblies assemblies)
+    private static ServiceCollection CreateCoreServices(
+        IFileSystem files,
+        Lifetime lifetime,
+        Threads threads,
+        Events events,
+        Project project,
+        Args args,
+        Assemblies assemblies)
     {
         ServiceCollection services = new();
         services.AddSingleton(assemblies);
@@ -159,7 +176,8 @@ public static class Engine
         services.AddSingleton(events);
         services.AddSingleton(project);
         services.AddSingleton(args);
-        services.AddSingleton(provider => new Settings(provider.GetRequiredService<Assets>(), files, events, project, args, lifetime));
+        services.AddSingleton(
+            provider => new Settings(provider.GetRequiredService<Assets>(), files, events, project, args, lifetime));
         services.AddSingleton(provider => new Caches(files, provider));
         services.AddSingleton(provider => new World(
             provider.GetService<IEcs>(),
@@ -174,11 +192,14 @@ public static class Engine
     }
 
     /// <summary>
-    /// Disposes the gems that are <see cref="IDisposable"/>, the last made first, so each ends before what it uses. A gem
-    /// that is an <see cref="ILogSink"/> is taken off the log first, once it has had every line logged before, so it can
-    /// close what it writes to.
+    /// Disposes the gems that are <see cref="IDisposable"/>, the last made first, so each ends before what it uses. A
+    /// gem that is an <see cref="ILogSink"/> is taken off the log first, once it has had every line logged before, so
+    /// it can close what it writes to.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever one gem throws while ending, the others still end.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever one gem throws while ending, the others still end.")]
     private static void DisposeGems(List<IGem> gems)
     {
         for (int i = gems.Count - 1; i >= 0; i--)

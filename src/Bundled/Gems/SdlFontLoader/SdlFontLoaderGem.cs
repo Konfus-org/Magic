@@ -1,17 +1,17 @@
 using System.Collections.Frozen;
 using System.Text.Json;
-using Magic.SdlBindings;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
+using Magic.SdlBindings;
 using Magic.Services;
 
 namespace Magic.SdlFontLoader;
 
 /// <summary>
-/// Reads fonts into <see cref="Font"/>s with SDL_ttf: every character of printable ASCII and Latin-1 the font has is drawn
-/// at the size its <c>.meta</c> asks for (<see cref="FontMeta"/>), and shelf-packed into one atlas. SDL_ttf shares state
-/// between its fonts, so files load one at a time.
+/// Reads fonts into <see cref="Font"/>s with SDL_ttf: every character of printable ASCII and Latin-1 the font has is
+/// drawn at the size its <c>.meta</c> asks for (<see cref="FontMeta"/>), and shelf-packed into one atlas. SDL_ttf
+/// shares state between its fonts, so files load one at a time.
 /// </summary>
 internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDisposable
 {
@@ -52,20 +52,13 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         }
     }
 
-    public ValueTask<Result<Font>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel)
+    public ValueTask<Result<Font>> LoadAsync(
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        JsonElement settings,
+        CancellationToken cancel)
     {
         return new(Load(bytes.Span, settings));
-    }
-
-    private Result<Font> Load(ReadOnlySpan<byte> bytes, JsonElement settings)
-    {
-        Result<FontMeta> meta = Json.Read<FontMeta>(settings);
-        if (!meta.Ok) return Result.Failure<Font>($"its .meta is not a font's: {meta.Error}");
-
-        lock (_loading)
-        {
-            return _stopped ? Result.Failure<Font>("the font loader has stopped.") : Draw(bytes, meta.Value.Size);
-        }
     }
 
     /// <summary>
@@ -105,8 +98,8 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     }
 
     /// <summary>
-    /// <paramref name="codepoint"/>'s image as tightly packed RGBA8 rows, white with its coverage in alpha, and where it
-    /// goes from the pen. A character that draws nothing, a space, has no pixels and still moves the pen.
+    /// <paramref name="codepoint"/>'s image as tightly packed RGBA8 rows, white with its coverage in alpha, and where
+    /// it goes from the pen. A character that draws nothing, a space, has no pixels and still moves the pen.
     /// </summary>
     private static Result<Drawn> DrawGlyph(TTF.Font* font, uint codepoint)
     {
@@ -134,7 +127,8 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         SDL.DestroySurface(image);
         if (rgba == null)
         {
-            return Result.Failure<Drawn>($"SDL could not convert U+{codepoint:X4} to RGBA8: {CString.Read(SDL.GetError())}");
+            return Result.Failure<Drawn>(
+                $"SDL could not convert U+{codepoint:X4} to RGBA8: {CString.Read(SDL.GetError())}");
         }
 
         int row = rgba->W * 4;
@@ -181,7 +175,8 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
                 glyph.Pixels.AsSpan(line * row, row).CopyTo(atlas.AsSpan((((y + line) * width) + x) * 4, row));
             }
 
-            glyphs[glyph.Codepoint] = new Glyph(x, y, glyph.Width, glyph.Height, glyph.BearingX, glyph.BearingY, glyph.Advance);
+            glyphs[glyph.Codepoint]
+                = new Glyph(x, y, glyph.Width, glyph.Height, glyph.BearingX, glyph.BearingY, glyph.Advance);
         }
 
         return new Font
@@ -225,8 +220,26 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         return true;
     }
 
+    private Result<Font> Load(ReadOnlySpan<byte> bytes, JsonElement settings)
+    {
+        Result<FontMeta> meta = Json.Read<FontMeta>(settings);
+        if (!meta.Ok) return Result.Failure<Font>($"its .meta is not a font's: {meta.Error}");
+
+        lock (_loading)
+        {
+            return _stopped ? Result.Failure<Font>("the font loader has stopped.") : Draw(bytes, meta.Value.Size);
+        }
+    }
+
     /// <summary>
     /// One character as SDL_ttf drew it, before it has a place in the atlas.
     /// </summary>
-    private readonly record struct Drawn(uint Codepoint, byte[] Pixels, int Width, int Height, int BearingX, int BearingY, int Advance);
+    private readonly record struct Drawn(
+        uint Codepoint,
+        byte[] Pixels,
+        int Width,
+        int Height,
+        int BearingX,
+        int BearingY,
+        int Advance);
 }

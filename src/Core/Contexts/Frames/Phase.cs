@@ -26,8 +26,8 @@ public enum Phase
 
     /// <summary>
     /// The one point where both engine threads hold still, once the render thread has finished the frame before:
-    /// swapping what LateUpdate prepared in for Render to read, and nothing more, as every gem waits on it. The settings
-    /// changed since the last frame are applied just before. Main thread.
+    /// swapping what LateUpdate prepared in for Render to read, and nothing more, as every gem waits on it. The
+    /// settings changed since the last frame are applied just before. Main thread.
     /// </summary>
     Sync,
 

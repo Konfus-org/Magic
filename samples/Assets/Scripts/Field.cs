@@ -9,22 +9,14 @@ namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
 /// Fills a square of ground around its entity with instances of a model and with point lights, spread evenly and the
-/// same way every run (the R2 sequence, Roberts 2018): a script a prefab attaches as
-/// <c>{ "id": 3314, "instances": 2000, "lights": 500, "model": { "id": 517 }, "material": { "id": 3322 } }</c>, to see many
-/// of each at once and measure what they cost. Each instance is a dynamic ball, resting on the ground at its size
-/// until something knocks it. They are its own, so they go when its entity does.
+/// same way every run (the R2 sequence, Roberts 2018): a script a prefab attaches as <c>{ "id": 3314, "instances":
+/// 2000, "lights": 500, "model": { "id": 517 }, "material": { "id": 3322 } }</c>, to see many of each at once and
+/// measure what they cost. Each instance is a dynamic ball, resting on the ground at its size until something knocks
+/// it. They are its own, so they go when its entity does.
 /// </summary>
 internal sealed class Field(Entity owner, World world) : IScript, IDisposable
 {
     private readonly List<Entity> _spawned = [];
-
-    public void Dispose()
-    {
-        foreach (Entity spawned in _spawned)
-        {
-            if (world.IsAlive(spawned)) world.Destroy(spawned);
-        }
-    }
 
     /// <summary>
     /// How many instances of <see cref="Model"/> it spawns.
@@ -45,6 +37,14 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
 
     public Handle<Material> Material { get; set; }
 
+    public void Dispose()
+    {
+        foreach (Entity spawned in _spawned)
+        {
+            if (world.IsAlive(spawned)) world.Destroy(spawned);
+        }
+    }
+
     /// <summary>
     /// Spawns everything around its entity.
     /// </summary>
@@ -58,7 +58,8 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
             float scale = 0.5f + GetSpread(i, 2);
             transforms[i] = new Transform
             {
-                Position = centre + new Vector3((GetSpread(i, 0) - 0.5f) * Size, scale, (GetSpread(i, 1) - 0.5f) * Size),
+                Position = centre
+                    + new Vector3((GetSpread(i, 0) - 0.5f) * Size, scale, (GetSpread(i, 1) - 0.5f) * Size),
                 Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, GetSpread(i, 3) * MathF.Tau),
                 Scale = new Vector3(scale),
             };
@@ -69,18 +70,29 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
         PointLight[] lights = new PointLight[Lights];
         for (int i = 0; i < Lights; i++)
         {
-            places[i] = new Transform { Position = centre + new Vector3((GetSpread(i + Instances, 0) - 0.5f) * Size, 1.5f + (GetSpread(i, 4) * 2), (GetSpread(i + Instances, 1) - 0.5f) * Size) };
-            lights[i] = new PointLight { Color = GetHueColor(GetSpread(i, 5)), Intensity = 50 + (GetSpread(i, 6) * 150), Range = 8 + (GetSpread(i, 7) * 6) };
+            places[i] = new Transform
+            {
+                Position = centre + new Vector3(
+                    (GetSpread(i + Instances, 0) - 0.5f) * Size,
+                    1.5f + (GetSpread(i, 4) * 2),
+                    (GetSpread(i + Instances, 1) - 0.5f) * Size)
+            };
+            lights[i] = new PointLight
+            {
+                Color = GetHueColor(GetSpread(i, 5)),
+                Intensity = 50 + (GetSpread(i, 6) * 150),
+                Range = 8 + (GetSpread(i, 7) * 6)
+            };
         }
 
-        _spawned.AddRange(world.Create<Transform, Renderer>(transforms, renderers));
+        _spawned.AddRange(world.Create(transforms, renderers));
         Physics body = new() { Motion = Motion.Dynamic, Shape = Shape.Sphere, Bounce = 0.3f };
         foreach (Entity instance in _spawned)
         {
             world.Set(instance, body);
         }
 
-        _spawned.AddRange(world.Create<Transform, PointLight>(places, lights));
+        _spawned.AddRange(world.Create(places, lights));
     }
 
     /// <summary>

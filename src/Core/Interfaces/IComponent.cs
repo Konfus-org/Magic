@@ -7,5 +7,8 @@ namespace Magic.Interfaces;
 /// ask for it, and what a file names by its type's name (<see cref="Services.Assemblies.Get{T}"/>), found in the code
 /// loaded, Core's, the project's and each gem's; so declaring it is all a gem or a game does.
 /// </summary>
-[SuppressMessage("Design", "CA1040:Avoid empty interfaces", Justification = "A marker the ECS's constraints name, which an attribute could not be.")]
+[SuppressMessage(
+    "Design",
+    "CA1040:Avoid empty interfaces",
+    Justification = "A marker the ECS's constraints name, which an attribute could not be.")]
 public interface IComponent;

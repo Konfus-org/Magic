@@ -18,11 +18,15 @@ public interface IAssetLoader<T>
     /// The asset in <paramref name="bytes"/>, the file at asset path <paramref name="path"/> (for its extension and for
     /// messages), or why it is not one, read with the import settings its <c>.meta</c> sidecar holds beside the id,
     /// <paramref name="settings"/>, which the loader reads as a type of its own
-    /// (<c>Json.Read&lt;TextureMeta&gt;(settings)</c>), so no loader handles the sidecar's format. A loader may load the
-    /// assets one is made from through <see cref="Assets"/>, as a prefab loads the prefabs it places: they are what it is
-    /// made from (<see cref="Assets.GetDependencies{T}"/>), so it is made again when one of them changes. The asset's
-    /// <see cref="IAsset{TSelf}.Handle"/> is left as it is: <see cref="Assets"/> gives it. On workers, for several files
-    /// at once.
+    /// (<c>Json.Read&lt;TextureMeta&gt;(settings)</c>), so no loader handles the sidecar's format. A loader may load
+    /// the assets one is made from through <see cref="Assets"/>, as a prefab loads the prefabs it places: they are what
+    /// it is made from (<see cref="Assets.GetDependencies{T}"/>), so it is made again when one of them changes. The
+    /// asset's <see cref="IAsset{TSelf}.Handle"/> is left as it is: <see cref="Assets"/> gives it. On workers, for
+    /// several files at once.
     /// </summary>
-    ValueTask<Result<T>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel);
+    ValueTask<Result<T>> LoadAsync(
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        JsonElement settings,
+        CancellationToken cancel);
 }

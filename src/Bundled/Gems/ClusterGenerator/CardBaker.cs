@@ -5,10 +5,10 @@ namespace Magic.ClusterGenerator;
 
 /// <summary>
 /// Draws a mesh's card views (<see cref="Card"/>) on the CPU: each of <see cref="Card.Views"/> turns about +Y, looking
-/// back at the mesh from that side, straight on (no perspective), into a cell of a <see cref="Card.Columns"/>-wide grid in
-/// two atlases <see cref="Card.Size"/> texels square. Each texel is drawn from four samples, for soft edges, and the colours
-/// of the texels the mesh covers are spread a few texels past its edge, so filtering at the edge reads the mesh rather
-/// than nothing.
+/// back at the mesh from that side, straight on (no perspective), into a cell of a <see cref="Card.Columns"/>-wide grid
+/// in two atlases <see cref="Card.Size"/> texels square. Each texel is drawn from four samples, for soft edges, and the
+/// colours of the texels the mesh covers are spread a few texels past its edge, so filtering at the edge reads the mesh
+/// rather than nothing.
 /// </summary>
 internal static class CardBaker
 {
@@ -29,8 +29,8 @@ internal static class CardBaker
 
     /// <summary>
     /// <paramref name="mesh"/>'s card: where it stands, half its side, and its two atlases as RGBA8 bytes, the surface
-    /// (material uv in red and green, how far behind the middle in blue, cover in alpha) and the normals (xyz * 0.5 + 0.5,
-    /// cover in alpha).
+    /// (material uv in red and green, how far behind the middle in blue, cover in alpha) and the normals (xyz * 0.5 +
+    /// 0.5, cover in alpha).
     /// </summary>
     internal static (Vector3 Centre, float Half, byte[] Surface, byte[] Normals) Bake(Mesh mesh)
     {
@@ -50,7 +50,12 @@ internal static class CardBaker
             raster.Clear();
             for (int t = 0; t + 2 < indices.Length; t += 3)
             {
-                raster.Draw(vertices[(int)indices[t]], vertices[(int)indices[t + 1]], vertices[(int)indices[t + 2]], right, forward);
+                raster.Draw(
+                    vertices[(int)indices[t]],
+                    vertices[(int)indices[t + 1]],
+                    vertices[(int)indices[t + 2]],
+                    right,
+                    forward);
             }
 
             raster.Resolve(view % Card.Columns * CellSize, view / Card.Columns * CellSize, surface, normals);
@@ -62,9 +67,11 @@ internal static class CardBaker
     }
 
     /// <summary>
-    /// Twice the signed area of the triangle <paramref name="a"/>, <paramref name="b"/>, <paramref name="c"/> on screen.
+    /// Twice the signed area of the triangle <paramref name="a"/>, <paramref name="b"/>, <paramref name="c"/> on
+    /// screen.
     /// </summary>
-    private static float EdgeFunction(Vector3 a, Vector3 b, Vector3 c) => ((b.X - a.X) * (c.Y - a.Y)) - ((b.Y - a.Y) * (c.X - a.X));
+    private static float EdgeFunction(Vector3 a, Vector3 b, Vector3 c)
+        => ((b.X - a.X) * (c.Y - a.Y)) - ((b.Y - a.Y) * (c.X - a.X));
 
     private static byte ToByte(float value) => (byte)Math.Clamp((int)MathF.Round(value * 255), 0, 255);
 
@@ -115,7 +122,8 @@ internal static class CardBaker
             {
                 int nx = x + dx;
                 int ny = y + dy;
-                bool inCell = nx >= 0 && ny >= 0 && nx < Card.Size && ny < Card.Size && nx / CellSize == x / CellSize && ny / CellSize == y / CellSize;
+                bool inCell = nx >= 0 && ny >= 0 && nx < Card.Size && ny < Card.Size && nx / CellSize == x / CellSize
+                    && ny / CellSize == y / CellSize;
                 if (!inCell || !filled[(ny * Card.Size) + nx]) continue;
 
                 int texel = ((ny * Card.Size) + nx) * 4;
@@ -129,9 +137,9 @@ internal static class CardBaker
     }
 
     /// <summary>
-    /// One view's samples: the nearest depth, uv and normal the mesh put at each, <see cref="Samples"/> a side per texel
-    /// of the view's cell, looking straight at the mesh from a side with its centre in the middle and its sphere filling
-    /// the cell.
+    /// One view's samples: the nearest depth, uv and normal the mesh put at each, <see cref="Samples"/> a side per
+    /// texel of the view's cell, looking straight at the mesh from a side with its centre in the middle and its sphere
+    /// filling the cell.
     /// </summary>
     private sealed class Raster(Vector3 centre, float half)
     {
@@ -150,8 +158,8 @@ internal static class CardBaker
         internal void Clear() => Array.Fill(_depths, float.PositiveInfinity);
 
         /// <summary>
-        /// The triangle, seen from the side <paramref name="right"/> and <paramref name="forward"/> give, into the samples
-        /// it covers where it is the nearest.
+        /// The triangle, seen from the side <paramref name="right"/> and <paramref name="forward"/> give, into the
+        /// samples it covers where it is the nearest.
         /// </summary>
         internal void Draw(in Vertex a, in Vertex b, in Vertex c, Vector3 right, Vector3 forward)
         {
@@ -188,8 +196,8 @@ internal static class CardBaker
 
         /// <summary>
         /// The view's cell at (<paramref name="cellX"/>, <paramref name="cellY"/>) of both atlases from the samples: a
-        /// texel's cover is the share of its samples the mesh is in, and its uv, normal and depth their mean over those,
-        /// the depth in half sides behind the middle, -1 to 1.
+        /// texel's cover is the share of its samples the mesh is in, and its uv, normal and depth their mean over
+        /// those, the depth in half sides behind the middle, -1 to 1.
         /// </summary>
         internal void Resolve(int cellX, int cellY, byte[] surface, byte[] normals)
         {

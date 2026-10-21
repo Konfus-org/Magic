@@ -6,12 +6,13 @@ namespace Magic.ClusterGenerator;
 /// <summary>
 /// Makes a model's <see cref="ClusterHierarchy"/>, after Karis, "Nanite: A Deep Dive" (SIGGRAPH 2021). The model's
 /// triangles are split into clusters, each of one material slot, grown greedily from triangle to neighbouring triangle
-/// so a cluster is compact and shares its vertices. Then, level after level, neighbouring clusters are grouped by how much
-/// border they share, each group is simplified to half its triangles with its border to the other groups kept where it
-/// is (<see cref="QuadricSimplifier.Reduce"/>), and split into clusters again. A group that can no longer simplify is
-/// drawn as it is from then on, so its border stays kept at every level after, and what is made beside it still meets
-/// it. A group's error is the most of what the simplification moved and what its clusters had, and its bounds enclose
-/// theirs, so neither ever shrinks from a level to the next, which is what lets a renderer pick each cluster alone.
+/// so a cluster is compact and shares its vertices. Then, level after level, neighbouring clusters are grouped by how
+/// much border they share, each group is simplified to half its triangles with its border to the other groups kept
+/// where it is (<see cref="QuadricSimplifier.Reduce"/>), and split into clusters again. A group that can no longer
+/// simplify is drawn as it is from then on, so its border stays kept at every level after, and what is made beside it
+/// still meets it. A group's error is the most of what the simplification moved and what its clusters had, and its
+/// bounds enclose theirs, so neither ever shrinks from a level to the next, which is what lets a renderer pick each
+/// cluster alone.
 /// </summary>
 internal static class ClusterBuilder
 {
@@ -59,7 +60,8 @@ internal static class ClusterBuilder
             for (int t = 0; t + 2 < source.Length; t += 3)
             {
                 (int a, int b, int c) = ((int)source[t], (int)source[t + 1], (int)source[t + 2]);
-                if (vertices[a].Position != vertices[b].Position && vertices[b].Position != vertices[c].Position && vertices[a].Position != vertices[c].Position)
+                if (vertices[a].Position != vertices[b].Position && vertices[b].Position != vertices[c].Position
+                    && vertices[a].Position != vertices[c].Position)
                 {
                     indices.Add(a);
                     indices.Add(b);
@@ -92,7 +94,11 @@ internal static class ClusterBuilder
             }
 
             List<Part>?[] made = new List<Part>?[groups.Count];
-            Parallel.For(0, groups.Count, new ParallelOptions { CancellationToken = cancel }, g => made[g] = Simplify(groups[g], borders[g], level + 1, step));
+            Parallel.For(
+                0,
+                groups.Count,
+                new ParallelOptions { CancellationToken = cancel },
+                g => made[g] = Simplify(groups[g], borders[g], level + 1, step));
             current = [];
             for (int g = 0; g < made.Length; g++)
             {
@@ -113,11 +119,37 @@ internal static class ClusterBuilder
     }
 
     /// <summary>
+    /// The sphere around <paramref name="vertices"/>: the middle of their box, out to the farthest.
+    /// </summary>
+    internal static Vector4 ComputeSphere(ReadOnlySpan<Vertex> vertices)
+    {
+        Vector3 min = new(float.MaxValue);
+        Vector3 max = new(float.MinValue);
+        foreach (Vertex vertex in vertices)
+        {
+            min = Vector3.Min(min, vertex.Position);
+            max = Vector3.Max(max, vertex.Position);
+        }
+
+        Vector3 centre = (min + max) / 2;
+        float radius = 0;
+        foreach (Vertex vertex in vertices)
+        {
+            radius = MathF.Max(radius, Vector3.Distance(centre, vertex.Position));
+        }
+
+        return new Vector4(centre, radius);
+    }
+
+    /// <summary>
     /// <paramref name="position"/> on the grid <paramref name="step"/> metres apart from the model's origin.
     /// </summary>
     private static Vector3 Snap(Vector3 position, float step)
     {
-        return new Vector3((float)(Math.Round(position.X / (double)step) * step), (float)(Math.Round(position.Y / (double)step) * step), (float)(Math.Round(position.Z / (double)step) * step));
+        return new Vector3(
+            (float)(Math.Round(position.X / (double)step) * step),
+            (float)(Math.Round(position.Y / (double)step) * step),
+            (float)(Math.Round(position.Z / (double)step) * step));
     }
 
     /// <summary>
@@ -143,10 +175,16 @@ internal static class ClusterBuilder
     /// <summary>
     /// Triangles split into clusters of one material slot each, at most <see cref="ClusterHierarchy.MaxTriangles"/>
     /// triangles and <see cref="ClusterHierarchy.MaxVertices"/> vertices. Each starts from the first triangle left in
-    /// Morton order and takes, next, the triangle beside it that brings the fewest new vertices, nearest its middle, so it
-    /// stays compact; when none is beside it, the next left in Morton order, which is near.
+    /// Morton order and takes, next, the triangle beside it that brings the fewest new vertices, nearest its middle, so
+    /// it stays compact; when none is beside it, the next left in Morton order, which is near.
     /// </summary>
-    private static List<Part> Split(Vertex[] vertices, int[] indices, int[] slots, int level, float error, Vector4? errorBounds)
+    private static List<Part> Split(
+        Vertex[] vertices,
+        int[] indices,
+        int[] slots,
+        int level,
+        float error,
+        Vector4? errorBounds)
     {
         Growth growth = new(vertices, indices, slots);
         List<Part> parts = [];
@@ -161,7 +199,15 @@ internal static class ClusterBuilder
     /// <summary>
     /// One cluster: the chosen triangles with their vertices numbered from 0 in the order they were met.
     /// </summary>
-    private static Part MakePart(Vertex[] vertices, int[] indices, List<int> chosen, Dictionary<int, int> local, int slot, int level, float error, Vector4? errorBounds)
+    private static Part MakePart(
+        Vertex[] vertices,
+        int[] indices,
+        List<int> chosen,
+        Dictionary<int, int> local,
+        int slot,
+        int level,
+        float error,
+        Vector4? errorBounds)
     {
         Vertex[] own = new Vertex[local.Count];
         foreach ((int vertex, int index) in local)
@@ -402,7 +448,8 @@ internal static class ClusterBuilder
         for (int t = 0; t + 2 < kept.Length; t += 3)
         {
             (int a, int b, int c) = ((int)kept[t], (int)kept[t + 1], (int)kept[t + 2]);
-            if (made[a].Position == made[b].Position || made[b].Position == made[c].Position || made[a].Position == made[c].Position)
+            if (made[a].Position == made[b].Position || made[b].Position == made[c].Position
+                || made[a].Position == made[c].Position)
             {
                 continue;
             }
@@ -446,30 +493,13 @@ internal static class ClusterBuilder
             indices.AddRange(part.Indices);
         }
 
-        return new ClusterHierarchy { Vertices = vertices.ToArray(), Indices = indices.ToArray(), Clusters = clusters, PositionStep = step };
-    }
-
-    /// <summary>
-    /// The sphere around <paramref name="vertices"/>: the middle of their box, out to the farthest.
-    /// </summary>
-    internal static Vector4 ComputeSphere(ReadOnlySpan<Vertex> vertices)
-    {
-        Vector3 min = new(float.MaxValue);
-        Vector3 max = new(float.MinValue);
-        foreach (Vertex vertex in vertices)
+        return new ClusterHierarchy
         {
-            min = Vector3.Min(min, vertex.Position);
-            max = Vector3.Max(max, vertex.Position);
-        }
-
-        Vector3 centre = (min + max) / 2;
-        float radius = 0;
-        foreach (Vertex vertex in vertices)
-        {
-            radius = MathF.Max(radius, Vector3.Distance(centre, vertex.Position));
-        }
-
-        return new Vector4(centre, radius);
+            Vertices = vertices.ToArray(),
+            Indices = indices.ToArray(),
+            Clusters = clusters,
+            PositionStep = step
+        };
     }
 
     /// <summary>
@@ -490,8 +520,8 @@ internal static class ClusterBuilder
     }
 
     /// <summary>
-    /// The indices of <paramref name="points"/> in Morton order: along a curve through their box that keeps what is near
-    /// in space near in the order.
+    /// The indices of <paramref name="points"/> in Morton order: along a curve through their box that keeps what is
+    /// near in space near in the order.
     /// </summary>
     private static int[] ComputeMortonOrder(Vector3[] points)
     {
@@ -557,8 +587,8 @@ internal static class ClusterBuilder
     /// <summary>
     /// Grows clusters over a mesh's triangles, one at a time: each starts at the first triangle left in Morton order
     /// and takes, of the triangles beside it in its material slot, the one adding the fewest new vertices and nearest
-    /// its middle, until it is full (<see cref="ClusterHierarchy.MaxTriangles"/>, <see cref="ClusterHierarchy.MaxVertices"/>)
-    /// or nothing beside it is left.
+    /// its middle, until it is full (<see cref="ClusterHierarchy.MaxTriangles"/>,
+    /// <see cref="ClusterHierarchy.MaxVertices"/>) or nothing beside it is left.
     /// </summary>
     private sealed class Growth
     {
@@ -680,7 +710,8 @@ internal static class ClusterBuilder
             for (int i = _cursor; i < _order.Length; i++)
             {
                 int triangle = _order[i];
-                if (!_taken[triangle] && _slots[triangle] == _slot && _local.Count + CountNewVertices(triangle) <= ClusterHierarchy.MaxVertices)
+                if (!_taken[triangle] && _slots[triangle] == _slot
+                    && _local.Count + CountNewVertices(triangle) <= ClusterHierarchy.MaxVertices)
                 {
                     return triangle;
                 }

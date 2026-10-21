@@ -23,7 +23,9 @@ public sealed class GpuComputePassTests
 
         pass.Dispatch(4, 2, 3);
 
-        Assert.Equal(new GpuCommand(GpuCommandType.Dispatch, GroupsX: 4, GroupsY: 2, GroupsZ: 3), commands.Commands[^1]);
+        Assert.Equal(
+            new GpuCommand(GpuCommandType.Dispatch, GroupsX: 4, GroupsY: 2, GroupsZ: 3),
+            commands.Commands[^1]);
     }
 
     [Fact]
@@ -35,7 +37,9 @@ public sealed class GpuComputePassTests
 
         pass.DispatchFromBuffer(arguments, 12);
 
-        Assert.Equal(new GpuCommand(GpuCommandType.DispatchFromBuffer, Buffer: arguments, Offset: 12), commands.Commands[^1]);
+        Assert.Equal(
+            new GpuCommand(GpuCommandType.DispatchFromBuffer, Buffer: arguments, Offset: 12),
+            commands.Commands[^1]);
     }
 
     [Fact]

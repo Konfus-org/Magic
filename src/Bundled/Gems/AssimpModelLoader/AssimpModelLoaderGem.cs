@@ -21,8 +21,11 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     /// What Assimp does to a file as it reads it. Normals are the file's, never made: a mesh without them is refused.
     /// Tangents are made only where the file has none.
     /// </summary>
-    private const Assimp.PostProcessSteps Steps = Assimp.PostProcessSteps.Triangulate | Assimp.PostProcessSteps.JoinIdenticalVertices
-        | Assimp.PostProcessSteps.CalcTangentSpace | Assimp.PostProcessSteps.FlipUVs | Assimp.PostProcessSteps.SortByPType
+    private const Assimp.PostProcessSteps Steps = Assimp.PostProcessSteps.Triangulate
+        | Assimp.PostProcessSteps.JoinIdenticalVertices
+        | Assimp.PostProcessSteps.CalcTangentSpace
+        | Assimp.PostProcessSteps.FlipUVs
+        | Assimp.PostProcessSteps.SortByPType
         | Assimp.PostProcessSteps.ImproveCacheLocality;
 
     /// <summary>
@@ -53,49 +56,13 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         }
     }
 
-    public ValueTask<Result<Model>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel)
+    public ValueTask<Result<Model>> LoadAsync(
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        JsonElement settings,
+        CancellationToken cancel)
     {
         return new(Load(path, bytes.Span, settings));
-    }
-
-    private Result<Model> Load(string path, ReadOnlySpan<byte> bytes, JsonElement settings)
-    {
-        Result<ModelMeta> meta = Json.Read<ModelMeta>(settings);
-        if (!meta.Ok) return Result.Failure<Model>($"its .meta is not a model's: {meta.Error}");
-
-        lock (_importing)
-        {
-            if (_stopped) return Result.Failure<Model>("the model loader has stopped.");
-
-            _running++;
-        }
-
-        try
-        {
-            return Import(path, bytes, meta.Value.Origin);
-        }
-        finally
-        {
-            lock (_importing)
-            {
-                _running--;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Stops the loader when no import is running, and lets none start after; false while one is.
-    /// </summary>
-    private bool TryStop()
-    {
-        lock (_importing)
-        {
-            if (_running > 0) return false;
-
-            _stopped = true;
-        }
-
-        return true;
     }
 
     private static Result<Model> Import(string path, ReadOnlySpan<byte> file, Vector3 origin)
@@ -111,7 +78,12 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
             fixed (byte* bytes = file)
             fixed (byte* hint = CString.ToBytes(format))
             {
-                scene = Assimp.ImportFileFromMemoryWithProperties(bytes, (uint)file.Length, (uint)Steps, hint, properties);
+                scene = Assimp.ImportFileFromMemoryWithProperties(
+                    bytes,
+                    (uint)file.Length,
+                    (uint)Steps,
+                    hint,
+                    properties);
             }
         }
         finally
@@ -136,7 +108,8 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
                 Assimp.Mesh* mesh = scene->MMeshes[i];
                 if (IsTriangles(mesh) && mesh->MNormals is null)
                 {
-                    return Result.Failure<Model>($"its mesh {CString.Read(mesh->MName.Data)} has no normals, which are imported, never made: export it with them.");
+                    return Result.Failure<Model>($"its mesh {CString.Read(mesh->MName.Data)} has no normals, "
+                        + "which are imported, never made: export it with them.");
                 }
             }
 
@@ -150,16 +123,24 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         }
     }
 
-    private static bool IsTriangles(Assimp.Mesh* mesh) => (mesh->MPrimitiveTypes & (uint)Assimp.PrimitiveType.Triangle) != 0;
+    private static bool IsTriangles(Assimp.Mesh* mesh)
+        => (mesh->MPrimitiveTypes & (uint)Assimp.PrimitiveType.Triangle) != 0;
 
     /// <summary>
     /// Bakes the triangle meshes of <paramref name="node"/> and those under it into <paramref name="meshes"/>, each
     /// with its node's transform under <paramref name="parent"/>.
     /// </summary>
-    private static void Walk(Assimp.Scene* scene, Assimp.Node* node, Matrix4x4 parent, Matrix4x4 toEngine, Vector3 origin, List<Mesh> meshes)
+    private static void Walk(
+        Assimp.Scene* scene,
+        Assimp.Node* node,
+        Matrix4x4 parent,
+        Matrix4x4 toEngine,
+        Vector3 origin,
+        List<Mesh> meshes)
     {
         // Assimp's matrices have the translation in the last column; transposed, they are System.Numerics' row vectors.
-        Matrix4x4 world = Matrix4x4.Transpose(Unsafe.BitCast<Assimp.Matrix4x4, Matrix4x4>(node->MTransformation)) * parent;
+        Matrix4x4 world = Matrix4x4.Transpose(Unsafe.BitCast<Assimp.Matrix4x4, Matrix4x4>(node->MTransformation))
+            * parent;
         for (uint i = 0; i < node->MNumMeshes; i++)
         {
             Assimp.Mesh* source = scene->MMeshes[node->MMeshes[i]];
@@ -179,8 +160,11 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     private static Mesh Bake(Assimp.Mesh* source, Matrix4x4 transform, Vector3 origin)
     {
         // Directions along the surface move with the transform; normals with its inverse transpose.
-        Matrix4x4 normals = Matrix4x4.Invert(transform, out Matrix4x4 inverse) ? Matrix4x4.Transpose(inverse) : transform;
-        // The texture coordinate channels are an array of pointers, read as one: an inline array of pointers has no indexer.
+        Matrix4x4 normals = Matrix4x4.Invert(transform, out Matrix4x4 inverse)
+            ? Matrix4x4.Transpose(inverse)
+            : transform;
+        // The texture coordinate channels are an array of pointers, read as one: an inline array of pointers has no
+        // indexer.
         Assimp.Vector3D* uvs = *(Assimp.Vector3D**)&source->MTextureCoords;
         bool hasTangents = source->MTangents is not null && source->MBitangents is not null;
         Vertex[] vertices = new Vertex[source->MNumVertices];
@@ -216,17 +200,22 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         }
 
         // A mesh naming a slot past the renderer's last is drawn with the last.
-        return new Mesh { Vertices = vertices, Indices = indices, MaterialSlot = Math.Min((int)source->MMaterialIndex, MaterialSlots.Capacity - 1) };
+        return new Mesh
+        {
+            Vertices = vertices,
+            Indices = indices,
+            MaterialSlot = Math.Min((int)source->MMaterialIndex, MaterialSlots.Capacity - 1)
+        };
     }
 
     private static Vector3 ToVector3(Assimp.Vector3D vector) => Unsafe.BitCast<Assimp.Vector3D, Vector3>(vector);
 
     /// <summary>
-    /// What Assimp hands over, to the engine's frame. glTF and OBJ come right-handed, in metres, +Y up, the front at +Z.
-    /// An FBX comes in its own unit and axes, untouched, and names them: its unit in centimetres (UnitScaleFactor) and
-    /// which of its axes, and which way, are right, up and front. Those are turned into metres and that same frame, so
-    /// a model exported from Blender is its size there whatever the export's scale and axes. Then an X mirror takes the
-    /// right-handed frame to the engine's left-handed one, the front staying at +Z.
+    /// What Assimp hands over, to the engine's frame. glTF and OBJ come right-handed, in metres, +Y up, the front at
+    /// +Z. An FBX comes in its own unit and axes, untouched, and names them: its unit in centimetres (UnitScaleFactor)
+    /// and which of its axes, and which way, are right, up and front. Those are turned into metres and that same frame,
+    /// so a model exported from Blender is its size there whatever the export's scale and axes. Then an X mirror takes
+    /// the right-handed frame to the engine's left-handed one, the front staying at +Z.
     /// </summary>
     private static Matrix4x4 ToEngine(Assimp.Scene* scene, string format)
     {
@@ -287,5 +276,45 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         }
 
         return fallback;
+    }
+
+    private Result<Model> Load(string path, ReadOnlySpan<byte> bytes, JsonElement settings)
+    {
+        Result<ModelMeta> meta = Json.Read<ModelMeta>(settings);
+        if (!meta.Ok) return Result.Failure<Model>($"its .meta is not a model's: {meta.Error}");
+
+        lock (_importing)
+        {
+            if (_stopped) return Result.Failure<Model>("the model loader has stopped.");
+
+            _running++;
+        }
+
+        try
+        {
+            return Import(path, bytes, meta.Value.Origin);
+        }
+        finally
+        {
+            lock (_importing)
+            {
+                _running--;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Stops the loader when no import is running, and lets none start after; false while one is.
+    /// </summary>
+    private bool TryStop()
+    {
+        lock (_importing)
+        {
+            if (_running > 0) return false;
+
+            _stopped = true;
+        }
+
+        return true;
     }
 }

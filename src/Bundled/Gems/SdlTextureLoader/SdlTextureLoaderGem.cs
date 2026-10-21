@@ -1,22 +1,26 @@
 using System.Numerics;
 using System.Text.Json;
-using Magic.SdlBindings;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
+using Magic.SdlBindings;
 using Magic.Services;
 
 namespace Magic.SdlTextureLoader;
 
 /// <summary>
 /// Reads images into <see cref="Texture"/>s with SDL_image: whatever it decodes, converted to RGBA8, with the mip chain
-/// made by halving each level with SDL's linear scaling, as the <c>.meta</c> asks (<see cref="TextureMeta"/>). SDL_image
-/// needs no SDL started, so files load on any worker, several at once.
+/// made by halving each level with SDL's linear scaling, as the <c>.meta</c> asks (<see cref="TextureMeta"/>).
+/// SDL_image needs no SDL started, so files load on any worker, several at once.
 /// </summary>
 internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
 {
-    public ValueTask<Result<Texture>> LoadAsync(string path, ReadOnlyMemory<byte> bytes, JsonElement settings, CancellationToken cancel)
+    public ValueTask<Result<Texture>> LoadAsync(
+        string path,
+        ReadOnlyMemory<byte> bytes,
+        JsonElement settings,
+        CancellationToken cancel)
     {
         return new(Load(path, bytes.Span, settings));
     }
@@ -71,8 +75,8 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
     }
 
     /// <summary>
-    /// <paramref name="level0"/> as a texture, with the levels below it when <paramref name="meta"/> asks for mips, each
-    /// half the one above, all in one array.
+    /// <paramref name="level0"/> as a texture, with the levels below it when <paramref name="meta"/> asks for mips,
+    /// each half the one above, all in one array.
     /// </summary>
     private static Result<Texture> MakeMips(SDL.Surface* level0, TextureMeta meta)
     {
@@ -110,7 +114,9 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
         {
             Width = level0->W,
             Height = level0->H,
-            Format = meta.Usage is TextureUsage.Normal or TextureUsage.Mask ? GpuFormat.Rgba8Unorm : GpuFormat.Rgba8Srgb,
+            Format = meta.Usage is TextureUsage.Normal or TextureUsage.Mask
+                ? GpuFormat.Rgba8Unorm
+                : GpuFormat.Rgba8Srgb,
             Pixels = pixels,
             Levels = levels,
             Filter = meta.Filter,

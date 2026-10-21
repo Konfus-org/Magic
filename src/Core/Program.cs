@@ -14,10 +14,14 @@ namespace Magic;
 /// </summary>
 internal static class Program
 {
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "A crash goes to Debugging.Critical, which writes a crash file and ends the process.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "A crash goes to Debugging.Critical, which writes a crash file and ends the process.")]
     private static async Task<int> Main(string[] rawArgs)
     {
-        AppDomain.CurrentDomain.UnhandledException += static (_, e) => Debugging.Critical($"Magic crashed: {e.ExceptionObject}");
+        AppDomain.CurrentDomain.UnhandledException += static (_, e) => Debugging.Critical(
+            $"Magic crashed: {e.ExceptionObject}");
 
         // Configure default cmd line args and parser.
         Option<string> project = new("--project")
@@ -31,11 +35,13 @@ internal static class Program
         };
         Option<bool> headless = new("--headless")
         {
-            Description = "The run has no window: Ctrl+C stops it cleanly, ending its gems, instead of ending the process at once.",
+            Description = "The run has no window: Ctrl+C stops it cleanly, ending its gems, "
+                + "instead of ending the process at once.",
         };
         Option<string[]> settings = new("--set")
         {
-            Description = "Overrides a gem setting from the presets, as many times as needed. The value is JSON, or a string when it is not valid JSON.",
+            Description = "Overrides a gem setting from the presets, as many times as needed. The value is JSON, "
+                + "or a string when it is not valid JSON.",
             HelpName = "Gem.setting=value",
         };
         settings.Validators.Add(static result =>
@@ -47,7 +53,8 @@ internal static class Program
         });
         Option<string> preset = new("--preset")
         {
-            Description = "Applies the preset Presets/<name>.preset over the default one, the project's settings, under --set.",
+            Description
+                = "Applies the preset Presets/<name>.preset over the default one, the project's settings, under --set.",
             HelpName = "name",
         };
         Option<bool> failOnError = new("--fail-on-error")
@@ -58,7 +65,14 @@ internal static class Program
         {
             Description = "Also log Verbose lines: detail that is usually noise.",
         };
-        RootCommand command = new("Magic runs a project and its gems.") { project, frames, headless, settings, preset, failOnError, verbose };
+        RootCommand command = new("Magic runs a project and its gems.") {
+            project,
+            frames,
+            headless,
+            settings,
+            preset,
+            failOnError,
+            verbose };
 
         // Help, version and bad arguments are answered here and exit.
         ParseResult parsed = command.Parse(rawArgs);
@@ -78,8 +92,8 @@ internal static class Program
             Preset = parsed.GetValue(preset) ?? string.Empty,
         };
 
-        // Nothing is awaited before the engine runs, so it runs on the process's first thread, which the OS ties windows
-        // and their events to: the render thread.
+        // Nothing is awaited before the engine runs, so it runs on the process's first thread, which the OS ties
+        // windows and their events to: the render thread.
         try
         {
             if (!Engine.Run(args)) return 1;

@@ -2,12 +2,12 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Drawing;
 using System.Numerics;
-using Magic.SdlBindings;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
+using Magic.SdlBindings;
 using Magic.Services;
 
 namespace Magic.SdlGpu;
@@ -37,8 +37,24 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private const uint InitialStagingBytes = 1024 * 1024;
 
     private static readonly Meter _meter = new("Magic.Gems.SdlGpu");
-    private static readonly Counter<long> _staged = _meter.CreateCounter<long>("magic.gems.sdl_gpu.upload.size", "By", "Bytes staged to upload to the GPU.");
-    private static readonly Histogram<double> _acquireWait = _meter.CreateHistogram("magic.gems.sdl_gpu.present.acquire.duration", "s", "How long the render thread waited for a window's next image: the time vsync holds the frame.", tags: null, advice: new InstrumentAdvice<double> { HistogramBucketBoundaries = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30, 0.05, 0.1, 0.25, 0.5, 1] });
+    private static readonly Counter<long> _staged = _meter.CreateCounter<long>(
+        "magic.gems.sdl_gpu.upload.size",
+        "By",
+        "Bytes staged to upload to the GPU.");
+    private static readonly Histogram<double> _acquireWait = _meter.CreateHistogram(
+        "magic.gems.sdl_gpu.present.acquire.duration",
+        "s",
+        "How long the render thread waited for a window's next image: the time vsync holds the frame.",
+        tags: null,
+        advice: new InstrumentAdvice<double>
+        {
+            HistogramBucketBoundaries =
+            [
+                0.0001, 0.00025, 0.0005, 0.001, 0.002,
+                1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30,
+                0.05, 0.1, 0.25, 0.5, 1,
+            ],
+        });
 
     private readonly SdlGpuSettings _settings;
     private readonly Threads _threads;
@@ -77,12 +93,6 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private readonly Dictionary<uint, GpuTexture> _windows = [];
 
     /// <summary>
-    /// Whether the windows present on the display's refresh, as the settings said when they were last followed.
-    /// </summary>
-    private bool _vsyncPresenting;
-    private Composition _composing;
-
-    /// <summary>
     /// The images of the window targets this frame has drawn into, by texture id: 0 for a window with none.
     /// </summary>
     private readonly Dictionary<uint, nint> _images = [];
@@ -96,6 +106,12 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// The captures this frame has begun.
     /// </summary>
     private readonly List<Capture> _capturing = [];
+
+    /// <summary>
+    /// Whether the windows present on the display's refresh, as the settings said when they were last followed.
+    /// </summary>
+    private bool _vsyncPresenting;
+    private Composition _composing;
 
     /// <summary>
     /// Where uploads are written until the next submit's copy pass moves them: mapped on the first upload of a frame,
@@ -135,14 +151,16 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         // made first, the platform is disposed last, once the GPU has let its windows go.
         if (!IsSdlStarted())
         {
-            throw new InvalidOperationException("SdlGpu draws through the SDL a platform gem starts: list that gem before it in the project.");
+            throw new InvalidOperationException(
+                "SdlGpu draws through the SDL a platform gem starts: list that gem before it in the project.");
         }
 
         // SDL opens a GPU only with its video subsystem up, which a headless platform leaves down. SDL counts each
         // subsystem's starts, so this one is undone in Dispose, before the platform quits SDL.
         if (!SDL.InitSubSystem(SDL.InitVideo))
         {
-            throw new InvalidOperationException($"SDL could not start its video subsystem for the GPU: {CString.Read(SDL.GetError())}");
+            throw new InvalidOperationException(
+                $"SDL could not start its video subsystem for the GPU: {CString.Read(SDL.GetError())}");
         }
 
         SDL.GPUVulkanOptions vulkan = new() { VulkanApiVersion = Vulkan11 };
@@ -177,13 +195,27 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         string name;
         fixed (byte* unnamed = "an unnamed GPU"u8)
         {
-            name = CString.Read(SDL.GetStringProperty(SDL.GetGPUDeviceProperties(_device), SDL.PropGpuDeviceNameString, unnamed));
+            name = CString.Read(
+                SDL.GetStringProperty(SDL.GetGPUDeviceProperties(_device), SDL.PropGpuDeviceNameString, unnamed));
         }
 
         Name = $"{name} ({CString.Read(SDL.GetGPUDeviceDriver(_device))})";
         SDL.SetGPUAllowedFramesInFlight(_device, FramesInFlight);
         _staging = CreateTransferBuffer(SDL.GPUTransferBufferUsage.Upload, _stagingCapacity);
         Debugging.Info($"GPU: {Name}, shaders {ShaderFormat}, validation {settings.Validation}");
+    }
+
+    public string Name { get; }
+
+    public GpuShaderFormat ShaderFormat { get; }
+
+    public GpuCommands Commands
+    {
+        get
+        {
+            ThrowIfNotRender();
+            return _commands;
+        }
     }
 
     public void Dispose()
@@ -237,19 +269,6 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.QuitSubSystem(SDL.InitVideo);
     }
 
-    public string Name { get; }
-
-    public GpuShaderFormat ShaderFormat { get; }
-
-    public GpuCommands Commands
-    {
-        get
-        {
-            ThrowIfNotRender();
-            return _commands;
-        }
-    }
-
     /// <summary>
     /// Render runs from the last gem made to the first, so every gem that takes this one has recorded by now.
     /// </summary>
@@ -290,7 +309,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         }
 
         uint depth = description.Kind == GpuTextureKind.Texture3D ? description.Layers : 1;
-        return new GpuTexture(_textures.Add(new TextureObject((nint)texture, description.Format, description.Width, description.Height, depth)));
+        return new GpuTexture(_textures.Add(
+            new TextureObject((nint)texture, description.Format, description.Width, description.Height, depth)));
     }
 
     public GpuTexture GetWindowTarget(IWindow window)
@@ -303,11 +323,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.Window* native = window.Id == 0 ? null : SDL.GetWindowFromID(window.Id);
         if (window.Id != 0 && native == null)
         {
-            throw new InvalidOperationException($"SDL knows no window {window.Id}: it must be the platform gem's, in the SDL this gem shares.");
+            throw new InvalidOperationException(
+                $"SDL knows no window {window.Id}: it must be the platform gem's, in the SDL this gem shares.");
         }
 
         GpuFormat format = native == null ? GpuFormat.Invalid : Claim(native, window.Id);
-        target = new GpuTexture(_textures.Add(new TextureObject(0, format, 0, 0, 1, new WindowObject((nint)native, window.Id))));
+        target = new GpuTexture(
+            _textures.Add(new TextureObject(0, format, 0, 0, 1, new WindowObject((nint)native, window.Id))));
         _windows[window.Id] = target;
         return target;
     }
@@ -363,17 +385,20 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.GPUShader* vertex = CreateShader(description.Vertex);
         if (vertex == null)
         {
-            return Result.Failure<GpuPipeline>($"The GPU would not make the vertex shader: {CString.Read(SDL.GetError())}");
+            return Result.Failure<GpuPipeline>(
+                $"The GPU would not make the vertex shader: {CString.Read(SDL.GetError())}");
         }
 
         SDL.GPUShader* fragment = CreateShader(description.Fragment);
         if (fragment == null)
         {
             SDL.ReleaseGPUShader(_device, vertex);
-            return Result.Failure<GpuPipeline>($"The GPU would not make the fragment shader: {CString.Read(SDL.GetError())}");
+            return Result.Failure<GpuPipeline>(
+                $"The GPU would not make the fragment shader: {CString.Read(SDL.GetError())}");
         }
 
-        SDL.GPUVertexBufferDescription* buffers = stackalloc SDL.GPUVertexBufferDescription[description.VertexBuffers.Count];
+        SDL.GPUVertexBufferDescription* buffers =
+            stackalloc SDL.GPUVertexBufferDescription[description.VertexBuffers.Count];
         for (int i = 0; i < description.VertexBuffers.Count; i++)
         {
             GpuVertexBuffer buffer = description.VertexBuffers[i];
@@ -389,14 +414,25 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         for (int i = 0; i < description.VertexInputs.Count; i++)
         {
             GpuVertexInput input = description.VertexInputs[i];
-            inputs[i] = new SDL.GPUVertexAttribute { Location = input.Location, BufferSlot = input.Slot, Format = input.Format.ToSdl(), Offset = input.Offset };
+            inputs[i] = new SDL.GPUVertexAttribute
+            {
+                Location = input.Location,
+                BufferSlot = input.Slot,
+                Format = input.Format.ToSdl(),
+                Offset = input.Offset
+            };
         }
 
-        SDL.GPUColorTargetDescription* colors = stackalloc SDL.GPUColorTargetDescription[description.ColorFormats.Count];
+        SDL.GPUColorTargetDescription* colors =
+            stackalloc SDL.GPUColorTargetDescription[description.ColorFormats.Count];
         for (int i = 0; i < description.ColorFormats.Count; i++)
         {
             GpuBlend blend = i < description.Blends.Count ? description.Blends[i] : GpuBlend.None;
-            colors[i] = new SDL.GPUColorTargetDescription { Format = description.ColorFormats[i].ToSdl(), BlendState = blend.ToSdl() };
+            colors[i] = new SDL.GPUColorTargetDescription
+            {
+                Format = description.ColorFormats[i].ToSdl(),
+                BlendState = blend.ToSdl()
+            };
         }
 
         bool hasDepth = description.DepthFormat != GpuFormat.Invalid;
@@ -444,7 +480,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.ReleaseGPUShader(_device, fragment);
         return pipeline == null
             ? Result.Failure<GpuPipeline>($"The GPU would not make the pipeline: {error}")
-            : Result.Success(new GpuPipeline(_pipelines.Add(new PipelineObject((nint)pipeline, Kind.GraphicsPipeline))));
+            : Result.Success(
+                new GpuPipeline(_pipelines.Add(new PipelineObject((nint)pipeline, Kind.GraphicsPipeline))));
     }
 
     public Result<GpuPipeline> CreatePipeline(GpuShader compute)
@@ -473,8 +510,10 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             };
             SDL.GPUComputePipeline* pipeline = SDL.CreateGPUComputePipeline(_device, &info);
             return pipeline == null
-                ? Result.Failure<GpuPipeline>($"The GPU would not make the compute pipeline: {CString.Read(SDL.GetError())}")
-                : Result.Success(new GpuPipeline(_pipelines.Add(new PipelineObject((nint)pipeline, Kind.ComputePipeline))));
+                ? Result.Failure<GpuPipeline>(
+                    $"The GPU would not make the compute pipeline: {CString.Read(SDL.GetError())}")
+                : Result.Success(
+                    new GpuPipeline(_pipelines.Add(new PipelineObject((nint)pipeline, Kind.ComputePipeline))));
         }
     }
 
@@ -562,7 +601,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         TextureObject stored = _textures[texture.Id];
         if (stored.Handle == 0)
         {
-            return Result.Failure<byte[]>($"Texture {texture.Id} is not one the GPU made, or is a window's, whose image cannot be read: draw into a texture of your own and read that.");
+            return Result.Failure<byte[]>($"Texture {texture.Id} is not one the GPU made, or is a window's, "
+                + "whose image cannot be read: draw into a texture of your own and read that.");
         }
 
         uint bytes = SDL.CalculateGPUTextureFormatSize(stored.Format.ToSdl(), stored.Width, stored.Height, 1);
@@ -579,12 +619,15 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         TextureObject stored = _textures[window.Id];
         if (stored.Window is not { Native: not 0 })
         {
-            return Task.FromResult(Result.Failure<GpuImage>($"Texture {window.Id} is no window's, or its window never has an image (headless)."));
+            return Task.FromResult(Result.Failure<GpuImage>(
+                $"Texture {window.Id} is no window's, or its window never has an image (headless)."));
         }
 
-        if (stored.Format is not (GpuFormat.Rgba8Unorm or GpuFormat.Rgba8Srgb or GpuFormat.Bgra8Unorm or GpuFormat.Bgra8Srgb))
+        if (stored.Format is not (GpuFormat.Rgba8Unorm or GpuFormat.Rgba8Srgb
+            or GpuFormat.Bgra8Unorm or GpuFormat.Bgra8Srgb))
         {
-            return Task.FromResult(Result.Failure<GpuImage>($"The window's images are {stored.Format}, which is not read back."));
+            return Task.FromResult(
+                Result.Failure<GpuImage>($"The window's images are {stored.Format}, which is not read back."));
         }
 
         if (!_captures.TryGetValue(window.Id, out TaskCompletionSource<Result<GpuImage>>? capture))
@@ -596,7 +639,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         return capture.Task;
     }
 
-    private static InvalidOperationException MakeFailure(string what) => new($"The GPU could not make {what}: {CString.Read(SDL.GetError())}");
+    private static InvalidOperationException MakeFailure(string what)
+        => new($"The GPU could not make {what}: {CString.Read(SDL.GetError())}");
 
     /// <summary>
     /// Whether SDL is loaded and started, as the platform gem starts it: its events are up, whatever else is.
@@ -614,13 +658,65 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     }
 
     /// <summary>
+    /// Records, in a copy pass of its own, the download of <paramref name="texture"/>'s first level,
+    /// <paramref name="width"/> x <paramref name="height"/>, into <paramref name="transfer"/>: the bytes are there once
+    /// the command buffer is done.
+    /// </summary>
+    private static void DownloadTexture(
+        SDL.GPUCommandBuffer* commandBuffer,
+        nint texture,
+        uint width,
+        uint height,
+        SDL.GPUTransferBuffer* transfer)
+    {
+        SDL.GPUCopyPass* copyPass = SDL.BeginGPUCopyPass(commandBuffer);
+        SDL.GPUTextureRegion source = new() { Texture = (SDL.GPUTexture*)texture, W = width, H = height, D = 1 };
+        SDL.GPUTextureTransferInfo destination = new()
+        {
+            TransferBuffer = transfer,
+            PixelsPerRow = width,
+            RowsPerLayer = height
+        };
+        SDL.DownloadFromGPUTexture(copyPass, &source, &destination);
+        SDL.EndGPUCopyPass(copyPass);
+    }
+
+    /// <summary>
+    /// The window's image this frame, and its size; null when it has none (minimised).
+    /// </summary>
+    private static SDL.GPUTexture* Acquire(
+        SDL.GPUCommandBuffer* commandBuffer,
+        WindowObject window,
+        uint* width,
+        uint* height)
+    {
+        SDL.GPUTexture* image = null;
+        long start = Stopwatch.GetTimestamp();
+        bool isAcquired = SDL.WaitAndAcquireGPUSwapchainTexture(
+            commandBuffer,
+            (SDL.Window*)window.Native,
+            &image,
+            width,
+            height);
+        _acquireWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+        if (!isAcquired)
+        {
+            Debugging.Warn($"Window {window.Id}'s image was not acquired: {CString.Read(SDL.GetError())}");
+            return null;
+        }
+
+        return image;
+    }
+
+    /// <summary>
     /// SDL ties a window and the command buffers that draw into it to the thread that made them: the render thread.
     /// </summary>
     private void ThrowIfNotRender()
     {
         if (!_threads.IsCurrent(EngineThread.Render))
         {
-            throw new InvalidOperationException("The GPU is the render thread's: use it in Render, or hand the work to the render thread (Threads.InvokeAsync).");
+            throw new InvalidOperationException("The GPU is the render thread's: use it in Render, "
+                + "or hand the work to the render thread (Threads.InvokeAsync).");
         }
     }
 
@@ -669,8 +765,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     }
 
     /// <summary>
-    /// Copies each capture begun this frame into its window's image, which the frame then shows, and downloads it. After
-    /// every command, so outside any pass.
+    /// Copies each capture begun this frame into its window's image, which the frame then shows, and downloads it.
+    /// After every command, so outside any pass.
     /// </summary>
     private void CopyCaptures(SDL.GPUCommandBuffer* commandBuffer)
     {
@@ -679,13 +775,25 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             Capture capture = _capturing[i];
             SDL.GPUBlitInfo blit = new()
             {
-                Source = new SDL.GPUBlitRegion { Texture = (SDL.GPUTexture*)capture.Copy, W = capture.Width, H = capture.Height },
-                Destination = new SDL.GPUBlitRegion { Texture = (SDL.GPUTexture*)capture.Image, W = capture.Width, H = capture.Height },
+                Source = new SDL.GPUBlitRegion
+                {
+                    Texture = (SDL.GPUTexture*)capture.Copy,
+                    W = capture.Width,
+                    H = capture.Height
+                },
+                Destination = new SDL.GPUBlitRegion
+                {
+                    Texture = (SDL.GPUTexture*)capture.Image,
+                    W = capture.Width,
+                    H = capture.Height
+                },
                 LoadOp = SDL.GPULoadOp.DontCare,
                 Filter = SDL.GPUFilter.Nearest,
             };
             SDL.BlitGPUTexture(commandBuffer, &blit);
-            SDL.GPUTransferBuffer* transfer = CreateTransferBuffer(SDL.GPUTransferBufferUsage.Download, capture.Width * capture.Height * 4);
+            SDL.GPUTransferBuffer* transfer = CreateTransferBuffer(
+                SDL.GPUTransferBufferUsage.Download,
+                capture.Width * capture.Height * 4);
             DownloadTexture(commandBuffer, capture.Copy, capture.Width, capture.Height, transfer);
             _capturing[i] = capture with { Transfer = (nint)transfer };
         }
@@ -701,7 +809,9 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         bool isDone = fence != null && SDL.WaitForGPUFences(_device, waitAll: true, &fence, 1);
         foreach (Capture capture in _capturing)
         {
-            capture.Done.SetResult(isDone ? TryReadPixels(capture) : Result.Failure<GpuImage>($"The frame it was in never finished: {CString.Read(SDL.GetError())}"));
+            capture.Done.SetResult(isDone
+                ? TryReadPixels(capture)
+                : Result.Failure<GpuImage>($"The frame it was in never finished: {CString.Read(SDL.GetError())}"));
             SDL.ReleaseGPUTransferBuffer(_device, (SDL.GPUTransferBuffer*)capture.Transfer);
             SDL.ReleaseGPUTexture(_device, (SDL.GPUTexture*)capture.Copy);
         }
@@ -859,7 +969,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
             if (!SDL.ClaimWindowForGPUDevice(_device, window))
             {
-                throw new InvalidOperationException($"The GPU cannot draw into window {id}: {CString.Read(SDL.GetError())}");
+                throw new InvalidOperationException(
+                    $"The GPU cannot draw into window {id}: {CString.Read(SDL.GetError())}");
             }
         }
 
@@ -867,8 +978,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     }
 
     /// <summary>
-    /// Presents <paramref name="window"/>, number <paramref name="id"/>, as the settings ask, composed and timed so, and
-    /// returns its images' format; when SDL refuses, it presents as SDL chose, which is warned about.
+    /// Presents <paramref name="window"/>, number <paramref name="id"/>, as the settings ask, composed and timed so,
+    /// and returns its images' format; when SDL refuses, it presents as SDL chose, which is warned about.
     /// </summary>
     private GpuFormat ApplySwapchain(SDL.Window* window, uint id)
     {
@@ -876,7 +987,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.GPUSwapchainComposition composition = GetComposition(window, id);
         if (!SDL.SetGPUSwapchainParameters(_device, window, composition, present))
         {
-            Debugging.Warn($"Window {id} presents as SDL chose, not {composition} with {present}: {CString.Read(SDL.GetError())}");
+            Debugging.Warn(
+                $"Window {id} presents as SDL chose, not {composition} with {present}: {CString.Read(SDL.GetError())}");
         }
 
         GpuFormat format = SDL.GetGPUSwapchainTextureFormat(_device, window).ToMagic();
@@ -891,7 +1003,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private SDL.GPUSwapchainComposition GetComposition(SDL.Window* window, uint id)
     {
         SDL.GPUSwapchainComposition asked = _settings.Composition.ToSdl();
-        if (asked == SDL.GPUSwapchainComposition.Sdr || SDL.WindowSupportsGPUSwapchainComposition(_device, window, asked))
+        if (asked == SDL.GPUSwapchainComposition.Sdr
+            || SDL.WindowSupportsGPUSwapchainComposition(_device, window, asked))
         {
             return asked;
         }
@@ -908,7 +1021,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         if (_settings.Vsync) return SDL.GPUPresentMode.Vsync;
 
-        return SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Immediate) ? SDL.GPUPresentMode.Immediate
+        return SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Immediate)
+            ? SDL.GPUPresentMode.Immediate
             : SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Mailbox) ? SDL.GPUPresentMode.Mailbox
             : SDL.GPUPresentMode.Vsync;
     }
@@ -943,20 +1057,6 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.GPUTransferBufferCreateInfo info = new() { Usage = usage, Size = bytes };
         SDL.GPUTransferBuffer* transfer = SDL.CreateGPUTransferBuffer(_device, &info);
         return transfer == null ? throw MakeFailure($"a {bytes}-byte transfer buffer") : transfer;
-    }
-
-    /// <summary>
-    /// Records, in a copy pass of its own, the download of <paramref name="texture"/>'s first level,
-    /// <paramref name="width"/> x <paramref name="height"/>, into <paramref name="transfer"/>: the bytes are there once
-    /// the command buffer is done.
-    /// </summary>
-    private static void DownloadTexture(SDL.GPUCommandBuffer* commandBuffer, nint texture, uint width, uint height, SDL.GPUTransferBuffer* transfer)
-    {
-        SDL.GPUCopyPass* copyPass = SDL.BeginGPUCopyPass(commandBuffer);
-        SDL.GPUTextureRegion source = new() { Texture = (SDL.GPUTexture*)texture, W = width, H = height, D = 1 };
-        SDL.GPUTextureTransferInfo destination = new() { TransferBuffer = transfer, PixelsPerRow = width, RowsPerLayer = height };
-        SDL.DownloadFromGPUTexture(copyPass, &source, &destination);
-        SDL.EndGPUCopyPass(copyPass);
     }
 
     /// <summary>
@@ -1012,7 +1112,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             _stagingMapped = (byte*)SDL.MapGPUTransferBuffer(_device, _staging, cycle: true);
             if (_stagingMapped == null)
             {
-                throw new InvalidOperationException($"SDL would not map staging memory: {CString.Read(SDL.GetError())}");
+                throw new InvalidOperationException(
+                    $"SDL would not map staging memory: {CString.Read(SDL.GetError())}");
             }
 
             offset = 0;
@@ -1056,14 +1157,29 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         {
             if (transfer.Region.Texture == GpuTexture.None)
             {
-                SDL.GPUTransferBufferLocation source = new() { TransferBuffer = (SDL.GPUTransferBuffer*)transfer.Staged, Offset = transfer.StagedOffset };
-                SDL.GPUBufferRegion destination = new() { Buffer = (SDL.GPUBuffer*)_buffers[transfer.Buffer.Id], Offset = transfer.BufferOffset, Size = transfer.Bytes };
+                SDL.GPUTransferBufferLocation source = new()
+                {
+                    TransferBuffer = (SDL.GPUTransferBuffer*)transfer.Staged,
+                    Offset = transfer.StagedOffset
+                };
+                SDL.GPUBufferRegion destination = new()
+                {
+                    Buffer = (SDL.GPUBuffer*)_buffers[transfer.Buffer.Id],
+                    Offset = transfer.BufferOffset,
+                    Size = transfer.Bytes
+                };
                 SDL.UploadToGPUBuffer(copyPass, &source, &destination, cycle: false);
                 continue;
             }
 
             SDL.GPUTextureRegion region = ToTextureRegion(transfer.Region);
-            SDL.GPUTextureTransferInfo texels = new() { TransferBuffer = (SDL.GPUTransferBuffer*)transfer.Staged, Offset = transfer.StagedOffset, PixelsPerRow = region.W, RowsPerLayer = region.H };
+            SDL.GPUTextureTransferInfo texels = new()
+            {
+                TransferBuffer = (SDL.GPUTransferBuffer*)transfer.Staged,
+                Offset = transfer.StagedOffset,
+                PixelsPerRow = region.W,
+                RowsPerLayer = region.H
+            };
             SDL.UploadToGPUTexture(copyPass, &texels, &region, cycle: false);
         }
 
@@ -1119,7 +1235,14 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 break;
             case GpuCommandType.Viewport:
             {
-                SDL.GPUViewport viewport = new() { X = command.Area.X, Y = command.Area.Y, W = command.Area.Width, H = command.Area.Height, MaxDepth = 1 };
+                SDL.GPUViewport viewport = new()
+                {
+                    X = command.Area.X,
+                    Y = command.Area.Y,
+                    W = command.Area.Width,
+                    H = command.Area.Height,
+                    MaxDepth = 1
+                };
                 SDL.SetGPUViewport(_renderPass, &viewport);
                 break;
             }
@@ -1129,7 +1252,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 // Inside the target's corner: a scissor that starts before it is an error on some backends.
                 int x = Math.Max(command.Area.X, 0);
                 int y = Math.Max(command.Area.Y, 0);
-                SDL.Rect scissor = new() { X = x, Y = y, W = Math.Max(command.Area.Right - x, 0), H = Math.Max(command.Area.Bottom - y, 0) };
+                SDL.Rect scissor = new()
+                {
+                    X = x,
+                    Y = y,
+                    W = Math.Max(command.Area.Right - x, 0),
+                    H = Math.Max(command.Area.Bottom - y, 0)
+                };
                 SDL.SetGPUScissor(_renderPass, &scissor);
                 break;
             }
@@ -1143,7 +1272,9 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             case GpuCommandType.IndexBuffer:
             {
                 SDL.GPUBufferBinding index = new() { Buffer = (SDL.GPUBuffer*)_buffers[command.Buffer.Id] };
-                SDL.BindGPUIndexBuffer(_renderPass, &index, command.IndexSize == GpuIndexSize.Bits32 ? SDL.GPUIndexElementSize.Size32bit : SDL.GPUIndexElementSize.Size16bit);
+                SDL.BindGPUIndexBuffer(_renderPass, &index, command.IndexSize == GpuIndexSize.Bits32
+                    ? SDL.GPUIndexElementSize.Size32bit
+                    : SDL.GPUIndexElementSize.Size16bit);
                 break;
             }
 
@@ -1160,19 +1291,37 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 PushConstants(commandBuffer, command);
                 break;
             case GpuCommandType.Draw:
-                SDL.DrawGPUPrimitives(_renderPass, command.Count, command.Instances, command.First, command.FirstInstance);
+                SDL.DrawGPUPrimitives(
+                    _renderPass,
+                    command.Count,
+                    command.Instances,
+                    command.First,
+                    command.FirstInstance);
                 break;
             case GpuCommandType.DrawIndexed:
-                SDL.DrawGPUIndexedPrimitives(_renderPass, command.Count, command.Instances, command.First, command.VertexOffset, command.FirstInstance);
+                SDL.DrawGPUIndexedPrimitives(
+                    _renderPass,
+                    command.Count,
+                    command.Instances,
+                    command.First,
+                    command.VertexOffset,
+                    command.FirstInstance);
                 break;
             case GpuCommandType.DrawIndexedFromBuffer:
-                SDL.DrawGPUIndexedPrimitivesIndirect(_renderPass, (SDL.GPUBuffer*)_buffers[command.Buffer.Id], command.Offset, command.Count);
+                SDL.DrawGPUIndexedPrimitivesIndirect(
+                    _renderPass,
+                    (SDL.GPUBuffer*)_buffers[command.Buffer.Id],
+                    command.Offset,
+                    command.Count);
                 break;
             case GpuCommandType.Dispatch:
                 SDL.DispatchGPUCompute(_computePass, command.GroupsX, command.GroupsY, command.GroupsZ);
                 break;
             case GpuCommandType.DispatchFromBuffer:
-                SDL.DispatchGPUComputeIndirect(_computePass, (SDL.GPUBuffer*)_buffers[command.Buffer.Id], command.Offset);
+                SDL.DispatchGPUComputeIndirect(
+                    _computePass,
+                    (SDL.GPUBuffer*)_buffers[command.Buffer.Id],
+                    command.Offset);
                 break;
             case GpuCommandType.CopyTexture:
                 CopyTexture(commandBuffer, command);
@@ -1212,7 +1361,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                 Texture = texture,
                 MipLevel = colors[i].Level,
                 LayerOrDepthPlane = colors[i].Layer,
-                ClearColor = new SDL.FColor { R = command.Clear.R, G = command.Clear.G, B = command.Clear.B, A = command.Clear.A },
+                ClearColor = new SDL.FColor
+                {
+                    R = command.Clear.R,
+                    G = command.Clear.G,
+                    B = command.Clear.B,
+                    A = command.Clear.A
+                },
                 LoadOp = command.Contents.ToSdl(),
                 StoreOp = SDL.GPUStoreOp.Store,
             };
@@ -1241,11 +1396,17 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         ReadOnlySpan<GpuTextureLevel> levels = _commands.GetLevels(command);
         ReadOnlySpan<GpuBuffer> written = _commands.GetBuffers(command);
-        SDL.GPUStorageTextureReadWriteBinding* textures = stackalloc SDL.GPUStorageTextureReadWriteBinding[levels.Length];
+        SDL.GPUStorageTextureReadWriteBinding* textures =
+            stackalloc SDL.GPUStorageTextureReadWriteBinding[levels.Length];
         SDL.GPUStorageBufferReadWriteBinding* buffers = stackalloc SDL.GPUStorageBufferReadWriteBinding[written.Length];
         for (int i = 0; i < levels.Length; i++)
         {
-            textures[i] = new SDL.GPUStorageTextureReadWriteBinding { Texture = (SDL.GPUTexture*)_textures[levels[i].Texture.Id].Handle, MipLevel = levels[i].Level, Layer = levels[i].Layer };
+            textures[i] = new SDL.GPUStorageTextureReadWriteBinding
+            {
+                Texture = (SDL.GPUTexture*)_textures[levels[i].Texture.Id].Handle,
+                MipLevel = levels[i].Level,
+                Layer = levels[i].Layer
+            };
         }
 
         for (int i = 0; i < written.Length; i++)
@@ -1253,7 +1414,12 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             buffers[i] = new SDL.GPUStorageBufferReadWriteBinding { Buffer = (SDL.GPUBuffer*)_buffers[written[i].Id] };
         }
 
-        _computePass = SDL.BeginGPUComputePass(commandBuffer, textures, (uint)levels.Length, buffers, (uint)written.Length);
+        _computePass = SDL.BeginGPUComputePass(
+            commandBuffer,
+            textures,
+            (uint)levels.Length,
+            buffers,
+            (uint)written.Length);
     }
 
     private void BindPipeline(GpuPipeline pipeline)
@@ -1376,7 +1542,10 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
                     SDL.PushGPUComputeUniformData(commandBuffer, 0, data, (uint)bytes.Length);
                     break;
                 default:
-                    throw new ArgumentOutOfRangeException(nameof(command), command.Stage, "There is no such shader stage.");
+                    throw new ArgumentOutOfRangeException(
+                        nameof(command),
+                        command.Stage,
+                        "There is no such shader stage.");
             }
         }
     }
@@ -1388,8 +1557,24 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         ReadOnlySpan<GpuTextureRegion> run = _commands.GetRegions(command);
         SDL.GPUTextureRegion from = ToTextureRegion(run[0]);
-        SDL.GPUTextureLocation source = new() { Texture = from.Texture, MipLevel = from.MipLevel, Layer = from.Layer, X = from.X, Y = from.Y, Z = from.Z };
-        SDL.GPUTextureLocation destination = new() { Texture = (SDL.GPUTexture*)_textures[run[1].Texture.Id].Handle, MipLevel = run[1].Level, Layer = run[1].Layer, X = run[1].X, Y = run[1].Y, Z = run[1].Z };
+        SDL.GPUTextureLocation source = new()
+        {
+            Texture = from.Texture,
+            MipLevel = from.MipLevel,
+            Layer = from.Layer,
+            X = from.X,
+            Y = from.Y,
+            Z = from.Z
+        };
+        SDL.GPUTextureLocation destination = new()
+        {
+            Texture = (SDL.GPUTexture*)_textures[run[1].Texture.Id].Handle,
+            MipLevel = run[1].Level,
+            Layer = run[1].Layer,
+            X = run[1].X,
+            Y = run[1].Y,
+            Z = run[1].Z
+        };
         SDL.GPUCopyPass* copyPass = SDL.BeginGPUCopyPass(commandBuffer);
         SDL.CopyGPUTextureToTexture(copyPass, &source, &destination, from.W, from.H, from.D, cycle: false);
         SDL.EndGPUCopyPass(copyPass);
@@ -1399,7 +1584,11 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         ReadOnlySpan<GpuBuffer> run = _commands.GetBuffers(command);
         SDL.GPUBufferLocation source = new() { Buffer = (SDL.GPUBuffer*)_buffers[run[0].Id], Offset = command.First };
-        SDL.GPUBufferLocation destination = new() { Buffer = (SDL.GPUBuffer*)_buffers[run[1].Id], Offset = command.Offset };
+        SDL.GPUBufferLocation destination = new()
+        {
+            Buffer = (SDL.GPUBuffer*)_buffers[run[1].Id],
+            Offset = command.Offset
+        };
         SDL.GPUCopyPass* copyPass = SDL.BeginGPUCopyPass(commandBuffer);
         SDL.CopyGPUBufferToBuffer(copyPass, &source, &destination, command.Count, cycle: false);
         SDL.EndGPUCopyPass(copyPass);
@@ -1438,29 +1627,16 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     }
 
     /// <summary>
-    /// The window's image this frame, and its size; null when it has none (minimised).
-    /// </summary>
-    private static SDL.GPUTexture* Acquire(SDL.GPUCommandBuffer* commandBuffer, WindowObject window, uint* width, uint* height)
-    {
-        SDL.GPUTexture* image = null;
-        long start = Stopwatch.GetTimestamp();
-        bool isAcquired = SDL.WaitAndAcquireGPUSwapchainTexture(commandBuffer, (SDL.Window*)window.Native, &image, width, height);
-        _acquireWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
-        if (!isAcquired)
-        {
-            Debugging.Warn($"Window {window.Id}'s image was not acquired: {CString.Read(SDL.GetError())}");
-            return null;
-        }
-
-        return image;
-    }
-
-    /// <summary>
-    /// A texture like the window's <paramref name="image"/>, which the frame draws into in its place, then copies into it
-    /// and reads back (<see cref="CopyCaptures"/>); the image itself when no such texture can be made, the capture
+    /// A texture like the window's <paramref name="image"/>, which the frame draws into in its place, then copies into
+    /// it and reads back (<see cref="CopyCaptures"/>); the image itself when no such texture can be made, the capture
     /// failing.
     /// </summary>
-    private SDL.GPUTexture* BeginCapture(SDL.GPUTexture* image, GpuFormat format, uint width, uint height, TaskCompletionSource<Result<GpuImage>> done)
+    private SDL.GPUTexture* BeginCapture(
+        SDL.GPUTexture* image,
+        GpuFormat format,
+        uint width,
+        uint height,
+        TaskCompletionSource<Result<GpuImage>> done)
     {
         SDL.GPUTextureCreateInfo info = new()
         {
@@ -1476,7 +1652,8 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         SDL.GPUTexture* copy = SDL.CreateGPUTexture(_device, &info);
         if (copy == null)
         {
-            done.SetResult(Result.Failure<GpuImage>($"The GPU could not make a {width} x {height} copy of the window's image: {CString.Read(SDL.GetError())}"));
+            done.SetResult(Result.Failure<GpuImage>($"The GPU could not make a {width} x {height} copy of the window's "
+                + $"image: {CString.Read(SDL.GetError())}"));
             return image;
         }
 
@@ -1501,13 +1678,25 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// <summary>
     /// One queued upload: staged bytes into a buffer, or into a texture region when <see cref="Region"/> names one.
     /// </summary>
-    private readonly record struct Transfer(nint Staged, uint StagedOffset, uint Bytes, GpuBuffer Buffer, uint BufferOffset, GpuTextureRegion Region);
+    private readonly record struct Transfer(
+        nint Staged,
+        uint StagedOffset,
+        uint Bytes,
+        GpuBuffer Buffer,
+        uint BufferOffset,
+        GpuTextureRegion Region);
 
     /// <summary>
     /// A texture, or a window's render target, which has no SDL texture of its own (no <see cref="Handle"/>): its
     /// texture is the image acquired each frame.
     /// </summary>
-    private readonly record struct TextureObject(nint Handle, GpuFormat Format, uint Width, uint Height, uint Depth, WindowObject? Window = null);
+    private readonly record struct TextureObject(
+        nint Handle,
+        GpuFormat Format,
+        uint Width,
+        uint Height,
+        uint Depth,
+        WindowObject? Window = null);
 
     /// <summary>
     /// The window a render target draws into: SDL's window (none, headless) and the platform's id for it.
@@ -1515,10 +1704,17 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private readonly record struct WindowObject(nint Native, uint Id);
 
     /// <summary>
-    /// A capture begun this frame: the window's image, the texture drawn into in its place, their size and format, where
-    /// it is downloaded to, and who waits for it.
+    /// A capture begun this frame: the window's image, the texture drawn into in its place, their size and format,
+    /// where it is downloaded to, and who waits for it.
     /// </summary>
-    private readonly record struct Capture(nint Image, nint Copy, uint Width, uint Height, GpuFormat Format, nint Transfer, TaskCompletionSource<Result<GpuImage>> Done);
+    private readonly record struct Capture(
+        nint Image,
+        nint Copy,
+        uint Width,
+        uint Height,
+        GpuFormat Format,
+        nint Transfer,
+        TaskCompletionSource<Result<GpuImage>> Done);
 
     /// <summary>
     /// A graphics or compute pipeline: <see cref="Kind"/> is which, as it is bound and released.

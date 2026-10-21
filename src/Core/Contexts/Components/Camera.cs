@@ -4,6 +4,22 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Components;
 
 /// <summary>
+/// A part of the window a camera draws into: all of it, a half, or a quarter.
+/// </summary>
+public enum ScreenSection : byte
+{
+    Full,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
+/// <summary>
 /// A perspective camera, looking along its entity's +Z, drawing into its <see cref="Target"/>. A zero reads as its
 /// default, so <c>new Camera()</c>, or <c>{}</c> in a file, has a 60 degree field of view, sees from 5 cm away, sees
 /// without end, and draws into the whole window.
@@ -58,20 +74,4 @@ public record struct CameraTarget
     public ScreenSection Section;
 
     public readonly bool IsWindow => Texture == Handle<RenderTexture>.None;
-}
-
-/// <summary>
-/// A part of the window a camera draws into: all of it, a half, or a quarter.
-/// </summary>
-public enum ScreenSection : byte
-{
-    Full,
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight,
-    Top,
-    Bottom,
-    Left,
-    Right,
 }

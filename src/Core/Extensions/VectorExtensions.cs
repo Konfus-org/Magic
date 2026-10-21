@@ -22,7 +22,9 @@ public static class VectorExtensions
         /// </summary>
         public Vector3 ToWorld(in Camera camera, in Transform transform, Size size, float depth)
         {
-            Rectangle area = camera.Target.IsWindow ? camera.Target.Section.AreaIn(size) : new Rectangle(Point.Empty, size);
+            Rectangle area = camera.Target.IsWindow
+                ? camera.Target.Section.AreaIn(size)
+                : new Rectangle(Point.Empty, size);
             float tanY = MathF.Tan(camera.FieldOfView * (MathF.PI / 360));
             float tanX = tanY * area.Width / area.Height;
             float x = (((screen.X - area.X) / area.Width * 2) - 1) * tanX;

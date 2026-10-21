@@ -80,12 +80,20 @@ public static class Debugging
     /// <summary>
     /// Detail that is usually noise: logged only under --verbose, and otherwise not even queued.
     /// </summary>
-    public static void Verbose(string message, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public static void Verbose(
+        string message,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
         if (IsVerbose) Write(LogLevel.Verbose, message, member, file, line);
     }
 
-    public static void Info(string message, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public static void Info(
+        string message,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
         Write(LogLevel.Info, message, member, file, line);
     }
@@ -93,7 +101,11 @@ public static class Debugging
     /// <summary>
     /// Something works, only worse.
     /// </summary>
-    public static void Warn(string message, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public static void Warn(
+        string message,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
         Write(LogLevel.Warn, message, member, file, line);
     }
@@ -101,7 +113,11 @@ public static class Debugging
     /// <summary>
     /// Something failed: what it was is skipped or stood in for, and the frame goes on.
     /// </summary>
-    public static void Error(string message, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public static void Error(
+        string message,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
         Interlocked.Increment(ref _errorCount);
         Write(LogLevel.Error, message, member, file, line);
@@ -114,7 +130,11 @@ public static class Debugging
     /// no sink sees the line.
     /// </summary>
     [DoesNotReturn]
-    public static void Critical(string message, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public static void Critical(
+        string message,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
         Crash(Stamp(LogLevel.Critical, message, member, file, line));
     }
@@ -123,7 +143,13 @@ public static class Debugging
     /// State that cannot be: when <paramref name="condition"/> is false, the run is <see cref="Critical"/>, with the
     /// condition's source as the message, and <paramref name="message"/> after it. On in every build.
     /// </summary>
-    public static void Assert([DoesNotReturnIf(false)] bool condition, string message = "", [CallerArgumentExpression(nameof(condition))] string expression = "", [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public static void Assert(
+        [DoesNotReturnIf(false)] bool condition,
+        string message = "",
+        [CallerArgumentExpression(nameof(condition))] string expression = "",
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
         if (!condition) Crash(Stamp(LogLevel.Critical, FormatFailed(expression, message), member, file, line));
     }
@@ -153,7 +179,11 @@ public static class Debugging
     /// Stops sending lines to <paramref name="sink"/>. Waits until it has been given every line logged before, so it
     /// can be closed straight after; never called from inside the sink's own <see cref="ILogSink.Write"/>.
     /// </summary>
-    [SuppressMessage("Usage", "VSTHRD002:Avoid problematic synchronous waits", Justification = "Removing a sink is synchronous, and the printing task never needs the waiting thread, so the wait cannot deadlock; it is bounded besides.")]
+    [SuppressMessage(
+        "Usage",
+        "VSTHRD002:Avoid problematic synchronous waits",
+        Justification = "Removing a sink is synchronous, and the printing task never needs the waiting thread, "
+            + "so the wait cannot deadlock; it is bounded besides.")]
     internal static void Remove(ILogSink sink)
     {
         TaskCompletionSource removed = new();
@@ -163,7 +193,8 @@ public static class Debugging
 
         if (!removed.Task.Wait(TimeSpan.FromSeconds(CatchUpSeconds)))
         {
-            Warn($"Log sink {sink.GetType().Name} did not catch up within {CatchUpSeconds} s, so its last lines may be lost.");
+            Warn($"Log sink {sink.GetType().Name} did not catch up within {CatchUpSeconds} s, "
+                + "so its last lines may be lost.");
         }
 
         void RemoveSink()
@@ -229,7 +260,10 @@ public static class Debugging
     /// <summary>
     /// Gives <paramref name="line"/> to every sink. A sink that throws is logged and dropped; the log goes on.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a sink throws, it is logged and the sink is dropped; the log goes on.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a sink throws, it is logged and the sink is dropped; the log goes on.")]
     private static void WriteSinks(in LogLine line)
     {
         for (int i = 0; i < _sinks.Count; i++)
@@ -284,7 +318,9 @@ public static class Debugging
     private static string WriteCrashFile(DateTime time, string text)
     {
         string folder = Path.Join(AppContext.BaseDirectory, "Logs");
-        string path = Path.Join(folder, time.ToString("yyyy-MM-dd_HH-mm-ss.fff", CultureInfo.InvariantCulture) + ".crash");
+        string path = Path.Join(
+            folder,
+            time.ToString("yyyy-MM-dd_HH-mm-ss.fff", CultureInfo.InvariantCulture) + ".crash");
         try
         {
             Directory.CreateDirectory(folder);

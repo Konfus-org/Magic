@@ -27,7 +27,10 @@ public record struct Renderer : IComponent
 /// </summary>
 [InlineArray(Capacity)]
 [JsonConverter(typeof(MaterialSlotsJsonConverter))]
-[SuppressMessage("Naming", "CA1710:Identifiers should have correct suffix", Justification = "Enumerable only so { material } builds it; it is a renderer's slots, not a collection.")]
+[SuppressMessage(
+    "Naming",
+    "CA1710:Identifiers should have correct suffix",
+    Justification = "Enumerable only so { material } builds it; it is a renderer's slots, not a collection.")]
 public struct MaterialSlots : IEquatable<MaterialSlots>, IEnumerable<Handle<Material>>
 {
     public const int Capacity = 8;

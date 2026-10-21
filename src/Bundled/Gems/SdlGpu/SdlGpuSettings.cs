@@ -5,6 +5,28 @@ using Magic.Interfaces;
 namespace Magic.SdlGpu;
 
 /// <summary>
+/// The graphics APIs SDL drives, each asked for by SDL's name for it; <see cref="Auto"/> leaves the choice to SDL.
+/// </summary>
+internal enum GpuDriver : byte
+{
+    Auto,
+    Vulkan,
+    Direct3d12,
+    Metal,
+}
+
+/// <summary>
+/// The swapchain compositions SDL offers, each with the image format it implies.
+/// </summary>
+internal enum Composition : byte
+{
+    Sdr,
+    SdrLinear,
+    Hdr10,
+    HdrLinear,
+}
+
+/// <summary>
 /// The GPU device SdlGpu opens. Set in the project's <c>Presets/Default.preset</c>, by another preset, or with
 /// <c>--set SdlGpu.driver=vulkan</c>.
 /// </summary>
@@ -33,9 +55,9 @@ internal sealed class SdlGpuSettings : ISettings
     public bool LowPower { get; set; }
 
     /// <summary>
-    /// Present on the display's refresh. Off, a frame is shown as soon as it is done, tearing where the OS allows it. On
-    /// by default only in a release: a Debug or Optimize build runs uncapped, so it shows its true frame rate. Changed
-    /// while running, every window presents the new way from the next frame.
+    /// Present on the display's refresh. Off, a frame is shown as soon as it is done, tearing where the OS allows it.
+    /// On by default only in a release: a Debug or Optimize build runs uncapped, so it shows its true frame rate.
+    /// Changed while running, every window presents the new way from the next frame.
     /// </summary>
     [Category("Window")]
     public bool Vsync { get; set; } = IsRelease;
@@ -56,26 +78,4 @@ internal sealed class SdlGpuSettings : ISettings
     [RequireRestart]
     [Category("Debug")]
     public bool Validation { get; set; }
-}
-
-/// <summary>
-/// The graphics APIs SDL drives, each asked for by SDL's name for it; <see cref="Auto"/> leaves the choice to SDL.
-/// </summary>
-internal enum GpuDriver : byte
-{
-    Auto,
-    Vulkan,
-    Direct3d12,
-    Metal,
-}
-
-/// <summary>
-/// The swapchain compositions SDL offers, each with the image format it implies.
-/// </summary>
-internal enum Composition : byte
-{
-    Sdr,
-    SdrLinear,
-    Hdr10,
-    HdrLinear,
 }

@@ -11,7 +11,10 @@ namespace Magic.Internal;
 /// holds them. Past <see cref="Scripts.Capacity"/>, the rest are left out. A prefab gives an entity its scripts with
 /// their values instead, in its scripts list, which the gem that reads prefabs turns into these.
 /// </summary>
-[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "The serializer makes it, as Scripts' [JsonConverter] names it.")]
+[SuppressMessage(
+    "Performance",
+    "CA1812:Avoid uninstantiated internal classes",
+    Justification = "The serializer makes it, as Scripts' [JsonConverter] names it.")]
 internal sealed class ScriptsJsonConverter : JsonConverter<Scripts>
 {
     public override Scripts Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

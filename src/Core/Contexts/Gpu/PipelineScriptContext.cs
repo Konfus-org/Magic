@@ -12,7 +12,15 @@ namespace Magic.Contexts.Gpu;
 /// draw in and dispose, a <c>using</c> block. Whatever must be uploaded is uploaded before <see cref="Begin"/>, as an
 /// upload cannot go in a render pass.
 /// </summary>
-public readonly record struct PipelineScriptContext(GpuCommands Commands, GpuTexture Target, Rectangle Area, GpuFormat Format, TargetEncoding Encoding, GpuContents Contents, Frame Frame)
+public readonly record struct PipelineScriptContext(
+    GpuCommands Commands,
+    GpuTexture Target,
+    Rectangle Area,
+    GpuFormat Format,
+    TargetEncoding Encoding,
+    GpuContents Contents,
+    Frame Frame)
 {
-    public GpuRenderPass Begin() => Commands.RenderPass([new GpuTextureLevel(Target)], Contents).Viewport(Area).Scissor(Area);
+    public GpuRenderPass Begin()
+        => Commands.RenderPass([new GpuTextureLevel(Target)], Contents).Viewport(Area).Scissor(Area);
 }

@@ -27,7 +27,8 @@ public record struct Transform : IComponent
     /// <summary>
     /// Scale, then rotation, then position: what takes the entity's model into the world.
     /// </summary>
-    public readonly Matrix4x4 Matrix => Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation) * Matrix4x4.CreateTranslation(Position);
+    public readonly Matrix4x4 Matrix => Matrix4x4.CreateScale(Scale) * Matrix4x4.CreateFromQuaternion(Rotation)
+        * Matrix4x4.CreateTranslation(Position);
 
     /// <summary>
     /// This transform, a child's, relative to <paramref name="parent"/>, as the world sees it: scaled, turned, then

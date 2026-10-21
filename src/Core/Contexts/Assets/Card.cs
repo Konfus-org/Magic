@@ -3,10 +3,10 @@ namespace Magic.Contexts.Assets;
 /// <summary>
 /// A card: a flat stand-in for a mesh far away, a quad that turns about its vertical to face the camera and shows the
 /// mesh as it was seen from the nearest of its <see cref="Views"/>, shaded with the mesh's own material. A
-/// <see cref="Mesh"/> that is a card holds one (<see cref="Mesh.Card"/>), and its vertices say where the quad is, four to a
-/// card: each <see cref="Vertex.Position"/> the card's centre, <see cref="Vertex.Uv"/> its corner (-1 or 1 on each axis),
-/// and <see cref="Vertex.Normal"/> its half width, its half height and its turn about +Y in radians, so many cards can be
-/// one mesh.
+/// <see cref="Mesh"/> that is a card holds one (<see cref="Mesh.Card"/>), and its vertices say where the quad is, four
+/// to a card: each <see cref="Vertex.Position"/> the card's centre, <see cref="Vertex.Uv"/> its corner (-1 or 1 on each
+/// axis), and <see cref="Vertex.Normal"/> its half width, its half height and its turn about +Y in radians, so many
+/// cards can be one mesh.
 /// <para>
 /// View n is the mesh seen from n of <see cref="Views"/> equal turns about +Y from its front, +Z, looking back at it:
 /// the cell of a <see cref="Columns"/>-wide grid, read left to right then top to bottom, in each of two atlases.

@@ -12,7 +12,10 @@ namespace Magic.Internal;
 /// <c>{ "id": 0 }</c>, and read back as one, so a saved world keeps every slot where it was; the empty slots after the
 /// last filled one are left out. More than <see cref="MaterialSlots.Capacity"/> is refused.
 /// </summary>
-[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "The serializer makes it, as MaterialSlots' [JsonConverter] names it.")]
+[SuppressMessage(
+    "Performance",
+    "CA1812:Avoid uninstantiated internal classes",
+    Justification = "The serializer makes it, as MaterialSlots' [JsonConverter] names it.")]
 internal sealed class MaterialSlotsJsonConverter : JsonConverter<MaterialSlots>
 {
     public override MaterialSlots Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

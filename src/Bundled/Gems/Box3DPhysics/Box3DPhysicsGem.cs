@@ -26,11 +26,11 @@ namespace Magic.Box3DPhysics;
 /// shapes the body remakes it. Then the step is handed to a thread of the gem's own, which steps the world while the
 /// frame goes on; what moved, and what the listening bodies touch, the main thread takes in at its next hook, each
 /// body's position, rotation and velocities written back unless a script wrote them meanwhile, whose values then stand
-/// and reach the body with the next step. A body whose entity or component is gone is destroyed at the next step, as is one that has gone
-/// farther from every player camera than the settings' range, so a world full of bodies is simulated only around the
-/// player; an entity past the range waits where it is, body or no body, until the player comes back. The models a
-/// domain's bodies are shaped like are fitted before it spawns (<see cref="IPreloader"/>), so its bodies are there from
-/// its first step.
+/// and reach the body with the next step. A body whose entity or component is gone is destroyed at the next step, as is
+/// one that has gone farther from every player camera than the settings' range, so a world full of bodies is simulated
+/// only around the player; an entity past the range waits where it is, body or no body, until the player comes back.
+/// The models a domain's bodies are shaped like are fitted before it spawns (<see cref="IPreloader"/>), so its bodies
+/// are there from its first step.
 /// <para>
 /// It answers <see cref="IPhysics"/> from the bodies as the last step left them, waiting for a step still running,
 /// and after each step writes what every body that listens, one whose entity has a <see cref="Contacts"/>, is
@@ -45,7 +45,12 @@ namespace Magic.Box3DPhysics;
 /// Box3D works in metres, kilograms and seconds with +Y up, as the engine does.
 /// </para>
 /// </summary>
-[SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", Justification = "The shapes are the main thread's, the world's, and end in Stop there; Dispose would run on the render thread. The step's event and semaphore hold no OS handle and outlive the physics thread, which may still be waking as the run ends.")]
+[SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "The shapes are the main thread's, the world's, and end in Stop there; "
+        + "Dispose would run on the render thread. The step's event and semaphore hold no OS handle and outlive the "
+        + "physics thread, which may still be waking as the run ends.")]
 internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 {
     /// <summary>
@@ -65,9 +70,23 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// <summary>
     /// Buckets from a tenth of a millisecond to a second, as a step is measured against the fixed step.
     /// </summary>
-    private static readonly InstrumentAdvice<double> _buckets = new() { HistogramBucketBoundaries = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.004, 0.008, 1.0 / 60, 1.0 / 30, 0.05, 0.1, 0.25, 0.5, 1] };
-    private static readonly Histogram<double> _stepDuration = _meter.CreateHistogram("magic.gems.box3d_physics.step.duration", "s", "How long the physics thread took to step the world and read what moved.", tags: null, advice: _buckets);
-    private static readonly Histogram<double> _stepWait = _meter.CreateHistogram("magic.gems.box3d_physics.step_wait.duration", "s", "How long the main thread waited for a step still running, ahead of a fixed step, a query or the end.", tags: null, advice: _buckets);
+    private static readonly InstrumentAdvice<double> _buckets = new()
+    {
+        HistogramBucketBoundaries
+        = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.004, 0.008, 1.0 / 60, 1.0 / 30, 0.05, 0.1, 0.25, 0.5, 1]
+    };
+    private static readonly Histogram<double> _stepDuration = _meter.CreateHistogram(
+        "magic.gems.box3d_physics.step.duration",
+        "s",
+        "How long the physics thread took to step the world and read what moved.",
+        tags: null,
+        advice: _buckets);
+    private static readonly Histogram<double> _stepWait = _meter.CreateHistogram(
+        "magic.gems.box3d_physics.step_wait.duration",
+        "s",
+        "How long the main thread waited for a step still running, ahead of a fixed step, a query or the end.",
+        tags: null,
+        advice: _buckets);
 
     private readonly World _world;
     private readonly Threads _threads;
@@ -150,7 +169,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         _box3d = B3.CreateWorld(&def);
 
         B3.Version version = B3.GetVersion();
-        Debugging.Info($"Box3D {version.Major}.{version.Minor}.{version.Revision} is simulating, on a thread of its own, with {def.WorkerCount} solver thread(s).");
+        Debugging.Info($"Box3D {version.Major}.{version.Minor}.{version.Revision} is simulating, "
+            + $"on a thread of its own, with {def.WorkerCount} solver thread(s).");
         threads.RunAsync("Physics", RunSteps).FireAndForget();
     }
 
@@ -237,7 +257,11 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         if (!result.Hit) return null;
 
         Entity entity = _bodies[GetSlot(result.ShapeId)].Entity;
-        return new RayHit(entity, FromVec(result.Point), FromVec(result.Normal), result.Fraction * Vector3.Distance(from, to));
+        return new RayHit(
+            entity,
+            FromVec(result.Point),
+            FromVec(result.Normal),
+            result.Fraction * Vector3.Distance(from, to));
     }
 
     public unsafe int SphereCast(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
@@ -253,7 +277,13 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         {
             query.Found = into;
             query.Bodies = bodies;
-            B3.WorldOverlapShape(_box3d, ToVec(center), &proxy, FilterOf(motions), (delegate* unmanaged<B3.ShapeId, void*, bool>)(delegate* unmanaged<B3.ShapeId, void*, byte>)&OnOverlap, &query);
+            B3.WorldOverlapShape(
+                _box3d,
+                ToVec(center),
+                &proxy,
+                FilterOf(motions),
+                (delegate* unmanaged<B3.ShapeId, void*, bool>)(delegate* unmanaged<B3.ShapeId, void*, byte>)&OnOverlap,
+                &query);
         }
 
         return query.Count;
@@ -264,7 +294,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// each gets its body in its first step rather than waiting for its model. Done once every shape is there; the
     /// shapes are kept for the run, so what it hands back holds nothing.
     /// </summary>
-    public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
+    public async Task<Subscription> PreloadAsync(
+        IReadOnlyList<Prefab> prefabs,
+        IProgress<float> progress,
+        CancellationToken cancel)
     {
         HashSet<Handle<Model>> models = GetModels(prefabs);
         Preload preload = new(models, progress, cancel);
@@ -300,6 +333,232 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     private static Quaternion FromQuat(B3.Quat rotation)
     {
         return new(rotation.V.X, rotation.V.Y, rotation.V.Z, rotation.S);
+    }
+
+    /// <summary>
+    /// Whether the components changed in a way that shapes the body, which is then made again.
+    /// </summary>
+    private static bool IsRemade(in Body body, Handle<Model> model, in Transform transform, in Physics physics)
+    {
+        return model != body.Model
+            || transform.Scale != body.Transform.Scale
+            || physics.Motion != body.Physics.Motion
+            || physics.Shape != body.Physics.Shape
+            || physics.Surface != body.Physics.Surface
+            || physics.Bounce != body.Physics.Bounce
+            || physics.Mass != body.Physics.Mass;
+    }
+
+    /// <summary>
+    /// Adds the shape to the body: the model's bounds at the entity's scale as a box, a sphere or a capsule, or its
+    /// triangles at that scale. A bound with no size, a plane's thickness, is given a little, as a shape needs some.
+    /// </summary>
+    private static unsafe void AddShape(B3.BodyId body, B3.ShapeDef* def, ModelShape shape, Shape kind, Vector3 scale)
+    {
+        const float Least = 0.01f;
+        scale = Vector3.Abs(scale);
+        Vector3 half = Vector3.Max((shape.Max - shape.Min) * scale * 0.5f, new Vector3(Least));
+        Vector3 centre = (shape.Max + shape.Min) * scale * 0.5f;
+        switch (kind)
+        {
+            case Shape.Sphere:
+                B3.Sphere sphere = new()
+                {
+                    Center = ToVec(centre),
+                    Radius = Math.Max(half.X, Math.Max(half.Y, half.Z))
+                };
+                B3.CreateSphereShape(body, def, &sphere);
+                break;
+            case Shape.Capsule:
+                float radius = Math.Max(half.X, half.Z);
+                float reach = Math.Max(half.Y - radius, 0);
+                B3.Capsule capsule = new()
+                {
+                    Center1 = ToVec(centre - new Vector3(0, reach, 0)),
+                    Center2 = ToVec(centre + new Vector3(0, reach, 0)),
+                    Radius = radius,
+                };
+                B3.CreateCapsuleShape(body, def, &capsule);
+                break;
+            case Shape.Mesh:
+                B3.CreateMeshShape(body, def, shape.Mesh, ToVec(scale));
+                break;
+            case Shape.Box:
+            default:
+                B3.BoxHull box = B3.MakeOffsetBoxHull(half.X, half.Y, half.Z, ToVec(centre));
+                B3.CreateHullShape(body, def, &box.Base);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Writes what <paramref name="entity"/>'s body touches after the last step, <paramref name="read"/>, over its
+    /// contacts: each Stay when the component already held it, else Enter; then each the component held and the body
+    /// no longer touches, as Exit for this step. An entity with no body, out of range, parts from them all.
+    /// </summary>
+    private static void Touch(Entity entity, ref Contacts contacts, in Contacts read)
+    {
+        Contacts now = default;
+        int written = 0;
+        foreach (Contact touching in read)
+        {
+            if (touching.Phase == ContactPhase.None) continue;
+
+            Contact contact = touching;
+            contact.Phase = GetPhase(contacts, contact.Other) is ContactPhase.Enter or ContactPhase.Stay
+                ? ContactPhase.Stay
+                : ContactPhase.Enter;
+            if (contact.Phase == ContactPhase.Enter)
+            {
+                Debugging.Verbose($"Entity {entity.Id} touched entity {contact.Other.Id} at ({contact.Point.X:0.###}, "
+                    + $"{contact.Point.Y:0.###}, {contact.Point.Z:0.###}), {contact.Impulse:0.###} Ns.");
+            }
+
+            now[written++] = contact;
+        }
+
+        foreach (Contact held in contacts)
+        {
+            if (held.Phase is ContactPhase.None or ContactPhase.Exit || GetPhase(now, held.Other) != ContactPhase.None)
+            {
+                continue;
+            }
+
+            if (written == Contacts.Capacity) break;
+
+            now[written++] = held with { Phase = ContactPhase.Exit, Impulse = 0 };
+            Debugging.Verbose($"Entity {entity.Id} parted from entity {held.Other.Id}.");
+        }
+
+        contacts = now;
+    }
+
+    private static ContactPhase GetPhase(in Contacts contacts, Entity other)
+    {
+        foreach (Contact held in contacts)
+        {
+            if (held.Phase != ContactPhase.None && held.Other == other) return held.Phase;
+        }
+
+        return ContactPhase.None;
+    }
+
+    /// <summary>
+    /// The body slot a shape belongs to, kept one up in its body's user data so that 0 is no body.
+    /// </summary>
+    private static unsafe int GetSlot(B3.ShapeId shape)
+    {
+        return (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
+    }
+
+    /// <summary>
+    /// A query's filter: Box3D's default, accepting the shapes whose category, their body's motion, is among
+    /// <paramref name="motions"/>.
+    /// </summary>
+    private static B3.QueryFilter FilterOf(Motions motions)
+    {
+        B3.QueryFilter filter = B3.DefaultQueryFilter();
+        filter.MaskBits = (ulong)motions;
+        return filter;
+    }
+
+    private static Motions GetMotions(Motion motion)
+    {
+        return motion switch
+        {
+            Motion.Static => Motions.Static,
+            Motion.Dynamic => Motions.Dynamic,
+            Motion.Kinematic => Motions.Kinematic,
+            _ => Motions.Static,
+        };
+    }
+
+    /// <summary>
+    /// What a <see cref="Surface"/> is to Box3D: a friction coefficient, from ice's to glue's, and for the stickiest a
+    /// little rolling resistance, so a sticky ball stops rolling. Two surfaces that touch take the geometric mean of
+    /// their frictions and the larger of their bounces, so a sticky box on ice still slides, a little.
+    /// </summary>
+    private static B3.SurfaceMaterial GetMaterial(Surface surface, float bounce)
+    {
+        B3.SurfaceMaterial material = B3.DefaultSurfaceMaterial();
+        (material.Friction, material.RollingResistance) = surface switch
+        {
+            Surface.Slippery => (0.05f, 0f),
+            Surface.Slick => (0.2f, 0f),
+            Surface.Grippy => (0.9f, 0.01f),
+            Surface.Sticky => (1.5f, 0.05f),
+            Surface.Normal => (0.6f, 0f),
+            _ => (0.6f, 0f),
+        };
+        material.Restitution = Math.Clamp(bounce, 0, 1);
+        return material;
+    }
+
+    /// <summary>
+    /// The models the bodies among <paramref name="prefabs"/> are shaped like: each part with a <see cref="Physics"/>
+    /// and a <see cref="Renderer"/> naming a model, and the parts under them. Any thread.
+    /// </summary>
+    private static HashSet<Handle<Model>> GetModels(IReadOnlyList<Prefab> prefabs)
+    {
+        HashSet<Handle<Model>> models = [];
+        foreach (Prefab prefab in prefabs)
+        {
+            Add(prefab.Parts);
+        }
+
+        return models;
+
+        void Add(IReadOnlyList<PrefabPart> parts)
+        {
+            foreach (PrefabPart part in parts)
+            {
+                Handle<Model> model = Handle<Model>.None;
+                bool isBody = false;
+                foreach (IComponent component in part.Components)
+                {
+                    isBody |= component is Physics;
+                    model = component is Renderer renderer ? renderer.Model : model;
+                }
+
+                if (isBody && model != Handle<Model>.None) models.Add(model);
+
+                Add(part.Children);
+            }
+        }
+    }
+
+    private static B3.Vec3 Scale(B3.Vec3 vector, float scale)
+    {
+        return new() { X = vector.X * scale, Y = vector.Y * scale, Z = vector.Z * scale };
+    }
+
+    /// <summary>
+    /// A failed Box3D assert is a bug, in the gem or in Box3D, that leaves the world in a state it cannot go on from:
+    /// the process ends with a crash file, as the engine's own asserts do.
+    /// </summary>
+    [UnmanagedCallersOnly]
+    private static unsafe int OnAssert(byte* condition, byte* file, int line)
+    {
+        Debugging.Critical($"Box3D failed an assert, {CString.Read(condition)}, at {CString.Read(file)}:{line}.");
+        return 1;
+    }
+
+    [UnmanagedCallersOnly]
+    private static unsafe void OnLog(byte* message)
+    {
+        Debugging.Warn($"Box3D: {CString.Read(message)}");
+    }
+
+    /// <summary>
+    /// Takes one shape an overlap found into the query's entities, and asks for more while there is room. A byte
+    /// rather than a bool, which cannot cross into native code from a method called only from it; C's bool is a byte.
+    /// </summary>
+    [UnmanagedCallersOnly]
+    private static unsafe byte OnOverlap(B3.ShapeId shape, void* context)
+    {
+        OverlapQuery* query = (OverlapQuery*)context;
+        query->Found[query->Count++] = query->Bodies[GetSlot(shape)].Entity;
+        return query->Count < query->Capacity ? (byte)1 : (byte)0;
     }
 
     /// <summary>
@@ -387,7 +646,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         if (_cameras.Count == 0) return true;
 
         Vector3 scale = Vector3.Abs(transform.Scale);
-        float reach = shape is null ? scale.Length() : (((shape.Max - shape.Min) * scale).Length() + ((shape.Max + shape.Min) * scale).Length()) * 0.5f;
+        float reach = shape is null
+            ? scale.Length()
+            : (((shape.Max - shape.Min) * scale).Length() + ((shape.Max + shape.Min) * scale).Length()) * 0.5f;
         foreach (Vector3 camera in _cameras)
         {
             if (Vector3.Distance(transform.Position, camera) - reach < range) return true;
@@ -397,23 +658,14 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// Whether the components changed in a way that shapes the body, which is then made again.
-    /// </summary>
-    private static bool IsRemade(in Body body, Handle<Model> model, in Transform transform, in Physics physics)
-    {
-        return model != body.Model
-            || transform.Scale != body.Transform.Scale
-            || physics.Motion != body.Physics.Motion
-            || physics.Shape != body.Physics.Shape
-            || physics.Surface != body.Physics.Surface
-            || physics.Bounce != body.Physics.Bounce
-            || physics.Mass != body.Physics.Mass;
-    }
-
-    /// <summary>
     /// Makes the entity's body and shape, once its model's shape is there; until then the entity waits, unmoved.
     /// </summary>
-    private unsafe void Create(Entity entity, Handle<Model> model, ModelShape? shape, in Transform transform, in Physics physics)
+    private unsafe void Create(
+        Entity entity,
+        Handle<Model> model,
+        ModelShape? shape,
+        in Transform transform,
+        in Physics physics)
     {
         if (shape is null) return;
 
@@ -449,8 +701,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         if (kind == Shape.Mesh && (physics.Motion != Motion.Static || shape.Mesh is null))
         {
             Debugging.Error(physics.Motion != Motion.Static
-                ? $"Entity {entity.Id}'s Physics asks for a mesh shape on a body that moves, which only a static body can have, so it is a box."
-                : $"Entity {entity.Id}'s Physics asks for a mesh shape, but its model has no triangles, so it is a box.");
+                ? $"Entity {entity.Id}'s Physics asks for a mesh shape on a body that moves, "
+                    + "which only a static body can have, so it is a box."
+                : $"Entity {entity.Id}'s Physics asks for a mesh shape, "
+                    + "but its model has no triangles, so it is a box.");
             kind = Shape.Box;
         }
 
@@ -469,47 +723,18 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             }
         }
 
-        _bodies[slot] = new Body { Id = id, Entity = entity, Model = model, Transform = transform, Physics = physics, Seen = _step };
-        _slots.Add(entity, slot);
-        Debugging.Verbose($"Entity {entity.Id} has a {physics.Motion} {kind} body, {B3.BodyGetMass(id):0.###} kg, at ({transform.Position.X:0.###}, {transform.Position.Y:0.###}, {transform.Position.Z:0.###}).");
-    }
-
-    /// <summary>
-    /// Adds the shape to the body: the model's bounds at the entity's scale as a box, a sphere or a capsule, or its
-    /// triangles at that scale. A bound with no size, a plane's thickness, is given a little, as a shape needs some.
-    /// </summary>
-    private static unsafe void AddShape(B3.BodyId body, B3.ShapeDef* def, ModelShape shape, Shape kind, Vector3 scale)
-    {
-        const float Least = 0.01f;
-        scale = Vector3.Abs(scale);
-        Vector3 half = Vector3.Max((shape.Max - shape.Min) * scale * 0.5f, new Vector3(Least));
-        Vector3 centre = (shape.Max + shape.Min) * scale * 0.5f;
-        switch (kind)
+        _bodies[slot] = new Body
         {
-            case Shape.Sphere:
-                B3.Sphere sphere = new() { Center = ToVec(centre), Radius = Math.Max(half.X, Math.Max(half.Y, half.Z)) };
-                B3.CreateSphereShape(body, def, &sphere);
-                break;
-            case Shape.Capsule:
-                float radius = Math.Max(half.X, half.Z);
-                float reach = Math.Max(half.Y - radius, 0);
-                B3.Capsule capsule = new()
-                {
-                    Center1 = ToVec(centre - new Vector3(0, reach, 0)),
-                    Center2 = ToVec(centre + new Vector3(0, reach, 0)),
-                    Radius = radius,
-                };
-                B3.CreateCapsuleShape(body, def, &capsule);
-                break;
-            case Shape.Mesh:
-                B3.CreateMeshShape(body, def, shape.Mesh, ToVec(scale));
-                break;
-            case Shape.Box:
-            default:
-                B3.BoxHull box = B3.MakeOffsetBoxHull(half.X, half.Y, half.Z, ToVec(centre));
-                B3.CreateHullShape(body, def, &box.Base);
-                break;
-        }
+            Id = id,
+            Entity = entity,
+            Model = model,
+            Transform = transform,
+            Physics = physics,
+            Seen = _step
+        };
+        _slots.Add(entity, slot);
+        Debugging.Verbose($"Entity {entity.Id} has a {physics.Motion} {kind} body, {B3.BodyGetMass(id):0.###} kg, "
+            + $"at ({transform.Position.X:0.###}, {transform.Position.Y:0.###}, {transform.Position.Z:0.###}).");
     }
 
     private void Destroy(Entity entity)
@@ -593,7 +818,13 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             ref B3.BodyMoveEvent moved = ref events.MoveEvents[i];
             int slot = (int)(nuint)moved.UserData - 1;
             B3.BodyId id = _bodies[slot].Id;
-            _moves.Add(new Moved(slot, FromVec(moved.Transform.P), FromQuat(moved.Transform.Q), FromVec(B3.BodyGetLinearVelocity(id)), FromVec(B3.BodyGetAngularVelocity(id)), moved.FellAsleep));
+            _moves.Add(new Moved(
+                slot,
+                FromVec(moved.Transform.P),
+                FromQuat(moved.Transform.Q),
+                FromVec(B3.BodyGetLinearVelocity(id)),
+                FromVec(B3.BodyGetAngularVelocity(id)),
+                moved.FellAsleep));
         }
 
         _touched.Clear();
@@ -662,7 +893,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
             if (moved.FellAsleep)
             {
-                Debugging.Verbose($"Entity {body.Entity.Id}'s body came to rest at ({moved.Position.X:0.###}, {moved.Position.Y:0.###}, {moved.Position.Z:0.###}).");
+                Debugging.Verbose($"Entity {body.Entity.Id}'s body came to rest at ({moved.Position.X:0.###}, "
+                    + $"{moved.Position.Y:0.###}, {moved.Position.Z:0.###}).");
             }
         }
 
@@ -676,45 +908,6 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
                 Touch(entities[i], ref contacts[i], read);
             }
         }
-    }
-
-    /// <summary>
-    /// Writes what <paramref name="entity"/>'s body touches after the last step, <paramref name="read"/>, over its
-    /// contacts: each Stay when the component already held it, else Enter; then each the component held and the body
-    /// no longer touches, as Exit for this step. An entity with no body, out of range, parts from them all.
-    /// </summary>
-    private static void Touch(Entity entity, ref Contacts contacts, in Contacts read)
-    {
-        Contacts now = default;
-        int written = 0;
-        foreach (Contact touching in read)
-        {
-            if (touching.Phase == ContactPhase.None) continue;
-
-            Contact contact = touching;
-            contact.Phase = GetPhase(contacts, contact.Other) is ContactPhase.Enter or ContactPhase.Stay ? ContactPhase.Stay : ContactPhase.Enter;
-            if (contact.Phase == ContactPhase.Enter)
-            {
-                Debugging.Verbose($"Entity {entity.Id} touched entity {contact.Other.Id} at ({contact.Point.X:0.###}, {contact.Point.Y:0.###}, {contact.Point.Z:0.###}), {contact.Impulse:0.###} Ns.");
-            }
-
-            now[written++] = contact;
-        }
-
-        foreach (Contact held in contacts)
-        {
-            if (held.Phase is ContactPhase.None or ContactPhase.Exit || GetPhase(now, held.Other) != ContactPhase.None)
-            {
-                continue;
-            }
-
-            if (written == Contacts.Capacity) break;
-
-            now[written++] = held with { Phase = ContactPhase.Exit, Impulse = 0 };
-            Debugging.Verbose($"Entity {entity.Id} parted from entity {held.Other.Id}.");
-        }
-
-        contacts = now;
     }
 
     /// <summary>
@@ -756,103 +949,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         };
     }
 
-    private static ContactPhase GetPhase(in Contacts contacts, Entity other)
-    {
-        foreach (Contact held in contacts)
-        {
-            if (held.Phase != ContactPhase.None && held.Other == other) return held.Phase;
-        }
-
-        return ContactPhase.None;
-    }
-
-    /// <summary>
-    /// The body slot a shape belongs to, kept one up in its body's user data so that 0 is no body.
-    /// </summary>
-    private static unsafe int GetSlot(B3.ShapeId shape)
-    {
-        return (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
-    }
-
-    /// <summary>
-    /// A query's filter: Box3D's default, accepting the shapes whose category, their body's motion, is among
-    /// <paramref name="motions"/>.
-    /// </summary>
-    private static B3.QueryFilter FilterOf(Motions motions)
-    {
-        B3.QueryFilter filter = B3.DefaultQueryFilter();
-        filter.MaskBits = (ulong)motions;
-        return filter;
-    }
-
-    private static Motions GetMotions(Motion motion)
-    {
-        return motion switch
-        {
-            Motion.Static => Motions.Static,
-            Motion.Dynamic => Motions.Dynamic,
-            Motion.Kinematic => Motions.Kinematic,
-            _ => Motions.Static,
-        };
-    }
-
-    /// <summary>
-    /// What a <see cref="Surface"/> is to Box3D: a friction coefficient, from ice's to glue's, and for the stickiest a
-    /// little rolling resistance, so a sticky ball stops rolling. Two surfaces that touch take the geometric mean of
-    /// their frictions and the larger of their bounces, so a sticky box on ice still slides, a little.
-    /// </summary>
-    private static B3.SurfaceMaterial GetMaterial(Surface surface, float bounce)
-    {
-        B3.SurfaceMaterial material = B3.DefaultSurfaceMaterial();
-        (material.Friction, material.RollingResistance) = surface switch
-        {
-            Surface.Slippery => (0.05f, 0f),
-            Surface.Slick => (0.2f, 0f),
-            Surface.Grippy => (0.9f, 0.01f),
-            Surface.Sticky => (1.5f, 0.05f),
-            Surface.Normal => (0.6f, 0f),
-            _ => (0.6f, 0f),
-        };
-        material.Restitution = Math.Clamp(bounce, 0, 1);
-        return material;
-    }
-
     private Handle<Model> GetModel(Entity entity)
     {
         return _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
-    }
-
-    /// <summary>
-    /// The models the bodies among <paramref name="prefabs"/> are shaped like: each part with a <see cref="Physics"/>
-    /// and a <see cref="Renderer"/> naming a model, and the parts under them. Any thread.
-    /// </summary>
-    private static HashSet<Handle<Model>> GetModels(IReadOnlyList<Prefab> prefabs)
-    {
-        HashSet<Handle<Model>> models = [];
-        foreach (Prefab prefab in prefabs)
-        {
-            Add(prefab.Parts);
-        }
-
-        return models;
-
-        void Add(IReadOnlyList<PrefabPart> parts)
-        {
-            foreach (PrefabPart part in parts)
-            {
-                Handle<Model> model = Handle<Model>.None;
-                bool isBody = false;
-                foreach (IComponent component in part.Components)
-                {
-                    isBody |= component is Physics;
-                    model = component is Renderer renderer ? renderer.Model : model;
-                }
-
-                if (isBody && model != Handle<Model>.None) models.Add(model);
-
-                Add(part.Children);
-            }
-        }
     }
 
     /// <summary>
@@ -893,39 +992,17 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         }
     }
 
-    private static B3.Vec3 Scale(B3.Vec3 vector, float scale)
-    {
-        return new() { X = vector.X * scale, Y = vector.Y * scale, Z = vector.Z * scale };
-    }
-
     /// <summary>
-    /// A failed Box3D assert is a bug, in the gem or in Box3D, that leaves the world in a state it cannot go on from:
-    /// the process ends with a crash file, as the engine's own asserts do.
+    /// Where a body is and how it moves after a step, read by the physics thread for the main thread to write to the
+    /// body's components.
     /// </summary>
-    [UnmanagedCallersOnly]
-    private static unsafe int OnAssert(byte* condition, byte* file, int line)
-    {
-        Debugging.Critical($"Box3D failed an assert, {CString.Read(condition)}, at {CString.Read(file)}:{line}.");
-        return 1;
-    }
-
-    [UnmanagedCallersOnly]
-    private static unsafe void OnLog(byte* message)
-    {
-        Debugging.Warn($"Box3D: {CString.Read(message)}");
-    }
-
-    /// <summary>
-    /// Takes one shape an overlap found into the query's entities, and asks for more while there is room. A byte
-    /// rather than a bool, which cannot cross into native code from a method called only from it; C's bool is a byte.
-    /// </summary>
-    [UnmanagedCallersOnly]
-    private static unsafe byte OnOverlap(B3.ShapeId shape, void* context)
-    {
-        OverlapQuery* query = (OverlapQuery*)context;
-        query->Found[query->Count++] = query->Bodies[GetSlot(shape)].Entity;
-        return query->Count < query->Capacity ? (byte)1 : (byte)0;
-    }
+    private readonly record struct Moved(
+        int Slot,
+        Vector3 Position,
+        Quaternion Rotation,
+        Vector3 Velocity,
+        Vector3 AngularVelocity,
+        bool FellAsleep);
 
     /// <summary>
     /// An entity's body, with its components as the body last saw them, which the next step's are compared with.
@@ -946,10 +1023,19 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// Where a body is and how it moves after a step, read by the physics thread for the main thread to write to the
-    /// body's components.
+    /// An overlap in progress, handed to <see cref="OnOverlap"/> through Box3D: where the entities go, how many fit,
+    /// how many are there, and the bodies to look them up in, pinned for the call.
     /// </summary>
-    private readonly record struct Moved(int Slot, Vector3 Position, Quaternion Rotation, Vector3 Velocity, Vector3 AngularVelocity, bool FellAsleep);
+    private unsafe struct OverlapQuery
+    {
+        internal Body* Bodies;
+
+        internal Entity* Found;
+
+        internal int Capacity;
+
+        internal int Count;
+    }
 
     /// <summary>
     /// A domain whose models are being fitted before it spawns: which, how far that is as last told, the task whoever
@@ -966,20 +1052,5 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         internal float Reported { get; set; } = -1;
-    }
-
-    /// <summary>
-    /// An overlap in progress, handed to <see cref="OnOverlap"/> through Box3D: where the entities go, how many fit,
-    /// how many are there, and the bodies to look them up in, pinned for the call.
-    /// </summary>
-    private unsafe struct OverlapQuery
-    {
-        internal Body* Bodies;
-
-        internal Entity* Found;
-
-        internal int Capacity;
-
-        internal int Count;
     }
 }

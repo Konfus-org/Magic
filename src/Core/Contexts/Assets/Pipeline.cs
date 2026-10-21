@@ -5,9 +5,9 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// Passes in order, as data: a <c>.pipeline</c> file. Each entry is a <see cref="Pass"/> or another pipeline, whose passes
-/// go in its place, and may give the passes it brings in other params, by the pass's file name and the param's. A
-/// renderer's frame is a pipeline, which its settings pick; so is each effect a world can add, and the list of them a
+/// Passes in order, as data: a <c>.pipeline</c> file. Each entry is a <see cref="Pass"/> or another pipeline, whose
+/// passes go in its place, and may give the passes it brings in other params, by the pass's file name and the param's.
+/// A renderer's frame is a pipeline, which its settings pick; so is each effect a world can add, and the list of them a
 /// world's <see cref="PostProcessing"/> names: <c>{ "entries": [ { "pipeline": { "id": 10360 } }, { "pipeline": { "id":
 /// 10370 }, "params": { "Tonemap": { "exposureBias": { "x": 0.5 } } } } ] }</c>. Each pass runs in its own stage, so a
 /// pipeline only orders the passes of one stage.
@@ -24,8 +24,8 @@ public sealed class Pipeline : IJsonAsset<Pipeline>
     public IReadOnlyList<PipelineEntry> Entries { get; set; } = [];
 
     /// <summary>
-    /// The passes it runs, in order: its entries with each nested pipeline's passes in its place. Made as it loads, by a
-    /// gem that post-processes pipelines, which replaces whatever the file says; none without that gem.
+    /// The passes it runs, in order: its entries with each nested pipeline's passes in its place. Made as it loads, by
+    /// a gem that post-processes pipelines, which replaces whatever the file says; none without that gem.
     /// </summary>
     public IReadOnlyList<PipelinePass> Passes { get; init; } = [];
 }
@@ -43,7 +43,8 @@ public sealed class PipelineEntry
     /// <summary>
     /// By the file name of a pass the entry brings in, without its extension, then by the param's name.
     /// </summary>
-    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> Params { get; set; } = ReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>>.Empty;
+    public IReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>> Params { get; set; }
+        = ReadOnlyDictionary<string, IReadOnlyDictionary<string, MaterialParam>>.Empty;
 }
 
 /// <summary>

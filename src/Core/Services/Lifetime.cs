@@ -17,11 +17,6 @@ public sealed class Lifetime : IDisposable
         Stopping = _stopping.Token;
     }
 
-    public void Dispose()
-    {
-        _stopping.Dispose();
-    }
-
     public bool IsStopping => Stopping.IsCancellationRequested;
 
     /// <summary>
@@ -34,6 +29,11 @@ public sealed class Lifetime : IDisposable
     /// now.
     /// </summary>
     public bool IsRestarting { get; private set; }
+
+    public void Dispose()
+    {
+        _stopping.Dispose();
+    }
 
     /// <summary>
     /// Ends the run after this frame. <paramref name="reason"/> goes to the log, so a run never stops unexplained;

@@ -3,20 +3,6 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A texture for <see cref="IGpu.CreateTexture"/> to make. <paramref name="Layers"/> is the layer count of a
-/// <see cref="GpuTextureKind.Texture2DArray"/>, the depth of a <see cref="GpuTextureKind.Texture3D"/>, and 6 for a
-/// <see cref="GpuTextureKind.Cube"/>.
-/// </summary>
-public readonly record struct GpuTextureDescription(
-    GpuFormat Format,
-    GpuTextureUsage Usage,
-    uint Width,
-    uint Height,
-    uint Levels = 1,
-    uint Layers = 1,
-    GpuTextureKind Kind = GpuTextureKind.Texture2D);
-
-/// <summary>
 /// A texture's shape.
 /// </summary>
 public enum GpuTextureKind : byte
@@ -30,3 +16,17 @@ public enum GpuTextureKind : byte
     /// </summary>
     Cube,
 }
+
+/// <summary>
+/// A texture for <see cref="IGpu.CreateTexture"/> to make. <paramref name="Layers"/> is the layer count of a
+/// <see cref="GpuTextureKind.Texture2DArray"/>, the depth of a <see cref="GpuTextureKind.Texture3D"/>, and 6 for a
+/// <see cref="GpuTextureKind.Cube"/>.
+/// </summary>
+public readonly record struct GpuTextureDescription(
+    GpuFormat Format,
+    GpuTextureUsage Usage,
+    uint Width,
+    uint Height,
+    uint Levels = 1,
+    uint Layers = 1,
+    GpuTextureKind Kind = GpuTextureKind.Texture2D);

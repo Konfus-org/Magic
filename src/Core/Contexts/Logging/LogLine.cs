@@ -11,13 +11,22 @@ namespace Magic.Contexts.Logging;
 /// <param name="Time">When it was logged, in local time.</param>
 /// <param name="Level">How bad it is.</param>
 /// <param name="Message">What happened.</param>
-/// <param name="Frame">The index of the frame the main thread was in; null before the first frame and after the last.</param>
+/// <param name="Frame">The index of the frame the main thread was in; null before the first frame and after the
+/// last.</param>
 /// <param name="ThreadId">The managed id of the thread that logged it.</param>
 /// <param name="File">The caller's source file, as the compiler saw it: a full path on the machine that built it, or
 /// its path in the repository after <c>/_/</c> in Release.</param>
 /// <param name="Line">The caller's line in <paramref name="File"/>.</param>
 /// <param name="Member">The method or property that logged it.</param>
-public readonly record struct LogLine(DateTime Time, LogLevel Level, string Message, ulong? Frame, int ThreadId, string File, int Line, string Member)
+public readonly record struct LogLine(
+    DateTime Time,
+    LogLevel Level,
+    string Message,
+    ulong? Frame,
+    int ThreadId,
+    string File,
+    int Line,
+    string Member)
 {
     /// <summary>
     /// The line as the terminal and crash files show it, with the file's name only:
@@ -26,6 +35,9 @@ public readonly record struct LogLine(DateTime Time, LogLevel Level, string Mess
     public override string ToString()
     {
         string frame = Frame is { } index ? index.ToString(CultureInfo.InvariantCulture) : "-";
-        return string.Create(CultureInfo.InvariantCulture, $"{Time:HH:mm:ss.fff} {Level,-8} f{frame} t{ThreadId} {Message} ({Path.GetFileName(File)}:{Line} {Member})");
+        string file = Path.GetFileName(File);
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"{Time:HH:mm:ss.fff} {Level,-8} f{frame} t{ThreadId} {Message} ({file}:{Line} {Member})");
     }
 }

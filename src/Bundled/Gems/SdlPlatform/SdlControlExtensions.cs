@@ -1,13 +1,16 @@
 using System.Diagnostics.CodeAnalysis;
-using Magic.SdlBindings;
 using Magic.Contexts.Input;
+using Magic.SdlBindings;
 
 namespace Magic.SdlPlatform;
 
 /// <summary>
 /// SDL's keys and buttons as Magic's <see cref="Control"/>s; what Magic does not name is null.
 /// </summary>
-[SuppressMessage("Style", "IDE0072:Add missing cases", Justification = "SDL names far more keys and buttons than Magic; the rest map to nothing on purpose.")]
+[SuppressMessage(
+    "Style",
+    "IDE0072:Add missing cases",
+    Justification = "SDL names far more keys and buttons than Magic; the rest map to nothing on purpose.")]
 internal static class SdlControlExtensions
 {
     extension(SDL.Scancode scancode)

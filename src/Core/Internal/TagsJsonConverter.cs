@@ -11,7 +11,10 @@ namespace Magic.Internal;
 /// and keeps no name to write. Past <see cref="Tags.Capacity"/>, the rest are left out. A prefab gives an entity its
 /// tags by name instead, beside its components, which the gem that reads prefabs turns into these.
 /// </summary>
-[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "The serializer makes it, as Tags' [JsonConverter] names it.")]
+[SuppressMessage(
+    "Performance",
+    "CA1812:Avoid uninstantiated internal classes",
+    Justification = "The serializer makes it, as Tags' [JsonConverter] names it.")]
 internal sealed class TagsJsonConverter : JsonConverter<Tags>
 {
     public override Tags Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)

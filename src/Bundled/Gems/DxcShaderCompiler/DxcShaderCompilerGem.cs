@@ -29,7 +29,10 @@ namespace Magic.DxcShaderCompiler;
 /// asked for while it already compiles waits for that compile rather than starting its own, so each compiles, and its
 /// entry is written, once.
 /// </summary>
-internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches, DxcShaderCompilerSettings settings) : IGem, IShaderCompiler, ICache<GpuShader>
+internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches, DxcShaderCompilerSettings settings) :
+    IGem,
+    IShaderCompiler,
+    ICache<GpuShader>
 {
     /// <summary>
     /// The text encoding DXC is told the source is in.
@@ -123,19 +126,32 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             ThreadCountZ = threadsZ,
             Code = reader.ReadBytes(length),
         };
-        return shader.Code.Length == length ? Result.Success(shader) : Result.Failure<GpuShader>("its code is cut short.");
+        return shader.Code.Length == length
+            ? Result.Success(shader)
+            : Result.Failure<GpuShader>("its code is cut short.");
     }
 
-    public async Task<Result<GpuShader>> CompileAsync(string path, GpuStage stage, GpuShaderFormat format, CancellationToken cancel)
+    public async Task<Result<GpuShader>> CompileAsync(
+        string path,
+        GpuStage stage,
+        GpuShaderFormat format,
+        CancellationToken cancel)
     {
         Handle<Shader> asset = _assets.Find<Shader>(path);
         if (asset == Handle<Shader>.None) return Result.Failure<GpuShader>($"{path}: no asset is there.");
 
         Result<Shader> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
-        return loaded.Ok ? await CompileAsync(loaded.Value.Text, path, stage, format, cancel).ConfigureAwait(false) : Result.Failure<GpuShader>(loaded.Error);
+        return loaded.Ok
+            ? await CompileAsync(loaded.Value.Text, path, stage, format, cancel).ConfigureAwait(false)
+            : Result.Failure<GpuShader>(loaded.Error);
     }
 
-    public async Task<Result<GpuShader>> CompileAsync(string hlsl, string name, GpuStage stage, GpuShaderFormat format, CancellationToken cancel)
+    public async Task<Result<GpuShader>> CompileAsync(
+        string hlsl,
+        string name,
+        GpuStage stage,
+        GpuShaderFormat format,
+        CancellationToken cancel)
     {
         (string profile, string define) = stage switch
         {
@@ -157,7 +173,8 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
         try
         {
-            Result<GpuShader> made = await ReadOrCompileAsync(key, source, name, profile, stage, format).ConfigureAwait(false);
+            Result<GpuShader> made = await ReadOrCompileAsync(key, source, name, profile, stage, format).ConfigureAwait(
+                false);
             own.SetResult(made);
             return made;
         }
@@ -172,98 +189,10 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         }
     }
 
-    /// <summary>
-    /// What the cache holds of <paramref name="key"/>, made with the debug-info setting as it is now, else
-    /// <paramref name="source"/> compiled and kept there. Not cancelled: a compile is short and what it makes is kept,
-    /// and whoever else waits for it stops waiting on their own.
-    /// </summary>
-    private async Task<Result<GpuShader>> ReadOrCompileAsync(ulong key, string source, string name, string profile, GpuStage stage, GpuShaderFormat format)
-    {
-        ulong version = _settings.DebugInfo ? 1UL : 0UL;
-        if (await _caches.ReadAsync<GpuShader>(key, version, CancellationToken.None).ConfigureAwait(false) is { Ok: true } cached)
-        {
-            return cached;
-        }
-
-        Result<GpuShader> compiled = await Task.Run(() => Compile(source, name, profile, stage, format)).ConfigureAwait(false);
-        if (compiled.Ok)
-        {
-            await _caches.WriteAsync(key, version, compiled.Value, CancellationToken.None).ConfigureAwait(false);
-        }
-
-        return compiled;
-    }
-
-    /// <summary>
-    /// <paramref name="source"/> with each <c>#include "path"</c> line replaced by the shader asset at
-    /// <c>Shaders/path</c>, spliced in turn, so DXC needs no folder to find includes in: a shader includes whatever
-    /// shaders are assets, whichever root they are under. Every include goes in where it is written, as the preprocessor
-    /// would read it (its guards then keep a second copy out), between <c>#line</c>s that keep DXC's errors naming the
-    /// file and line they are in. A file in <paramref name="including"/>, which holds those being spliced, is not spliced
-    /// into itself again; an include no asset is at is left as it is, for DXC to report, and one that does not load fails
-    /// the compile. <paramref name="name"/> is what <paramref name="source"/> is called. Paths compare ignoring case, as
-    /// the engine's do on every OS.
-    /// </summary>
-    private async Task<Result<string>> SpliceAsync(string source, string name, HashSet<string> including, CancellationToken cancel)
-    {
-        StringBuilder spliced = new(source.Length);
-        int number = 0;
-        foreach (string line in source.Split('\n'))
-        {
-            number++;
-            string path = Include().Match(line) is { Success: true } include ? include.Groups["path"].Value : string.Empty;
-            Handle<Shader> asset = path.Length == 0 || including.Contains(path) ? Handle<Shader>.None : _assets.Find<Shader>("Shaders/" + path);
-            if (asset == Handle<Shader>.None)
-            {
-                spliced.Append(line).Append('\n');
-                continue;
-            }
-
-            Result<Shader> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
-            if (!loaded.Ok) return Result.Failure<string>($"{name}:{number}: {loaded.Error}");
-
-            including.Add(path);
-            Result<string> included = await SpliceAsync(loaded.Value.Text, path, including, cancel).ConfigureAwait(false);
-            including.Remove(path);
-            if (!included.Ok) return included;
-
-            spliced.Append(CultureInfo.InvariantCulture, $"#line 1 \"{path}\"\n")
-                .Append(included.Value)
-                .Append(CultureInfo.InvariantCulture, $"#line {number + 1} \"{name}\"\n");
-        }
-
-        return Result.Success(spliced.ToString());
-    }
-
-    /// <summary>
-    /// <paramref name="source"/>, its includes spliced in and its stage defined, compiled by DXC for
-    /// <paramref name="profile"/> into <paramref name="format"/>, with what it binds, by name, read from its SPIR-V
-    /// (<see cref="SpirvBindings"/>).
-    /// </summary>
-    private Result<GpuShader> Compile(string source, string name, string profile, GpuStage stage, GpuShaderFormat format)
-    {
-        Result<byte[]> spirv = CompileWithDxc(source, name, profile, isSpirv: true);
-        if (!spirv.Ok) return Result.Failure<GpuShader>(spirv.Error);
-
-        Result<GpuShader> reflected = SpirvBindings.Read(spirv.Value, stage);
-        if (!reflected.Ok)
-        {
-            return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {reflected.Error}");
-        }
-
-        Result<byte[]> code = format switch
-        {
-            GpuShaderFormat.Spirv => spirv,
-            GpuShaderFormat.Dxil => CompileWithDxc(source, name, profile, isSpirv: false),
-            GpuShaderFormat.Msl => Metal.Translate(spirv.Value, name, stage),
-            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "There is no such shader format."),
-        };
-        return code.Ok
-            ? Result.Success(reflected.Value with { Code = code.Value, EntryPoint = format == GpuShaderFormat.Msl ? "main0" : "main" })
-            : Result.Failure<GpuShader>(code.Error);
-    }
-
-    [GeneratedRegex("""^\s*#\s*include\s+"(?<path>[^"]+)"\s*(//.*)?$""", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture, matchTimeoutMilliseconds: 1000)]
+    [GeneratedRegex(
+        """^\s*#\s*include\s+"(?<path>[^"]+)"\s*(//.*)?$""",
+        RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture,
+        matchTimeoutMilliseconds: 1000)]
     private static partial Regex Include();
 
     /// <summary>
@@ -314,6 +243,125 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     }
 
     /// <summary>
+    /// What the cache holds of <paramref name="key"/>, made with the debug-info setting as it is now, else
+    /// <paramref name="source"/> compiled and kept there. Not cancelled: a compile is short and what it makes is kept,
+    /// and whoever else waits for it stops waiting on their own.
+    /// </summary>
+    private async Task<Result<GpuShader>> ReadOrCompileAsync(
+        ulong key,
+        string source,
+        string name,
+        string profile,
+        GpuStage stage,
+        GpuShaderFormat format)
+    {
+        ulong version = _settings.DebugInfo ? 1UL : 0UL;
+        if (await _caches.ReadAsync<GpuShader>(key, version, CancellationToken.None)
+            .ConfigureAwait(false) is { Ok: true } cached)
+        {
+            return cached;
+        }
+
+        Result<GpuShader> compiled = await Task.Run(() => Compile(source, name, profile, stage, format))
+            .ConfigureAwait(false);
+        if (compiled.Ok)
+        {
+            await _caches.WriteAsync(key, version, compiled.Value, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        return compiled;
+    }
+
+    /// <summary>
+    /// <paramref name="source"/> with each <c>#include "path"</c> line replaced by the shader asset at
+    /// <c>Shaders/path</c>, spliced in turn, so DXC needs no folder to find includes in: a shader includes whatever
+    /// shaders are assets, whichever root they are under. Every include goes in where it is written, as the
+    /// preprocessor would read it (its guards then keep a second copy out), between <c>#line</c>s that keep DXC's
+    /// errors naming the file and line they are in. A file in <paramref name="including"/>, which holds those being
+    /// spliced, is not spliced into itself again; an include no asset is at is left as it is, for DXC to report, and
+    /// one that does not load fails the compile. <paramref name="name"/> is what <paramref name="source"/> is called.
+    /// Paths compare ignoring case, as the engine's do on every OS.
+    /// </summary>
+    private async Task<Result<string>> SpliceAsync(
+        string source,
+        string name,
+        HashSet<string> including,
+        CancellationToken cancel)
+    {
+        StringBuilder spliced = new(source.Length);
+        int number = 0;
+        foreach (string line in source.Split('\n'))
+        {
+            number++;
+            string path = Include().Match(line) is { Success: true } include
+                ? include.Groups["path"].Value
+                : string.Empty;
+            Handle<Shader> asset = path.Length == 0 || including.Contains(path)
+                ? Handle<Shader>.None
+                : _assets.Find<Shader>("Shaders/" + path);
+            if (asset == Handle<Shader>.None)
+            {
+                spliced.Append(line).Append('\n');
+                continue;
+            }
+
+            Result<Shader> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
+            if (!loaded.Ok) return Result.Failure<string>($"{name}:{number}: {loaded.Error}");
+
+            including.Add(path);
+            Result<string> included = await SpliceAsync(loaded.Value.Text, path, including, cancel).ConfigureAwait(
+                false);
+            including.Remove(path);
+            if (!included.Ok) return included;
+
+            spliced.Append(CultureInfo.InvariantCulture, $"#line 1 \"{path}\"\n")
+                .Append(included.Value)
+                .Append(CultureInfo.InvariantCulture, $"#line {number + 1} \"{name}\"\n");
+        }
+
+        return Result.Success(spliced.ToString());
+    }
+
+    /// <summary>
+    /// <paramref name="source"/>, its includes spliced in and its stage defined, compiled by DXC for
+    /// <paramref name="profile"/> into <paramref name="format"/>, with what it binds, by name, read from its SPIR-V
+    /// (<see cref="SpirvBindings"/>).
+    /// </summary>
+    private Result<GpuShader> Compile(
+        string source,
+        string name,
+        string profile,
+        GpuStage stage,
+        GpuShaderFormat format)
+    {
+        Result<byte[]> spirv = CompileWithDxc(source, name, profile, isSpirv: true);
+        if (!spirv.Ok) return Result.Failure<GpuShader>(spirv.Error);
+
+        Result<GpuShader> reflected = SpirvBindings.Read(spirv.Value, stage);
+        if (!reflected.Ok)
+        {
+            return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {reflected.Error}");
+        }
+
+        Result<byte[]> code = format switch
+        {
+            GpuShaderFormat.Spirv => spirv,
+            GpuShaderFormat.Dxil => CompileWithDxc(source, name, profile, isSpirv: false),
+            GpuShaderFormat.Msl => Metal.Translate(spirv.Value, name, stage),
+            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "There is no such shader format."),
+        };
+        return code.Ok
+            ? Result.Success(reflected.Value with
+            {
+                Code = code.Value,
+                EntryPoint = format == GpuShaderFormat.Msl
+                ? "main0"
+                : "main"
+            })
+            : Result.Failure<GpuShader>(code.Error);
+    }
+
+    /// <summary>
     /// One DXC compile of <paramref name="source"/>, to SPIR-V or DXIL; a failure carries DXC's own text.
     /// </summary>
     private unsafe Result<byte[]> CompileWithDxc(string source, string name, string profile, bool isSpirv)
@@ -321,9 +369,9 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         List<string> arguments = ["-E", "main", "-T", profile, "-HV", "2021", "-WX", "-O3", "-Zpc"];
 
         // Vulkan's attributes ([[vk::image_format]]) mean nothing to DXIL, which warns that it ignores them; the SPIR-V
-        // compile, which always runs first, still checks every one with every warning on. A resource the shader does not
-        // use is dropped, so what is read from the SPIR-V is what the shader uses; its interface is kept whole, so the
-        // stages' varyings line up.
+        // compile, which always runs first, still checks every one with every warning on. A resource the shader does
+        // not use is dropped, so what is read from the SPIR-V is what the shader uses; its interface is kept whole, so
+        // the stages' varyings line up.
         arguments.AddRange(isSpirv
             ? ["-spirv", "-fspv-target-env=vulkan1.1", "-fspv-flatten-resource-arrays", "-fspv-preserve-interface"]
             : ["-Wno-ignored-attributes"]);
@@ -356,7 +404,15 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             fixed (nint* argumentList = wide)
             {
                 DxcBuffer buffer = new() { Start = bytes, Size = (nuint)text.Length, Encoding = Utf8CodePage };
-                int compiled = ((delegate* unmanaged<nint, DxcBuffer*, nint*, uint, nint, Guid*, nint*, int>)GetMethod(compiler, 3))(compiler, &buffer, argumentList, (uint)wide.Length, 0, &resultInterface, &result);
+                nint compile = GetMethod(compiler, 3);
+                int compiled = ((delegate* unmanaged<nint, DxcBuffer*, nint*, uint, nint, Guid*, nint*, int>)compile)(
+                    compiler,
+                    &buffer,
+                    argumentList,
+                    (uint)wide.Length,
+                    0,
+                    &resultInterface,
+                    &result);
                 if (compiled < 0) return Result.Failure<byte[]>($"{name}: DXC failed to run (0x{compiled:X8}).");
             }
 
@@ -365,7 +421,9 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             if (status < 0)
             {
                 errors = GetOutput(result, 5);
-                string message = errors == 0 ? $"0x{status:X8}" : Encoding.UTF8.GetString(GetBytes(errors)).TrimEnd('\0', '\n', ' ');
+                string message = errors == 0
+                    ? $"0x{status:X8}"
+                    : Encoding.UTF8.GetString(GetBytes(errors)).TrimEnd('\0', '\n', ' ');
                 return Result.Failure<byte[]>(message);
             }
 

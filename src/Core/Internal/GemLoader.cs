@@ -58,7 +58,9 @@ internal sealed class GemLoader
         _files = files;
         _assemblies = assemblies;
         LoadCode(files.Combine(AppContext.BaseDirectory, "Resources", "Resources.dll"), "Magic's scripts");
-        LoadCode(files.Combine(AppContext.BaseDirectory, "Projects", project.Name, project.Name + ".dll"), $"{project.Name}'s code");
+        LoadCode(
+            files.Combine(AppContext.BaseDirectory, "Projects", project.Name, project.Name + ".dll"),
+            $"{project.Name}'s code");
 
         List<string> resources = [GemAssembly.GetResources(files, typeof(GemLoader).Assembly)];
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
@@ -83,7 +85,8 @@ internal sealed class GemLoader
             GemAssembly gem = loaded.Value;
             if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
             {
-                Debugging.Error($"Gem {name} is {gem.Version.ToString(3)}, and {project.Name} asks for {wanted}; it is not made.");
+                Debugging.Error(
+                    $"Gem {name} is {gem.Version.ToString(3)}, and {project.Name} asks for {wanted}; it is not made.");
                 continue;
             }
 
@@ -116,17 +119,21 @@ internal sealed class GemLoader
 
     /// <summary>
     /// Watches where the code that is no gem was loaded from, until the subscription is disposed, and loads what is
-    /// built there again once the build has settled: its assembly replaces its last build's (<see cref="Assemblies"/>), and
-    /// <paramref name="assets"/> makes every script and every prefab again, as those are read as the classes code
+    /// built there again once the build has settled: its assembly replaces its last build's (<see cref="Assemblies"/>),
+    /// and <paramref name="assets"/> makes every script and every prefab again, as those are read as the classes code
     /// holds, so the world runs the scripts as they are now. The gems are never loaded again: a gem takes a restart.
     /// </summary>
-    [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "The subscription returned owns the list, and disposing it disposes the list.")]
+    [SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "The subscription returned owns the list, and disposing it disposes the list.")]
     internal Subscription WatchCode(Assets assets)
     {
         SubscriptionList watching = new();
         foreach (CodeFile code in _code)
         {
-            watching.Add(FileSystem.Watch(_files.GetParent(code.Path), _ => ReloadCodeAsync(code, assets).FireAndForget()));
+            watching.Add(
+                FileSystem.Watch(_files.GetParent(code.Path), _ => ReloadCodeAsync(code, assets).FireAndForget()));
         }
 
         return new Subscription(watching.Dispose);
@@ -154,6 +161,65 @@ internal sealed class GemLoader
     }
 
     /// <summary>
+    /// Whether <paramref name="version"/> is the one a project asks for as <paramref name="wanted"/>: the parts it
+    /// gives, <c>1</c>, <c>1.2</c> or <c>1.2.3</c>, each match, and the rest may be anything. Anything that is not
+    /// one to four numbers matches no version.
+    /// </summary>
+    private static bool IsVersion(Version version, string wanted)
+    {
+        ReadOnlySpan<int> parts = [version.Major, version.Minor, version.Build, version.Revision];
+        string[] asked = wanted.Split('.');
+        if (asked.Length > parts.Length) return false;
+
+        for (int i = 0; i < asked.Length; i++)
+        {
+            if (!int.TryParse(asked[i], NumberStyles.None, CultureInfo.InvariantCulture, out int part)
+                || part != parts[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Why <paramref name="gem"/> is not made when it would provide something Core or a gem listed before it already
+    /// provides; null when it provides nothing that is taken.
+    /// </summary>
+    private static string? FindClash(ServiceCollection services, GemAssembly gem)
+    {
+        foreach (Type contract in gem.Provides)
+        {
+            foreach (ServiceDescriptor service in services)
+            {
+                // Core's services are instances, or made as their own class, and a gem is registered as its class
+                // before the interfaces it provides, so what is found is the class that provides the interface.
+                Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
+                if (provider.IsAssignableTo(contract))
+                {
+                    return $"Gem {gem.Name} provides {GetName(contract)}, "
+                        + $"which {provider.Name} already provides; it is not made.";
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// <paramref name="type"/>'s name as C# writes it, <c>IAssetLoader&lt;Texture&gt;</c> rather than
+    /// <c>IAssetLoader`1</c>.
+    /// </summary>
+    private static string GetName(Type type)
+    {
+        if (!type.IsGenericType) return type.Name;
+
+        string name = type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)];
+        return $"{name}<{string.Join(", ", Array.ConvertAll(type.GetGenericArguments(), GetName))}>";
+    }
+
+    /// <summary>
     /// Loads the code at <paramref name="path"/> (<see cref="GemAssembly.LoadCode"/>) and takes in its assembly, and
     /// keeps it to load again when it is built.
     /// </summary>
@@ -174,7 +240,8 @@ internal sealed class GemLoader
     {
         int change = code.Note();
         await Task.Delay(_settle).ConfigureAwait(false);
-        if (!code.IsLatest(change) || GemAssembly.LoadCode(_files, code.Path, code.What, again: true) is not { } assembly)
+        if (!code.IsLatest(change)
+            || GemAssembly.LoadCode(_files, code.Path, code.What, again: true) is not { } assembly)
         {
             return;
         }
@@ -185,74 +252,22 @@ internal sealed class GemLoader
     }
 
     /// <summary>
-    /// Whether <paramref name="version"/> is the one a project asks for as <paramref name="wanted"/>: the parts it
-    /// gives, <c>1</c>, <c>1.2</c> or <c>1.2.3</c>, each match, and the rest may be anything. Anything that is not
-    /// one to four numbers matches no version.
-    /// </summary>
-    private static bool IsVersion(Version version, string wanted)
-    {
-        ReadOnlySpan<int> parts = [version.Major, version.Minor, version.Build, version.Revision];
-        string[] asked = wanted.Split('.');
-        if (asked.Length > parts.Length) return false;
-
-        for (int i = 0; i < asked.Length; i++)
-        {
-            if (!int.TryParse(asked[i], NumberStyles.None, CultureInfo.InvariantCulture, out int part) || part != parts[i])
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Why <paramref name="gem"/> is not made when it would provide something Core or a gem listed before it already
-    /// provides; null when it provides nothing that is taken.
-    /// </summary>
-    private static string? FindClash(ServiceCollection services, GemAssembly gem)
-    {
-        foreach (Type contract in gem.Provides)
-        {
-            foreach (ServiceDescriptor service in services)
-            {
-                // Core's services are instances, or made as their own class, and a gem is registered as its class before
-                // the interfaces it provides, so what is found is the class that provides the interface.
-                Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
-                if (provider.IsAssignableTo(contract))
-                {
-                    return $"Gem {gem.Name} provides {GetName(contract)}, which {provider.Name} already provides; it is not made.";
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// <paramref name="type"/>'s name as C# writes it, <c>IAssetLoader&lt;Texture&gt;</c> rather than <c>IAssetLoader`1</c>.
-    /// </summary>
-    private static string GetName(Type type)
-    {
-        if (!type.IsGenericType) return type.Name;
-
-        string name = type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)];
-        return $"{name}<{string.Join(", ", Array.ConvertAll(type.GetGenericArguments(), GetName))}>";
-    }
-
-    /// <summary>
     /// The service provider's factory for a gem: makes it from its settings object and the services its constructor
     /// asks for, which the provider makes first, adds it to what was made, and adds it to the log if it is an
     /// <see cref="ILogSink"/>. Why it could not be made, settings that do not fit it among the reasons, is logged here,
     /// against the gem, and the gems that need it are told only that it was not. A gem is tried once; one asked for
     /// while its constructor runs, by something it needs, is a cycle, which is said.
     /// </summary>
-    [SuppressMessage("Design", "CA1031:Do not catch general exception types", Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on.")]
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on.")]
     private IGem MakeGem(IServiceProvider services, GemAssembly gem)
     {
         if (_making.Contains(gem.Type))
         {
-            throw new InvalidOperationException($"it needs {gem.Name}, which is being made: a cycle, as {gem.Name} needs something that needs it.");
+            throw new InvalidOperationException(
+                $"it needs {gem.Name}, which is being made: a cycle, as {gem.Name} needs something that needs it.");
         }
 
         if (!_tried.Add(gem.Type)) throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
@@ -268,13 +283,17 @@ internal sealed class GemLoader
         _making.Add(gem.Type);
         try
         {
-            made = (IGem)ActivatorUtilities.CreateInstance(services, gem.Type, settings.Value is { } given ? [given] : []);
+            made = (IGem)ActivatorUtilities.CreateInstance(
+                services,
+                gem.Type,
+                settings.Value is { } given ? [given] : []);
         }
         catch (Exception ex)
         {
             // A service that is missing or was not made, and a gem that cannot start, say why in the message; anything
             // else is a bug in the gem, and its stack says where.
-            Debugging.Error($"Gem {gem.Name} was not made: {(ex is InvalidOperationException ? ex.Message : ex.ToString())}");
+            Debugging.Error(
+                $"Gem {gem.Name} was not made: {(ex is InvalidOperationException ? ex.Message : ex.ToString())}");
             throw new InvalidOperationException($"it needs {gem.Name}, which was not made.", ex);
         }
         finally

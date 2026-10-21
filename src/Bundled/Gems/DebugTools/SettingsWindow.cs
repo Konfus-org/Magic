@@ -21,15 +21,15 @@ namespace Magic.DebugTools;
 
 /// <summary>
 /// The settings: the preset applied, which can be switched, and what the frame shows (<see cref="DebugViewChanged"/>),
-/// which F5 and F6 step through whether or not the window is open, and which says its name and what it shows as a
-/// line on screen while it is a debug view; a filter, which while it has text shows every setting it finds in place
-/// of the tabs; then a tab per category of settings (<see cref="CategoryAttribute"/> up to its slash, else the gem's name), in it a
-/// header per sub-category (past the slash, else the gem's name), which a click folds away, and under it a row per
+/// which F5 and F6 step through whether or not the window is open, and which says its name and what it shows as a line
+/// on screen while it is a debug view; a filter, which while it has text shows every setting it finds in place of the
+/// tabs; then a tab per category of settings (<see cref="CategoryAttribute"/> up to its slash, else the gem's name), in
+/// it a header per sub-category (past the slash, else the gem's name), which a click folds away, and under it a row per
 /// setting (<see cref="Settings.All"/>): labelled in words, its key and description shown while the mouse rests on it,
 /// a number kept to its <see cref="RangeAttribute"/>. A setting marked <see cref="RequireRestartAttribute"/> says on
-/// its row that a change starts the engine again. An edit is set through <see cref="Settings.Set{T}"/>, live until the next preset;
-/// nothing is saved. Copy gives the open tab, or what the filter finds, as <c>Gem.setting=value</c> lines, the form
-/// <c>--set</c> takes. Its commands: <c>get Gem</c>, <c>set Gem.setting=value</c>, <c>preset [Name]</c> and
+/// its row that a change starts the engine again. An edit is set through <see cref="Settings.Set{T}"/>, live until the
+/// next preset; nothing is saved. Copy gives the open tab, or what the filter finds, as <c>Gem.setting=value</c> lines,
+/// the form <c>--set</c> takes. Its commands: <c>get Gem</c>, <c>set Gem.setting=value</c>, <c>preset [Name]</c> and
 /// <c>view [Name]</c>.
 /// </summary>
 internal sealed class SettingsWindow : IDisposable
@@ -43,7 +43,8 @@ internal sealed class SettingsWindow : IDisposable
     /// <summary>
     /// What the view choice says of the frame as it is.
     /// </summary>
-    private const string NormalTip = "The frame as it is. A debug view shows one thing the frame made, its depth or its normals, say, in its place.";
+    private const string NormalTip = "The frame as it is. A debug view shows one thing the frame made, "
+        + "its depth or its normals, say, in its place.";
 
     private readonly ToolWindow _window;
     private readonly IDebugUI _ui;
@@ -97,7 +98,15 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private string _filter = string.Empty;
 
-    internal SettingsWindow(ToolWindow window, IDebugUI ui, Settings settings, Assets assets, ICommands? commands, Events events, IInput? input, CancellationToken stopping)
+    internal SettingsWindow(
+        ToolWindow window,
+        IDebugUI ui,
+        Settings settings,
+        Assets assets,
+        ICommands? commands,
+        Events events,
+        IInput? input,
+        CancellationToken stopping)
     {
         _window = window;
         _ui = ui;
@@ -106,10 +115,14 @@ internal sealed class SettingsWindow : IDisposable
         _input = input;
         _stopping = stopping;
         _presets = [.. settings.Presets];
-        _presetNames = Array.ConvertAll(_presets, preset => Path.GetFileNameWithoutExtension(assets.GetPath(preset)) ?? string.Empty);
+        _presetNames = Array.ConvertAll(
+            _presets,
+            preset => Path.GetFileNameWithoutExtension(assets.GetPath(preset)) ?? string.Empty);
         Array.Sort(_presetNames, _presets, StringComparer.OrdinalIgnoreCase);
         Handle<Pass>[] passes = Array.ConvertAll([.. assets.GetPaths(ViewsFolder)], assets.Find<Pass>);
-        _viewNames = Array.ConvertAll(passes, pass => Path.GetFileNameWithoutExtension(assets.GetPath(pass)) ?? string.Empty);
+        _viewNames = Array.ConvertAll(
+            passes,
+            pass => Path.GetFileNameWithoutExtension(assets.GetPath(pass)) ?? string.Empty);
         Array.Sort(_viewNames, passes, StringComparer.OrdinalIgnoreCase);
         _viewDescriptions = new string[_viewNames.Length];
         Array.Fill(_viewDescriptions, string.Empty);
@@ -123,10 +136,23 @@ internal sealed class SettingsWindow : IDisposable
         DescribeViewsAsync(assets, passes, stopping).FireAndForget();
         if (commands is null) return;
 
-        _commands.Add(commands.Register("get", "Logs every setting of a gem as Gem.setting=value lines: get DebugTools.", RunGet));
-        _commands.Add(commands.Register("set", "Changes a setting while running, until the next preset: set DebugTools.frameRate=false.", RunSet));
-        _commands.Add(commands.Register("preset", "Logs the preset applied and every preset there is; with a name, applies that preset.", RunPreset));
-        _commands.Add(commands.Register("view", "Shows a debug view, a pass in Passes/Debug by its file name, in place of the finished image; alone, the frame as it is.", RunView));
+        _commands.Add(commands.Register(
+            "get",
+            "Logs every setting of a gem as Gem.setting=value lines: get DebugTools.",
+            RunGet));
+        _commands.Add(commands.Register(
+            "set",
+            "Changes a setting while running, until the next preset: set DebugTools.frameRate=false.",
+            RunSet));
+        _commands.Add(commands.Register(
+            "preset",
+            "Logs the preset applied and every preset there is; with a name, applies that preset.",
+            RunPreset));
+        _commands.Add(commands.Register(
+            "view",
+            "Shows a debug view, a pass in Passes/Debug by its file name, in place of the finished image; "
+                + "alone, the frame as it is.",
+            RunView));
     }
 
     public void Dispose()
@@ -176,6 +202,77 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
+    /// A name in words: <c>RenderScale</c> and <c>renderScale</c> are "Render scale"; an acronym stays as it is
+    /// (<c>LodBiasLOD</c> is "Lod bias LOD").
+    /// </summary>
+    private static string ToWords(string name)
+    {
+        StringBuilder words = new(name.Length + 8);
+        for (int i = 0; i < name.Length; i++)
+        {
+            char character = name[i];
+            bool isAfterLower = i > 0 && (char.IsLower(name[i - 1]) || char.IsDigit(name[i - 1]));
+            bool isEndOfAcronym = i > 0 && char.IsUpper(name[i - 1]) && i + 1 < name.Length
+                && char.IsLower(name[i + 1]);
+            if (i == 0)
+            {
+                words.Append(char.ToUpperInvariant(character));
+            }
+            else if (char.IsUpper(character) && (isAfterLower || isEndOfAcronym))
+            {
+                bool isAcronym = i + 1 < name.Length && char.IsUpper(name[i + 1]);
+                words.Append(' ').Append(isAcronym ? character : char.ToLowerInvariant(character));
+            }
+            else
+            {
+                words.Append(character);
+            }
+        }
+
+        return words.ToString();
+    }
+
+    /// <summary>
+    /// Where a setting sits: its tab, its category up to its slash, <c>Render</c> of <c>Render/Shadows</c>, and its
+    /// header in the tab, the category past the slash, <c>Shadows</c>; its gem's name stands in for whichever the
+    /// category does not say.
+    /// </summary>
+    private static (string Tab, string Header) PlaceOf(Setting setting)
+    {
+        string? category = setting.Attributes.OfType<CategoryAttribute>().FirstOrDefault()?.Category;
+        int slash = category?.IndexOf('/', StringComparison.Ordinal) ?? -1;
+        return category is null
+            ? (setting.Owner, setting.Owner)
+            : slash < 0 ? (category, setting.Owner) : (category[..slash], category[(slash + 1)..]);
+    }
+
+    /// <summary>
+    /// What is typed for a setting, as the console takes it: JSON when it parses as JSON (1920, true, ["a"],
+    /// "quoted"), and a string when it does not.
+    /// </summary>
+    private static JsonNode? ParseValue(string text)
+    {
+        try
+        {
+            return JsonNode.Parse(text);
+        }
+        catch (JsonException)
+        {
+            return JsonValue.Create(text);
+        }
+    }
+
+    /// <summary>
+    /// Where a tab goes: Render first and Debug last, the rest between them as they were first met.
+    /// </summary>
+    private static int GetTabOrder(string tab, string[] met)
+    {
+        return string.Equals(tab, "Render", StringComparison.Ordinal) ? -1
+            : string.Equals(tab, "Debug", StringComparison.Ordinal) ? met.Length
+            : Array.IndexOf(met, tab);
+    }
+
+    /// <summary>
     /// Whether the filter finds <paramref name="setting"/>: in its name in words, <paramref name="label"/>, its key or
     /// its description, in any case.
     /// </summary>
@@ -219,64 +316,6 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
-    /// A name in words: <c>RenderScale</c> and <c>renderScale</c> are "Render scale"; an acronym stays as it is
-    /// (<c>LodBiasLOD</c> is "Lod bias LOD").
-    /// </summary>
-    private static string ToWords(string name)
-    {
-        StringBuilder words = new(name.Length + 8);
-        for (int i = 0; i < name.Length; i++)
-        {
-            char character = name[i];
-            bool isAfterLower = i > 0 && (char.IsLower(name[i - 1]) || char.IsDigit(name[i - 1]));
-            bool isEndOfAcronym = i > 0 && char.IsUpper(name[i - 1]) && i + 1 < name.Length && char.IsLower(name[i + 1]);
-            if (i == 0)
-            {
-                words.Append(char.ToUpperInvariant(character));
-            }
-            else if (char.IsUpper(character) && (isAfterLower || isEndOfAcronym))
-            {
-                bool isAcronym = i + 1 < name.Length && char.IsUpper(name[i + 1]);
-                words.Append(' ').Append(isAcronym ? character : char.ToLowerInvariant(character));
-            }
-            else
-            {
-                words.Append(character);
-            }
-        }
-
-        return words.ToString();
-    }
-
-    /// <summary>
-    /// Where a setting sits: its tab, its category up to its slash, <c>Render</c> of <c>Render/Shadows</c>, and its
-    /// header in the tab, the category past the slash, <c>Shadows</c>; its gem's name stands in for whichever the
-    /// category does not say.
-    /// </summary>
-    private static (string Tab, string Header) PlaceOf(Setting setting)
-    {
-        string? category = setting.Attributes.OfType<CategoryAttribute>().FirstOrDefault()?.Category;
-        int slash = category?.IndexOf('/', StringComparison.Ordinal) ?? -1;
-        return category is null ? (setting.Owner, setting.Owner) : slash < 0 ? (category, setting.Owner) : (category[..slash], category[(slash + 1)..]);
-    }
-
-    /// <summary>
-    /// What is typed for a setting, as the console takes it: JSON when it parses as JSON (1920, true, ["a"],
-    /// "quoted"), and a string when it does not.
-    /// </summary>
-    private static JsonNode? ParseValue(string text)
-    {
-        try
-        {
-            return JsonNode.Parse(text);
-        }
-        catch (JsonException)
-        {
-            return JsonValue.Create(text);
-        }
-    }
-
-    /// <summary>
     /// The settings <paramref name="includes"/> as <c>Gem.setting=value</c> lines.
     /// </summary>
     private string GetLines(Predicate<Setting> includes)
@@ -286,7 +325,9 @@ internal sealed class SettingsWindow : IDisposable
         {
             if (includes(setting))
             {
-                text.Append(setting.Key).Append('=').Append(JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options)).Append('\n');
+                text.Append(setting.Key).Append('=')
+                    .Append(JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options))
+                    .Append('\n');
             }
         }
 
@@ -322,7 +363,10 @@ internal sealed class SettingsWindow : IDisposable
                 Heading = string.Equals(tab, header, StringComparison.Ordinal) ? tab : $"{tab}: {header}",
                 Label = label,
                 Id = $"{label}##{setting.Key}",
-                Tip = restarts ? $"{tip} Changed, the engine starts again at once, every setting as it is: the world is saved and put back, so the game goes on where it was." : tip,
+                Tip = restarts
+                    ? $"{tip} Changed, the engine starts again at once, every setting as it is: the world is saved and "
+                        + "put back, so the game goes on where it was."
+                    : tip,
                 Min = range is null ? 0 : Convert.ToSingle(range.Minimum, CultureInfo.InvariantCulture),
                 Max = range is null ? 0 : Convert.ToSingle(range.Maximum, CultureInfo.InvariantCulture),
                 Choices = setting.Type.IsEnum ? [.. Enum.GetValues(setting.Type).Cast<object>()] : [],
@@ -336,22 +380,13 @@ internal sealed class SettingsWindow : IDisposable
 
         string[] met = [.. tabs];
         tabs.Sort((left, right) => GetTabOrder(left, met).CompareTo(GetTabOrder(right, met)));
-        _rows.AddRange(rows.OrderBy(row => tabs.IndexOf(row.Tab)).ThenBy(row => headers.IndexOf((row.Tab, row.Header))));
+        _rows.AddRange(
+            rows.OrderBy(row => tabs.IndexOf(row.Tab)).ThenBy(row => headers.IndexOf((row.Tab, row.Header))));
         _tabs = [.. tabs];
         foreach ((string tab, _) in headers)
         {
             _headerCounts[tab] = _headerCounts.GetValueOrDefault(tab) + 1;
         }
-    }
-
-    /// <summary>
-    /// Where a tab goes: Render first and Debug last, the rest between them as they were first met.
-    /// </summary>
-    private static int GetTabOrder(string tab, string[] met)
-    {
-        return string.Equals(tab, "Render", StringComparison.Ordinal) ? -1
-            : string.Equals(tab, "Debug", StringComparison.Ordinal) ? met.Length
-            : Array.IndexOf(met, tab);
     }
 
     /// <summary>
@@ -383,7 +418,8 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private int GetViewIndex()
     {
-        return Array.FindIndex(_viewNames, name => string.Equals(name, _debugView, StringComparison.OrdinalIgnoreCase)) + 1;
+        return Array.FindIndex(_viewNames, name => string.Equals(name, _debugView, StringComparison.OrdinalIgnoreCase))
+            + 1;
     }
 
     /// <summary>
@@ -421,7 +457,8 @@ internal sealed class SettingsWindow : IDisposable
 
         int index = GetViewIndex();
         string description = index == 0 ? string.Empty : _viewDescriptions[index - 1];
-        if (!string.Equals(_linedView, _debugView, StringComparison.Ordinal) || !_viewLine.EndsWith(description, StringComparison.Ordinal))
+        if (!string.Equals(_linedView, _debugView, StringComparison.Ordinal)
+            || !_viewLine.EndsWith(description, StringComparison.Ordinal))
         {
             _linedView = _debugView;
             string name = index == 0 ? _debugView : _views[index];
@@ -490,7 +527,8 @@ internal sealed class SettingsWindow : IDisposable
     {
         if (!Equals(setting.Value, row.Value) || row.Shown is null)
         {
-            string shown = setting.Value as string ?? JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options);
+            string shown = setting.Value as string
+                ?? JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options);
             if (row.Draft is null || string.Equals(row.Draft, row.Shown, StringComparison.Ordinal)) row.Draft = shown;
 
             row.Value = setting.Value;
@@ -547,7 +585,10 @@ internal sealed class SettingsWindow : IDisposable
         string lines = GetLines(setting => string.Equals(setting.Owner, gem, StringComparison.OrdinalIgnoreCase));
         if (lines.Length == 0)
         {
-            Debugging.Warn($"get takes a gem with settings: {string.Join(", ", _settings.All.Select(setting => setting.Owner).Distinct(StringComparer.Ordinal))}.");
+            string gems = string.Join(
+                ", ",
+                _settings.All.Select(setting => setting.Owner).Distinct(StringComparer.Ordinal));
+            Debugging.Warn($"get takes a gem with settings: {gems}.");
             return;
         }
 
@@ -576,12 +617,15 @@ internal sealed class SettingsWindow : IDisposable
         if (words.Length == 0)
         {
             int applied = Array.IndexOf(_presets, _settings.Preset);
-            Debugging.Info($"Preset: {(applied < 0 ? "none" : _presetNames[applied])}. Presets: {string.Join(", ", _presetNames)}.");
+            string current = applied < 0 ? "none" : _presetNames[applied];
+            Debugging.Info($"Preset: {current}. Presets: {string.Join(", ", _presetNames)}.");
             return;
         }
 
         string wanted = words[0];
-        int chosen = Array.FindIndex(_presetNames, name => string.Equals(name, wanted, StringComparison.OrdinalIgnoreCase));
+        int chosen = Array.FindIndex(
+            _presetNames,
+            name => string.Equals(name, wanted, StringComparison.OrdinalIgnoreCase));
         if (chosen < 0)
         {
             Debugging.Warn($"There is no preset {wanted}; there are {string.Join(", ", _presetNames)}.");
@@ -592,8 +636,8 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
-    /// <c>view Stage</c> shows what that stage of the frame made in place of the finished image; <c>view</c> alone shows
-    /// the frame as it is again.
+    /// <c>view Stage</c> shows what that stage of the frame made in place of the finished image; <c>view</c> alone
+    /// shows the frame as it is again.
     /// </summary>
     private void RunView(ReadOnlySpan<string> words)
     {

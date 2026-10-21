@@ -22,7 +22,10 @@ namespace Magic.ClusterGenerator;
 /// its file or sidecar, or the setting, changes. A card's atlases are handed out with the assets
 /// (<see cref="Assets.Add{T}"/>), so whatever draws loads them as it loads any texture.
 /// </summary>
-internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterGeneratorSettings settings) : IGem, ILoadPostProcessor<Model>, ICache<ClustersAndCards>
+internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterGeneratorSettings settings) :
+    IGem,
+    ILoadPostProcessor<Model>,
+    ICache<ClustersAndCards>
 {
     /// <summary>
     /// Raised whenever the clusters or the cards would come out otherwise or how they are written changes, so what was
@@ -132,7 +135,13 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
             bytes.ReadExactly(MemoryMarshal.AsBytes(vertices.AsSpan()));
             bytes.ReadExactly(indices);
             bytes.ReadExactly(MemoryMarshal.AsBytes(clusters.AsSpan()));
-            hierarchy = new ClusterHierarchy { Vertices = vertices, Indices = indices, Clusters = clusters, PositionStep = step };
+            hierarchy = new ClusterHierarchy
+            {
+                Vertices = vertices,
+                Indices = indices,
+                Clusters = clusters,
+                PositionStep = step
+            };
         }
 
         return Result.Success(new ClustersAndCards(cards, hierarchy));
@@ -163,7 +172,8 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         float cardHeight = _settings.CardHeight;
         ulong madeFrom = CombineVersion(version, cardHeight);
         ClustersAndCards made;
-        if (await _caches.ReadAsync<ClustersAndCards>(key, madeFrom, cancel).ConfigureAwait(false) is { Ok: true } cached)
+        if (await _caches.ReadAsync<ClustersAndCards>(key, madeFrom, cancel)
+            .ConfigureAwait(false) is { Ok: true } cached)
         {
             Debugging.Verbose($"Read the clusters and cards of model {key} from the cache.");
             made = cached.Value;
@@ -171,12 +181,14 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         else
         {
             made = new(MakeCards(asset, cardHeight), ClusterBuilder.Build(asset, cancel));
-            Debugging.Verbose($"Made {made.Clusters?.Clusters.Length ?? 0} clusters and {made.Cards?.Meshes.Count ?? 0} cards of model {key}.");
+            Debugging.Verbose($"Made {made.Clusters?.Clusters.Length ?? 0} clusters and "
+                + $"{made.Cards?.Meshes.Count ?? 0} cards of model {key}.");
             await _caches.WriteAsync(key, madeFrom, made, cancel).ConfigureAwait(false);
         }
 
         HandOut(made.Cards);
-        return Result.Success(new Model { Handle = asset.Handle, Meshes = asset.Meshes, Clusters = made.Clusters, Cards = made.Cards });
+        return Result.Success(
+            new Model { Handle = asset.Handle, Meshes = asset.Meshes, Clusters = made.Clusters, Cards = made.Cards });
     }
 
     /// <summary>
@@ -192,9 +204,9 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     }
 
     /// <summary>
-    /// <paramref name="model"/>'s cards, one for each of its meshes, drawn from where it is <paramref name="cardHeight"/>
-    /// of the view tall; none for a model that lies flat. How big it is, which its height on screen is measured by, is
-    /// half the largest side of the box around its vertices.
+    /// <paramref name="model"/>'s cards, one for each of its meshes, drawn from where it is
+    /// <paramref name="cardHeight"/> of the view tall; none for a model that lies flat. How big it is, which its height
+    /// on screen is measured by, is half the largest side of the box around its vertices.
     /// </summary>
     private static ModelCards? MakeCards(Model model, float cardHeight)
     {
@@ -233,7 +245,13 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
             new() { Position = centre, Normal = sides, Tangent = marker, Uv = new Vector2(1, 1) },
             new() { Position = centre, Normal = sides, Tangent = marker, Uv = new Vector2(-1, 1) },
         ];
-        return new Mesh { Vertices = vertices, Indices = new uint[] { 0, 3, 2, 0, 2, 1 }, MaterialSlot = slot, Card = card };
+        return new Mesh
+        {
+            Vertices = vertices,
+            Indices = new uint[] { 0, 3, 2, 0, 2, 1 },
+            MaterialSlot = slot,
+            Card = card
+        };
     }
 
     /// <summary>

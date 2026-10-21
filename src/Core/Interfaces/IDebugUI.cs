@@ -17,8 +17,8 @@ namespace Magic.Interfaces;
 /// </para>
 /// <para>
 /// Windows are drawn with the widgets, <see cref="Begin(string, bool)"/> to <see cref="MenuItem"/>, in immediate mode:
-/// what is called in a frame's Update is that frame's windows, so a window is drawn every frame it is open. They are the
-/// main thread's, called in Update by a gem made after the provider, as one that takes this is. A widget's label is
+/// what is called in a frame's Update is that frame's windows, so a window is drawn every frame it is open. They are
+/// the main thread's, called in Update by a gem made after the provider, as one that takes this is. A widget's label is
 /// drawn on its left, and the widget stretches to the width of what it is in; the part of a label from <c>##</c> on is
 /// not shown, and tells apart widgets that show the same label. A widget answers from the input of the frame it is
 /// called in.
@@ -32,9 +32,9 @@ public interface IDebugUI
     bool Enabled { get; }
 
     /// <summary>
-    /// <paramref name="text"/> at <paramref name="position"/> in the world, in the next frame drawn: call it every frame it
-    /// should show. A few words, a quick why: the log is where detail goes. <paramref name="tooltip"/> shows while the
-    /// mouse rests on the text; a null <paramref name="color"/> is the UI's own.
+    /// <paramref name="text"/> at <paramref name="position"/> in the world, in the next frame drawn: call it every
+    /// frame it should show. A few words, a quick why: the log is where detail goes. <paramref name="tooltip"/> shows
+    /// while the mouse rests on the text; a null <paramref name="color"/> is the UI's own.
     /// </summary>
     void Text(Vector3 position, string text, Color? color = null, string? tooltip = null);
 
@@ -45,30 +45,49 @@ public interface IDebugUI
     void Text(string text, Color? color = null);
 
     /// <summary>
-    /// A line on screen for <paramref name="seconds"/>, null for the UI's own time, logged as information. The same line
-    /// again while it shows is one line, with how often.
+    /// A line on screen for <paramref name="seconds"/>, null for the UI's own time, logged as information. The same
+    /// line again while it shows is one line, with how often.
     /// </summary>
-    void Info(string text, float? seconds = null, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0);
+    void Info(
+        string text,
+        float? seconds = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0);
 
     /// <summary>
     /// A warning: at <paramref name="position"/> in the world, or a line on screen without one. It stays
-    /// <paramref name="seconds"/> after it was last reported (null for the UI's own time, 0 for only while it is reported
-    /// every frame), and is logged as a warning when it appears, not again while it stays. <paramref name="tooltip"/>
-    /// shows while the mouse rests on it.
+    /// <paramref name="seconds"/> after it was last reported (null for the UI's own time, 0 for only while it is
+    /// reported every frame), and is logged as a warning when it appears, not again while it stays.
+    /// <paramref name="tooltip"/> shows while the mouse rests on it.
     /// </summary>
-    void Warn(string text, Vector3? position = null, float? seconds = null, string? tooltip = null, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0);
+    void Warn(
+        string text,
+        Vector3? position = null,
+        float? seconds = null,
+        string? tooltip = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0);
 
     /// <summary>
     /// <see cref="Warn"/> for an error, logged as an error.
     /// </summary>
-    void Error(string text, Vector3? position = null, float? seconds = null, string? tooltip = null, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0);
+    void Error(
+        string text,
+        Vector3? position = null,
+        float? seconds = null,
+        string? tooltip = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0);
 
     /// <summary>
     /// Opens a movable window titled <paramref name="title"/>, and what is drawn until <see cref="End"/> goes in it.
     /// Called while another is open, it is a view nested in that one instead, as wide as its parent and as tall as the
-    /// room the parent has left after what follows the view. <paramref name="scrollable"/>: a window is sized by the user
-    /// and scrolls, where otherwise it fits what is in it; a nested view scrolls, and while it is scrolled to the bottom
-    /// it follows what is added there.
+    /// room the parent has left after what follows the view. <paramref name="scrollable"/>: a window is sized by the
+    /// user and scrolls, where otherwise it fits what is in it; a nested view scrolls, and while it is scrolled to the
+    /// bottom it follows what is added there.
     /// </summary>
     void Begin(string title, bool scrollable = false);
 
@@ -103,8 +122,8 @@ public interface IDebugUI
     bool Input(string label, ref string text, string? hint = null, bool focus = false);
 
     /// <summary>
-    /// Text of many lines editing <paramref name="text"/>, as tall as its lines; <paramref name="readOnly"/> text can still
-    /// be selected and copied. True when changed.
+    /// Text of many lines editing <paramref name="text"/>, as tall as its lines; <paramref name="readOnly"/> text can
+    /// still be selected and copied. True when changed.
     /// </summary>
     bool Document(string label, ref string text, bool readOnly = false);
 
@@ -125,8 +144,8 @@ public interface IDebugUI
     bool Choice(string label, ref int index, ReadOnlySpan<string> options);
 
     /// <summary>
-    /// A row of tabs across the window, one of <paramref name="options"/> selected by index: what is drawn after it is the
-    /// selected tab's. <paramref name="label"/> only tells the rows of one window apart. True when changed.
+    /// A row of tabs across the window, one of <paramref name="options"/> selected by index: what is drawn after it is
+    /// the selected tab's. <paramref name="label"/> only tells the rows of one window apart. True when changed.
     /// </summary>
     bool Tabs(string label, ref int index, ReadOnlySpan<string> options);
 
@@ -160,8 +179,8 @@ public interface IDebugUI
     void Tooltip(string text);
 
     /// <summary>
-    /// An item of the menu a right-click anywhere in the window or nested view it is called in opens, in the order called.
-    /// True in the frame it is clicked.
+    /// An item of the menu a right-click anywhere in the window or nested view it is called in opens, in the order
+    /// called. True in the frame it is clicked.
     /// </summary>
     bool MenuItem(string label);
 }

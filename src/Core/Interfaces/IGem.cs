@@ -21,12 +21,12 @@ namespace Magic.Interfaces;
 /// gems that take it drew.
 /// </para>
 /// <para>
-/// The constructor and Dispose run on the render thread, alone. Update, FixedUpdate, LateUpdate and Sync run on the main
-/// thread; Render on the render thread, one frame behind, while the main thread runs the next frame's Update,
+/// The constructor and Dispose run on the render thread, alone. Update, FixedUpdate, LateUpdate and Sync run on the
+/// main thread; Render on the render thread, one frame behind, while the main thread runs the next frame's Update,
 /// FixedUpdate and LateUpdate. Sync is the one point where both hold still. So a gem prepares in LateUpdate what Render
-/// will read, into a buffer Render is not reading, swaps the two in Sync, and Render reads only that: never what Update,
-/// FixedUpdate and LateUpdate change. Once the frames end, Stop runs on the main thread, then Dispose on the render
-/// thread, each gem in reverse order. Implement the hooks the gem needs; the rest are never called.
+/// will read, into a buffer Render is not reading, swaps the two in Sync, and Render reads only that: never what
+/// Update, FixedUpdate and LateUpdate change. Once the frames end, Stop runs on the main thread, then Dispose on the
+/// render thread, each gem in reverse order. Implement the hooks the gem needs; the rest are never called.
 /// </para>
 /// <para>
 /// What a worker makes for a gem reaches it as data: the gem keeps what arrived and takes it in at the start of the

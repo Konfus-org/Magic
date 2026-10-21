@@ -90,12 +90,15 @@ internal static class Program
                         merged.Remove(key);
                         ordered.Remove(seen.Declaration);
                         dropped.Add(key);
-                        skipped.TryAdd($"macro {declaration.CName}", new($"macro {declaration.CName} (its value differs between {seen.Target} and {target.Name})", "Bindings"));
+                        skipped.TryAdd($"macro {declaration.CName}", new(
+                            $"macro {declaration.CName} (its value differs between {seen.Target} and {target.Name})",
+                            "Bindings"));
                         continue;
                     }
 
                     (string first, string second) = FirstDifference(seen.Declaration.Text, declaration.Text);
-                    errors.Add($"Bindings : error BND003: {declaration.CName} differs between {seen.Target} ({first}) and {target.Name} ({second}); add a rule for it before it can be bound.");
+                    errors.Add($"Bindings : error BND003: {declaration.CName} differs between {seen.Target} ({first}) "
+                        + $"and {target.Name} ({second}); add a rule for it before it can be bound.");
                 }
             }
         }
@@ -105,7 +108,9 @@ internal static class Program
         {
             if (!names.TryAdd((declaration.Owner, declaration.Name), declaration.CName))
             {
-                errors.Add($"Bindings : error BND004: {declaration.CName} and {names[(declaration.Owner, declaration.Name)]} would both be {declaration.Name}.");
+                errors.Add("Bindings : error BND004: "
+                    + $"{declaration.CName} and {names[(declaration.Owner, declaration.Name)]} would both "
+                    + $"be {declaration.Name}.");
             }
         }
 
@@ -166,8 +171,13 @@ internal static class Program
             nameMap.Append(cName).Append('\t').Append(name).Append('\n');
         }
 
-        File.WriteAllText(Path.ChangeExtension(options.Output, ".names.txt"), nameMap.ToString(), new UTF8Encoding(false));
-        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Bindings: {options.Library}: {types} types, {functions} functions, {constants} constants -> {options.Output}; {skippedMacros} macros skipped, listed in {skippedPath}"));
+        File.WriteAllText(
+            Path.ChangeExtension(options.Output, ".names.txt"),
+            nameMap.ToString(),
+            new UTF8Encoding(false));
+        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Bindings: {options.Library}: {types} types, "
+            + $"{functions} functions, {constants} constants -> {options.Output}; {skippedMacros} macros skipped, "
+            + $"listed in {skippedPath}"));
         return true;
     }
 
@@ -203,7 +213,8 @@ internal static class Program
             {
                 text.Append("long");
             }
-            else if (IsPair(a, b, "ushort", "int", "void") && i + 1 < firstTokens.Count && firstTokens[i + 1].StartsWith('*'))
+            else if (IsPair(a, b, "ushort", "int", "void") && i + 1 < firstTokens.Count
+                && firstTokens[i + 1].StartsWith('*'))
             {
                 text.Append("void");
             }
@@ -216,14 +227,18 @@ internal static class Program
         return text.ToString();
     }
 
-    /// <summary>Both tokens are the Windows, Unix or already reconciled spelling of one pointer-sized integer.</summary>
+    /// <summary>Both tokens are the Windows, Unix or already reconciled spelling of one pointer-sized
+    /// integer.</summary>
     private static bool IsPair(string a, string b, string windows, string unix, string reconciled)
         => IsOneOf(a, windows, unix, reconciled) && IsOneOf(b, windows, unix, reconciled);
 
     private static bool IsOneOf(string token, string first, string second, string third)
-        => string.Equals(token, first, StringComparison.Ordinal) || string.Equals(token, second, StringComparison.Ordinal) || string.Equals(token, third, StringComparison.Ordinal);
+        => string.Equals(token, first, StringComparison.Ordinal)
+            || string.Equals(token, second, StringComparison.Ordinal)
+            || string.Equals(token, third, StringComparison.Ordinal);
 
-    /// <summary>The text as runs of identifier characters and runs of everything else, so a type name is one token.</summary>
+    /// <summary>The text as runs of identifier characters and runs of everything else, so a type name is one
+    /// token.</summary>
     private static List<string> Tokenize(string text)
     {
         List<string> tokens = [];

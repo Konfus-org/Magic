@@ -102,11 +102,21 @@ public sealed class GpuCommands
     /// goes for every target: a clear is to <paramref name="clear"/>, and depth to 0, reverse-Z's far. The pass ends
     /// when what is handed back is disposed.
     /// </summary>
-    public GpuRenderPass RenderPass(ReadOnlySpan<GpuTextureLevel> colors, GpuContents contents, Color clear = default, GpuTextureLevel depth = default)
+    public GpuRenderPass RenderPass(
+        ReadOnlySpan<GpuTextureLevel> colors,
+        GpuContents contents,
+        Color clear = default,
+        GpuTextureLevel depth = default)
     {
         int start = _levels.Count;
         _levels.AddRange(colors);
-        _commands.Add(new GpuCommand(GpuCommandType.BeginRenderPass, Depth: depth, Contents: contents, Clear: clear, RunStart: start, RunLength: colors.Length));
+        _commands.Add(new GpuCommand(
+            GpuCommandType.BeginRenderPass,
+            Depth: depth,
+            Contents: contents,
+            Clear: clear,
+            RunStart: start,
+            RunLength: colors.Length));
         return new GpuRenderPass(this);
     }
 
@@ -120,7 +130,12 @@ public sealed class GpuCommands
         _levels.AddRange(textures);
         int bufferStart = _buffers.Count;
         _buffers.AddRange(buffers);
-        _commands.Add(new GpuCommand(GpuCommandType.BeginComputePass, RunStart: levelStart, RunLength: textures.Length, SecondRunStart: bufferStart, SecondRunLength: buffers.Length));
+        _commands.Add(new GpuCommand(
+            GpuCommandType.BeginComputePass,
+            RunStart: levelStart,
+            RunLength: textures.Length,
+            SecondRunStart: bufferStart,
+            SecondRunLength: buffers.Length));
         return new GpuComputePass(this);
     }
 
@@ -146,13 +161,19 @@ public sealed class GpuCommands
         int start = _buffers.Count;
         _buffers.Add(from);
         _buffers.Add(to);
-        _commands.Add(new GpuCommand(GpuCommandType.CopyBuffer, First: fromOffset, Offset: toOffset, Count: bytes, RunStart: start, RunLength: 2));
+        _commands.Add(new GpuCommand(
+            GpuCommandType.CopyBuffer,
+            First: fromOffset,
+            Offset: toOffset,
+            Count: bytes,
+            RunStart: start,
+            RunLength: 2));
         return this;
     }
 
     /// <summary>
-    /// Makes every level of <paramref name="texture"/> past the first from the one before, each layer alone; outside any
-    /// pass. The texture is sampled and drawn into (<see cref="GpuTextureUsage.Sampled"/> and
+    /// Makes every level of <paramref name="texture"/> past the first from the one before, each layer alone; outside
+    /// any pass. The texture is sampled and drawn into (<see cref="GpuTextureUsage.Sampled"/> and
     /// <see cref="GpuTextureUsage.ColorTarget"/>).
     /// </summary>
     public GpuCommands GenerateMipmaps(GpuTexture texture)
@@ -171,7 +192,8 @@ public sealed class GpuCommands
 
     internal void Scissor(Rectangle area) => _commands.Add(new GpuCommand(GpuCommandType.Scissor, Area: area));
 
-    internal void Pipeline(GpuPipeline pipeline) => _commands.Add(new GpuCommand(GpuCommandType.Pipeline, Pipeline: pipeline));
+    internal void Pipeline(GpuPipeline pipeline)
+        => _commands.Add(new GpuCommand(GpuCommandType.Pipeline, Pipeline: pipeline));
 
     internal void VertexBuffers(ReadOnlySpan<GpuBuffer> buffers)
     {
@@ -180,7 +202,8 @@ public sealed class GpuCommands
         _commands.Add(new GpuCommand(GpuCommandType.VertexBuffers, RunStart: start, RunLength: buffers.Length));
     }
 
-    internal void IndexBuffer(GpuBuffer buffer, GpuIndexSize size) => _commands.Add(new GpuCommand(GpuCommandType.IndexBuffer, Buffer: buffer, IndexSize: size));
+    internal void IndexBuffer(GpuBuffer buffer, GpuIndexSize size)
+        => _commands.Add(new GpuCommand(GpuCommandType.IndexBuffer, Buffer: buffer, IndexSize: size));
 
     internal void Buffers(GpuStage stage, ReadOnlySpan<GpuBuffer> buffers)
     {
@@ -193,14 +216,16 @@ public sealed class GpuCommands
     {
         int start = _textures.Count;
         _textures.AddRange(textures);
-        _commands.Add(new GpuCommand(GpuCommandType.RawTextures, Stage: stage, RunStart: start, RunLength: textures.Length));
+        _commands.Add(
+            new GpuCommand(GpuCommandType.RawTextures, Stage: stage, RunStart: start, RunLength: textures.Length));
     }
 
     internal void Textures(GpuStage stage, ReadOnlySpan<GpuSampledTexture> textures)
     {
         int start = _sampled.Count;
         _sampled.AddRange(textures);
-        _commands.Add(new GpuCommand(GpuCommandType.Textures, Stage: stage, RunStart: start, RunLength: textures.Length));
+        _commands.Add(
+            new GpuCommand(GpuCommandType.Textures, Stage: stage, RunStart: start, RunLength: textures.Length));
     }
 
     internal void Constants<T>(GpuStage stage, in T constants)
@@ -208,17 +233,30 @@ public sealed class GpuCommands
     {
         int start = _bytes.Count;
         _bytes.AddRange(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)));
-        _commands.Add(new GpuCommand(GpuCommandType.Constants, Stage: stage, RunStart: start, RunLength: Unsafe.SizeOf<T>()));
+        _commands.Add(
+            new GpuCommand(GpuCommandType.Constants, Stage: stage, RunStart: start, RunLength: Unsafe.SizeOf<T>()));
     }
 
     internal void Draw(uint vertices, uint instances, uint firstVertex, uint firstInstance)
-        => _commands.Add(new GpuCommand(GpuCommandType.Draw, Count: vertices, Instances: instances, First: firstVertex, FirstInstance: firstInstance));
+        => _commands.Add(new GpuCommand(
+            GpuCommandType.Draw,
+            Count: vertices,
+            Instances: instances,
+            First: firstVertex,
+            FirstInstance: firstInstance));
 
     internal void DrawIndexed(uint indices, uint firstIndex, int vertexOffset, uint instances, uint firstInstance)
-        => _commands.Add(new GpuCommand(GpuCommandType.DrawIndexed, Count: indices, First: firstIndex, VertexOffset: vertexOffset, Instances: instances, FirstInstance: firstInstance));
+        => _commands.Add(new GpuCommand(
+            GpuCommandType.DrawIndexed,
+            Count: indices,
+            First: firstIndex,
+            VertexOffset: vertexOffset,
+            Instances: instances,
+            FirstInstance: firstInstance));
 
     internal void DrawIndexedFromBuffer(GpuBuffer arguments, uint offset, uint count)
-        => _commands.Add(new GpuCommand(GpuCommandType.DrawIndexedFromBuffer, Buffer: arguments, Offset: offset, Count: count));
+        => _commands.Add(
+            new GpuCommand(GpuCommandType.DrawIndexedFromBuffer, Buffer: arguments, Offset: offset, Count: count));
 
     internal void Dispatch(uint groupsX, uint groupsY, uint groupsZ)
         => _commands.Add(new GpuCommand(GpuCommandType.Dispatch, GroupsX: groupsX, GroupsY: groupsY, GroupsZ: groupsZ));

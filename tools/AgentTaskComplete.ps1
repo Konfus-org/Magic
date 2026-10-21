@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-What an agent runs on completing a task: tools/Validate.ps1 in full, then a stamp of the exact state it validated,
-without which the project's hook refuses the agent's git commit and git merge.
+What an agent runs on completing a task: tools/Format.ps1 on the change, tools/Validate.ps1 in full, then a stamp of
+the exact state it validated, without which the project's hook refuses the agent's git commit and git merge.
 
 .DESCRIPTION
-Validation means the app ran with the change and its screenshot was looked at (AGENTS.md, Finish). This script runs
-every step of tools/Validate.ps1, the samples headless and with a window until their world has loaded, and when all
+Validation means the app ran with the change and its screenshot was looked at (AGENTS.md, Finish). This script first
+formats the change, so what is validated, stamped and reviewed is the formatted code, then runs every step of
+tools/Validate.ps1, the samples headless and with a window until their world has loaded, and when all
 pass, stamps the checkout's state: the git tree of every file in it, tracked or new, as git add -A would record it, so
 the stamp names content rather than a time. A checkout whose files changed while it ran is not stamped. The stamps are
 kept in the repository's git folder, which every worktree shares, so a merge from the main checkout finds the stamp its
@@ -68,6 +69,9 @@ function ConvertTo-Native([string] $path) {
 
 if (-not $Hook) {
     $root = Split-Path -Parent $PSScriptRoot
+    & (Join-Path $PSScriptRoot 'Format.ps1')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
     $before = Get-CheckoutTree $root
     & (Join-Path $PSScriptRoot 'Validate.ps1') | Tee-Object -Variable lines
     $code = $LASTEXITCODE

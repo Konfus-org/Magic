@@ -4,13 +4,20 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
+/// One mip level of a <see cref="Texture"/>: its size in texels, and where its bytes are in
+/// <see cref="Texture.Pixels"/>.
+/// </summary>
+public readonly record struct TextureLevel(int Width, int Height, int Offset, int Size);
+
+/// <summary>
 /// An image, decoded and ready to upload: every mip level in <see cref="Pixels"/>, level 0 first, tightly packed. Its
 /// loader has already turned it into <see cref="Format"/> and made its mips, so whatever draws it copies bytes and
 /// nothing else.
 /// </summary>
 public sealed class Texture : IAsset<Texture>
 {
-    public static IReadOnlyList<string> Extensions { get; } = [".png", ".jpg", ".jpeg", ".bmp", ".tga", ".webp", ".svg"];
+    public static IReadOnlyList<string> Extensions { get; }
+        = [".png", ".jpg", ".jpeg", ".bmp", ".tga", ".webp", ".svg"];
 
     public Handle<Texture> Handle { get; init; }
 
@@ -40,8 +47,3 @@ public sealed class Texture : IAsset<Texture>
     /// </summary>
     public required GpuWrap Wrap { get; init; }
 }
-
-/// <summary>
-/// One mip level of a <see cref="Texture"/>: its size in texels, and where its bytes are in <see cref="Texture.Pixels"/>.
-/// </summary>
-public readonly record struct TextureLevel(int Width, int Height, int Offset, int Size);

@@ -63,7 +63,10 @@ public sealed class CurveExtensionsTests
     [Fact]
     public void At_runs_from_the_later_of_two_keys_sharing_a_place()
     {
-        Curve curve = new() { Keys = [new CurveKey(0, 1), new CurveKey(5, 2), new CurveKey(5, 4), new CurveKey(10, 6)] };
+        Curve curve = new()
+        {
+            Keys = [new CurveKey(0, 1), new CurveKey(5, 2), new CurveKey(5, 4), new CurveKey(10, 6)]
+        };
 
         float value = curve.At(7.5f);
 

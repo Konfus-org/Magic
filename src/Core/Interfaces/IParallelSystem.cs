@@ -5,8 +5,8 @@ namespace Magic.Interfaces;
 
 /// <summary>
 /// Work over every entity, which the ECS runs every frame a chunk at a time on its worker threads, going on to the next
-/// system once every chunk is done. <see cref="Run"/> runs on several threads at once, one chunk each, so it writes only
-/// through its chunk and adds up anything shared with <see cref="Interlocked"/>; it may read other entities
+/// system once every chunk is done. <see cref="Run"/> runs on several threads at once, one chunk each, so it writes
+/// only through its chunk and adds up anything shared with <see cref="Interlocked"/>; it may read other entities
 /// (<see cref="IEcs.IsAlive"/>, <see cref="IEcs.Has{T}"/>, <see cref="IEcs.Get{T}"/>). What it throws is thrown on the
 /// main thread once the other chunks are done, and the system is taken off as any other. A system that looks at certain
 /// components says which (<see cref="IParallelSystem{T1}"/> and on, up to four).

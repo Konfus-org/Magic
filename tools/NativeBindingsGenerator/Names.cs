@@ -28,7 +28,9 @@ internal static class Names
     /// <c>CreateWindow</c>; with <c>ipl=IPL</c> configured, <c>iplContextCreate</c> is <c>IPL</c> and
     /// <c>ContextCreate</c>. A name with neither has no owner and is declared at the namespace.
     /// </summary>
-    internal static (string Owner, string Name) Split(string name, IReadOnlyList<(string Prefix, string Owner)> prefixes)
+    internal static (string Owner, string Name) Split(
+        string name,
+        IReadOnlyList<(string Prefix, string Owner)> prefixes)
     {
         foreach ((string prefix, string owner) in prefixes)
         {
@@ -55,7 +57,9 @@ internal static class Names
         name = name.Trim('_');
         if (name.Length == 0) return "_";
 
-        string text = name.Contains('_', StringComparison.Ordinal) ? ToTitle(name) : char.ToUpperInvariant(name[0]) + name[1..];
+        string text = name.Contains('_', StringComparison.Ordinal)
+            ? ToTitle(name)
+            : char.ToUpperInvariant(name[0]) + name[1..];
         return ToLegal(text);
     }
 
@@ -67,29 +71,10 @@ internal static class Names
         return _keywords.Contains(text) ? "@" + text : text;
     }
 
-    /// <summary>
-    /// An enum's members without their prefix, title-cased word by word, as they are SCREAMING_SNAKE in C. A member
-    /// that starts with the enum's own name loses it (<c>ImGuiWindowFlags_NoTitleBar</c> to <c>NoTitleBar</c>; in an
-    /// enum where some do not, as <c>ImGuiKey</c> holds <c>ImGuiMod_Ctrl</c>, those keep their name). Otherwise the
-    /// members lose the prefix they all share (<c>IPL_STATUS_SUCCESS</c>, <c>IPL_STATUS_FAILURE</c> to
-    /// <c>Success</c>, <c>Failure</c>), and a lone member only its owner's. A member that would start with a digit
-    /// is led by the enum's last word (<c>ImGuiKey_0</c> to <c>Key0</c>).
-    /// </summary>
-    private static int CountOwned(IReadOnlyList<string> names, string own)
-    {
-        int owned = 0;
-        foreach (string name in names)
-        {
-            if (IsOwned(name, own)) owned++;
-        }
-
-        return owned;
-    }
-
-    private static bool IsOwned(string name, string own)
-        => name.StartsWith(own, StringComparison.Ordinal) && name.Length > own.Length && (own.EndsWith('_') || char.IsUpper(name[own.Length]) || char.IsDigit(name[own.Length]));
-
-    internal static string[] MakeEnumMembers(string enumName, IReadOnlyList<string> names, IReadOnlyList<(string Prefix, string Owner)> prefixes)
+    internal static string[] MakeEnumMembers(
+        string enumName,
+        IReadOnlyList<string> names,
+        IReadOnlyList<(string Prefix, string Owner)> prefixes)
     {
         // Members named after the enum lose its name: ImGuiKey_A, or SpvDecorationBinding where the next letter
         // starts a word.
@@ -130,7 +115,8 @@ internal static class Names
             for (int i = 1; i < pieces.Length; i++)
             {
                 int common = 0;
-                while (common < shared && common < pieces[i].Length && string.Equals(pieces[0][common], pieces[i][common], StringComparison.Ordinal))
+                while (common < shared && common < pieces[i].Length
+                    && string.Equals(pieces[0][common], pieces[i][common], StringComparison.Ordinal))
                 {
                     common++;
                 }
@@ -152,7 +138,31 @@ internal static class Names
         return result;
     }
 
-    /// <summary>A member's name from what is left of it: title-cased, led by the enum's last word when it would start with a digit.</summary>
+    /// <summary>
+    /// An enum's members without their prefix, title-cased word by word, as they are SCREAMING_SNAKE in C. A member
+    /// that starts with the enum's own name loses it (<c>ImGuiWindowFlags_NoTitleBar</c> to <c>NoTitleBar</c>; in an
+    /// enum where some do not, as <c>ImGuiKey</c> holds <c>ImGuiMod_Ctrl</c>, those keep their name). Otherwise the
+    /// members lose the prefix they all share (<c>IPL_STATUS_SUCCESS</c>, <c>IPL_STATUS_FAILURE</c> to
+    /// <c>Success</c>, <c>Failure</c>), and a lone member only its owner's. A member that would start with a digit
+    /// is led by the enum's last word (<c>ImGuiKey_0</c> to <c>Key0</c>).
+    /// </summary>
+    private static int CountOwned(IReadOnlyList<string> names, string own)
+    {
+        int owned = 0;
+        foreach (string name in names)
+        {
+            if (IsOwned(name, own)) owned++;
+        }
+
+        return owned;
+    }
+
+    private static bool IsOwned(string name, string own)
+        => name.StartsWith(own, StringComparison.Ordinal) && name.Length > own.Length
+            && (own.EndsWith('_') || char.IsUpper(name[own.Length]) || char.IsDigit(name[own.Length]));
+
+    /// <summary>A member's name from what is left of it: title-cased, led by the enum's last word when it would start
+    /// with a digit.</summary>
     private static string MakeMember(string enumName, string rest)
     {
         if (rest.Length == 0 || char.IsAsciiDigit(rest[0])) rest = GetLastWord(enumName) + "_" + rest;
@@ -160,7 +170,8 @@ internal static class Names
         return ToLegal(ToTitle(rest));
     }
 
-    /// <summary>The last word of a name: of <c>ImGuiKey</c>, <c>Key</c>; of <c>SDL_EventType</c>, <c>Type</c>.</summary>
+    /// <summary>The last word of a name: of <c>ImGuiKey</c>, <c>Key</c>; of <c>SDL_EventType</c>,
+    /// <c>Type</c>.</summary>
     private static string GetLastWord(string name)
     {
         name = name.Trim('_');

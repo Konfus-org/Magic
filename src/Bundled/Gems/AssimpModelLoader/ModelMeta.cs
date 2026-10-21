@@ -10,8 +10,8 @@ namespace Magic.AssimpModelLoader;
 internal sealed class ModelMeta
 {
     /// <summary>
-    /// The point of the model, in the engine's frame and metres, moved to (0, 0, 0): what sits at its entity's position,
-    /// and what scale and rotation turn about.
+    /// The point of the model, in the engine's frame and metres, moved to (0, 0, 0): what sits at its entity's
+    /// position, and what scale and rotation turn about.
     /// </summary>
     public Vector3 Origin { get; set; }
 }

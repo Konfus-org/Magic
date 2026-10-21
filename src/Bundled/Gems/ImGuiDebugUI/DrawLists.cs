@@ -4,6 +4,18 @@ using Rectangle = System.Drawing.Rectangle;
 namespace Magic.ImGuiDebugUI;
 
 /// <summary>
+/// One draw: the texture it samples, by the gem's number for it, the window pixels it is clipped to, and its run of
+/// indices, from <see cref="FirstIndex"/> in the frame's indices, each added to <see cref="VertexOffset"/>.
+/// </summary>
+internal readonly record struct DrawCall(uint Texture, Rectangle Clip, uint Indices, uint FirstIndex, int VertexOffset);
+
+/// <summary>
+/// A texture ImGui has: its RGBA8 <see cref="Pixels"/> whole, and their <see cref="Version"/>, which goes up each time
+/// ImGui changes them.
+/// </summary>
+internal readonly record struct TextureChange(int Width, int Height, byte[] Pixels, uint Version);
+
+/// <summary>
 /// One frame of ImGui's drawing, copied at Sync while both threads hold still, for the render thread to draw a frame
 /// behind while ImGui makes the next: the vertices and indices of every draw list in one array each, the draws into
 /// them, and ImGui's textures as they are, each known by a number of the gem's own. At Sync the render thread is done
@@ -50,7 +62,8 @@ internal sealed unsafe class DrawLists
         for (int listIndex = 0; listIndex < data->CmdLists.Size; listIndex++)
         {
             ImDrawList* list = data->CmdLists.Data[listIndex];
-            new ReadOnlySpan<ImDrawVert>(list->VtxBuffer.Data, list->VtxBuffer.Size).CopyTo(_vertices.AsSpan(vertexBase));
+            new ReadOnlySpan<ImDrawVert>(list->VtxBuffer.Data, list->VtxBuffer.Size).CopyTo(
+                _vertices.AsSpan(vertexBase));
             new ReadOnlySpan<ushort>(list->IdxBuffer.Data, list->IdxBuffer.Size).CopyTo(_indices.AsSpan(indexBase));
             for (int commandIndex = 0; commandIndex < list->CmdBuffer.Size; commandIndex++)
             {
@@ -65,7 +78,12 @@ internal sealed unsafe class DrawLists
                 if (clip.Width <= 0 || clip.Height <= 0) continue;
 
                 ulong texture = command.TexRef.TexData != null ? command.TexRef.TexData->TexID : command.TexRef.TexID;
-                _calls.Add(new DrawCall((uint)texture, clip, command.ElemCount, (uint)indexBase + command.IdxOffset, vertexBase + (int)command.VtxOffset));
+                _calls.Add(new DrawCall(
+                    (uint)texture,
+                    clip,
+                    command.ElemCount,
+                    (uint)indexBase + command.IdxOffset,
+                    vertexBase + (int)command.VtxOffset));
             }
 
             vertexBase += list->VtxBuffer.Size;
@@ -116,7 +134,11 @@ internal sealed unsafe class DrawLists
 
             if (texture->Status is ImTextureStatus.WantCreate or ImTextureStatus.WantUpdates)
             {
-                Known[(uint)texture->TexID] = new TextureChange(texture->Width, texture->Height, ToRgba(texture), _nextVersion++);
+                Known[(uint)texture->TexID] = new TextureChange(
+                    texture->Width,
+                    texture->Height,
+                    ToRgba(texture),
+                    _nextVersion++);
                 ImTextureData.SetStatus(texture, ImTextureStatus.Ok);
             }
             else if (texture->Status == ImTextureStatus.WantDestroy && texture->UnusedFrames > 0)
@@ -128,15 +150,3 @@ internal sealed unsafe class DrawLists
         }
     }
 }
-
-/// <summary>
-/// One draw: the texture it samples, by the gem's number for it, the window pixels it is clipped to, and its run of
-/// indices, from <see cref="FirstIndex"/> in the frame's indices, each added to <see cref="VertexOffset"/>.
-/// </summary>
-internal readonly record struct DrawCall(uint Texture, Rectangle Clip, uint Indices, uint FirstIndex, int VertexOffset);
-
-/// <summary>
-/// A texture ImGui has: its RGBA8 <see cref="Pixels"/> whole, and their <see cref="Version"/>, which goes up each time
-/// ImGui changes them.
-/// </summary>
-internal readonly record struct TextureChange(int Width, int Height, byte[] Pixels, uint Version);

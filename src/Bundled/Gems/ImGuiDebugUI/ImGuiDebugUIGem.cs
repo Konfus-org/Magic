@@ -3,10 +3,10 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
-using Magic.Contexts.Utils;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;
+using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
@@ -19,10 +19,10 @@ namespace Magic.ImGuiDebugUI;
 /// <para>
 /// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
 /// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported;
-/// <see cref="Sync"/>, while both threads hold still, ends the frame and copies what ImGui drew (<see cref="DrawLists"/>);
-/// the renderer draws that copy over the window with the gem's pipeline script (<see cref="Resources.Scripts.DebugUi"/>),
-/// a pass of its overlay stage, once every view in the window is composed. Reports come from any thread and are kept
-/// until they have shown (<see cref="Reports"/>).
+/// <see cref="Sync"/>, while both threads hold still, ends the frame and copies what ImGui drew
+/// (<see cref="DrawLists"/>); the renderer draws that copy over the window with the gem's pipeline script
+/// (<see cref="Resources.Scripts.DebugUi"/>), a pass of its overlay stage, once every view in the window is composed.
+/// Reports come from any thread and are kept until they have shown (<see cref="Reports"/>).
 /// </para>
 /// </summary>
 internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
@@ -40,14 +40,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private const uint Plate = 0xC0000000;
 
-    private static readonly Vector2 _platePadding = new(4, 2);
-    private static readonly Vector2 _linesMargin = new(8, 8);
-
-    // What reports are written in, linear as Color is: white, an orange warning and a red error.
-    private static readonly Color _white = new(1, 1, 1);
-    private static readonly Color _warning = new(1, 0.376f, 0);
-    private static readonly Color _error = new(1, 0, 0);
-
     /// <summary>
     /// Whether what is reported shows whatever windows are open, as in a Debug build, or only while one is.
     /// </summary>
@@ -56,6 +48,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 #else
     private const bool IsAlwaysShowing = false;
 #endif
+
+    private static readonly Vector2 _platePadding = new(4, 2);
+    private static readonly Vector2 _linesMargin = new(8, 8);
+
+    // What reports are written in, linear as Color is: white, an orange warning and a red error.
+    private static readonly Color _white = new(1, 1, 1);
+    private static readonly Color _warning = new(1, 0.376f, 0);
+    private static readonly Color _error = new(1, 0, 0);
 
     private readonly ImGuiDebugUISettings _settings;
     private readonly Assets _assets;
@@ -142,7 +142,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private bool _isTableShown;
     private int _tableColumns;
 
-    public unsafe ImGuiDebugUIGem(ImGuiDebugUISettings settings, Assets assets, IWindow window, Lifetime lifetime, World world, IInput? input = null)
+    public unsafe ImGuiDebugUIGem(
+        ImGuiDebugUISettings settings,
+        Assets assets,
+        IWindow window,
+        Lifetime lifetime,
+        World world,
+        IInput? input = null)
     {
         _settings = settings;
         _window = window;
@@ -173,6 +179,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         LoadFontAsync().FireAndForget();
     }
 
+    public bool Enabled => _isShowing;
+
+    /// <summary>
+    /// What ImGui drew last frame, copied in <see cref="Sync"/>, which the gem's pipeline script draws from on the
+    /// render thread.
+    /// </summary>
+    internal DrawLists DrawLists { get; } = new();
+
     public unsafe void Dispose()
     {
         _viewing.Dispose();
@@ -182,14 +196,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _self.Free();
         if (_pasted.IsAllocated) _pasted.Free();
     }
-
-    public bool Enabled => _isShowing;
-
-    /// <summary>
-    /// What ImGui drew last frame, copied in <see cref="Sync"/>, which the gem's pipeline script draws from on the render
-    /// thread.
-    /// </summary>
-    internal DrawLists DrawLists { get; } = new();
 
     /// <summary>
     /// Hands ImGui the frame's input and starts its frame, which the widgets called in Update go into.
@@ -270,23 +276,56 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _reports.Add(text, ReportKind.Plain, color ?? _white, null, null, 0, GetNow());
     }
 
-    public void Info(string text, float? seconds = null, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public void Info(
+        string text,
+        float? seconds = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
         _reports.Add(text, ReportKind.Counted, _white, null, null, seconds ?? _settings.ReportSeconds, GetNow());
         Debugging.Info(text, member, file, line);
     }
 
-    public void Warn(string text, Vector3? position = null, float? seconds = null, string? tooltip = null, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public void Warn(
+        string text,
+        Vector3? position = null,
+        float? seconds = null,
+        string? tooltip = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
-        if (_reports.Add(text, ReportKind.Alarm, _warning, position, tooltip, seconds ?? _settings.ReportSeconds, GetNow()))
+        if (_reports.Add(
+            text,
+            ReportKind.Alarm,
+            _warning,
+            position,
+            tooltip,
+            seconds ?? _settings.ReportSeconds,
+            GetNow()))
         {
             Debugging.Warn(text, member, file, line);
         }
     }
 
-    public void Error(string text, Vector3? position = null, float? seconds = null, string? tooltip = null, [CallerMemberName] string member = "", [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    public void Error(
+        string text,
+        Vector3? position = null,
+        float? seconds = null,
+        string? tooltip = null,
+        [CallerMemberName] string member = "",
+        [CallerFilePath] string file = "",
+        [CallerLineNumber] int line = 0)
     {
-        if (_reports.Add(text, ReportKind.Alarm, _error, position, tooltip, seconds ?? _settings.ReportSeconds, GetNow()))
+        if (_reports.Add(
+            text,
+            ReportKind.Alarm,
+            _error,
+            position,
+            tooltip,
+            seconds ?? _settings.ReportSeconds,
+            GetNow()))
         {
             Debugging.Error(text, member, file, line);
         }
@@ -387,7 +426,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         ThrowIfOutsideFrame();
         byte* id = LabelField(label);
-        if (!_documents.TryGetValue(label, out DocumentBuffer? document) || !ReferenceEquals(document.Text, text) || document.IsReadOnly != readOnly)
+        if (!_documents.TryGetValue(label, out DocumentBuffer? document) || !ReferenceEquals(document.Text, text)
+            || document.IsReadOnly != readOnly)
         {
             document = new DocumentBuffer(text, readOnly);
             _documents[label] = document;
@@ -398,7 +438,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         bool isChanged;
         fixed (byte* buffer = document.Bytes)
         {
-            isChanged = ImGui.InputTextMultilineEx(id, buffer, (ulong)document.Bytes.Length, new Vector2(Stretch, height).Im, flags, null, null);
+            isChanged = ImGui.InputTextMultilineEx(
+                id,
+                buffer,
+                (ulong)document.Bytes.Length,
+                new Vector2(Stretch, height).Im,
+                flags,
+                null,
+                null);
         }
 
         if (!isChanged) return false;
@@ -423,7 +470,14 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         float speed = Math.Max(Math.Abs(value) * 0.01f, 0.1f);
         fixed (float* held = &value)
         {
-            return ImGui.DragFloatEx(LabelField(label), held, speed, min, max, Literal("%.6g"u8), ImGuiSliderFlags.None);
+            return ImGui.DragFloatEx(
+                LabelField(label),
+                held,
+                speed,
+                min,
+                max,
+                Literal("%.6g"u8),
+                ImGuiSliderFlags.None);
         }
     }
 
@@ -431,7 +485,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         ThrowIfOutsideFrame();
         byte* id = LabelField(label);
-        if (!ImGui.BeginCombo(id, _text.Of(index >= 0 && index < options.Length ? options[index] : string.Empty), ImGuiComboFlags.None))
+        if (!ImGui.BeginCombo(
+            id,
+            _text.Of(index >= 0 && index < options.Length ? options[index] : string.Empty),
+            ImGuiComboFlags.None))
         {
             return false;
         }
@@ -461,7 +518,9 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         int chosen = index;
         for (int i = 0; i < options.Length; i++)
         {
-            ImGuiTabItemFlags flags = i == index && index != shown ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            ImGuiTabItemFlags flags = i == index && index != shown
+                ? ImGuiTabItemFlags.SetSelected
+                : ImGuiTabItemFlags.None;
             if (!ImGui.BeginTabItem(_text.Of(options[i]), null, flags)) continue;
 
             chosen = i;
@@ -486,7 +545,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         ThrowIfOutsideFrame();
         _tableColumns = columns.Length;
-        _isTableShown = ImGui.BeginTable(_text.Of(label), columns.Length, ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
+        _isTableShown = ImGui.BeginTable(
+            _text.Of(label),
+            columns.Length,
+            ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
         if (!_isTableShown) return;
 
         foreach (string column in columns)
@@ -515,7 +577,11 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         {
             ImGui.TableSetColumnIndex(0);
             ImGui.PushIDInt(ImGui.TableGetRowIndex());
-            ImGui.SelectableEx(_text.Of(cells[0]), false, ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.Disabled, default);
+            ImGui.SelectableEx(
+                _text.Of(cells[0]),
+                false,
+                ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.Disabled,
+                default);
             ImGui.PopID();
         }
     }
@@ -539,7 +605,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ThrowIfOutsideFrame();
 
         // Over the window's own items and nested views too (a document is one), not only its empty space.
-        const ImGuiHoveredFlags Over = ImGuiHoveredFlags.ChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem | ImGuiHoveredFlags.AllowWhenBlockedByPopup;
+        const ImGuiHoveredFlags Over = ImGuiHoveredFlags.ChildWindows | ImGuiHoveredFlags.AllowWhenBlockedByActiveItem
+            | ImGuiHoveredFlags.AllowWhenBlockedByPopup;
         byte* menu = Literal("##context"u8);
         if (ImGui.IsMouseReleased(ImGuiMouseButton.Right) && ImGui.IsWindowHovered(Over))
         {
@@ -562,12 +629,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// A linear colour as ImGui packs one, encoded to sRGB as the window's image wants: alpha, blue, green, red from the
-    /// top byte down.
+    /// A linear colour as ImGui packs one, encoded to sRGB as the window's image wants: alpha, blue, green, red from
+    /// the top byte down.
     /// </summary>
     private static uint PackColor(Color color)
     {
-        return (Byte(color.A) << 24) | (Byte(Encode(color.B)) << 16) | (Byte(Encode(color.G)) << 8) | Byte(Encode(color.R));
+        return (Byte(color.A) << 24) | (Byte(Encode(color.B)) << 16) | (Byte(Encode(color.G)) << 8)
+            | Byte(Encode(color.R));
 
         static float Encode(float linear)
         {
@@ -578,41 +646,6 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         {
             return (uint)MathF.Round(Math.Clamp(value, 0, 1) * 255);
         }
-    }
-
-    /// <summary>
-    /// Lays out a field: its label, up to any <c>##</c>, on the left, then the field stretched to the right edge. Returns
-    /// the field's hidden ImGui id: the whole label, so fields that share what they show stay apart.
-    /// </summary>
-    private unsafe byte* LabelField(string label)
-    {
-        if (!_fields.TryGetValue(label, out (string Shown, string Id) field))
-        {
-            int hidden = label.IndexOf("##", StringComparison.Ordinal);
-            field = (hidden < 0 ? label : label[..hidden], "##" + label);
-            _fields[label] = field;
-        }
-
-        if (field.Shown.Length > 0)
-        {
-            ImGui.AlignTextToFramePadding();
-            ImGui.TextUnformatted(_text.Of(field.Shown));
-            ImGui.SameLine();
-        }
-
-        ImGui.SetNextItemWidth(Stretch);
-        return _text.Of(field.Id);
-    }
-
-    /// <summary>
-    /// The text of a tooltip begun, wrapped to a readable width, and the tooltip ended.
-    /// </summary>
-    private unsafe void WriteTooltip(string text)
-    {
-        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 30f);
-        ImGui.TextUnformatted(_text.Of(text));
-        ImGui.PopTextWrapPos();
-        ImGui.EndTooltip();
     }
 
     /// <summary>
@@ -651,6 +684,41 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     }
 
     /// <summary>
+    /// Lays out a field: its label, up to any <c>##</c>, on the left, then the field stretched to the right edge.
+    /// Returns the field's hidden ImGui id: the whole label, so fields that share what they show stay apart.
+    /// </summary>
+    private unsafe byte* LabelField(string label)
+    {
+        if (!_fields.TryGetValue(label, out (string Shown, string Id) field))
+        {
+            int hidden = label.IndexOf("##", StringComparison.Ordinal);
+            field = (hidden < 0 ? label : label[..hidden], "##" + label);
+            _fields[label] = field;
+        }
+
+        if (field.Shown.Length > 0)
+        {
+            ImGui.AlignTextToFramePadding();
+            ImGui.TextUnformatted(_text.Of(field.Shown));
+            ImGui.SameLine();
+        }
+
+        ImGui.SetNextItemWidth(Stretch);
+        return _text.Of(field.Id);
+    }
+
+    /// <summary>
+    /// The text of a tooltip begun, wrapped to a readable width, and the tooltip ended.
+    /// </summary>
+    private unsafe void WriteTooltip(string text)
+    {
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 30f);
+        ImGui.TextUnformatted(_text.Of(text));
+        ImGui.PopTextWrapPos();
+        ImGui.EndTooltip();
+    }
+
+    /// <summary>
     /// The window, or a view nested in the one open: a window gets a close button writing to <paramref name="visible"/>
     /// unless it is null.
     /// </summary>
@@ -672,7 +740,9 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             float step = _settings.FontSize * 2;
             if (_placed.Add(title))
             {
-                ImGui.SetNextWindowPos(new Vector2(step * _placed.Count, step * _placed.Count).Im, ImGuiCond.FirstUseEver);
+                ImGui.SetNextWindowPos(
+                    new Vector2(step * _placed.Count, step * _placed.Count).Im,
+                    ImGuiCond.FirstUseEver);
             }
 
             if (scrollable)
@@ -680,7 +750,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
                 ImGui.SetNextWindowSize((new Vector2(32, 18) * _settings.FontSize).Im, ImGuiCond.FirstUseEver);
             }
 
-            ImGui.Begin(_text.Of(title), visible, scrollable ? ImGuiWindowFlags.None : ImGuiWindowFlags.AlwaysAutoResize);
+            ImGui.Begin(
+                _text.Of(title),
+                visible,
+                scrollable ? ImGuiWindowFlags.None : ImGuiWindowFlags.AlwaysAutoResize);
             return;
         }
 
@@ -689,7 +762,9 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         byte* name = _text.Of(title);
         level.Id = ImGui.GetID(name);
         float reserved = _reserved.GetValueOrDefault(level.Id);
-        ImGuiWindowFlags flags = scrollable ? ImGuiWindowFlags.HorizontalScrollbar : ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
+        ImGuiWindowFlags flags = scrollable
+            ? ImGuiWindowFlags.HorizontalScrollbar
+            : ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse;
         ImGui.BeginChild(name, new Vector2(0, -reserved).Im, ImGuiChildFlags.Borders, flags);
     }
 
@@ -701,7 +776,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         if (!_isInFrame)
         {
-            throw new InvalidOperationException("The debug UI's widgets are drawn in Update, by a gem made after the UI gem.");
+            throw new InvalidOperationException(
+                "The debug UI's widgets are drawn in Update, by a gem made after the UI gem.");
         }
     }
 
@@ -756,7 +832,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             ShownReport line = _lines[i];
             byte* label = _text.Of(line.Label);
             Vector2 size = ImGui.CalcTextSize(label).Vector;
-            ImDrawList.AddRectFilledEx(under, (at - _platePadding).Im, (at + size + _platePadding).Im, Plate, 3f, ImDrawFlags.None);
+            ImDrawList.AddRectFilledEx(
+                under,
+                (at - _platePadding).Im,
+                (at + size + _platePadding).Im,
+                Plate,
+                3f,
+                ImDrawFlags.None);
             ImDrawList.AddText(under, at.Im, PackColor(line.Color), label);
             if (line.Tooltip is { } tooltip && canHover && ImGui.IsMouseHoveringRect(at.Im, (at + size).Im))
             {

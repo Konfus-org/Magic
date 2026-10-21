@@ -22,14 +22,16 @@ internal sealed class SettingsDocs(IFileSystem files)
     /// </summary>
     internal string GetSummary(PropertyInfo property)
     {
-        Type declaring = property.DeclaringType ?? throw new ArgumentException($"{property.Name} belongs to no type.", nameof(property));
+        Type declaring = property.DeclaringType
+            ?? throw new ArgumentException($"{property.Name} belongs to no type.", nameof(property));
         if (!_summaries.TryGetValue(declaring.Assembly, out Dictionary<string, string>? summaries))
         {
             summaries = Read(declaring.Assembly);
             _summaries[declaring.Assembly] = summaries;
         }
 
-        return summaries.GetValueOrDefault($"P:{declaring.FullName?.Replace('+', '.')}.{property.Name}") ?? string.Empty;
+        return summaries.GetValueOrDefault($"P:{declaring.FullName?.Replace('+', '.')}.{property.Name}")
+            ?? string.Empty;
     }
 
     /// <summary>
@@ -93,7 +95,9 @@ internal sealed class SettingsDocs(IFileSystem files)
 
             text.Clear();
             AppendText(text, summary);
-            summaries[id.Value] = string.Join(' ', text.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            summaries[id.Value] = string.Join(
+                ' ',
+                text.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         }
 
         return summaries;

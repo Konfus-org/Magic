@@ -30,8 +30,8 @@ internal sealed class ClusterRenderingSettings : ISettings
     public Handle<Pipeline> Overlay { get; set; }
 
     /// <summary>
-    /// Pixels across each view is drawn at, then scaled to fill its target; 0 for its target's width, or, with a height,
-    /// the width that keeps the target's proportions.
+    /// Pixels across each view is drawn at, then scaled to fill its target; 0 for its target's width, or, with a
+    /// height, the width that keeps the target's proportions.
     /// </summary>
     [Category("Render/Display")]
     public int RenderWidth { get; set; }
@@ -45,7 +45,8 @@ internal sealed class ClusterRenderingSettings : ISettings
 
     /// <summary>
     /// How a view's image is read as it is scaled onto its target: between its pixels, or the nearest, which keeps a
-    /// low resolution crisp. Nearest also keeps the post stage at the drawn size, so nothing upscales before the output.
+    /// low resolution crisp. Nearest also keeps the post stage at the drawn size, so nothing upscales before the
+    /// output.
     /// </summary>
     [Category("Render/Display")]
     public GpuFilter OutputFilter { get; set; } = GpuFilter.Linear;
@@ -66,16 +67,16 @@ internal sealed class ClusterRenderingSettings : ISettings
     public int PieceCapacity { get; set; } = 1 << 20;
 
     /// <summary>
-    /// Megabytes of models taken into the pool a frame at most, nearest the player first, so a burst of models streaming
-    /// in is spread over frames rather than stalling one.
+    /// Megabytes of models taken into the pool a frame at most, nearest the player first, so a burst of models
+    /// streaming in is spread over frames rather than stalling one.
     /// </summary>
     [Category("Render/Clusters")]
     [Range(0.25, 1024)]
     public float ModelUploadRate { get; set; } = 32;
 
     /// <summary>
-    /// Point and spot lights a view lights pixel by pixel at most, nearest first, a power of two; the farther light only
-    /// through the light from everywhere. What a view's light tiles hold a bit for each of.
+    /// Point and spot lights a view lights pixel by pixel at most, nearest first, a power of two; the farther light
+    /// only through the light from everywhere. What a view's light tiles hold a bit for each of.
     /// </summary>
     [Category("Render/Lights")]
     public int LightCapacity { get; set; } = 16384;
@@ -142,8 +143,8 @@ internal sealed class ClusterRenderingSettings : ISettings
     public int GiRays { get; set; } = 64;
 
     /// <summary>
-    /// The finest level's probes are traced every this many frames, a share of them each frame, and each coarser level's
-    /// half as often: a power of two.
+    /// The finest level's probes are traced every this many frames, a share of them each frame, and each coarser
+    /// level's half as often: a power of two.
     /// </summary>
     [Category("Render/Global illumination")]
     public int GiUpdateEvery { get; set; } = 4;

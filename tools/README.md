@@ -6,14 +6,45 @@ that runs the same under `pwsh` on Linux and macOS and under Windows PowerShell 
 (`&&`, `?:`, `??`). A script runs from any current directory, finds the repository from its own folder, and reports
 with its exit code: 0 passed, else the failing command's code.
 
-The scripts run the `Magic` the build made, `Build/bin/<Configuration>/Magic` under the repository (`Magic.exe` on
-Windows): the `Debug` one unless `-Configuration` says `Optimize` or `Release`. A script that finds none says to build
-first.
+A script that runs Magic runs the one the build made, `Build/bin/<Configuration>/Magic` under the repository
+(`Magic.exe` on Windows): the `Debug` one unless `-Configuration` says `Optimize` or `Release`. A script that finds
+none says to build first.
+
+## Format.ps1
+
+`Format.ps1` formats the C# a change touches by the rules in `.editorconfig`, the ones the build and Validate's format
+check hold the code to, so formatting is never a second rulebook. It takes the `.cs` files that differ from the last
+commit, new ones included, and leaves every other file alone: it formats what is about to be reviewed, never someone
+else's code. `dotnet format`, which comes with the SDK, makes four passes over them: the ordering analyzers' fixes,
+which move a type's members into the order the code standards give; the line-length analyzer's fix, which wraps a line
+of code longer than the limit at its argument lists, operators or arrows, a pass of its own so it wraps the lines where
+the move left them; the code-style fixes, which order the usings, shorten names and apply every style rule that has
+one right answer; and whitespace, line endings and the final newline. A style fix that would delete code, invent it or
+rename it across the solution is left out, as it needs a person, and the build still reports what it would have
+fixed; so are the other analyzers' fixes, which change what code does.
+
+Moving members changes nothing a type does but in one case the fix cannot see: static fields and properties with
+initializers are set in the order they are written, so a static moved above one its initializer reads, directly or
+through a method, reads it unset, and the type fails as it starts. What other statics read is therefore a field, which
+the order puts first, with a property over it where other types read it; and a moved static is worth a look in review,
+as the build passes it and only a run that uses the type shows it.
+
+The wrap is mechanical. It breaks a line at the first place that fits, which is not always where a person would:
+inside an initializer the style pass can leave the wrapped arguments unindented, and an expression-bodied member too
+long for its line is broken at its parameters, which leaves it too long, where its body belongs on the next line after
+`=>`. A wrap that reads badly is reshaped by hand, and a line that fits is never wrapped again. It cannot wrap a string
+literal or a comment: a long string is split by hand, the next part starting with `+`, and a comment at a word, as the
+build checks the first and nothing checks the second.
+
+It reads the code as the last build left it, generated bindings included, and builds nothing. `AgentTaskComplete.ps1`
+runs it first, so an agent's change is formatted before it is validated.
 
 ## Validate.ps1
 
 `Validate.ps1` runs the checks [AGENTS.md](../AGENTS.md) asks of every change, in order, and stops at the first failure:
-builds the solution, where every warning is already an error; runs the tests against that build; runs the samples
+builds the solution, where every warning is already an error; checks the whole tree's formatting with `dotnet format`,
+writing nothing, which fails on what `Format.ps1` would change, what no build can check among it, such as a file's line
+endings; runs the tests against that build; runs the samples
 headless under `--fail-on-error`, which exits 2 when any error was logged, until their world has loaded; and runs them
 with a window through `Screenshot.ps1`, which needs a display and a GPU. Both runs wait for the world rather than for a
 number of frames, through the console's `wait loaded`, so they prove the shaders compile and the domain opens, and a
@@ -39,6 +70,7 @@ a debug view, so what the image shows is chosen rather than found. It does not b
 ## AgentTaskComplete.ps1
 
 What an agent runs on completing a task, and what makes "validation means the app ran" enforced rather than asked. It
+formats the change with `Format.ps1` first, so what is validated, stamped and reviewed is the formatted code, then
 runs `Validate.ps1` in full, and when every step passes it stamps the state it validated: the git tree of every file in
 the checkout, new ones included, so the stamp names content, not a time, and any edit after the run, or a rebase onto
 new work, leaves the new state unstamped. A checkout whose files changed during the run is not stamped. It ends with
