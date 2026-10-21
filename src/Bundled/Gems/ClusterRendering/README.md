@@ -44,7 +44,11 @@ pipelines: the one the settings pick, and the effects the world's `PostProcessin
   comparison for the shadows' pool.
 - **Params.** A pass's shader declares its params struct, with defaults, and reads it through the shader library; a
   pass file's params are packed over them, so one shader runs as several passes. A curve member takes a curve asset
-  ([Curves](../../Resources/Curves/README.md)), and editing the curve builds the listing again.
+  ([Curves](../../Resources/Curves/README.md)), and editing the curve builds the listing again. A param a game sets on
+  a pipeline the frame runs ([Core's README](../../../Core/README.md#assets)) is packed again in place from the next
+  frame, its count told apart from the one last packed, so nothing is built again and what the passes keep from frame
+  to frame, exposure, history, the field, stays; only a curve member set to a curve the listing did not load builds it
+  again, to load it.
 - **Indirect dispatch.** A pass dispatched indirectly names the pass before it whose output holds the group counts,
   so work only the GPU knows the size of costs no readback. No pass writes what it is dispatched by.
 - **Sizes and history.** A texture a pass makes at the output's size follows the view's target, not the size it is
@@ -101,6 +105,13 @@ those, a material holds the textures it samples, a model holds its cards' atlase
 it draws into, and a domain being taken in holds everything it draws. What nothing holds any more is let go once a
 frame, so an asset let go and held again within a frame never leaves, and a texture shown by two things leaves only
 when both let it go.
+
+A material whose params, blending or sides a game sets is taken in again from the next frame as one whose file
+changed is, its params' count told apart from the one last read, and redoes only what its new row changes: what its
+instances work out from it, and what is made from them and kept, shadows and the field, when it turned transparent or
+back or is drawn as the failure or no longer; the field alone about them when only the colour or light it gives global
+illumination changed; and nothing but the row when only its other values did, as no shadow reads them. A value eased
+every frame costs its row.
 
 ### Culling
 

@@ -282,9 +282,9 @@ every file is written in, is in [Resources](../Bundled/Resources/README.md).
 
 Every asset type implements `IAsset<T>` of itself: its file extensions, a static, and its own handle, which `Assets`
 gives it as it loads it, never read from the file. An asset holds what its users read, never how its file was read,
-and every caller gets the same object while it is kept, so nobody changes one once it is loaded. A `Handle<T>` is an
-asset by the id in its sidecar: what components, assets and the project hold, typed so a texture's cannot go where a
-model's is wanted, with a none value.
+and every caller gets the same object while it is kept, so nothing changes one once it is loaded but what a game may
+change while it runs, below. A `Handle<T>` is an asset by the id in its sidecar: what components, assets and the
+project hold, typed so a texture's cannot go where a model's is wanted, with a none value.
 
 `Assets` finds an asset by its path, a type's default and the assets in a folder, loads one, says what one was made
 from and its version, and hands out one a gem made rather than read from a file, from any thread.
@@ -320,6 +320,15 @@ and lets it go when it is done, so what is not in use is not in memory. Whoever 
 still hears of changes to it, as one that was loaded is loaded again when its file changes. An asset a gem made, such
 as a card's atlas, is found by its handle the same way, for as long as it is held, under a handle the gem derives from
 what it made it from, so making it again replaces it.
+
+**What changes while it runs.** A material's params, how it is blended and its sides, and the params of the passes a
+pipeline runs, by each pass's name, are a game's to change while they are drawn, every frame if it likes, so a look
+eases rather than one asset swapping for another. They are set on the main thread and hold until the asset is made
+again, as its file changes; they are not saved with the world, so a game that wants them after a restart sets them
+again. Params are a dictionary of Core's that keeps its values as a snapshot each change replaces whole, so whatever
+draws reads them on its own thread while a script writes, and that counts its changes, so whatever draws compares the
+count with the one it last read rather than being told of each. Nothing else of an asset changes once it is loaded: a
+material with another shader, or a pipeline with other passes, is another asset.
 
 What happens to assets is told on [Events](#events), each message of the asset's type, so a gem watches only the
 types it uses: that an asset finished loading, with the asset; that a loaded asset's file or sidecar changed, or an
@@ -497,8 +506,9 @@ reads, writes and makes, by name. Both are plain JSON assets, so an effect is da
 makes of them is in its README; their keys are the two types' properties, documented on them, and the bundled
 pipelines and passes are the examples. A pipeline loads as any asset does, and comes with the passes it runs, nested
 pipelines in their place and params merged, made by a gem that post-processes pipelines, so a renderer never walks a
-pipeline itself. Which pipeline a renderer's frame runs is one of its settings, so the project or the machine picks
-it. A debug view to show in place of the finished image is chosen by name on [Events](#events), from whatever
+pipeline itself; a game changes how the passes of a pipeline being run look by setting their params, by the pass's
+name ([Assets](#assets)). Which pipeline a renderer's frame runs is one of its settings, so the project or the machine
+picks it. A debug view to show in place of the finished image is chosen by name on [Events](#events), from whatever
 chooses it, a debug window or a console command, to whatever draws the frame, which decides what the name shows.
 
 ## Physics

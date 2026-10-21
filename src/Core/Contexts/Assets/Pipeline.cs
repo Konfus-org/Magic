@@ -10,7 +10,9 @@ namespace Magic.Contexts.Assets;
 /// A renderer's frame is a pipeline, which its settings pick; so is each effect a world can add, and the list of them a
 /// world's <see cref="PostProcessing"/> names: <c>{ "entries": [ { "pipeline": { "id": 10360 } }, { "pipeline": { "id":
 /// 10370 }, "params": { "Tonemap": { "exposureBias": { "x": 0.5 } } } } ] }</c>. Each pass runs in its own stage, so a
-/// pipeline only orders the passes of one stage.
+/// pipeline only orders the passes of one stage. The params of the passes it runs may be set while it runs, on the main
+/// thread, by the pass's name (<see cref="Params"/>), and are drawn so from the next frame; what is set holds until the
+/// pipeline is made again, as its file or what it is made from changes, and is not saved with the world.
 /// </summary>
 public sealed class Pipeline : IJsonAsset<Pipeline>
 {
@@ -28,6 +30,15 @@ public sealed class Pipeline : IJsonAsset<Pipeline>
     /// a gem that post-processes pipelines, which replaces whatever the file says; none without that gem.
     /// </summary>
     public IReadOnlyList<PipelinePass> Passes { get; init; } = [];
+
+    /// <summary>
+    /// The params of each of its <see cref="Passes"/> by the pass's name, the first's where a name runs twice: the
+    /// same dictionaries, so <c>effects.Params["Bloom"]["strength"] = 0.06f</c> sets what the pass runs with. Made as
+    /// it loads, with <see cref="Passes"/>. A nested pipeline's passes are its own copies, so only the pipeline that is
+    /// run, a renderer's frame or a world's effects, changes what is drawn.
+    /// </summary>
+    public IReadOnlyDictionary<string, MaterialParamDictionary> Params { get; init; }
+        = ReadOnlyDictionary<string, MaterialParamDictionary>.Empty;
 }
 
 /// <summary>
@@ -50,6 +61,7 @@ public sealed class PipelineEntry
 /// <summary>
 /// One pass a pipeline runs (<see cref="Pipeline.Passes"/>): the pass, the name its file gives it, which settings and
 /// pipelines know it by, and its params' values, those of the machine's settings first, then those of the entries that
-/// brought it in, the outermost first, then its own. A param none of them sets takes the shader's default.
+/// brought it in, the outermost first, then its own. A param none of them sets takes the shader's default; one set
+/// while it runs wins over all of them until the pipeline is made again.
 /// </summary>
-public sealed record PipelinePass(Pass Pass, string Name, IReadOnlyDictionary<string, MaterialParam> Params);
+public sealed record PipelinePass(Pass Pass, string Name, MaterialParamDictionary Params);

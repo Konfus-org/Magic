@@ -1,7 +1,6 @@
 using System.Drawing;
 using System.IO;
 using System.Numerics;
-using System.Runtime.InteropServices;
 using System.Text;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
@@ -328,13 +327,14 @@ internal sealed class PassGraph(
 
     /// <summary>
     /// Swaps in the listing built once it is compiled with every surface variant the frame draws now, those that first
-    /// showed while it was built among them, so the swap shows no gap; and starts building one when the renderer's
-    /// <paramref name="pipeline"/> or the world's effects are not the ones built or something changed, its surface
-    /// pipelines compiled up front for the variants the frame draws now. One listing builds at a time: while one is
-    /// under way it is finished and swapped in first, then what changed meanwhile is built, so the frame draws as soon
-    /// as it can (the loading domain, before the first is compiled) and a burst of changes starts one build, not one
-    /// each; a build that throws (an error, said by FireAndForget) never swaps in, and nothing builds again after it.
-    /// Each frame, before anything records.
+    /// showed while it was built among them, so the swap shows no gap; packs again in place the params a game set on
+    /// the pipelines the frame runs (<see cref="PassParams"/>); and starts building one when the renderer's
+    /// <paramref name="pipeline"/> or the world's effects are not the ones built or something changed, a param set to a
+    /// curve not yet loaded among those, its surface pipelines compiled up front for the variants the frame draws now.
+    /// One listing builds at a time: while one is under way it is finished and swapped in first, then what changed
+    /// meanwhile is built, so the frame draws as soon as it can (the loading domain, before the first is compiled) and
+    /// a burst of changes starts one build, not one each; a build that throws (an error, said by FireAndForget) never
+    /// swaps in, and nothing builds again after it. Each frame, before anything records.
     /// </summary>
     internal void Update(
         Handle<Pipeline> pipeline,
@@ -350,6 +350,9 @@ internal sealed class PassGraph(
             _next = null;
         }
 
+        // A curve the listing drawn did not load asks for a build once; the build under way, if any, loads it.
+        bool isFollowed = Current?.TryFollowParams() ?? true;
+        _isStale |= !isFollowed && _next is null;
         if ((!_isStale && effects == Effects && pipeline == _pipeline && overlay == _overlay) || _next is not null)
         {
             return;
@@ -438,7 +441,7 @@ internal sealed class PassGraph(
             for (uint iteration = 0; iteration < iterations; iteration++)
             {
                 FrameConstants constants = scope.Constants;
-                constants.Pass = pass.Params;
+                constants.Pass = pass.Params.Words;
                 constants.Pass[28] = iteration;
                 bool isRecorded = pass.Pass.Kind switch
                 {
@@ -733,8 +736,8 @@ internal sealed class PassGraph(
         SurfaceVariants variants)
     {
         List<string> failures = [];
-        List<Loaded> loaded = await LoadPassesAsync(pipeline, effects, overlay, appended, failures).ConfigureAwait(
-            false);
+        List<Loaded> loaded = await LoadPassesAsync(listing, pipeline, effects, overlay, appended, failures)
+            .ConfigureAwait(false);
         await threads.InvokeAsync(EngineThread.Render, () => listing.Fit(loaded, failures, variants), stopping)
             .ConfigureAwait(false);
         Task<Result<StageBindings>> piecesProbe = ProbeAsync(
@@ -784,9 +787,11 @@ internal sealed class PassGraph(
 
     /// <summary>
     /// The passes of the frame pipeline, the world's effects, the overlay pipeline and the pass appended after them,
-    /// with their shaders, in that order; what does not load is said and added to <paramref name="failures"/>.
+    /// with their shaders, in that order, the pipelines held by <paramref name="listing"/>; what does not load is said
+    /// and added to <paramref name="failures"/>.
     /// </summary>
     private async Task<List<Loaded>> LoadPassesAsync(
+        Listing listing,
         Handle<Pipeline> pipeline,
         Handle<Pipeline> effects,
         Handle<Pipeline> overlay,
@@ -806,6 +811,7 @@ internal sealed class PassGraph(
                 continue;
             }
 
+            listing.Pipelines.Add(frame.Value);
             foreach (PipelinePass pass in frame.Value.Passes)
             {
                 if (await LoadPassAsync(pass, failures).ConfigureAwait(false) is { } ready) loaded.Add(ready);
@@ -826,7 +832,9 @@ internal sealed class PassGraph(
             {
                 Debugging.Error($"Debug view {name} does not load, so it is not shown: {view.Error}");
             }
-            else if (await LoadPassAsync(new PipelinePass(view.Value, name, view.Value.Params), failures)
+            else if (await LoadPassAsync(
+                    new PipelinePass(view.Value, name, [.. view.Value.Params]),
+                    failures)
                 .ConfigureAwait(false) is { } ready)
             {
                 loaded.Add(ready);
@@ -838,8 +846,8 @@ internal sealed class PassGraph(
 
     /// <summary>
     /// A pass with its shader's text as HLSL takes it, its params' loader in, and its params packed, those the pipeline
-    /// loader merged over the shader's defaults. Null, said once and added to <paramref name="failures"/>, when its
-    /// shader does not load.
+    /// loader merged over the shader's defaults, with the curves they name, to pack again as a game sets them. Null,
+    /// said once and added to <paramref name="failures"/>, when its shader does not load.
     /// </summary>
     private async Task<Loaded?> LoadPassAsync(PipelinePass pass, List<string> failures)
     {
@@ -861,25 +869,18 @@ internal sealed class PassGraph(
             return null;
         }
 
+        // The count before the values are read, so a param set while the build reads them is packed again after.
+        long version = pass.Params.Version;
         string body = text.Value;
-        PassWords words = default;
+        Dictionary<Handle<Curve>, Curve> curves = [];
         if (layout.Value is { } paramLayout)
         {
             body = paramLayout.Prepare("LoadPassParams()", string.Empty, "PassRaw");
-            foreach (string unknown in paramLayout.FindUnknown(pass.Params.Keys))
-            {
-                Debugging.Warn($"Pass {pass.Name} is given {unknown}, which its shader's PassParams does not declare.");
-            }
-
-            Dictionary<Handle<Curve>, Curve> curves = await GetCurvesAsync(paramLayout, pass).ConfigureAwait(false);
-            paramLayout.Write(
-                [pass.Params],
-                _ => GpuContract.NoTexture,
-                param => curves.GetValueOrDefault(GetCurve(param)),
-                MemoryMarshal.AsBytes(new Span<PassWords>(ref words)));
+            curves = await GetCurvesAsync(paramLayout, pass).ConfigureAwait(false);
         }
 
-        return new Loaded(pass.Pass, pass.Name, body, words);
+        PassParams packed = new(pass.Name, pass.Params, version, layout.Value, curves, assets.Default<Curve>());
+        return new Loaded(pass.Pass, pass.Name, body, packed);
     }
 
     /// <summary>
@@ -1775,4 +1776,4 @@ internal sealed class PassGraph(
 /// A pass loaded for a build: its file, its name, its shader's text as HLSL takes it, its params' loader in, and its
 /// params packed.
 /// </summary>
-internal sealed record Loaded(Pass Pass, string Name, string Body, PassWords Params);
+internal sealed record Loaded(Pass Pass, string Name, string Body, PassParams Params);

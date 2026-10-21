@@ -288,7 +288,8 @@ public sealed class Pass : IJsonAsset<Pass>
 
     /// <summary>
     /// Values by the names of the shader's <c>PassParams</c> members, in the forms a material's take; one left out
-    /// takes the shader's default.
+    /// takes the shader's default. What a pass runs with is set while it runs on the pipeline that runs it
+    /// (<see cref="Pipeline.Params"/>), never here.
     /// </summary>
     public IReadOnlyDictionary<string, MaterialParam> Params { get; set; }
         = new Dictionary<string, MaterialParam>(StringComparer.Ordinal);

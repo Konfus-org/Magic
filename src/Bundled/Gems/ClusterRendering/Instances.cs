@@ -71,6 +71,7 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     private readonly List<int> _moving = [];
     private readonly List<int> _stillMoving = [];
     private readonly List<MovedSphere> _moved = [];
+    private readonly List<MovedSphere> _recoloured = [];
     private InstanceEntry[] _entries = new InstanceEntry[1024];
 
     /// <summary>
@@ -98,10 +99,18 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
 
     /// <summary>
     /// This frame's spheres, each around an instance where it was or where it is, that moved, changed model, came,
-    /// went, could be drawn at last, or whose model or a material came in again: where what is made from the instances
-    /// and kept, shadows and the field global illumination traces, is made again.
+    /// went, could be drawn at last, or whose model came in again or a material of which changed what its instances
+    /// work out from it (<see cref="GpuCache.ChangedMaterials"/>): where what is made from the instances and kept,
+    /// shadows and the field global illumination traces, is made again.
     /// </summary>
     internal IReadOnlyList<MovedSphere> Moved => _moved;
+
+    /// <summary>
+    /// This frame's spheres around the instances drawn with a material whose colour or light alone changed
+    /// (<see cref="GpuCache.RecolouredMaterials"/>): where the field global illumination traces is made again, while
+    /// their shadows, which no colour changes, are kept.
+    /// </summary>
+    internal IReadOnlyList<MovedSphere> Recoloured => _recoloured;
 
     /// <summary>
     /// Where the instance at <paramref name="slot"/> is, as the last frame copied it.
@@ -123,6 +132,7 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         if (_entries.Length < instances.Length) Array.Resize(ref _entries, instances.Length);
 
         _moved.Clear();
+        _recoloured.Clear();
         _stillMoving.Clear();
 
         // What moved last frame stands where it was unless it moves again: its last place becomes its place, which a
@@ -151,6 +161,7 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         WriteChanged();
         _moving.AddRange(_stillMoving);
         Recheck(time);
+        Recolour();
         LetGo();
     }
 
@@ -405,7 +416,8 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     /// changed, and spheres about them where shadows and the field are made again, when they can be drawn at last or
     /// what they draw came in again. A model or material that only came in changes no row of a look already drawn, as
     /// its row is the one they named all along. Everything <see cref="Resolve"/> reads of a model or material counts it
-    /// changed when it changes, so no other look can differ.
+    /// changed when it changes, so no other look can differ; a material whose values alone changed is not counted, as
+    /// its instances' rows and what they cast stay as they are.
     /// </summary>
     private void Recheck(float time)
     {
@@ -448,6 +460,27 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
 
         resources.ChangedModels.Clear();
         resources.ChangedMaterials.Clear();
+    }
+
+    /// <summary>
+    /// Spheres about every drawn instance of each look drawn with a material whose colour or light alone changed since
+    /// the last frame, where the field is painted again (<see cref="Recoloured"/>).
+    /// </summary>
+    private void Recolour()
+    {
+        if (resources.RecolouredMaterials.Count == 0) return;
+
+        foreach (LookEntry entry in _looks.Values)
+        {
+            if (!entry.IsReady || !IsDrawingAnyOf(entry.Look, resources.RecolouredMaterials)) continue;
+
+            foreach (int slot in entry.Slots)
+            {
+                if (GetSphere(_entries[slot].Transform, entry.Look.Model) is { } sphere) _recoloured.Add(sphere);
+            }
+        }
+
+        resources.RecolouredMaterials.Clear();
     }
 
     /// <summary>

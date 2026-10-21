@@ -11,8 +11,9 @@ namespace Magic.PipelineLoader;
 /// <summary>
 /// Pipelines as they load: the post-processor that gives every loaded <see cref="Pipeline"/> its
 /// <see cref="Pipeline.Passes"/>: each entry in order, a nested pipeline's passes in its place, each pass with its
-/// params merged and what the settings turn off left out. What it loads to make one, its passes and nested pipelines,
-/// is what the assets make it from again when one of them changes.
+/// params merged into a dictionary of its own and what the settings turn off left out, and those dictionaries by each
+/// pass's name (<see cref="Pipeline.Params"/>). What it loads to make one, its passes and nested pipelines, is what the
+/// assets make it from again when one of them changes.
 /// </summary>
 internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings) : IGem, ILoadPostProcessor<Pipeline>
 {
@@ -73,7 +74,8 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
             }
         }
 
-        return Result.Success(new Pipeline { Entries = asset.Entries, Passes = passes });
+        return Result.Success(
+            new Pipeline { Entries = asset.Entries, Passes = passes, Params = MakeParams(asset, passes) });
     }
 
     private static void Add(Dictionary<string, MaterialParam> merged, IReadOnlyDictionary<string, MaterialParam>? layer)
@@ -87,11 +89,30 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
     }
 
     /// <summary>
+    /// The params of <paramref name="passes"/> by each pass's name, which a game sets them by while the pipeline runs:
+    /// the first's where a name runs twice, which is said, as the second's cannot be reached by its name.
+    /// </summary>
+    private Dictionary<string, MaterialParamDictionary> MakeParams(Pipeline asset, List<PipelinePass> passes)
+    {
+        Dictionary<string, MaterialParamDictionary> byName = new(StringComparer.Ordinal);
+        foreach (PipelinePass pass in passes)
+        {
+            if (!byName.TryAdd(pass.Name, pass.Params))
+            {
+                Debugging.Warn($"Pipeline {assets.GetPath(asset.Handle)} runs pass {pass.Name} twice; setting its "
+                    + "params by name sets the first's.");
+            }
+        }
+
+        return byName;
+    }
+
+    /// <summary>
     /// Pass <paramref name="name"/>'s params: the settings' first, then <paramref name="entry"/>'s, then
     /// <paramref name="inner"/>, the pass's own or what a nested pipeline made of them, the first to set a param
-    /// winning.
+    /// winning; a dictionary of the pass's own, so setting one changes only the pipeline it is in.
     /// </summary>
-    private Dictionary<string, MaterialParam> Merge(
+    private MaterialParamDictionary Merge(
         string name,
         PipelineEntry entry,
         IReadOnlyDictionary<string, MaterialParam> inner)
@@ -100,7 +121,7 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
         Add(merged, settings.Params.GetValueOrDefault(name));
         Add(merged, entry.Params.GetValueOrDefault(name));
         Add(merged, inner);
-        return merged;
+        return [.. merged];
     }
 
     private bool IsOff(string name)

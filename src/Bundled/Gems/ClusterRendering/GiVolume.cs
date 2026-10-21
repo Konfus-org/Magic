@@ -7,7 +7,8 @@ namespace Magic.ClusterRendering;
 /// Where the world's field for global illumination lies this frame and what of it is made again: nested levels around
 /// the main camera, each <see cref="Resolution"/> voxels a side and twice the last one's voxel, stored wrapping around
 /// so a level that moves with the camera keeps what it already holds and makes only the slabs it moved into, and around
-/// what moved (<see cref="Instances.Moved"/>) the bricks it touched. Each level has a grid of <see cref="Probes"/>
+/// what moved (<see cref="Instances.Moved"/>) or took another colour (<see cref="Instances.Recoloured"/>) the bricks
+/// it touched. Each level has a grid of <see cref="Probes"/>
 /// probes a side, a share of them traced each frame: all of the finest level's every
 /// <see cref="ClusterRenderingSettings.GiUpdateEvery"/> frames, and of each coarser level, whose probes light what is
 /// further and larger, half as often. A probe blends what it was traced with into what it held by how long it waited,
@@ -99,13 +100,14 @@ internal sealed class GiVolume
     }
 
     /// <summary>
-    /// Places the levels around <paramref name="camera"/>, marks what is made again, from where they moved and from
-    /// <paramref name="moved"/>, and uploads them with which probes are traced this frame and how much of what they
-    /// held they keep, from the frame's <paramref name="seconds"/>.
+    /// Places the levels around <paramref name="camera"/>, marks what is made again, from where they moved, from
+    /// <paramref name="moved"/> and from <paramref name="recoloured"/>, and uploads them with which probes are traced
+    /// this frame and how much of what they held they keep, from the frame's <paramref name="seconds"/>.
     /// </summary>
     internal void Plan(
         Vector3 camera,
         IReadOnlyList<MovedSphere> moved,
+        IReadOnlyList<MovedSphere> recoloured,
         float seconds,
         ClusterRenderingSettings settings)
     {
@@ -135,12 +137,8 @@ internal sealed class GiVolume
                 LeastKept,
                 MostKept);
             level.IsHeld = true;
-            foreach (MovedSphere sphere in moved)
-            {
-                Vector3 centre = sphere.Centre;
-                float reach = sphere.Radius + (Reach * voxel);
-                level.Mark(centre - new Vector3(reach), centre + new Vector3(reach));
-            }
+            Mark(level, moved, voxel);
+            Mark(level, recoloured, voxel);
         }
 
         for (int index = levels; index < MaxLevels; index++)
@@ -178,6 +176,20 @@ internal sealed class GiVolume
     /// </summary>
     private static int Snap(double metres, float voxel)
         => ((int)Math.Floor(metres / voxel / Brick) * Brick) - (Resolution / 2);
+
+    /// <summary>
+    /// Marks what <paramref name="spheres"/> reach of <paramref name="level"/>, of voxels <paramref name="voxel"/>
+    /// metres a side, to be made again, with as far past them as a distance reaches (<see cref="Reach"/>).
+    /// </summary>
+    private static void Mark(Level level, IReadOnlyList<MovedSphere> spheres, float voxel)
+    {
+        foreach (MovedSphere sphere in spheres)
+        {
+            Vector3 centre = sphere.Centre;
+            float reach = sphere.Radius + (Reach * voxel);
+            level.Mark(centre - new Vector3(reach), centre + new Vector3(reach));
+        }
+    }
 
     /// <summary>
     /// One level: where it is, whether what it holds is whole, and the bricks made again this frame.

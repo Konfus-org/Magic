@@ -381,7 +381,12 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     {
         if (_graph.Current?.HasPass("GiField") == true && main is { } eye)
         {
-            _gi.Plan(eye.Transform.Position, _world.Instances.Moved, frame.DeltaSeconds, _settings);
+            _gi.Plan(
+                eye.Transform.Position,
+                _world.Instances.Moved,
+                _world.Instances.Recoloured,
+                frame.DeltaSeconds,
+                _settings);
             _giRays.Add(_gi.Rays);
             return;
         }

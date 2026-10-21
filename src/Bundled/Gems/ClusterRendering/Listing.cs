@@ -46,6 +46,12 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     internal List<ListedPass> Passes { get; } = [];
 
     /// <summary>
+    /// The pipelines it runs, held while it does: the assets hold what loaded only while something uses it, so a game
+    /// that loads one of them gets the one whose params these passes run with, not one made again.
+    /// </summary>
+    internal List<Pipeline> Pipelines { get; } = [];
+
+    /// <summary>
     /// The passes of each stage, in the order they run, by <see cref="PassStage"/>.
     /// </summary>
     internal List<ListedPass>[] Stages { get; } = MakeStages();
@@ -88,6 +94,21 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     {
         int end = error.IndexOf('\n', StringComparison.Ordinal);
         return (end < 0 ? error : error[..end]).Trim();
+    }
+
+    /// <summary>
+    /// Packs again the params of each pass a game set one of since (<see cref="PassParams.TryFollow"/>): false when one
+    /// named a curve the build did not load, which only another build can.
+    /// </summary>
+    internal bool TryFollowParams()
+    {
+        bool isFollowed = true;
+        foreach (ListedPass pass in Passes)
+        {
+            isFollowed &= pass.Params.TryFollow();
+        }
+
+        return isFollowed;
     }
 
     /// <summary>
@@ -300,7 +321,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// </summary>
     internal string Body => loaded.Body;
 
-    internal PassWords Params => loaded.Params;
+    internal PassParams Params => loaded.Params;
 
     /// <summary>
     /// The texture a compute pass dispatched <c>output:Name</c> runs a thread per texel of; empty for any other

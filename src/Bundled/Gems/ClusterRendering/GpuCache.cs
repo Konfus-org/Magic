@@ -67,7 +67,10 @@ internal readonly record struct SurfaceKey(Handle<Shader> Shader, bool Masked, b
 /// by, and whether it is in yet, transparent, masked or double-sided. What is broken is packed, in its own row, as the
 /// failure material for what broke. A material is drawn only once it can be drawn as it should be: its textures in, and
 /// every pipeline it is drawn with compiled (<see cref="PassGraph.IsDrawable"/>). Until then its row stays as it was,
-/// not in for a new one, so nothing is drawn flat, black or not at all for a while and then changes.
+/// not in for a new one, so nothing is drawn flat, black or not at all for a while and then changes. A material whose
+/// params, blending or sides a game set is taken in again as one whose file changed is, from the count its params keep
+/// (<see cref="MaterialParamDictionary.Version"/>), and its instances are told only what the new row changes for them
+/// (<see cref="ChangedMaterials"/>, <see cref="RecolouredMaterials"/>), so a value eased every frame costs its row.
 /// </para>
 /// <para>
 /// A model's distance field, which the world's field for global illumination is made from, is a box of
@@ -214,6 +217,11 @@ internal sealed class GpuCache
     private readonly Handle<Material> _defaultMaterial;
 
     /// <summary>
+    /// <see cref="GetTextureRef"/>, made once, so packing a material, as often as a game sets one, makes no closure.
+    /// </summary>
+    private readonly Func<MaterialParam, uint> _getTextureRef;
+
+    /// <summary>
     /// What stands in for what broke, and where a failure is said.
     /// </summary>
     private readonly FailureHandler _failures;
@@ -283,6 +291,7 @@ internal sealed class GpuCache
         _failures = failures;
         _settings = settings;
         _stopping = stopping;
+        _getTextureRef = GetTextureRef;
         _models = new(
             assets,
             "A model does not load, so what draws it is drawn as the failure",
@@ -346,9 +355,18 @@ internal sealed class GpuCache
     internal HashSet<Handle<Model>> ChangedModels { get; } = [];
 
     /// <summary>
-    /// The materials whose row, surface or type changed since the instances last asked: whose instances draw anew.
+    /// The materials that came in since the instances last asked, or whose row changed what their instances work out
+    /// from it: why it is drawn as the failure, whether it is a sky, whether it is transparent. Whose instances are
+    /// worked out again, and what is made from them and kept, shadows and the field, made again about them.
     /// </summary>
     internal HashSet<Handle<Material>> ChangedMaterials { get; } = [];
+
+    /// <summary>
+    /// The materials whose row changed what global illumination takes of them, their colour or their light, and
+    /// nothing their instances work out, since the instances last asked: about whose instances the field is made again,
+    /// their shadows kept.
+    /// </summary>
+    internal HashSet<Handle<Material>> RecolouredMaterials { get; } = [];
 
     /// <summary>
     /// The surfaces with a raster bin of their own, from <see cref="GpuContract.FixedRasterBins"/> on, in bin order:
@@ -670,15 +688,35 @@ internal sealed class GpuCache
     /// </summary>
     private static int GetMipCount(uint size) => BitOperations.Log2(size) - BitOperations.Log2(SmallestMip) + 1;
 
-    private static bool IsUsingAnyOf(Material material, HashSet<Handle<Texture>> textures)
+    private static bool IsUsingAnyOf(MaterialEntry entry, HashSet<Handle<Texture>> textures)
     {
-        foreach (MaterialParam param in material.Params.Values)
+        foreach (Handle<Texture> texture in entry.Textures)
         {
-            if (textures.Contains(param.Texture)) return true;
+            if (textures.Contains(texture)) return true;
         }
 
         return false;
     }
+
+    /// <summary>
+    /// Whether what the instances drawing a material work out from it differs between two of its packings: why it is
+    /// drawn as the failure, whether it is a sky, whether it is transparent (<see cref="Instances"/>). Its row stays
+    /// the same, and its surface and sides are its bins', so neither is theirs.
+    /// </summary>
+    private static bool IsLookChanged(PackedMaterial before, PackedMaterial after)
+    {
+        bool wasTransparent = before.Drawn.Type == MaterialType.Transparent;
+        bool isTransparent = after.Drawn.Type == MaterialType.Transparent;
+        return !string.Equals(before.Failure, after.Failure, StringComparison.Ordinal)
+            || before.Drawn.IsSky != after.Drawn.IsSky
+            || wasTransparent != isTransparent;
+    }
+
+    /// <summary>
+    /// Whether two packings give global illumination another colour or light.
+    /// </summary>
+    private static bool IsRecoloured(PackedMaterial before, PackedMaterial after)
+        => before.Gi.Color != after.Gi.Color || before.Gi.Emission != after.Gi.Emission;
 
     /// <summary>
     /// A hash of the triangles a field is made from (<see cref="GpuConverter.Convert(IReadOnlyList{Mesh})"/>).
@@ -702,6 +740,11 @@ internal sealed class GpuCache
     /// </summary>
     private uint GetRef(Handle<Texture> texture)
         => _textures.Entries.TryGetValue(texture, out TextureEntry? entry) ? entry.Ref : GpuContract.NoTexture;
+
+    /// <summary>
+    /// The texture a param names as a surface names it (<see cref="GetRef"/>).
+    /// </summary>
+    private uint GetTextureRef(MaterialParam param) => GetRef(param.Texture);
 
     /// <summary>
     /// Filters textures with as many taps as the settings now say, 1 to 16, from now on: the pools read through that
@@ -1124,13 +1167,14 @@ internal sealed class GpuCache
         }
 
         _materials.Take(TakeMaterial);
+        FollowChanges();
 
         if (_failures.TakeBroke(_broke) || _changedTextures.Count > 0)
         {
             foreach ((Handle<Material> handle, MaterialEntry entry) in _materials.Entries)
             {
                 if (entry.Asset is { } material
-                    && (IsUsingAnyOf(material, _changedTextures) || _broke.Contains(material.Shader)))
+                    && (IsUsingAnyOf(entry, _changedTextures) || _broke.Contains(material.Shader)))
                 {
                     Pack(handle, entry);
                 }
@@ -1156,13 +1200,28 @@ internal sealed class GpuCache
     }
 
     /// <summary>
-    /// Takes in a material, or that it failed: the textures it samples held in place of those it sampled before, its
-    /// surface read first if it is new, then the material packed.
+    /// Takes in again each material held whose params, blending or sides a game set since it was last read, as one
+    /// whose file changed is, so it is drawn so from this frame.
+    /// </summary>
+    private void FollowChanges()
+    {
+        foreach ((Handle<Material> handle, MaterialEntry entry) in _materials.Entries)
+        {
+            if (entry.Asset is { } material && entry.Read != MaterialRead.Of(material))
+            {
+                TakeMaterial(handle, entry, material);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Takes in a material, or that it failed: what of it is read noted first, the textures it samples held in place of
+    /// those it sampled before, its surface read first if it is new, then the material packed.
     /// </summary>
     private void TakeMaterial(Handle<Material> handle, MaterialEntry entry, Material? material)
     {
-        HoldTextures(material);
-        HoldTextures(entry.Asset, release: true);
+        entry.Read = material is null ? default : MaterialRead.Of(material);
+        HoldTextures(entry, material);
         entry.Asset = material;
         if (material is not null && !_surfaces.ContainsKey(material.Shader))
         {
@@ -1175,22 +1234,25 @@ internal sealed class GpuCache
     }
 
     /// <summary>
-    /// Holds every texture <paramref name="material"/> samples, or lets each go.
+    /// Holds every texture <paramref name="material"/> samples now, then lets go of those the entry held for it before,
+    /// so one it still samples never leaves between.
     /// </summary>
-    private void HoldTextures(Material? material, bool release = false)
+    private void HoldTextures(MaterialEntry entry, Material? material)
     {
-        if (material is null) return;
-
-        foreach (MaterialParam param in material.Params.Values)
+        Handle<Texture>[] before = entry.Textures;
+        List<Handle<Texture>> now = [];
+        foreach (KeyValuePair<string, MaterialParam> param in material?.Params ?? [])
         {
-            if (release)
-            {
-                Release(param.Texture);
-            }
-            else
-            {
-                Record(param.Texture);
-            }
+            if (param.Value.Texture == Handle<Texture>.None) continue;
+
+            Record(param.Value.Texture);
+            now.Add(param.Value.Texture);
+        }
+
+        entry.Textures = [.. now];
+        foreach (Handle<Texture> texture in before)
+        {
+            Release(texture);
         }
     }
 
@@ -1251,16 +1313,17 @@ internal sealed class GpuCache
 
         foreach (string unknown in source.Layout.FindUnknown(material.Params.Keys))
         {
+            if (!entry.Unknown.Add(unknown)) continue;
+
             Debugging.Warn(
                 $"{_assets.GetPath(handle)} sets {unknown}, which {source.Name}'s MaterialParams does not declare.");
         }
 
         GpuMaterial row = default;
-        IReadOnlyDictionary<string, MaterialParam>?[] layers = [material.Params];
         source.Layout.Write(
-            layers,
-            param => GetRef(param.Texture),
-            _ => null,
+            [material.Params],
+            _getTextureRef,
+            static _ => null,
             MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
         (Vector3 color, Vector3 emission) = source.Layout.GiOf(material.Params);
         GpuMaterialGi gi = new() { Color = new Vector4(color, 1), Emission = new Vector4(emission, 0) };
@@ -1343,17 +1406,28 @@ internal sealed class GpuCache
     }
 
     /// <summary>
-    /// Writes a material's row as packed, what global illumination takes of it and the bins it is drawn by; a failure
+    /// Writes a material's row as packed, what global illumination takes of it and the bins it is drawn by, and tells
+    /// its instances what that changes for them: everything when it is new or changed what they work out from it, the
+    /// field alone when only its colour or light changed, and nothing when only its other values did. A failure
     /// material drawn packs again the broken materials waiting for it.
     /// </summary>
     private void Show(Handle<Material> handle, MaterialEntry entry, PackedMaterial packed)
     {
+        PackedMaterial? shown = entry.Packed;
         entry.Waiting = null;
         entry.Packed = packed;
         _materialTable.Set(entry.Row, packed.Record);
         _materialGiTable.Set(entry.Row, packed.Gi);
         WriteBins(packed.Drawn);
-        ChangedMaterials.Add(handle);
+        if (shown is null || IsLookChanged(shown, packed))
+        {
+            ChangedMaterials.Add(handle);
+        }
+        else if (IsRecoloured(shown, packed))
+        {
+            RecolouredMaterials.Add(handle);
+        }
+
         if (!_failures.IsMaterial(handle)) return;
 
         foreach ((Handle<Material> broken, MaterialEntry waiting) in _materials.Entries)
@@ -1419,7 +1493,8 @@ internal sealed class GpuCache
         _materialRows.Free(entry.Row, 1);
         _binTable.Set(entry.Row, 0);
         ChangedMaterials.Remove(material);
-        HoldTextures(entry.Asset, release: true);
+        RecolouredMaterials.Remove(material);
+        HoldTextures(entry, null);
     }
 
     /// <summary>
@@ -1497,6 +1572,19 @@ internal sealed class GpuCache
     private void Evict(Handle<RenderTexture> handle, RenderTextureEntry entry)
     {
         if (entry.Made.Texture != GpuTexture.None) _resources.Release(entry.Made.Texture);
+    }
+
+    /// <summary>
+    /// What a material entry last read of its material: its params' count, read first, as what is read after it is at
+    /// least as new, then how it is blended and its sides. Another of any is a change to take in.
+    /// </summary>
+    private readonly record struct MaterialRead(long Version, MaterialType Type, bool DoubleSided)
+    {
+        internal static MaterialRead Of(Material material)
+        {
+            long version = material.Params.Version;
+            return new MaterialRead(version, material.Type, material.DoubleSided);
+        }
     }
 
     /// <summary>
@@ -1752,6 +1840,21 @@ internal sealed class GpuCache
         internal int Row { get; } = row;
 
         internal Material? Asset { get; set; }
+
+        /// <summary>
+        /// What of <see cref="Asset"/> it was last taken in from; a game setting any of it since is taken in again.
+        /// </summary>
+        internal MaterialRead Read { get; set; }
+
+        /// <summary>
+        /// The textures its material sampled when it was last taken in, which it holds.
+        /// </summary>
+        internal Handle<Texture>[] Textures { get; set; } = [];
+
+        /// <summary>
+        /// The params its material sets that its surface does not declare, each said once, however often it is packed.
+        /// </summary>
+        internal HashSet<string> Unknown { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// What it is drawn as; null until it is drawn.

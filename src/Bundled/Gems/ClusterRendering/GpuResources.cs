@@ -101,6 +101,9 @@ internal sealed class GpuResources : IDisposable
     /// <inheritdoc cref="GpuCache.ChangedMaterials"/>
     internal HashSet<Handle<Material>> ChangedMaterials => _cache.ChangedMaterials;
 
+    /// <inheritdoc cref="GpuCache.RecolouredMaterials"/>
+    internal HashSet<Handle<Material>> RecolouredMaterials => _cache.RecolouredMaterials;
+
     /// <inheritdoc cref="GpuCache.RasterBins"/>
     internal List<SurfaceKey> RasterBins => _cache.RasterBins;
 
