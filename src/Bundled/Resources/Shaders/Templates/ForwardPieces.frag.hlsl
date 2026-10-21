@@ -1,7 +1,8 @@
 // The transparent template for pieces: composed after a surface and its LoadMaterialParams, it evaluates the surface and
 // lights it as it is drawn, with the lighting the G-buffer gets (Lighting/Shade.hlsli), blended over what is behind it
 // with premultiplied alpha. What a refracting surface emits is the scene behind it (SceneBehind), so it covers it
-// (alpha 1) and shows it bent.
+// (alpha 1) and shows it bent. Its roughness is widened by how far the normal turns across the pixel, as the G-buffer's
+// is (Include/Brdf.hlsli's FilteredRoughness).
 
 #include "Include/PieceFragment.hlsli"
 #include "Include/Pieces.hlsli"
@@ -11,6 +12,9 @@ float4 main(PieceVaryings input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 {
     float2 uvDdx = ddx(input.uv);
     float2 uvDdy = ddy(input.uv);
+    float3 normal = NormalizeOrZero(input.normal);
+    float3 normalDdx = ddx(normal) * TextureMipScale;
+    float3 normalDdy = ddy(normal) * TextureMipScale;
     float cover;
     float surfaceDepth;
     SurfaceInputs inputs = PieceInputsOf(input, uvDdx, uvDdy, isFrontFace, cover, surfaceDepth);
@@ -24,7 +28,7 @@ float4 main(PieceVaryings input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
     shaded.baseColor = surface.baseColor;
     shaded.metallic = surface.metallic;
     shaded.specular = surface.specular;
-    shaded.roughness = surface.roughness;
+    shaded.roughness = FilteredRoughness(surface.roughness, normalDdx, normalDdy);
     shaded.occlusion = surface.occlusion;
     shaded.model = surface.shadingModel;
     shaded.modelData = surface.modelData;

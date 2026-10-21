@@ -126,8 +126,10 @@ triangle in front, its piece's slot and which of the piece's triangles, and its 
 The view's small tiles are sorted by the surfaces their pixels show, and each surface draws a quad over each of its
 tiles, evaluating its surface once a pixel for the triangle the visibility buffer names, with the pixel's place on it
 from the triangle's homogeneous coordinates (Olano & Greer 1997) and its uv's derivatives from its neighbours'. Every
-surface is the same `.surf.hlsl` it would be anywhere. The pixel's velocity, from where its instance was last frame,
-is written beside it.
+surface is the same `.surf.hlsl` it would be anywhere. The roughness it stores is widened by how far the triangle's
+normal turns across the pixel, from the same neighbours, so a highlight narrower than the pixel spreads over it
+rather than flickering ([Shaders](../../Resources/Shaders/README.md#lighting-a-pixel)). The pixel's velocity, from
+where its instance was last frame, is written beside it.
 
 ### Lights
 
@@ -359,6 +361,8 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
 - Reflections are traced for opaque surfaces only: a transparent one, glass or water drawn as transparent, reflects the
   sky. What is reflected is the field, flat-coloured and without highlights, a voxel to a quarter of a metre close by
   and coarser further off; and nothing where the world draws no global illumination, the sky alone.
+- A highlight is widened by how far the triangle's normal turns across a pixel, not by a normal map's detail finer than
+  the pixel, which can still sparkle; and a card's normal is not measured at all.
 - A texture's mips are all resident; none is streamed by what the view reads of it.
 - The sky's shadow covers a few kilometres around the camera and is the square's edge's past it, so a far hill is shaded
   by the cloud over the edge, not its own. Its texels are metres across and read through a smooth filter, so a cloud's

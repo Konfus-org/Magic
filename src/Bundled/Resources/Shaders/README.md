@@ -32,6 +32,11 @@ it offers:
 - **Reflections** come from a cube prefiltered by GGX, a mip per roughness, read along the specular lobe's dominant
   direction, box-projected for a local probe; diffuse light from nine spherical-harmonic coefficients. Where a renderer
   traces reflections of the world itself, it uses them in place of the cube's for a surface smooth enough to have them.
+- **Specular anti-aliasing.** A highlight narrower than a pixel only aliases, flickering as the view moves, so a
+  renderer widens a surface's roughness by how far its normal turns across the pixel, the pixel's spread of normals
+  added to the surface's own (Tokuyoshi & Kaplanyan 2019); where the normal does not turn, the roughness is as the
+  surface said. It measures the normal it can take a pixel's neighbours of, the mesh's: a normal map's detail finer
+  than a pixel is not measured.
 - **Light from everywhere** is the sky's, from its harmonics, or where a renderer gathers it, global illumination's
   probes (`Lighting/Gi.hlsli`): the probes' irradiance over pi, as the harmonics' is, with how much of it the probes
   hold, the rest the sky's.

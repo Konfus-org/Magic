@@ -5,7 +5,7 @@
 // Sources: Walter et al. 2007 (GGX); Heitz 2014 (height-correlated Smith); Karis 2013 (the split sum); Lagarde &
 // de Rousiers 2014, "Moving Frostbite to PBR" (units, F90); Fdez-Aguera 2019 (multiple scattering); Kelemen &
 // Szirmay-Kalos 2001 (clear coat visibility); Estevez & Kulla 2017 and Neubelt & Pettineo 2013 (cloth);
-// Duff et al. 2017 (the tangent frame).
+// Duff et al. 2017 (the tangent frame); Tokuyoshi & Kaplanyan 2019 (specular anti-aliasing).
 
 #ifndef MAGIC_BRDF_HLSLI
 #define MAGIC_BRDF_HLSLI
@@ -19,10 +19,26 @@ static const float MinRoughness = 0.045;
 // What every dielectric clear coat reflects at normal incidence: 4 %, an index of refraction of 1.5.
 static const float CoatF0 = 0.04;
 
+// How much the normal's turn across a pixel widens a highlight (Tokuyoshi & Kaplanyan 2019, "Improved Geometric
+// Specular Antialiasing"): the variance of the pixel's filter, 1 / 2 pi, and the most it adds to alpha squared.
+static const float SpecularFilterVariance = 0.15915494;
+static const float SpecularFilterLimit = 0.18;
+
 float RoughnessToAlpha(float roughness)
 {
     float clamped = clamp(roughness, MinRoughness, 1.0);
     return clamped * clamped;
+}
+
+// A perceptual roughness widened by how much the normal turns across the pixel, given its change a pixel across and a
+// pixel down: the pixel's own spread of normals is added to the surface's as variances add, in alpha squared, so a
+// highlight narrower than the pixel, on a small or far curved surface, is spread over it rather than flickering as the
+// view moves. Where the normal does not turn, the roughness is as it was.
+float FilteredRoughness(float roughness, float3 normalAcross, float3 normalDown)
+{
+    float added = min(2.0 * SpecularFilterVariance * (dot(normalAcross, normalAcross) + dot(normalDown, normalDown)), SpecularFilterLimit);
+    float alpha = Pow2(saturate(roughness));
+    return sqrt(sqrt(saturate(alpha * alpha + added)));
 }
 
 // The reflectance at normal incidence of a dielectric whose specular is 0..1: 0.5 is 4 %, what most non-metals

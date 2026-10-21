@@ -3,12 +3,14 @@
 // one the visibility buffer names: its piece, its instance, its cluster's three corners read from the geometry and
 // moved as the vertex stage moved them (or a card's quad), and where the pixel falls on it, by the triangle's 2D
 // homogeneous coordinates (Olano & Greer, "Triangle Scan Conversion using 2D Homogeneous Coordinates", 1997), which
-// are perspective-correct and hold for a corner behind the camera. Its uv's derivatives are the same taken a pixel
-// across and a pixel down, the neighbours' its own triangle would have had. Then the surface is evaluated as the
-// rasteriser's fragments would have, and written as the G-buffer template writes it, with the pixel's velocity: where
-// it was on screen last frame, its instance's last place through the last frame's view, less where it is now without
-// this frame's jitter, in uv.
+// are perspective-correct and hold for a corner behind the camera. Its uv's derivatives, and its normal's, are the same
+// taken a pixel across and a pixel down, the neighbours' its own triangle would have had. Then the surface is evaluated
+// as the rasteriser's fragments would have, its roughness widened by how far the normal turns across the pixel
+// (Include/Brdf.hlsli's FilteredRoughness), and written as the G-buffer template writes it, with the pixel's velocity:
+// where it was on screen last frame, its instance's last place through the last frame's view, less where it is now
+// without this frame's jitter, in uv.
 
+#include "Include/Brdf.hlsli"
 #include "Include/GBuffer.hlsli"
 #include "Include/PieceFragment.hlsli"
 #include "Include/Pieces.hlsli"
@@ -117,6 +119,11 @@ ResolveOutput main(TileVaryings input)
     varyings.clip = float4(pixel + 0.5, 0.0, 1.0);
     float2 uvDdx = (across.x * uvs[0] + across.y * uvs[1] + across.z * uvs[2]) - uv;
     float2 uvDdy = (down.x * uvs[0] + down.y * uvs[1] + down.z * uvs[2]) - uv;
+
+    // The normal's turn across the pixel, over the footprint its textures are read at.
+    float3 normal = NormalizeOrZero(varyings.normal);
+    float3 normalDdx = (NormalizeOrZero(across.x * normals[0] + across.y * normals[1] + across.z * normals[2]) - normal) * TextureMipScale;
+    float3 normalDdy = (NormalizeOrZero(down.x * normals[0] + down.y * normals[1] + down.z * normals[2]) - normal) * TextureMipScale;
     float cover;
     float depth;
     SurfaceInputs inputs = PieceInputsOf(varyings, uvDdx, uvDdy, isFrontFace, cover, depth);
@@ -126,7 +133,7 @@ ResolveOutput main(TileVaryings input)
     stored.baseColor = surface.baseColor;
     stored.occlusion = surface.occlusion;
     stored.normal = NormalizeOrZero(surface.normal);
-    stored.roughness = surface.roughness;
+    stored.roughness = FilteredRoughness(surface.roughness, normalDdx, normalDdy);
     stored.model = surface.shadingModel;
     stored.metallic = surface.metallic;
     stored.specular = surface.specular;
