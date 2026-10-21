@@ -338,6 +338,44 @@ dotnet_diagnostic.NX0003.severity = warning
 # Banned APIs (BannedSymbols.txt): what the standards say to use instead
 dotnet_diagnostic.RS0030.severity = warning
 
+# Roslynator's rules, on as every code-quality rule is: the category turns on those on by default, and a line each the
+# ones off by default. The few that are off are with the others below, each saying why. The options hold its style
+# rules to what the rules above already ask: summaries on their own lines, types written out, access always stated,
+# every await configured.
+dotnet_analyzer_diagnostic.category-Roslynator.severity = warning
+dotnet_diagnostic.RCS1013.severity = warning
+dotnet_diagnostic.RCS1014.severity = warning
+dotnet_diagnostic.RCS1016.severity = warning
+dotnet_diagnostic.RCS1018.severity = warning
+dotnet_diagnostic.RCS1046.severity = warning
+dotnet_diagnostic.RCS1050.severity = warning
+dotnet_diagnostic.RCS1051.severity = warning
+dotnet_diagnostic.RCS1052.severity = warning
+dotnet_diagnostic.RCS1078.severity = warning
+dotnet_diagnostic.RCS1079.severity = warning
+dotnet_diagnostic.RCS1080.severity = warning
+dotnet_diagnostic.RCS1081.severity = warning
+dotnet_diagnostic.RCS1090.severity = warning
+dotnet_diagnostic.RCS1094.severity = warning
+dotnet_diagnostic.RCS1096.severity = warning
+dotnet_diagnostic.RCS1126.severity = warning
+dotnet_diagnostic.RCS1162.severity = warning
+dotnet_diagnostic.RCS1174.severity = warning
+dotnet_diagnostic.RCS1198.severity = warning
+dotnet_diagnostic.RCS1207.severity = warning
+dotnet_diagnostic.RCS1208.severity = warning
+dotnet_diagnostic.RCS1248.severity = warning
+dotnet_diagnostic.RCS1250.severity = warning
+dotnet_diagnostic.RCS1252.severity = warning
+dotnet_diagnostic.RCS1253.severity = warning
+dotnet_diagnostic.RCS1255.severity = warning
+dotnet_diagnostic.RCS1260.severity = warning
+dotnet_diagnostic.RCS1264.severity = warning
+roslynator_doc_comment_summary_style = multi_line
+roslynator_use_var = never
+roslynator_accessibility_modifiers = explicit
+roslynator_configure_await = true
+
 # Code-quality rules that are off
 # Magic is used from C#: CLS compliance and other languages' keywords (End, Stop, Error) do not matter.
 dotnet_diagnostic.CA1014.severity = none
@@ -367,6 +405,57 @@ dotnet_diagnostic.CA1724.severity = none
 dotnet_diagnostic.MA0008.severity = none
 # Data structs keep their public fields (CODESTANDARDS State), so an ECS component's can be written through a span.
 dotnet_code_quality.CA1051.exclude_structs = true
+# An if with one short statement is one line without braces, and loops, an else and a multi-line body always have
+# braces (CODESTANDARDS Methods): adding braces everywhere breaks the first, removing them the second. Braces in a case
+# are there to scope its locals, and none are asked of one with several statements.
+dotnet_diagnostic.RCS1002.severity = none
+dotnet_diagnostic.RCS1004.severity = none
+dotnet_diagnostic.RCS1007.severity = none
+dotnet_diagnostic.RCS1031.severity = none
+dotnet_diagnostic.RCS1111.severity = none
+# Stacked fixed statements share one block, as stacked usings do.
+dotnet_diagnostic.RCS1001.severity = none
+# Docs go on types and non-obvious members and say why (CODESTANDARDS Comments), as for CS1591; a comment over a group
+# of fields is one comment, not the first field's doc.
+dotnet_diagnostic.RCS1139.severity = none
+dotnet_diagnostic.RCS1140.severity = none
+dotnet_diagnostic.RCS1141.severity = none
+dotnet_diagnostic.RCS1142.severity = none
+dotnet_diagnostic.RCS1181.severity = none
+# A file can hold small types that belong with its main one (CODESTANDARDS Files), as for MA0048.
+dotnet_diagnostic.RCS1060.severity = none
+# An alias settles a name clash.
+dotnet_diagnostic.RCS1056.severity = none
+# Enums are read from files by name; one stored as a number says its values.
+dotnet_diagnostic.RCS1161.severity = none
+# [DebuggerDisplay] goes where a type debugs badly, not on every public one.
+dotnet_diagnostic.RCS1223.severity = none
+# Repeats IDE0036, in another order.
+dotnet_diagnostic.RCS1019.severity = none
+# A switch lists every enum member (IDE0010, IDE0072), which these would take out.
+dotnet_diagnostic.RCS1069.severity = none
+dotnet_diagnostic.RCS1070.severity = none
+# A local that names a value is kept for its name.
+dotnet_diagnostic.RCS1124.severity = none
+# A parameter's ref kind is chosen where it is measured (CODESTANDARDS Performance), and the ECS reads components by
+# in, a field at a time, without a copy.
+dotnet_diagnostic.RCS1231.severity = none
+dotnet_diagnostic.RCS1242.severity = none
+# Take the element field of an [InlineArray] struct for unused or unwritten; IDE0044 and IDE0051 cover the rest.
+dotnet_diagnostic.RCS1169.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+# Takes a parameter a delegate's signature requires for unused; IDE0060 covers the rest.
+dotnet_diagnostic.RCS1163.severity = none
+# A static member of a generic type may use the type parameter in its body alone, such as its size.
+dotnet_diagnostic.RCS1158.severity = none
+# A native library's bit-flag enums come from its headers, without [Flags].
+dotnet_diagnostic.RCS1130.severity = none
+# Prose repeats a word on purpose ("taken in in place").
+dotnet_diagnostic.RCS1243.severity = none
+# An inline example too long for one line spans lines.
+dotnet_diagnostic.RCS1247.severity = none
+# A formula from a paper keeps the paper's form.
+dotnet_diagnostic.RCS1268.severity = none
 
 [src/Core/**.cs]
 # Core is an executable whose public types are the API gems compile against.

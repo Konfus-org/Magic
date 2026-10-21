@@ -11,8 +11,9 @@ namespace Magic.Interfaces;
 /// if it is <see cref="IDisposable"/>.
 /// <para>
 /// Its constructor takes the entity it is attached to first, then the services it needs, as a gem's does, and keeps
-/// them, nothing more: <c>Hover(Entity owner, World world)</c>. One with no parameters is fine. Its public <c>{ get;
-/// set; }</c> properties are its values, which a prefab sets after it is made, and their initialisers its defaults.
+/// them, nothing more: <c>Hover(Entity owner, World world)</c>. One with no parameters is fine. Its public
+/// <c>{ get; set; }</c> properties are its values, which a prefab sets after it is made, and their initialisers its
+/// defaults.
 /// <see cref="Start"/> is where it begins, with its values set and its entity's components there to read. A script that
 /// is an <see cref="IBehavior"/> has hooks each frame; one that is also a system (<see cref="ISystemScript{T1}"/>,
 /// <see cref="IParallelSystemScript{T1}"/> and the rest) is added to the ECS while its entity lives.

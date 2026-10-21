@@ -63,7 +63,9 @@ internal static class Names
         return ToLegal(text);
     }
 
-    /// <summary>The camelCase form of a C name, a C# parameter name.</summary>
+    /// <summary>
+    /// The camelCase form of a C name, a C# parameter name.
+    /// </summary>
     internal static string ToCamel(string name)
     {
         string pascal = ToPascal(name).TrimEnd('_');
@@ -186,7 +188,9 @@ internal static class Names
         return name;
     }
 
-    /// <summary>Each underscore-separated word title-cased.</summary>
+    /// <summary>
+    /// Each underscore-separated word title-cased.
+    /// </summary>
     private static string ToTitle(string name)
     {
         StringBuilder result = new(name.Length);
@@ -198,7 +202,9 @@ internal static class Names
         return result.Length == 0 ? "_" : result.ToString();
     }
 
-    /// <summary>A name C# accepts as an identifier: not starting with a digit, not a keyword.</summary>
+    /// <summary>
+    /// A name C# accepts as an identifier: not starting with a digit, not a keyword.
+    /// </summary>
     private static string ToLegal(string text)
     {
         if (char.IsAsciiDigit(text[0])) text = "_" + text;

@@ -306,6 +306,11 @@ that would not fit on one line within `.editorconfig`'s `max_line_length`, whate
 body, puts its body in braces on the lines below, so the body is never lost off the end of a long line. The build
 requires braces around any multi-line body (`IDE0011`).
 
+A choice between two values is a `?:`; among more, it is a switch expression, on a tuple of the conditions where they
+are not one value, or early returns, never a `?:` inside a `?:`, which the build refuses. An `if` that ends a method or
+a loop iteration and holds the rest of it is turned around into a guard clause (`if (done) return;`), which the build
+asks for too.
+
 ### Naming
 
 - Read a name as `Class.Member(arguments)`. If that says what happens or what is held, the name is good, however

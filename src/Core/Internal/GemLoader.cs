@@ -225,11 +225,10 @@ internal sealed class GemLoader
     /// </summary>
     private void LoadCode(string path, string what)
     {
-        if (GemAssembly.LoadCode(_files, path, what, again: false) is { } assembly)
-        {
-            _assemblies.Add(path, assembly);
-            _code.Add(new CodeFile(path, what));
-        }
+        if (GemAssembly.LoadCode(_files, path, what, again: false) is not { } assembly) return;
+
+        _assemblies.Add(path, assembly);
+        _code.Add(new CodeFile(path, what));
     }
 
     /// <summary>

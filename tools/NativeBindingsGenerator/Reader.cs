@@ -62,10 +62,14 @@ internal sealed class Reader
         _macros = new(_compilation, GetTypedefType);
     }
 
-    /// <summary>The C names of the structs the library defines: what a function can attach to.</summary>
+    /// <summary>
+    /// The C names of the structs the library defines: what a function can attach to.
+    /// </summary>
     internal IReadOnlySet<string> Structs => _structs;
 
-    /// <summary>Every C name read and the qualified C# name it became, enum members included.</summary>
+    /// <summary>
+    /// Every C name read and the qualified C# name it became, enum members included.
+    /// </summary>
     internal IReadOnlyList<(string CName, string Name)> NameMap => _names;
 
     internal IReadOnlyList<Declaration> Declarations => _declarations;
@@ -74,7 +78,9 @@ internal sealed class Reader
 
     internal IReadOnlyList<string> Errors => _errors;
 
-    /// <summary>Where the shims are made: beside the output, so a clean build remakes them.</summary>
+    /// <summary>
+    /// Where the shims are made: beside the output, so a clean build remakes them.
+    /// </summary>
     private string ShimFolder => Path.ChangeExtension(_options.Output, ".shims");
 
     internal static Reader Read(Options options, Target target)
@@ -147,7 +153,9 @@ internal sealed class Reader
         return true;
     }
 
-    /// <summary>The alignment the struct's fields would give it unpacked: the largest of theirs.</summary>
+    /// <summary>
+    /// The alignment the struct's fields would give it unpacked: the largest of theirs.
+    /// </summary>
     private static int GetAlignment(CppClass cppClass)
     {
         int alignment = 1;
@@ -184,7 +192,9 @@ internal sealed class Reader
         return "int";
     }
 
-    /// <summary>The size in bytes of a bit field's storage type, which is what a compiler packs a run by.</summary>
+    /// <summary>
+    /// The size in bytes of a bit field's storage type, which is what a compiler packs a run by.
+    /// </summary>
     private static int GetSize(string storage) => storage switch
     {
         "int" or "uint" => 4,
@@ -192,7 +202,9 @@ internal sealed class Reader
         _ => 1,
     };
 
-    /// <summary>The unsigned integer a run of bit fields stored as <paramref name="storage"/> is kept in.</summary>
+    /// <summary>
+    /// The unsigned integer a run of bit fields stored as <paramref name="storage"/> is kept in.
+    /// </summary>
     private static string GetBacking(string storage) => storage switch
     {
         "int" or "uint" => "uint",
@@ -241,7 +253,9 @@ internal sealed class Reader
             + $"{Write($"({storage})value")};\n}}\n";
     }
 
-    /// <summary>A <c>va_list</c>, which no C# can build the same on every OS, so what takes one is skipped.</summary>
+    /// <summary>
+    /// A <c>va_list</c>, which no C# can build the same on every OS, so what takes one is skipped.
+    /// </summary>
     private static bool IsVaList(CppType type)
     {
         type = Unqualify(type);
@@ -296,9 +310,9 @@ internal sealed class Reader
     }
 
     /// <summary>
-    /// The function type under any qualifiers and typedefs, or null: a header may name a function type (<c>typedef int
-    /// b3AssertFcn(const char*)</c>) and take a pointer to it (<c>b3AssertFcn*</c>), which is a function pointer as
-    /// much as a pointer typedef is.
+    /// The function type under any qualifiers and typedefs, or null: a header may name a function type
+    /// (<c>typedef int b3AssertFcn(const char*)</c>) and take a pointer to it (<c>b3AssertFcn*</c>), which is a function
+    /// pointer as much as a pointer typedef is.
     /// </summary>
     private static CppFunctionType? FindFunctionType(CppType type)
     {
@@ -311,7 +325,9 @@ internal sealed class Reader
         return type as CppFunctionType;
     }
 
-    /// <summary>Whether a typedef is, through any typedefs between, an integer.</summary>
+    /// <summary>
+    /// Whether a typedef is, through any typedefs between, an integer.
+    /// </summary>
     private static bool IsInteger(CppTypedef typedef)
     {
         CppType type = Unqualify(typedef.ElementType);
@@ -327,7 +343,9 @@ internal sealed class Reader
         };
     }
 
-    /// <summary>Whether a name is one the header gave, not the placeholder libclang gives an anonymous type.</summary>
+    /// <summary>
+    /// Whether a name is one the header gave, not the placeholder libclang gives an anonymous type.
+    /// </summary>
     private static bool IsNamed(string name)
         => name.Length > 0 && !name.Contains("(unnamed", StringComparison.Ordinal)
             && !name.Contains("(anonymous", StringComparison.Ordinal);
@@ -411,7 +429,9 @@ internal sealed class Reader
         }
     }
 
-    /// <summary>The headers read for the target, with the generator's sysroot in place of the machine's.</summary>
+    /// <summary>
+    /// The headers read for the target, with the generator's sysroot in place of the machine's.
+    /// </summary>
     private CppCompilation Parse()
     {
         CppParserOptions parserOptions = new()
@@ -433,10 +453,7 @@ internal sealed class Reader
             parserOptions.IncludeFolders.Add(Path.Combine(_options.Root, include));
         }
 
-        foreach (string include in _options.AbsoluteIncludePaths)
-        {
-            parserOptions.IncludeFolders.Add(include);
-        }
+        parserOptions.IncludeFolders.AddRange(_options.AbsoluteIncludePaths);
 
         if (_options.Shims.Count > 0)
         {
@@ -444,10 +461,7 @@ internal sealed class Reader
             parserOptions.IncludeFolders.Add(ShimFolder);
         }
 
-        foreach (string define in _options.Defines)
-        {
-            parserOptions.Defines.Add(define);
-        }
+        parserOptions.Defines.AddRange(_options.Defines);
 
         // A root header is in the archive, or is one the shims made (assimp/config.h), named by its include path.
         List<string> headers = [];
@@ -660,7 +674,9 @@ internal sealed class Reader
         }
     }
 
-    /// <summary>A constant already made from a macro, as its C# type and qualified name.</summary>
+    /// <summary>
+    /// A constant already made from a macro, as its C# type and qualified name.
+    /// </summary>
     private (string Type, string Name)? Constant(string cName)
         => _constants.TryGetValue(cName, out string? name) ? (_constantParts[cName].Type, name) : null;
 
@@ -766,8 +782,8 @@ internal sealed class Reader
             string value = flags && item.Value > 0
                 ? "0x" + item.Value.ToString("X", CultureInfo.InvariantCulture)
                 : item.Value.ToString(CultureInfo.InvariantCulture);
-            text.Append(Indent(MakeSummary(item.Comment)));
-            text.Append(CultureInfo.InvariantCulture, $"    {members[i]} = {value},\n");
+            text.Append(Indent(MakeSummary(item.Comment)))
+                .Append(CultureInfo.InvariantCulture, $"    {members[i]} = {value},\n");
         }
 
         text.Append("}\n");
@@ -804,10 +820,9 @@ internal sealed class Reader
 
         _declarations.Add(new(DeclarationKind.Type, cName, owner, false, name, Unshadow(text, owner, name)));
         _names.Add((cName, Qualify(cName)));
-        if (cppClass.Name.Length > 0 && !string.Equals(cppClass.Name, cName, StringComparison.Ordinal))
-        {
-            _names.Add((cppClass.Name, Qualify(cName)));
-        }
+        if (cppClass.Name.Length == 0 || string.Equals(cppClass.Name, cName, StringComparison.Ordinal)) return;
+
+        _names.Add((cppClass.Name, Qualify(cName)));
     }
 
     /// <summary>
@@ -852,8 +867,8 @@ internal sealed class Reader
             ? $", Pack = {cppClass.AlignOf.ToString(CultureInfo.InvariantCulture)}"
             : "";
         text.Append(
-            union ? $"[StructLayout(LayoutKind.Explicit{pack})]\n" : $"[StructLayout(LayoutKind.Sequential{pack})]\n");
-        text.Append(CultureInfo.InvariantCulture, $"public partial struct {name}\n{{\n");
+            union ? $"[StructLayout(LayoutKind.Explicit{pack})]\n" : $"[StructLayout(LayoutKind.Sequential{pack})]\n")
+            .Append(CultureInfo.InvariantCulture, $"public partial struct {name}\n{{\n");
         HashSet<string> fieldNames = new(StringComparer.Ordinal);
         bool first = true;
         (string Type, int Offset, string Name)? bits = null;
@@ -883,8 +898,8 @@ internal sealed class Reader
 
                 string bitName = Names.ToPascal(field.Name);
                 _names.Add(($"{cName}.{field.Name}", bitName));
-                text.Append('\n').Append(Indent(MakeSummary(field.Comment)));
-                text.Append(Indent(
+                text.Append('\n').Append(Indent(MakeSummary(field.Comment)))
+                    .Append(Indent(
                     MakeBitField(storage, bitType, bits.Value.Name, bitName, bits.Value.Offset, field.BitFieldWidth)));
                 bits = (storage, bits.Value.Offset + field.BitFieldWidth, bits.Value.Name);
                 continue;
@@ -910,7 +925,12 @@ internal sealed class Reader
 
             // The nested type is named from the field as it ends up, so a struct's second unnamed union, Union_, is a
             // Union_Type.
-            string fieldType = kind.Length == 0 ? "" : field.Name.Length == 0 ? fieldName + "Type" : fieldName + kind;
+            string fieldType = (kind.Length, field.Name.Length) switch
+            {
+                (0, _) => "",
+                (_, 0) => fieldName + "Type",
+                _ => fieldName + kind,
+            };
 
             _names.Add(($"{cName}.{(field.Name.Length == 0 ? fieldName : field.Name)}", fieldName));
             if (!first) text.Append('\n');
@@ -918,8 +938,8 @@ internal sealed class Reader
             first = false;
             if (fieldType.Length > 0 && Unqualify(field.Type) is CppClass anonymousType)
             {
-                text.Append(Indent(MakeStructText(anonymousType, $"{cName}.{fieldName}", fieldType)));
-                text.Append('\n');
+                text.Append(Indent(MakeStructText(anonymousType, $"{cName}.{fieldName}", fieldType)))
+                    .Append('\n');
             }
 
             text.Append(Indent(MakeSummary(field.Comment)));
@@ -1048,7 +1068,9 @@ internal sealed class Reader
         _names.Add((function.Name, (owner.Length == 0 ? _options.Class : GetContainer(owner)) + "." + name));
     }
 
-    /// <summary>The C# type for a C one, as it is written in a declaration.</summary>
+    /// <summary>
+    /// The C# type for a C one, as it is written in a declaration.
+    /// </summary>
     private string TranslateType(CppType type, bool voidAllowed)
     {
         switch (type)
@@ -1117,7 +1139,11 @@ internal sealed class Reader
     }
 
     private string? GetName(CppClass cppClass)
-        => _classNames.TryGetValue(cppClass, out string? name) ? name : IsNamed(cppClass.Name) ? cppClass.Name : null;
+    {
+        if (_classNames.TryGetValue(cppClass, out string? name)) return name;
+
+        return IsNamed(cppClass.Name) ? cppClass.Name : null;
+    }
 
     /// <summary>
     /// An enum's C name: its own, the typedef's that names it, or, for one with neither whose members share a prefix
@@ -1154,7 +1180,9 @@ internal sealed class Reader
             : null;
     }
 
-    /// <summary>A type's C# name as written from anywhere in the namespace: owner-qualified when it has one.</summary>
+    /// <summary>
+    /// A type's C# name as written from anywhere in the namespace: owner-qualified when it has one.
+    /// </summary>
     private string Qualify(string cName)
     {
         (string owner, string rest) = Names.Split(cName, _options.Prefixes);
@@ -1172,7 +1200,9 @@ internal sealed class Reader
     }
 }
 
-/// <summary>A struct whose layout differs between the platforms' compilers, so no one C# struct is it.</summary>
+/// <summary>
+/// A struct whose layout differs between the platforms' compilers, so no one C# struct is it.
+/// </summary>
 internal sealed class LayoutException : Exception
 {
     public LayoutException()
@@ -1190,7 +1220,9 @@ internal sealed class LayoutException : Exception
     }
 }
 
-/// <summary>A C construct the generator has no faithful C# for.</summary>
+/// <summary>
+/// A C construct the generator has no faithful C# for.
+/// </summary>
 internal sealed class UnsupportedException : Exception
 {
     public UnsupportedException()

@@ -163,11 +163,11 @@ public sealed class GpuCommands
         _buffers.Add(to);
         _commands.Add(new GpuCommand(
             GpuCommandType.CopyBuffer,
-            First: fromOffset,
-            Offset: toOffset,
-            Count: bytes,
             RunStart: start,
-            RunLength: 2));
+            RunLength: 2,
+            Count: bytes,
+            First: fromOffset,
+            Offset: toOffset));
         return this;
     }
 
@@ -249,14 +249,14 @@ public sealed class GpuCommands
         => _commands.Add(new GpuCommand(
             GpuCommandType.DrawIndexed,
             Count: indices,
+            Instances: instances,
             First: firstIndex,
             VertexOffset: vertexOffset,
-            Instances: instances,
             FirstInstance: firstInstance));
 
     internal void DrawIndexedFromBuffer(GpuBuffer arguments, uint offset, uint count)
         => _commands.Add(
-            new GpuCommand(GpuCommandType.DrawIndexedFromBuffer, Buffer: arguments, Offset: offset, Count: count));
+            new GpuCommand(GpuCommandType.DrawIndexedFromBuffer, Buffer: arguments, Count: count, Offset: offset));
 
     internal void Dispatch(uint groupsX, uint groupsY, uint groupsZ)
         => _commands.Add(new GpuCommand(GpuCommandType.Dispatch, GroupsX: groupsX, GroupsY: groupsY, GroupsZ: groupsZ));

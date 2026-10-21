@@ -154,10 +154,9 @@ public sealed class Threads : IDisposable
     /// </summary>
     internal void HandFrame(Action render)
     {
-        if (!_render.TryEnqueue(render, isTimed: false))
-        {
-            Debugging.Warn("A frame was handed to the render thread after the run ended; it is dropped.");
-        }
+        if (_render.TryEnqueue(render, isTimed: false)) return;
+
+        Debugging.Warn("A frame was handed to the render thread after the run ended; it is dropped.");
     }
 
     /// <summary>
@@ -320,12 +319,11 @@ public sealed class Threads : IDisposable
             }
 
             // Outside the try: a listener that throws is its own failure, not the work's.
-            if (timed)
-            {
-                _workDuration.Record(
-                    Stopwatch.GetElapsedTime(start).TotalSeconds,
-                    new KeyValuePair<string, object?>(Metrics.ThreadNameTag, name));
-            }
+            if (!timed) return;
+
+            _workDuration.Record(
+                Stopwatch.GetElapsedTime(start).TotalSeconds,
+                new KeyValuePair<string, object?>(Metrics.ThreadNameTag, name));
         }
 
         /// <summary>

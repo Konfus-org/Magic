@@ -241,9 +241,10 @@ internal sealed class SettingsWindow : IDisposable
     {
         string? category = setting.Attributes.OfType<CategoryAttribute>().FirstOrDefault()?.Category;
         int slash = category?.IndexOf('/', StringComparison.Ordinal) ?? -1;
-        return category is null
-            ? (setting.Owner, setting.Owner)
-            : slash < 0 ? (category, setting.Owner) : (category[..slash], category[(slash + 1)..]);
+        if (category is null) return (setting.Owner, setting.Owner);
+        if (slash < 0) return (category, setting.Owner);
+
+        return (category[..slash], category[(slash + 1)..]);
     }
 
     /// <summary>
@@ -267,9 +268,10 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private static int GetTabOrder(string tab, string[] met)
     {
-        return string.Equals(tab, "Render", StringComparison.Ordinal) ? -1
-            : string.Equals(tab, "Debug", StringComparison.Ordinal) ? met.Length
-            : Array.IndexOf(met, tab);
+        if (string.Equals(tab, "Render", StringComparison.Ordinal)) return -1;
+        if (string.Equals(tab, "Debug", StringComparison.Ordinal)) return met.Length;
+
+        return Array.IndexOf(met, tab);
     }
 
     /// <summary>
@@ -395,10 +397,9 @@ internal sealed class SettingsWindow : IDisposable
     private void DrawPreset()
     {
         int index = Array.IndexOf(_presets, _settings.Preset);
-        if (_ui.Choice("Preset", ref index, _presetNames) && index >= 0)
-        {
-            ApplyAsync(_presets[index], _stopping).FireAndForget();
-        }
+        if (!_ui.Choice("Preset", ref index, _presetNames) || index < 0) return;
+
+        ApplyAsync(_presets[index], _stopping).FireAndForget();
     }
 
     /// <summary>
@@ -440,9 +441,10 @@ internal sealed class SettingsWindow : IDisposable
     {
         if (_input is not { } input) return;
 
-        int step = input[Control.KeyF5].WasPressed ? 1 : input[Control.KeyF6].WasPressed ? -1 : 0;
-        if (step == 0) return;
+        bool isForward = input[Control.KeyF5].WasPressed;
+        if (!isForward && !input[Control.KeyF6].WasPressed) return;
 
+        int step = isForward ? 1 : -1;
         int index = (GetViewIndex() + step + _views.Length) % _views.Length;
         Show(index == 0 ? string.Empty : _viewNames[index - 1]);
     }

@@ -7,6 +7,4 @@ namespace Magic.Attributes;
 /// was. On a settings class, it marks every setting in it. A settings window says so on the row.
 /// </summary>
 [AttributeUsage(AttributeTargets.Property | AttributeTargets.Class)]
-public sealed class RequireRestartAttribute : Attribute
-{
-}
+public sealed class RequireRestartAttribute : Attribute;

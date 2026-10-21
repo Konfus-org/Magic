@@ -87,7 +87,14 @@ internal sealed class ConsoleWindow : IDisposable
         _ui.Begin("Log", scrollable: true);
         foreach (Line line in GetShown())
         {
-            _ui.Label(line.Text, line.Level >= LogLevel.Error ? _error : line.Level == LogLevel.Warn ? _warning : null);
+            Color? color = line.Level switch
+            {
+                LogLevel.Error or LogLevel.Critical => _error,
+                LogLevel.Warn => _warning,
+                LogLevel.Verbose or LogLevel.Info => null,
+                _ => null,
+            };
+            _ui.Label(line.Text, color);
         }
 
         _ui.End();

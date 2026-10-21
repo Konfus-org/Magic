@@ -64,10 +64,12 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     {
         _slowest.Current = frame.Index;
         Follow();
-        if (_listener is not null && Stopwatch.GetElapsedTime(_windowStart).TotalSeconds >= _settings.IntervalSeconds)
+        if (_listener is null || Stopwatch.GetElapsedTime(_windowStart).TotalSeconds < _settings.IntervalSeconds)
         {
-            Report();
+            return;
         }
+
+        Report();
     }
 
     /// <summary>

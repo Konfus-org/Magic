@@ -22,5 +22,7 @@ internal sealed record Declaration(
     string Name,
     string Text);
 
-/// <summary>A construct the generator does not emit, with where it is, for the build log.</summary>
+/// <summary>
+/// A construct the generator does not emit, with where it is, for the build log.
+/// </summary>
 internal sealed record Skip(string What, string Where);

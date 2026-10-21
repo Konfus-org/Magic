@@ -78,11 +78,10 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
 
         // A thread of its own rather than a task, and a background one: a terminal read cannot be cancelled on every
         // OS, so the thread waits in it until a line comes or the process ends, through every run of the process.
-        if (!_isReading)
-        {
-            _isReading = true;
-            new Thread(ReadLines) { IsBackground = true, Name = "Terminal input" }.Start();
-        }
+        if (_isReading) return;
+
+        _isReading = true;
+        new Thread(ReadLines) { IsBackground = true, Name = "Terminal input" }.Start();
     }
 
     public Subscription Register(string name, string description, Action<ReadOnlySpan<string>> run)

@@ -248,11 +248,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _world.Clear();
         _lines.Clear();
         _reports.Take(GetNow(), _world, _lines);
-        if (_isShowing)
-        {
-            DrawWorld();
-            DrawLines();
-        }
+        if (!_isShowing) return;
+
+        DrawWorld();
+        DrawLines();
     }
 
     /// <summary>
@@ -296,7 +295,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0)
     {
-        if (_reports.Add(
+        if (!_reports.Add(
             text,
             ReportKind.Alarm,
             _warning,
@@ -305,8 +304,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             seconds ?? _settings.ReportSeconds,
             GetNow()))
         {
-            Debugging.Warn(text, member, file, line);
+            return;
         }
+
+        Debugging.Warn(text, member, file, line);
     }
 
     public void Error(
@@ -318,7 +319,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0)
     {
-        if (_reports.Add(
+        if (!_reports.Add(
             text,
             ReportKind.Alarm,
             _error,
@@ -327,8 +328,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             seconds ?? _settings.ReportSeconds,
             GetNow()))
         {
-            Debugging.Error(text, member, file, line);
+            return;
         }
+
+        Debugging.Error(text, member, file, line);
     }
 
     public unsafe void Begin(string title, bool scrollable = false)
@@ -573,17 +576,16 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         // The first cell last, spanning the row, so the row is the item a tooltip after it rests on. Rows may start
         // with the same text, so the row's index, not its text, is its id.
-        if (cells.Length > 0 && _tableColumns > 0)
-        {
-            ImGui.TableSetColumnIndex(0);
-            ImGui.PushIDInt(ImGui.TableGetRowIndex());
-            ImGui.SelectableEx(
-                _text.Of(cells[0]),
-                false,
-                ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.Disabled,
-                default);
-            ImGui.PopID();
-        }
+        if (cells.Length == 0 || _tableColumns <= 0) return;
+
+        ImGui.TableSetColumnIndex(0);
+        ImGui.PushIDInt(ImGui.TableGetRowIndex());
+        ImGui.SelectableEx(
+            _text.Of(cells[0]),
+            false,
+            ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.Disabled,
+            default);
+        ImGui.PopID();
     }
 
     public void EndTable()
@@ -774,11 +776,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private void ThrowIfOutsideFrame()
     {
-        if (!_isInFrame)
-        {
-            throw new InvalidOperationException(
-                "The debug UI's widgets are drawn in Update, by a gem made after the UI gem.");
-        }
+        if (_isInFrame) return;
+
+        throw new InvalidOperationException(
+            "The debug UI's widgets are drawn in Update, by a gem made after the UI gem.");
     }
 
     /// <summary>

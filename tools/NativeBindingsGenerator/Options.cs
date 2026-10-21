@@ -8,10 +8,14 @@ namespace Magic.Tools.NativeBindingsGenerator;
 /// </summary>
 internal sealed class Options
 {
-    /// <summary>The library's logical name: what the generated <c>DllImport</c>s name.</summary>
+    /// <summary>
+    /// The library's logical name: what the generated <c>DllImport</c>s name.
+    /// </summary>
     internal string Library { get; private set; } = "";
 
-    /// <summary>The namespace the API is declared in.</summary>
+    /// <summary>
+    /// The namespace the API is declared in.
+    /// </summary>
     internal string Namespace { get; private set; } = "";
 
     /// <summary>The extracted archive; the headers and include paths are relative to it, and only declarations from
@@ -40,7 +44,9 @@ internal sealed class Options
     /// </summary>
     internal IReadOnlyList<(string Prefix, string Owner)> Prefixes { get; private set; } = [];
 
-    /// <summary>The class a name with no owner is declared in; the library's name unless the item says.</summary>
+    /// <summary>
+    /// The class a name with no owner is declared in; the library's name unless the item says.
+    /// </summary>
     internal string Class { get; private set; } = "";
 
     /// <summary>The standard headers the parse sees instead of the machine's, so every machine parses the
@@ -121,12 +127,9 @@ internal sealed class Options
     private static List<string> ParseList(string value)
     {
         List<string> items = [];
-        foreach (string item in value.Split(
+        items.AddRange(value.Split(
             ',',
-            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            items.Add(item);
-        }
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
         return items;
     }

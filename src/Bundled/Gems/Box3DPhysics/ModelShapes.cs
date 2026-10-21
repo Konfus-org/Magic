@@ -190,10 +190,9 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
 
     internal void Free()
     {
-        if (Mesh is not null)
-        {
-            B3.DestroyMesh(Mesh);
-            Mesh = null;
-        }
+        if (Mesh is null) return;
+
+        B3.DestroyMesh(Mesh);
+        Mesh = null;
     }
 }

@@ -135,9 +135,8 @@ public sealed class GpuCommandsTests
     public void Commands_are_in_the_order_recorded()
     {
         GpuCommands commands = new();
-        commands.GenerateMipmaps(new GpuTexture(1));
-
-        commands.CopyBuffer(new GpuBuffer(1), 0, new GpuBuffer(2), 0, 4);
+        commands.GenerateMipmaps(new GpuTexture(1))
+            .CopyBuffer(new GpuBuffer(1), 0, new GpuBuffer(2), 0, 4);
 
         GpuCommandType[] expected = [GpuCommandType.GenerateMipmaps, GpuCommandType.CopyBuffer];
         GpuCommandType[] types = [commands.Commands[0].Type, commands.Commands[1].Type];

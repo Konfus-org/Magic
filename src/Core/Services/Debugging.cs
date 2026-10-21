@@ -191,11 +191,10 @@ public static class Debugging
         // The printing task has finished, at exit: the sink gets nothing more.
         if (!_entries.Writer.TryWrite(new Entry(default, RemoveSink))) return;
 
-        if (!removed.Task.Wait(TimeSpan.FromSeconds(CatchUpSeconds)))
-        {
-            Warn($"Log sink {sink.GetType().Name} did not catch up within {CatchUpSeconds} s, "
-                + "so its last lines may be lost.");
-        }
+        if (removed.Task.Wait(TimeSpan.FromSeconds(CatchUpSeconds))) return;
+
+        Warn($"Log sink {sink.GetType().Name} did not catch up within {CatchUpSeconds} s, "
+            + "so its last lines may be lost.");
 
         void RemoveSink()
         {

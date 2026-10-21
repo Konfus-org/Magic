@@ -26,11 +26,14 @@ public static class TaskExtensions
         {
             task.ConfigureAwait(false).GetAwaiter().OnCompleted(() =>
             {
-                if (task.Exception is { } failure)
+                if (task.Exception is not
+                    { } failure)
                 {
-                    Exception thrown = failure.InnerExceptions.Count == 1 ? failure.InnerExceptions[0] : failure;
-                    Debugging.Error($"A task let go with FireAndForget failed: {thrown}", member, file, line);
+                    return;
                 }
+
+                Exception thrown = failure.InnerExceptions.Count == 1 ? failure.InnerExceptions[0] : failure;
+                Debugging.Error($"A task let go with FireAndForget failed: {thrown}", member, file, line);
             });
         }
     }

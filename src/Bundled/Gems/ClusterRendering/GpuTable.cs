@@ -134,11 +134,10 @@ internal sealed class GpuTable<T> : IGpuTable
 
     private void Mark(int row)
     {
-        if (!_isAllDirty && !_isDirty[row])
-        {
-            _isDirty[row] = true;
-            _dirty.Add(row);
-        }
+        if (_isAllDirty || _isDirty[row]) return;
+
+        _isDirty[row] = true;
+        _dirty.Add(row);
     }
 
     private void Send(int start, int end)

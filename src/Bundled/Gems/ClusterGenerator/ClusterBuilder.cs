@@ -169,7 +169,9 @@ internal static class ClusterBuilder
             }
         }
 
-        return !any ? 0 : farthest > 0 ? farthest / PositionSteps : 1e-6f;
+        if (!any) return 0;
+
+        return farthest > 0 ? farthest / PositionSteps : 1e-6f;
     }
 
     /// <summary>
@@ -646,12 +648,15 @@ internal static class ClusterBuilder
                 _cursor++;
             }
 
-            chosen = _chosen = [];
-            local = _local = [];
+            _chosen = [];
+            _local = [];
+            chosen = _chosen;
+            local = _local;
             slot = 0;
             if (_cursor == _order.Length) return false;
 
-            slot = _slot = _slots[_order[_cursor]];
+            _slot = _slots[_order[_cursor]];
+            slot = _slot;
             _frontier.Clear();
             _sum = Vector3.Zero;
             int next = _order[_cursor];

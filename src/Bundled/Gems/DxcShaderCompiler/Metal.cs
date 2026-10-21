@@ -85,9 +85,13 @@ internal static unsafe class Metal
     private static Result Bind(Spvc.Compiler* compiler, GpuStage stage)
     {
         bool compute = stage == GpuStage.Compute;
-        Spv.ExecutionModel model = compute
-            ? Spv.ExecutionModel.GLCompute
-            : stage == GpuStage.Vertex ? Spv.ExecutionModel.Vertex : Spv.ExecutionModel.Fragment;
+        Spv.ExecutionModel model = (compute, stage) switch
+        {
+            (true, _) => Spv.ExecutionModel.GLCompute,
+            (false, GpuStage.Vertex) => Spv.ExecutionModel.Vertex,
+            _ => Spv.ExecutionModel.Fragment,
+        };
+
         Spvc.Set* active;
         Spvc.Resources* resources;
         if (Spvc.CompilerGetActiveInterfaceVariables(compiler, &active) != Spvc.Result.Success

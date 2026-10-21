@@ -702,7 +702,13 @@ internal static class QuadricSimplifier
             double atSecond = quadric.VertexError(second.Position);
             double atMiddle = quadric.VertexError(middle);
             double least = Math.Min(atFirst, Math.Min(atSecond, atMiddle));
-            place = least == atFirst ? first.Position : least == atSecond ? second.Position : middle;
+            if (least == atFirst)
+            {
+                place = first.Position;
+                return least;
+            }
+
+            place = least == atSecond ? second.Position : middle;
             return least;
         }
     }

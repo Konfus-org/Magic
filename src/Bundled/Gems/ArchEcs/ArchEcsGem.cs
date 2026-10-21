@@ -532,11 +532,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
     private void ThrowIfNotMain()
     {
-        if (!_threads.IsCurrent(EngineThread.Main))
-        {
-            throw new InvalidOperationException(
-                "The world is the main thread's: hand the work to it (Threads.InvokeAsync).");
-        }
+        if (_threads.IsCurrent(EngineThread.Main)) return;
+
+        throw new InvalidOperationException(
+            "The world is the main thread's: hand the work to it (Threads.InvokeAsync).");
     }
 
     /// <summary>
@@ -549,11 +548,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
     private void ThrowIfQuerying()
     {
-        if (_querying > 0)
-        {
-            throw new InvalidOperationException("An entity's components cannot change during a query's loop or a "
-                + "parallel system: collect what to change, and change it after.");
-        }
+        if (_querying <= 0) return;
+
+        throw new InvalidOperationException("An entity's components cannot change during a query's loop or a "
+            + "parallel system: collect what to change, and change it after.");
     }
 
     /// <summary>

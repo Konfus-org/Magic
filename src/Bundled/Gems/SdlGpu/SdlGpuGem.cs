@@ -189,9 +189,15 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         }
 
         uint formats = SDL.GetGPUShaderFormats(_device);
-        ShaderFormat = (formats & SDL.GpuShaderformatSpirv) != 0 ? GpuShaderFormat.Spirv
-            : (formats & SDL.GpuShaderformatDxil) != 0 ? GpuShaderFormat.Dxil
-            : GpuShaderFormat.Msl;
+        bool hasSpirv = (formats & SDL.GpuShaderformatSpirv) != 0;
+        bool hasDxil = (formats & SDL.GpuShaderformatDxil) != 0;
+        ShaderFormat = (hasSpirv, hasDxil) switch
+        {
+            (true, _) => GpuShaderFormat.Spirv,
+            (false, true) => GpuShaderFormat.Dxil,
+            _ => GpuShaderFormat.Msl,
+        };
+
         string name;
         fixed (byte* unnamed = "an unnamed GPU"u8)
         {
@@ -713,11 +719,10 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private void ThrowIfNotRender()
     {
-        if (!_threads.IsCurrent(EngineThread.Render))
-        {
-            throw new InvalidOperationException("The GPU is the render thread's: use it in Render, "
-                + "or hand the work to the render thread (Threads.InvokeAsync).");
-        }
+        if (_threads.IsCurrent(EngineThread.Render)) return;
+
+        throw new InvalidOperationException("The GPU is the render thread's: use it in Render, "
+            + "or hand the work to the render thread (Threads.InvokeAsync).");
     }
 
     /// <summary>
@@ -1021,9 +1026,13 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     {
         if (_settings.Vsync) return SDL.GPUPresentMode.Vsync;
 
-        return SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Immediate)
-            ? SDL.GPUPresentMode.Immediate
-            : SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Mailbox) ? SDL.GPUPresentMode.Mailbox
+        if (SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Immediate))
+        {
+            return SDL.GPUPresentMode.Immediate;
+        }
+
+        return SDL.WindowSupportsGPUPresentMode(_device, window, SDL.GPUPresentMode.Mailbox)
+            ? SDL.GPUPresentMode.Mailbox
             : SDL.GPUPresentMode.Vsync;
     }
 

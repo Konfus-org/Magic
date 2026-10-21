@@ -569,11 +569,10 @@ public sealed class World : IDisposable
         Result<object> read = type.Ok ? Json.Read(saved.Values, type.Value) : Result.Failure<object>(type.Error);
         if (read.Ok) return (IComponent)read.Value;
 
-        if (failed.Add(saved.Type))
-        {
-            Debugging.Error(
-                $"Saved {saved.Type} components are not put back, so entities go without them: {read.Error}");
-        }
+        if (!failed.Add(saved.Type)) return null;
+
+        Debugging.Error(
+            $"Saved {saved.Type} components are not put back, so entities go without them: {read.Error}");
 
         return null;
     }

@@ -84,16 +84,15 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         }
 
         writer.Write(value.Clusters is not null);
-        if (value.Clusters is { } clusters)
-        {
-            writer.Write(clusters.PositionStep);
-            writer.Write(clusters.Vertices.Length);
-            writer.Write(clusters.Indices.Length);
-            writer.Write(clusters.Clusters.Length);
-            writer.Write(MemoryMarshal.AsBytes(clusters.Vertices.Span));
-            writer.Write(clusters.Indices.Span);
-            writer.Write(MemoryMarshal.AsBytes(clusters.Clusters.Span));
-        }
+        if (value.Clusters is not { } clusters) return;
+
+        writer.Write(clusters.PositionStep);
+        writer.Write(clusters.Vertices.Length);
+        writer.Write(clusters.Indices.Length);
+        writer.Write(clusters.Clusters.Length);
+        writer.Write(MemoryMarshal.AsBytes(clusters.Vertices.Span));
+        writer.Write(clusters.Indices.Span);
+        writer.Write(MemoryMarshal.AsBytes(clusters.Clusters.Span));
 
         void WriteAtlas(Texture atlas)
         {

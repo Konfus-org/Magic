@@ -34,10 +34,9 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     {
         // SDL itself first, so SDL_ttf binds to the SDL every gem shares.
         _ = SDL.GetVersion();
-        if (!TTF.Init())
-        {
-            throw new InvalidOperationException($"SDL_ttf could not start: {CString.Read(SDL.GetError())}");
-        }
+        if (TTF.Init()) return;
+
+        throw new InvalidOperationException($"SDL_ttf could not start: {CString.Read(SDL.GetError())}");
     }
 
     /// <summary>

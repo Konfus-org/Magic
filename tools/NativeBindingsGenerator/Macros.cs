@@ -215,13 +215,15 @@ internal sealed class Macros
             return null;
         }
 
-        string type = cast ?? (isDouble ? "double" : isFloat ? "float" : (isUnsigned, isLong) switch
+        string type = cast ?? (isDouble, isFloat, isUnsigned, isLong) switch
         {
-            (true, true) => "ulong",
-            (false, true) => "long",
-            (true, false) => "uint",
+            (true, _, _, _) => "double",
+            (_, true, _, _) => "float",
+            (_, _, true, true) => "ulong",
+            (_, _, false, true) => "long",
+            (_, _, true, false) => "uint",
             _ => "int",
-        });
+        };
         return new(type, expression.ToString());
     }
 
@@ -478,6 +480,8 @@ internal sealed class Macros
         return false;
     }
 
-    /// <summary>A constant's C# type and expression.</summary>
+    /// <summary>
+    /// A constant's C# type and expression.
+    /// </summary>
     internal sealed record Value(string Type, string Expression);
 }

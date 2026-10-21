@@ -622,11 +622,10 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
 
     private static void Add(Dictionary<string, CreatedResource> created, string name, GpuTextureUsage textures, GpuBufferUsage buffers)
     {
-        if (created.TryGetValue(name, out CreatedResource? resource))
-        {
-            resource.TextureUsage |= textures;
-            resource.BufferUsage |= buffers;
-        }
+        if (!created.TryGetValue(name, out CreatedResource? resource)) return;
+
+        resource.TextureUsage |= textures;
+        resource.BufferUsage |= buffers;
     }
 }
 
