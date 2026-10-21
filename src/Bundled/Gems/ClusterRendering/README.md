@@ -215,6 +215,10 @@ from showing where they meet or lagging behind a change:
   bounce as the sun does. Each probe's cell, where it lies in the world, lists the few lights that reach it most
   strongly, made again each frame on the GPU from those that reach the field at all, found first among the table's
   slots, so the list follows lights that move and stays as a level moves.
+- Where nothing traced what a pixel reflects, a surface too rough for the reflections or a world without them, it
+  reflects the probes' light along its reflection rather than the sky's alone, with the sky's own detail kept by as
+  much of the sky as the probes see that way: a rough floor in a courtyard reflects its walls, and in the open the sky
+  as it did.
 
 ### The sky
 

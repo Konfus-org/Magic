@@ -6,7 +6,9 @@
 // without which it is lit. Where the world draws them, the lighting pass also reads contact shadows, ambient occlusion
 // and traced reflections, each a texel per pixel of the view, the reflections in place of the sky's where they have
 // them, and the probes of global illumination (Lighting/Gi.hlsli), which light from everywhere comes from in place of
-// the sky alone. The sun reaches it through the sky's shadow where the frame draws one (SkyShadow).
+// the sky alone, and which a surface reflects where nothing traced its reflection: their light along it, the sky's
+// detail kept by as much of the sky as they see that way. The sun reaches it through the sky's shadow where the frame
+// draws one (SkyShadow).
 //
 // The lights reaching a pixel are found as Drobot 2017 ("Improved Culling for Tiled and Clustered Rendering") finds
 // them: the view's lights are sorted nearest first, a z-bin holds the first and last of them that can reach its depths,
@@ -163,22 +165,36 @@ float3 Shade(ShadePoint surface)
     open = dot(bent, bent) > 1e-4 ? normalize(bent) : surface.normal;
     specularOcclusion = SpecularOcclusionCone(open, visibility, reflected, surface.roughness);
 #endif
-    // Light from everywhere: the probes' where they hold the place, the sky's past them. Where they see less than the
-    // open sky would give, inside, they hide that much of the sky's reflection too.
+    // What the surface reflects, traced, where it is smooth enough to have it, in place of the sky's.
+    float4 traced = float4(0.0, 0.0, 0.0, 0.0);
+#if defined(HAS_Reflections) && !SURFACE_FORWARD
+    traced = Reflections.Load(int3(surface.pixel, 0));
+#endif
+
+    // Light from everywhere: the probes' where they hold the place, the sky's past them.
     float3 irradiance = ShIrradiance(open, sh);
 #if defined(SHADE_GI)
     float held;
     float3 gathered = GiIrradianceAt(surface.position + CameraPosition, open, surface.view, held);
-    float skyShare = saturate(Luminance(gathered) / max(Luminance(irradiance), 1e-4));
-    prefiltered *= lerp(1.0, skyShare, held);
-    coatPrefiltered *= lerp(1.0, skyShare, held);
     irradiance = lerp(irradiance, gathered, held);
+
+    // Where nothing traced the reflection, the probes' light along it, the world's colour and shade that way, with the
+    // sky's own detail kept by the share of the sky the probes see there: in the open the sky as it was, in a courtyard
+    // the courtyard. Their light along a direction is irradiance over pi, as the sky's harmonics and cube are read.
+    [branch] if (held > 0.0 && traced.a < 1.0)
+    {
+        float aroundHeld;
+        float3 around = GiIrradianceAt(surface.position + CameraPosition, dominant, surface.view, aroundHeld);
+        float3 skyAround = ShIrradiance(dominant, sh);
+        float seen = saturate(Luminance(around) / max(Luminance(skyAround), 1e-4));
+        prefiltered = lerp(prefiltered, max(around + (prefiltered - skyAround) * seen, 0.0), aroundHeld);
+        [branch] if (surface.model == ShadingClearCoat)
+        {
+            coatPrefiltered = lerp(coatPrefiltered, max(around + (coatPrefiltered - skyAround) * seen, 0.0), aroundHeld);
+        }
+    }
 #endif
-#if defined(HAS_Reflections) && !SURFACE_FORWARD
-    // What the surface reflects, traced, where it is smooth enough to have it, in place of the sky's.
-    float4 traced = Reflections.Load(int3(surface.pixel, 0));
     prefiltered = lerp(prefiltered, traced.rgb, traced.a);
-#endif
     float3 bounced = MultiBounceAo(visibility, shading.diffuseColor);
     luminance += ShadeAmbient(shading, irradiance * bounced, prefiltered, coatPrefiltered, 1.0, specularOcclusion);
     return luminance;

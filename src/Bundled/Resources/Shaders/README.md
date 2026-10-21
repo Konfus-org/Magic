@@ -15,8 +15,9 @@ pass, and hands it to the lighting entry point (`Lighting/Shade.hlsli`), which a
 toward the viewer, in nits. It looks the pixel up in the DFG table at (n·v, roughness), prepares the surface's shading
 model, adds the sun through its shadow and each local light that reaches the pixel, walked from the frame's light bins
 and tiles, then light from everywhere: the sky's harmonics, or the probes of global illumination where they hold the
-place, for diffuse, and the sky prefiltered by roughness for reflections, or the world's traced reflections where the
-renderer has them, less what occlusion hides. The renderer multiplies by exposure and adds the surface's emissive,
+place, for diffuse, and the sky prefiltered by roughness for reflections, coloured by the probes along the reflection
+where they hold it, or the world's traced reflections where the renderer has them, less what occlusion hides. The
+renderer multiplies by exposure and adds the surface's emissive,
 which is pre-exposed already. The pieces, each in its own header under `Lighting/` or `Include/`, which documents what
 it offers:
 
@@ -32,6 +33,9 @@ it offers:
 - **Reflections** come from a cube prefiltered by GGX, a mip per roughness, read along the specular lobe's dominant
   direction, box-projected for a local probe; diffuse light from nine spherical-harmonic coefficients. Where a renderer
   traces reflections of the world itself, it uses them in place of the cube's for a surface smooth enough to have them.
+  Where it has none, and global illumination's probes hold the place, a surface reflects the probes' light along the
+  reflection, the world's colour and shade that way, with the cube's detail kept by as much of the sky as the probes
+  see there: out in the open the sky as before, in a courtyard its walls.
 - **Specular anti-aliasing.** A highlight narrower than a pixel only aliases, flickering as the view moves, so a
   renderer widens a surface's roughness by how far its normal turns across the pixel, the pixel's spread of normals
   added to the surface's own (Tokuyoshi & Kaplanyan 2019); where the normal does not turn, the roughness is as the
