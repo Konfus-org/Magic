@@ -8,13 +8,13 @@ namespace Magic.ClusterRendering;
 
 /// <summary>
 /// A GPU buffer of <typeparamref name="T"/> rows that grows, with a copy of every row on the CPU: rows are set on the
-/// copy, and <see cref="Flush"/> uploads the rows that changed, a run of neighbours at a time, so a frame that moves a few
+/// copy, and <see cref="Upload"/> sends the rows that changed, a run of neighbours at a time, so a frame that moves a few
 /// instances of many sends those few, wherever they are. Growing makes the buffer again twice as big and uploads the
 /// whole copy into it, since uploads reach the GPU in the order they are made, where a copy on the GPU would run after
 /// every upload of its frame and undo them. Its handle changes as it grows, so whoever binds it asks for it each frame.
 /// Render thread.
 /// </summary>
-internal sealed class GpuArray<T> : IDisposable
+internal sealed class GpuTable<T> : IGpuTable
     where T : unmanaged
 {
     /// <summary>
@@ -24,7 +24,7 @@ internal sealed class GpuArray<T> : IDisposable
     private const int Gap = 16;
 
     /// <summary>
-    /// Runs past which a flush sends everything from the first changed row to the last as one, as a frame that changed
+    /// Runs past which an upload sends everything from the first changed row to the last as one, as a frame that changed
     /// that much changed most of it.
     /// </summary>
     private const int MaxRuns = 256;
@@ -36,7 +36,7 @@ internal sealed class GpuArray<T> : IDisposable
     private bool[] _isDirty;
     private bool _isAllDirty = true;
 
-    internal GpuArray(IGpu gpu, GpuBufferUsage usage, int rows)
+    internal GpuTable(IGpu gpu, GpuBufferUsage usage, int rows)
     {
         _gpu = gpu;
         _usage = usage;
@@ -45,10 +45,15 @@ internal sealed class GpuArray<T> : IDisposable
         Buffer = gpu.CreateBuffer(usage, Bytes);
     }
 
-    public void Dispose()
+    /// <summary>
+    /// Releases the buffer: the manager's, when what holds the table goes.
+    /// </summary>
+    public void Release()
     {
         _gpu.Release(Buffer);
     }
+
+    public BoundResource Bound => BoundResource.Of(Buffer, Bytes);
 
     internal static int RowBytes => Unsafe.SizeOf<T>();
 
@@ -63,18 +68,11 @@ internal sealed class GpuArray<T> : IDisposable
 
     internal uint Bytes => (uint)(_rows.Length * RowBytes);
 
-    internal void Set(int row, in T value)
-    {
-        Grow(row + 1);
-        _rows[row] = value;
-        Mark(row);
-    }
-
     /// <summary>
-    /// Uploads the rows set since the last flush, a run of neighbours at a time; they reach the buffer at the start of
-    /// the next submit.
+    /// Sends the rows set since the last upload, a run of neighbours at a time; they reach the buffer at the start of the
+    /// next submit.
     /// </summary>
-    internal void Flush()
+    public void Upload()
     {
         if (_isAllDirty)
         {
@@ -94,7 +92,7 @@ internal sealed class GpuArray<T> : IDisposable
 
         if (runs > MaxRuns)
         {
-            Upload(_dirty[0], _dirty[^1] + 1);
+            Send(_dirty[0], _dirty[^1] + 1);
             Clean();
             return;
         }
@@ -104,7 +102,7 @@ internal sealed class GpuArray<T> : IDisposable
         {
             if (i == _dirty.Count || _dirty[i] - _dirty[i - 1] > Gap)
             {
-                Upload(start, _dirty[i - 1] + 1);
+                Send(start, _dirty[i - 1] + 1);
                 start = i < _dirty.Count ? _dirty[i] : start;
             }
         }
@@ -112,8 +110,15 @@ internal sealed class GpuArray<T> : IDisposable
         Clean();
     }
 
+    internal void Set(int row, in T value)
+    {
+        Grow(row + 1);
+        _rows[row] = value;
+        Mark(row);
+    }
+
     /// <summary>
-    /// Makes room for <paramref name="rows"/>: a new buffer, all of whose rows the next flush uploads.
+    /// Makes room for <paramref name="rows"/>: a new buffer, all of whose rows the next upload sends.
     /// </summary>
     internal void Grow(int rows)
     {
@@ -136,7 +141,7 @@ internal sealed class GpuArray<T> : IDisposable
         }
     }
 
-    private void Upload(int start, int end)
+    private void Send(int start, int end)
     {
         _gpu.Upload(Buffer, (uint)(start * RowBytes), MemoryMarshal.AsBytes(_rows.AsSpan(start, end - start)));
     }
@@ -151,4 +156,16 @@ internal sealed class GpuArray<T> : IDisposable
         _dirty.Clear();
         _isAllDirty = false;
     }
+}
+
+/// <summary>
+/// A <see cref="GpuTable{T}"/> whatever its rows, as <see cref="GpuResources"/> sends every table in one loop and finds it as it stands.
+/// </summary>
+internal interface IGpuTable
+{
+    BoundResource Bound { get; }
+
+    void Upload();
+
+    void Release();
 }

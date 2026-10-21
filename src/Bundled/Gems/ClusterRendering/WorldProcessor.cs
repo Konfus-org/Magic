@@ -12,14 +12,21 @@ using Magic.Services;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// The world as Render reads it, copied twice over: on the main thread in LateUpdate, by systems that run on the ECS's
-/// threads, into the copy Render is not reading (<see cref="WorldCopy"/>), while the render thread may still be drawing
-/// the frame before; the two are swapped in Sync, when both threads hold still, and Render reads <see cref="Front"/>
-/// while the main thread is busy with the next frame, which writes only the other. Instances and lights are kept at
-/// their entity's slot, and only what changed is passed on (<see cref="Delta{T}"/>), so a frame costs the render thread
-/// what moved, not what there is: the copy itself is a comparison per entity, on every thread, counted once per chunk.
+/// The world as the GPU draws it, in two halves: the copy of it the render thread reads, and the rows the GPU reads made
+/// from that copy (<see cref="UpdateRows"/>), the instances' (<see cref="Instances"/>) and the lights'
+/// (<see cref="Lights"/>).
+/// <para>
+/// The world is copied twice over: on the main thread in LateUpdate, into the copy Render is not reading
+/// (<see cref="Renderables"/>), while the render thread may still be drawing the frame before; the two are swapped in
+/// Sync, when both threads hold still, and Render reads <see cref="Front"/> while the main thread is busy with the next
+/// frame, which writes only the other. One system reads what the world has one of, or a few, and starts the copy
+/// (<see cref="ReadWorld"/>); the instances and lights, of which there are many, are copied by systems on the ECS's
+/// threads after it, kept at their entity's slot, and only what changed is passed on (<see cref="Delta{T}"/>), so a
+/// frame costs the render thread what moved, not what there is: the copy itself is a comparison per entity, on every
+/// thread, counted once per chunk.
+/// </para>
 /// </summary>
-internal sealed class Snapshot : IDisposable
+internal sealed class WorldProcessor : IDisposable
 {
     private readonly List<Subscription> _systems = [];
     private readonly Slots<InstanceCopy> _instances;
@@ -28,23 +35,20 @@ internal sealed class Snapshot : IDisposable
     /// <summary>
     /// The copy LateUpdate writes. Main thread, and the ECS's threads under it.
     /// </summary>
-    private WorldCopy _back = new();
+    private Renderables _back = new();
 
-    internal Snapshot(World world)
+    internal WorldProcessor(World world, GpuResources resources, FailureHandler failures, Assets assets)
     {
+        Instances = new Instances(resources, failures, assets);
+        Lights = new WorldLights(resources);
         _instances = new Slots<InstanceCopy>(_back.Instances);
         _lights = new Slots<LightCopy>(_back.Lights);
-        _systems.Add(world.Add(new Starter(this)));
+
+        // In this order: the ECS runs a phase's systems in the order they were added, and the first starts the copy.
+        _systems.Add(world.Add(new ReadWorld(this, world)));
         _systems.Add(world.Add(new InstanceCopier(_instances)));
         _systems.Add(world.Add(new PointLightCopier(_lights)));
         _systems.Add(world.Add(new SpotLightCopier(_lights)));
-        _systems.Add(world.Add(new CameraCopier(this)));
-        _systems.Add(world.Add(new PlayerFinder(this)));
-        _systems.Add(world.Add(new SunCopier(this)));
-        _systems.Add(world.Add(new UntaggedSunWarner(this)));
-        _systems.Add(world.Add(new SkyCopier(this)));
-        _systems.Add(world.Add(new WeatherCopier(this)));
-        _systems.Add(world.Add(new PostProcessingCopier(this)));
     }
 
     public void Dispose()
@@ -58,7 +62,17 @@ internal sealed class Snapshot : IDisposable
     /// <summary>
     /// The copy Render reads: the frame LateUpdate last finished, swapped in by <see cref="Swap"/>. Render thread.
     /// </summary>
-    internal WorldCopy Front { get; private set; } = new();
+    internal Renderables Front { get; private set; } = new();
+
+    /// <summary>
+    /// The instances' rows. Render thread.
+    /// </summary>
+    internal Instances Instances { get; }
+
+    /// <summary>
+    /// The point and spot lights' rows. Render thread.
+    /// </summary>
+    internal WorldLights Lights { get; }
 
     /// <summary>
     /// Ends a frame's copy, after the systems ran: takes in what outgrew the slots and finds what is gone. LateUpdate.
@@ -67,6 +81,16 @@ internal sealed class Snapshot : IDisposable
     {
         _instances.Finish();
         _lights.Finish();
+    }
+
+    /// <summary>
+    /// Takes what changed in <see cref="Front"/> into the instances' and the lights' rows. <paramref name="time"/> is the
+    /// frame's, which a fade starts at; <paramref name="player"/> where detail is wanted first. Render thread.
+    /// </summary>
+    internal void UpdateRows(float time, Vector3 player)
+    {
+        Instances.Update(Front, time, player);
+        Lights.Update(Front);
     }
 
     /// <summary>
@@ -79,27 +103,91 @@ internal sealed class Snapshot : IDisposable
     }
 
     /// <summary>
-    /// Starts a frame's copy, before the systems run: the copy Render read two frames ago is written over.
+    /// Starts a frame's copy, before the copiers run: the copy Render read two frames ago is written over.
     /// </summary>
-    private void Begin()
+    private Renderables Begin()
     {
         _back.Clear();
         _instances.Begin(_back.Instances);
         _lights.Begin(_back.Lights);
+        return _back;
     }
 
     private static Vector3 GetIntensity(Color color, float intensity) => new Vector3(color.R, color.G, color.B) * intensity;
 
     /// <summary>
-    /// Starts the frame's copy in LateUpdate, before the systems added after it copy anything.
+    /// What the renderer needs that the world has one of, or a few: its cameras, the player, the sun, the sky, the weather
+    /// and the effects, read in one place, once a frame, after starting the frame's copy. The sun is the first directional
+    /// light tagged as the sun; one that is not tagged lights nothing, as there is one sun and the world says which it
+    /// is, and a world with directional lights but none tagged is told so once.
     /// </summary>
-    private sealed class Starter(Snapshot snapshot) : ISystem
+    private sealed class ReadWorld(WorldProcessor owner, World world) : ISystem
     {
+        private bool _hasWarnedOfSun;
+
         public Phase Phase => Phase.LateUpdate;
 
         public void Run(in Frame frame, EcsQuery query)
         {
-            snapshot.Begin();
+            Renderables next = owner.Begin();
+            ReadCameras(next.Cameras);
+            next.Player = FindTagged<Camera>(Tag.Player)?.Transform.Position;
+            if (FindTagged<DirectionalLight>(Tag.Sun) is { } sun)
+            {
+                Vector3 direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, sun.Transform.Rotation));
+                next.Sun = new SunCopy(direction, GetIntensity(sun.Value.Color, sun.Value.Intensity));
+            }
+
+            next.Sky = FindFirst<Sky>()?.Material;
+            next.Weather = FindFirst<Weather>();
+            next.Effects = FindFirst<PostProcessing>()?.Effects ?? Handle<Pipeline>.None;
+            if (next.Sun is null && !_hasWarnedOfSun && FindFirst<DirectionalLight>() is not null)
+            {
+                Debugging.Warn("The world has a directional light but none tagged \"sun\", so it has no sun: give the sun's entity \"tags\": [ \"sun\" ].");
+                _hasWarnedOfSun = true;
+            }
+        }
+
+        private void ReadCameras(List<CameraCopy> cameras)
+        {
+            foreach ((ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Camera> found) in world.Query<Transform, Camera>())
+            {
+                for (int i = 0; i < found.Length; i++)
+                {
+                    cameras.Add(new CameraCopy(entities[i], transforms[i], found[i]));
+                }
+            }
+        }
+
+        /// <summary>
+        /// The first <typeparamref name="T"/> in the world, or none.
+        /// </summary>
+        private T? FindFirst<T>()
+            where T : unmanaged, IComponent
+        {
+            foreach ((_, Span<T> found) in world.Query<T>())
+            {
+                if (found.Length > 0) return found[0];
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// The first <typeparamref name="T"/> on an entity tagged <paramref name="tag"/>, with where it is; or none.
+        /// </summary>
+        private (Transform Transform, T Value)? FindTagged<T>(Tag tag)
+            where T : unmanaged, IComponent
+        {
+            foreach ((_, Span<Transform> transforms, Span<T> found, Span<Tags> tags) in world.Query<Transform, T, Tags>())
+            {
+                for (int i = 0; i < tags.Length; i++)
+                {
+                    if (tags[i].Has(tag)) return (transforms[i], found[i]);
+                }
+            }
+
+            return null;
         }
     }
 
@@ -159,140 +247,14 @@ internal sealed class Snapshot : IDisposable
             lights.Count(tally);
         }
     }
-
-    private sealed class CameraCopier(Snapshot snapshot) : ISystem<Transform, Camera>
-    {
-        public Phase Phase => Phase.LateUpdate;
-
-        public void Run(in Frame frame, EcsQuery<Transform, Camera> query)
-        {
-            List<CameraCopy> cameras = snapshot._back.Cameras;
-            foreach ((ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Camera> found) in query)
-            {
-                for (int i = 0; i < found.Length; i++)
-                {
-                    cameras.Add(new CameraCopy(entities[i], transforms[i], found[i]));
-                }
-            }
-        }
-    }
-
-    private sealed class PlayerFinder(Snapshot snapshot) : ISystem<Camera, Transform, Tags>
-    {
-        public Phase Phase => Phase.LateUpdate;
-
-        public void Run(in Frame frame, EcsQuery<Camera, Transform, Tags> query)
-        {
-            WorldCopy copy = snapshot._back;
-            foreach ((_, _, Span<Transform> transforms, Span<Tags> tags) in query)
-            {
-                for (int i = 0; i < tags.Length && copy.Player is null; i++)
-                {
-                    if (tags[i].Has(Tag.Player)) copy.Player = transforms[i].Position;
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// The sun: the first directional light tagged as the sun. One that is not tagged lights nothing, as there is one
-    /// sun and the world says which it is.
-    /// </summary>
-    private sealed class SunCopier(Snapshot snapshot) : ISystem<Transform, DirectionalLight, Tags>
-    {
-        public Phase Phase => Phase.LateUpdate;
-
-        public void Run(in Frame frame, EcsQuery<Transform, DirectionalLight, Tags> query)
-        {
-            WorldCopy copy = snapshot._back;
-            foreach ((_, Span<Transform> transforms, Span<DirectionalLight> lights, Span<Tags> tags) in query)
-            {
-                for (int i = 0; i < tags.Length && copy.Sun is null; i++)
-                {
-                    if (tags[i].Has(Tag.Sun))
-                    {
-                        Vector3 direction = Vector3.Normalize(Vector3.Transform(Vector3.UnitZ, transforms[i].Rotation));
-                        copy.Sun = new SunCopy(direction, GetIntensity(lights[i].Color, lights[i].Intensity));
-                    }
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Says once when a world has directional lights but none tagged as the sun, so the sun it meant is not lost without
-    /// a word.
-    /// </summary>
-    private sealed class UntaggedSunWarner(Snapshot snapshot) : ISystem<DirectionalLight>
-    {
-        private bool _hasWarned;
-
-        public Phase Phase => Phase.LateUpdate;
-
-        public void Run(in Frame frame, EcsQuery<DirectionalLight> query)
-        {
-            if (_hasWarned || snapshot._back.Sun is not null) return;
-
-            foreach ((_, Span<DirectionalLight> lights) in query)
-            {
-                if (lights.Length == 0) continue;
-
-                Debugging.Warn("The world has a directional light but none tagged \"sun\", so it has no sun: give the sun's entity \"tags\": [ \"sun\" ].");
-                _hasWarned = true;
-                return;
-            }
-        }
-    }
-
-    private sealed class SkyCopier(Snapshot snapshot) : ISystem<Sky>
-    {
-        public Phase Phase => Phase.LateUpdate;
-
-        public void Run(in Frame frame, EcsQuery<Sky> query)
-        {
-            WorldCopy copy = snapshot._back;
-            foreach ((_, Span<Sky> skies) in query)
-            {
-                if (copy.Sky is null && skies.Length > 0) copy.Sky = skies[0].Material;
-            }
-        }
-    }
-
-    private sealed class WeatherCopier(Snapshot snapshot) : ISystem<Weather>
-    {
-        public Phase Phase => Phase.LateUpdate;
-
-        public void Run(in Frame frame, EcsQuery<Weather> query)
-        {
-            WorldCopy copy = snapshot._back;
-            foreach ((_, Span<Weather> found) in query)
-            {
-                if (copy.Weather is null && found.Length > 0) copy.Weather = found[0];
-            }
-        }
-    }
-
-    private sealed class PostProcessingCopier(Snapshot snapshot) : ISystem<PostProcessing>
-    {
-        public Phase Phase => Phase.LateUpdate;
-
-        public void Run(in Frame frame, EcsQuery<PostProcessing> query)
-        {
-            WorldCopy copy = snapshot._back;
-            foreach ((_, Span<PostProcessing> found) in query)
-            {
-                if (copy.Effects == Handle<Pipeline>.None && found.Length > 0) copy.Effects = found[0].Effects;
-            }
-        }
-    }
 }
 
 /// <summary>
 /// The world as one frame's Render reads it: what changed among the instances and lights since the copy before, and
 /// the cameras, player, sun, sky, weather and effects as they were. There are two, written and read in turn
-/// (<see cref="Snapshot"/>).
+/// (<see cref="WorldProcessor"/>).
 /// </summary>
-internal sealed class WorldCopy
+internal sealed class Renderables
 {
     internal Delta<InstanceCopy> Instances { get; } = new();
 

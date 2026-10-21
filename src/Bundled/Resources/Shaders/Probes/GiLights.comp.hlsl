@@ -13,7 +13,7 @@ groupshared uint Reaching[64];
 groupshared uint ReachingCount;
 
 // How strongly a light reaches a box, as the lighting weighs it at the box's nearest point; 0 where it does not reach.
-float Strength(GpuSceneLight light, float3 low, float3 high)
+float Strength(GpuWorldLight light, float3 low, float3 high)
 {
     float3 position = light.position;
     return Luminance(light.intensity) * DistanceAttenuation(position - clamp(position, low, high), 1.0 / Pow2(light.range));
@@ -57,7 +57,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         if (start + thread < lights)
         {
             uint slot = GiFieldLights.Load((1u + start + thread) * 4u);
-            if (Strength(LOAD(SceneLights, GpuSceneLight, slot), groupLow, groupHigh) > 0.0)
+            if (Strength(LOAD(WorldLights, GpuWorldLight, slot), groupLow, groupHigh) > 0.0)
             {
                 uint at;
                 InterlockedAdd(ReachingCount, 1u, at);
@@ -71,7 +71,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         {
             // Into its place among the strongest, each weaker one moving down a place, the weakest past the last dropped.
             uint candidate = Reaching[i];
-            float strength = Strength(LOAD(SceneLights, GpuSceneLight, candidate), low, high);
+            float strength = Strength(LOAD(WorldLights, GpuWorldLight, candidate), low, high);
             [branch] if (strength <= strengths[GiCellLights - 1u])
             {
                 continue;

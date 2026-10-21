@@ -1,25 +1,23 @@
 using System.Drawing;
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
-using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
-using Magic.Services;
 
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// Every camera's view: where it draws (a section of the window or a render texture), its own visibility buffer,
-/// G-buffer, scene colour, velocity and exposure, kept while its camera is, and its constants and transparent pieces
-/// worked out each frame from the <see cref="Snapshot"/>. Render thread.
+/// Every camera's view: where it draws (a section of the window or a render texture, which the view holds while
+/// it draws into it), its own visibility buffer, G-buffer, scene colour, velocity and exposure, kept while
+/// its camera is, and its constants and transparent pieces worked out each frame from the
+/// <see cref="WorldProcessor"/>'s copy. Render thread.
 /// </summary>
-internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Scene scene, ClusterPool models, Materials materials, ClusterRenderingSettings settings, CancellationToken stopping) : IDisposable
+internal sealed class Views(IGpu gpu, IWindow? window, GpuResources resources, Instances instances, ClusterRenderingSettings settings) : IDisposable
 {
     /// <summary>
     /// Pixels a side of a light tile, which Shaders/Lights/LightTiles.comp.hlsl bins the lights into.
@@ -39,15 +37,8 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Scene scen
     internal const float ZBinFar = 20000;
 
     private readonly Dictionary<Entity, View> _views = [];
-    private readonly Dictionary<Handle<RenderTexture>, BoundResource> _renderTextures = [];
     private readonly HashSet<Entity> _seen = [];
     private readonly List<View> _drawn = [];
-
-    /// <summary>
-    /// Render textures loaded, with their sizes, for the render thread to make as the views are prepared.
-    /// </summary>
-    private readonly Channel<(Handle<RenderTexture> Handle, uint Width, uint Height)> _loaded = Channel.CreateUnbounded<(Handle<RenderTexture> Handle, uint Width, uint Height)>(new UnboundedChannelOptions { SingleReader = true });
-    private GpuTexture _windowTarget;
 
     public void Dispose()
     {
@@ -55,39 +46,27 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Scene scen
         {
             view.Dispose();
         }
-
-        foreach (BoundResource texture in _renderTextures.Values)
-        {
-            gpu.Release(texture.Texture);
-        }
-
-        if (_windowTarget != GpuTexture.None) gpu.Release(_windowTarget);
     }
 
     /// <summary>
     /// The views this frame draws: each camera whose target has an image, its constants and transparent pieces worked
-    /// out; a view whose camera is gone is let go.
+    /// out; a view whose camera is gone is let go, with its render texture.
     /// </summary>
     internal List<View> Prepare(in ViewFrame frame)
     {
-        while (_loaded.Reader.TryRead(out (Handle<RenderTexture> Handle, uint Width, uint Height) loaded))
-        {
-            GpuTexture texture = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.Rgba16Float, GpuTextureUsage.Sampled | GpuTextureUsage.ColorTarget, loaded.Width, loaded.Height));
-            _renderTextures[loaded.Handle] = BoundResource.Of(texture, loaded.Width, loaded.Height);
-        }
-
         _drawn.Clear();
         _seen.Clear();
         foreach (CameraCopy camera in frame.Copy.Cameras)
         {
             _seen.Add(camera.Entity);
-            if (GetTarget(camera.Camera.Target) is not { } target) continue;
-
             if (!_views.TryGetValue(camera.Entity, out View? view))
             {
-                view = new View(gpu, scene, models, materials);
+                view = new View(resources, instances);
                 _views[camera.Entity] = view;
             }
+
+            view.Hold(camera.Camera.Target);
+            if (GetTarget(camera.Camera.Target) is not { } target) continue;
 
             view.Prepare(camera, target, settings, frame);
             _drawn.Add(view);
@@ -108,12 +87,7 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Scene scen
     /// <summary>
     /// The window's image, which a camera draws into its section of; none without a window.
     /// </summary>
-    internal GpuTexture GetWindow()
-    {
-        if (window is not null && _windowTarget == GpuTexture.None) _windowTarget = gpu.GetWindowTarget(window);
-
-        return _windowTarget;
-    }
+    internal GpuTexture GetWindow() => resources.GetWindowTarget(window);
 
     /// <summary>
     /// Where a camera draws this frame: its section of the window, or its render texture, whole; none while the window
@@ -123,31 +97,13 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Scene scen
     {
         if (!target.IsWindow)
         {
-            if (_renderTextures.TryGetValue(target.Texture, out BoundResource texture))
-            {
-                return texture.Texture == GpuTexture.None ? null : new ViewTarget(texture.Texture, new Rectangle(0, 0, (int)texture.Width, (int)texture.Height), GpuFormat.Rgba16Float, false);
-            }
-
-            _renderTextures[target.Texture] = default;
-            LoadAsync(target.Texture).FireAndForget();
-            return null;
+            BoundResource texture = resources.GetTexture(target.Texture);
+            return texture.Texture == GpuTexture.None ? null : new ViewTarget(texture.Texture, new Rectangle(0, 0, (int)texture.Width, (int)texture.Height), GpuFormat.Rgba16Float, false);
         }
 
         GpuTexture image = GetWindow();
         Size size = image == GpuTexture.None ? Size.Empty : gpu.GetSize(image);
         return size.IsEmpty ? null : new ViewTarget(image, target.Section.AreaIn(size), gpu.GetFormat(image), true);
-    }
-
-    private async Task LoadAsync(Handle<RenderTexture> handle)
-    {
-        Result<RenderTexture> loaded = await assets.LoadAsync(handle, stopping).ConfigureAwait(false);
-        if (!loaded.Ok)
-        {
-            Debugging.Error($"A camera's render texture does not load, so it draws nothing: {loaded.Error}");
-            return;
-        }
-
-        _loaded.Writer.TryWrite((handle, (uint)Math.Max(1, loaded.Value.Width), (uint)Math.Max(1, loaded.Value.Height)));
     }
 }
 
@@ -155,7 +111,7 @@ internal sealed class Views(IGpu gpu, IWindow? window, Assets assets, Scene scen
 /// What every view is worked out from this frame: the copy of the world, the frame, the sky's row, the frame's counts,
 /// where the player is, and whether views jitter.
 /// </summary>
-internal readonly record struct ViewFrame(WorldCopy Copy, Frame Frame, int SkyMaterial, Counts Counts, Vector3? Player, bool Jitters);
+internal readonly record struct ViewFrame(Renderables Copy, Frame Frame, int SkyMaterial, Counts Counts, Vector3? Player, bool Jitters);
 
 /// <summary>
 /// Where a view draws: a texture, the rectangle of it, its format, and whether it is a window's.
@@ -184,35 +140,40 @@ internal sealed class View : IDisposable
     /// </summary>
     private const int JitterPhases = 8;
 
-    private readonly Scene _scene;
-    private readonly ClusterPool _models;
-    private readonly Materials _materials;
-    private readonly GpuArray<Vector4> _exposure;
-    private readonly GpuArray<PieceEntry> _transparentPieces;
+    private readonly GpuResources _resources;
+    private readonly Instances _instances;
+    private readonly GpuTable<Vector4> _exposure;
+    private readonly GpuTable<GpuPiece> _transparentPieces;
     private readonly List<(int Slot, float Distance)> _transparentOrder = [];
     private Matrix4x4 _lastViewProj;
     private Vector3 _lastPosition;
     private bool _hasLast;
 
-    internal View(IGpu gpu, Scene scene, ClusterPool models, Materials materials)
+    /// <summary>
+    /// The render texture the view draws into, held while it does; none for the window.
+    /// </summary>
+    private Handle<RenderTexture> _held;
+
+    internal View(GpuResources resources, Instances instances)
     {
-        _scene = scene;
-        _models = models;
-        _materials = materials;
-        Resources = new ResourceSet(gpu);
-        _exposure = new GpuArray<Vector4>(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite, 1);
+        _resources = resources;
+        _instances = instances;
+        Resources = resources.MakeScope();
+        _exposure = resources.MakeTable<Vector4>(GpuContract.Exposure, 1, Resources);
         _exposure.Set(0, new Vector4(1, 0, 0, 0));
-        _transparentPieces = new GpuArray<PieceEntry>(gpu, GpuBufferUsage.Vertex, 64);
+        _transparentPieces = resources.MakeTable<GpuPiece>(GpuBufferUsage.Vertex, 64, Resources);
     }
 
     public void Dispose()
     {
-        Resources.Dispose();
-        _exposure.Dispose();
-        _transparentPieces.Dispose();
+        Hold(default);
+        _resources.Release(Resources);
     }
 
-    internal ResourceSet Resources { get; }
+    /// <summary>
+    /// The view's own scope: its targets, its exposure and what passes make for it, found before the frame's.
+    /// </summary>
+    internal ResourceScope Resources { get; }
 
     internal ViewTarget Target { get; private set; }
 
@@ -233,6 +194,21 @@ internal sealed class View : IDisposable
     internal GpuBuffer TransparentPieces => _transparentPieces.Buffer;
 
     /// <summary>
+    /// Holds the render texture <paramref name="target"/> names, in place of the one held before; none for the window.
+    /// </summary>
+    internal void Hold(CameraTarget target)
+    {
+        Handle<RenderTexture> texture = target.IsWindow ? default : target.Texture;
+        if (texture == _held) return;
+
+        if (texture != Handle<RenderTexture>.None) _resources.Record(texture);
+
+        if (_held != Handle<RenderTexture>.None) _resources.Release(_held);
+
+        _held = texture;
+    }
+
+    /// <summary>
     /// Works out the frame for this view: its sizes, the targets drawn at the size it is drawn at, its constants, and its
     /// transparent pieces. The size it is shown at is its target's, which the post stage upscales to, unless the output
     /// filter is nearest: then it is the drawn size, and only the output pass scales, crisply.
@@ -240,16 +216,16 @@ internal sealed class View : IDisposable
     internal void Prepare(CameraCopy camera, ViewTarget target, ClusterRenderingSettings settings, in ViewFrame frame)
     {
         Target = target;
-        (uint width, uint height) = DrawnSize(target.Area.Width, target.Area.Height, settings.RenderWidth, settings.RenderHeight);
+        (uint width, uint height) = GetDrawnSize(target.Area.Width, target.Area.Height, settings.RenderWidth, settings.RenderHeight);
         // Nearest keeps the low resolution to the output pass, so the post stage runs at the drawn size, not the target's.
         Vector2 output = settings.OutputFilter == GpuFilter.Nearest ? new Vector2(width, height) : new Vector2(target.Area.Width, target.Area.Height);
-        Make("Depth", GpuFormat.D32Float, GpuTextureUsage.DepthTarget | GpuTextureUsage.Sampled, width, height);
-        Make("Visibility", GpuFormat.R32Uint, GpuTextureUsage.ColorTarget | GpuTextureUsage.GraphicsRead | GpuTextureUsage.ComputeRead, width, height);
-        Make("Albedo", GpuFormat.Rgba8Srgb, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
-        Make("Normal", GpuFormat.Rgb10A2Unorm, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
-        Make("Material", GpuFormat.Rgba8Unorm, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
-        Make("Hdr", GpuFormat.Rgba16Float, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
-        Make("Velocity", GpuFormat.Rg16Float, GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled, width, height);
+        Make(GpuContract.Depth, width, height);
+        Make(GpuContract.Visibility, width, height);
+        Make(GpuContract.Albedo, width, height);
+        Make(GpuContract.Normal, width, height);
+        Make(GpuContract.Material, width, height);
+        Make(GpuContract.Hdr, width, height);
+        Make(GpuContract.Velocity, width, height);
 
         Camera lens = camera.Camera;
         Vector3 position = camera.Transform.Position;
@@ -272,7 +248,7 @@ internal sealed class View : IDisposable
         uint tileWords = Math.Max(1, (frame.Counts.Lights + 31) / 32);
         float binScale = Views.ZBinCount / MathF.Log2(Views.ZBinFar / lens.Near);
         uint resolveTiles = (width + Views.ResolveTile - 1) / Views.ResolveTile * ((height + Views.ResolveTile - 1) / Views.ResolveTile);
-        (uint hizTexels, uint hizLevels) = HiZOf(width, height);
+        (uint hizTexels, uint hizLevels) = GetHiZSize(width, height);
         Counts = frame.Counts with { Tiles = resolveTiles, HizTexels = hizTexels, HizLevels = hizLevels, LightTileWords = tilesX * tilesY * tileWords };
         Weather weather = frame.Copy.Weather ?? new Weather();
         Constants = new FrameConstants
@@ -320,16 +296,13 @@ internal sealed class View : IDisposable
         _lastViewProj = view * still;
         _lastPosition = position;
         SortTransparent();
-        _exposure.Flush();
-        _transparentPieces.Flush();
-        Resources.Set("Exposure", BoundResource.Of(_exposure.Buffer, _exposure.Bytes));
     }
 
     /// <summary>
     /// The size a view is drawn at: its target's, or the width and height the settings ask for, one of them alone
     /// keeping the target's proportions; a pixel at least, and four times the target each way at most.
     /// </summary>
-    private static (uint Width, uint Height) DrawnSize(float targetWidth, float targetHeight, int wantedWidth, int wantedHeight)
+    private static (uint Width, uint Height) GetDrawnSize(float targetWidth, float targetHeight, int wantedWidth, int wantedHeight)
     {
         float proportion = targetHeight > 0 ? targetWidth / targetHeight : 1;
         float width = wantedWidth > 0 ? wantedWidth : wantedHeight > 0 ? wantedHeight * proportion : targetWidth;
@@ -341,7 +314,7 @@ internal sealed class View : IDisposable
     /// The texels of a view's depth pyramid, the depth halved again and again down to one texel, the farthest of each
     /// four kept, and how many levels it has.
     /// </summary>
-    private static (uint Texels, uint Levels) HiZOf(uint width, uint height)
+    private static (uint Texels, uint Levels) GetHiZSize(uint width, uint height)
     {
         uint texels = 0;
         uint levels = 0;
@@ -379,13 +352,16 @@ internal sealed class View : IDisposable
         }
     }
 
-    private void Make(string name, GpuFormat format, GpuTextureUsage usage, uint width, uint height)
+    /// <summary>
+    /// One of the view's own targets, in the format and use its contract entry has, made again when its size changes.
+    /// </summary>
+    private void Make(ResourceInfo info, uint width, uint height)
     {
-        Resources.TryMake(name, new ResourceKey(false, format, GpuTextureKind.Texture2D, usage, GpuBufferUsage.None, width, height, 1, 1, 0));
+        Resources.MakeIfChanged(info.Name, new ResourceKey(false, info.Format, GpuTextureKind.Texture2D, info.TextureUsage, GpuBufferUsage.None, width, height, 1, 1, 0));
     }
 
     /// <summary>
-    /// The scene's transparent instances, farthest first, each its finest clusters drawn with a transparent material, a
+    /// The world's transparent instances, farthest first, each its finest clusters drawn with a transparent material, a
     /// piece of up to 32 triangles at a time, as runs of one surface each.
     /// </summary>
     private void SortTransparent()
@@ -393,17 +369,17 @@ internal sealed class View : IDisposable
         TransparentRuns.Clear();
         _transparentOrder.Clear();
         Vector3 position = Position;
-        foreach (int slot in _scene.Transparent)
+        foreach (int slot in _instances.Transparent)
         {
-            _transparentOrder.Add((slot, -Vector3.Distance(_scene.GetPosition(slot), position)));
+            _transparentOrder.Add((slot, -Vector3.Distance(_instances.GetPosition(slot), position)));
         }
 
         CollectionsMarshal.AsSpan(_transparentOrder).Sort(static (left, right) => left.Distance.CompareTo(right.Distance));
         int count = 0;
         foreach ((int slot, _) in _transparentOrder)
         {
-            Renderer renderer = _scene.GetRenderer(slot);
-            if (_models.InPool(renderer.Model) is not ({ } firstCluster, { } packed) || packed.Levels.Length == 0)
+            Renderer renderer = _instances.GetRenderer(slot);
+            if (_resources.FindInPool(renderer.Model) is not ({ } firstCluster, { } packed) || packed.Levels.Length == 0)
             {
                 continue;
             }
@@ -412,7 +388,7 @@ internal sealed class View : IDisposable
             for (int i = (int)finest.FirstCluster; i < finest.FirstCluster + finest.Count; i++)
             {
                 GpuCluster cluster = packed.Clusters[i];
-                if (_materials.Get(renderer.Materials[(int)((cluster.Counts >> 17) & 7)]) is not { Type: MaterialType.Transparent } drawn)
+                if (_resources.Get(renderer.Materials[(int)((cluster.Counts >> 17) & 7)]) is not { Type: MaterialType.Transparent } drawn)
                 {
                     continue;
                 }
@@ -420,7 +396,7 @@ internal sealed class View : IDisposable
                 uint triangles = cluster.Counts & 0xFF;
                 for (uint piece = 0; piece * 32 < triangles; piece++)
                 {
-                    _transparentPieces.Set(count, new PieceEntry((uint)slot, ((uint)(firstCluster + i) << 2) | piece, 0));
+                    _transparentPieces.Set(count, new GpuPiece((uint)slot, ((uint)(firstCluster + i) << 2) | piece, 0));
                     if (TransparentRuns.Count > 0 && TransparentRuns[^1].Surface == drawn.Surface && TransparentRuns[^1].First + TransparentRuns[^1].Count == count)
                     {
                         TransparentRuns[^1] = TransparentRuns[^1] with { Count = TransparentRuns[^1].Count + 1 };
@@ -436,10 +412,3 @@ internal sealed class View : IDisposable
         }
     }
 }
-
-/// <summary>
-/// One piece of up to 32 triangles to draw: its instance's slot, its cluster's row times four plus which piece of it,
-/// or a card's row with the top bit, and its slot among the view's pieces, which the visibility buffer names it by.
-/// </summary>
-[StructLayout(LayoutKind.Sequential)]
-internal readonly record struct PieceEntry(uint Instance, uint What, uint Slot);

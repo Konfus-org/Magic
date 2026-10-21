@@ -1,4 +1,4 @@
-// The scene as a renderer drawing clusters keeps it (its ClusterPool.cs and Scene.cs), read back: a
+// The world as a renderer drawing clusters keeps it (its GpuCache.cs and Instances.cs), read back: a
 // cluster's vertices and triangles from the geometry's words, a card's quad, and how an instance dissolves. What reads
 // the geometry is there when whoever includes it declares Geometry (HAS_Geometry), as a pass's header does for what
 // the pass reads: a shader binds only what it uses.
@@ -68,7 +68,7 @@ int SignExtend20(uint value)
 }
 
 #if defined(HAS_Geometry)
-// A vertex from its five words (ClusterPool.PackVertex): its position in steps of its model's grid, its normal and
+// A vertex from its five words (GpuConverter.PackVertex): its position in steps of its model's grid, its normal and
 // tangent on the octahedron, its uv as two halves.
 PieceVertex LoadVertex(uint word, float step)
 {
@@ -101,7 +101,7 @@ PieceVertex LoadCorner(GpuCluster cluster, uint corner, float step)
 #endif
 
 // How far through its fade an instance is, 0 to 1.
-float FadeProgress(GpuSceneInstance instance)
+float FadeProgress(GpuInstance instance)
 {
     return saturate((Time - instance.fadeStart) / FadeSeconds);
 }
@@ -109,7 +109,7 @@ float FadeProgress(GpuSceneInstance instance)
 // How far a model's cards have taken over from its clusters at a distance, 0 to 1 across the band about the distance
 // they start at (the model's own cardDistance at unit scale and a 60 degree view, scaled by the instance and the
 // view's zoom); 0 for a model with no cards.
-float CardTakeover(GpuModel model, GpuSceneInstance instance, float distance)
+float CardTakeover(GpuModel model, GpuInstance instance, float distance)
 {
     if (model.cardCount == 0u || model.cardDistance <= 0.0)
     {
@@ -126,11 +126,11 @@ float CardTakeover(GpuModel model, GpuSceneInstance instance, float distance)
 // What of a piece is kept as it dissolves, as two thresholds of a pixel's dither: it is kept where the dither is under
 // x and not under y. A fade in raises x; a card taking over raises x for the card and y for the clusters, so the two
 // between them draw each pixel once.
-float2 DissolveOf(GpuSceneInstance instance, float takeover, bool isCard)
+float2 DissolveOf(GpuInstance instance, float takeover, bool isCard)
 {
     float2 dissolve = float2(1.0, 0.0);
     float progress = FadeProgress(instance);
-    dissolve.x = (instance.flags & SceneFadeIn) != 0u ? progress : dissolve.x;
+    dissolve.x = (instance.flags & InstanceFadeIn) != 0u ? progress : dissolve.x;
     dissolve.x = isCard ? min(dissolve.x, takeover) : dissolve.x;
     dissolve.y = isCard ? dissolve.y : max(dissolve.y, takeover);
     return dissolve;
@@ -153,13 +153,13 @@ bool Dissolves(float2 dissolve)
 // One corner of a card's quad, which turns about +Y to face the camera at the front of its mesh, as wide and tall as
 // the instance scales it: where it is relative to the camera, its normal, its corner in -1..1, the view it shows (its
 // atlases' cell, its turn, whether it shows the mesh mirrored) and which way its front is and how far.
-void CardCorner(GpuSceneInstance instance, GpuCard card, uint corner, out float3 position, out float3 normal, out float2 uv, out float4 view, out float3 front)
+void CardCorner(GpuInstance instance, GpuCard card, uint corner, out float3 position, out float3 normal, out float2 uv, out float4 view, out float3 front)
 {
     float3 axisX = float3(instance.row0.x, instance.row1.x, instance.row2.x);
     float3 axisY = float3(instance.row0.y, instance.row1.y, instance.row2.y);
     float3 axisZ = float3(instance.row0.z, instance.row1.z, instance.row2.z);
-    float3 centre = ScenePosition(instance, card.centre);
-    bool isMirrored = (instance.flags & SceneMirrored) != 0u;
+    float3 centre = InstancePosition(instance, card.centre);
+    bool isMirrored = (instance.flags & InstanceMirrored) != 0u;
     bool showsMirrored = isMirrored != (card.halfWidth < 0.0);
     float turn = card.turn + atan2(axisZ.x, axisZ.z);
 

@@ -160,16 +160,14 @@ internal struct PassWords
 }
 
 /// <summary>
-/// One instance in the scene's table, at its entity's slot (Shaders/Include/Structs.hlsli's GpuSceneInstance): the rows
+/// One instance in the instances' table, at its entity's slot (Shaders/Include/Structs.hlsli's GpuInstance): the rows
 /// of its transpose(world), xyz its turn and scale and w its position; the last frame's the same way, which velocity is
 /// worked out from; its largest scale, flags, model row, when its fade started, and its eight material slots' rows, two
-/// to a word, <see cref="NoMaterial"/> for one not in yet.
+/// to a word.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-internal struct GpuSceneInstance
+internal struct GpuInstance
 {
-    internal const uint NoMaterial = 0xFFFF;
-
     internal Vector4 Row0;
     internal Vector4 Row1;
     internal Vector4 Row2;
@@ -179,7 +177,7 @@ internal struct GpuSceneInstance
     internal float MaxScale;
 
     /// <summary>
-    /// <see cref="GpuSceneFlags"/>.
+    /// <see cref="GpuInstanceFlags"/>.
     /// </summary>
     internal uint Flags;
 
@@ -194,7 +192,7 @@ internal struct GpuSceneInstance
 }
 
 /// <summary>
-/// A scene instance's eight material slots' rows, two to a word.
+/// An instance's eight material slots' rows, two to a word.
 /// </summary>
 [InlineArray(4)]
 internal struct MaterialRows
@@ -203,10 +201,10 @@ internal struct MaterialRows
 }
 
 /// <summary>
-/// What a <see cref="GpuSceneInstance"/> carries besides its transform.
+/// What a <see cref="GpuInstance"/> carries besides its transform.
 /// </summary>
 [Flags]
-internal enum GpuSceneFlags : uint
+internal enum GpuInstanceFlags : uint
 {
     None = 0,
 
@@ -216,14 +214,14 @@ internal enum GpuSceneFlags : uint
     Mirrored = 1,
 
     /// <summary>
-    /// It dissolves into view from <see cref="GpuSceneInstance.FadeStart"/>.
+    /// It dissolves into view from <see cref="GpuInstance.FadeStart"/>.
     /// </summary>
     FadeIn = 2,
 }
 
 /// <summary>
-/// A model in the <see cref="ClusterPool"/>: its sphere about its origin, its clusters, levels and cards, the unit-scale
-/// distance its cards are drawn from, 0 for none, its grid's step, its distance field's slot in <see cref="MeshFields"/>,
+/// A model on the GPU (<see cref="GpuResources"/>): its sphere about its origin, its clusters, levels and cards, the unit-scale
+/// distance its cards are drawn from, 0 for none, its grid's step, its distance field's slot in <c>MeshFields</c>,
 /// 0 for none, and how far from its sphere's middle its clusters' error spheres reach.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
@@ -291,7 +289,7 @@ internal struct GpuCluster
 
 /// <summary>
 /// One card of a model (Core's <c>Card</c>): its centre, half width (less than 0 when it shows its mesh mirrored), half
-/// height and turn about +Y, its material slot, and its atlases' texture refs, <see cref="TexturePools.None"/> while they
+/// height and turn about +Y, its material slot, and its atlases' texture refs, <see cref="GpuContract.NoTexture"/> while they
 /// load.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
@@ -335,7 +333,7 @@ internal struct GpuMaterialGi
 }
 
 /// <summary>
-/// The first row of <c>GiLevels</c>: how many levels the scene's field and probes have this frame, and how they are
+/// The first row of <c>GiLevels</c>: how many levels the world's field and probes have this frame, and how they are
 /// updated. As big as a <see cref="GpuGiLevel"/>, which the rows after it are.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Size = GpuGiLevel.Bytes)]
@@ -360,7 +358,7 @@ internal struct GpuGi
 }
 
 /// <summary>
-/// One level of the scene's field and its probes, each finer one inside the next: its origin its first voxel's place in
+/// One level of the world's field and its probes, each finer one inside the next: its origin its first voxel's place in
 /// voxels of <see cref="Voxel"/> metres from the world's origin, a box of <see cref="GiVolume.Resolution"/> a
 /// side stored wrapping around, as is its grid of probes; the voxels made again this frame, a bit per brick of
 /// <see cref="GiVolume.Brick"/> voxels a side by where it is stored, and the box around them; how many frames a probe
@@ -408,3 +406,115 @@ internal struct GpuDrawArgs
     internal int VertexOffset;
     internal uint FirstInstance;
 }
+
+/// <summary>
+/// The sun's clipmap this frame (Shaders/Include/VirtualShadows.hlsli's GpuSunClipmap), its levels after it: its frame,
+/// the axes across it and the way its light travels, how many levels it has, the frame's number (pages last read before
+/// it are free to take), whether every page starts again, how far along the sun the camera is from the plane depth is
+/// measured from, how deep a page reaches either side of it, the finest level's width, the words of the changed lights'
+/// bits, the pool's pages a side, the pages of it whole and the small pages the rest is split into, how many spheres
+/// moved, where the main camera is, which the clipmap is placed about, and the rows of the tables where the sun's
+/// entries, this frame's lights' table and the last frame's start, and how many entries a lights' table has.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct GpuSunClipmap
+{
+    internal Vector3 Right;
+    internal uint Levels;
+    internal Vector3 Up;
+    internal uint Frame;
+    internal Vector3 Direction;
+    internal uint AllDirty;
+    internal float CameraDepth;
+    internal float DepthRange;
+    internal float Finest;
+    internal uint ChangedLightWords;
+    internal uint PoolAcross;
+    internal uint WholePages;
+    internal uint SmallPages;
+    internal uint Moved;
+    internal Vector3 Camera;
+    internal uint SunTable;
+    internal uint LightTable;
+    internal uint LightTableLast;
+    internal uint LightEntries;
+    internal uint Padding0;
+    internal uint Padding1;
+    internal uint Padding2;
+    internal uint Padding3;
+    internal uint Padding4;
+}
+
+/// <summary>
+/// One level of the sun's clipmap: its window's first page, counted from the sun's frame's origin, metres a page and a
+/// texel, and where the camera is across the sun from the window's corner, in metres.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct GpuSunLevel
+{
+    internal int OriginX;
+    internal int OriginY;
+    internal float PageSize;
+    internal float Texel;
+    internal float CameraX;
+    internal float CameraY;
+    internal float Padding0;
+    internal float Padding1;
+}
+
+/// <summary>
+/// One row of the materials buffer: a surface's <c>MaterialParams</c>, packed by its <see cref="ParamLayout"/>.
+/// </summary>
+[InlineArray(32)]
+internal struct GpuMaterial
+{
+    private uint _word;
+}
+
+/// <summary>
+/// A point or spot light in the world's table (Shaders/Include/Structs.hlsli's GpuWorldLight): where it is; how far it
+/// reaches; its intensity in candela times its colour; the size of its bulb; for a spot its axis and the scale and
+/// offset of its cone's falloff; and <see cref="GpuWorldLightFlags"/>.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct GpuWorldLight
+{
+    internal Vector3 Position;
+    internal float Range;
+    internal Vector3 Intensity;
+    internal float Radius;
+    internal Vector3 Forward;
+    internal float SpotScale;
+    internal float SpotOffset;
+    internal uint Flags;
+    internal uint Padding0;
+    internal uint Padding1;
+}
+
+/// <summary>
+/// What a <see cref="GpuWorldLight"/> is.
+/// </summary>
+[Flags]
+internal enum GpuWorldLightFlags : uint
+{
+    None = 0,
+
+    /// <summary>
+    /// There is a light in the slot.
+    /// </summary>
+    Live = 1,
+
+    Spot = 2,
+
+    /// <summary>
+    /// It casts no shadow (Core's <c>PointLight.Shadowless</c>).
+    /// </summary>
+    Shadowless = 4,
+}
+
+/// <summary>
+/// One piece of up to 32 triangles to draw: its instance's slot, its cluster's row times four plus which piece of it,
+/// or a card's row with the top bit, and its slot among the view's pieces, which the visibility buffer names it by.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct GpuPiece(uint Instance, uint What, uint Slot);

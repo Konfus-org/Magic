@@ -59,10 +59,10 @@ internal sealed class ClusterRenderingSettings : ISettings
     public float ClusterError { get; set; } = 1;
 
     /// <summary>
-    /// Pieces of up to 32 triangles a view draws at most. Past it, what is farthest from the player is drawn coarser,
-    /// never left out.
+    /// Pieces of up to 32 triangles a view draws at most, which sizes what each view holds of them. Past it, what is
+    /// farthest from the player is drawn coarser, never left out.
     /// </summary>
-    [Category("Render/Clusters")]
+    [Category("Render/Budgets")]
     public int PieceCapacity { get; set; } = 1 << 20;
 
     /// <summary>
@@ -71,7 +71,7 @@ internal sealed class ClusterRenderingSettings : ISettings
     /// </summary>
     [Category("Render/Clusters")]
     [Range(0.25, 1024)]
-    public float UploadBudget { get; set; } = 32;
+    public float ModelUploadRate { get; set; } = 32;
 
     /// <summary>
     /// Point and spot lights a view lights pixel by pixel at most, nearest first, a power of two; the farther light only
@@ -81,11 +81,13 @@ internal sealed class ClusterRenderingSettings : ISettings
     public int LightCapacity { get; set; } = 16384;
 
     /// <summary>
-    /// Texels a side of the pool every shadow is drawn into, a power of two: how many pages of shadow are held at once.
-    /// Past it, the lights farthest from the player are shadowed coarser.
+    /// Megabytes of video memory the pool every shadow is drawn into may take: it is made as large as fits, a power of
+    /// two texels a side, which is how many pages of shadow are held at once. Past them, the lights farthest from the
+    /// player are shadowed coarser.
     /// </summary>
-    [Category("Render/Shadows")]
-    public int ShadowPool { get; set; } = 8192;
+    [Category("Render/Budgets")]
+    [Range(4, 1024)]
+    public float ShadowBudget { get; set; } = 256;
 
     /// <summary>
     /// Levels of the sun's shadow, each twice as wide as the last: how far it reaches, the finest's width doubled again
@@ -121,7 +123,7 @@ internal sealed class ClusterRenderingSettings : ISettings
     public float Anisotropy { get; set; } = 8;
 
     /// <summary>
-    /// Levels of the scene's field and probes for global illumination, each twice the size of the last: 1 to 5.
+    /// Levels of the world's field and probes for global illumination, each twice the size of the last: 1 to 5.
     /// </summary>
     [Category("Render/Global illumination")]
     public int GiLevels { get; set; } = 5;

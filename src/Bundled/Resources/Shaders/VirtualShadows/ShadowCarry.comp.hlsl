@@ -40,8 +40,8 @@ void main(uint3 id : SV_DispatchThreadID)
     }
 
     uint slot = LightSlotOfKey(entry.tag);
-    GpuSceneLight light = LOAD(SceneLights, GpuSceneLight, slot);
-    if ((light.flags & SceneLightLive) == 0u || (light.flags & SceneLightShadowless) != 0u)
+    GpuWorldLight light = LOAD(WorldLights, GpuWorldLight, slot);
+    if ((light.flags & WorldLightLive) == 0u || (light.flags & WorldLightShadowless) != 0u)
     {
         return;
     }
@@ -65,7 +65,7 @@ void main(uint3 id : SV_DispatchThreadID)
     }
 
     bool hasChanged = slot / 32u < sun.changedLightWords && (ChangedLights.Load((slot / 32u) * 4u) & (1u << (slot % 32u))) != 0u;
-    uint rect = hasChanged ? WholeRect : TouchedRect(MainRelative(sun, SceneLightPosition(light)), light.range, entry.tag, sun.moved);
+    uint rect = hasChanged ? WholeRect : TouchedRect(MainRelative(sun, WorldLightPosition(light)), light.range, entry.tag, sun.moved);
     ShadowTables.Store((sun.lightTable + id.x) * 16u, (page & ~PageDirty) | (rect != 0u || (page & PageDirty) != 0u ? PageDirty : 0u));
     ShadowTables.Store2(record * 16u, uint2(id.x | LightOwner, sun.frame));
     if (rect != 0u)

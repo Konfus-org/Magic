@@ -1,8 +1,6 @@
 using System.Diagnostics.Metrics;
 using System.IO;
 using System.Numerics;
-using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
@@ -15,18 +13,18 @@ using Magic.Services;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// Draws the world GPU-driven, as clusters at the detail each part of it needs: each camera's view of the scene's
+/// Draws the world GPU-driven, as clusters at the detail each part of it needs: each camera's view of the world's
 /// triangles into a visibility buffer, then each pixel shaded once into the G-buffer, lit once a pixel, then the sky,
 /// transparent surfaces lit as they are drawn, and the world's effects. What runs is data: the frame pipeline the
 /// settings pick (<see cref="ClusterRenderingSettings.Pipeline"/>) and the effects the world's <c>PostProcessing</c>
 /// names, their passes run in their stages (<see cref="PassStage"/>). The CPU only keeps the GPU's tables in step with
-/// the world, a row for each thing that changed (<see cref="Scene"/>, <see cref="ClusterPool"/>,
-/// <see cref="Materials"/>), and records a fixed list of passes; which clusters are drawn, how finely, which lights
-/// reach which pixels, all of it the GPU works out each frame.
+/// the world, a row for each thing that changed (<see cref="WorldProcessor"/>, <see cref="GpuResources"/>), and records a
+/// fixed list of passes; which clusters are drawn, how finely, which lights reach which pixels, all of it the GPU works
+/// out each frame.
 /// <para>
-/// The world is copied in LateUpdate (<see cref="Snapshot"/>), handed over in Sync, and drawn in Render from that copy, one
-/// frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is drawn whole in
-/// its first frame.
+/// The world is copied in LateUpdate (<see cref="WorldProcessor"/>), handed over in Sync, and drawn in Render from
+/// that copy, one frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is
+/// drawn whole in its first frame.
 /// While a debug view is named (<see cref="DebugViewChanged"/>), its pass (<c>Passes/Debug/Name.pass</c>) runs after the world's
 /// effects and what it draws is shown in place of the finished image, or the failure's magenta saying nothing draws while
 /// it is not ready; while the debug UI shows, each instance drawn as the failure says why where it is. Once every view
@@ -37,19 +35,6 @@ namespace Magic.ClusterRendering;
 internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>, ICache<CompressedTexture>, IDisposable
 {
     /// <summary>
-    /// The gem's meter, which its parts record on (Core's README, Telemetry).
-    /// </summary>
-    internal static Meter Meter { get; } = new("Magic.Gems.ClusterRendering");
-
-    private static readonly Counter<int> _movedInstances = Meter.CreateCounter<int>("magic.gems.cluster_rendering.scene.moved", "{instance}", "Instances that moved, whose shadows and light are drawn again.");
-    private static readonly Counter<long> _giRays = Meter.CreateCounter<long>("magic.gems.cluster_rendering.gi.rays", "{ray}", "Rays the global illumination probes traced.");
-
-    private readonly IGpu _gpu;
-    private readonly IDebugUI? _debug;
-    private readonly ClusterRenderingSettings _settings;
-    private readonly Assets _assets;
-
-    /// <summary>
     /// The overlay pipeline run when the settings name none: whichever gem or project has it.
     /// </summary>
     private const string OverlayPath = "Pipelines/Overlay.pipeline";
@@ -59,52 +44,49 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// it.
     /// </summary>
     private const string PipelinePath = "Pipelines/Clusters.pipeline";
-    private readonly Snapshot _snapshot;
-    private readonly TexturePools _textures;
-    private readonly ClusterPool _models;
-    private readonly Materials _materials;
-    private readonly Scene _scene;
-    private readonly SceneLights _lights;
-    private readonly Shadows _shadows;
-    private readonly PassGraph _graph;
-    private readonly PassRecorder _recorder;
-    private readonly Views _views;
-    private readonly Output _output;
-    private readonly Failures _failures;
-    private readonly ResourceSet _frame;
 
     /// <summary>
-    /// A target's names while its overlay stage records, the target itself among them; one set, each target in turn.
+    /// The gem's meter, which its parts record on (Core's README, Telemetry); before the instruments made on it, as
+    /// statics start in the order they are written.
     /// </summary>
-    private readonly ResourceSet _target;
+    internal static Meter Meter { get; } = new("Magic.Gems.ClusterRendering");
+
+    private static readonly Counter<int> _movedInstances = Meter.CreateCounter<int>("magic.gems.cluster_rendering.instances.moved", "{instance}", "Instances that moved, whose shadows and light are drawn again.");
+    private static readonly Counter<long> _giRays = Meter.CreateCounter<long>("magic.gems.cluster_rendering.gi.rays", "{ray}", "Rays the global illumination probes traced.");
+
+    private readonly IGpu _gpu;
+    private readonly ClusterRenderingSettings _settings;
+    private readonly Assets _assets;
+    private readonly WorldProcessor _world;
+    private readonly GpuResources _resources;
+    private readonly Shadows _shadows;
+    private readonly PassGraph _graph;
+    private readonly Views _views;
+    private readonly Output _output;
+    private readonly FailureHandler _failures;
+    private readonly Preloader _preloader;
+
+    /// <summary>
+    /// A target's names while its overlay stage records, the target itself among them; one scope, each target in turn.
+    /// </summary>
+    private readonly ResourceScope _target;
+
+    /// <summary>
+    /// This frame's spheres where something moved, about the main camera, by which shadows and the field are made again:
+    /// the frame's <c>Moved</c>.
+    /// </summary>
+    private readonly GpuTable<Vector4> _moved;
     private readonly Dictionary<GpuTexture, ViewTarget> _targets = [];
-    private readonly MeshFields _fields;
     private readonly GiVolume _gi;
-    private readonly GpuArray<uint> _zBinsEmpty;
-    private readonly GpuArray<uint> _zeros;
-    private readonly GpuArray<Vector4> _moved;
     private readonly List<Subscription> _watching = [];
     private readonly List<SurfaceKey> _raster = [];
     private readonly HashSet<GpuTexture> _cleared = [];
 
     /// <summary>
-    /// The domains being taken in before they spawn, each checked every frame until all it draws is in
-    /// (<see cref="CheckPreloads"/>). Render thread.
+    /// What other threads tell the render thread, taken in as Render starts, in the order told (<see cref="TakeChanges"/>):
+    /// an asset made again, or the debug view named.
     /// </summary>
-    private readonly List<Preload> _preloads = [];
-
-    /// <summary>
-    /// What the main thread and workers tell the render thread, taken in as Render starts, in the order told
-    /// (<see cref="TakeArrived"/>): an asset made again, the debug view named, a domain to take in or let go, or one
-    /// whose open was cancelled.
-    /// </summary>
-    private readonly Channel<Arrival> _arrived = Channel.CreateUnbounded<Arrival>(new UnboundedChannelOptions { SingleReader = true });
-
-    /// <summary>
-    /// The effects the latest domain taken in names, which the frame is built for while the world names none, so
-    /// the listing the domain needs is compiled before it spawns; none once that domain is let go.
-    /// </summary>
-    private Handle<Pipeline> _preloadEffects;
+    private readonly Channel<Change> _changes = Channel.CreateUnbounded<Change>(new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// The debug view shown in place of the finished image, as last told (<see cref="DebugViewChanged"/>); empty for
@@ -117,52 +99,32 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private string _missingView = string.Empty;
 
-    /// <summary>
-    /// The world's sky material drawn as the failure, said once, and why, on the failure banner while it stays so; none
-    /// and null while the sky is drawn as it is.
-    /// </summary>
-    private Handle<Material> _brokenSky;
-    private string? _skyFailure;
-
     public ClusterRenderingGem(IGpu gpu, IShaderCompiler compiler, Assets assets, Caches caches, World world, Events events, Threads threads, Lifetime lifetime, ClusterRenderingSettings settings, IWindow? window = null, IDebugUI? debug = null, IScripts? scripts = null)
     {
         _gpu = gpu;
-        _debug = debug;
         _settings = settings;
         _assets = assets;
         CancellationToken stopping = lifetime.Stopping;
-        _snapshot = new Snapshot(world);
-        _textures = new TexturePools(gpu, assets, caches, settings, stopping);
-        _fields = new MeshFields(gpu, assets, caches);
-        _models = new ClusterPool(gpu, assets, _textures, _fields, settings, stopping);
-        _graph = new PassGraph(gpu, compiler, assets, scripts, threads, stopping);
-        _materials = new Materials(gpu, assets, _textures, _graph, stopping);
-        _scene = new Scene(gpu, assets, _models, _materials);
-        _lights = new SceneLights(gpu);
-        _shadows = new Shadows(gpu);
-        _recorder = new PassRecorder(gpu, _graph, _materials);
-        _views = new Views(gpu, window, assets, _scene, _models, _materials, settings, stopping);
-        _output = new Output(gpu, compiler, stopping);
-        _failures = new Failures(gpu);
-        _frame = new ResourceSet(gpu);
-        _target = new ResourceSet(gpu);
-        _gi = new GiVolume(gpu);
-        _zBinsEmpty = new GpuArray<uint>(gpu, GpuBufferUsage.ComputeRead, Views.ZBinCount * 2);
-        _zeros = new GpuArray<uint>(gpu, GpuBufferUsage.ComputeRead, 16384);
-        _moved = new GpuArray<Vector4>(gpu, GpuBufferUsage.ComputeRead, 256);
-        for (int bin = 0; bin < Views.ZBinCount; bin++)
-        {
-            _zBinsEmpty.Set(bin * 2, uint.MaxValue);
-        }
+        _failures = new FailureHandler(assets, debug);
+        _graph = new PassGraph(gpu, compiler, assets, scripts, threads, _failures, stopping);
+        _resources = new GpuResources(gpu, assets, caches, _graph, _failures, settings, stopping);
+        _world = new WorldProcessor(world, _resources, _failures, assets);
+        _shadows = new Shadows(_resources);
+        _views = new Views(gpu, window, _resources, _world.Instances, settings);
+        _output = new Output(gpu, _resources, compiler, stopping);
+        _preloader = new Preloader(_resources, _graph);
+        _target = _resources.MakeScope();
+        _moved = _resources.MakeTable<Vector4>(GpuContract.Moved, 256);
+        _gi = new GiVolume(_resources);
 
-        _watching.Add(events.Watch<AssetReloaded<Model>>(reloaded => Tell(new Arrival(Model: reloaded.Asset))));
-        _watching.Add(events.Watch<AssetReloaded<Texture>>(reloaded => Tell(new Arrival(Texture: reloaded.Asset))));
-        _watching.Add(events.Watch<AssetReloaded<Material>>(reloaded => Tell(new Arrival(Material: reloaded.Asset))));
-        _watching.Add(events.Watch<AssetReloaded<Shader>>(reloaded => Tell(new Arrival(Shader: reloaded.Asset, Invalidates: true))));
-        _watching.Add(events.Watch<AssetReloaded<Pipeline>>(_ => Tell(new Arrival(Invalidates: true))));
-        _watching.Add(events.Watch<AssetReloaded<Curve>>(_ => Tell(new Arrival(Invalidates: true))));
-        _watching.Add(events.Watch<AssetReloaded<Script>>(_ => Tell(new Arrival(Invalidates: true))));
-        _watching.Add(events.Watch<DebugViewChanged>(changed => Tell(new Arrival(DebugView: changed.Name))));
+        _watching.Add(events.Watch<AssetReloaded<Model>>(reloaded => Tell(new Change(Model: reloaded.Asset))));
+        _watching.Add(events.Watch<AssetReloaded<Texture>>(reloaded => Tell(new Change(Texture: reloaded.Asset))));
+        _watching.Add(events.Watch<AssetReloaded<Material>>(reloaded => Tell(new Change(Material: reloaded.Asset))));
+        _watching.Add(events.Watch<AssetReloaded<Shader>>(reloaded => Tell(new Change(Shader: reloaded.Asset, Invalidates: true))));
+        _watching.Add(events.Watch<AssetReloaded<Pipeline>>(_ => Tell(new Change(Invalidates: true))));
+        _watching.Add(events.Watch<AssetReloaded<Curve>>(_ => Tell(new Change(Invalidates: true))));
+        _watching.Add(events.Watch<AssetReloaded<Script>>(_ => Tell(new Change(Invalidates: true))));
+        _watching.Add(events.Watch<DebugViewChanged>(changed => Tell(new Change(DebugView: changed.Name))));
     }
 
     public void Dispose()
@@ -172,81 +134,25 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             watch.Dispose();
         }
 
-        _snapshot.Dispose();
-        _frame.Dispose();
-        _target.Dispose();
-        _gi.Dispose();
-        _failures.Dispose();
+        _world.Dispose();
         _output.Dispose();
         _views.Dispose();
-        _recorder.Dispose();
         _graph.Dispose();
-        _shadows.Dispose();
-        _lights.Dispose();
-        _scene.Dispose();
-        _materials.Dispose();
-        _models.Dispose();
-        _fields.Dispose();
-        _textures.Dispose();
-        _zBinsEmpty.Dispose();
-        _zeros.Dispose();
-        _moved.Dispose();
+        _resources.Dispose();
     }
 
-    public int Version => MeshFields.CacheVersion;
+    // The engine finds a cache's format only on a gem, so these forward to the types they keep.
+    public int Version => ModelField.CacheVersion;
 
-    /// <summary>
-    /// A model's field as the cache keeps it: its box's corner and size, then its distances.
-    /// </summary>
-    public void Write(ModelField value, Stream bytes)
-    {
-        using BinaryWriter writer = new(bytes, Encoding.UTF8, leaveOpen: true);
-        writer.Write(value.Min.X);
-        writer.Write(value.Min.Y);
-        writer.Write(value.Min.Z);
-        writer.Write(value.Size.X);
-        writer.Write(value.Size.Y);
-        writer.Write(value.Size.Z);
-        writer.Write(MemoryMarshal.AsBytes(value.Distances.AsSpan()));
-    }
+    public void Write(ModelField value, Stream bytes) => value.Write(bytes);
 
-    public Result<ModelField> Read(Stream bytes)
-    {
-        using BinaryReader reader = new(bytes, Encoding.UTF8, leaveOpen: true);
-        Vector3 min = new(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
-        Vector3 size = new(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
-        Half[] distances = new Half[MeshFields.Resolution * MeshFields.Resolution * MeshFields.Resolution];
-        bytes.ReadExactly(MemoryMarshal.AsBytes(distances.AsSpan()));
-        return Result.Success(new ModelField(min, size, distances));
-    }
+    public Result<ModelField> Read(Stream bytes) => ModelField.Read(bytes);
 
-    int ICache<CompressedTexture>.Version => TexturePools.CacheVersion;
+    int ICache<CompressedTexture>.Version => CompressedTexture.CacheVersion;
 
-    /// <summary>
-    /// A texture's levels as the cache keeps them: how many, then each one's length and its bytes.
-    /// </summary>
-    void ICache<CompressedTexture>.Write(CompressedTexture value, Stream bytes)
-    {
-        using BinaryWriter writer = new(bytes, Encoding.UTF8, leaveOpen: true);
-        writer.Write(value.Levels.Length);
-        foreach (byte[] level in value.Levels)
-        {
-            writer.Write(level.Length);
-            writer.Write(level);
-        }
-    }
+    void ICache<CompressedTexture>.Write(CompressedTexture value, Stream bytes) => value.Write(bytes);
 
-    Result<CompressedTexture> ICache<CompressedTexture>.Read(Stream bytes)
-    {
-        using BinaryReader reader = new(bytes, Encoding.UTF8, leaveOpen: true);
-        byte[][] levels = new byte[reader.ReadInt32()][];
-        for (int level = 0; level < levels.Length; level++)
-        {
-            levels[level] = reader.ReadBytes(reader.ReadInt32());
-        }
-
-        return Result.Success(new CompressedTexture(levels));
-    }
+    Result<CompressedTexture> ICache<CompressedTexture>.Read(Stream bytes) => CompressedTexture.Read(bytes);
 
     /// <summary>
     /// The copy is done: what is gone and what outgrew it is taken in, after the systems that copied the world ran in
@@ -254,7 +160,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     public void LateUpdate(in Frame frame)
     {
-        _snapshot.Finish();
+        _world.Finish();
     }
 
     /// <summary>
@@ -262,7 +168,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     public void Sync(in Frame frame)
     {
-        _snapshot.Swap();
+        _world.Swap();
     }
 
     /// <summary>
@@ -273,40 +179,44 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     public void Render(in Frame frame)
     {
-        TakeArrived();
-        _textures.FollowSettings();
-        WorldCopy copy = _snapshot.Front;
+        TakeChanges();
+        _preloader.Take();
+        Renderables copy = _world.Front;
         CameraCopy? main = GetMainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
-        UpdateScene(copy, main, player, frame);
-        (SurfaceKey skySurface, int skyRow) = GetSky(copy);
+        UpdateRows(copy, main, player, frame);
+        (SurfaceKey skySurface, int skyRow) = _resources.GetSky(copy.Sky);
         UpdateGraph(copy, skySurface);
         PlanGi(main, frame);
         List<View> views = _views.Prepare(new ViewFrame(copy, frame, skyRow, MakeCounts(), player, HasJitter()));
+        View? shown = views.Find(view => view.Target.IsWindow) ?? (views.Count > 0 ? views[0] : null);
+        if (shown is not null) WriteMoved(main?.Transform.Position ?? shown.Position);
+
+        Listing? listing = _graph.Current;
+        if (listing is not null) _failures.Say(listing.Failures);
+
+        _resources.Upload();
         _cleared.Clear();
-        if (_graph.Current is not { } listing)
+        if (listing is null)
         {
             ClearWindow();
-            _textures.EndFrame();
+            _resources.EndFrame();
             return;
         }
 
-        if (views.Count == 0)
+        if (shown is null)
         {
             ClearWindow();
             RecordOverlays(listing, views, null, frame);
-            _textures.EndFrame();
+            _resources.EndFrame();
             return;
         }
 
-        View shown = views.Find(view => view.Target.IsWindow) ?? views[0];
-        SetFrame(main?.Transform.Position ?? shown.Position);
-        _failures.Say(listing.Failures, _skyFailure);
-        _failures.Begin(_zeros.Buffer);
-        RecordScope frameScope = new(_frame, null, shown.Constants, shown.Counts, [], GpuBuffer.None, skySurface, frame);
+        _output.SendBanner(_failures);
+        RecordScope frameScope = new(_resources, null, shown.Constants, shown.Counts, [], GpuBuffer.None, skySurface, frame);
         for (PassStage stage = PassStage.Probes; stage < PassStage.Cull; stage++)
         {
-            _recorder.Record(listing, stage, frameScope);
+            _graph.Record(listing, stage, frameScope);
         }
 
         foreach (View view in views)
@@ -314,80 +224,52 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             RenderView(view, listing, skySurface, frame);
         }
 
-        _frame.Keep(listing);
+        _resources.Frame.ReleaseUnlisted(listing);
         ClearWindow();
         RecordOverlays(listing, views, shown, frame);
-        _textures.EndFrame();
+        _resources.EndFrame();
     }
 
     /// <summary>
-    /// The scene, its lights and the shadow plan from this frame's copy of the world, then what the pools took in since
-    /// the last frame, so the materials the frame draws with are the ones in.
+    /// Takes in what <paramref name="prefabs"/> draw before they spawn, so they are drawn whole in their first frame:
+    /// their models into the pool, their materials packed with their textures in and every surface's pipelines
+    /// compiled, and the frame built for the effects they name. Done once all of it is in, or failed, and so drawn as
+    /// the failure; what it hands back keeps it in the pool until it is disposed.
     /// </summary>
-    private void UpdateScene(WorldCopy copy, CameraCopy? main, Vector3? player, in Frame frame)
+    public Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
     {
-        _scene.Update(copy, (float)frame.Seconds, player ?? default);
-        _movedInstances.Add(_scene.Moved.Count);
-        _lights.Update(copy);
+        return _preloader.PreloadAsync(prefabs, progress, cancel);
+    }
+
+    /// <summary>
+    /// The instances' and lights' rows and the shadow plan from this frame's copy of the world, what nothing holds any
+    /// more let go, then what came in since the last frame, so the materials the frame draws with are the ones in.
+    /// </summary>
+    private void UpdateRows(Renderables copy, CameraCopy? main, Vector3? player, in Frame frame)
+    {
+        _world.UpdateRows((float)frame.Seconds, player ?? default);
+        _movedInstances.Add(_world.Instances.Moved.Count);
         if (main is { } camera)
         {
-            _shadows.Plan(camera.Transform.Position, copy.Sun?.Direction ?? -Vector3.UnitY, _lights.ChangedLights.Capacity, _scene.Moved.Count, frame.Index, _settings);
+            _shadows.Plan(camera.Transform.Position, copy.Sun?.Direction ?? -Vector3.UnitY, _world.Lights.ChangedWords, _world.Instances.Moved.Count, frame.Index, _settings);
         }
 
-        ReportFailures();
-        _textures.Flush();
-        _models.Flush();
-        _materials.Flush();
+        _failures.Label(_world.Instances);
+        _resources.Update();
     }
 
     /// <summary>
-    /// What the sky is drawn with this frame, and the row its params are loaded from: the world's sky material's sky
-    /// shader once it is in; the renderer's own sky without one, or while it loads; and the sky failure material when
-    /// the material is no sky, its shader a surface or a sky that does not compile, as a broken material is drawn as
-    /// the failure (<see cref="FailureType.Sky"/>). Why is said in the log and on the failure banner when it breaks.
-    /// </summary>
-    private (SurfaceKey Surface, int Row) GetSky(WorldCopy copy)
-    {
-        Handle<Material> material = copy.Sky ?? Handle<Material>.None;
-        DrawnMaterial? drawn = material == Handle<Material>.None ? null : _materials.Get(material);
-        Handle<Material> broken = drawn is { IsSky: false } ? material : Handle<Material>.None;
-        if (broken != _brokenSky) SayBrokenSky(broken);
-
-        if (broken != Handle<Material>.None) drawn = _materials.Get(_materials.GetFailureMaterial(FailureType.Sky));
-
-        return drawn is { IsSky: true } sky ? (sky.Surface, sky.Row) : (default, 0);
-    }
-
-    /// <summary>
-    /// Takes <paramref name="broken"/> as the sky material drawn as the failure, none when the sky is drawn as it is:
-    /// why goes in the log once and on the failure banner for as long as it stays broken.
-    /// </summary>
-    private void SayBrokenSky(Handle<Material> broken)
-    {
-        _brokenSky = broken;
-        if (broken == Handle<Material>.None)
-        {
-            _skyFailure = null;
-            return;
-        }
-
-        string why = _materials.GetFailure(broken) ?? "a surface, not a sky";
-        _skyFailure = $"Sky {_assets.GetPath(broken) ?? $"{broken.Id}"} is drawn as the failure: {why}";
-        Debugging.Error($"{_skyFailure}.");
-    }
-
-    /// <summary>
-    /// The pass graph for this frame's pipelines and the surface variants the scene draws, the debug view's pass
+    /// The pass graph for this frame's pipelines and the surface variants the instances draw, the debug view's pass
     /// appended, and the preloads checked against what came in.
     /// </summary>
-    private void UpdateGraph(WorldCopy copy, SurfaceKey skySurface)
+    private void UpdateGraph(Renderables copy, SurfaceKey skySurface)
     {
         _raster.Clear();
-        _raster.AddRange(Materials.FixedRasterKeys);
-        _raster.AddRange(_materials.RasterBins);
+        _raster.AddRange(GpuContract.FixedRasterKeys);
+        _raster.AddRange(_resources.RasterBins);
         _graph.Append(DebugViewPass(_debugView));
-        _graph.Update(GetPipeline(), GetEffects(copy), GetOverlay(), new SceneVariants(_raster, _materials.ResolveBins, _materials.TransparentSurfaces, skySurface));
-        CheckPreloads(copy);
+        _graph.Update(GetPipeline(), _preloader.GetEffects(copy.Effects), GetOverlay(), new SurfaceVariants(_raster, _resources.ResolveBins, _resources.TransparentSurfaces, skySurface));
+        _preloader.Check(_preloader.GetEffects(copy.Effects));
     }
 
     /// <summary>
@@ -398,7 +280,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     {
         if (_graph.Current?.HasPass("GiField") == true && main is { } eye)
         {
-            _gi.Plan(eye.Transform.Position, _scene.Moved, frame.DeltaSeconds, _settings);
+            _gi.Plan(eye.Transform.Position, _world.Instances.Moved, frame.DeltaSeconds, _settings);
             _giRays.Add(_gi.Rays);
             return;
         }
@@ -407,17 +289,17 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// How much of everything the frame's buffers hold, from the settings and what the scene has.
+    /// How much of everything the frame's buffers hold, from the settings and what the world has.
     /// </summary>
     private Counts MakeCounts() => new(
-        Instances: (uint)_scene.Capacity,
+        Instances: (uint)_world.Instances.Capacity,
         Pieces: (uint)Math.Max(_settings.PieceCapacity, 1024),
         Clusters: (uint)Math.Max(_settings.PieceCapacity, 1024),
         // Room for every instance eight times over, so a frame drawing several of the shadow pages that hold the
         // whole world, the sun's coarsest levels' after a turn, fits rather than drawing nothing and waiting.
-        Jobs: (uint)Math.Max(Math.Max(_settings.PieceCapacity / 16, 8 * _scene.Capacity), 1024),
-        RasterBins: Materials.RasterBinRows,
-        ResolveBins: (uint)Math.Max(_materials.ResolveBins.Count, 1),
+        Jobs: (uint)Math.Max(Math.Max(_settings.PieceCapacity / 16, 8 * _world.Instances.Capacity), 1024),
+        RasterBins: GpuContract.RasterBinRows,
+        ResolveBins: (uint)Math.Max(_resources.ResolveBins.Count, 1),
         Tiles: 0,
         HizTexels: 0,
         HizLevels: 0,
@@ -426,11 +308,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         LightTileWords: 0,
         GiRays: _gi.Rays,
         GiProbeThreads: _gi.ProbeThreads,
-        SceneLights: (uint)_lights.Capacity,
+        WorldLights: (uint)_world.Lights.Capacity,
         SunEntries: (uint)_shadows.SunEntries,
         LightEntries: Shadows.LightTableEntries,
         ShadowViews: (uint)Math.Max(_settings.ShadowUpdates, 1),
-        ShadowGroups: (uint)(Math.Max(_settings.ShadowUpdates, 1) + _settings.ShadowLevels),
+        ShadowGroups: (uint)(Math.Max(_settings.ShadowUpdates, 1) + Shadows.GetLevelCount(_settings)),
         ShadowCandidates: (uint)(_shadows.WholePages + _shadows.SmallPages));
 
     /// <summary>
@@ -439,41 +321,18 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private void RenderView(View view, Listing listing, SurfaceKey skySurface, in Frame frame)
     {
-        view.Resources.Keep(listing);
-        RecordScope scope = new(_frame, view.Resources, view.Constants, view.Counts, view.TransparentRuns, view.TransparentPieces, skySurface, frame);
+        view.Resources.ReleaseUnlisted(listing);
+        RecordScope scope = new(_resources, view.Resources, view.Constants, view.Counts, view.TransparentRuns, view.TransparentPieces, skySurface, frame);
         for (PassStage stage = PassStage.Cull; stage <= PassStage.Ui; stage++)
         {
-            _recorder.Record(listing, stage, scope);
+            _graph.Record(listing, stage, scope);
         }
 
         BoundResource? image = _debugView.Length > 0 ? DebugImage(view) : GetFinished(view);
         bool clears = _cleared.Add(view.Target.Texture);
-        if (image is { } made)
-        {
-            _output.Draw(view.Target, view.Constants, made, _settings.OutputFilter, clears, _failures);
-        }
-        else
-        {
-            _output.DrawNothing(view.Target, view.Constants, clears);
-        }
+        _output.Draw(view.Target, view.Constants, image, _settings.OutputFilter, clears);
 
         view.Resources.Swap();
-    }
-
-    /// <summary>
-    /// Takes in what <paramref name="prefabs"/> draw before they spawn, so they are drawn whole in their first frame:
-    /// their models into the pool, their materials packed with their textures in and every surface's pipelines
-    /// compiled, and the frame built for the effects they name. Done once all of it is in, or failed, and so drawn as
-    /// the failure; what it hands back keeps it in the pool until it is disposed.
-    /// </summary>
-    public async Task<Subscription> PreloadAsync(IReadOnlyList<Prefab> prefabs, IProgress<float> progress, CancellationToken cancel)
-    {
-        Preloaded preloaded = Preloaded.Of(prefabs);
-        Preload preload = new(preloaded, progress);
-        using CancellationTokenRegistration cancelling = cancel.Register(() => Tell(new Arrival(Cancelled: preload, Cancel: cancel)));
-        Tell(new Arrival(Begun: preload));
-        await preload.Done.Task.ConfigureAwait(false);
-        return new Subscription(() => Tell(new Arrival(Ended: preloaded)));
     }
 
     /// <summary>
@@ -484,7 +343,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private void RecordOverlays(Listing listing, List<View> views, View? shown, in Frame frame)
     {
-        _target.Keep(listing);
+        _target.ReleaseUnlisted(listing);
         _targets.Clear();
         GpuTexture window = _views.GetWindow();
         System.Drawing.Size size = window == GpuTexture.None ? System.Drawing.Size.Empty : _gpu.GetSize(window);
@@ -500,7 +359,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
         foreach (ViewTarget target in _targets.Values)
         {
-            _target.Set(ResourceInfo.TargetName, BoundResource.Of(target.Texture, (uint)target.Area.Width, (uint)target.Area.Height));
+            _target.Set(GpuContract.Target, BoundResource.Of(target.Texture, (uint)target.Area.Width, (uint)target.Area.Height));
             FrameConstants constants = shown?.Constants ?? default;
             constants.ViewSize = new Vector2(target.Area.Width, target.Area.Height);
             constants.ViewTexel = new Vector2(1f / target.Area.Width, 1f / target.Area.Height);
@@ -508,8 +367,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             constants.TargetEncoding = (uint)target.Encoding;
             constants.Time = (float)frame.Seconds;
             constants.FrameIndex = (uint)(frame.Index % uint.MaxValue);
-            RecordScope scope = new(_frame, _target, constants, shown?.Counts ?? default, [], GpuBuffer.None, default, frame, target.Format, target.Encoding);
-            _recorder.Record(listing, PassStage.Overlay, scope);
+            RecordScope scope = new(_resources, _target, constants, shown?.Counts ?? default, [], GpuBuffer.None, default, frame, target.Format, target.Encoding);
+            _graph.Record(listing, PassStage.Overlay, scope);
         }
     }
 
@@ -541,45 +400,16 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// The frame's names this frame: the scene's tables, as they may have grown, the materials' texture pools, where it
-    /// moved relative to the main camera, which the shadows are placed about, the templates binning and counting start
-    /// from, and the shadows' pool and tables.
+    /// This frame's spheres where something moved, about <paramref name="origin"/>, the main camera, which the shadows
+    /// are placed about.
     /// </summary>
-    private void SetFrame(Vector3 main)
+    private void WriteMoved(Vector3 origin)
     {
-        for (int i = 0; i < _scene.Moved.Count; i++)
+        for (int i = 0; i < _world.Instances.Moved.Count; i++)
         {
-            MovedSphere sphere = _scene.Moved[i];
-            _moved.Set(i, new Vector4(sphere.Centre - main, sphere.Radius));
+            MovedSphere sphere = _world.Instances.Moved[i];
+            _moved.Set(i, new Vector4(sphere.Centre - origin, sphere.Radius));
         }
-
-        _moved.Flush();
-        _zBinsEmpty.Flush();
-        _zeros.Flush();
-        _frame.Set("Instances", BoundResource.Of(_scene.Instances.Buffer, _scene.Instances.Bytes));
-        _frame.Set("Models", BoundResource.Of(_models.Models.Buffer, _models.Models.Bytes));
-        _frame.Set("Levels", BoundResource.Of(_models.Levels.Buffer, _models.Levels.Bytes));
-        _frame.Set("Clusters", BoundResource.Of(_models.Clusters.Buffer, _models.Clusters.Bytes));
-        _frame.Set("Cards", BoundResource.Of(_models.Cards.Buffer, _models.Cards.Bytes));
-        _frame.Set("Geometry", BoundResource.Of(_models.Geometry, 4));
-        _frame.Set("Materials", BoundResource.Of(_materials.Records.Buffer, _materials.Records.Bytes));
-        _frame.Set("MaterialBins", BoundResource.Of(_materials.Bins.Buffer, _materials.Bins.Bytes));
-        for (int pool = 0; pool < TexturePools.Count; pool++)
-        {
-            _frame.Set(TexturePools.Names[pool], BoundResource.Of(_textures.GetTexture(pool), 0, 0, _textures.Sampler));
-        }
-
-        _frame.Set("Moved", BoundResource.Of(_moved.Buffer, _moved.Bytes));
-        _frame.Set("ZBinsEmpty", BoundResource.Of(_zBinsEmpty.Buffer, _zBinsEmpty.Bytes));
-        _frame.Set("Zeros", BoundResource.Of(_zeros.Buffer, _zeros.Bytes));
-        _frame.Set("Failures", BoundResource.Of(_failures.Raised, Failures.RaisedBytes));
-        _frame.Set("MeshFieldAtlas", BoundResource.Of(_fields.Atlas, MeshFields.Resolution, MeshFields.Resolution));
-        _frame.Set("MeshFields", BoundResource.Of(_fields.Table.Buffer, _fields.Table.Bytes));
-        _frame.Set("MaterialGi", BoundResource.Of(_materials.Gi.Buffer, _materials.Gi.Bytes));
-        _frame.Set("GiLevels", BoundResource.Of(_gi.Rows.Buffer, _gi.Rows.Bytes));
-        _frame.Set("SceneLights", BoundResource.Of(_lights.Rows.Buffer, _lights.Rows.Bytes));
-        _frame.Set("ChangedLights", BoundResource.Of(_lights.ChangedLights.Buffer, _lights.ChangedLights.Bytes));
-        _shadows.Bind(_frame);
     }
 
     /// <summary>
@@ -588,20 +418,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// which is drawn from the view as it is and would shake with it.
     /// </summary>
     private bool HasJitter() => _graph.Current?.HasPass("Taa") == true && _debugView.Length == 0;
-
-    /// <summary>
-    /// Says, at each instance drawn as the failure, why, with what failed while the mouse rests on it: for this frame,
-    /// so the words go once it is repaired. Only while the debug UI shows.
-    /// </summary>
-    private void ReportFailures()
-    {
-        if (_debug is not { Enabled: true } debug) return;
-
-        foreach ((int slot, (string why, string what)) in _scene.Failures)
-        {
-            debug.Error(why, _scene.GetPosition(slot), 0, what);
-        }
-    }
 
     /// <summary>
     /// The pass of the debug view <paramref name="name"/> names, <c>Passes/Debug/Name.pass</c>; none for no view, or for
@@ -626,7 +442,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private static BoundResource GetFinished(View view)
     {
-        return view.Resources.TryGet("Ldr", out BoundResource ldr) ? ldr : view.Resources.TryGet("Hdr", out BoundResource hdr) ? hdr : default;
+        return view.Resources.TryGet("Ldr", out BoundResource ldr) ? ldr : view.Resources.TryGet(GpuContract.Hdr.Name, out BoundResource hdr) ? hdr : default;
     }
 
     /// <summary>
@@ -642,7 +458,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// <summary>
     /// The camera drawing into the window, else the first; none without a camera.
     /// </summary>
-    private static CameraCopy? GetMainCamera(WorldCopy copy)
+    private static CameraCopy? GetMainCamera(Renderables copy)
     {
         foreach (CameraCopy camera in copy.Cameras)
         {
@@ -653,154 +469,37 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// Tells the render thread <paramref name="arrival"/>, from any thread; it is taken in as the next Render starts.
+    /// Tells the render thread <paramref name="change"/>, from any thread; it is taken in as the next Render starts.
     /// </summary>
-    private void Tell(in Arrival arrival)
+    private void Tell(in Change change)
     {
-        _arrived.Writer.TryWrite(arrival);
+        _changes.Writer.TryWrite(change);
     }
 
     /// <summary>
     /// Takes in what the main thread and workers told the render thread since the last frame, in the order told.
     /// </summary>
-    private void TakeArrived()
+    private void TakeChanges()
     {
-        while (_arrived.Reader.TryRead(out Arrival arrival))
+        while (_changes.Reader.TryRead(out Change change))
         {
-            if (arrival.Model is { } model) _models.Reload(model);
+            if (change.Model is { } model) _resources.Reload(model);
 
-            if (arrival.Texture is { } texture) _textures.Reload(texture);
+            if (change.Texture is { } texture) _resources.Reload(texture);
 
-            if (arrival.Material is { } material) _materials.Reload(material);
+            if (change.Material is { } material) _resources.Reload(material);
 
-            if (arrival.Shader is { } shader) _materials.Reload(shader);
+            if (change.Shader is { } shader) _resources.Reload(shader);
 
-            if (arrival.Invalidates) _graph.Invalidate();
+            if (change.Invalidates) _graph.Invalidate();
 
-            if (arrival.DebugView is { } view) _debugView = view;
-
-            if (arrival.Begun is { } begun) Begin(begun);
-
-            if (arrival.Ended is { } ended) End(ended);
-
-            if (arrival.Cancelled is { } cancelled) Cancel(cancelled, arrival.Cancel);
+            if (change.DebugView is { } view) _debugView = view;
         }
     }
 
     /// <summary>
-    /// The effects the frame is built for: the world's, else those of the latest domain being taken in, so its
-    /// listing is compiled under the loading domain, which names none of its own.
+    /// One change told to the render thread: whichever of these it carries. An asset made again, to take in in place
+    /// of what it had; that the frame's listing is to be built again; or the debug view named.
     /// </summary>
-    private Handle<Pipeline> GetEffects(WorldCopy copy)
-    {
-        return copy.Effects == Handle<Pipeline>.None ? _preloadEffects : copy.Effects;
-    }
-
-    /// <summary>
-    /// Starts taking in what a domain draws: its models and materials are held, then asked for as the nearest, which
-    /// starts their loads, and the frame is built for its effects.
-    /// </summary>
-    private void Begin(Preload preload)
-    {
-        Preloaded preloaded = preload.Preloaded;
-        _scene.Hold(preloaded);
-        foreach (Handle<Model> model in preloaded.Models)
-        {
-            _models.GetRow(model, 0);
-        }
-
-        foreach (Handle<Material> material in preloaded.Materials)
-        {
-            _materials.GetRow(material);
-        }
-
-        if (preloaded.Effects != Handle<Pipeline>.None) _preloadEffects = preloaded.Effects;
-
-        _preloads.Add(preload);
-    }
-
-    /// <summary>
-    /// A domain that was taken in is let go: what no look draws leaves, and the frame no longer builds for its effects.
-    /// </summary>
-    private void End(Preloaded preloaded)
-    {
-        _scene.Release(preloaded);
-        if (preloaded.Effects == _preloadEffects) _preloadEffects = Handle<Pipeline>.None;
-    }
-
-    /// <summary>
-    /// The open of a domain being taken in was cancelled before all it draws was in: it is let go now, and whoever
-    /// waited is told; one already in is let go by whoever holds it.
-    /// </summary>
-    private void Cancel(Preload preload, CancellationToken cancel)
-    {
-        if (_preloads.Remove(preload))
-        {
-            End(preload.Preloaded);
-            preload.Done.TrySetCanceled(cancel);
-        }
-    }
-
-    /// <summary>
-    /// Checks each domain being taken in: each model that can be drawn, or failed and is drawn as the failure cube,
-    /// each material shown, and the frame built for the effects, tell how far it is; once all are in, whoever waits
-    /// for it goes on and spawns it.
-    /// </summary>
-    private void CheckPreloads(WorldCopy copy)
-    {
-        if (_preloads.Count == 0) return;
-
-        bool isBuilt = _graph.Current is not null && !_graph.IsBuilding && _graph.Effects == GetEffects(copy);
-        for (int i = _preloads.Count - 1; i >= 0; i--)
-        {
-            Preload preload = _preloads[i];
-            Preloaded preloaded = preload.Preloaded;
-            int total = 1 + preloaded.Models.Count + preloaded.Materials.Count;
-            int done = isBuilt ? 1 : 0;
-            foreach (Handle<Model> model in preloaded.Models)
-            {
-                if (_models.IsDrawable(model)) done++;
-            }
-
-            foreach (Handle<Material> material in preloaded.Materials)
-            {
-                if (_materials.IsShown(_materials.GetRow(material))) done++;
-            }
-
-            float share = (float)done / total;
-            if (share != preload.Reported)
-            {
-                preload.Reported = share;
-                preload.Progress.Report(share);
-            }
-
-            if (done == total)
-            {
-                _preloads.RemoveAt(i);
-                preload.Done.TrySetResult();
-            }
-        }
-    }
-
-    /// <summary>
-    /// A domain being taken in before it spawns: what it draws, how far that is as last told, and the task whoever
-    /// opens it awaits.
-    /// </summary>
-    private sealed class Preload(Preloaded preloaded, IProgress<float> progress)
-    {
-        internal Preloaded Preloaded { get; } = preloaded;
-
-        internal IProgress<float> Progress { get; } = progress;
-
-        internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        internal float Reported { get; set; } = -1;
-    }
-
-    /// <summary>
-    /// One thing told to the render thread: whichever of these it carries. An asset made again, to take in in place of
-    /// what it had; that the frame's listing is to be built again; the debug view named; a domain to begin taking in,
-    /// one taken in to let go, or one whose open was cancelled, with the token that cancelled it.
-    /// </summary>
-    private readonly record struct Arrival(Model? Model = null, Texture? Texture = null, Material? Material = null, Shader? Shader = null, bool Invalidates = false, string? DebugView = null, Preload? Begun = null, Preloaded? Ended = null, Preload? Cancelled = null, CancellationToken Cancel = default);
+    private readonly record struct Change(Model? Model = null, Texture? Texture = null, Material? Material = null, Shader? Shader = null, bool Invalidates = false, string? DebugView = null);
 }

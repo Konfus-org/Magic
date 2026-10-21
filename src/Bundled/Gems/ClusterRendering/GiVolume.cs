@@ -1,22 +1,20 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using Magic.Contexts.Gpu;
-using Magic.Interfaces;
 
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// Where the scene's field for global illumination lies this frame and what of it is made again: nested levels around
+/// Where the world's field for global illumination lies this frame and what of it is made again: nested levels around
 /// the main camera, each <see cref="Resolution"/> voxels a side and twice the last one's voxel, stored wrapping around
 /// so a level that moves with the camera keeps what it already holds and makes only the slabs it moved into, and around
-/// what moved (<see cref="Scene.Moved"/>) the bricks it touched. Each level has a grid of <see cref="Probes"/> probes a
+/// what moved (<see cref="Instances.Moved"/>) the bricks it touched. Each level has a grid of <see cref="Probes"/> probes a
 /// side, a share of them traced each frame: all of the finest level's every
 /// <see cref="ClusterRenderingSettings.GiUpdateEvery"/> frames, and of each coarser level, whose probes light what is
 /// further and larger, half as often. A probe blends what it was traced with into what it held by how long it waited,
 /// so light everywhere follows a change in about the same time whatever the frame rate and however seldom a level is
 /// traced (<see cref="Response"/>). Render thread.
 /// </summary>
-internal sealed class GiVolume : IDisposable
+internal sealed class GiVolume
 {
     /// <summary>
     /// Voxels a side of a level; the shaders' GiResolution.
@@ -36,7 +34,7 @@ internal sealed class GiVolume : IDisposable
     /// <summary>
     /// The most levels, which the volumes the passes make hold.
     /// </summary>
-    private const int MaxLevels = 5;
+    internal const int MaxLevels = 5;
 
     /// <summary>
     /// Voxels a distance reaches past a surface, beyond which the field says no more: what a voxel near something that
@@ -60,26 +58,21 @@ internal sealed class GiVolume : IDisposable
     private const float MostKept = 0.98f;
 
     private readonly Level[] _levels = new Level[MaxLevels];
+
+    /// <summary>
+    /// <c>GiLevels</c>: a <see cref="GpuGi"/>, then a <see cref="GpuGiLevel"/> for each level.
+    /// </summary>
+    private readonly GpuTable<GpuGiLevel> _rows;
     private uint _frame;
 
-    internal GiVolume(IGpu gpu)
+    internal GiVolume(GpuResources resources)
     {
-        Rows = new GpuArray<GpuGiLevel>(gpu, GpuBufferUsage.ComputeRead | GpuBufferUsage.GraphicsRead, 1 + MaxLevels);
+        _rows = resources.MakeTable<GpuGiLevel>(GpuContract.GiLevels, 1 + MaxLevels);
         for (int level = 0; level < MaxLevels; level++)
         {
             _levels[level] = new Level();
         }
     }
-
-    public void Dispose()
-    {
-        Rows.Dispose();
-    }
-
-    /// <summary>
-    /// <c>GiLevels</c>: a <see cref="GpuGi"/>, then a <see cref="GpuGiLevel"/> for each level.
-    /// </summary>
-    internal GpuArray<GpuGiLevel> Rows { get; }
 
     /// <summary>
     /// Rays traced this frame, every probe due's.
@@ -155,13 +148,12 @@ internal sealed class GiVolume : IDisposable
             Seed = _frame,
             Camera = camera,
         };
-        Rows.Set(0, Unsafe.As<GpuGi, GpuGiLevel>(ref header));
+        _rows.Set(0, Unsafe.As<GpuGi, GpuGiLevel>(ref header));
         for (int index = 0; index < MaxLevels; index++)
         {
-            Rows.Set(1 + index, _levels[index].GetRow());
+            _rows.Set(1 + index, _levels[index].GetRow());
         }
 
-        Rows.Flush();
         uint due = 0;
         for (int index = 0; index < levels; index++)
         {
@@ -203,6 +195,13 @@ internal sealed class GiVolume : IDisposable
         /// </summary>
         internal float Hysteresis { get; set; }
 
+        /// <summary>
+        /// The level's first brick and its last, by their place in bricks from the world's origin.
+        /// </summary>
+        private (int X, int Y, int Z) FirstBrick => (_origin.X / Brick, _origin.Y / Brick, _origin.Z / Brick);
+
+        private (int X, int Y, int Z) LastBrick => (FirstBrick.X + Bricks - 1, FirstBrick.Y + Bricks - 1, FirstBrick.Z + Bricks - 1);
+
         internal void Clear()
         {
             _dirty = default;
@@ -216,7 +215,7 @@ internal sealed class GiVolume : IDisposable
         internal void MarkAll((int X, int Y, int Z) origin)
         {
             _origin = origin;
-            MarkBricks((_origin.X / Brick, _origin.Y / Brick, _origin.Z / Brick), ((_origin.X / Brick) + Bricks - 1, (_origin.Y / Brick) + Bricks - 1, (_origin.Z / Brick) + Bricks - 1));
+            MarkBricks(FirstBrick, LastBrick);
         }
 
         /// <summary>
@@ -226,13 +225,14 @@ internal sealed class GiVolume : IDisposable
         {
             (int X, int Y, int Z) was = _origin;
             _origin = origin;
+            (int X, int Y, int Z) first = FirstBrick;
             for (int z = 0; z < Bricks; z++)
             {
                 for (int y = 0; y < Bricks; y++)
                 {
                     for (int x = 0; x < Bricks; x++)
                     {
-                        (int X, int Y, int Z) brick = ((_origin.X / Brick) + x, (_origin.Y / Brick) + y, (_origin.Z / Brick) + z);
+                        (int X, int Y, int Z) brick = (first.X + x, first.Y + y, first.Z + z);
                         if (!WasIn(brick, was)) MarkBrick(brick.X, brick.Y, brick.Z);
                     }
                 }
@@ -250,8 +250,10 @@ internal sealed class GiVolume : IDisposable
         /// </summary>
         internal void Mark(Vector3 min, Vector3 max)
         {
-            (int X, int Y, int Z) low = (Math.Max(FloorToBrick(min.X), _origin.X / Brick), Math.Max(FloorToBrick(min.Y), _origin.Y / Brick), Math.Max(FloorToBrick(min.Z), _origin.Z / Brick));
-            (int X, int Y, int Z) high = (Math.Min(FloorToBrick(max.X), ((_origin.X + Resolution) / Brick) - 1), Math.Min(FloorToBrick(max.Y), ((_origin.Y + Resolution) / Brick) - 1), Math.Min(FloorToBrick(max.Z), ((_origin.Z + Resolution) / Brick) - 1));
+            (int X, int Y, int Z) first = FirstBrick;
+            (int X, int Y, int Z) last = LastBrick;
+            (int X, int Y, int Z) low = (Math.Max(FloorToBrick(min.X), first.X), Math.Max(FloorToBrick(min.Y), first.Y), Math.Max(FloorToBrick(min.Z), first.Z));
+            (int X, int Y, int Z) high = (Math.Min(FloorToBrick(max.X), last.X), Math.Min(FloorToBrick(max.Y), last.Y), Math.Min(FloorToBrick(max.Z), last.Z));
             MarkBricks(low, high);
         }
 

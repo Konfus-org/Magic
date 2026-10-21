@@ -31,16 +31,16 @@ struct GiJob
 };
 
 // Where an instance stands in the world, from the origin the scene's field is placed about.
-float3 GiTranslation(GpuSceneInstance instance)
+float3 GiTranslation(GpuInstance instance)
 {
     return float3(instance.row0.w, instance.row1.w, instance.row2.w);
 }
 
 // The box a model's field covers where its instance stands: its middle and half its size along each axis.
-void GiWorldBox(GpuSceneInstance instance, GpuMeshField field, out float3 centre, out float3 extent)
+void GiWorldBox(GpuInstance instance, GpuMeshField field, out float3 centre, out float3 extent)
 {
     float3 half = field.size * 0.5;
-    centre = SceneDirection(instance, field.min + half) + GiTranslation(instance);
+    centre = InstanceDirection(instance, field.min + half) + GiTranslation(instance);
     extent = float3(dot(abs(instance.row0.xyz), half), dot(abs(instance.row1.xyz), half), dot(abs(instance.row2.xyz), half));
 }
 
@@ -55,10 +55,10 @@ void GiReachOf(GpuGiLevel level, float3 centre, float3 extent, out int3 low, out
 GiJob GiJobOf(uint index)
 {
     uint2 entry = LOAD(GiJobs, uint2, 1u + index);
-    GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, entry.x);
+    GpuInstance instance = LOAD(Instances, GpuInstance, entry.x);
     GiJob job;
     job.field = LOAD(MeshFields, GpuMeshField, LOAD(Models, GpuModel, instance.model).field);
-    job.material = SceneMaterial(instance, 0u);
+    job.material = InstanceMaterial(instance, 0u);
     job.level = entry.y;
     job.info = GiLevel(entry.y);
 

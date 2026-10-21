@@ -10,7 +10,7 @@
 // middle, lists the point and spot lights that reach it (Probes/GiLights), which light what the field holds there.
 //
 // What a function reads it declares by name, so a shader includes this and binds only what it uses: GiLevels always,
-// GiField to sample the field, GiIrradiance and GiDistance to sample the probes, GiLights and SceneLights to light what
+// GiField to sample the field, GiIrradiance and GiDistance to sample the probes, GiLights and WorldLights to light what
 // a ray hits by the world's lights.
 
 #ifndef MAGIC_GI_HLSLI
@@ -527,7 +527,7 @@ float3 GiIrradianceAt(float3 position, float3 normal, float3 view, out float hel
 }
 #endif
 
-#if defined(HAS_GiField) && defined(HAS_GiSurface) && defined(HAS_GiEmission) && defined(HAS_GiIrradiance) && defined(HAS_GiDistance) && defined(HAS_GiLights) && defined(HAS_SceneLights)
+#if defined(HAS_GiField) && defined(HAS_GiSurface) && defined(HAS_GiEmission) && defined(HAS_GiIrradiance) && defined(HAS_GiDistance) && defined(HAS_GiLights) && defined(HAS_WorldLights)
 #include "Lighting/Ibl.hlsli"
 #include "Lighting/Lights.hlsli"
 
@@ -565,7 +565,7 @@ float3 GiHitRadiance(GiHit hit, uint levels, float3 sh[9])
             break;
         }
 
-        GpuSceneLight light = LOAD(SceneLights, GpuSceneLight, slot);
+        GpuWorldLight light = LOAD(WorldLights, GpuWorldLight, slot);
         float3 position = light.position;
         float3 toLight = position - hit.position;
         float3 l = toLight * rsqrt(max(dot(toLight, toLight), 1e-8));

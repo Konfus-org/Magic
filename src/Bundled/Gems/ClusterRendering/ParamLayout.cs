@@ -133,12 +133,12 @@ internal sealed partial class ParamLayout
 
             ParamField field = new(name, type, 0, new MaterialParam());
             int align = field.Components switch { 1 => 4, 2 => 8, _ => 16 };
-            offset = (offset + align - 1) / align * align;
+            offset = RoundUp(offset, align);
             fields.Add(field with { Offset = offset, Default = GetDefault(field, member.Groups["default"].Success ? member.Groups["default"].Value.Trim() : null), Role = member.Groups["role"].Value });
             offset += field.Size;
         }
 
-        int size = (offset + 15) / 16 * 16;
+        int size = RoundUp(offset, 16);
         if (size > maxBytes)
         {
             return Result.Failure<ParamLayout?>($"{structName} packs to {size} bytes, past the {maxBytes} it may.");
@@ -206,7 +206,7 @@ internal sealed partial class ParamLayout
         foreach (ParamField field in Fields)
         {
             MaterialParam value = values.TryGetValue(field.Name, out MaterialParam? given) ? given : field.Default;
-            Vector3 rgb = field.Type == ParamType.Color ? new Vector3(value.R, value.G, value.B) : new Vector3(value.X, value.Y, value.Z);
+            Vector3 rgb = new(GetComponent(field, value, 0), GetComponent(field, value, 1), GetComponent(field, value, 2));
             switch (field.Role)
             {
                 case "GiColor":
@@ -332,9 +332,7 @@ internal sealed partial class ParamLayout
     {
         for (int component = 0; component < field.Components; component++)
         {
-            float number = field.Type == ParamType.Color
-                ? component switch { 0 => value.R, 1 => value.G, 2 => value.B, _ => value.A }
-                : component switch { 0 => value.X, 1 => value.Y, 2 => value.Z, _ => value.W };
+            float number = GetComponent(field, value, component);
             Span<byte> word = destination[(component * 4)..];
             if (field.IsFloat)
             {
@@ -350,6 +348,21 @@ internal sealed partial class ParamLayout
             }
         }
     }
+
+    /// <summary>
+    /// A component of a member's value: r to a for a Color, x to w for the rest.
+    /// </summary>
+    private static float GetComponent(ParamField field, MaterialParam value, int component)
+    {
+        return field.Type == ParamType.Color
+            ? component switch { 0 => value.R, 1 => value.G, 2 => value.B, _ => value.A }
+            : component switch { 0 => value.X, 1 => value.Y, 2 => value.Z, _ => value.W };
+    }
+
+    /// <summary>
+    /// <paramref name="value"/> rounded up to a whole number of <paramref name="multiple"/>.
+    /// </summary>
+    private static int RoundUp(int value, int multiple) => (value + multiple - 1) / multiple * multiple;
 
     /// <summary>
     /// The declared default as a param: the numbers of its initialiser in order (into r to a for a Color, and one

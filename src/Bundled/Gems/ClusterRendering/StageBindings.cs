@@ -75,7 +75,7 @@ internal sealed class StageBindings
         {
             if (kinds.TryGetValue(info.Name, out GpuBindingKind kind) && kind is GpuBindingKind.Sampled or GpuBindingKind.StorageTexture or GpuBindingKind.StorageBuffer)
             {
-                List<BoundName> list = kind == GpuBindingKind.Sampled ? bound.Sampled : kind == GpuBindingKind.StorageTexture ? bound.StorageReads : bound.Buffers;
+                List<BoundName> list = bound.GetList(kind);
                 list.Add(new BoundName(new PassBinding(info, 0, 0, GpuContents.Keep, false), (uint)list.Count));
             }
         }
@@ -84,7 +84,7 @@ internal sealed class StageBindings
         {
             if (kinds.TryGetValue(write.Info.Name, out GpuBindingKind kind) && kind is GpuBindingKind.ReadWriteStorageTexture or GpuBindingKind.ReadWriteStorageBuffer)
             {
-                List<BoundName> list = kind == GpuBindingKind.ReadWriteStorageTexture ? bound.TextureWrites : bound.BufferWrites;
+                List<BoundName> list = bound.GetList(kind);
                 list.Add(new BoundName(write, (uint)list.Count));
             }
         }

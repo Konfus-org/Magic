@@ -1,5 +1,5 @@
 // What a renderer drawing clusters culls its lights with (Shaders/Lights/): the world's lights are a table on the GPU
-// (SceneLights), and each view finds those that reach it, sorts them by the z-bin their centre is in, a count and a
+// (WorldLights), and each view finds those that reach it, sorts them by the z-bin their centre is in, a count and a
 // prefix per bin, which Drobot's z-bins only need (Drobot 2017, "Improved Culling for Tiled and Clustered Rendering"),
 // writes them nearest first as the lighting reads them (Lights), then gives each z-bin the first and last that can reach
 // its depths, and each tile a bit for each that reaches it, each light setting the bits of the tiles it covers.

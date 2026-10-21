@@ -10,7 +10,7 @@
         { "name": "ShadowJobs", "kind": "buffer", "type": "uint4", "stride": 16, "per": "jobs" },
         { "name": "ShadowPieces", "kind": "buffer", "type": "uint3", "stride": 12, "per": "pieces" },
         { "name": "ShadowCandidates", "kind": "buffer", "type": "uint", "stride": 4, "per": "shadowCandidates" },
-        { "name": "ShadowLightGroups", "kind": "buffer", "type": "uint2", "stride": 8, "per": "sceneLights" }
+        { "name": "ShadowLightGroups", "kind": "buffer", "type": "uint2", "stride": 8, "per": "worldLights" }
     ],
     "writes": [ { "name": "ShadowTables" } ],
     "dispatch": { "per": "lightEntries" }

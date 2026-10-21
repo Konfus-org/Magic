@@ -7,18 +7,18 @@
 [numthreads(64, 1, 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= CountOf(SceneLights, GpuSceneLightBytes))
+    if (id.x >= CountOf(WorldLights, GpuWorldLightBytes))
     {
         return;
     }
 
-    GpuSceneLight light = LOAD(SceneLights, GpuSceneLight, id.x);
-    if ((light.flags & SceneLightLive) == 0u)
+    GpuWorldLight light = LOAD(WorldLights, GpuWorldLight, id.x);
+    if ((light.flags & WorldLightLive) == 0u)
     {
         return;
     }
 
-    float3 centre = SceneLightPosition(light);
+    float3 centre = WorldLightPosition(light);
     if (!SphereInView(centre, light.range))
     {
         return;

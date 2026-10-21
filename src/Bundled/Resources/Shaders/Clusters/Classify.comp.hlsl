@@ -24,9 +24,9 @@ void main(uint3 tile : SV_GroupID, uint3 id : SV_DispatchThreadID, uint thread :
     if (visible != 0u)
     {
         uint3 piece = VisiblePieces.Load3(((visible - 1u) >> 5) * 12u);
-        GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, piece.x);
+        GpuInstance instance = LOAD(Instances, GpuInstance, piece.x);
         uint slot = (piece.y & CardBit) != 0u ? LOAD(Cards, GpuCard, piece.y & ~CardBit).slot : ClusterSlot(LOAD(Clusters, GpuCluster, piece.y >> 2));
-        uint material = SceneMaterial(instance, slot);
+        uint material = InstanceMaterial(instance, slot);
 
         // A row past the materials reads nothing meant: raised, and binned with the first.
         bool isInRange = material < CountOf(MaterialBins, 4u);

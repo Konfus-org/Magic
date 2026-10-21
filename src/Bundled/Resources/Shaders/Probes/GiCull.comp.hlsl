@@ -6,12 +6,12 @@
 [numthreads(64, 1, 1)]
 void main(uint3 thread : SV_DispatchThreadID)
 {
-    if (thread.x >= CountOf(Instances, GpuSceneInstanceBytes))
+    if (thread.x >= CountOf(Instances, GpuInstanceBytes))
     {
         return;
     }
 
-    GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, thread.x);
+    GpuInstance instance = LOAD(Instances, GpuInstance, thread.x);
     if (instance.maxScale <= 0.0)
     {
         return;

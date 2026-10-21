@@ -29,10 +29,17 @@ static const uint ArgsClusterCullSecond = 4u;
 static const uint ArgsPieceWriteSecond = 5u;
 
 // Raster bins: the two that do not clip, single-sided then double-sided; a surface's own clusters' from 2, and its
-// cards' CardBinOffset after (the renderer's Materials.cs). BinArgs holds a phase's 256 after another's.
+// cards' CardBinOffset after (the renderer's GpuCache.cs). BinArgs holds a phase's 256 after another's.
 static const uint RasterBins = 256u;
 static const uint FixedBins = 2u;
 static const uint CardBinOffset = 126u;
+
+// A material row's MaterialBins word, as the renderer's GpuCache.cs writes it: its raster bin in the low byte, its
+// resolve bin in the third, and these.
+static const uint BinMasked = 1u << 8;
+static const uint BinDoubleSided = 1u << 9;
+static const uint BinTransparent = 1u << 10;
+static const uint BinReady = 1u << 11;
 
 // Clusters a culling group of 64 threads tests, one each: a job.
 static const uint JobClusters = 64u;
@@ -129,14 +136,14 @@ uint BinOf(uint bins, bool dissolves, bool isCard)
         return own + CardBinOffset;
     }
 
-    bool clips = (bins & (1u << 8)) != 0u || dissolves;
-    return clips ? own : ((bins & (1u << 9)) != 0u ? 1u : 0u);
+    bool clips = (bins & BinMasked) != 0u || dissolves;
+    return clips ? own : ((bins & BinDoubleSided) != 0u ? 1u : 0u);
 }
 
 // Whether a material row is in and drawn by the visibility buffer: not still loading, nor transparent.
 bool IsDrawnOpaque(uint bins)
 {
-    return (bins & (1u << 11)) != 0u && (bins & (1u << 10)) == 0u;
+    return (bins & BinReady) != 0u && (bins & BinTransparent) == 0u;
 }
 
 #endif

@@ -1,26 +1,24 @@
 using System.Numerics;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
-using Magic.Contexts.Gpu;
-using Magic.Interfaces;
 using Magic.Services;
 
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// The scene as the GPU draws it, kept up to date from the <see cref="Snapshot"/>'s changes rather than rebuilt: a row
-/// per entity slot (<see cref="GpuSceneInstance"/>) naming its model's row and its material slots' rows, which are made
-/// the first time they are asked for and never change as what they name loads, so an instance is written when it
-/// changes, once more when what it draws can be drawn, and at no other time. Everything else, which clusters of it to
-/// draw and how finely, whether it is seen at all, how far through a fade it is, the GPU works out each frame from these
-/// rows. Render thread.
+/// The world's instances as the GPU draws them, kept up to date from the copy's changes
+/// rather than rebuilt: a row per entity slot (<see cref="GpuInstance"/>) naming its model's row and its material
+/// slots' rows, which are made the first time they are asked for and never change as what they name loads, so an
+/// instance is written when it changes, once more when what it draws can be drawn, and at no other time. Everything
+/// else, which clusters of it to draw and how finely, whether it is seen at all, how far through a fade it is, the GPU
+/// works out each frame from these rows. Render thread.
 /// <para>
 /// An instance's row holds where it was the frame before as well, for velocity: when it changes the old place is kept as
 /// that, and the frame after, unless it changed again, its row is written once more with the two the same. A fade is
 /// written as the time it started, which the GPU dissolves it by. Transparent surfaces
 /// are drawn forward, farthest first, so the instances with any are kept apart for the views to sort
-/// (<see cref="Transparent"/>). A model or material no instance uses any more is let go as the frame's changes are taken
-/// in, so what is not drawn is not kept.
+/// (<see cref="Transparent"/>). A look holds its model and materials while an instance draws it
+/// (<see cref="GpuResources.Record(Handle{Model})"/>) and lets them go when none does, so what is not drawn is not kept.
 /// </para>
 /// <para>
 /// The instances that draw the same model with the same materials share a <see cref="Look"/>, and what follows from it,
@@ -30,14 +28,14 @@ namespace Magic.ClusterRendering;
 /// </para>
 /// <para>
 /// Nothing pops in. A look is drawn once it can be drawn as it should be, its model and its cards' atlases in and each
-/// of its materials drawn (<see cref="ClusterPool.IsDrawable"/>, <see cref="Materials.IsShown"/>), and from then on;
-/// until it is, its instances' rows are empty, so nothing of them is drawn, casts or is in the field global illumination
-/// traces. One that waited for it dissolves into view over the shaders' <c>FadeSeconds</c> from when it could be
-/// drawn, and what is made from the scene and kept is made again where it stands; one whose look is drawn already
-/// appears as it is, as it was made to.
+/// of its materials drawn (<see cref="GpuResources.IsDrawable(Handle{Model})"/>,
+/// <see cref="GpuResources.IsShown"/>), and from then on; until it is, its instances' rows are empty, so
+/// nothing of them is drawn, casts or is in the field global illumination traces. One that waited for it dissolves into
+/// view over the shaders' <c>FadeSeconds</c> from when it could be drawn, and what is made from the instances and kept
+/// is made again where it stands; one whose look is drawn already appears as it is, as it was made to.
 /// </para>
 /// </summary>
-internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materials materials) : IDisposable
+internal sealed class Instances(GpuResources resources, FailureHandler failures, Assets assets)
 {
     /// <summary>
     /// Rows changed in a frame past which they are worked out on the thread pool's threads, as a domain arriving changes
@@ -46,9 +44,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     private const int ParallelRows = 4096;
 
     /// <summary>
-    /// The instances drawn as the failure, by slot: why, in a few words, and what failed, by its path.
+    /// An instance a row, at its entity's slot: the frame's <c>Instances</c>.
     /// </summary>
-    private readonly Dictionary<int, (string Why, string What)> _failures = [];
+    private readonly GpuTable<GpuInstance> _table = resources.MakeTable<GpuInstance>(GpuContract.Instances, 1024);
 
     /// <summary>
     /// What the instances drawing each look share, while any does.
@@ -56,8 +54,8 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     private readonly Dictionary<Look, LookEntry> _looks = [];
 
     /// <summary>
-    /// The looks an instance stopped drawing this frame: let go at its end, with their models and materials when no other
-    /// look draws them, unless another instance took them up.
+    /// The looks an instance stopped drawing this frame: let go at its end, with their holds on their models and
+    /// materials, unless another instance took them up.
     /// </summary>
     private readonly HashSet<Look> _droppedLooks = [];
 
@@ -74,7 +72,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// set together once every change is taken in.
     /// </summary>
     private readonly List<(int Slot, bool KeepsLast)> _changed = [];
-    private GpuSceneInstance[] _rows = [];
+    private GpuInstance[] _rows = [];
     private Action<int>? _workOut;
 
     /// <summary>
@@ -83,29 +81,9 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     private readonly List<LookEntry> _nearer = [];
 
     /// <summary>
-    /// The models and materials some look still draws, gathered when one may be let go (<see cref="GatherDrawn"/>).
+    /// The slots there are, a GPU thread each where culling runs over the instances.
     /// </summary>
-    private readonly HashSet<Handle<Model>> _drawnModels = [];
-    private readonly HashSet<Handle<Material>> _drawnMaterials = [];
-
-    /// <summary>
-    /// The models and materials taken in for a domain before it spawned, by how many such holds keep each
-    /// (<see cref="Hold"/>): kept though no look draws them yet.
-    /// </summary>
-    private readonly Dictionary<Handle<Model>, int> _heldModels = [];
-    private readonly Dictionary<Handle<Material>, int> _heldMaterials = [];
-
-    public void Dispose()
-    {
-        Instances.Dispose();
-    }
-
-    internal GpuArray<GpuSceneInstance> Instances { get; } = new(gpu, GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead, 1024);
-
-    /// <summary>
-    /// The slots there are, a GPU thread each where culling runs over the scene.
-    /// </summary>
-    internal int Capacity => Instances.Capacity;
+    internal int Capacity => _table.Capacity;
 
     /// <summary>
     /// The slots of the instances with a transparent surface, which the views sort and draw forward.
@@ -113,13 +91,8 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     internal HashSet<int> Transparent { get; } = [];
 
     /// <summary>
-    /// The instances drawn as the failure, by slot: why, in a few words, and what failed, by its path.
-    /// </summary>
-    internal IReadOnlyDictionary<int, (string Why, string What)> Failures => _failures;
-
-    /// <summary>
     /// This frame's spheres, each around an instance where it was or where it is, that moved, changed model, came, went,
-    /// could be drawn at last, or whose model or a material came in again: where what is made from the scene and kept,
+    /// could be drawn at last, or whose model or a material came in again: where what is made from the instances and kept,
     /// shadows and the field global illumination traces, is made again.
     /// </summary>
     internal IReadOnlyList<MovedSphere> Moved => _moved;
@@ -130,68 +103,15 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     internal Vector3 GetPosition(int slot) => _entries[slot].Transform.Position;
 
     /// <summary>
-    /// Keeps the models and materials of <paramref name="preloaded"/>, taken in for a domain before it spawns, though
-    /// no look draws them yet, until <see cref="Release"/> lets them go as many times.
-    /// </summary>
-    internal void Hold(Preloaded preloaded)
-    {
-        foreach (Handle<Model> model in preloaded.Models)
-        {
-            _heldModels[model] = _heldModels.GetValueOrDefault(model) + 1;
-        }
-
-        foreach (Handle<Material> material in preloaded.Materials)
-        {
-            _heldMaterials[material] = _heldMaterials.GetValueOrDefault(material) + 1;
-        }
-    }
-
-    /// <summary>
-    /// Lets go one hold of <paramref name="preloaded"/>'s models and materials: what no hold keeps and no look draws
-    /// leaves the pool and the materials, as a dropped look's does.
-    /// </summary>
-    internal void Release(Preloaded preloaded)
-    {
-        GatherDrawn();
-        foreach (Handle<Model> model in preloaded.Models)
-        {
-            if (!_heldModels.TryGetValue(model, out int holds)) continue;
-
-            if (holds > 1)
-            {
-                _heldModels[model] = holds - 1;
-                continue;
-            }
-
-            _heldModels.Remove(model);
-            if (!_drawnModels.Contains(model)) models.Release(model);
-        }
-
-        foreach (Handle<Material> material in preloaded.Materials)
-        {
-            if (!_heldMaterials.TryGetValue(material, out int holds)) continue;
-
-            if (holds > 1)
-            {
-                _heldMaterials[material] = holds - 1;
-                continue;
-            }
-
-            _heldMaterials.Remove(material);
-            if (!_drawnMaterials.Contains(material)) materials.Release(material);
-        }
-    }
-
-    /// <summary>
     /// The model and materials an instance draws.
     /// </summary>
     internal Renderer GetRenderer(int slot) => _entries[slot].Renderer;
 
     /// <summary>
-    /// Takes in what changed since the last frame, then uploads it. <paramref name="time"/> is the frame's, which a fade
-    /// starts at; <paramref name="player"/> where detail is wanted first.
+    /// Takes in what changed since the last frame into the instances' table. <paramref name="time"/> is the frame's,
+    /// which a fade starts at; <paramref name="player"/> where detail is wanted first.
     /// </summary>
-    internal void Update(WorldCopy copy, float time, Vector3 player)
+    internal void Update(Renderables copy, float time, Vector3 player)
     {
         Delta<InstanceCopy> instances = copy.Instances;
         if (_entries.Length < instances.Length) Array.Resize(ref _entries, instances.Length);
@@ -206,8 +126,8 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             ref InstanceEntry entry = ref _entries[slot];
             if (entry.IsLive)
             {
-                GpuSceneInstance row = Instances.Rows[slot];
-                Instances.Set(slot, row with { PrevRow0 = row.Row0, PrevRow1 = row.Row1, PrevRow2 = row.Row2 });
+                GpuInstance row = _table.Rows[slot];
+                _table.Set(slot, row with { PrevRow0 = row.Row0, PrevRow1 = row.Row1, PrevRow2 = row.Row2 });
             }
         }
 
@@ -226,7 +146,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         _moving.AddRange(_stillMoving);
         Recheck(time);
         LetGo();
-        Instances.Flush();
     }
 
     private void Change(int slot, in InstanceCopy instance, float time, Vector3 player)
@@ -262,14 +181,14 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// Asks for each changed look's model as near as its nearest changed instance, which orders what the pool takes in
+    /// Asks for each changed look's model as near as its nearest changed instance, which orders what the cache takes in
     /// first, then works out every changed row, on the thread pool's threads when there are many, and sets them.
     /// </summary>
     private void WriteChanged()
     {
         foreach (LookEntry look in _nearer)
         {
-            look.ModelRow = models.GetRow(look.HasFailed ? models.Failed : look.Look.Model, look.Nearest);
+            resources.Prioritize(look.HasFailed ? failures.Model : look.Look.Model, look.Nearest);
             look.Nearest = float.MaxValue;
         }
 
@@ -293,7 +212,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 
         for (int i = 0; i < _changed.Count; i++)
         {
-            Instances.Set(_changed[i].Slot, _rows[i]);
+            _table.Set(_changed[i].Slot, _rows[i]);
         }
 
         _changed.Clear();
@@ -313,7 +232,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// moved, else its own; its model's row and its material slots', its look's; and how it fades, in from when its look
     /// could be drawn when it waited for that. Empty while its look cannot be drawn yet.
     /// </summary>
-    private GpuSceneInstance MakeRow(int slot, in InstanceEntry entry, bool keepsLast)
+    private GpuInstance MakeRow(int slot, in InstanceEntry entry, bool keepsLast)
     {
         if (entry.Look is not { IsReady: true } look) return default;
 
@@ -323,18 +242,18 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         Vector3 scale = Vector3.Abs(transform.Scale);
         bool isMirrored = transform.Scale.X * transform.Scale.Y * transform.Scale.Z < 0;
         bool hasWaited = look.ReadyAt > entry.FadeStart;
-        GpuSceneInstance row = new()
+        GpuInstance row = new()
         {
             Row0 = new Vector4(linear.M11, linear.M21, linear.M31, position.X),
             Row1 = new Vector4(linear.M12, linear.M22, linear.M32, position.Y),
             Row2 = new Vector4(linear.M13, linear.M23, linear.M33, position.Z),
             MaxScale = MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z)),
-            Flags = (uint)((isMirrored ? GpuSceneFlags.Mirrored : GpuSceneFlags.None)
-                | (hasWaited ? GpuSceneFlags.FadeIn : GpuSceneFlags.None)),
+            Flags = (uint)((isMirrored ? GpuInstanceFlags.Mirrored : GpuInstanceFlags.None)
+                | (hasWaited ? GpuInstanceFlags.FadeIn : GpuInstanceFlags.None)),
             FadeStart = hasWaited ? look.ReadyAt : entry.FadeStart,
         };
 
-        GpuSceneInstance last = keepsLast ? Instances.Rows[slot] : row;
+        GpuInstance last = keepsLast ? _table.Rows[slot] : row;
         row.PrevRow0 = last.Row0;
         row.PrevRow1 = last.Row1;
         row.PrevRow2 = last.Row2;
@@ -344,14 +263,16 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// The entry of what the instances drawing <paramref name="look"/> share, worked out the first time one does, with
-    /// <paramref name="slot"/> now among them and counted as transparent or failed as they are.
+    /// The entry of what the instances drawing <paramref name="look"/> share, worked out the first time one does, its
+    /// model and materials held from then, with <paramref name="slot"/> now among them and counted as transparent or
+    /// failed as they are.
     /// </summary>
     private LookEntry Take(int slot, Look look, float time)
     {
         if (!_looks.TryGetValue(look, out LookEntry? entry))
         {
             entry = new LookEntry(look);
+            Hold(look);
             Resolve(entry, time);
             _looks[look] = entry;
         }
@@ -370,7 +291,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     private void Resolve(LookEntry entry, float time)
     {
         Look look = entry.Look;
-        bool hasFailed = models.HasFailed(look.Model);
+        bool hasFailed = resources.HasFailed(look.Model);
         (string Why, string What)? failure = hasFailed ? ("Model does not load", assets.GetPath(look.Model) ?? string.Empty) : null;
         bool isTransparent = false;
         bool areShown = true;
@@ -378,29 +299,27 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
         for (int i = 0; i < MaterialSlots.Capacity; i++)
         {
             Handle<Material> material = look.Materials[i];
-            bool isSky = !hasFailed && materials.IsSky(material);
-            Handle<Material> drawn = hasFailed ? materials.GetFailureMaterial(FailureType.Mesh) : isSky ? materials.GetFailureMaterial(FailureType.Shader) : material;
-            int materialRow = materials.GetRow(drawn);
-            rows[i >> 1] |= (uint)materialRow << ((i & 1) * 16);
-            areShown &= materials.IsShown(materialRow);
-            isTransparent |= !hasFailed && !isSky && materials.Get(material) is { Type: MaterialType.Transparent };
+            bool isSky = !hasFailed && resources.IsSky(material);
+            Handle<Material> drawn = hasFailed ? failures.GetMaterial(FailureType.Mesh) : isSky ? failures.GetMaterial(FailureType.Shader) : material;
+            rows[i >> 1] |= (uint)resources.GetRow(drawn) << ((i & 1) * 16);
+            areShown &= resources.IsShown(drawn);
+            isTransparent |= !hasFailed && !isSky && resources.Get(material) is { Type: MaterialType.Transparent };
             if (isSky)
             {
                 failure ??= ("Sky material on a mesh", assets.GetPath(material) ?? string.Empty);
             }
-            else if (!hasFailed && materials.GetFailure(material) is { } why)
+            else if (!hasFailed && resources.GetFailure(material) is { } why)
             {
                 failure ??= (why, assets.GetPath(material) ?? string.Empty);
             }
         }
 
         entry.HasFailed = hasFailed;
-        entry.ModelRow = models.GetRow(hasFailed ? models.Failed : look.Model, float.MaxValue);
-
+        entry.ModelRow = resources.GetRow(hasFailed ? failures.Model : look.Model);
         entry.Rows = rows;
         entry.IsTransparent = isTransparent;
         entry.Failure = failure;
-        if (!entry.IsReady && areShown && models.IsDrawable(look.Model))
+        if (!entry.IsReady && areShown && resources.IsDrawable(look.Model))
         {
             entry.IsReady = true;
             entry.ReadyAt = time;
@@ -415,7 +334,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     {
         if (look.IsTransparent && look.IsReady) Transparent.Add(slot);
 
-        if (look.Failure is { } failure) _failures[slot] = failure;
+        if (look.Failure is { } failure) failures.Mark(slot, failure);
     }
 
     private void Remove(int slot)
@@ -425,7 +344,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 
         Forget(slot, ref entry);
         entry = default;
-        Instances.Set(slot, default);
+        _table.Set(slot, default);
     }
 
     /// <summary>
@@ -441,7 +360,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 
     private MovedSphere? GetSphere(Transform transform, Handle<Model> model)
     {
-        Vector4 bounds = models.GetBounds(model);
+        Vector4 bounds = resources.GetBounds(model);
         if (bounds.W <= 0) return null;
 
         Vector3 centre = transform.Position + Vector3.Transform(new Vector3(bounds.X, bounds.Y, bounds.Z) * transform.Scale, transform.Rotation);
@@ -460,13 +379,13 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     /// </summary>
     private void Recheck(float time)
     {
-        if (models.Changed.Count == 0 && materials.Changed.Count == 0) return;
+        if (resources.ChangedModels.Count == 0 && resources.ChangedMaterials.Count == 0) return;
 
-        bool hasFailureChanged = models.Changed.Contains(models.Failed) || materials.Changed.Contains(materials.GetFailureMaterial(FailureType.Mesh));
+        bool hasFailureChanged = resources.ChangedModels.Contains(failures.Model) || resources.ChangedMaterials.Contains(failures.GetMaterial(FailureType.Mesh));
         foreach (LookEntry entry in _looks.Values)
         {
             // A look whose model failed draws the failure model and its material, so it is worked out again as they come in.
-            if (!models.Changed.Contains(entry.Look.Model) && !(entry.HasFailed && hasFailureChanged) && !IsDrawingAnyOf(entry.Look, materials.Changed))
+            if (!resources.ChangedModels.Contains(entry.Look.Model) && !(entry.HasFailed && hasFailureChanged) && !IsDrawingAnyOf(entry.Look, resources.ChangedMaterials))
             {
                 continue;
             }
@@ -486,16 +405,16 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
             foreach (int slot in entry.Slots)
             {
                 Transparent.Remove(slot);
-                _failures.Remove(slot);
+                failures.Unmark(slot);
                 Classify(slot, entry);
-                if (isRowChanged) Instances.Set(slot, MakeRow(slot, _entries[slot], keepsLast: false));
+                if (isRowChanged) _table.Set(slot, MakeRow(slot, _entries[slot], keepsLast: false));
 
                 if (isRemade && GetSphere(_entries[slot].Transform, entry.Look.Model) is { } sphere) _moved.Add(sphere);
             }
         }
 
-        models.Changed.Clear();
-        materials.Changed.Clear();
+        resources.ChangedModels.Clear();
+        resources.ChangedMaterials.Clear();
     }
 
     /// <summary>
@@ -514,35 +433,20 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// Lets go of the looks no instance draws any more, and of their models and materials when no other look draws them,
-    /// so what is not drawn is not kept: they load again when an instance takes them up again.
+    /// Lets go of the looks no instance draws any more, and of their holds on their models and materials, which the
+    /// cache lets leave once nothing else holds them: they load again when an instance takes them up again.
     /// </summary>
     private void LetGo()
     {
-        if (_droppedLooks.Count == 0) return;
-
         foreach (Look dropped in _droppedLooks)
         {
-            if (_looks.TryGetValue(dropped, out LookEntry? entry) && entry.Slots.Count == 0) _looks.Remove(dropped);
-        }
+            if (!_looks.TryGetValue(dropped, out LookEntry? entry) || entry.Slots.Count > 0) continue;
 
-        GatherDrawn();
-        foreach (Look dropped in _droppedLooks)
-        {
-            if (_looks.ContainsKey(dropped)) continue;
-
-            if (!_drawnModels.Contains(dropped.Model) && !_heldModels.ContainsKey(dropped.Model))
-            {
-                models.Release(dropped.Model);
-            }
-
+            _looks.Remove(dropped);
+            resources.Release(dropped.Model);
             for (int i = 0; i < MaterialSlots.Capacity; i++)
             {
-                Handle<Material> material = dropped.Materials[i];
-                if (!_drawnMaterials.Contains(material) && !_heldMaterials.ContainsKey(material))
-                {
-                    materials.Release(material);
-                }
+                resources.Release(dropped.Materials[i]);
             }
         }
 
@@ -550,19 +454,14 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// What the looks left draw, gathered once: a domain going away drops thousands of looks in one frame.
+    /// Holds a new look's model and materials while an instance draws it.
     /// </summary>
-    private void GatherDrawn()
+    private void Hold(Look look)
     {
-        _drawnModels.Clear();
-        _drawnMaterials.Clear();
-        foreach (Look look in _looks.Keys)
+        resources.Record(look.Model);
+        for (int i = 0; i < MaterialSlots.Capacity; i++)
         {
-            _drawnModels.Add(look.Model);
-            for (int i = 0; i < MaterialSlots.Capacity; i++)
-            {
-                _drawnMaterials.Add(look.Materials[i]);
-            }
+            resources.Record(look.Materials[i]);
         }
     }
 
@@ -573,7 +472,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     {
         if (!entry.IsLive || entry.Look is not { } look) return;
 
-        _failures.Remove(slot);
+        failures.Unmark(slot);
         Transparent.Remove(slot);
         look.Slots.Remove(slot);
         if (look.Slots.Count == 0) _droppedLooks.Add(look.Look);
@@ -617,7 +516,7 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
     }
 
     /// <summary>
-    /// An instance as the scene holds it: where it is and what it draws, its look's entry, and when its fade started.
+    /// An instance as these hold it: where it is and what it draws, its look's entry, and when its fade started.
     /// </summary>
     private struct InstanceEntry
     {
@@ -630,66 +529,6 @@ internal sealed class Scene(IGpu gpu, Assets assets, ClusterPool models, Materia
 }
 
 /// <summary>
-/// A sphere around an instance where it was or is, where what is made from the scene and kept is made again.
+/// A sphere around an instance where it was or is, where what is made from the instances and kept is made again.
 /// </summary>
 internal readonly record struct MovedSphere(Vector3 Centre, float Radius);
-
-/// <summary>
-/// What the renderer takes in for a domain before it spawns (<see cref="IPreloader"/>): the models and materials its
-/// prefabs draw, the sky's among them, and the effects they name, none when they name none.
-/// </summary>
-internal sealed record Preloaded(HashSet<Handle<Model>> Models, HashSet<Handle<Material>> Materials, Handle<Pipeline> Effects)
-{
-    /// <summary>
-    /// What <paramref name="prefabs"/> draw, from their parts and the parts under them. Any thread.
-    /// </summary>
-    internal static Preloaded Of(IReadOnlyList<Prefab> prefabs)
-    {
-        HashSet<Handle<Model>> models = [];
-        HashSet<Handle<Material>> materials = [];
-        Handle<Pipeline> effects = Handle<Pipeline>.None;
-        foreach (Prefab prefab in prefabs)
-        {
-            Add(prefab.Parts);
-        }
-
-        return new Preloaded(models, materials, effects);
-
-        void Add(IReadOnlyList<PrefabPart> parts)
-        {
-            foreach (PrefabPart part in parts)
-            {
-                foreach (IComponent component in part.Components)
-                {
-                    AddComponent(component);
-                }
-
-                Add(part.Children);
-            }
-        }
-
-        void AddComponent(IComponent component)
-        {
-            switch (component)
-            {
-                case Renderer renderer:
-                    if (renderer.Model != Handle<Model>.None) models.Add(renderer.Model);
-
-                    for (int i = 0; i < MaterialSlots.Capacity; i++)
-                    {
-                        if (renderer.Materials[i] != Handle<Material>.None) materials.Add(renderer.Materials[i]);
-                    }
-
-                    break;
-                case Sky { Material: var sky } when sky != Handle<Material>.None:
-                    materials.Add(sky);
-                    break;
-                case PostProcessing { Effects: var named } when named != Handle<Pipeline>.None:
-                    effects = named;
-                    break;
-                default:
-                    break;
-            }
-        }
-    }
-}

@@ -60,7 +60,7 @@ uint KindOfKey(uint key)
 // waited would light them unshadowed. Its whole pages come after every sun level.
 uint LightClass(uint key)
 {
-    return KindOfKey(key) == 1u ? 0u : 1u + SunMaxLevels + BucketOf(SceneLightPosition(LOAD(SceneLights, GpuSceneLight, LightSlotOfKey(key))));
+    return KindOfKey(key) == 1u ? 0u : 1u + SunMaxLevels + BucketOf(WorldLightPosition(LOAD(WorldLights, GpuWorldLight, LightSlotOfKey(key))));
 }
 
 // Whether an entry is wanted this frame and has a page waiting to be drawn.
@@ -126,7 +126,7 @@ GpuShadowView SunView(GpuSunClipmap sun, GpuSunLevel row, uint level, int2 page)
 GpuShadowView LightView(uint key)
 {
     uint slot = LightSlotOfKey(key);
-    float3 light = SceneLightPosition(LOAD(SceneLights, GpuSceneLight, slot));
+    float3 light = WorldLightPosition(LOAD(WorldLights, GpuWorldLight, slot));
     float3 across;
     float3 upward;
     float3 forward;
@@ -463,13 +463,13 @@ void main(uint thread : SV_GroupIndex)
             continue;
         }
 
-        GpuSceneLight light = LOAD(SceneLights, GpuSceneLight, slot);
+        GpuWorldLight light = LOAD(WorldLights, GpuWorldLight, slot);
         GpuShadowGroup group;
         group.target = slot | LightOwner;
         group.faceMips = ShadowLightGroups.Load(slot * 8u + 4u);
         group.texel = 0.0;
         group.view = NoView;
-        group.light = SceneLightPosition(light);
+        group.light = WorldLightPosition(light);
         group.range = light.range;
         uint at;
         InterlockedAdd(Groups, 1u, at);
@@ -484,7 +484,7 @@ void main(uint thread : SV_GroupIndex)
     if (thread == 0u)
     {
         uint groups = min(Groups, groupRoom);
-        uint instanceGroups = (CountOf(Instances, GpuSceneInstanceBytes) + 63u) / 64u;
+        uint instanceGroups = (CountOf(Instances, GpuInstanceBytes) + 63u) / 64u;
         ShadowCounts.Store(ShadowCountGroups, groups);
         ShadowArgs.Store3(ShadowArgsInstanceCull, uint3(groups > 0u ? clamp(instanceGroups, 1u, MaxGroupsX) : 0u, 1u, 1u));
         ShadowArgs.Store4(ShadowArgsClear, uint4(6u, ShadowCounts.Load(ShadowCountViews), 0u, 0u));

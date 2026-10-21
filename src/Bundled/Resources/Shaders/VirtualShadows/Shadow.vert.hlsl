@@ -28,12 +28,12 @@ struct VsOut
 
 VsOut main(VsIn input)
 {
-    GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, input.instance);
+    GpuInstance instance = LOAD(Instances, GpuInstance, input.instance);
     GpuCluster cluster = LOAD(Clusters, GpuCluster, input.what >> 2);
     uint index = (input.what & 3u) * PieceTriangles + input.vertex / 3u;
     uint triangles = ClusterTriangles(cluster);
     PieceVertex vertex = LoadCorner(cluster, LoadTriangle(cluster, min(index, triangles - 1u))[input.vertex % 3u], cluster.step);
-    float4 position = float4(ScenePosition(instance, vertex.position), 1.0);
+    float4 position = float4(InstancePosition(instance, vertex.position), 1.0);
 
     GpuShadowView view = LOAD(ShadowViews, GpuShadowView, input.view);
     float4 page = float4(dot(view.row0, position), dot(view.row1, position), dot(view.row2, position), dot(view.row3, position));

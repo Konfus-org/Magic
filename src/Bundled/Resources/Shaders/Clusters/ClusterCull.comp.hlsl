@@ -16,23 +16,18 @@ struct PassParams
 };
 
 // The pixels an error of a cluster's covers from as near as its sphere comes.
-float ErrorPixels(GpuSceneInstance instance, float4 sphere, float error)
+float ErrorPixels(GpuInstance instance, float4 sphere, float error)
 {
-    float3 centre = ScenePosition(instance, sphere.xyz);
+    float3 centre = InstancePosition(instance, sphere.xyz);
     float distance = max(length(centre) - sphere.w * instance.maxScale, Near);
     return error * instance.maxScale * PixelScale / distance;
 }
 
 void Test(uint slot, uint index, uint bucket, uint mode)
 {
-    GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, slot);
+    GpuInstance instance = LOAD(Instances, GpuInstance, slot);
     GpuCluster cluster = LOAD(Clusters, GpuCluster, index);
-    uint row = SceneMaterial(instance, ClusterSlot(cluster));
-    if (row == 0xFFFFu)
-    {
-        return;
-    }
-
+    uint row = InstanceMaterial(instance, ClusterSlot(cluster));
     uint bins = MaterialBins.Load(row * 4u);
     if (!IsDrawnOpaque(bins))
     {
@@ -45,7 +40,7 @@ void Test(uint slot, uint index, uint bucket, uint mode)
         return;
     }
 
-    float3 centre = ScenePosition(instance, cluster.bounds.xyz);
+    float3 centre = InstancePosition(instance, cluster.bounds.xyz);
     float radius = cluster.bounds.w * instance.maxScale;
     if (!SphereInView(centre, radius))
     {
@@ -53,7 +48,7 @@ void Test(uint slot, uint index, uint bucket, uint mode)
     }
 
     bool isHidden = mode == 0u
-        ? IsHidden(mul(PrevViewProj, float4(ScenePrevPosition(instance, cluster.bounds.xyz), 1.0)), radius)
+        ? IsHidden(mul(PrevViewProj, float4(InstancePrevPosition(instance, cluster.bounds.xyz), 1.0)), radius)
         : IsHidden(mul(ViewProj, float4(centre, 1.0)), radius);
     if (isHidden)
     {
@@ -70,7 +65,7 @@ void Test(uint slot, uint index, uint bucket, uint mode)
     }
 
     GpuModel model = LOAD(Models, GpuModel, instance.model);
-    float takeover = CardTakeover(model, instance, length(ScenePosition(instance, model.bounds.xyz)));
+    float takeover = CardTakeover(model, instance, length(InstancePosition(instance, model.bounds.xyz)));
     uint bin = BinOf(bins, Dissolves(DissolveOf(instance, takeover, false)), false);
     uint pieces = ClusterPieces(cluster);
     uint at = WaveAllocate(CullCounts, CountClusters * 4u, 1u);

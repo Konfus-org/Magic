@@ -8,13 +8,13 @@
 [numthreads(64, 1, 1)]
 void main(uint3 thread : SV_DispatchThreadID)
 {
-    if (thread.x >= CountOf(SceneLights, GpuSceneLightBytes))
+    if (thread.x >= CountOf(WorldLights, GpuWorldLightBytes))
     {
         return;
     }
 
-    GpuSceneLight light = LOAD(SceneLights, GpuSceneLight, thread.x);
-    if ((light.flags & SceneLightLive) == 0u)
+    GpuWorldLight light = LOAD(WorldLights, GpuWorldLight, thread.x);
+    if ((light.flags & WorldLightLive) == 0u)
     {
         return;
     }

@@ -22,8 +22,8 @@ void main(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    GpuSceneLight light = LOAD(SceneLights, GpuSceneLight, visible.x);
-    float3 centre = SceneLightPosition(light);
+    GpuWorldLight light = LOAD(WorldLights, GpuWorldLight, visible.x);
+    float3 centre = WorldLightPosition(light);
     GpuLight placed;
     placed.position = centre;
     placed.invRangeSquared = 1.0 / (light.range * light.range);
@@ -34,8 +34,8 @@ void main(uint3 id : SV_DispatchThreadID)
     placed.spotScale = light.spotScale;
     placed.spotOffset = light.spotOffset;
     placed.viewDepth = WorldToView(centre).z;
-    placed.isSpot = (light.flags & SceneLightSpot) != 0u ? 1u : 0u;
-    placed.shadow = (light.flags & SceneLightShadowless) != 0u ? NoShadowFace : visible.x;
+    placed.isSpot = (light.flags & WorldLightSpot) != 0u ? 1u : 0u;
+    placed.shadow = (light.flags & WorldLightShadowless) != 0u ? NoShadowFace : visible.x;
     placed.padding = uint3(0u, 0u, 0u);
     STORE(Lights, GpuLight, at, placed);
 }

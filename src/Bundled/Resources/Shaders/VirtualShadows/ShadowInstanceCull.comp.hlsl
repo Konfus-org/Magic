@@ -8,7 +8,7 @@
 #include "Include/Culling.hlsli"
 #include "Include/VirtualShadows.hlsli"
 
-void Cull(uint slot, GpuSceneInstance instance, GpuModel model, float3 centre, float radius, uint shadowGroup, GpuShadowGroup target)
+void Cull(uint slot, GpuInstance instance, GpuModel model, float3 centre, float radius, uint shadowGroup, GpuShadowGroup target)
 {
     // Pixels of error a metre of the model's is, as near and as far as its clusters' error spheres reach.
     float perMetre;
@@ -70,13 +70,13 @@ void Cull(uint slot, GpuSceneInstance instance, GpuModel model, float3 centre, f
 [numthreads(64, 1, 1)]
 void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 {
-    uint instances = CountOf(Instances, GpuSceneInstanceBytes);
+    uint instances = CountOf(Instances, GpuInstanceBytes);
     uint shadowGroups = min(ShadowCounts.Load(ShadowCountGroups), CountOf(ShadowGroups, 32u));
 
     // A row runs MaxGroupsX groups at most; past them, each thread takes the next instance a row's width on.
     [loop] for (uint slot = group.x * 64u + thread; slot < instances; slot += MaxGroupsX * 64u)
     {
-        GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, slot);
+        GpuInstance instance = LOAD(Instances, GpuInstance, slot);
         if (instance.maxScale <= 0.0)
         {
             continue;
@@ -88,7 +88,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
             continue;
         }
 
-        float3 centre = ScenePosition(instance, model.bounds.xyz);
+        float3 centre = InstancePosition(instance, model.bounds.xyz);
         float radius = model.bounds.w * instance.maxScale;
         [loop] for (uint shadowGroup = 0u; shadowGroup < shadowGroups; shadowGroup++)
         {

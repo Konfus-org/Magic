@@ -9,7 +9,7 @@
         "ClusterRendering.clusterError": 2,
         "ClusterRendering.pieceCapacity": 524288,
         "ClusterRendering.lightCapacity": 4096,
-        "ClusterRendering.shadowPool": 4096,
+        "ClusterRendering.shadowBudget": 64,
         "ClusterRendering.shadowFinest": 12,
         "ClusterRendering.shadowUpdates": 128,
         "ClusterRendering.anisotropy": 2,

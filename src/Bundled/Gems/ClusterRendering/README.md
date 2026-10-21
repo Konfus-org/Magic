@@ -1,6 +1,6 @@
 # ClusterRendering
 
-Draws the world GPU-driven, as clusters at the detail each part of it needs: each camera's view of the scene's
+Draws the world GPU-driven, as clusters at the detail each part of it needs: each camera's view of the world's
 triangles into a visibility buffer, each pixel shaded once into a G-buffer and lit once, then the sky, transparent
 surfaces lit as they are drawn, the view upscaled to its target's size, and the world's effects. Every shadow, the
 sun's and every point and spot light's, is pages of one virtual shadow map. It takes the GPU, a shader compiler, the
@@ -27,7 +27,7 @@ names it writes and makes, and how it runs; what it reads its shader says. A pip
 ordered list of passes and other pipelines ([Core's README](../../../Core/README.md#the-gpu)). The frame is two
 pipelines: the one the settings pick, and the effects the world's `PostProcessing` names.
 
-- **Names.** The renderer's own (the scene's tables, the materials and their texture pools, the shadows' pool and
+- **Names.** The renderer's own (the frame-wide tables, the materials and their texture pools, the shadows' pool and
   tables, each view's targets) are declared by the renderer; any other is made by a pass for itself and every pass
   after it, for the frame in a stage that runs once a frame, else for each view. A pass can see every name the frame
   has by the time it runs, its own among them, and its shader reads whichever it uses.
@@ -72,26 +72,32 @@ pipelines: the one the settings pick, and the effects the world's `PostProcessin
 
 ### The copy
 
-In LateUpdate, while the render thread may still be drawing the frame before, systems on the ECS's threads copy what
-Render reads into the copy it is not reading: each instance's transform and renderer, the lights, cameras, sun, sky,
-weather and post-processing. Each instance and light is kept at its entity's slot and compared with what was there, so only what
+In LateUpdate, while the render thread may still be drawing the frame before, what Render reads is copied into the
+copy it is not reading. One system on the main thread reads what the world has one of, or a few: the cameras, the
+player, the sun, the sky, the weather and the post-processing. Systems on the ECS's threads then copy each instance's
+transform and renderer and each light, kept at its entity's slot and compared with what was there, so only what
 changed is passed on. Sync swaps the two copies, and Render reads the one just finished.
 
 Every shader works with positions relative to the camera, the frame's camera position taken from each, so what is
 near the camera is as exact as floats are near zero, wherever the camera stands.
 
-### The scene on the GPU
+### Instances, lights and materials on the GPU
 
-Instances, lights and materials are tables kept by slot and row, uploaded a run of changed rows at a time. An
-instance's row holds its transform and the last frame's, its model's row, its material slots' rows, and when its fade
-in started, which the GPU times it from. Models go into one pool of geometry, nearest the player first within an
-upload budget a frame: each cluster's vertices are a few words (its position in steps of its model's grid, its normal
-and tangent on the octahedron, its uv as halves) and its triangles a word each. A model with no cluster hierarchy,
-one a gem made, is cut into clusters as it is, of one level. Cards (Core's `Card`) take a row each and take over from a
-model's clusters far off, across a band where both dissolve into each other, once their atlases are in: until then, or
-for good when one fails, the model's clusters are drawn at every distance. A card shows the two views of its atlases
-either side of the camera, dithered by how far round from one to the next it is, so it turns smoothly as the camera
-goes round it.
+Instances, lights and materials are tables kept by slot and row, uploaded a run of changed rows at a time. An instance's
+row holds its transform and the last frame's, its model's row, its material slots' rows, and when its fade in started,
+which the GPU times it from. Models go into one pool of geometry, nearest the player first and no more a frame than its
+upload rate: each cluster's vertices are a few words (its position in steps of its model's grid, its normal and tangent
+on the octahedron, its uv as halves) and its triangles a word each. A model with no cluster hierarchy, one a gem made,
+is cut into clusters as it is, of one level. Cards (Core's `Card`) take a row each and take over from a model's clusters
+far off, across a band where both dissolve into each other, once their atlases are in: until then, or for good when one
+fails, the model's clusters are drawn at every distance. A card shows the two views of its atlases either side of the
+camera, dithered by how far round from one to the next it is, so it turns smoothly as the camera goes round it.
+
+An asset stays on the GPU while something holds it: the instances drawing one model with the same materials hold
+those, a material holds the textures it samples, a model holds its cards' atlases, a view holds the render texture
+it draws into, and a domain being taken in holds everything it draws. What nothing holds any more is let go once a
+frame, so an asset let go and held again within a frame never leaves, and a texture shown by two things leaves only
+when both let it go.
 
 ### Culling
 
@@ -187,7 +193,7 @@ clusters, lit as they are drawn and reading a copy of the lit scene behind them.
 
 ### Global illumination
 
-An effect: probes that see the scene as a signed distance field, made from each model's field, which the GPU makes
+An effect: probes that see the world as a signed distance field, made from each model's field, which the GPU makes
 once from its coarsest clusters and the cache keeps. The field and the probes are nested levels about the camera, kept
 from showing where they meet or lagging behind a change:
 
@@ -314,7 +320,7 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
   lighting adds to it, is read in the G-buffer stage). A view draws black where nothing was drawn, flat teal where it
   reads an effect's output the world does not draw, and never magenta, which says that something failed; one that
   shows a value or overlays the scene draws over a faint grey of the albedo, through the debug views' shared header,
-  so the scene's shape reads whatever the value. While the pass is not ready, the view shows the failure's magenta
+  so the world's shape reads whatever the value. While the pass is not ready, the view shows the failure's magenta
   saying that nothing draws, never an image from an earlier frame. A project adds a view by adding a pass there, with
   a description of what it shows in a sentence; it is listed in the settings window and taken by the `view` command
   by its file name, and the debug UI says its name and description on screen while it is shown.
@@ -328,6 +334,9 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
   screenshot and a Release build alike. What only the GPU finds wrong, a lit pixel that is NaN or a material row past
   the table, a shader draws as the failure where it is and raises as a code in the frame's failures buffer, which
   the banner says too; a compute pass that raises one lists that buffer among its writes.
+  Which stand-in replaces what broke, what is said and what the banner shows are decided in one place, which the
+  parts that find a failure (loading, compiling, the world copy) report to, so a failure looks the same wherever it is
+  found; the output only draws what it decided.
 - **Failure labels.** While the debug UI shows, every instance drawn as the failure says why at its place.
 
 ## Limits

@@ -1,4 +1,4 @@
-// Culls the scene's instances for a view, a thread each: every slot in the first phase, those the first phase hid in
+// Culls the world's instances for a view, a thread each: every slot in the first phase, those the first phase hid in
 // the second. An instance in view and not hidden behind the depth pyramid (last frame's, seen through last frame's view
 // as it stood then, in the first phase; this frame's in the second) hands its model's clusters to the cluster cull: only
 // the levels whose error, projected from as near and as far as the model reaches, can be what the view wants there, in
@@ -13,13 +13,13 @@ struct PassParams
     uint phase = 1u;
 };
 
-void AddCards(uint slot, GpuSceneInstance instance, GpuModel model, float takeover, uint bucket)
+void AddCards(uint slot, GpuInstance instance, GpuModel model, float takeover, uint bucket)
 {
     float2 dissolve = DissolveOf(instance, takeover, true);
     [loop] for (uint i = 0u; i < model.cardCount; i++)
     {
         GpuCard card = LOAD(Cards, GpuCard, model.firstCard + i);
-        uint row = SceneMaterial(instance, card.slot);
+        uint row = InstanceMaterial(instance, card.slot);
         if (row == 0xFFFFu)
         {
             continue;
@@ -57,12 +57,12 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         slot = HiddenInstances.Load(slot * 4u);
     }
 
-    if (slot >= CountOf(Instances, GpuSceneInstanceBytes))
+    if (slot >= CountOf(Instances, GpuInstanceBytes))
     {
         return;
     }
 
-    GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, slot);
+    GpuInstance instance = LOAD(Instances, GpuInstance, slot);
     if (instance.maxScale <= 0.0)
     {
         return;
@@ -74,7 +74,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
         return;
     }
 
-    float3 centre = ScenePosition(instance, model.bounds.xyz);
+    float3 centre = InstancePosition(instance, model.bounds.xyz);
     float radius = model.bounds.w * instance.maxScale;
     if (!SphereInView(centre, radius))
     {
@@ -82,7 +82,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
     }
 
     bool isHidden = params.phase == 1u
-        ? IsHidden(mul(PrevViewProj, float4(ScenePrevPosition(instance, model.bounds.xyz), 1.0)), radius)
+        ? IsHidden(mul(PrevViewProj, float4(InstancePrevPosition(instance, model.bounds.xyz), 1.0)), radius)
         : IsHidden(mul(ViewProj, float4(centre, 1.0)), radius);
     if (isHidden)
     {

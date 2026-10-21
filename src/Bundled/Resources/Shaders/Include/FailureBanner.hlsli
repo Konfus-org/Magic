@@ -4,7 +4,7 @@
 // (Include/Failure.hlsli), in the text a shader draws itself (Include/DebugText.hlsli), at half the size on a view
 // too narrow for a full row. Nothing when nothing failed.
 //
-// The renderer packs FailureText (Failures.cs): word 0 is how many rows it wrote, then each row's glyphs,
+// The renderer packs FailureText (FailureHandler.cs): word 0 is how many rows it wrote, then each row's glyphs,
 // FailureLineGlyphs a row, then the words of each code in code order, a row each. Failures holds a word per code,
 // 1 once raised.
 

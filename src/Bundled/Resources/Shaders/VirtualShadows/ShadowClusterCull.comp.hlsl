@@ -98,9 +98,9 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 
     uint slot = work.x;
     uint index = work.y + thread;
-    GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, slot);
+    GpuInstance instance = LOAD(Instances, GpuInstance, slot);
     GpuCluster cluster = LOAD(Clusters, GpuCluster, index);
-    uint row = SceneMaterial(instance, ClusterSlot(cluster));
+    uint row = InstanceMaterial(instance, ClusterSlot(cluster));
     if (row == 0xFFFFu)
     {
         return;
@@ -114,7 +114,7 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
     GpuSunClipmap sun = SunClipmapOf();
     GpuShadowGroup target = LOAD(ShadowGroups, GpuShadowGroup, work.w);
     uint views = ShadowCounts.Load(ShadowCountViews);
-    float3 centre = ScenePosition(instance, cluster.bounds.xyz);
+    float3 centre = InstancePosition(instance, cluster.bounds.xyz);
     float radius = cluster.bounds.w * instance.maxScale;
     uint pieces = ClusterPieces(cluster);
     if ((target.target & LightOwner) == 0u)
@@ -136,8 +136,8 @@ void main(uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 
     // A light's texels grow with distance from it: a face's finest mip drawn sets how many pixels an error is.
     float perMetre = instance.maxScale * (float)FaceTexels(min(FinestMip(target.faceMips), LightMips - 1u)) * 0.5;
-    float own = max(length(ScenePosition(instance, cluster.errorBounds.xyz) - target.light) - cluster.errorBounds.w * instance.maxScale, LightNear);
-    float parent = max(length(ScenePosition(instance, cluster.parentErrorBounds.xyz) - target.light) - cluster.parentErrorBounds.w * instance.maxScale, LightNear);
+    float own = max(length(InstancePosition(instance, cluster.errorBounds.xyz) - target.light) - cluster.errorBounds.w * instance.maxScale, LightNear);
+    float parent = max(length(InstancePosition(instance, cluster.parentErrorBounds.xyz) - target.light) - cluster.parentErrorBounds.w * instance.maxScale, LightNear);
     if (cluster.error * perMetre / own > ClusterError || cluster.parentError * perMetre / parent <= ClusterError)
     {
         return;

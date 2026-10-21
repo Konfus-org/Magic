@@ -27,10 +27,10 @@ PiecePlace main(VsIn input)
 PieceVaryings main(VsIn input)
 #endif
 {
-    GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, input.instance);
+    GpuInstance instance = LOAD(Instances, GpuInstance, input.instance);
     uint face = input.vertex / 3u;
     uint corner = input.vertex % 3u;
-    corner = (instance.flags & SceneMirrored) != 0u && corner != 0u ? 3u - corner : corner;
+    corner = (instance.flags & InstanceMirrored) != 0u && corner != 0u ? 3u - corner : corner;
     bool isCard = (input.what & CardBit) != 0u;
     float3 position;
     float3 normal = float3(0.0, 1.0, 0.0);
@@ -55,9 +55,9 @@ PieceVaryings main(VsIn input)
         uint index = (input.what & 3u) * PieceTriangles + face;
         isPast = index >= ClusterTriangles(cluster);
         PieceVertex vertex = LoadCorner(cluster, LoadTriangle(cluster, min(index, ClusterTriangles(cluster) - 1u))[corner], cluster.step);
-        position = ScenePosition(instance, vertex.position);
-        normal = SceneNormal(instance, vertex.normal);
-        tangent = float4(NormalizeOrZero(SceneDirection(instance, vertex.tangent.xyz)), vertex.tangent.w);
+        position = InstancePosition(instance, vertex.position);
+        normal = InstanceNormal(instance, vertex.normal);
+        tangent = float4(NormalizeOrZero(InstanceDirection(instance, vertex.tangent.xyz)), vertex.tangent.w);
         uv = vertex.uv;
         slot = ClusterSlot(cluster);
     }
@@ -71,13 +71,13 @@ PieceVaryings main(VsIn input)
     return output;
 #else
     GpuModel model = LOAD(Models, GpuModel, instance.model);
-    float takeover = CardTakeover(model, instance, length(ScenePosition(instance, model.bounds.xyz)));
+    float takeover = CardTakeover(model, instance, length(InstancePosition(instance, model.bounds.xyz)));
     PieceVaryings output;
     output.position = position;
     output.normal = normal;
     output.tangent = tangent;
     output.uv = uv;
-    output.material = SceneMaterial(instance, slot);
+    output.material = InstanceMaterial(instance, slot);
     output.flags = instance.flags;
     output.card = view;
     output.dissolve = DissolveOf(instance, takeover, isCard);

@@ -1,73 +1,18 @@
 using System.Diagnostics.CodeAnalysis;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
-using Magic.Interfaces;
 
 namespace Magic.ClusterRendering;
 
 /// <summary>
 /// What a name a pass's shader reads or writes stands for: a texture or a buffer, the renderer's or one a pass makes,
 /// for the frame, for each view or for each target (<see cref="IsTarget"/>), how a shader declares it, and how a texture
-/// is sampled wherever one samples it. The renderer's own are <see cref="Engine"/>; a pass's come from its
-/// <see cref="PassCreate"/>.
+/// is sampled wherever one samples it. The renderer's own are <see cref="GpuContract"/>'s, which also say how the
+/// renderer uses what it makes for them; a pass's come from its <see cref="PassCreate"/>.
 /// </summary>
 [SuppressMessage("Style", "IDE0072:Add missing cases", Justification = "A format or shape maps to the HLSL it is declared as; the rest share a default.")]
-internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, GpuFormat Format, GpuTextureKind Shape, string BufferType, PassFilter Filter = PassFilter.Default, bool IsTarget = false)
+internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, GpuFormat Format, GpuTextureKind Shape, string BufferType, PassFilter Filter = PassFilter.Default, bool IsTarget = false, GpuBufferUsage BufferUsage = GpuBufferUsage.None, GpuTextureUsage TextureUsage = GpuTextureUsage.None)
 {
-    /// <summary>
-    /// What the renderer has, by name: the scene's tables, the materials and their texture pools, the templates culling and
-    /// binning start from, and the shadows' pool and tables, once a frame; each view's visibility buffer, G-buffer, scene
-    /// colour, velocity and exposure.
-    /// </summary>
-    internal static IReadOnlyDictionary<string, ResourceInfo> Engine { get; } = new Dictionary<string, ResourceInfo>(StringComparer.Ordinal)
-    {
-        ["Instances"] = MakeFrameBuffer("Instances", "GpuSceneInstance"),
-        ["Models"] = MakeFrameBuffer("Models", "GpuModel"),
-        ["Levels"] = MakeFrameBuffer("Levels", "GpuLevel"),
-        ["Clusters"] = MakeFrameBuffer("Clusters", "GpuCluster"),
-        ["Cards"] = MakeFrameBuffer("Cards", "GpuCard"),
-        ["Geometry"] = MakeFrameBuffer("Geometry", "uint"),
-        ["Materials"] = MakeFrameBuffer("Materials", "GpuMaterial"),
-        [TexturePools.Names[0]] = MakePoolTexture(0, GpuFormat.Bc7Srgb),
-        [TexturePools.Names[1]] = MakePoolTexture(1, GpuFormat.Bc7Srgb),
-        [TexturePools.Names[2]] = MakePoolTexture(2, GpuFormat.Bc7Srgb),
-        [TexturePools.Names[3]] = MakePoolTexture(3, GpuFormat.Bc7Srgb),
-        [TexturePools.Names[4]] = MakePoolTexture(4, GpuFormat.Bc7Unorm),
-        [TexturePools.Names[5]] = MakePoolTexture(5, GpuFormat.Bc7Unorm),
-        [TexturePools.Names[6]] = MakePoolTexture(6, GpuFormat.Bc7Unorm),
-        [TexturePools.Names[7]] = MakePoolTexture(7, GpuFormat.Bc7Unorm),
-        ["MaterialBins"] = MakeFrameBuffer("MaterialBins", "uint"),
-        ["SceneLights"] = MakeFrameBuffer("SceneLights", "GpuSceneLight"),
-        ["Moved"] = MakeFrameBuffer("Moved", "float4"),
-        ["ZBinsEmpty"] = MakeFrameBuffer("ZBinsEmpty", "uint"),
-        ["Zeros"] = MakeFrameBuffer("Zeros", "uint"),
-        ["Depth"] = MakeViewTexture("Depth", GpuFormat.D32Float),
-        ["Visibility"] = MakeViewTexture("Visibility", GpuFormat.R32Uint),
-        ["Albedo"] = MakeViewTexture("Albedo", GpuFormat.Rgba8Srgb),
-        ["Normal"] = MakeViewTexture("Normal", GpuFormat.Rgb10A2Unorm),
-        ["Material"] = MakeViewTexture("Material", GpuFormat.Rgba8Unorm),
-        ["Hdr"] = MakeViewTexture("Hdr", GpuFormat.Rgba16Float),
-        ["Velocity"] = MakeViewTexture("Velocity", GpuFormat.Rg16Float),
-        ["Exposure"] = new("Exposure", true, false, GpuFormat.Invalid, GpuTextureKind.Texture2D, "float4"),
-        ["MeshFieldAtlas"] = new("MeshFieldAtlas", false, true, GpuFormat.R16Float, GpuTextureKind.Texture3D, string.Empty),
-        ["MeshFields"] = MakeFrameBuffer("MeshFields", "GpuMeshField"),
-        ["MaterialGi"] = MakeFrameBuffer("MaterialGi", "GpuMaterialGi"),
-        ["GiLevels"] = MakeFrameBuffer("GiLevels", "GpuGiLevel"),
-        ["ShadowPool"] = new("ShadowPool", false, true, GpuFormat.D32Float, GpuTextureKind.Texture2D, string.Empty, PassFilter.Comparison),
-        ["ShadowTables"] = MakeFrameBuffer("ShadowTables", "ShadowEntry"),
-        ["SunClipmap"] = MakeFrameBuffer("SunClipmap", "GpuSunClipmap"),
-        ["ChangedLights"] = MakeFrameBuffer("ChangedLights", "uint"),
-        ["Failures"] = MakeFrameBuffer("Failures", "uint"),
-        [TargetName] = new(TargetName, false, false, GpuFormat.Rgba16Float, GpuTextureKind.Texture2D, string.Empty, IsTarget: true),
-    };
-
-    /// <summary>
-    /// What a target's passes draw into (<see cref="PassStage.Overlay"/>): the window's image or a render texture,
-    /// every view in it composed, whose format and encoding are the target's own and known only as it is drawn into,
-    /// so only a script pass, which makes its pipelines for the target it is given, draws into it.
-    /// </summary>
-    internal const string TargetName = "Target";
-
     /// <summary>
     /// What ends the name a texture kept from frame to frame is read by as it was the frame before
     /// (<see cref="GetHistoryName"/>).
@@ -144,16 +89,6 @@ internal sealed record ResourceInfo(string Name, bool IsBuffer, bool IsFrame, Gp
         create.Type,
         create.Filter,
         isTarget);
-
-    private static ResourceInfo MakeFrameBuffer(string name, string type) => new(name, true, true, GpuFormat.Invalid, GpuTextureKind.Texture2D, type);
-
-    /// <summary>
-    /// A texture pool the materials' textures live in (<see cref="TexturePools"/>): an array of layers, sampled as the
-    /// pools' own sampler says, which the frame binds with it.
-    /// </summary>
-    private static ResourceInfo MakePoolTexture(int pool, GpuFormat format) => new(TexturePools.Names[pool], false, true, format, GpuTextureKind.Texture2DArray, string.Empty);
-
-    private static ResourceInfo MakeViewTexture(string name, GpuFormat format) => new(name, false, false, format, GpuTextureKind.Texture2D, string.Empty);
 }
 
 /// <summary>
@@ -170,7 +105,7 @@ internal readonly record struct BoundResource(GpuTexture Texture, GpuBuffer Buff
 /// <summary>
 /// Everything that sizes and shapes what a pass makes: two made from the same key are alike, so a key that changes, a
 /// view resized or a count grown, makes it again. <see cref="HasHistory"/> makes it twice, the frame's and the last
-/// frame's (<see cref="ResourceSet.Swap"/>).
+/// frame's (<see cref="ResourceScope.Swap"/>).
 /// </summary>
 internal readonly record struct ResourceKey(
     bool IsBuffer,
@@ -184,133 +119,3 @@ internal readonly record struct ResourceKey(
     uint Levels,
     uint Bytes,
     bool HasHistory = false);
-
-/// <summary>
-/// The textures and buffers names stand for in one scope, the frame or a view: the renderer's, set each frame as they
-/// may have been made again, and the passes', made here as their keys say and made again when a key changes. Render
-/// thread.
-/// </summary>
-internal sealed class ResourceSet(IGpu gpu) : IDisposable
-{
-    private readonly Dictionary<string, BoundResource> _bound = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (BoundResource Resource, ResourceKey Key)> _made = new(StringComparer.Ordinal);
-
-    /// <summary>
-    /// What is kept from frame to frame, each with its history's name, so a frame's swap walks these and makes no name.
-    /// </summary>
-    private readonly List<(string Name, string History)> _histories = [];
-
-    /// <summary>
-    /// The listing last trimmed for, so a frame with the same one does nothing.
-    /// </summary>
-    private Listing? _kept;
-
-    public void Dispose()
-    {
-        foreach (string name in new List<string>(_made.Keys))
-        {
-            Release(name);
-        }
-
-        _bound.Clear();
-    }
-
-    internal bool TryGet(string name, out BoundResource resource) => _bound.TryGetValue(name, out resource);
-
-    /// <summary>
-    /// What a name of the renderer's stands for this frame.
-    /// </summary>
-    internal void Set(string name, BoundResource resource)
-    {
-        _bound[name] = resource;
-    }
-
-    /// <summary>
-    /// What a pass makes, made now unless it was made with the same key; returns whether it was made now, so whoever
-    /// fills it knows. One kept from frame to frame is made with its history, <see cref="ResourceInfo.GetHistoryName"/>.
-    /// </summary>
-    internal bool TryMake(string name, in ResourceKey key)
-    {
-        if (_made.TryGetValue(name, out (BoundResource Resource, ResourceKey Key) made) && made.Key == key)
-        {
-            return false;
-        }
-
-        Release(name);
-        Keep(name, key);
-        if (key.HasHistory)
-        {
-            string history = ResourceInfo.GetHistoryName(name);
-            Keep(history, key with { HasHistory = false });
-            _histories.Add((name, history));
-        }
-
-        return true;
-    }
-
-    /// <summary>
-    /// Swaps each texture kept from frame to frame with its history, so what was written this frame is read as it the
-    /// next, and the next frame writes over the older one.
-    /// </summary>
-    internal void Swap()
-    {
-        foreach ((string name, string history) in _histories)
-        {
-            (BoundResource Resource, ResourceKey Key) current = _made[name];
-            (BoundResource Resource, ResourceKey Key) last = _made[history];
-            _made[name] = (last.Resource, current.Key);
-            _made[history] = (current.Resource, last.Key);
-            _bound[name] = last.Resource;
-            _bound[history] = current.Resource;
-        }
-    }
-
-    /// <summary>
-    /// Releases what the passes made that <paramref name="listing"/> does not make; what the renderer made here of its
-    /// own names stays.
-    /// </summary>
-    internal void Keep(Listing listing)
-    {
-        if (listing == _kept) return;
-
-        _kept = listing;
-        foreach (string name in new List<string>(_made.Keys))
-        {
-            if (_made.ContainsKey(name) && !listing.Created.ContainsKey(name) && !ResourceInfo.Engine.ContainsKey(name) && !IsHistoryOf(listing, name))
-            {
-                Release(name);
-            }
-        }
-    }
-
-    private static bool IsHistoryOf(Listing listing, string name)
-    {
-        return name.EndsWith(ResourceInfo.HistorySuffix, StringComparison.Ordinal) && listing.Created.TryGetValue(name[..^ResourceInfo.HistorySuffix.Length], out CreatedResource? created) && created.Create.History;
-    }
-
-    private void Keep(string name, in ResourceKey key)
-    {
-        BoundResource resource = key.IsBuffer
-            ? BoundResource.Of(gpu.CreateBuffer(key.BufferUsage, key.Bytes), key.Bytes)
-            : BoundResource.Of(gpu.CreateTexture(new GpuTextureDescription(key.Format, key.TextureUsage, key.Width, key.Height, key.Levels, key.Layers, key.Shape)), key.Width, key.Height);
-        _made[name] = (resource, key);
-        _bound[name] = resource;
-    }
-
-    /// <summary>
-    /// Releases what <paramref name="name"/> was made as, and its history with it.
-    /// </summary>
-    private void Release(string name)
-    {
-        if (!_made.Remove(name, out (BoundResource Resource, ResourceKey Key) made)) return;
-
-        _bound.Remove(name);
-        gpu.Release(made.Resource.Texture);
-        gpu.Release(made.Resource.Buffer);
-        if (made.Key.HasHistory)
-        {
-            _histories.RemoveAll(kept => string.Equals(kept.Name, name, StringComparison.Ordinal));
-            Release(ResourceInfo.GetHistoryName(name));
-        }
-    }
-}

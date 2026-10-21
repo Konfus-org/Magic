@@ -13,7 +13,7 @@
 #include "Include/Noise.hlsli"
 #include "Include/Packing.hlsli"
 #include "Lighting/Ibl.hlsli"
-#if defined(HAS_GiLevels) && defined(HAS_GiField) && defined(HAS_GiSurface) && defined(HAS_GiEmission) && defined(HAS_GiIrradiance) && defined(HAS_GiDistance) && defined(HAS_GiLights) && defined(HAS_SceneLights)
+#if defined(HAS_GiLevels) && defined(HAS_GiField) && defined(HAS_GiSurface) && defined(HAS_GiEmission) && defined(HAS_GiIrradiance) && defined(HAS_GiDistance) && defined(HAS_GiLights) && defined(HAS_WorldLights)
 #define TRACE_FIELD 1
 #include "Lighting/Gi.hlsli"
 #endif

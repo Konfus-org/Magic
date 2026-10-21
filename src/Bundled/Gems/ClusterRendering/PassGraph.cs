@@ -1,7 +1,10 @@
+using System.Drawing;
 using System.IO;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
@@ -12,12 +15,25 @@ using Magic.Services;
 namespace Magic.ClusterRendering;
 
 /// <summary>
-/// The passes a frame runs: the renderer's pipeline's, then the world's effects', then the overlay pipeline's, as
-/// each loads with its passes, and a debug view's pass after them, put in their stages, checked, and compiled, as a
-/// <see cref="Listing"/>. A script pass's script is made by <paramref name="scripts"/>, without which it does not run. Whatever changes them (the world names other
-/// effects, a pass, pipeline, shader or curve is edited) builds a new listing from scratch on workers, and the frame keeps
-/// drawing with the old one until every pass of the new is compiled, then swaps. The listing's state is the render
-/// thread's: workers load and compile, and hand what they made to it.
+/// The passes a frame runs, and running them. Its members go in that order: the listing in use and the next, building
+/// the next on workers, then recording a stage (<see cref="Record"/>).
+/// <para>
+/// The passes are the renderer's pipeline's, then the world's effects', then the overlay pipeline's, as each loads with
+/// its passes, and a debug view's pass after them, put in their stages, checked, and compiled, as a
+/// <see cref="Listing"/>. A script pass's script is made by <paramref name="scripts"/>, without which it does not run.
+/// Whatever changes them (the world names other effects, a pass, pipeline, shader or curve is edited) builds a new
+/// listing from scratch on workers, and the frame keeps drawing with the old one until every pass of the new is
+/// compiled, then swaps. The listing's state is the render thread's: workers load and compile, and hand what they made
+/// to it.
+/// </para>
+/// <para>
+/// Every pass runs one way: what it makes made (or kept) and seeded, then for each of its iterations its constants
+/// pushed, every name each of its stages binds bound at its slot, each looked up by name in the frame's or the view's
+/// resources, and its dispatch or draws, under a debug group of its name. A draw of pieces (the visibility buffer,
+/// transparent surfaces, depth) steps through the pieces a pass before it made with the one run of indices it holds; a
+/// draw of the visibility buffer is one indirect draw per raster bin, and one of surfaces one per resolve bin, over the
+/// tiles a pass before it classified. Recording holds nothing of a frame between calls.
+/// </para>
 /// <para>
 /// A draw's pipelines are composed around the surfaces it draws, one per <see cref="SurfaceKey"/>: the visibility
 /// buffer's raster bins, the clipping template with the surface (Templates/VisibilityClip.frag.hlsl) or the fixed one
@@ -34,7 +50,7 @@ namespace Magic.ClusterRendering;
 /// surface, with what the surface contract offers any surface, and every surface of it is bound the same.
 /// </para>
 /// </summary>
-internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets assets, IScripts? scripts, Threads threads, CancellationToken stopping) : IDisposable
+internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets assets, IScripts? scripts, Threads threads, FailureHandler failureHandler, CancellationToken stopping) : IDisposable
 {
     private const string FullscreenPath = "Shaders/Passes/Fullscreen.vert.hlsl";
     private const string DepthOnlyPath = "Shaders/Passes/DepthOnly.frag.hlsl";
@@ -48,6 +64,19 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     private const uint PieceBytes = 12;
 
     /// <summary>
+    /// Groups a dispatch runs along x at most, as every API allows; more go on in y, which a shader that may run more
+    /// reads back as one number (Shaders/Include/Culling.hlsli's LinearGroup).
+    /// </summary>
+    private const uint MaxGroupsX = 65535;
+
+    /// <summary>
+    /// The samplers a texture is read through when the frame binds it with none of its own (<see cref="GetSampler"/>).
+    /// </summary>
+    private static readonly GpuSamplerDescription _nearest = new(GpuFilter.Nearest, GpuWrap.Clamp);
+    private static readonly GpuSamplerDescription _linear = new(GpuFilter.Linear, GpuWrap.Clamp);
+    private static readonly GpuSamplerDescription _comparison = new(GpuFilter.Linear, GpuWrap.Clamp, Compare: GpuCompare.GreaterOrEqual);
+
+    /// <summary>
     /// A piece's three words, as the pieces' vertex stage reads them from the instance-rate buffer.
     /// </summary>
     private static readonly GpuVertexInput[] _pieceInputs =
@@ -58,9 +87,9 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     ];
 
     /// <summary>
-    /// What the shared vertex stages can see: the renderer's own names, the scene's tables among them.
+    /// What the shared vertex stages can see: the renderer's own names, the frame-wide tables among them.
     /// </summary>
-    private static readonly List<ResourceInfo> _engineVisible = [.. ResourceInfo.Engine.Values];
+    private static readonly List<ResourceInfo> _engineVisible = [.. GpuContract.All.Values];
 
     private Listing? _next;
 
@@ -72,6 +101,12 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     private Handle<Pipeline> _overlay;
     private Handle<Pipeline> _pipeline;
     private bool _isStale = true;
+
+    /// <summary>
+    /// The surface variants the frame draws, as the latest <see cref="Update"/> was told: the raster and resolve bins
+    /// <see cref="Record"/> draws, in bin order.
+    /// </summary>
+    private SurfaceVariants _variants = new([], [], [], default);
 
     public void Dispose()
     {
@@ -93,17 +128,6 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// Whether a listing is being built, which the frame swaps in once it is compiled.
     /// </summary>
     internal bool IsBuilding => _next is not null;
-
-    /// <summary>
-    /// The surfaces that do not compile for some pass, whose materials are drawn as the failure
-    /// (<see cref="Materials"/>), until the shader changes.
-    /// </summary>
-    internal HashSet<Handle<Shader>> BrokenSurfaces { get; } = [];
-
-    /// <summary>
-    /// The surfaces that failed to compile since the materials last asked: whose materials are packed anew.
-    /// </summary>
-    internal HashSet<Handle<Shader>> Broke { get; } = [];
 
     /// <summary>
     /// A pipeline (made again when one of its passes changes) or a shader changed: the listing is built again, once the
@@ -128,14 +152,16 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// <summary>
     /// Swaps in the listing built once it is compiled with every surface variant the frame draws now, those that first
     /// showed while it was built among them, so the swap shows no gap; and starts building one when the renderer's
-    /// <paramref name="pipeline"/> or the world's effects are not the ones built or something changed, its surface pipelines compiled up front for the variants the frame
-    /// draws now. One listing builds at a time: while one is under way it is finished and swapped in first, then what
-    /// changed meanwhile is built, so the frame draws as soon as it can (the loading domain, before the first is
-    /// compiled) and a burst of changes starts one build, not one each; a build that throws (an error, said by
-    /// FireAndForget) never swaps in, and nothing builds again after it. Each frame, before anything records.
+    /// <paramref name="pipeline"/> or the world's effects are not the ones built or something changed, its surface
+    /// pipelines compiled up front for the variants the frame draws now. One listing builds at a time: while one is
+    /// under way it is finished and swapped in first, then what changed meanwhile is built, so the frame draws as soon
+    /// as it can (the loading domain, before the first is compiled) and a burst of changes starts one build, not one
+    /// each; a build that throws (an error, said by FireAndForget) never swaps in, and nothing builds again after it.
+    /// Each frame, before anything records.
     /// </summary>
-    internal void Update(Handle<Pipeline> pipeline, Handle<Pipeline> effects, Handle<Pipeline> overlay, SceneVariants variants)
+    internal void Update(Handle<Pipeline> pipeline, Handle<Pipeline> effects, Handle<Pipeline> overlay, SurfaceVariants variants)
     {
+        _variants = variants;
         if (_next is { IsCompiled: true } built && HasEvery(built, variants))
         {
             Current?.Dispose();
@@ -153,20 +179,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         _pipeline = pipeline;
         _overlay = overlay;
         _next = new Listing(gpu);
-        BuildAsync(_next, pipeline, effects, overlay, _appended, new SceneVariants([.. variants.Raster], [.. variants.Resolve], [.. variants.Transparent], variants.Sky)).FireAndForget();
-    }
-
-    /// <summary>
-    /// A draw pass's pipeline for <paramref name="variant"/>, compiling it the first time it is asked for; none while it
-    /// compiles.
-    /// </summary>
-    internal GpuPipeline GetSurfacePipeline(ListedPass pass, SurfaceKey variant)
-    {
-        if (pass.Surfaces.TryGetValue(variant, out GpuPipeline made)) return made;
-
-        pass.Surfaces[variant] = GpuPipeline.None;
-        CompileSurfaceAsync(pass, variant, isCounted: false).FireAndForget();
-        return GpuPipeline.None;
+        BuildAsync(_next, pipeline, effects, overlay, _appended, new SurfaceVariants([.. variants.Raster], [.. variants.Resolve], [.. variants.Transparent], variants.Sky)).FireAndForget();
     }
 
     /// <summary>
@@ -174,7 +187,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// pipeline it is drawn with compiled: the raster bins' for its clusters, which clip as it fades or its cards take
     /// over, and the resolve bin's for its pixels, or the forward one for a transparent material. Those not asked for yet
     /// start compiling, for the listing being built while there is one, as that is the one that will draw it: it is
-    /// drawable once that listing is swapped in. A material waits for this (<see cref="Materials"/>), so nothing is drawn
+    /// drawable once that listing is swapped in. A material waits for this (<see cref="GpuResources"/>), so nothing is drawn
     /// black, left out, or drawn without the world's effects for a while.
     /// </summary>
     internal bool IsDrawable(SurfaceKey surface, MaterialType type)
@@ -213,9 +226,61 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     }
 
     /// <summary>
+    /// The passes of <paramref name="stage"/> that are ready, in order, in <paramref name="scope"/>: the frame's
+    /// resources, and a view's for a view's stage. One that never runs has what it would draw into shown as the
+    /// failure instead (<see cref="Fill"/>).
+    /// </summary>
+    internal void Record(Listing listing, PassStage stage, in RecordScope scope)
+    {
+        foreach (ListedPass pass in listing.Stages[(int)stage])
+        {
+            if (!pass.IsReady)
+            {
+                if (pass.HasFailed) Fill(listing, pass, scope);
+
+                continue;
+            }
+
+            using GpuDebugGroup group = gpu.Commands.DebugGroup(pass.Name);
+            Make(listing, pass, scope);
+            uint iterations = GetIterations(pass, scope.Counts);
+            for (uint iteration = 0; iteration < iterations; iteration++)
+            {
+                FrameConstants constants = scope.Constants;
+                constants.Pass = pass.Params;
+                constants.Pass[28] = iteration;
+                bool isRecorded = pass.Pass.Kind switch
+                {
+                    PassKind.Compute => TryRecordCompute(pass, scope, constants, iteration),
+                    PassKind.Fullscreen => TryRecordFullscreen(pass, scope, constants, iteration),
+                    PassKind.Draw => TryRecordDraw(pass, scope, constants, iteration),
+                    PassKind.Script => TryRecordScript(pass, scope),
+                    _ => false,
+                };
+                if (!isRecorded) break;
+            }
+
+            Mipmaps(pass, scope);
+        }
+    }
+
+    /// <summary>
+    /// A draw pass's pipeline for <paramref name="variant"/>, compiling it the first time it is asked for; none while it
+    /// compiles.
+    /// </summary>
+    private GpuPipeline GetSurfacePipeline(ListedPass pass, SurfaceKey variant)
+    {
+        if (pass.Surfaces.TryGetValue(variant, out GpuPipeline made)) return made;
+
+        pass.Surfaces[variant] = GpuPipeline.None;
+        CompileSurfaceAsync(pass, variant, isCounted: false).FireAndForget();
+        return GpuPipeline.None;
+    }
+
+    /// <summary>
     /// Whether a listing has the pipelines of every surface variant the frame draws, asking for those it has not.
     /// </summary>
-    private bool HasEvery(Listing listing, SceneVariants variants)
+    private bool HasEvery(Listing listing, SurfaceVariants variants)
     {
         bool hasEvery = true;
         foreach (ListedPass pass in listing.Passes)
@@ -246,10 +311,42 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// for, then compiles every pass bound to that, and every draw's vertex stages and pipelines for the variants it
     /// draws.
     /// </summary>
-    private async Task BuildAsync(Listing listing, Handle<Pipeline> pipeline, Handle<Pipeline> effects, Handle<Pipeline> overlay, Handle<Pass> appended, SceneVariants variants)
+    private async Task BuildAsync(Listing listing, Handle<Pipeline> pipeline, Handle<Pipeline> effects, Handle<Pipeline> overlay, Handle<Pass> appended, SurfaceVariants variants)
+    {
+        List<string> failures = [];
+        List<Loaded> loaded = await LoadPassesAsync(pipeline, effects, overlay, appended, failures).ConfigureAwait(false);
+        await threads.InvokeAsync(EngineThread.Render, () => listing.Fit(loaded, failures, variants), stopping).ConfigureAwait(false);
+        Task<Result<StageBindings>> piecesProbe = ProbeAsync(_engineVisible, [], GpuStage.Vertex, [(GetPiecesText(placeOnly: false), "Pieces")]);
+        List<Task> probes = [];
+        foreach (ListedPass pass in listing.Passes)
+        {
+            probes.Add(ProbePassAsync(pass, piecesProbe));
+        }
+
+        await Task.WhenAll(probes).ConfigureAwait(false);
+        await threads.InvokeAsync(EngineThread.Render, listing.Use, stopping).ConfigureAwait(false);
+
+        // The place-only pieces use a part of what the pieces do, and are bound as the pieces are, so a draw binds once.
+        Result<StageBindings> piecesBound = await piecesProbe.ConfigureAwait(false);
+        Task<Result<GpuShader>> fullscreen = compiler.CompileAsync(FullscreenPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
+        Task<Result<GpuShader>> pieces = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, GetPiecesText(placeOnly: false), "Pieces");
+        Task<Result<GpuShader>> places = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, GetPiecesText(placeOnly: true), "Pieces (place only)");
+        Task<Result<GpuShader>> tiles = compiler.CompileAsync(TilesPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
+        foreach (ListedPass pass in listing.Passes)
+        {
+            CompileAsync(listing, pass, fullscreen, pieces, places, tiles).FireAndForget();
+        }
+
+        listing.Done();
+    }
+
+    /// <summary>
+    /// The passes of the frame pipeline, the world's effects, the overlay pipeline and the pass appended after them, with
+    /// their shaders, in that order; what does not load is said and added to <paramref name="failures"/>.
+    /// </summary>
+    private async Task<List<Loaded>> LoadPassesAsync(Handle<Pipeline> pipeline, Handle<Pipeline> effects, Handle<Pipeline> overlay, Handle<Pass> appended, List<string> failures)
     {
         List<Loaded> loaded = [];
-        List<string> failures = [];
         foreach (Handle<Pipeline> handle in (Handle<Pipeline>[])[pipeline, effects, overlay])
         {
             if (handle == Handle<Pipeline>.None) continue;
@@ -287,29 +384,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             }
         }
 
-        await threads.InvokeAsync(EngineThread.Render, () => listing.Fit(loaded, failures, variants), stopping).ConfigureAwait(false);
-        Task<Result<StageBindings>> piecesProbe = ProbeAsync(_engineVisible, [], GpuStage.Vertex, [(GetPiecesText(placeOnly: false), "Pieces")]);
-        List<Task> probes = [];
-        foreach (ListedPass pass in listing.Passes)
-        {
-            probes.Add(ProbePassAsync(pass, piecesProbe));
-        }
-
-        await Task.WhenAll(probes).ConfigureAwait(false);
-        await threads.InvokeAsync(EngineThread.Render, listing.Use, stopping).ConfigureAwait(false);
-
-        // The place-only pieces use a part of what the pieces do, and are bound as the pieces are, so a draw binds once.
-        Result<StageBindings> piecesBound = await piecesProbe.ConfigureAwait(false);
-        Task<Result<GpuShader>> fullscreen = compiler.CompileAsync(FullscreenPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
-        Task<Result<GpuShader>> pieces = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, GetPiecesText(placeOnly: false), "Pieces");
-        Task<Result<GpuShader>> places = CompileBoundAsync(_engineVisible, [], piecesBound, GpuStage.Vertex, GetPiecesText(placeOnly: true), "Pieces (place only)");
-        Task<Result<GpuShader>> tiles = compiler.CompileAsync(TilesPath, GpuStage.Vertex, gpu.ShaderFormat, stopping);
-        foreach (ListedPass pass in listing.Passes)
-        {
-            CompileAsync(listing, pass, fullscreen, pieces, places, tiles).FireAndForget();
-        }
-
-        listing.Done();
+        return loaded;
     }
 
     /// <summary>
@@ -339,7 +414,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             }
 
             Dictionary<Handle<Curve>, Curve> curves = await GetCurvesAsync(paramLayout, pass).ConfigureAwait(false);
-            paramLayout.Write([pass.Params], _ => TexturePools.None, param => curves.GetValueOrDefault(GetCurve(param)), MemoryMarshal.AsBytes(new Span<PassWords>(ref words)));
+            paramLayout.Write([pass.Params], _ => GpuContract.NoTexture, param => curves.GetValueOrDefault(GetCurve(param)), MemoryMarshal.AsBytes(new Span<PassWords>(ref words)));
         }
 
         return new Loaded(pass.Pass, pass.Name, body, words);
@@ -514,7 +589,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
 
     /// <summary>
     /// A surface pipeline of a draw pass: the variant's surface composed between the pass's bindings and its template. A
-    /// surface that does not compile is broken (<see cref="BrokenSurfaces"/>), so its materials are drawn as the
+    /// surface that does not compile is broken (<see cref="FailureHandler.Break"/>), so its materials are drawn as the
     /// failure material; one not loaded yet is asked for again next frame. <paramref name="isCounted"/> when the listing
     /// waits for it.
     /// </summary>
@@ -523,15 +598,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         Result<GpuPipelineDescription> desc = await SurfaceAsync(pass, variant).ConfigureAwait(false);
         await threads.InvokeAsync(EngineThread.Render, () =>
         {
-            if (!desc.Ok && desc.Error.Length > 0)
-            {
-                Debugging.Error($"A surface does not compile for pass {pass.Name}, so its materials are drawn as the failure: {desc.Error}");
-                if (variant.Shader != Handle<Shader>.None)
-                {
-                    BrokenSurfaces.Add(variant.Shader);
-                    Broke.Add(variant.Shader);
-                }
-            }
+            if (!desc.Ok && desc.Error.Length > 0) failureHandler.Break(variant.Shader, pass.Name, desc.Error);
 
             pass.Listing.TakeSurface(pass, variant, desc.Ok ? gpu.CreatePipeline(desc.Value) : Result.Failure<GpuPipeline>(desc.Error), isCounted);
         }, stopping).ConfigureAwait(false);
@@ -544,7 +611,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         GpuShader? vertex = drawn == PassDrawn.Visibility && !hasSurface ? pass.PlaceVertex : pass.Vertex;
         if (vertex is null) return Result.Failure<GpuPipelineDescription>(string.Empty);
 
-        Result<(string Text, string Name)> source = await SurfaceTextAsync(pass, variant).ConfigureAwait(false);
+        Result<(string Text, string Name)> source = await ComposeAsync(pass, variant).ConfigureAwait(false);
         if (!source.Ok) return Result.Failure<GpuPipelineDescription>(source.Error);
 
         Result<GpuShader> fragment = await CompileBoundAsync(pass, GpuStage.Fragment, source.Value.Text, source.Value.Name).ConfigureAwait(false);
@@ -568,7 +635,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// A surface pipeline's fragment shader, after the pass's bindings: what the surface and template are told of the
     /// variant, the variant's surface and its template, and the name it is compiled under.
     /// </summary>
-    private async Task<Result<(string Text, string Name)>> SurfaceTextAsync(ListedPass pass, SurfaceKey variant)
+    private async Task<Result<(string Text, string Name)>> ComposeAsync(ListedPass pass, SurfaceKey variant)
     {
         PassDrawn drawn = pass.Pass.Draw.Drawn;
         bool hasSurface = variant.Shader != Handle<Shader>.None;
@@ -653,16 +720,16 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         List<(string Text, string Name)> sources = [];
         foreach (SurfaceKey variant in variants)
         {
-            Result<(string Text, string Name)> source = await SurfaceTextAsync(pass, variant).ConfigureAwait(false);
+            Result<(string Text, string Name)> source = await ComposeAsync(pass, variant).ConfigureAwait(false);
             if (!source.Ok) return Result.Failure<StageBindings>(source.Error);
 
             sources.Add(source.Value);
         }
 
-        List<GpuShaderBinding> contract = [new GpuShaderBinding("Materials", GpuBindingKind.StorageBuffer, 0)];
-        foreach (string pool in TexturePools.Names)
+        List<GpuShaderBinding> contract = [new GpuShaderBinding(GpuContract.Materials.Name, GpuBindingKind.StorageBuffer, 0)];
+        foreach (ResourceInfo pool in GpuContract.TexturePools)
         {
-            contract.Add(new GpuShaderBinding(pool, GpuBindingKind.Sampled, 0));
+            contract.Add(new GpuShaderBinding(pool.Name, GpuBindingKind.Sampled, 0));
         }
 
         if (drawn == PassDrawn.Transparent && pass.Visible.Exists(info => string.Equals(info.Name, "SceneColor", StringComparison.Ordinal)))
@@ -686,9 +753,9 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     }
 
     /// <summary>
-    /// What a stage's shaders use of what <paramref name="visible"/> and <paramref name="writes"/> declare: each compiled
-    /// to SPIR-V with every name declared, what it bound read back, and the union resolved (<see cref="StageBindings.TryCreate"/>)
-    /// with whatever is <paramref name="also"/> bound.
+    /// What a stage's shaders use of what <paramref name="visible"/> and <paramref name="writes"/> declare: each
+    /// compiled to SPIR-V with every name declared, what it bound read back, and the union resolved
+    /// (<see cref="StageBindings.TryCreate"/>) with whatever is <paramref name="also"/> bound.
     /// </summary>
     private async Task<Result<StageBindings>> ProbeAsync(IReadOnlyList<ResourceInfo> visible, IReadOnlyList<PassBinding> writes, GpuStage stage, IReadOnlyList<(string Text, string Name)> sources, IReadOnlyList<GpuShaderBinding>? also = null)
     {
@@ -762,6 +829,508 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         Result<Shader> loaded = await assets.LoadAsync(shader, stopping).ConfigureAwait(false);
         return loaded.Ok ? Result.Success(loaded.Value.Text) : Result.Failure<string>(loaded.Error);
     }
+
+    /// <summary>
+    /// Makes what the pass makes, unless it was made with the same key, and copies each seed into each copy. A texture
+    /// kept from frame to frame starts with its history empty.
+    /// </summary>
+    private void Make(Listing listing, ListedPass pass, in RecordScope scope)
+    {
+        foreach (PassCreate create in pass.Pass.Creates)
+        {
+            CreatedResource created = listing.Created[create.Name];
+            ResourceScope set = created.Info.IsFrame ? scope.Resources.Frame : scope.View ?? scope.Resources.Frame;
+            bool isMade = set.MakeIfChanged(create.Name, GetKey(created, scope));
+            if (isMade && create.History && set.TryGet(ResourceInfo.GetHistoryName(create.Name), out BoundResource history) && history.Texture != GpuTexture.None)
+            {
+                gpu.Commands.RenderPass([new GpuTextureLevel(history.Texture)], GpuContents.Clear).Dispose();
+            }
+
+            if (create.Seed.Length == 0 || !set.TryGet(create.Name, out BoundResource made) || !TryGetResource(scope, create.Seed, out BoundResource seed))
+            {
+                continue;
+            }
+
+            uint slice = GetSliceBytes(created, scope.Counts);
+            uint copies = created.Copies.IsNone ? 1 : Math.Max(1, scope.Counts.GetCount(created.Copies));
+            for (uint copy = 0; copy < copies; copy++)
+            {
+                scope.Resources.Copy(seed.Buffer, 0, made.Buffer, copy * slice, Math.Min(seed.Bytes, slice));
+            }
+        }
+    }
+
+    /// <summary>
+    /// What a pass that never runs would draw into, made as it would have been and cleared to the failure's colour,
+    /// breathing: a fullscreen pass's target, or a draw's colours, at every layer its iterations would draw, so what it
+    /// would have drawn shows as broken and the passes after it read that. What a compute pass writes is left as it is
+    /// made; the words say why (Include/FailureBanner.hlsli).
+    /// </summary>
+    private void Fill(Listing listing, ListedPass pass, in RecordScope scope)
+    {
+        Make(listing, pass, scope);
+        if (pass.Pass.Kind is not (PassKind.Fullscreen or PassKind.Draw)) return;
+
+        using GpuDebugGroup group = gpu.Commands.DebugGroup(pass.Name);
+        Magic.Contexts.Assets.Color color = FailureHandler.GetPulseColor(scope.Constants.Time);
+        uint iterations = GetIterations(pass, scope.Counts);
+        foreach (PassBinding write in pass.Pass.Kind == PassKind.Fullscreen ? pass.TextureWrites : GetColors(pass))
+        {
+            if (!TryGetResource(scope, write.Info.Name, out BoundResource target)) continue;
+
+            for (uint iteration = 0; iteration < iterations; iteration++)
+            {
+                gpu.Commands.RenderPass([new GpuTextureLevel(target.Texture, write.Level, GetLayer(pass, write, iteration))], GpuContents.Clear, color).Dispose();
+            }
+        }
+    }
+
+    /// <summary>
+    /// A draw's colours as bindings, at their first level and layer: each is a name the pass can see.
+    /// </summary>
+    private static List<PassBinding> GetColors(ListedPass pass)
+    {
+        List<PassBinding> colors = [];
+        foreach (string name in pass.Pass.Draw.Colors)
+        {
+            if (pass.Visible.Find(seen => string.Equals(seen.Name, name, StringComparison.Ordinal)) is { } info)
+            {
+                colors.Add(new PassBinding(info, 0, 0, GpuContents.Clear, false));
+            }
+        }
+
+        return colors;
+    }
+
+    private bool TryRecordCompute(ListedPass pass, in RecordScope scope, in FrameConstants constants, uint iteration)
+    {
+        if (pass.GetBindings(GpuStage.Compute) is not { } bound) return false;
+
+        Span<GpuTextureLevel> textureWrites = stackalloc GpuTextureLevel[StageBindings.MaxStorage];
+        int textureCount = 0;
+        foreach (BoundName write in bound.TextureWrites)
+        {
+            if (!TryGetResource(scope, write.Binding.Info.Name, out BoundResource written)) return false;
+
+            textureWrites[textureCount++] = new GpuTextureLevel(written.Texture, write.Binding.Level, GetLayer(pass, write.Binding, iteration));
+        }
+
+        Span<GpuBuffer> bufferWrites = stackalloc GpuBuffer[StageBindings.MaxStorage];
+        int bufferCount = 0;
+        foreach (BoundName write in bound.BufferWrites)
+        {
+            if (!TryGetResource(scope, write.Binding.Info.Name, out BoundResource written)) return false;
+
+            bufferWrites[bufferCount++] = written.Buffer;
+        }
+
+        Reads reads = default;
+        if (!reads.TryGather(bound, scope)) return false;
+
+        BoundResource args = default;
+        bool isIndirect = pass.Pass.Dispatch.Args.Length > 0;
+        if (isIndirect && !TryGetResource(scope, pass.Pass.Dispatch.Args, out args)) return false;
+
+        using GpuComputePass compute = gpu.Commands.ComputePass(textureWrites[..textureCount], bufferWrites[..bufferCount]);
+        compute.Constants(constants).Pipeline(pass.Pipeline);
+        reads.Bind(compute, bound);
+        if (isIndirect)
+        {
+            compute.DispatchFromBuffer(args.Buffer, (pass.Pass.Dispatch.First + iteration) * 3 * sizeof(uint));
+        }
+        else
+        {
+            (uint x, uint y, uint z) = GetGroups(pass, scope);
+            compute.Dispatch(x, y, z);
+        }
+
+        return true;
+    }
+
+    private bool TryRecordFullscreen(ListedPass pass, in RecordScope scope, in FrameConstants constants, uint iteration)
+    {
+        PassBinding write = pass.TextureWrites[0];
+        Reads reads = default;
+        if (pass.GetBindings(GpuStage.Fragment) is not { } bound || !TryGetResource(scope, write.Info.Name, out BoundResource target) || !reads.TryGather(bound, scope))
+        {
+            return false;
+        }
+
+        Rectangle area = new(0, 0, (int)Math.Max(1, target.Width >> (int)write.Level), (int)Math.Max(1, target.Height >> (int)write.Level));
+        using GpuRenderPass render = gpu.Commands.RenderPass([new GpuTextureLevel(target.Texture, write.Level, GetLayer(pass, write, iteration))], write.Contents);
+        render.Viewport(area).Scissor(area).Pipeline(pass.Pipeline).Constants(GpuStage.Fragment, constants);
+        reads.Bind(render, GpuStage.Fragment, bound);
+        render.Draw(3);
+        return true;
+    }
+
+    /// <summary>
+    /// A script pass: its script records into the one texture it writes, the target itself in a target's stage, told
+    /// the texture's format and encoding, which its pipelines are made for.
+    /// </summary>
+    private bool TryRecordScript(ListedPass pass, in RecordScope scope)
+    {
+        PassBinding write = pass.TextureWrites[0];
+        if (pass.Script is not { } script || !TryGetResource(scope, write.Info.Name, out BoundResource target))
+        {
+            return false;
+        }
+
+        bool isTarget = write.Info.IsTarget;
+        Rectangle area = new(0, 0, (int)Math.Max(1, target.Width), (int)Math.Max(1, target.Height));
+        script.Record(new PipelineScriptContext(
+            gpu.Commands,
+            target.Texture,
+            area,
+            isTarget ? scope.TargetFormat : write.Info.Format,
+            isTarget ? scope.TargetEncoding : TargetEncoding.Linear,
+            write.Contents,
+            scope.Now));
+        return true;
+    }
+
+    /// <summary>
+    /// A draw pass: one render pass into its targets, at the layer of its iteration when it runs for each of a count;
+    /// both stages' bindings bound once, every pipeline of the draw being bound alike; then what it draws: the
+    /// visibility buffer's pieces, a bin at a time, the G-buffer's tiles, a resolve bin at a time, transparent pieces
+    /// farthest first, depth for shadows (an iteration's arguments each), or the sky.
+    /// </summary>
+    private bool TryRecordDraw(ListedPass pass, in RecordScope scope, in FrameConstants constants, uint iteration)
+    {
+        PassDraw draw = pass.Pass.Draw;
+        uint layer = pass.Each.IsNone ? 0 : iteration;
+        Span<GpuTextureLevel> colors = stackalloc GpuTextureLevel[8];
+        Size size = Size.Empty;
+        for (int i = 0; i < draw.Colors.Count; i++)
+        {
+            if (!TryGetResource(scope, draw.Colors[i], out BoundResource color)) return false;
+
+            colors[i] = new GpuTextureLevel(color.Texture, 0, layer);
+            size = new Size((int)color.Width, (int)color.Height);
+        }
+
+        BoundResource depth = default;
+        if (draw.Depth.Length > 0 && !TryGetResource(scope, draw.Depth, out depth)) return false;
+
+        BoundResource args = default;
+        BoundResource instances = default;
+        if (pass.DrawsIndirect && (!TryGetResource(scope, draw.Args, out args) || !TryGetResource(scope, draw.Instances, out instances)))
+        {
+            return false;
+        }
+
+        Reads vertexReads = default;
+        Reads fragmentReads = default;
+        if (pass.GetBindings(GpuStage.Vertex) is not { } vertexBound || pass.GetBindings(GpuStage.Fragment) is not { } fragmentBound
+            || !vertexReads.TryGather(vertexBound, scope) || !fragmentReads.TryGather(fragmentBound, scope))
+        {
+            return false;
+        }
+
+        size = size.IsEmpty ? new Size((int)depth.Width, (int)depth.Height) : size;
+        Rectangle area = new(Point.Empty, size);
+        using GpuRenderPass render = gpu.Commands.RenderPass(colors[..draw.Colors.Count], draw.Contents, default, new GpuTextureLevel(depth.Texture, 0, layer));
+        render.Viewport(area).Scissor(area).Constants(GpuStage.Vertex, constants).Constants(GpuStage.Fragment, constants);
+        vertexReads.Bind(render, GpuStage.Vertex, vertexBound);
+        fragmentReads.Bind(render, GpuStage.Fragment, fragmentBound);
+        switch (draw.Drawn)
+        {
+            case PassDrawn.Depth:
+                BindPieces(render, instances.Buffer, scope.Resources)
+                    .Pipeline(pass.Pipeline)
+                    .DrawIndexedFromBuffer(args.Buffer, (uint)((draw.First + iteration) * GpuTable<GpuDrawArgs>.RowBytes), 1);
+                break;
+            case PassDrawn.Visibility:
+                Visibility(render, pass, args, instances, scope.Resources);
+                break;
+            case PassDrawn.Surfaces:
+                Resolve(render, pass, args, instances, scope.Resources);
+                break;
+            case PassDrawn.Transparent:
+                Transparent(render, pass, scope);
+                break;
+            case PassDrawn.Sky or PassDrawn.SkyShadow:
+                Sky(render, pass, scope);
+                break;
+            default:
+                break;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The visibility buffer: each raster bin of the frame's surface variants with its pipeline, from the arguments the
+    /// bins' pass counted into. The two fixed bins draw what does not clip, single and double sided; then each surface's
+    /// bin of clusters and its bin of cards, which take six indices, not a piece's 96, both with its pipeline.
+    /// </summary>
+    private void Visibility(GpuRenderPass render, ListedPass pass, BoundResource args, BoundResource instances, GpuResources resources)
+    {
+        BindPieces(render, instances.Buffer, resources);
+        int bin = 0;
+        foreach (SurfaceKey key in _variants.Raster)
+        {
+            DrawBin(key, bin);
+            if (bin >= GpuContract.FixedRasterBins) DrawBin(key, GpuContract.CardBins + bin - GpuContract.FixedRasterBins);
+
+            bin++;
+        }
+
+        void DrawBin(SurfaceKey key, int bin)
+        {
+            GpuPipeline pipeline = GetSurfacePipeline(pass, key);
+            if (pipeline == GpuPipeline.None) return;
+
+            render.Pipeline(pipeline).DrawIndexedFromBuffer(args.Buffer, (uint)((pass.Pass.Draw.First + bin) * GpuTable<GpuDrawArgs>.RowBytes), 1);
+        }
+    }
+
+    /// <summary>
+    /// The G-buffer: each resolve bin's tiles with its surface's pipeline, from the arguments the classifying pass counted.
+    /// </summary>
+    private void Resolve(GpuRenderPass render, ListedPass pass, BoundResource args, BoundResource tiles, GpuResources resources)
+    {
+        BindPieces(render, tiles.Buffer, resources);
+        int bin = 0;
+        foreach (SurfaceKey key in _variants.Resolve)
+        {
+            GpuPipeline pipeline = GetSurfacePipeline(pass, key);
+            if (pipeline != GpuPipeline.None) render.Pipeline(pipeline).DrawIndexedFromBuffer(args.Buffer, (uint)(bin * GpuTable<GpuDrawArgs>.RowBytes), 1);
+
+            bin++;
+        }
+    }
+
+    /// <summary>
+    /// The world's sky, its material's sky shader or the renderer's own, over what nothing was drawn on, or its shadow
+    /// over the whole target.
+    /// </summary>
+    private void Sky(GpuRenderPass render, ListedPass pass, in RecordScope scope)
+    {
+        GpuPipeline sky = GetSurfacePipeline(pass, scope.Sky);
+        if (sky != GpuPipeline.None) render.Pipeline(sky).Draw(3);
+    }
+
+    /// <summary>
+    /// The view's transparent pieces, farthest instance first, a run of one surface at a time.
+    /// </summary>
+    private void Transparent(GpuRenderPass render, ListedPass pass, in RecordScope scope)
+    {
+        if (scope.TransparentRuns.Count == 0) return;
+
+        BindPieces(render, scope.TransparentPieces, scope.Resources);
+        GpuPipeline bound = GpuPipeline.None;
+        foreach (TransparentRun run in scope.TransparentRuns)
+        {
+            GpuPipeline pipeline = GetSurfacePipeline(pass, run.Surface);
+            if (pipeline == GpuPipeline.None) continue;
+
+            if (pipeline != bound)
+            {
+                render.Pipeline(pipeline);
+                bound = pipeline;
+            }
+
+            render.DrawIndexed(GpuResources.PieceIndexCount, 0, 0, (uint)run.Count, (uint)run.First);
+        }
+    }
+
+    /// <summary>
+    /// Binds pieces to draw: their instance-rate buffer and the indices. The frame-wide tables their vertex stage reads are
+    /// bound as any stage's reads are.
+    /// </summary>
+    private static GpuRenderPass BindPieces(GpuRenderPass render, GpuBuffer pieces, GpuResources resources) => render.VertexBuffers([pieces]).IndexBuffer(resources.PieceIndices, GpuIndexSize.Bits16);
+
+    private void Mipmaps(ListedPass pass, in RecordScope scope)
+    {
+        foreach (PassBinding write in pass.TextureWrites)
+        {
+            if (write.Mipmaps && TryGetResource(scope, write.Info.Name, out BoundResource bound))
+            {
+                gpu.Commands.GenerateMipmaps(bound.Texture);
+            }
+        }
+
+        if (pass.Pass.Kind != PassKind.Draw || !pass.Pass.Draw.Mipmaps) return;
+
+        foreach (string color in pass.Pass.Draw.Colors)
+        {
+            if (TryGetResource(scope, color, out BoundResource bound)) gpu.Commands.GenerateMipmaps(bound.Texture);
+        }
+    }
+
+    /// <summary>
+    /// The sampler a texture is read through: its own, where the frame binds it with one (the materials' textures), else
+    /// by its filter: nearest for depth and single-channel textures, linear for the rest, unless its filter says.
+    /// </summary>
+    private static GpuSampler GetSampler(ResourceInfo info, in BoundResource resource, GpuResources resources)
+    {
+        if (resource.Sampler != GpuSampler.None) return resource.Sampler;
+
+        bool isNearest = info.IsDepth || info.Format is GpuFormat.R32Float or GpuFormat.R32Uint or GpuFormat.R16Float;
+        return info.Filter switch
+        {
+            PassFilter.Nearest => resources.GetSampler(_nearest),
+            PassFilter.Linear => resources.GetSampler(_linear),
+            PassFilter.Comparison => resources.GetSampler(_comparison),
+            PassFilter.Default => resources.GetSampler(isNearest ? _nearest : _linear),
+            _ => resources.GetSampler(isNearest ? _nearest : _linear),
+        };
+    }
+
+    /// <summary>
+    /// How many groups a compute pass runs: enough threads for the view or a texture it writes, one per of a count (rows
+    /// of <see cref="MaxGroupsX"/>), or fixed.
+    /// </summary>
+    private static (uint X, uint Y, uint Z) GetGroups(ListedPass pass, in RecordScope scope)
+    {
+        PassDispatch dispatch = pass.Pass.Dispatch;
+        (uint threadsX, uint threadsY, uint threadsZ) = pass.Threads;
+        if (dispatch.Groups.Count > 0)
+        {
+            return (dispatch.Groups[0], dispatch.Groups.Count > 1 ? dispatch.Groups[1] : 1, dispatch.Groups.Count > 2 ? dispatch.Groups[2] : 1);
+        }
+
+        bool isView = pass.DispatchesPerView;
+        if (isView || pass.DispatchOutput.Length > 0)
+        {
+            Vector2 view = scope.Constants.ViewSize;
+            (uint width, uint height) = ((uint)view.X, (uint)view.Y);
+            if (!isView && TryGetResource(scope, pass.DispatchOutput, out BoundResource output))
+            {
+                (width, height) = (output.Width, output.Height);
+            }
+
+            return dispatch.Tile > 0 ? (CeilingDivide(width, dispatch.Tile), CeilingDivide(height, dispatch.Tile), 1u) : (CeilingDivide(width, threadsX), CeilingDivide(height, threadsY), 1u);
+        }
+
+        uint groups = CeilingDivide(scope.Counts.GetCount(pass.DispatchPer), threadsX * threadsY * threadsZ);
+        return (Math.Min(groups, MaxGroupsX), CeilingDivide(groups, MaxGroupsX), 1);
+    }
+
+    /// <summary>
+    /// How many times a pass runs this frame: once, or once for each of the count it names.
+    /// </summary>
+    private static uint GetIterations(ListedPass pass, in Counts counts) => pass.Each.IsNone ? 1 : counts.GetCount(pass.Each);
+
+    /// <summary>
+    /// The layer a texture write goes to: its iteration's, in a texture array a pass writes for each of a count.
+    /// </summary>
+    private static uint GetLayer(ListedPass pass, PassBinding write, uint iteration)
+    {
+        return !pass.Each.IsNone && write.Info.Shape is GpuTextureKind.Texture2DArray or GpuTextureKind.Cube ? iteration : write.Layer;
+    }
+
+    /// <summary>
+    /// What a pass makes is made with, as its file and this frame's sizes and counts say: a texture follows the view's
+    /// size as it is drawn, or as it is shown.
+    /// </summary>
+    private static ResourceKey GetKey(CreatedResource created, in RecordScope scope)
+    {
+        PassCreate create = created.Create;
+        if (create.Kind == PassResource.Buffer)
+        {
+            uint rows = created.Per.IsNone ? create.Rows : BitOperations.RoundUpToPowerOf2(Math.Max(1, scope.Counts.GetCount(created.Per)));
+            uint copies = created.Copies.IsNone ? 1 : Math.Max(1, scope.Counts.GetCount(created.Copies));
+            return new ResourceKey(true, GpuFormat.Invalid, GpuTextureKind.Texture2D, GpuTextureUsage.None, created.BufferUsage, 0, 0, 0, 0, Math.Max(rows * create.Stride, create.Stride) * copies);
+        }
+
+        Vector2 view = create.Size == PassSize.Output ? scope.Constants.OutputSize : scope.Constants.ViewSize;
+        uint side = created.Per.IsNone ? 0 : Math.Max(1, scope.Counts.GetCount(created.Per));
+        uint width = side > 0 ? side : create.Scale > 0 ? (uint)Math.Max(1, MathF.Ceiling(view.X * create.Scale)) : create.Width;
+        uint height = side > 0 ? side : create.Scale > 0 ? (uint)Math.Max(1, MathF.Ceiling(view.Y * create.Scale)) : create.Height;
+        uint layers = create.Cube ? 6 : create.Depth > 0 ? create.Depth : create.Layers;
+        uint levels = Math.Min(create.Levels, (uint)BitOperations.Log2(Math.Max(width, height)) + 1);
+
+        // Sampled whether or not a pass reads it: the renderer shows the view's Ldr, which no pass does. A texture kept
+        // from frame to frame is drawn into once as it is made, to empty its history.
+        GpuTextureUsage usage = created.TextureUsage | (created.Info.IsStorageRead ? GpuTextureUsage.None : GpuTextureUsage.Sampled) | (created.Info.IsDepth ? GpuTextureUsage.DepthTarget : GpuTextureUsage.None)
+            | (create.History ? GpuTextureUsage.ColorTarget : GpuTextureUsage.None);
+        return new ResourceKey(false, create.Format, created.Info.Shape, usage, GpuBufferUsage.None, width, height, layers, levels, 0, create.History);
+    }
+
+    /// <summary>
+    /// The bytes of one copy of a buffer a pass makes: as many rows as its count, not as many as it is made with, so an
+    /// iteration's offset agrees with what the shader that fills it works out.
+    /// </summary>
+    private static uint GetSliceBytes(CreatedResource created, in Counts counts)
+    {
+        return (created.Per.IsNone ? created.Create.Rows : Math.Max(1, counts.GetCount(created.Per))) * created.Create.Stride;
+    }
+
+    private static bool TryGetResource(in RecordScope scope, string name, out BoundResource resource)
+    {
+        return (scope.View is { } view && view.TryGet(name, out resource)) || scope.Resources.Frame.TryGet(name, out resource);
+    }
+
+    private static uint CeilingDivide(uint count, uint per) => (Math.Max(1, count) + Math.Max(1, per) - 1) / Math.Max(1, per);
+
+    /// <summary>
+    /// What a stage reads this frame, gathered from what it binds, each at its slot: sampled textures with the sampler
+    /// each is read through, textures read with none, and buffers; false when one is not there yet.
+    /// </summary>
+    private ref struct Reads
+    {
+        private Buffer16<GpuSampledTexture> _sampled;
+        private Buffer8<GpuTexture> _storage;
+        private Buffer8<GpuBuffer> _buffers;
+
+        internal bool TryGather(StageBindings bound, in RecordScope scope)
+        {
+            foreach (BoundName read in bound.Sampled)
+            {
+                if (!TryGetResource(scope, read.Binding.Info.Name, out BoundResource resource)) return false;
+
+                _sampled[(int)read.Slot] = new GpuSampledTexture(resource.Texture, GetSampler(read.Binding.Info, resource, scope.Resources));
+            }
+
+            foreach (BoundName read in bound.StorageReads)
+            {
+                if (!TryGetResource(scope, read.Binding.Info.Name, out BoundResource resource)) return false;
+
+                _storage[(int)read.Slot] = resource.Texture;
+            }
+
+            foreach (BoundName read in bound.Buffers)
+            {
+                if (!TryGetResource(scope, read.Binding.Info.Name, out BoundResource resource)) return false;
+
+                _buffers[(int)read.Slot] = resource.Buffer;
+            }
+
+            return true;
+        }
+
+        internal void Bind(GpuRenderPass render, GpuStage stage, StageBindings bound)
+        {
+            if (bound.Sampled.Count > 0) render.Textures(stage, _sampled[..bound.Sampled.Count]);
+
+            if (bound.StorageReads.Count > 0) render.RawTextures(stage, _storage[..bound.StorageReads.Count]);
+
+            if (bound.Buffers.Count > 0) render.Buffers(stage, _buffers[..bound.Buffers.Count]);
+        }
+
+        internal void Bind(GpuComputePass compute, StageBindings bound)
+        {
+            if (bound.Sampled.Count > 0) compute.Textures(_sampled[..bound.Sampled.Count]);
+
+            if (bound.StorageReads.Count > 0) compute.RawTextures(_storage[..bound.StorageReads.Count]);
+
+            if (bound.Buffers.Count > 0) compute.Buffers(_buffers[..bound.Buffers.Count]);
+        }
+    }
+
+    [System.Runtime.CompilerServices.InlineArray(StageBindings.MaxSampled)]
+    private struct Buffer16<T>
+    {
+        private T _first;
+    }
+
+    [System.Runtime.CompilerServices.InlineArray(StageBindings.MaxStorage)]
+    private struct Buffer8<T>
+    {
+        private T _first;
+    }
 }
 
 /// <summary>
@@ -769,3 +1338,170 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
 /// params packed.
 /// </summary>
 internal sealed record Loaded(Pass Pass, string Name, string Body, PassWords Params);
+
+/// <summary>
+/// What a stage records against: the renderer's resources with the frame's scope, and a view's scope, or a target's in
+/// a target's stage, which is looked in first; the constants and counts of the frame or the view, the view's
+/// transparent pieces and their runs, the sky's surface, the frame now, and a target's format and encoding.
+/// </summary>
+internal readonly record struct RecordScope(
+    GpuResources Resources,
+    ResourceScope? View,
+    FrameConstants Constants,
+    Counts Counts,
+    IReadOnlyList<TransparentRun> TransparentRuns,
+    GpuBuffer TransparentPieces,
+    SurfaceKey Sky,
+    Frame Now,
+    GpuFormat TargetFormat = GpuFormat.Invalid,
+    TargetEncoding TargetEncoding = TargetEncoding.Linear);
+
+/// <summary>
+/// A run of a view's transparent pieces drawn with one surface's pipeline.
+/// </summary>
+internal readonly record struct TransparentRun(SurfaceKey Surface, int First, int Count);
+
+/// <summary>
+/// How much of each count a pass file can name the frame holds (<see cref="PassCount"/>), from the settings and what the
+/// world has.
+/// </summary>
+internal readonly record struct Counts(
+    uint Instances,
+    uint Pieces,
+    uint Clusters,
+    uint Jobs,
+    uint RasterBins,
+    uint ResolveBins,
+    uint Tiles,
+    uint HizTexels,
+    uint HizLevels,
+    uint Lights,
+    uint ZBins,
+    uint LightTileWords,
+    uint GiRays,
+    uint GiProbeThreads,
+    uint WorldLights,
+    uint SunEntries,
+    uint LightEntries,
+    uint ShadowViews,
+    uint ShadowGroups,
+    uint ShadowCandidates)
+{
+    internal uint GetCount(CountName name) => name.Count switch
+    {
+        PassCount.None => 0,
+        PassCount.Number => name.Number,
+        PassCount.Instances => Instances,
+        PassCount.Pieces => Pieces,
+        PassCount.Clusters => Clusters,
+        PassCount.Jobs => Jobs,
+        PassCount.RasterBins => RasterBins,
+        PassCount.TileEntries => Tiles * Math.Max(1, ResolveBins),
+        PassCount.HizTexels => HizTexels,
+        PassCount.HizLevels => HizLevels,
+        PassCount.Lights => Lights,
+        PassCount.ZBins => ZBins,
+        PassCount.LightTileWords => LightTileWords,
+        PassCount.GiRays => GiRays,
+        PassCount.GiProbeThreads => GiProbeThreads,
+        PassCount.WorldLights => WorldLights,
+        PassCount.SunEntries => SunEntries,
+        PassCount.LightEntries => LightEntries,
+        PassCount.ShadowViews => ShadowViews,
+        PassCount.ShadowGroups => ShadowGroups,
+        PassCount.ShadowCandidates => ShadowCandidates,
+        _ => 0,
+    };
+}
+
+/// <summary>
+/// The counts a pass file can name, for how many times a pass runs, how many groups it dispatches and how big a buffer it
+/// makes is, each by its name with its first letter small (<c>tileEntries</c>): the instances' and the view's, the
+/// lights' (the world's light slots, and those a view holds), and the shadows' (their tables' entries, the pages drawn
+/// a frame at most, their groups, and the pool's pages to take).
+/// </summary>
+internal enum PassCount
+{
+    /// <summary>
+    /// None named: the pass runs once, or what it makes is as big as its file says.
+    /// </summary>
+    None,
+
+    /// <summary>
+    /// A number, which names itself.
+    /// </summary>
+    Number,
+    Instances,
+    Pieces,
+    Clusters,
+    Jobs,
+    RasterBins,
+
+    /// <summary>
+    /// A view's tiles times its resolve bins.
+    /// </summary>
+    TileEntries,
+    HizTexels,
+    HizLevels,
+    Lights,
+    ZBins,
+    LightTileWords,
+    GiRays,
+    GiProbeThreads,
+    WorldLights,
+    SunEntries,
+    LightEntries,
+    ShadowViews,
+    ShadowGroups,
+    ShadowCandidates,
+}
+
+/// <summary>
+/// A count a pass file names, read as the pass loads: one the frame holds, a number, or none.
+/// </summary>
+internal readonly record struct CountName(PassCount Count, uint Number = 0)
+{
+    /// <summary>
+    /// The counts by the names a pass file uses for them.
+    /// </summary>
+    private static readonly Dictionary<string, PassCount> _names = GetNames();
+
+    internal bool IsNone => Count == PassCount.None;
+
+    /// <summary>
+    /// The count <paramref name="name"/> names, none for an empty name; false for a name no count has.
+    /// </summary>
+    internal static bool TryParse(string name, out CountName count)
+    {
+        count = default;
+        if (name.Length == 0) return true;
+
+        if (uint.TryParse(name, System.Globalization.CultureInfo.InvariantCulture, out uint number))
+        {
+            count = new CountName(PassCount.Number, number);
+            return true;
+        }
+
+        if (!_names.TryGetValue(name, out PassCount named)) return false;
+
+        count = new CountName(named);
+        return true;
+    }
+
+    /// <summary>
+    /// The count <paramref name="name"/> names; none for a name no count has, which fails its pass as it is listed.
+    /// </summary>
+    internal static CountName Of(string name) => TryParse(name, out CountName count) ? count : default;
+
+    private static Dictionary<string, PassCount> GetNames()
+    {
+        Dictionary<string, PassCount> names = new(StringComparer.Ordinal);
+        foreach (PassCount count in Enum.GetValues<PassCount>())
+        {
+            string name = count.ToString();
+            if (count > PassCount.Number) names[$"{char.ToLowerInvariant(name[0])}{name[1..]}"] = count;
+        }
+
+        return names;
+    }
+}

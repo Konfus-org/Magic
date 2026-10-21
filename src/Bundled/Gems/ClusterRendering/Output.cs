@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
@@ -10,8 +11,10 @@ namespace Magic.ClusterRendering;
 /// Shows a view: its finished image, what the post stage made (<c>Ldr</c>) or else the lit scene as it is, scaled into
 /// its rectangle of its target and encoded as its image's format expects (<see cref="TargetEncoding"/>): as it is for
 /// a render texture, sRGB and dithered for an SDR window, PQ or scRGB for an HDR one. Or, while the frame is viewed at
-/// a stage that makes no image for the view, that nothing draws to it, in the failure's magenta. A pipeline per
-/// target format and shader, made the first time one is drawn into. Render thread.
+/// a stage that makes no image for the view, that nothing draws to it, in the failure's magenta. Over the image, the
+/// failure banner: what the failures said, as glyphs (<see cref="FailureHandler.Text"/>), and the codes the frame's
+/// shaders raised (<see cref="Raised"/>). A pipeline per target format and shader, made the first time one is drawn
+/// into. Render thread.
 /// </summary>
 internal sealed class Output : IDisposable
 {
@@ -19,7 +22,19 @@ internal sealed class Output : IDisposable
     private const string Nothing = "Shaders/Passes/Nothing.frag.hlsl";
     private const string Fullscreen = "Shaders/Passes/Fullscreen.vert.hlsl";
 
+    /// <summary>
+    /// What empties the raised codes each frame, a word per code.
+    /// </summary>
+    private static readonly byte[] _noCodes = new byte[FailureHandler.CodeCount * sizeof(uint)];
+
     private readonly IGpu _gpu;
+    private readonly GpuResources _resources;
+
+    /// <summary>
+    /// The failure banner's glyphs as last sent, and which packing of them that was.
+    /// </summary>
+    private readonly GpuBuffer _banner;
+    private int _bannerVersion = -1;
     private readonly Dictionary<(GpuFormat Format, bool IsNothing), GpuPipeline> _pipelines = [];
     private readonly GpuSampler _linear;
     private readonly GpuSampler _nearest;
@@ -30,11 +45,14 @@ internal sealed class Output : IDisposable
     /// </summary>
     private volatile Compiled? _shaders;
 
-    internal Output(IGpu gpu, IShaderCompiler compiler, CancellationToken stopping)
+    internal Output(IGpu gpu, GpuResources resources, IShaderCompiler compiler, CancellationToken stopping)
     {
         _gpu = gpu;
-        _linear = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
-        _nearest = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Nearest, GpuWrap.Clamp));
+        _resources = resources;
+        _banner = resources.MakeBuffer(GpuBufferUsage.GraphicsRead, FailureHandler.TextWords * sizeof(uint));
+        Raised = resources.MakeBuffer(GpuContract.Failures, (uint)_noCodes.Length);
+        _linear = resources.GetSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
+        _nearest = resources.GetSampler(new GpuSamplerDescription(GpuFilter.Nearest, GpuWrap.Clamp));
         CompileAsync(compiler, stopping).FireAndForget();
     }
 
@@ -44,46 +62,53 @@ internal sealed class Output : IDisposable
         {
             _gpu.Release(pipeline);
         }
-
-        _gpu.Release(_linear);
-        _gpu.Release(_nearest);
     }
+
+    /// <summary>
+    /// A word per code, 1 once a shader raised it this frame: the frame's <c>Failures</c>.
+    /// </summary>
+    internal GpuBuffer Raised { get; }
 
     /// <summary>
     /// Draws the view's finished image into its rectangle of its target, read with <paramref name="filter"/> as it is
-    /// scaled, with the words of what failed this frame over it (<paramref name="failures"/>), clearing the rest of
-    /// the target first when <paramref name="clears"/>; only the clear until the pipeline is made and the view has an
-    /// image.
+    /// scaled, with the failure banner over it (<see cref="SendBanner"/>); or, with no image
+    /// (null), the failure's magenta, saying that nothing draws to the stage the frame is viewed at. The rest of the
+    /// target is cleared first when <paramref name="clears"/>; only the clear until the pipeline is made, or while the
+    /// image is not made yet.
     /// </summary>
-    internal void Draw(ViewTarget target, in FrameConstants constants, BoundResource image, GpuFilter filter, bool clears, Failures failures)
+    internal void Draw(ViewTarget target, in FrameConstants constants, BoundResource? image, GpuFilter filter, bool clears)
     {
-        GpuPipeline pipeline = GetPipeline(target.Format, isNothing: false);
-        if (pipeline == GpuPipeline.None || image.Texture == GpuTexture.None)
+        GpuPipeline pipeline = GetPipeline(target.Format, isNothing: image is null);
+        if (pipeline == GpuPipeline.None || image?.Texture == GpuTexture.None)
         {
             if (clears) Clear(target.Texture);
 
             return;
         }
 
-        Record(target, constants, pipeline, clears, [new GpuSampledTexture(image.Texture, filter == GpuFilter.Nearest ? _nearest : _linear)], [failures.Text, failures.Raised]);
+        if (image is { } drawn)
+        {
+            Record(target, constants, pipeline, clears, [new GpuSampledTexture(drawn.Texture, filter == GpuFilter.Nearest ? _nearest : _linear)], [_banner, Raised]);
+        }
+        else
+        {
+            Record(target, constants, pipeline, clears, [], []);
+        }
     }
 
     /// <summary>
-    /// Draws into the view's rectangle of its target that nothing draws to the stage the frame is viewed at, in the
-    /// failure's magenta, clearing the rest of the target first when <paramref name="clears"/>; only the clear until
-    /// the pipeline is made.
+    /// Sends the banner's glyphs when <paramref name="failures"/> packed them again, and empties the raised codes, before
+    /// the frame's passes run, so a code shows the frame it is raised.
     /// </summary>
-    internal void DrawNothing(ViewTarget target, in FrameConstants constants, bool clears)
+    internal void SendBanner(FailureHandler failures)
     {
-        GpuPipeline pipeline = GetPipeline(target.Format, isNothing: true);
-        if (pipeline == GpuPipeline.None)
+        if (failures.TextVersion != _bannerVersion)
         {
-            if (clears) Clear(target.Texture);
-
-            return;
+            _bannerVersion = failures.TextVersion;
+            _resources.Upload(_banner, 0, MemoryMarshal.AsBytes(failures.Text));
         }
 
-        Record(target, constants, pipeline, clears, [], []);
+        _resources.Upload(Raised, 0, _noCodes);
     }
 
     /// <summary>

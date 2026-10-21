@@ -4,7 +4,7 @@
 // surface pipeline is bound only what it uses, which the renderer reads from its compile.
 //
 // A TextureRef is (pool << 16) | layer. Pools are colour (sRGB) then data (linear), each 256, 512, 1024 and 2048 texels
-// a side, as the renderer's TexturePools.cs makes them. The pool is picked by a switch of constant indexes, since a
+// a side, as the renderer's GpuCache.cs makes them. The pool is picked by a switch of constant indexes, since a
 // runtime index into resources does not survive translation to every API.
 
 #ifndef MAGIC_SURFACE_BINDINGS_HLSLI

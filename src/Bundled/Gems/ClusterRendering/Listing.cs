@@ -84,10 +84,10 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     /// were. Then counts the pipelines to wait for: a pass's own, and a draw's for the <paramref name="variants"/> it
     /// draws (<see cref="ListedPass.GetVariants"/>).
     /// </summary>
-    internal void Fit(List<Loaded> loaded, List<string> failures, SceneVariants variants)
+    internal void Fit(List<Loaded> loaded, List<string> failures, SurfaceVariants variants)
     {
         Failures.AddRange(failures);
-        List<ResourceInfo> names = [.. ResourceInfo.Engine.Values];
+        List<ResourceInfo> names = [.. GpuContract.All.Values];
         foreach (PassStage stage in Enum.GetValues<PassStage>())
         {
             bool isFrame = stage < PassStage.Cull;
@@ -234,6 +234,13 @@ internal sealed class Listing(IGpu gpu) : IDisposable
 /// </summary>
 internal sealed record CreatedResource(PassCreate Create, ResourceInfo Info)
 {
+    /// <summary>
+    /// The count its rows or its side follow, and how many copies of it there are, as its file names them.
+    /// </summary>
+    internal CountName Per { get; } = CountName.Of(Create.Per);
+
+    internal CountName Copies { get; } = CountName.Of(Create.Copies);
+
     internal GpuTextureUsage TextureUsage { get; set; }
 
     internal GpuBufferUsage BufferUsage { get; set; }
@@ -245,6 +252,13 @@ internal sealed record CreatedResource(PassCreate Create, ResourceInfo Info)
 /// </summary>
 internal sealed class ListedPass(Loaded loaded, Listing listing)
 {
+    /// <summary>
+    /// What a compute pass's dispatch names in place of a count: a thread per pixel of the view, or per texel of what
+    /// follows the prefix.
+    /// </summary>
+    private const string PerView = "view";
+    private const string OutputPrefix = "output:";
+
     private readonly StageBindings?[] _bound = new StageBindings?[3];
 
     internal Pass Pass => loaded.Pass;
@@ -269,7 +283,23 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// <summary>
     /// The texture a compute pass dispatched <c>output:Name</c> runs a thread per texel of; empty for any other dispatch.
     /// </summary>
-    internal string DispatchOutput { get; } = loaded.Pass.Dispatch.Per.StartsWith("output:", StringComparison.Ordinal) ? loaded.Pass.Dispatch.Per["output:".Length..] : string.Empty;
+    internal string DispatchOutput { get; } = loaded.Pass.Dispatch.Per.StartsWith(OutputPrefix, StringComparison.Ordinal) ? loaded.Pass.Dispatch.Per[OutputPrefix.Length..] : string.Empty;
+
+    /// <summary>
+    /// Whether a compute pass runs a thread per pixel of the view.
+    /// </summary>
+    internal bool DispatchesPerView { get; } = string.Equals(loaded.Pass.Dispatch.Per, PerView, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The count a compute pass runs a thread for each of; none when it runs one per pixel of the view or texel of what
+    /// it names.
+    /// </summary>
+    internal CountName DispatchPer { get; } = IsCount(loaded.Pass.Dispatch.Per) ? CountName.Of(loaded.Pass.Dispatch.Per) : default;
+
+    /// <summary>
+    /// How many times it runs: once, or once for each of the count its file names.
+    /// </summary>
+    internal CountName Each { get; } = CountName.Of(loaded.Pass.Each);
 
     /// <summary>
     /// Every name its shaders can read, in the order the frame makes them: the renderer's, what the passes before it
@@ -326,7 +356,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
 
     /// <summary>
     /// Its pipeline could not be made, so it never runs: what it would draw into is shown as the failure instead
-    /// (<see cref="PassRecorder"/>).
+    /// (<see cref="PassGraph.Record"/>).
     /// </summary>
     internal bool HasFailed { get; set; }
 
@@ -374,6 +404,8 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// </summary>
     internal string? Bind(List<ResourceInfo> names, Dictionary<string, PassCreate> made, bool isFrame, bool isTarget)
     {
+        if (FindUnknownCount() is { } unknown) return $"it names the count {unknown}, which the frame has none of.";
+
         foreach (ResourceInfo info in names)
         {
             if (made.ContainsKey(info.Name))
@@ -434,7 +466,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
             PassKind.Compute when TextureWrites.Count + BufferWrites.Count == 0 => "a compute pass writes something.",
             PassKind.Fullscreen when Pass.Shader == Handle<Shader>.None => "a fullscreen pass names its fragment shader.",
             PassKind.Fullscreen when TextureWrites.Count != 1 || BufferWrites.Count > 0 => "a fullscreen pass writes one texture, its target.",
-            PassKind.Fullscreen when TextureWrites[0].Info.IsTarget => $"only a script pass draws into {ResourceInfo.TargetName}, whose format is known only as it is drawn into; a fullscreen pass in the overlay stage writes what it makes.",
+            PassKind.Fullscreen when TextureWrites[0].Info.IsTarget => $"only a script pass draws into {GpuContract.Target.Name}, whose format is known only as it is drawn into; a fullscreen pass in the overlay stage writes what it makes.",
             PassKind.Script when Pass.Script == Handle<Script>.None => "a script pass names its script.",
             PassKind.Script when TextureWrites.Count != 1 || BufferWrites.Count > 0 => "a script pass writes one texture, its target.",
             PassKind.Draw when Pass.Draw.Drawn == PassDrawn.Depth && Pass.Shader == Handle<Shader>.None => "a depth draw names its vertex shader.",
@@ -449,7 +481,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// visibility buffer, the resolve bins' for a draw of surfaces, the transparent ones for a draw of transparent
     /// surfaces, the sky's for a draw of the sky or its shadow, none for any other pass.
     /// </summary>
-    internal IReadOnlyCollection<SurfaceKey> GetVariants(SceneVariants variants)
+    internal IReadOnlyCollection<SurfaceKey> GetVariants(SurfaceVariants variants)
     {
         return Pass.Kind != PassKind.Draw ? [] : Pass.Draw.Drawn switch
         {
@@ -528,6 +560,26 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     }
 
     /// <summary>
+    /// The first count its file names that the frame has none of (<see cref="PassCount"/>); null when it has them all.
+    /// </summary>
+    private string? FindUnknownCount()
+    {
+        List<string> named = [Pass.Each, IsCount(Pass.Dispatch.Per) ? Pass.Dispatch.Per : string.Empty];
+        foreach (PassCreate create in Pass.Creates)
+        {
+            named.Add(create.Per);
+            named.Add(create.Copies);
+        }
+
+        return named.Find(name => !CountName.TryParse(name, out _));
+    }
+
+    /// <summary>
+    /// Whether a dispatch's <paramref name="per"/> names a count, not the view or what it writes.
+    /// </summary>
+    private static bool IsCount(string per) => !string.Equals(per, PerView, StringComparison.Ordinal) && !per.StartsWith(OutputPrefix, StringComparison.Ordinal);
+
+    /// <summary>
     /// Whether a pass of a stage's scope can see a name: every pass the frame's; a view's stages the views'; a target's
     /// stages the targets'.
     /// </summary>
@@ -583,7 +635,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
 /// surface of none for the bins that do not clip), the resolve bins' into the G-buffer, transparent forward, and the
 /// sky's.
 /// </summary>
-internal readonly record struct SceneVariants(IReadOnlyCollection<SurfaceKey> Raster, IReadOnlyCollection<SurfaceKey> Resolve, IReadOnlyCollection<SurfaceKey> Transparent, SurfaceKey Sky);
+internal readonly record struct SurfaceVariants(IReadOnlyCollection<SurfaceKey> Raster, IReadOnlyCollection<SurfaceKey> Resolve, IReadOnlyCollection<SurfaceKey> Transparent, SurfaceKey Sky);
 
 /// <summary>
 /// One name a pass binds: what it stands for, and for a write the level and layer, what happens to what was there, and

@@ -43,19 +43,19 @@ ResolveOutput main(TileVaryings input)
 
     uint3 piece = VisiblePieces.Load3(((id - 1u) >> 5) * 12u);
     uint face = (id - 1u) & 31u;
-    GpuSceneInstance instance = LOAD(Instances, GpuSceneInstance, piece.x);
+    GpuInstance instance = LOAD(Instances, GpuInstance, piece.x);
     bool isCard = (piece.y & CardBit) != 0u;
     GpuCard card = LOAD(Cards, GpuCard, isCard ? piece.y & ~CardBit : 0u);
     GpuCluster cluster = LOAD(Clusters, GpuCluster, isCard ? 0u : piece.y >> 2);
     uint slot = isCard ? card.slot : ClusterSlot(cluster);
-    uint material = SceneMaterial(instance, slot);
+    uint material = InstanceMaterial(instance, slot);
     if (((MaterialBins.Load(material * 4u) >> 16) & 0xFFu) != input.bin)
     {
         discard;
     }
 
     // The triangle's corners in the order the vertex stage drew them, a mirrored instance's second and third swapped.
-    bool isMirrored = (instance.flags & SceneMirrored) != 0u;
+    bool isMirrored = (instance.flags & InstanceMirrored) != 0u;
     float3 positions[3];
     float3 normals[3];
     float4 tangents[3];
@@ -76,9 +76,9 @@ ResolveOutput main(TileVaryings input)
         else
         {
             PieceVertex vertex = LoadCorner(cluster, corners[corner], cluster.step);
-            positions[k] = ScenePosition(instance, vertex.position);
-            normals[k] = SceneNormal(instance, vertex.normal);
-            tangents[k] = float4(NormalizeOrZero(SceneDirection(instance, vertex.tangent.xyz)), vertex.tangent.w);
+            positions[k] = InstancePosition(instance, vertex.position);
+            normals[k] = InstanceNormal(instance, vertex.normal);
+            tangents[k] = float4(NormalizeOrZero(InstanceDirection(instance, vertex.tangent.xyz)), vertex.tangent.w);
             uvs[k] = vertex.uv;
             places[k] = vertex.position;
         }
@@ -136,8 +136,8 @@ ResolveOutput main(TileVaryings input)
     // A card moves as its centre does; a cluster's point as its instance moved it.
     float3 place = here.x * places[0] + here.y * places[1] + here.z * places[2];
     float3 last = isCard
-        ? varyings.position + ScenePrevPosition(instance, card.centre) - ScenePosition(instance, card.centre)
-        : ScenePrevPosition(instance, place);
+        ? varyings.position + InstancePrevPosition(instance, card.centre) - InstancePosition(instance, card.centre)
+        : InstancePrevPosition(instance, place);
     float4 lastClip = mul(PrevViewProj, float4(last, 1.0));
     float2 lastNdc = lastClip.xy / max(lastClip.w, 1e-6);
 

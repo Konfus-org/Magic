@@ -22,7 +22,7 @@ static const float PulseMax = 1.0;
 static const float PulsePeriod = 2.0; // seconds
 
 // What only the GPU finds wrong, a word each of the frame's Failures buffer, 1 once raised, emptied every frame. The
-// renderer's Failures.cs holds the words for each, in this order: change both together.
+// renderer's FailureHandler.cs holds the words for each, in this order: change both together.
 static const uint FailureNaN = 0u;            // a NaN or infinity in the lit scene
 static const uint FailureMaterialRange = 1u;  // a material row past the materials there are
 static const uint FailureCodeCount = 8u;

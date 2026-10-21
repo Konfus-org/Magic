@@ -3,5 +3,5 @@
     "kind": "compute",
     "shader": { "id": 60032 },
     "writes": [ { "name": "LightStarts" }, { "name": "Lights" } ],
-    "dispatch": { "per": "sceneLights" }
+    "dispatch": { "per": "worldLights" }
 }

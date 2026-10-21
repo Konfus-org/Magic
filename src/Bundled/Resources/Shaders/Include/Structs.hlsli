@@ -1,4 +1,4 @@
-// The rows of the renderer's GPU tables, as its GpuStructs.cs (and Materials.cs's GpuMaterial) lays them out member for
+// The rows of the renderer's GPU tables, as its GpuStructs.cs lays them out member for
 // member: change both together. Every member group is 16 bytes, which packs the same in every API's storage buffers.
 // A transform is three float4 rows of transpose(world), applied with dot(): storage buffers carry no matrix types.
 
@@ -75,13 +75,13 @@ struct GpuGiLevel
 };
 
 // A scene instance's flags.
-static const uint SceneMirrored = 1u;
-static const uint SceneFadeIn = 2u;
+static const uint InstanceMirrored = 1u;
+static const uint InstanceFadeIn = 2u;
 
-// A scene instance, by its entity's slot: the rows of transpose(world) (xyz its turn and scale, w its position), and
+// An instance, by its entity's slot: the rows of transpose(world) (xyz its turn and scale, w its position), and
 // the last frame's the same way; its largest scale, its model's row, when its fade started (in Time) and its eight
-// material slots' rows, two to a word, 0xFFFF for one not in yet.
-struct GpuSceneInstance
+// material slots' rows, two to a word.
+struct GpuInstance
 {
     float4 row0;
     float4 row1;
@@ -97,7 +97,7 @@ struct GpuSceneInstance
 };
 
 // Its size in bytes, what a pass counts the Instances buffer's rows by.
-static const uint GpuSceneInstanceBytes = 128u;
+static const uint GpuInstanceBytes = 128u;
 
 // A model in the cluster pool: its sphere about its origin, its clusters, its levels (GpuLevel) and its cards
 // (GpuCard), the unit-scale distance its cards are drawn from (0 for none), its grid's step, its distance field's slot,
@@ -148,7 +148,7 @@ struct GpuCluster
 };
 
 // One card of a model (Core's Card): its centre, half width (less than 0 when it shows its mesh mirrored), half height
-// and turn about +Y, its material slot, and its two atlases' texture refs, TexturePools.None while they load.
+// and turn about +Y, its material slot, and its two atlases' texture refs, GpuCache.NoTexture while they load.
 struct GpuCard
 {
     float3 centre;
@@ -161,14 +161,14 @@ struct GpuCard
     uint3 padding;
 };
 
-// A point or spot light in the world's table (the renderer's SceneLights.cs), by its entity's slot: where it is, how
+// A point or spot light in the world's table (the renderer's WorldLights.cs), by its entity's slot: where it is, how
 // far it reaches, its intensity in candela times its colour, its bulb's radius, for a spot its axis and the scale and
 // offset of its cone's falloff, and its flags.
-static const uint SceneLightLive = 1u;
-static const uint SceneLightSpot = 2u;
-static const uint SceneLightShadowless = 4u;
+static const uint WorldLightLive = 1u;
+static const uint WorldLightSpot = 2u;
+static const uint WorldLightShadowless = 4u;
 
-struct GpuSceneLight
+struct GpuWorldLight
 {
     float3 position;
     float range;
@@ -181,37 +181,37 @@ struct GpuSceneLight
     uint2 padding;
 };
 
-// Its size in bytes, what a pass counts the SceneLights buffer's rows by.
-static const uint GpuSceneLightBytes = 64u;
+// Its size in bytes, what a pass counts the WorldLights buffer's rows by.
+static const uint GpuWorldLightBytes = 64u;
 
 // Where a light is relative to the camera.
-float3 SceneLightPosition(GpuSceneLight light)
+float3 WorldLightPosition(GpuWorldLight light)
 {
     return light.position - CameraPosition;
 }
 
 // Where a scene instance's model-space point is relative to the camera, and was relative to the last frame's.
-float3 ScenePosition(GpuSceneInstance instance, float3 position)
+float3 InstancePosition(GpuInstance instance, float3 position)
 {
     float3 turned = float3(dot(instance.row0.xyz, position), dot(instance.row1.xyz, position), dot(instance.row2.xyz, position));
     float3 moved = float3(instance.row0.w, instance.row1.w, instance.row2.w) - CameraPosition;
     return turned + moved;
 }
 
-float3 ScenePrevPosition(GpuSceneInstance instance, float3 position)
+float3 InstancePrevPosition(GpuInstance instance, float3 position)
 {
     float3 turned = float3(dot(instance.prevRow0.xyz, position), dot(instance.prevRow1.xyz, position), dot(instance.prevRow2.xyz, position));
     float3 moved = float3(instance.prevRow0.w, instance.prevRow1.w, instance.prevRow2.w) - CameraPosition;
     return turned + moved + CameraMotion;
 }
 
-float3 SceneDirection(GpuSceneInstance instance, float3 direction)
+float3 InstanceDirection(GpuInstance instance, float3 direction)
 {
     return float3(dot(instance.row0.xyz, direction), dot(instance.row1.xyz, direction), dot(instance.row2.xyz, direction));
 }
 
 // As TransformNormal, for a scene instance.
-float3 SceneNormal(GpuSceneInstance instance, float3 normal)
+float3 InstanceNormal(GpuInstance instance, float3 normal)
 {
     float3 cofactor0 = cross(instance.row1.xyz, instance.row2.xyz);
     float3 cofactor1 = cross(instance.row2.xyz, instance.row0.xyz);
@@ -220,8 +220,8 @@ float3 SceneNormal(GpuSceneInstance instance, float3 normal)
     return NormalizeOrZero(dot(instance.row0.xyz, cofactor0) < 0.0 ? -turned : turned);
 }
 
-// A material slot's row, 0xFFFF for none in yet.
-uint SceneMaterial(GpuSceneInstance instance, uint slot)
+// A material slot's row.
+uint InstanceMaterial(GpuInstance instance, uint slot)
 {
     uint word = instance.materials[slot >> 1];
     return (slot & 1u) != 0u ? word >> 16 : word & 0xFFFFu;
