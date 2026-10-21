@@ -4,6 +4,7 @@
     <BuildType Name="Optimize" />
     <BuildType Name="Release" />
   </Configurations>
+  <Project Path="samples/Samples.csproj" />
   <Project Path="src/Core/Core.csproj" />
   <Folder Name="/Tools/">
     <Project Path="tools/NativeBindingsGenerator/NativeBindingsGenerator.csproj" />
@@ -29,7 +30,6 @@
     <Project Path="src/Bundled/Gems/SdlTextureLoader/SdlTextureLoader.csproj" />
   </Folder>
   <Project Path="src/Bundled/Resources/Resources.csproj" />
-  <Project Path="samples/Samples.csproj" />
   <Folder Name="/Tests/">
     <Project Path="tests/Core.Tests/Core.Tests.csproj" />
   </Folder>

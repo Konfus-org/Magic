@@ -10,9 +10,6 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <!-- Launched from an IDE or dotnet run, Magic starts in the repository and opens the samples. -->
-    <RunWorkingDirectory>$(MSBuildThisFileDirectory)../../</RunWorkingDirectory>
-    <RunArguments>--project samples</RunArguments>
     <!-- The engine's own assets, its bundled gems' among them, every project's to use, which are not in this folder. -->
     <MagicResources>$(MSBuildThisFileDirectory)../Bundled/Resources</MagicResources>
   </PropertyGroup>
@@ -28,23 +25,4 @@
   <ItemGroup>
     <AdditionalFiles Include="BannedSymbols.txt" />
   </ItemGroup>
-
-  <!-- Built alone (dotnet build src/Core, dotnet run, a run from an IDE), Magic builds the bundled gems and resources
-       with it. The gems reference Magic rather than the other way round, so none is left stale against a new Magic,
-       which would not load it; they take the Magic just built rather than building it again, which would be a cycle,
-       so a gem other gems build on (one named <X>Bindings, a native library's API) is built first, the same way. A
-       solution build builds them all itself, so under one this is skipped, which would build each twice at once;
-       built alone, MSBuild names the solution *Undefined* rather than nothing. Built this way they are restored by
-       nothing else, and a restore is per configuration, so they are restored first, in a pass of their own (the
-       session id), as dotnet build does before it builds. -->
-  <ItemGroup>
-    <BundledLibrary Include="../Bundled/Gems/*Bindings/*.csproj" />
-    <BundledProject Include="../Bundled/Gems/*/*.csproj;../Bundled/Resources/Resources.csproj" Exclude="@(BundledLibrary)" />
-  </ItemGroup>
-
-  <Target Name="BuildBundled" AfterTargets="Build" Condition="('$(SolutionName)' == '' or '$(SolutionName)' == '*Undefined*') and '$(BuildingInsideVisualStudio)' != 'true'">
-    <MSBuild Projects="@(BundledLibrary);@(BundledProject)" Targets="Restore" Properties="Configuration=$(Configuration);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" BuildInParallel="true" />
-    <MSBuild Projects="@(BundledLibrary)" Targets="Build" Properties="BuildProjectReferences=false;Configuration=$(Configuration)" BuildInParallel="true" />
-    <MSBuild Projects="@(BundledProject)" Targets="Build" Properties="BuildProjectReferences=false;Configuration=$(Configuration)" BuildInParallel="true" />
-  </Target>
 </Project>

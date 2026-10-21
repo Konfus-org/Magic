@@ -8,7 +8,10 @@
        the assembly under runtimes/<rid>/native/, where the gem load context finds it. Every item's include folder
        serves every generation in the project, so a library whose headers include another's declares that one too; an
        item with no Headers is bound by hand and declared for its binary alone, and one declared HeadersOnly is fetched
-       for its headers and sources alone. -->
+       for its headers and sources alone. Building and generating are a real build's work, never a design-time one's:
+       the build an IDE runs in the background to feed its editor compiles what the last real build generated. It
+       hides what it logs and skips the compiler, so a native build in it would run unseen and the generator, built
+       inside it, would not be compiled, failing it and every target the IDE asked for after, NuGet's among them. -->
   <PropertyGroup>
     <MagicNativeLibs Condition="'$(MagicNativeLibs)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))/Magic/NativeLibs/</MagicNativeLibs>
     <!-- With forward slashes, as CMake writes paths, so an option a project makes of it reads as CMake recorded it. -->
@@ -53,7 +56,8 @@
     </NativeLibrary>
   </ItemDefinitionGroup>
 
-  <!-- Where each library's source and product live, and what this project makes from it. -->
+  <!-- Where each library's source and product live, and what this project makes from it, known without building, so a
+       design-time build sees the same items as a real one. -->
   <Target Name="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != ''">
     <ItemGroup>
       <NativeLibrary>
@@ -66,6 +70,7 @@
     <ItemGroup>
       <_NativeInclude Include="@(NativeLibrary)" Condition="'%(NativeLibrary.IncludePath)' != ''" />
       <_NativeGenerated Include="@(NativeLibrary)" Condition="'%(NativeLibrary.Headers)' != ''" />
+      <_NativeBuilt Include="@(NativeLibrary->'%(Native)')" Condition="'%(NativeLibrary.HeadersOnly)' != 'true'" />
     </ItemGroup>
     <PropertyGroup>
       <_NativeIncludeFolders>@(_NativeInclude->'%(Checkout)%(IncludePath)', ',')</_NativeIncludeFolders>
@@ -92,7 +97,6 @@
       <Project ParameterType="System.String" Required="true" />
       <Rid ParameterType="System.String" Required="true" />
       <Cores ParameterType="System.Int32" />
-      <Built ParameterType="Microsoft.Build.Framework.ITaskItem[]" Output="true" />
     </ParameterGroup>
     <Task>
       <Using Namespace="System.IO" />
@@ -434,22 +438,19 @@ if (!Enumerable.Range(0, count).All(ready))
         }
     }
 }
-
-Built = Enumerable.Range(0, count).Where(i => Libraries[i].GetMetadata("HeadersOnly") != "true").Select(i => (ITaskItem)new TaskItem(Libraries[i].GetMetadata("Native"))).ToArray();
 ]]></Code>
     </Task>
   </UsingTask>
 
-  <Target Name="PrepareNativeLibraries" DependsOnTargets="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != ''">
+  <Target Name="PrepareNativeLibraries" DependsOnTargets="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'">
     <BuildNativeLibraries Libraries="@(NativeLibrary)" Natives="$(MagicNativeLibs)" Superbuild="$(MagicNativeSuperbuild)"
-                          Project="$(MSBuildProjectName)" Rid="$(MagicNativeRid)" Cores="$(MagicNativeCores)">
-      <Output TaskParameter="Built" ItemName="_NativeBuilt" />
-    </BuildNativeLibraries>
+                          Project="$(MSBuildProjectName)" Rid="$(MagicNativeRid)" Cores="$(MagicNativeCores)" />
   </Target>
 
   <!-- The generated API joins the compile, and the libraries join the output, before the build assigns output paths,
-       so a project referencing this one copies them too. -->
-  <Target Name="_AddNativeLibraryItems" DependsOnTargets="PrepareNativeLibraries" BeforeTargets="AssignTargetPaths;CoreCompile" Condition="'@(NativeLibrary)' != ''">
+       so a project referencing this one copies them too. Located first, as a design-time build skips the preparing
+       and what it depends on. -->
+  <Target Name="_AddNativeLibraryItems" DependsOnTargets="_LocateNativeLibraries;PrepareNativeLibraries" BeforeTargets="AssignTargetPaths;CoreCompile" Condition="'@(NativeLibrary)' != ''">
     <ItemGroup>
       <None Include="@(_NativeBuilt)" Link="runtimes/$(MagicNativeRid)/native/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
       <Compile Include="@(_NativeGenerated->'%(Generated)');$(IntermediateOutputPath)NativeLibraries.g.cs" Visible="false" />
@@ -464,7 +465,7 @@ Built = Enumerable.Range(0, count).Where(i => Libraries[i].GetMetadata("HeadersO
 
   <!-- Generation reruns when a library's binary changed (a new pin brings new headers with it), the item changed or the
        generator did. -->
-  <Target Name="GenerateNativeBindings" DependsOnTargets="_AddNativeLibraryItems" BeforeTargets="CoreCompile" Condition="'@(NativeLibrary)' != ''"
+  <Target Name="GenerateNativeBindings" DependsOnTargets="_AddNativeLibraryItems" BeforeTargets="CoreCompile" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'"
           Inputs="@(_NativeBuilt);@(_NativeGenerated->'%(Response)');$(MagicNativeBindingsGeneratorDll)" Outputs="@(_NativeGenerated->'%(Generated)')">
     <Exec Command="dotnet &quot;$(MagicNativeBindingsGeneratorDll)&quot; @&quot;%(_NativeGenerated.Response)&quot;" />
   </Target>
@@ -473,7 +474,7 @@ Built = Enumerable.Range(0, count).Where(i => Libraries[i].GetMetadata("HeadersO
        in the same configuration, so it lands with what it builds for, and a solution build, which builds it too, builds
        it once. Built this way it is restored by nothing else, and a restore is per configuration, so it is restored
        first, in a pass of its own (the session id), as dotnet build does before it builds. -->
-  <Target Name="_BuildNativeBindingsGenerator" BeforeTargets="GenerateNativeBindings" Condition="'@(NativeLibrary)' != '' and '$(MSBuildProjectFullPath)' != '$(MagicNativeBindingsGenerator)'">
+  <Target Name="_BuildNativeBindingsGenerator" BeforeTargets="GenerateNativeBindings" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true' and '$(MSBuildProjectFullPath)' != '$(MagicNativeBindingsGenerator)'">
     <MSBuild Projects="$(MagicNativeBindingsGenerator)" Targets="Restore" Properties="Configuration=$(Configuration);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
     <MSBuild Projects="$(MagicNativeBindingsGenerator)" Targets="Build" Properties="Configuration=$(Configuration)" />
   </Target>

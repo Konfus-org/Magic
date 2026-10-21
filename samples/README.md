@@ -3,8 +3,9 @@
 The engine's sample project, laid out as a game is: `Samples.magic`, its `Assets/`, and the csproj beside them, which
 compiles the scripts and components among the assets into `Projects/Samples/` beside Magic, where Magic loads them
 with the project ([the project file](../src/Core/README.md#the-project-file)). It has no gem of its own; its preset,
-`Assets/Presets/Default.preset`, picks the pipeline the renderer runs. Build the solution, then run
-`Magic --project samples` ([command line](../README.md#command-line)).
+`Assets/Presets/Default.preset`, picks the pipeline the renderer runs. Its Run in an IDE, or `dotnet run --project
+samples`, builds what it runs with and starts Magic on it ([building](../README.md#building),
+[command line](../README.md#command-line)).
 
 The camera flies itself until it is flown: hold the right mouse button and move the mouse to look around, WASD moves
 where it looks, E and Q go straight up and down, and Shift goes faster. On a gamepad the left stick moves, the right

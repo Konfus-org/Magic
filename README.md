@@ -33,19 +33,23 @@ so the frame rate they show is the true one.
 ```powershell
 dotnet build Magic.slnx
 dotnet test Magic.slnx
-Build/bin/Debug/Magic --project samples
+dotnet run --project samples
 ```
 
 The first build fetches the native libraries into one folder per machine, under the user's local application data
 (`MagicNativeLibs` moves it), builds them for this machine, on half its cores unless `MagicNativeCores` says how
 many, and generates their C# from the headers ([Native libraries](src/Bundled/Gems/README.md#native-libraries));
 after that a build touches them only when one's item changes, and every checkout and worktree on the machine shares
-them. The build says which library it is on as it goes; in a terminal, `dotnet build -tl:off` shows it, since the
-terminal logger shows a task's messages only after its project ends. Building `src/Core` alone builds the bundled gems and resources with it, so `dotnet run --project src/Core`
-or a run from an IDE never loads a gem left stale against a new Magic; the solution build adds the samples' own code.
-Run from an IDE or with `dotnet run --project src/Core`, Magic opens the samples project. Only a `Release` build
-copies the engine's and the gems' assets beside Magic; the others read them where they are in the repository, so
-building stays fast and an edit to one reaches a running engine at once.
+them. The build says which library it is on as it goes, in an IDE's build output too; in a terminal, `dotnet build
+-tl:off` shows it, since the terminal logger shows a task's messages only after its project ends. An IDE's background
+builds, which only feed its editor, never build a library or generate its API, so the editor knows the API from the
+first real build on.
+
+Running the samples, with `dotnet run --project samples` or the Samples project's Run in an IDE, first builds what
+they run with: Magic, the bundled gems and resources, and the samples' own code, each only where something changed.
+Then it starts Magic on them, passing it any options after `--`. Building `src/Core` alone builds Magic alone. Only a
+`Release` build copies the engine's and the gems' assets beside Magic; the others read them where they are in the
+repository, so building stays fast and an edit to one reaches a running engine at once.
 
 ### Command line
 

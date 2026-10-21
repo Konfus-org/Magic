@@ -79,13 +79,18 @@ library is declared after those it depends on. What must hold:
   elsewhere CMake and Ninja come from the PATH ([requirements](../../../README.md#requirements)).
 - **Named plainly.** Each library's shared library is `<name>.dll`, `lib<name>.so` or `lib<name>.dylib`, found under
   `built/` then `build/`, or where the item names it in an archive that holds several; a library whose build would
-  name it otherwise is told not to (the model importer's compiler suffix). The name is what the gem's `DllImport`s name and what
-  the gem load context resolves.
+  name it otherwise is told not to (the model importer's compiler suffix). The name is what the gem's `DllImport`s
+  name and what the gem load context resolves.
 - **Said as it happens.** The build logs a line as each library starts, with where it comes from, and as it is
   ready, and what CMake, git and the compilers print one verbosity down (normal), as they print it. A logger that
   shows a build's messages shows them live: an IDE's build output, CI's log, `dotnet build` with its output
   redirected or with `-tl:off`. The terminal logger `dotnet build` uses in a terminal shows only the target running
   and its time while a task runs, and a task's messages at detailed verbosity alone, after its project ends.
+- **A real build's work alone.** An IDE builds each project in the background to feed its editor, a design-time build
+  that hides what it logs and skips the compiler. Such a build compiles the API the last real build generated, and
+  neither builds a library nor generates one: a native build in it would run unseen, and the generator, built inside
+  it, would not be compiled, failing it and what the IDE asked of it, the package restore among them. So the editor
+  knows a library's API from the first real build on.
 
 ### Sharing a library
 
