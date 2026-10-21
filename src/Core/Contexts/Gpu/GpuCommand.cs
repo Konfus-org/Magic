@@ -113,7 +113,8 @@ public enum GpuCommandType : byte
 
     /// <summary>
     /// Outside any pass. The run of bytes: the group's name, UTF-8; what a GPU debugger shows the commands up to the
-    /// matching <see cref="EndDebugGroup"/> under.
+    /// matching <see cref="EndDebugGroup"/> under, and what the provider's telemetry names their GPU time by, where it
+    /// times it.
     /// </summary>
     BeginDebugGroup,
 

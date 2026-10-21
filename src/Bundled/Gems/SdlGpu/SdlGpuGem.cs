@@ -36,7 +36,28 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
     private const uint InitialStagingBytes = 1024 * 1024;
 
+    /// <summary>
+    /// What a timed frame's stretches with no debug group of their own are named: the uploads, and the commands
+    /// between groups.
+    /// </summary>
+    private const string UploadsGroup = "(uploads)";
+    private const string NoGroup = "(no group)";
+
     private static readonly Meter _meter = new("Magic.Gems.SdlGpu");
+
+    /// <summary>
+    /// For what spans up to a frame: a tenth of a millisecond to a second, with edges at the frame budgets of 240, 144,
+    /// 120, 60 and 30 frames a second.
+    /// </summary>
+    private static readonly InstrumentAdvice<double> _frameBuckets = new()
+    {
+        HistogramBucketBoundaries =
+        [
+            0.0001, 0.00025, 0.0005, 0.001, 0.002,
+            1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30,
+            0.05, 0.1, 0.25, 0.5, 1,
+        ],
+    };
     private static readonly Counter<long> _staged = _meter.CreateCounter<long>(
         "magic.gems.sdl_gpu.upload.size",
         "By",
@@ -46,15 +67,28 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
         "s",
         "How long the render thread waited for a window's next image: the time vsync holds the frame.",
         tags: null,
+        advice: _frameBuckets);
+    private static readonly Histogram<double> _groupDuration = _meter.CreateHistogram(
+        "magic.gems.sdl_gpu.group.duration",
+        "s",
+        "The GPU's time on each debug group of a frame, a renderer's pass, added up where one recurs, run alone: "
+        + "listening submits a command buffer per group, so passes stop overlapping and the frame is markedly slower.",
+        tags: null,
         advice: new InstrumentAdvice<double>
         {
             HistogramBucketBoundaries =
             [
-                0.0001, 0.00025, 0.0005, 0.001, 0.002,
-                1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30,
-                0.05, 0.1, 0.25, 0.5, 1,
+                0.00001, 0.000025, 0.00005, 0.0001, 0.00025, 0.0005,
+                0.001, 0.002, 0.004, 0.008, 0.016, 1.0 / 30, 0.1,
             ],
         });
+    private static readonly Histogram<double> _frameDuration = _meter.CreateHistogram(
+        "magic.gems.sdl_gpu.frame.duration",
+        "s",
+        "The GPU's time on a frame while its groups are timed: their times added up, without the GPU's waits for the "
+        + "CPU. Timing slows the frame, so this is over what it costs untimed.",
+        tags: null,
+        advice: _frameBuckets);
 
     private readonly SdlGpuSettings _settings;
     private readonly Threads _threads;
@@ -86,6 +120,11 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     /// </summary>
     private readonly nint[] _fences = new nint[FramesInFlight];
     private readonly List<(Kind Kind, nint Handle)>[] _freed = new List<(Kind Kind, nint Handle)>[FramesInFlight];
+
+    /// <summary>
+    /// Times the frame's debug groups while their instrument is listened to.
+    /// </summary>
+    private readonly GpuTimer _timer;
 
     /// <summary>
     /// Every window that is a render target, by its id, so asking again hands back the same texture.
@@ -207,6 +246,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
 
         Name = $"{name} ({CString.Read(SDL.GetGPUDeviceDriver(_device))})";
         SDL.SetGPUAllowedFramesInFlight(_device, FramesInFlight);
+        _timer = new GpuTimer(_device, FramesInFlight, _groupDuration, _frameDuration);
         _staging = CreateTransferBuffer(SDL.GPUTransferBufferUsage.Upload, _stagingCapacity);
         Debugging.Info($"GPU: {Name}, shaders {ShaderFormat}, validation {settings.Validation}");
     }
@@ -237,6 +277,7 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             ReleaseFrame(slot);
         }
 
+        _timer.Dispose();
         foreach (nint buffer in _buffers.Live)
         {
             Release(Kind.Buffer, buffer);
@@ -751,22 +792,116 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
             return;
         }
 
-        RunTransfers(commandBuffer);
-        foreach (ref readonly GpuCommand command in _commands.Commands)
+        SDL.GPUFence* fence;
+        if (_timer.IsListenedTo)
         {
-            Run(commandBuffer, command);
+            _timer.Begin(slot);
+            commandBuffer = RunTimed(commandBuffer, out string group);
+            CopyCaptures(commandBuffer);
+            fence = _timer.Submit(commandBuffer, group);
+            _timer.End();
+        }
+        else
+        {
+            RunTransfers(commandBuffer);
+            foreach (ref readonly GpuCommand command in _commands.Commands)
+            {
+                Run(commandBuffer, command);
+            }
+
+            CopyCaptures(commandBuffer);
+            fence = SDL.SubmitGPUCommandBufferAndAcquireFence(commandBuffer);
         }
 
-        CopyCaptures(commandBuffer);
-        _fences[slot] = (nint)SDL.SubmitGPUCommandBufferAndAcquireFence(commandBuffer);
-        if (_fences[slot] == 0) Debugging.Error($"SDL did not submit the frame: {CString.Read(SDL.GetError())}");
+        _fences[slot] = (nint)fence;
+        if (fence == null) Debugging.Error($"SDL did not submit the frame: {CString.Read(SDL.GetError())}");
 
-        FinishCaptures((SDL.GPUFence*)_fences[slot]);
+        FinishCaptures(fence);
 
         _frameNumber++;
         _images.Clear();
         _commands.Clear();
         FreeReleased();
+    }
+
+    /// <summary>
+    /// Runs the uploads and the frame's commands as <see cref="Submit"/> does, but submits a command buffer for the
+    /// uploads and one for each top-level debug group and each stretch outside any, for the timer to time, up to the
+    /// stretch that first draws into a window: a window's image is only the command buffer's that acquired it, so that
+    /// stretch and the rest of the frame are one, named for the first group in it. Returns that last command buffer,
+    /// unsubmitted, and its <paramref name="group"/>.
+    /// </summary>
+    private SDL.GPUCommandBuffer* RunTimed(SDL.GPUCommandBuffer* commandBuffer, out string group)
+    {
+        bool hasWork = _transfers.Count > 0;
+        RunTransfers(commandBuffer);
+        string? stretch = hasWork ? UploadsGroup : null;
+        int depth = 0;
+        int windowStretch = FindWindowStretch();
+        ReadOnlySpan<GpuCommand> commands = _commands.Commands;
+        for (int i = 0; i < commands.Length; i++)
+        {
+            ref readonly GpuCommand command = ref commands[i];
+            bool isStretchStart = depth == 0
+                && (i == 0 || command.Type == GpuCommandType.BeginDebugGroup
+                    || commands[i - 1].Type == GpuCommandType.EndDebugGroup);
+            bool isCut = isStretchStart && hasWork && i <= windowStretch
+                && _timer.Count < GpuTimer.MaxStretches - 1;
+
+            // Without another command buffer from SDL, the stretch goes on into the next.
+            SDL.GPUCommandBuffer* next = isCut ? SDL.AcquireGPUCommandBuffer(_device) : null;
+            if (next != null)
+            {
+                _timer.Submit(commandBuffer, stretch ?? NoGroup);
+                commandBuffer = next;
+                stretch = null;
+            }
+
+            if (command.Type == GpuCommandType.BeginDebugGroup && depth++ == 0)
+            {
+                stretch ??= _timer.GetName(_commands.GetBytes(command));
+            }
+
+            if (command.Type == GpuCommandType.EndDebugGroup) depth--;
+
+            Run(commandBuffer, command);
+            hasWork = true;
+        }
+
+        group = stretch ?? NoGroup;
+        return commandBuffer;
+    }
+
+    /// <summary>
+    /// Where the stretch with the frame's first render pass into a window begins: its top-level debug group, or the
+    /// command after the last group before it. The command count when nothing draws into a window.
+    /// </summary>
+    private int FindWindowStretch()
+    {
+        ReadOnlySpan<GpuCommand> commands = _commands.Commands;
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < commands.Length; i++)
+        {
+            ref readonly GpuCommand command = ref commands[i];
+            if (command.Type == GpuCommandType.BeginRenderPass && IsIntoWindow(command)) return start;
+
+            if (command.Type == GpuCommandType.BeginDebugGroup && depth++ == 0) start = i;
+
+            if (command.Type == GpuCommandType.EndDebugGroup && --depth == 0) start = i + 1;
+        }
+
+        return commands.Length;
+
+        bool IsIntoWindow(in GpuCommand beginRenderPass)
+        {
+            foreach (GpuTextureLevel color in _commands.GetLevels(beginRenderPass))
+            {
+                if (_textures[color.Texture.Id].Window is not null) return true;
+            }
+
+            return false;
+        }
     }
 
     /// <summary>
@@ -859,16 +994,15 @@ internal sealed unsafe class SdlGpuGem : IGem, IGpu, IDisposable
     private void ReleaseFrame(int slot)
     {
         SDL.GPUFence* fence = (SDL.GPUFence*)_fences[slot];
-        if (fence != null)
+        if (fence != null && !SDL.WaitForGPUFences(_device, waitAll: true, &fence, 1))
         {
-            if (!SDL.WaitForGPUFences(_device, waitAll: true, &fence, 1))
-            {
-                Debugging.Error($"Waiting for a frame failed: {CString.Read(SDL.GetError())}");
-            }
-
-            SDL.ReleaseGPUFence(_device, fence);
-            _fences[slot] = 0;
+            Debugging.Error($"Waiting for a frame failed: {CString.Read(SDL.GetError())}");
         }
+
+        // A timed frame's fences are the timer's, the frame's own the last of them.
+        if (!_timer.TryCollect(slot) && fence != null) SDL.ReleaseGPUFence(_device, fence);
+
+        _fences[slot] = 0;
 
         foreach ((Kind kind, nint handle) in _freed[slot])
         {

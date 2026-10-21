@@ -33,7 +33,9 @@ a screenshot says what it is of.
 ## Telemetry
 
 - Laid out as the instruments are named, as an exporter shows them: a tab per entry of the settings' tabs, in their
-  order, holding the meters under its prefix, and in it a header per meter and area, which a click folds away: the
+  order, holding the meters under its prefix, and in it a header per meter and area, which a click folds away, and
+  which is folded the first time it has very many rows, such as a GPU provider's time per pass, so it does not push
+  the rest of its tab out of view: the
   meter past the prefix, so a gem's name in the gems' tab and nothing in Core's, then the area, the part of a name
   after its meter's. So Core's frame time is its last word under the frame's header, a GPU provider's upload size is
   its last word under the gem's upload header, and a .NET instrument, not named after its meter, loses its first part
@@ -50,7 +52,9 @@ a screenshot says what it is of.
   as the garbage collector's, the total and how fast it rose; a gauge's its latest value alone. Seconds are shown as
   milliseconds, bytes as megabytes, and a count's unit not at all.
 - It listens only while the window is open, so nothing is measured for it otherwise, and opening it shows its first
-  numbers a second later. Measurements are added up on the thread that records them, without allocating after a
+  numbers a second later. What a gem measures only while listened to starts then too, and can cost: a GPU provider
+  that times each pass slows the frame while it does, so the frame time with the window open is not the frame time
+  with it shut. Measurements are added up on the thread that records them, without allocating after a
   series' first; the rows are made once a second. Copy gives every tab as text, a row a line.
 
 ## Settings window

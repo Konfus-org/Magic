@@ -538,9 +538,11 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         return true;
     }
 
-    public unsafe bool Header(string label)
+    public unsafe bool Header(string label, bool folds = false)
     {
         ThrowIfOutsideFrame();
+        if (folds) ImGui.SetNextItemOpen(false, ImGuiCond.Always);
+
         return ImGui.CollapsingHeader(_text.Of(label), ImGuiTreeNodeFlags.DefaultOpen);
     }
 

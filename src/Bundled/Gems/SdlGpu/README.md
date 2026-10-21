@@ -36,7 +36,7 @@ without HDR takes the HDR compositions, which then fall back to SDR.
   with nothing recorded and nothing uploaded submits nothing. Two frames are in flight.
 - A copy between textures or buffers is a command like any other, run in the frame's order in a copy pass of its own,
   so it sees what the commands before it wrote, as does making a texture's mips. Debug groups name stretches of the
-  frame in a GPU capture.
+  frame in a GPU capture, and are what the frame is timed by ([Telemetry](#telemetry)).
 - A window's image is acquired the first time a frame draws into it; minimised, there is none, and the passes
   into it are skipped. It can be drawn into, never sampled or read back, which not every API allows. A capture gets
   what it shows another way: the next frame that draws into the window draws into a texture of its own in its place,
@@ -47,3 +47,29 @@ without HDR takes the HDR compositions, which then fall back to SDR.
   before the platform gem closes them and SDL.
 - A synchronous read waits for the GPU, holding the render thread: for checks, screenshots and tools, never every
   frame.
+
+## Telemetry
+
+The gem measures what it uploads, how long the render thread waits for a window's next image, and, while something
+listens to them, the GPU's time on each debug group of a frame and on the frame as a whole
+([Core's README](../../../Core/README.md#telemetry)). A renderer's pass is a debug group, so the groups' times are its
+passes' costs, by name.
+
+- **How a frame is timed.** SDL's GPU API has no timestamp queries, so the GPU's own clock cannot be read. Instead, a
+  timed frame is submitted as a command buffer for the uploads and one for each top-level debug group and each
+  stretch between groups, each with a fence, and a thread of the gem's own polls the fences in order and stamps the
+  moment each signals. A stretch's time runs from the later of the stamp before it and its own submit, so the GPU's
+  wait for the CPU is charged to no group. A group that recurs in a frame, a pass per view, is added up.
+- **A window's stretch.** A window's image belongs to the command buffer that acquired it, so the stretch with the
+  frame's first pass into a window and everything after it are one, named for the first group in it: the renderer's
+  output and whatever is drawn over it, such as the debug UI.
+- **Nothing waits for it.** A frame's times are read when its slot comes round again, after the wait for that frame
+  the submit does anyway. The fences are polled rather than waited on, since SDL's blocking wait holds its submit lock
+  on some backends and would stall the render thread.
+- **What it costs.** Nothing while nothing listens: the frame is one command buffer as ever. While something does, the
+  frame is markedly slower, by a large share of a frame on the samples. Between command buffers the GPU finishes one
+  before it starts the next, so passes that would run side by side run one after another, and each boundary adds a
+  drain. A group's time is therefore its pass run alone, which is what compares passes and shows what a change to one
+  costs, and the timed frame's time is not the untimed frame's: read frame times with nothing listening to these
+  instruments (the telemetry window closed, or the log not taking this gem's meter). The polling thread keeps a core
+  busy too. The times are the CPU's clock reading the GPU's fences, good to some microseconds.

@@ -480,7 +480,8 @@ alike; a window's can be drawn into, never sampled or read, but `IGpu` can captu
 screenshot. The frame's commands are plain data, each command with the handles and bytes it points into. Drawing
 and computing happen inside a pass: beginning a render or compute pass hands back an object holding only the
 commands legal inside it, which chain, and ends the pass when disposed, so a pass is a `using` block, as a debug
-group is. Copies and mipmaps go between passes.
+group is. Copies and mipmaps go between passes. A debug group names a stretch of the frame, for a GPU capture and for
+the provider, which can time the GPU's work by group, so a renderer's passes are each a group of their own.
 
 `IShaderCompiler` turns HLSL into the bytecode the GPU takes, in the format `IGpu` asks for, with the counts of what
 it binds, compiled on a worker. Each `#include "path"` is the shader asset at `Shaders/path`, which the compiler

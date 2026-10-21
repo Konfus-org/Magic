@@ -11,9 +11,20 @@ namespace Magic.DebugTools;
 /// </summary>
 internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugToolsSettings settings) : IDisposable
 {
+    /// <summary>
+    /// A header is folded the first time it has more rows than this, so one long table, such as the GPU's time per
+    /// pass, does not push the rest of its tab out of view. Above the rows Core's hook timings have.
+    /// </summary>
+    private const int FoldedRows = 40;
+
     private static readonly string[] _columns = ["Name", "Value", "Per second", "Max"];
 
     private readonly Telemetry _telemetry = new(settings);
+
+    /// <summary>
+    /// The headers folded for having too many rows: each is folded once, then opens and closes as it is clicked.
+    /// </summary>
+    private readonly HashSet<string> _folded = new(StringComparer.Ordinal);
     private int _tab;
 
     public void Dispose()
@@ -62,7 +73,14 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
                 if (isUnfolded) ui.EndTable();
 
                 header = line.Header;
-                isUnfolded = ui.Header(header);
+                int rows = 1;
+                while (i + rows < lines.Count
+                    && string.Equals(lines[i + rows].Header, header, StringComparison.Ordinal))
+                {
+                    rows++;
+                }
+
+                isUnfolded = ui.Header(header, folds: rows > FoldedRows && _folded.Add(header));
                 if (isUnfolded) ui.Table(header, _columns);
             }
 
