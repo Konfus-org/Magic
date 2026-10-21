@@ -247,8 +247,10 @@ from showing where they meet or lagging behind a change:
 - A ray that passes into a coarser level close over a surface, a floor it grazes, finds itself inside that level's
   fatter copy of it, though the finer level held it clear; it stops there only once it goes deeper than it came in, so
   a ray is not stopped at the line where the levels meet, while well inside a copy still stops it.
-- The field holds each surface's colour as matte, less as much of it as the material is metal: a metal only mirrors
-  light, which the field cannot, so it holds none rather than glowing in the sun.
+- The field holds each surface's colour as matte, as it holds no mirrors: what the surface scatters, less as much of it
+  as the material is metal, and what a fully rough surface of it would reflect, as Unreal holds a material for its
+  global illumination. A metal is the matte colour of its rough reflection, lit and bouncing light as one, rather than
+  black, which every reflection of a metal showed.
 - What a ray hits is lit by the sun and by the point and spot lights that reach it, each through the field, so lamps
   bounce as the sun does. Each probe's cell, where it lies in the world, lists the few lights that reach it most
   strongly, made again each frame on the GPU from those that reach the field at all, found first among the table's
@@ -313,7 +315,10 @@ of flat colour with no highlights of its own. A ray sets out through the field f
 surface, a voxel and a half of that level off it, so a far surface's ray does not start inside its own coarse copy;
 moved out of the field along its gradient where it starts inside another surface's fattened band, the foot of a wall
 within the floor's; and a voxel along the ray, past the field's rounding of its own corners, which a ray leaving a
-corner at a grazing angle would otherwise meet. A rough surface traces two rays and takes their mean, as its lobe is
+corner at a grazing angle would otherwise meet. A ray stops on the field's surface, not a little short of it as a
+probe's does, so a reflection is no larger than the field holds what it shows: true to size for what is a voxel or more
+across, while what is thinner, a ball shot far off or a lamp's post, shows a voxel and a half wide, fattened so that it
+closes as a wall must. A rough surface traces two rays and takes their mean, as its lobe is
 wide. The rays are filtered across the surface, over a wider patch the rougher it is, and blended over frames, more of
 the last kept the rougher the surface: last frame's is looked for where the reflection's image was, behind the surface
 by as far as the ray went, so a reflection sliding across a mirror or a ball as the camera moves is followed rather

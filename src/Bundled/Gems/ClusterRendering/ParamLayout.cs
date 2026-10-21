@@ -272,9 +272,11 @@ internal sealed partial class ParamLayout
     /// <summary>
     /// What a material of <paramref name="values"/> gives global illumination: the colour of its <c>: GiColor</c>
     /// member, white without one, and half of it when a <c>: GiColorMap</c> member names a texture, whose own colour is
-    /// taken as mid grey, less as much of it as its <c>: GiMetallic</c> member says it is metal, as a metal scatters no
-    /// light the way a matte surface does, only mirrors it; and the light of its <c>: GiEmissive</c> member, none
-    /// without one.
+    /// taken as mid grey, held as matte: what scatters of it, less as much as its <c>: GiMetallic</c> member says it is
+    /// metal, and what a fully rough surface of it reflects (Karis 2014's approximation of the environment's reflection
+    /// at roughness one, as Unreal holds a material for its global illumination), the field holding no mirrors, so a
+    /// metal is the matte colour of its rough reflection rather than black; and the light of its <c>: GiEmissive</c>
+    /// member, none without one.
     /// </summary>
     internal (Vector3 Color, Vector3 Emission) GiOf(IReadOnlyDictionary<string, MaterialParam> values)
     {
@@ -308,7 +310,10 @@ internal sealed partial class ParamLayout
             }
         }
 
-        return ((isMapped ? color * 0.5f : color) * (1 - metallic), emission);
+        // A dielectric reflects 4 % head on; a fully rough reflection sends back 0.45 of that colour.
+        Vector3 albedo = isMapped ? color * 0.5f : color;
+        Vector3 reflected = Vector3.Lerp(new Vector3(0.04f), albedo, metallic);
+        return ((albedo * (1 - metallic)) + (reflected * 0.45f), emission);
     }
 
     /// <summary>

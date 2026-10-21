@@ -79,7 +79,7 @@ float3 TraceReflection(float2 pixel, float3 position, float3 normal, float3 toEy
         origin += GiNormalAt(level, first, origin) * (0.3 * level.voxel - inside);
     }
 
-    GiHit hit = GiTrace(origin + direction * level.voxel, direction, first, header.levels, GiLevel(header.levels - 1u).voxel * (float)GiResolution * 0.5);
+    GiHit hit = GiTrace(origin + direction * level.voxel, direction, first, header.levels, GiLevel(header.levels - 1u).voxel * (float)GiResolution * 0.5, 0.0);
     [branch] if (hit.isHit && !hit.isInside)
     {
         distance = length(hit.position - surface);

@@ -346,14 +346,16 @@ struct GiHit
 };
 
 // A ray through the field, stepping as far as the nearest surface each time (sphere tracing, Hart 1996), in the finest
-// level from first on that holds where it is; no hit once it leaves the coarsest or goes maxDistance. A ray that runs
-// out of steps first is creeping along a surface it never quite reaches, and is taken to have hit it where it stopped:
-// taken to see the sky past it, it would let the sky into rooms. A ray that comes into a coarser level already within
-// that level's fatter copy of a surface the finer one held it clear of, one grazing a floor where the levels meet, reads
-// the coarser field raised by as deep as it came in, less as it climbs back out, so it stops only once it goes deeper
-// than it came in rather than where the levels meet; well inside a copy still stops it, which is all a wall thinner
-// than a voxel is held in by.
-GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float maxDistance)
+// level from first on that holds where it is, and stopping stop voxels short of the field's surface: a probe's ray a
+// little short, which is all the light it gathers needs, in fewer steps; a reflection's on it, as what it shows would
+// otherwise be larger than the field already holds it. No hit once it leaves the coarsest or goes maxDistance. A ray
+// that runs out of steps first is creeping along a surface it never quite reaches, and is taken to have hit it where it
+// stopped: taken to see the sky past it, it would let the sky into rooms. A ray that comes into a coarser level already
+// within that level's fatter copy of a surface the finer one held it clear of, one grazing a floor where the levels
+// meet, reads the coarser field raised by as deep as it came in, less as it climbs back out, so it stops only once it
+// goes deeper than it came in rather than where the levels meet; well inside a copy still stops it, which is all a wall
+// thinner than a voxel is held in by.
+GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float maxDistance, float stop)
 {
     GiHit hit;
     hit.isHit = false;
@@ -388,7 +390,7 @@ GiHit GiTrace(float3 origin, float3 direction, uint first, uint levels, float ma
         hit.distance = t;
         hit.level = index;
         hit.position = position;
-        if (distance < 0.2 * level.voxel || field < -0.2 * level.voxel)
+        if (distance < stop * level.voxel || field < -0.2 * level.voxel)
         {
             hit.isHit = true;
             hit.isInside = step == 0u && distance < 0.0;
