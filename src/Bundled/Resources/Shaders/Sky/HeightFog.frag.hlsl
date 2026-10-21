@@ -4,13 +4,15 @@
 // the heights the ray goes through, over how steeply it goes, exact for a curve of straight lines, so nothing is
 // stepped and nothing is noisy; a level ray crosses the fog at the camera's height all the way. The fog scatters its
 // colour of the light that reaches it: the sky's from everywhere (its average, from SkySh) and the sun's, scattered
-// forward more than back (Henyey & Greenstein 1941), so it follows day and night and the far world takes the sky's
-// colour. It is composited over the lit scene and the sky, keeping what is behind by the share it lets through, before
-// anything transparent is drawn. The sky is taken to be SkyDistance away.
+// forward more than back (Henyey & Greenstein 1941), as much of it as the sky's shadow lets through at the camera, so
+// it follows day and night and the weather and the far world takes the sky's colour. It is composited over the lit
+// scene and the sky, keeping what is behind by the share it lets through, before anything transparent is drawn. The sky
+// is taken to be SkyDistance away.
 
 #include "Include/Curve.hlsli"
 #include "Include/Fullscreen.hlsli"
 #include "Include/Math.hlsli"
+#include "Include/SkyShadow.hlsli"
 
 struct PassParams
 {
@@ -49,7 +51,7 @@ float4 main(PassVaryings input) : SV_Target0
     float towardSun = dot(direction, -SunDirection);
     float phase = (1.0 - Pow2(ForwardScatter)) / (4.0 * Pi * pow(max(1.0 + Pow2(ForwardScatter) - 2.0 * ForwardScatter * towardSun, 1e-4), 1.5));
     float3 sky = LOAD(SkySh, float4, 0u).rgb * 0.282095;
-    float3 scattered = params.color.rgb * (sky + SunIlluminance * phase);
+    float3 scattered = params.color.rgb * (sky + SunIlluminance * (phase * SkyShadowAt(float3(0.0, 0.0, 0.0))));
     float fogged = 1.0 - through;
     return float4(scattered * LOAD(Exposure, float4, 0u).x * fogged, fogged);
 }

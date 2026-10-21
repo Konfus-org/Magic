@@ -20,6 +20,7 @@
 #include "Include/Math.hlsli"
 #include "Include/Noise.hlsli"
 #include "Include/Packing.hlsli"
+#include "Include/SkyShadow.hlsli"
 #include "Include/Structs.hlsli"
 
 static const uint GiResolution = 64u;
@@ -530,10 +531,10 @@ float3 GiIrradianceAt(float3 position, float3 normal, float3 view, out float hel
 #include "Lighting/Ibl.hlsli"
 #include "Lighting/Lights.hlsli"
 
-// The light the field's surface sends back the way a ray hit it: what it gives off, the sun and the point and spot
-// lights its cell lists as far as the field lets them through, and everything else as the probes held it last, the
-// sky's (its nine coefficients) where they hold nothing. What a probe's ray takes, which is how light bounces again and
-// again, and what a reflection the view cannot see shows.
+// The light the field's surface sends back the way a ray hit it: what it gives off, the sun through the sky's shadow
+// and the point and spot lights its cell lists as far as the field lets them through, and everything else as the probes
+// held it last, the sky's (its nine coefficients) where they hold nothing. What a probe's ray takes, which is how light
+// bounces again and again, and what a reflection the view cannot see shows.
 float3 GiHitRadiance(GiHit hit, uint levels, float3 sh[9])
 {
     GpuGiLevel hitLevel = GiLevel(hit.level);
@@ -549,7 +550,8 @@ float3 GiHitRadiance(GiHit hit, uint levels, float3 sh[9])
         [branch] if (facing > 0.0)
         {
             float visible = GiVisibility(origin, -SunDirection, GiFarAway, hit.level, levels);
-            radiance += albedo * SunIlluminance * (facing * visible * InvPi);
+            float through = SkyShadowAt(hit.position - CameraPosition);
+            radiance += albedo * SunIlluminance * (facing * visible * through * InvPi);
         }
     }
 

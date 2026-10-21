@@ -305,7 +305,7 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials material
             case PassDrawn.Transparent:
                 Transparent(render, pass, scope);
                 break;
-            case PassDrawn.Sky:
+            case PassDrawn.Sky or PassDrawn.SkyShadow:
                 Sky(render, pass, scope);
                 break;
             default:
@@ -359,7 +359,8 @@ internal sealed class PassRecorder(IGpu gpu, PassGraph graph, Materials material
     }
 
     /// <summary>
-    /// The world's sky, its material's surface or the renderer's own, over what nothing was drawn on.
+    /// The world's sky, its material's sky shader or the renderer's own, over what nothing was drawn on, or its shadow
+    /// over the whole target.
     /// </summary>
     private void Sky(GpuRenderPass render, ListedPass pass, in RecordScope scope)
     {

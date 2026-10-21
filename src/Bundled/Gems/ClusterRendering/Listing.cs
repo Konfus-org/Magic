@@ -292,7 +292,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     internal List<GpuFormat> ColorFormats { get; } = [];
 
     /// <summary>
-    /// A draw of surfaces or the sky, whose pipelines are composed around them, one per variant.
+    /// A draw of surfaces, the sky or its shadow, whose pipelines are composed around them, one per variant.
     /// </summary>
     internal bool DrawsSurfaces => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn != PassDrawn.Depth;
 
@@ -300,6 +300,11 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// A draw through the pieces' vertex stage: the visibility buffer's, or transparent surfaces forward.
     /// </summary>
     internal bool DrawsPieces => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn is PassDrawn.Visibility or PassDrawn.Transparent;
+
+    /// <summary>
+    /// A draw of the sky's shader over one triangle: the sky, or its shadow on the world.
+    /// </summary>
+    internal bool DrawsSky => Pass.Kind == PassKind.Draw && Pass.Draw.Drawn is PassDrawn.Sky or PassDrawn.SkyShadow;
 
     /// <summary>
     /// A draw from the arguments and instances a pass before it made: the visibility buffer's pieces or depth's, or the
@@ -442,7 +447,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// <summary>
     /// The surface variants a draw's pipelines are made for up front, those it draws: the raster bins' for a draw of the
     /// visibility buffer, the resolve bins' for a draw of surfaces, the transparent ones for a draw of transparent
-    /// surfaces, the sky's for a draw of the sky, none for any other pass.
+    /// surfaces, the sky's for a draw of the sky or its shadow, none for any other pass.
     /// </summary>
     internal IReadOnlyCollection<SurfaceKey> GetVariants(SceneVariants variants)
     {
@@ -451,7 +456,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
             PassDrawn.Visibility => variants.Raster,
             PassDrawn.Surfaces => variants.Resolve,
             PassDrawn.Transparent => variants.Transparent,
-            PassDrawn.Sky => [variants.Sky],
+            PassDrawn.Sky or PassDrawn.SkyShadow => [variants.Sky],
             PassDrawn.Depth => [],
             _ => [],
         };

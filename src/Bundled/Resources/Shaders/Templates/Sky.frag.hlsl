@@ -11,6 +11,7 @@
 #include "Include/Fullscreen.hlsli"
 #include "Include/Math.hlsli"
 #include "Include/Sky.hlsli"
+#include "Include/SkyFrame.hlsli"
 
 // The fallback sky's colours, and its luminance per lux of the sun: a clear sky's zenith is around 0.03 to 0.08 of the
 // sun's illuminance, in nits.
@@ -50,32 +51,13 @@ float3 SkyDirection(float2 uv)
 #endif
 }
 
-// What a sky shader is handed along a direction: the frame's sun and weather.
-SkyInputs SkyInputsOf(float3 direction)
-{
-    SkyInputs inputs;
-    inputs.direction = direction;
-    inputs.cameraPosition = CameraPosition;
-    inputs.time = Time;
-    inputs.sunDirection = SunDirection;
-    inputs.sunIlluminance = SunIlluminance;
-    inputs.sunAngularRadius = SunAngularRadius;
-    inputs.wind = Weather.Wind;
-    inputs.coverage = Weather.Coverage;
-    inputs.density = Weather.Density;
-    inputs.cloudColor = Weather.CloudColor;
-    inputs.cloudShadow = Weather.CloudShadow;
-    inputs.isCapture = SKY_CUBE != 0;
-    return inputs;
-}
-
 float4 main(PassVaryings input) : SV_Target0
 {
     float3 direction = SkyDirection(input.uv);
 #if SKY_FALLBACK
     SkyLight light = FallbackSky(direction);
 #else
-    SkyLight light = EvaluateSky(SkyInputsOf(direction), LoadMaterialParams(SkyMaterial));
+    SkyLight light = EvaluateSky(SkyInputsOf(direction, SKY_CUBE != 0), LoadMaterialParams(SkyMaterial));
 #endif
 
 #if SKY_CUBE

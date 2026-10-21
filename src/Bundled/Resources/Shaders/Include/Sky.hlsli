@@ -4,15 +4,21 @@
 // defines SampleTextureGrad (Include/Surface.hlsli), so a sky can sample a texture, an image of a sky, at the
 // derivatives it works out itself.
 //
-// A sky shader declares exactly two things:
+// A sky shader declares exactly three things:
 //
 //   struct MaterialParams { ... };                     // its parameters, as a surface's are; a .mat file gives values
 //   SkyLight EvaluateSky(SkyInputs input, MaterialParams material);
+//   float SunThrough(SkyInputs input, float3 position, MaterialParams material);
 //
 // It is drawn twice a frame: over what nothing was drawn on in each view, and into the cube the world's light from
 // everywhere and the reflections of the sky are made from (isCapture). So it lights the world as it looks. The sun's
 // disc is handed back apart from the rest: the renderer shows it in the view and leaves it out of the capture, where
 // the sun's own light already stands for it, so no sky counts the sun twice.
+//
+// SunThrough is the sky's shadow on the world: the share of the sun's light that reaches a place (metres, world space)
+// through what the sky has in front of the sun, 1 for all of it; input.direction means nothing to it. The renderer
+// lays it over the ground around the camera and lights the world by it, so it must agree with what EvaluateSky shows
+// in front of the sun's disc. A sky with nothing in front of the sun returns 1.
 //
 // A sky never deals with failure: a material whose sky does not compile, or whose shader is a surface, is drawn with
 // Skies/Failure.sky.hlsl instead, chosen by the renderer, as a broken surface is drawn with the failure surface.

@@ -16,6 +16,8 @@
 //   darker on the side away from it (the powder term of Schneider 2015, "The Real-time Volumetric Cloudscapes of
 //   Horizon Zero Dawn"), brighter looking toward it (two Henyey-Greenstein lobes), and by the sky from around them in
 //   their shade. The weather's two colours tint the lit and the shaded light, so pink and purple clouds are weather.
+//   What they let through of the sun lights the world, by the same cover the view sees in front of the sun's disc, so
+//   their shadows cross the ground with the wind and an overcast sky leaves the world no sunlight.
 // - The sun's disc is as wide as the material says, darker toward its rim (limb darkening), seen through the air and
 //   the clouds; its light is the sun's, so a wider disc is dimmer, not brighter.
 
@@ -167,6 +169,28 @@ float CloudCover(float3 place, float coverage, float detail, float softness, uin
     return saturate((noise - (1.0 - coverage)) / edge);
 }
 
+// Where in the noise's space the clouds are seen, a distance along a direction from a place of the world: carried by
+// the wind and changing slowly.
+float3 CloudPlace(SkyInputs input, MaterialParams material, float2 from, float3 direction, float along)
+{
+    float2 where = from + direction.xz * along - input.wind.xz * input.time;
+    return float3(where / max(material.cloudScale, 1.0), input.time * CloudChange);
+}
+
+// The clouds' optical depth through their layer at a place of the noise's space.
+float CloudDepth(SkyInputs input, MaterialParams material, float3 place, uint octaves)
+{
+    float thickness = lerp(ThinCloud, ThickCloud, saturate(input.density));
+    return CloudCover(place, input.coverage, material.cloudDetail, material.cloudSoftness, octaves) * thickness;
+}
+
+// How much of what is behind them clouds of an optical depth hide, a distance off: faded out toward the horizon, where
+// the layer thins to a line.
+float CloudOpacity(float depth, float along)
+{
+    return (1.0 - exp(-depth)) * saturate(1.0 - along / CloudFade);
+}
+
 // A star's light along a direction: a few cells of the sky hold one, somewhere in the cell, of its own brightness and
 // tint.
 float3 StarLight(float3 direction)
@@ -271,16 +295,12 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
     float3 cloudLight = float3(0.0, 0.0, 0.0);
     if (hasClouds)
     {
-        float scale = max(material.cloudScale, 1.0);
-        float2 where = input.cameraPosition.xz + direction.xz * cloudDistance - input.wind.xz * input.time;
-        float3 place = float3(where / scale, input.time * CloudChange);
-        uint octaves = input.isCapture ? CaptureCloudOctaves : CloudOctaves;
-        float thickness = lerp(ThinCloud, ThickCloud, saturate(input.density));
-        float depth = CloudCover(place, input.coverage, material.cloudDetail, material.cloudSoftness, octaves) * thickness;
-        cover = (1.0 - exp(-depth)) * saturate(1.0 - cloudDistance / CloudFade);
+        float3 place = CloudPlace(input, material, input.cameraPosition.xz, direction, cloudDistance);
+        float depth = CloudDepth(input, material, place, input.isCapture ? CaptureCloudOctaves : CloudOctaves);
+        cover = CloudOpacity(depth, cloudDistance);
 
-        float3 towardSunPlace = float3(towardSun.xz * (CloudShadowStep / scale), 0.0);
-        float shade = CloudCover(place + towardSunPlace, input.coverage, material.cloudDetail, material.cloudSoftness, ShadowOctaves) * thickness;
+        float3 towardSunPlace = float3(towardSun.xz * (CloudShadowStep / max(material.cloudScale, 1.0)), 0.0);
+        float shade = CloudDepth(input, material, place + towardSunPlace, ShadowOctaves);
         float beer = exp(-shade * CloudShadowShare);
         float powder = lerp(1.0, 1.0 - exp(-2.0 * depth), saturate(0.5 - 0.5 * cosSun));
         float phase = 4.0 * Pi * lerp(HenyeyGreenstein(cosSun, CloudBack), HenyeyGreenstein(cosSun, CloudForward), CloudForwardShare);
@@ -305,4 +325,21 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
     }
 
     return light;
+}
+
+// The clouds' shadow: what they let through of the sun where its light toward a place meets their layer, as the view
+// sees them in front of the sun's disc, so the ground beneath the camera is dimmed as the disc is.
+float SunThrough(SkyInputs input, float3 position, MaterialParams material)
+{
+    float3 towardSun = -input.sunDirection;
+    float3 origin = float3(0.0, PlanetRadius + max(position.y, 0.0) + 1.0, 0.0);
+    float2 layer = SphereHits(origin, towardSun, PlanetRadius + material.cloudHeight);
+    float toLayer = layer.x > 0.0 ? layer.x : layer.y;
+    if (input.coverage <= 0.0 || toLayer <= 0.0)
+    {
+        return 1.0;
+    }
+
+    float3 place = CloudPlace(input, material, position.xz, towardSun, toLayer);
+    return 1.0 - CloudOpacity(CloudDepth(input, material, place, CloudOctaves), toLayer);
 }

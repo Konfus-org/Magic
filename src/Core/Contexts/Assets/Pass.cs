@@ -472,6 +472,12 @@ public enum PassDrawn : byte
     Sky,
 
     /// <summary>
+    /// The world's sky's shadow on the ground around the camera: the share of the sun's light that gets through it,
+    /// into a single-channel target, which whatever the sun lights reads.
+    /// </summary>
+    SkyShadow,
+
+    /// <summary>
     /// Which triangle each pixel sees, and its depth, a culling pass's pieces of the scene drawn into the view's
     /// visibility buffer: what a renderer that shades each pixel once draws first.
     /// </summary>

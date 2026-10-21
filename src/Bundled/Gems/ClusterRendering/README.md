@@ -48,8 +48,9 @@ pipelines: the one the settings pick, and the effects the world's `PostProcessin
   drawn at; one made with history is two, one written this frame and one holding the last, swapped each frame and
   emptied whenever they are made again.
 - **Drawn passes** draw the visibility buffer's pieces a raster bin at a time, the G-buffer a surface's tiles at a time,
-  transparent pieces farthest first, depth alone for shadows, or the sky; the renderer composes each surface variant's
-  shader from the pass's template and the surface, and the sky's from the sky template and the sky shader.
+  transparent pieces farthest first, depth alone for shadows, the sky, or its shadow on the world; the renderer composes
+  each surface variant's shader from the pass's template and the surface, and the sky's and its shadow's from their
+  templates and the sky shader.
 - **Script passes.** A pass of kind `script` names a `Script` asset, a class that is an `IPipelineScript`, which the
   renderer makes for each listing it builds, through the scripting gem, with the services its constructor asks for, and
   calls on the render thread to record the pass: a hook at a point of the frame for code that is no gem, a HUD, an
@@ -221,6 +222,21 @@ as a broken material is drawn with a failure material: magenta in the view, and 
 so the world it lights stays lit. Why is said in the log once and on the failure banner for as long as it stays broken.
 A world with no sky material has the renderer's own, a gradient as bright as the sun makes it.
 
+### The sky's shadow
+
+What the sky has in front of the sun, its clouds, shades the world: the sun reaches each place only by the share the
+sky lets through toward it. The sky shader says that share for any place, and the renderer draws it, composed into a
+template of its own as the sky is, into a small texture over the ground around the camera each frame, so the shadows
+cross the ground as the wind carries the clouds. Everything the sun lights reads it by name: the lighting of each
+pixel, times the sun's shadow map, so an overcast sky leaves no hard shadow as it leaves no sun; the light the global
+illumination's rays find; and, at the camera's own place, the exposure metered from the world's light and the sun's
+light the fog scatters. The texture covers a level square through the camera, its middle moved in whole steps of the
+world so the shadows of still clouds stand still, and a place is looked up where its way toward the sun crosses it,
+which serves every height below the clouds. It is read through a cubic filter rather than a bilinear one, as up close a
+texel covers much of the view and a bilinear read would show the texels' grid along a cloud's edge. The share under the camera is the share the view sees of the sun's disc,
+so the ground goes dark as the disc does. A world with the renderer's own sky, or a broken one, has nothing in front of
+the sun.
+
 ### The sky's light
 
 Captured each frame into a small cube, projected onto nine spherical-harmonic coefficients for light from everywhere,
@@ -250,7 +266,8 @@ it that it scatters; its intensity, how much fog there is a metre at the densest
 camera; and its falloff, a curve of how dense it is by height above the world's origin. How much fog each pixel's
 ray crosses is the falloff's integral over the heights the ray goes through, exact for a curve of straight lines, so
 it costs one fullscreen pass with no steps and no noise; the light it scatters is the sky's from everywhere and the
-sun's, forward more than back, so it follows the time of day and the far world takes the sky's colour. It is drawn
+sun's through the sky's shadow at the camera, forward more than back, so it follows the time of day and the weather and
+the far world takes the sky's colour. It is drawn
 over the lit scene and the sky, before transparent surfaces, which it does not fog, and before the scene the
 reflections read is kept, so they show it.
 
@@ -258,8 +275,8 @@ reflections read is kept, so they show it.
 
 Ambient occlusion, contact shadows, exposure and tonemapping are effects too, reading the view's targets by name.
 Exposure is metered one of two ways, by which effect a world names: from the view's pixels, so it follows what the
-view sees and a dark wall filling it brightens everything; or from the light its sun and sky shed on an open, level
-surface, so what fills the view never changes it, for a world they light.
+view sees and a dark wall filling it brightens everything; or from the light its sun, through the sky's shadow, and its
+sky shed on an open, level surface at the camera, so what fills the view never changes it, for a world they light.
 
 ### Textures
 
@@ -324,5 +341,7 @@ Nothing is drawn until it can be drawn as it should be, and what had to wait dis
   sky. What is reflected is the field, flat-coloured and without highlights, a voxel to a quarter of a metre close by
   and coarser further off; and nothing where the world draws no global illumination, the sky alone.
 - A texture's mips are all resident; none is streamed by what the view reads of it.
-- The sky's clouds are drawn in the sky alone: they neither dim the sun's light on the world nor cast shadows on it,
-  so an overcast sky still lights the world with a hard-shadowed sun.
+- The sky's shadow covers a few kilometres around the camera and is the square's edge's past it, so a far hill is shaded
+  by the cloud over the edge, not its own. Its texels are metres across and read through a smooth filter, so a cloud's
+  edge sharper than a few of them is softened rather than drawn sharp. A place above the clouds is shaded as if it were below them. Thin cloud dims the sun's shadows but does not
+  soften them, as the sun's light seen through cloud spreads wider than its disc.

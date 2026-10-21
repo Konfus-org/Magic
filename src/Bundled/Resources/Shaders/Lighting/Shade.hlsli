@@ -6,7 +6,7 @@
 // without which it is lit. Where the world draws them, the lighting pass also reads contact shadows, ambient occlusion
 // and traced reflections, each a texel per pixel of the view, the reflections in place of the sky's where they have
 // them, and the probes of global illumination (Lighting/Gi.hlsli), which light from everywhere comes from in place of
-// the sky alone.
+// the sky alone. The sun reaches it through the sky's shadow where the frame draws one (SkyShadow).
 //
 // The lights reaching a pixel are found as Drobot 2017 ("Improved Culling for Tiled and Clustered Rendering") finds
 // them: the view's lights are sorted nearest first, a z-bin holds the first and last of them that can reach its depths,
@@ -20,6 +20,7 @@
 #include "Include/Frame.hlsli"
 #include "Include/LightCulling.hlsli"
 #include "Include/Noise.hlsli"
+#include "Include/SkyShadow.hlsli"
 #include "Include/Structs.hlsli"
 #include "Lighting/Ambient.hlsli"
 #include "Lighting/Ibl.hlsli"
@@ -49,14 +50,14 @@ struct ShadePoint
     float viewDepth;
 };
 
-// The sun's share at a point: its virtual shadow map's, its level picked by a dither that moves each frame, which the
-// temporal upscale blends, times what contact shadows, when the world draws them, say of the pixel an opaque surface
-// was drawn at.
+// The sun's share at a point: what the sky lets through of it there (Include/SkyShadow.hlsli), times its virtual
+// shadow map's, its level picked by a dither that moves each frame, which the temporal upscale blends, times what
+// contact shadows, when the world draws them, say of the pixel an opaque surface was drawn at.
 float SunShadow(float3 position, float3 normal, float viewDepth, float2 pixel)
 {
-    float lit = 1.0;
+    float lit = SkyShadowAt(position);
 #if defined(HAS_ShadowTables)
-    lit = SunVirtualShadow(position, normal, viewDepth, InterleavedGradientNoise(pixel + float2(17.0, 59.0), FrameIndex));
+    lit *= SunVirtualShadow(position, normal, viewDepth, InterleavedGradientNoise(pixel + float2(17.0, 59.0), FrameIndex));
 #endif
 
 #if defined(HAS_ContactShadows) && !SURFACE_FORWARD

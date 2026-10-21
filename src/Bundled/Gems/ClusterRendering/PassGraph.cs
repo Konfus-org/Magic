@@ -24,7 +24,8 @@ namespace Magic.ClusterRendering;
 /// without (Templates/Visibility.frag.hlsl), over the pieces' vertex stage, whole or only their place
 /// (Templates/Pieces.vert.hlsl); the G-buffer's resolve bins (Templates/Resolve.frag.hlsl) over the tiles' quads
 /// (Templates/Tiles.vert.hlsl); transparent surfaces forward over the pieces (Templates/ForwardPieces.frag.hlsl); and
-/// the sky over the fullscreen triangle.
+/// the sky (Templates/Sky.frag.hlsl) and its shadow on the world (Templates/SkyShadow.frag.hlsl) over the fullscreen
+/// triangle.
 /// </para>
 /// <para>
 /// A shader binds what it uses: each stage's is first compiled to SPIR-V with every name its pass can see declared, a
@@ -189,7 +190,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
                 PassDrawn.Visibility => isTransparent ? null : surface,
                 PassDrawn.Surfaces => isTransparent ? null : surface with { Masked = false },
                 PassDrawn.Transparent => isTransparent ? surface : null,
-                PassDrawn.Sky => null,
+                PassDrawn.Sky or PassDrawn.SkyShadow => null,
                 PassDrawn.Depth => null,
                 _ => null,
             };
@@ -415,7 +416,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
         else
         {
             PassDrawn drawn = pass.Pass.Draw.Drawn;
-            Result<GpuShader> vertex = await (drawn == PassDrawn.Sky ? fullscreen : drawn == PassDrawn.Surfaces ? tiles : pieces).ConfigureAwait(false);
+            Result<GpuShader> vertex = await (pass.DrawsSky ? fullscreen : drawn == PassDrawn.Surfaces ? tiles : pieces).ConfigureAwait(false);
             Result<GpuShader> place = await places.ConfigureAwait(false);
             make = () =>
             {
@@ -555,8 +556,8 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             Fragment = fragment.Value,
             ColorFormats = pass.ColorFormats,
             Blends = drawn == PassDrawn.Transparent ? [GpuBlend.Premultiplied] : [],
-            VertexBuffers = drawn == PassDrawn.Sky ? [] : [new GpuVertexBuffer(0, pass.DrawsPieces ? PieceBytes : sizeof(uint), PerInstance: true)],
-            VertexInputs = drawn == PassDrawn.Sky ? [] : pass.DrawsPieces ? _pieceInputs : [new GpuVertexInput(0, 0, GpuVertexFormat.Uint1, 0)],
+            VertexBuffers = pass.DrawsSky ? [] : [new GpuVertexBuffer(0, pass.DrawsPieces ? PieceBytes : sizeof(uint), PerInstance: true)],
+            VertexInputs = pass.DrawsSky ? [] : pass.DrawsPieces ? _pieceInputs : [new GpuVertexInput(0, 0, GpuVertexFormat.Uint1, 0)],
             DepthFormat = pass.Pass.Draw.Depth.Length > 0 ? GpuFormat.D32Float : GpuFormat.Invalid,
             DepthWrite = drawn == PassDrawn.Visibility,
             Cull = variant.DoubleSided || !pass.DrawsPieces ? GpuCull.None : GpuCull.Back,
@@ -638,17 +639,17 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
     /// <summary>
     /// What a draw of surfaces binds in its fragment stage: the union over its templates, each over the default surface,
     /// whose every value comes from the materials, so no path of the template folds away as it would over a surface of
-    /// constants, and the visibility buffer's also with no surface; the sky's with no sky alone, as a sky reads only the
-    /// frame's constants and what the contract offers; and what the surface contract offers any surface or sky
-    /// (Shaders/Include/SurfaceBindings.hlsli), the texture pools, the materials and, for a forward surface, the scene
-    /// behind, whether the probe used them or not.
+    /// constants, and the visibility buffer's also with no surface; the sky's and its shadow's with no sky alone, as a
+    /// sky reads only the frame's constants and what the contract offers; and what the surface contract offers any
+    /// surface or sky (Shaders/Include/SurfaceBindings.hlsli), the texture pools, the materials and, for a forward
+    /// surface, the scene behind, whether the probe used them or not.
     /// </summary>
     private async Task<Result<StageBindings>> ProbeTemplatesAsync(ListedPass pass)
     {
         SurfaceKey surface = new(assets.Default<Shader>(), false, false);
         SurfaceKey none = new(Handle<Shader>.None, false, false);
         PassDrawn drawn = pass.Pass.Draw.Drawn;
-        SurfaceKey[] variants = drawn == PassDrawn.Sky ? [none] : drawn == PassDrawn.Visibility ? [surface, none] : [surface];
+        SurfaceKey[] variants = pass.DrawsSky ? [none] : drawn == PassDrawn.Visibility ? [surface, none] : [surface];
         List<(string Text, string Name)> sources = [];
         foreach (SurfaceKey variant in variants)
         {
@@ -750,6 +751,7 @@ internal sealed class PassGraph(IGpu gpu, IShaderCompiler compiler, Assets asset
             PassDrawn.Visibility => hasSurface ? "VisibilityClip" : "Visibility",
             PassDrawn.Transparent => "ForwardPieces",
             PassDrawn.Sky => "Sky",
+            PassDrawn.SkyShadow => "SkyShadow",
             PassDrawn.Surfaces or PassDrawn.Depth => "Resolve",
             _ => "Resolve",
         };

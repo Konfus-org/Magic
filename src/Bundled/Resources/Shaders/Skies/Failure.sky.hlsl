@@ -27,3 +27,9 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
 
     return light;
 }
+
+// Nothing in front of the sun, so the world stays lit.
+float SunThrough(SkyInputs input, float3 position, MaterialParams material)
+{
+    return 1.0;
+}
