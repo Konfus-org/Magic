@@ -123,12 +123,12 @@ of enums converted the same way) share one class, one block each.
 - What a gem tells others has happened is a message, a struct, on `Events`; whoever listens watches it and keeps the
   `Subscription`.
 - A script is a `.cs` asset under a project's `Assets/`, a gem's `Resources/` or `src/Bundled/Resources/`, its class
-  named like the file and an `IScript`: an `IBehavior` for what one entity does each frame, and a system script, of
-  any kind of system the world takes, when it works over many. A game is its assets and that
-  code, never a gem of its own. A script's constructor takes the `Entity` it is attached to first, then what it asks
-  for as a gem's does, and only keeps them: no work in a constructor, as its values are not set yet. Its values are its
-  public `{ get; set; }` properties, and `Start()` is where it begins, with them set. A pipeline script runs on no
-  entity, so its constructor takes services alone ([Scripts](src/Core/README.md#scripts)).
+  named like the file and an `IScript`: an `IBehavior` for what one entity does each frame, and a system script, of any
+  kind of system the world takes, when it works over many. A game is its assets and that code, never a gem of its own. A
+  script's constructor takes the `Entity` it is attached to first, when it uses it, then what it asks for as a gem's
+  does, and only keeps them: no work in a constructor, as its values are not set yet. Its values are its public
+  `{ get; set; }` properties, and `Start()` is where it begins, with them set. A pipeline script runs on no entity, so
+  its constructor takes services alone ([Scripts](src/Core/README.md#scripts)).
 
 ### Assets
 

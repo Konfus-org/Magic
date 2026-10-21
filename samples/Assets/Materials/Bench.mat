@@ -1,0 +1,10 @@
+{
+    // The bench by the fire.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3533 } },
+        "normalMap": { "texture": { "id": 3534 } },
+        "ormMap": { "texture": { "id": 3535 } },
+        "roughness": { "x": 1 }
+    }
+}

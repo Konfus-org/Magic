@@ -1,0 +1,10 @@
+{
+    // The cabin's floor, gables, frames and timbers.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3521 } },
+        "normalMap": { "texture": { "id": 3522 } },
+        "ormMap": { "texture": { "id": 3523 } },
+        "roughness": { "x": 1 }
+    }
+}

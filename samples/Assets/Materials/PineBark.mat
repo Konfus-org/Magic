@@ -1,0 +1,10 @@
+{
+    // The conifers' bark, wet under cloud and snowed on as the season says.
+    "shader": { "id": 3651 },
+    "params": {
+        "colorMap": { "texture": { "id": 3512 } },
+        "normalMap": { "texture": { "id": 3513 } },
+        "ormMap": { "texture": { "id": 3514 } },
+        "roughness": { "x": 1 }
+    }
+}

@@ -21,8 +21,9 @@ what the component says: a copy for each handle an entity has no copy of, with t
 script's defaults, and the end of a copy whose handle is gone or whose entity is. A copy is made on the main thread,
 while the entity names it:
 
-1. **Made**: its one public constructor is called, given the entity it is attached to first, then a service for each
-   other parameter, as a gem's constructor is, and an optional one its default when nothing provides it.
+1. **Made**: its one public constructor is called, given the entity it is attached to first when it asks for it, then a
+   service for each other parameter, as a gem's constructor is, and an optional one its default when nothing provides
+   it.
 2. **Given its values**: each of the prefab's values is set on its property, so a property's initialiser is its default
    and a prefab's value replaces it.
 3. **Started**: its `Start()` runs, with its values set and its entity's components there to read, and a system is added

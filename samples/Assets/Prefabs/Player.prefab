@@ -8,7 +8,14 @@
                 "Camera": {}
             },
             "scripts": [
-                { "id": 3315, "speed": 30, "cruise": 40, "radius": 575, "orbit": 4 },
+                { "id": 3315, "speed": 10 },
+                {
+                    "id": 3431,
+                    "domains": [
+                        { "id": 3400 }, { "id": 3406 }, { "id": 3408 }, { "id": 3410 }, { "id": 3412 }, { "id": 3414 },
+                        { "id": 3416 }
+                    ]
+                },
                 { "id": 3317, "speed": 40, "most": 50, "model": { "id": 517 }, "material": { "id": 3322 } }
             ]
         }

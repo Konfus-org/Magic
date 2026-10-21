@@ -1,6 +1,0 @@
-{
-    "entities": [
-        { "name": "Shore", "components": { "Transform": { "position": { "x": 0, "y": 0.03, "z": 0 }, "scale": { "x": 1.12, "y": 0.03, "z": 1.12 } }, "Renderer": { "model": { "id": 515 }, "materials": [ { "id": 3328 } ] } } },
-        { "name": "Water", "components": { "Transform": { "position": { "x": 0, "y": 0.08, "z": 0 }, "scale": { "x": 1, "y": 0.03, "z": 1 } }, "Renderer": { "model": { "id": 515 }, "materials": [ { "id": 3331 } ] } } }
-    ]
-}

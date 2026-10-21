@@ -1,0 +1,5 @@
+{
+    "entities": [
+        {"name": "Boulder", "components": {"Transform": {}, "Renderer": {"model": {"id": 3479}, "materials": [{"id": 3615}]}, "Physics": {"shape": "mesh"}, "Acoustics": {"material": "rock"}}}
+    ]
+}

@@ -1,6 +1,0 @@
-{
-    "entities": [
-        { "name": "Trunk", "components": { "Transform": { "position": { "x": 0, "y": 1.5, "z": 0 }, "scale": { "x": 0.25, "y": 1.5, "z": 0.25 } }, "Renderer": { "model": { "id": 515 }, "materials": [ { "id": 3334 } ] }, "Physics": {} } },
-        { "name": "Needles", "components": { "Transform": { "position": { "x": 0, "y": 6, "z": 0 }, "scale": { "x": 2, "y": 4, "z": 2 } }, "Renderer": { "model": { "id": 513 }, "materials": [ { "id": 3333 } ] } } }
-    ]
-}

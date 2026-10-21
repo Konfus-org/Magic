@@ -1,0 +1,11 @@
+{
+    // The lantern's brass.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3542 } },
+        "normalMap": { "texture": { "id": 3543 } },
+        "ormMap": { "texture": { "id": 3544 } },
+        "roughness": { "x": 1 },
+        "metallic": { "x": 1 }
+    }
+}

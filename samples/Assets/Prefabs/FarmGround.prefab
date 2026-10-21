@@ -1,5 +1,0 @@
-{
-    "entities": [
-        { "name": "Ground", "components": { "Transform": { "position": { "x": 0, "y": 0.04, "z": 0 }, "scale": { "x": 32, "y": 1, "z": 32 } }, "Renderer": { "model": { "id": 519 }, "materials": [ { "id": 3337 } ] } } }
-    ]
-}

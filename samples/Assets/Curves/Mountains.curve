@@ -1,0 +1,11 @@
+{
+    // The mountains' haze by metres above the world's origin: thickest over the valley floors, thinning up the slopes
+    // and gone above the peaks, so the far ranges fade blue and the summits stand clear.
+    "keys": [
+        { "at": 0, "value": 1 },
+        { "at": 600, "value": 0.6 },
+        { "at": 1500, "value": 0.25 },
+        { "at": 3000, "value": 0.06 },
+        { "at": 4500, "value": 0 }
+    ]
+}

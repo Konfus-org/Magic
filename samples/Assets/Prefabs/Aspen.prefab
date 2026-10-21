@@ -1,0 +1,6 @@
+{
+    "entities": [
+        {"name": "Aspen", "components": {"Transform": {}, "Renderer": {"model": {"id": 3473}, "materials": [{"id": 3603}, {"id": 3604}]}}},
+        {"name": "Trunk", "components": {"Transform": {"position": {"x": 0, "y": 5.5, "z": 0}, "scale": {"x": 0.5, "y": 11.0, "z": 0.5}}, "Physics": {"shape": "capsule"}}}
+    ]
+}

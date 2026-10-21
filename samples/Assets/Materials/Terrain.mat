@@ -1,0 +1,19 @@
+{
+    // The terrain's layers, laid by height and slope (Shaders/Terrain.surf.hlsl).
+    "shader": { "id": 3650 },
+    "params": {
+        "grassTint": { "r": 0.72, "g": 0.95, "b": 0.6, "a": 1 },
+        "grassColor": { "texture": { "id": 3500 } },
+        "grassNormal": { "texture": { "id": 3501 } },
+        "grassOrm": { "texture": { "id": 3502 } },
+        "forestColor": { "texture": { "id": 3503 } },
+        "forestNormal": { "texture": { "id": 3504 } },
+        "forestOrm": { "texture": { "id": 3505 } },
+        "rockColor": { "texture": { "id": 3506 } },
+        "rockNormal": { "texture": { "id": 3507 } },
+        "rockOrm": { "texture": { "id": 3508 } },
+        "snowColor": { "texture": { "id": 3509 } },
+        "snowNormal": { "texture": { "id": 3510 } },
+        "snowOrm": { "texture": { "id": 3511 } }
+    }
+}

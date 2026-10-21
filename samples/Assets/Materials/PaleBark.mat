@@ -1,0 +1,11 @@
+{
+    // The aspens' pale bark.
+    "shader": { "id": 3651 },
+    "params": {
+        "colorMap": { "texture": { "id": 3515 } },
+        "normalMap": { "texture": { "id": 3516 } },
+        "ormMap": { "texture": { "id": 3517 } },
+        "color": { "r": 1.2, "g": 1.2, "b": 1.15, "a": 1 },
+        "roughness": { "x": 1 }
+    }
+}

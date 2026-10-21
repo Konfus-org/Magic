@@ -1,0 +1,15 @@
+{
+    "entities": [
+        {"name": "Annex floor", "components": {"Transform": {"position": {"x": -24.0, "y": 0.1, "z": 6.0}, "scale": {"x": 5.0, "y": 0.1, "z": 5.0}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3339}]}, "Physics": {}}},
+        {"name": "Annex roof", "components": {"Transform": {"position": {"x": -24.0, "y": 6.2, "z": 6.0}, "scale": {"x": 5.5, "y": 1.2, "z": 5.5}}, "Renderer": {"model": {"id": 513}, "materials": [{"id": 3324}]}, "Physics": {}}},
+        {"name": "Annex column", "components": {"Transform": {"position": {"x": -19.7, "y": 2.5, "z": 6.0}, "scale": {"x": 0.25, "y": 2.5, "z": 0.25}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3339}]}, "Physics": {}}},
+        {"name": "Annex column", "components": {"Transform": {"position": {"x": -21.85, "y": 2.5, "z": 9.7239}, "scale": {"x": 0.25, "y": 2.5, "z": 0.25}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3339}]}, "Physics": {}}},
+        {"name": "Annex column", "components": {"Transform": {"position": {"x": -26.15, "y": 2.5, "z": 9.7239}, "scale": {"x": 0.25, "y": 2.5, "z": 0.25}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3339}]}, "Physics": {}}},
+        {"name": "Annex column", "components": {"Transform": {"position": {"x": -28.3, "y": 2.5, "z": 6.0}, "scale": {"x": 0.25, "y": 2.5, "z": 0.25}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3339}]}, "Physics": {}}},
+        {"name": "Annex column", "components": {"Transform": {"position": {"x": -26.15, "y": 2.5, "z": 2.2761}, "scale": {"x": 0.25, "y": 2.5, "z": 0.25}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3339}]}, "Physics": {}}},
+        {"name": "Annex column", "components": {"Transform": {"position": {"x": -21.85, "y": 2.5, "z": 2.2761}, "scale": {"x": 0.25, "y": 2.5, "z": 0.25}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3339}]}, "Physics": {}}},
+        {"name": "Annex monkey", "components": {"Transform": {"position": {"x": -24.0, "y": 1.8, "z": 6.0}, "scale": {"x": 0.7, "y": 0.7, "z": 0.7}}, "Renderer": {"model": {"id": 516}, "materials": [{"id": 3322}]}}, "scripts": [{"id": 3312, "height": 0.5}]},
+        {"name": "Label", "components": {"Transform": {"position": {"x": -24.0, "y": 2.5, "z": 6.0}}}, "scripts": [{"id": 3450, "text": "The Annex: opened beside the hub", "height": 1.6}]},
+        {"name": "Spawn", "tags": ["spawn"], "components": {"Transform": {"position": {"x": -24.0, "y": 3.0, "z": -8.0}, "rotation": {"x": 0.06976, "y": 0.0, "z": -0.0, "w": 0.99756}}}}
+    ]
+}

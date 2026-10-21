@@ -1,0 +1,14 @@
+{
+    // The valley's effects: the engine's own, with the exposure metered from what the view sees, so stepping into the
+    // cabin out of the sun lets the eyes open to the room, and kept from opening up past EV 0, so the night outside
+    // stays dark while the fire and the lantern light the room; and a glow around what is bright (Bloom).
+    "entries": [
+        { "pipeline": { "id": 11005 } },
+        { "pipeline": { "id": 11006 } },
+        { "pipeline": { "id": 11007 } },
+        { "pipeline": { "id": 11010 } },
+        { "pipeline": { "id": 11002 }, "params": { "ExposureAdapt": { "minEv": { "x": 0 } } } },
+        { "pipeline": { "id": 11009 } },
+        { "pipeline": { "id": 11003 } }
+    ]
+}

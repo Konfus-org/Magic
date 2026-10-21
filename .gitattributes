@@ -1,1 +1,17 @@
 * text=auto eol=lf
+
+# Assets git must never treat as text: no line endings converted, no diff attempted.
+*.fbx binary
+*.glb binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.bmp binary
+*.tga binary
+*.webp binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.flac binary
+*.otf binary
+*.ttf binary

@@ -1,0 +1,10 @@
+{
+    // The cabin's plinth, step, fireplace and chimney.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3527 } },
+        "normalMap": { "texture": { "id": 3528 } },
+        "ormMap": { "texture": { "id": 3529 } },
+        "roughness": { "x": 1 }
+    }
+}

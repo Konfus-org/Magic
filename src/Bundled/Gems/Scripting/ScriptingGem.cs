@@ -401,9 +401,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
 
     /// <summary>
     /// A new <paramref name="type"/> for <paramref name="entity"/>, or for none: its one public constructor given the
-    /// entity first, when there is one, then a service for each parameter, and a parameter's default when nothing
-    /// provides it. Why not, when it has no such constructor, its first parameter is not the entity it is made for, it
-    /// asks for an entity when it is made for none or anywhere but first, asks for what nothing provides, or throws.
+    /// entity first, when it asks for it, then a service for each parameter, and a parameter's default when nothing
+    /// provides it. A script that needs only services, as one that answers keys does, asks for no entity. Why not, when
+    /// it has no such constructor, asks for an entity when it is made for none or anywhere but first, asks for what
+    /// nothing provides, or throws.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -419,12 +420,6 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IDisp
         }
 
         ParameterInfo[] parameters = constructors[0].GetParameters();
-        if (entity is not null && parameters.Length > 0 && parameters[0].ParameterType != typeof(Entity))
-        {
-            return Result.Failure<IScript>("it has an invalid constructor: a script's first parameter is the Entity it "
-                + "is attached to, before the services it asks for.");
-        }
-
         object?[] arguments = new object?[parameters.Length];
         for (int i = 0; i < parameters.Length; i++)
         {

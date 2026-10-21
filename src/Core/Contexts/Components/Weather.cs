@@ -10,7 +10,7 @@ namespace Magic.Contexts.Components;
 /// moves. Calm air, a clear sky and no fog are zeros, so <c>new Weather()</c>, or <c>{}</c> in a file, is that; a zero
 /// density or colour reads as its default, as it means nothing of its own. Pink and purple clouds, beside a coverage:
 /// <c>{ "cloudColor": { "r": 1, "g": 0.55, "b": 0.75 }, "cloudShadow": { "r": 0.35, "g": 0.2, "b": 0.55 } }</c>; mist
-/// in the valleys, thinning with height as a curve says: <c>{ "fog": 0.0015, "fogFalloff": { "id": 3363 } }</c>.
+/// in the valleys, thinning with height as a curve says: <c>{ "fog": 0.0015, "fogFalloff": { "id": 3680 } }</c>.
 /// </summary>
 public record struct Weather : IComponent
 {

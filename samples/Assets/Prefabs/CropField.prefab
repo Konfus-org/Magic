@@ -1,5 +1,0 @@
-{
-    "entities": [
-        { "name": "Field", "components": { "Transform": { "position": { "x": 0, "y": 0.1, "z": 0 }, "scale": { "x": 1, "y": 0.2, "z": 1 } }, "Renderer": { "model": { "id": 514 }, "materials": [ { "id": 3336 } ] } } }
-    ]
-}

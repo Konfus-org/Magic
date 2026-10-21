@@ -1,0 +1,8 @@
+{
+    "entities": [
+        {"name": "Left pillar", "components": {"Transform": {"position": {"x": -1.7, "y": 2.3, "z": 0}, "scale": {"x": 0.25, "y": 2.3, "z": 0.3}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 3323}]}, "Physics": {}}},
+        {"name": "Right pillar", "components": {"Transform": {"position": {"x": 1.7, "y": 2.3, "z": 0}, "scale": {"x": 0.25, "y": 2.3, "z": 0.3}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 3323}]}, "Physics": {}}},
+        {"name": "Lintel", "components": {"Transform": {"position": {"x": 0, "y": 4.85, "z": 0}, "scale": {"x": 2.0, "y": 0.25, "z": 0.35}}, "Renderer": {"model": {"id": 514}, "materials": [{"id": 3323}]}, "Physics": {}}},
+        {"name": "Threshold", "components": {"Transform": {"position": {"x": 0, "y": 0.03, "z": 0}, "scale": {"x": 1.4, "y": 0.025, "z": 0.45}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3325}]}}}
+    ]
+}

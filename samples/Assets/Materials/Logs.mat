@@ -1,0 +1,10 @@
+{
+    // The cabin's logs.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3518 } },
+        "normalMap": { "texture": { "id": 3519 } },
+        "ormMap": { "texture": { "id": 3520 } },
+        "roughness": { "x": 1 }
+    }
+}

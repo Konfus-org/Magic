@@ -6,11 +6,11 @@ the exact state it validated, without which the project's hook refuses the agent
 .DESCRIPTION
 Validation means the app ran with the change and its screenshot was looked at (AGENTS.md, Finish). This script first
 formats the change, so what is validated, stamped and reviewed is the formatted code, then runs every step of
-tools/Validate.ps1, the samples headless and with a window until their world has loaded, and when all
+tools/Validate.ps1, the samples headless and with a window through every one of their domains, and when all
 pass, stamps the checkout's state: the git tree of every file in it, tracked or new, as git add -A would record it, so
 the stamp names content rather than a time. A checkout whose files changed while it ran is not stamped. The stamps are
 kept in the repository's git folder, which every worktree shares, so a merge from the main checkout finds the stamp its
-branch's worktree wrote. The script ends with the screenshot's path: open it and look at what it shows.
+branch's worktree wrote. The script ends with the screenshots' paths, one of each domain: open each and look at it.
 
 With -Hook it is that hook instead: the project's .claude/settings.json runs it before a Bash command that commits or
 merges, with the hook's input as JSON on stdin. A git commit passes when the checkout's state has a stamp, and a
@@ -83,13 +83,14 @@ if (-not $Hook) {
         exit 1
     }
 
-    $screenshot = @($lines | Where-Object { $_ -like 'Screenshot: *' } | ForEach-Object { $_.Substring(12) }) | Select-Object -Last 1
+    $screenshots = @($lines | Where-Object { $_ -like 'Screenshot: *' } | ForEach-Object { $_.Substring(12) })
     $stamp = Get-StampPath $root $after
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $stamp) | Out-Null
-    Set-Content -Path $stamp -Value $screenshot -Encoding utf8
+    Set-Content -Path $stamp -Value $screenshots -Encoding utf8
     Write-Output ""
     Write-Output "Stamped this state ($after): git commit and git merge of it are allowed."
-    Write-Output "Open the screenshot and look at what it shows before reporting the task complete: $screenshot"
+    Write-Output 'Open each screenshot and look at what it shows before reporting the task complete:'
+    foreach ($path in $screenshots) { Write-Output "  $path" }
     exit 0
 }
 

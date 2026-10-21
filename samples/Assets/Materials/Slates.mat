@@ -1,0 +1,10 @@
+{
+    // The cabin's roof.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3524 } },
+        "normalMap": { "texture": { "id": 3525 } },
+        "ormMap": { "texture": { "id": 3526 } },
+        "roughness": { "x": 1 }
+    }
+}

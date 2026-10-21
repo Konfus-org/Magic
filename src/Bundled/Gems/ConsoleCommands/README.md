@@ -23,6 +23,12 @@ screen; a short `wait` after it lets what fades in settle, and `quit` ends the r
 printf 'wait loaded\nwait 600\nscreenshot\nquit\n' | Magic --project samples --seconds 600
 ```
 
+`open` puts a domain, named by its asset path, in place of the world and holds the lines after it back until it is
+there, so a script can visit domains the project does not open first. `wait loaded` is no use straight after it: the
+world before still counts as loaded until the domain's file has been read and the world starts to load. An open still
+going when the engine restarts becomes a `wait loaded` in the restarted run, which opens the domain again as it puts
+the world back.
+
 `screenshot` asks the GPU provider for the window's presented image ([Core's README](../../../Core/README.md#the-gpu))
 and a worker writes it as a PNG under `Screenshots/` beside Magic; the log says where. Without a GPU provider or a
 window (`--headless`), there is nothing to take, and `screenshot` says so.

@@ -1,0 +1,8 @@
+{
+    // The fire's embers.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.02, "g": 0.02, "b": 0.02, "a": 1 },
+        "emissive": { "x": 0.9, "y": 0.26, "z": 0.05 }
+    }
+}

@@ -1,0 +1,77 @@
+using System.Numerics;
+using Magic.Contexts.Assets;
+using Magic.Contexts.Components;
+using Magic.Contexts.ECS;
+using Magic.Contexts.Frames;
+using Magic.Interfaces;
+using Magic.Samples.Assets.Components;
+using Magic.Services;
+
+namespace Magic.Samples.Assets.Scripts;
+
+/// <summary>
+/// A fountain: every <see cref="Every"/> seconds it makes an entity of its own, a small body thrown up from its entity a
+/// little to one side, which falls, bounces and goes <see cref="Lifetime"/> seconds later, as its
+/// <see cref="Expires"/> says and <see cref="ExpireSystem"/> sees to. A behaviour making entities at run time, with
+/// the components it builds them of:
+/// <c>{ "id": 3440, "every": 0.25, "model": { "id": 514 }, "material": { "id": 3322 } }</c>.
+/// </summary>
+internal sealed class Spawner(Entity owner, World world) : IBehavior
+{
+    /// <summary>
+    /// Radians between one throw's direction and the next's: the golden angle, so they spread evenly all round.
+    /// </summary>
+    private const float Turn = 2.39996f;
+
+    /// <summary>
+    /// The frame clock's seconds when it makes the next.
+    /// </summary>
+    private double _next;
+
+    /// <summary>
+    /// How many it has made, which turns each throw on from the last.
+    /// </summary>
+    private int _made;
+
+    public float Every { get; set; } = 0.25f;
+
+    public float Lifetime { get; set; } = 6;
+
+    /// <summary>
+    /// Metres a second each is thrown up at.
+    /// </summary>
+    public float Speed { get; set; } = 9;
+
+    /// <summary>
+    /// How big each is, for a model 2 m across.
+    /// </summary>
+    public float Size { get; set; } = 0.2f;
+
+    public Handle<Model> Model { get; set; }
+
+    public Handle<Material> Material { get; set; }
+
+    public void Update(in Frame frame)
+    {
+        if (frame.Seconds < _next) return;
+
+        _next = frame.Seconds + Every;
+        Transform from = world.Get<Transform>(owner);
+        float angle = _made++ * Turn;
+        Vector3 aside = new(MathF.Cos(angle), 0, MathF.Sin(angle));
+        Transform at = new()
+        {
+            Position = from.Position + (Vector3.UnitY * 0.5f),
+            Rotation = Quaternion.CreateFromAxisAngle(aside, angle),
+            Scale = new Vector3(Size),
+        };
+        Renderer renderer = new() { Model = Model, Materials = new MaterialSlots { Material } };
+        Physics body = new()
+        {
+            Motion = Motion.Dynamic,
+            Bounce = 0.5f,
+            Velocity = (Vector3.UnitY * Speed) + (aside * (Speed * 0.25f)),
+        };
+        world.Create([at, renderer, body, new Expires { At = frame.Seconds + Lifetime }]);
+    }
+}

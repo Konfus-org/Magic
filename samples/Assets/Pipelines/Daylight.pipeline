@@ -1,5 +1,5 @@
 {
-    // The grid's effects: the engine's own, but with its exposure metered from the light its sun, moon and sky shed
+    // The samples' effects: the engine's own, but with its exposure metered from the light its sun, moon and sky shed
     // rather than from what the view sees, so a thing looks the same however much of the view something darker or
     // brighter fills as the camera nears it, and kept from opening up past EV 0, so a moonlit night stays dark as eyes
     // see it rather than turning into a dim day as a long exposure would; and a glow around what is bright (Bloom).

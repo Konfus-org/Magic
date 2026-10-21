@@ -11,9 +11,11 @@ uint main(PieceVaryings input, bool isFrontFace : SV_IsFrontFace, out float dept
 {
     float2 uvDdx = ddx(input.uv);
     float2 uvDdy = ddy(input.uv);
+    float3 positionDdx = ddx(input.position);
+    float3 positionDdy = ddy(input.position);
     float cover;
     float surfaceDepth;
-    SurfaceInputs inputs = PieceInputsOf(input, uvDdx, uvDdy, isFrontFace, cover, surfaceDepth);
+    SurfaceInputs inputs = PieceInputsOf(input, uvDdx, uvDdy, positionDdx, positionDdy, isFrontFace, cover, surfaceDepth);
     Surface surface = EvaluateSurface(inputs, LoadMaterialParams(input.material));
     float keep = min(cover - 0.5, DissolveKeep(input.dissolve, input.clip.xy));
 #if SURFACE_MASKED

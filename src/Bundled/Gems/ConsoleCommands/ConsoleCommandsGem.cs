@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Threading.Channels;
+using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Subscriptions;
@@ -15,8 +16,8 @@ namespace Magic.ConsoleCommands;
 /// <summary>
 /// Commands typed in the terminal Magic was started from, or piped into it. A thread of its own reads lines into a
 /// channel, and <see cref="Update"/> runs them on the main thread, so a command touches the engine like any hook; a
-/// console of another kind hands its lines to <see cref="Run"/>. Built in: <c>help</c>, <c>quit</c>, <c>wait</c> and
-/// <c>screenshot</c>.
+/// console of another kind hands its lines to <see cref="Run"/>. Built in: <c>help</c>, <c>quit</c>, <c>wait</c>,
+/// <c>open</c> and <c>screenshot</c>.
 /// </summary>
 internal sealed class ConsoleCommandsGem : IGem, ICommands
 {
@@ -48,21 +49,30 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     private readonly SortedDictionary<string, Command> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly IFileSystem _files;
     private readonly World _world;
+    private readonly Assets _assets;
     private readonly Threads _threads;
     private readonly CancellationToken _stopping;
     private readonly IGpu? _gpu;
     private readonly IWindow? _window;
+
+    /// <summary>
+    /// What an <c>open</c> is opening, the lines after it held back until it is done: this run's, as the world is, so a
+    /// restart before it is done makes it a <c>wait loaded</c> for the next run (<see cref="Stop"/>).
+    /// </summary>
+    private Task? _opening;
 
     public ConsoleCommandsGem(
         Lifetime lifetime,
         Threads threads,
         IFileSystem files,
         World world,
+        Assets assets,
         IGpu? gpu = null,
         IWindow? window = null)
     {
         _files = files;
         _world = world;
+        _assets = assets;
         _threads = threads;
         _stopping = lifetime.Stopping;
         _gpu = gpu;
@@ -72,6 +82,10 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         _commands.Add("wait", new Command(
             "Holds the lines after it back for that many frames, or until the world has loaded: wait 100, wait loaded.",
             Wait));
+        _commands.Add("open", new Command(
+            "Opens a domain in place of the world, by its asset path, and holds the lines after it back until it is "
+                + "there: open Domains/Hub/Hub.domain.",
+            Open));
         _commands.Add(
             "screenshot",
             new Command("Saves the window's next image as Screenshots/<time>.png beside Magic.", _ => Screenshot()));
@@ -123,10 +137,20 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
             _isWaitingForWorld = false;
         }
 
-        while (_waiting == 0 && !_isWaitingForWorld && _lines.Reader.TryRead(out string? line))
+        while (_waiting == 0
+            && !_isWaitingForWorld
+            && _opening is not { IsCompleted: false }
+            && _lines.Reader.TryRead(out string? line))
         {
             Run(line);
         }
+    }
+
+    public void Stop()
+    {
+        // A restart ends this run's open, and the next run opens the domain again as it puts the world back, so the
+        // lines after it wait for that world as they would after a wait loaded.
+        if (_opening is { IsCompleted: false }) _isWaitingForWorld = true;
     }
 
     /// <summary>
@@ -234,6 +258,37 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         }
 
         _waiting = frames;
+    }
+
+    /// <summary>
+    /// <c>open Domains/Hub/Hub.domain</c>: the domain at that asset path in place of the world, the lines after it held
+    /// back until it is there. A <c>wait loaded</c> alone would let them through at once, as the world before still
+    /// counts as loaded until the domain's file has been read.
+    /// </summary>
+    private void Open(ReadOnlySpan<string> words)
+    {
+        if (words.Length != 1)
+        {
+            Debugging.Warn("open takes a domain's asset path: open Domains/Hub/Hub.domain");
+            return;
+        }
+
+        Handle<Domain> domain = _assets.Find<Domain>(words[0]);
+        if (domain == Handle<Domain>.None)
+        {
+            Debugging.Error($"There is no domain at {words[0]}.");
+            return;
+        }
+
+        _opening = OpenAsync(domain, words[0]);
+        _opening.FireAndForget();
+    }
+
+    private async Task OpenAsync(Handle<Domain> domain, string path)
+    {
+        Result<Domain> opened = await _world.OpenAsync(domain, DomainOpenMode.Replace, cancel: _stopping)
+            .ConfigureAwait(false);
+        if (!opened.Ok) Debugging.Error($"{path} did not open: {opened.Error}");
     }
 
     /// <summary>

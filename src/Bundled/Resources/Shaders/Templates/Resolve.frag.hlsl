@@ -3,8 +3,8 @@
 // one the visibility buffer names: its piece, its instance, its cluster's three corners read from the geometry and
 // moved as the vertex stage moved them (or a card's quad), and where the pixel falls on it, by the triangle's 2D
 // homogeneous coordinates (Olano & Greer, "Triangle Scan Conversion using 2D Homogeneous Coordinates", 1997), which
-// are perspective-correct and hold for a corner behind the camera. Its uv's derivatives, and its normal's, are the same
-// taken a pixel across and a pixel down, the neighbours' its own triangle would have had. Then the surface is evaluated
+// are perspective-correct and hold for a corner behind the camera. Its uv's derivatives, its position's and its
+// normal's, are the same taken a pixel across and a pixel down, the neighbours' its own triangle would have had. Then the surface is evaluated
 // as the rasteriser's fragments would have, its roughness widened by how far the normal turns across the pixel
 // (Include/Brdf.hlsli's FilteredRoughness), and written as the G-buffer template writes it, with the pixel's velocity:
 // where it was on screen last frame, its instance's last place through the last frame's view, less where it is now
@@ -119,6 +119,8 @@ ResolveOutput main(TileVaryings input)
     varyings.clip = float4(pixel + 0.5, 0.0, 1.0);
     float2 uvDdx = (across.x * uvs[0] + across.y * uvs[1] + across.z * uvs[2]) - uv;
     float2 uvDdy = (down.x * uvs[0] + down.y * uvs[1] + down.z * uvs[2]) - uv;
+    float3 positionDdx = (across.x * positions[0] + across.y * positions[1] + across.z * positions[2]) - varyings.position;
+    float3 positionDdy = (down.x * positions[0] + down.y * positions[1] + down.z * positions[2]) - varyings.position;
 
     // The normal's turn across the pixel, over the footprint its textures are read at.
     float3 normal = NormalizeOrZero(varyings.normal);
@@ -126,7 +128,7 @@ ResolveOutput main(TileVaryings input)
     float3 normalDdy = (NormalizeOrZero(down.x * normals[0] + down.y * normals[1] + down.z * normals[2]) - normal) * TextureMipScale;
     float cover;
     float depth;
-    SurfaceInputs inputs = PieceInputsOf(varyings, uvDdx, uvDdy, isFrontFace, cover, depth);
+    SurfaceInputs inputs = PieceInputsOf(varyings, uvDdx, uvDdy, positionDdx, positionDdy, isFrontFace, cover, depth);
     Surface surface = EvaluateSurface(inputs, LoadMaterialParams(material));
 
     GBufferSurface stored;

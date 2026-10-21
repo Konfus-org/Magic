@@ -1,0 +1,6 @@
+{
+    "entities": [
+        {"name": "Fir", "components": {"Transform": {}, "Renderer": {"model": {"id": 3472}, "materials": [{"id": 3601}, {"id": 3602}]}}},
+        {"name": "Trunk", "components": {"Transform": {"position": {"x": 0, "y": 6.5, "z": 0}, "scale": {"x": 0.5, "y": 13.0, "z": 0.5}}, "Physics": {"shape": "capsule"}}}
+    ]
+}

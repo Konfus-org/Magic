@@ -12,13 +12,14 @@ the `Magic` executable is built.
   long, orders the members and the usings, applies the code style and fixes the whitespace. Agents never need to run
   it on its own, as the next command does.
 - **Validate:** `tools/Validate.ps1` builds `Magic.slnx`, checks the whole tree's formatting, runs the tests, runs the
-  samples headless until their world has loaded, and runs them with a window until it has loaded, ending in a
-  screenshot whose path it prints. It reports each step's exit code. Every step must pass, and the screenshot must be
-  looked at, before work is done.
+  samples headless through every one of their domains until each has loaded, and runs them with a window through every
+  domain, ending in a screenshot of each whose paths it prints. It reports each step's exit code. Every step must pass,
+  and the screenshots must be looked at, before work is done.
 - **Task complete:** `tools/AgentTaskComplete.ps1` formats the change, runs all of Validate and, when it passes,
   stamps the exact state it validated. Run it on completing a task, and again after any later edit or rebase.
 - **Screenshot:** `tools/Screenshot.ps1` runs a project with a window until its world has loaded and prints the
-  screenshot's path; `-Project` and `-Commands` reach what the samples alone do not show.
+  screenshot's path; `-Domains` opens other domains after it, a screenshot of each, and `-Project` and `-Commands`
+  reach what the samples alone do not show.
 - **Review:** `plannotator review` opens the change in the user's browser as a diff they comment on line by line,
   and returns when they send their comments or approve ([Finish](#finish)).
 
@@ -32,8 +33,8 @@ What Validate runs, for when you need one step on its own:
 dotnet build Magic.slnx
 dotnet format Magic.slnx --verify-no-changes --no-restore
 dotnet test Magic.slnx
-'wait loaded', 'quit' | Magic --project samples --seconds 600 --fail-on-error --headless
-tools/Screenshot.ps1
+'wait loaded', 'open Domains/Audio/Audio.domain', 'quit' | Magic --project samples --seconds 1200 --fail-on-error --headless
+tools/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
 ```
 
 `--fail-on-error` returns exit code `2` if anything was logged as an error during the run.
@@ -120,10 +121,10 @@ want to question as you make it.
 
 1. Run `tools/AgentTaskComplete.ps1`, which formats the change before it validates it, so the review shows the
    formatted code. A failing test is fixed at its cause, never loosened, skipped or deleted.
-2. Open the screenshot `tools/AgentTaskComplete.ps1` printed and look at it, for every change, not only visual ones: the app
-   ran with your change, and what it shows is the check. Where the change shows only somewhere the samples do not
-   reach, a failure path, a debug view or another project, screenshot that too, with `tools/Screenshot.ps1 -Project`
-   or `-Commands`, and look at it.
+2. Open the screenshots `tools/AgentTaskComplete.ps1` printed, one of each sample, and look at them, for every change,
+   not only visual ones: the app ran with your change, and what they show is the check. Where the change shows only
+   somewhere the samples do not reach, a failure path, a debug view or another project, screenshot that too, with
+   `tools/Screenshot.ps1 -Project` or `-Commands`, and look at it.
 3. Summarize what changed and why, what you assumed, anything you could not verify, and what the screenshots show,
    with the fix told apart from the cleanup.
 4. Open the review: from the worktree, run `plannotator review --base <merge target>` in the background. Against
@@ -209,7 +210,7 @@ long as its task, or, when the task is dropped, until the user decides at the ne
 - **Finish:** as soon as the user approves the review:
   1. Commit on the worktree branch.
   2. Rebase onto the merge target and run `tools/AgentTaskComplete.ps1` again, since other work may have landed
-     since you started, and look at its new screenshot: the rebased result is what merges, so it is what must be seen working.
+     since you started, and look at its new screenshots: the rebased result is what merges, so it is what must be seen working.
      Resolve conflicts in your own changes only. If a conflict needs another agent's work changed, stop and ask.
   3. Fast-forward the merge target to your branch, and push nothing ([Commits](#commits)).
   4. Remove the worktree (`git worktree remove`) and delete the branch with `git branch -d`, never `-D`. `-d`

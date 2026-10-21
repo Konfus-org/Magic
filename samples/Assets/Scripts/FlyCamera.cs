@@ -13,9 +13,7 @@ namespace Magic.Samples.Assets.Scripts;
 /// attaches as <c>{ "id": 3315 }</c>. WASD or the left stick move it where it looks, E and Q or the right and left
 /// triggers straight up and down, and Shift or the left shoulder <see cref="FastFactor"/> times as fast. It looks
 /// around with the mouse while the right button is held, so the pointer is free otherwise, or with the right stick.
-/// With <see cref="Cruise"/> and <see cref="Orbit"/> set it flies by itself until it is flown, straight out to
-/// <see cref="Radius"/> from the world's middle, then around it, looking at it, which shows the world going past the
-/// same way on every run.
+/// Until it is flown it stays where it spawned, looking the way it spawned facing.
 /// </summary>
 internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBehavior
 {
@@ -36,11 +34,6 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
     /// </summary>
     private const float MaxPitch = 89 * (MathF.PI / 180);
 
-    /// <summary>
-    /// Radians a second it turns to look at the world's middle as it orbits, so it swings round rather than snaps.
-    /// </summary>
-    private const float TurnToMiddle = 45 * (MathF.PI / 180);
-
     private readonly World _world = world;
     private readonly IInput _input = input;
 
@@ -51,32 +44,9 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
     private float _pitch;
 
     /// <summary>
-    /// Whether it still flies by itself: until the first move or turn of the controls, which hand it over for good.
-    /// </summary>
-    private bool _isFlyingItself = true;
-
-    /// <summary>
     /// Metres a second with a key held or a stick all the way over.
     /// </summary>
     public float Speed { get; set; } = 10;
-
-    /// <summary>
-    /// Metres a second it flies on by itself, where it looks, while nearer the world's middle than
-    /// <see cref="Radius"/>, until it is flown: 0, by default, for none.
-    /// </summary>
-    public float Cruise { get; set; }
-
-    /// <summary>
-    /// Metres from the world's up through the origin it cruises out to before it orbits: 0, by default, to orbit from
-    /// where it spawned.
-    /// </summary>
-    public float Radius { get; set; }
-
-    /// <summary>
-    /// Degrees a second it swings about the world's up through the origin by itself once <see cref="Radius"/> out,
-    /// keeping its height and distance and turning to look at the origin, until it is flown: 0, by default, for none.
-    /// </summary>
-    public float Orbit { get; set; }
 
     /// <summary>
     /// Starts looking the way its entity spawned facing.
@@ -100,23 +70,6 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
         float up = ReadAxis(Control.KeyE, Control.KeyQ)
             + ReadAxis(Control.GamepadRightTrigger, Control.GamepadLeftTrigger);
 
-        // Out from the middle, then around it, turning to look at it no faster than TurnToMiddle.
-        ref Transform transform = ref _world.Get<Transform>(owner);
-        _isFlyingItself &= turn == Vector2.Zero && right == 0 && forward == 0 && up == 0;
-        Vector3 at = transform.Position;
-        float fromMiddle = MathF.Sqrt((at.X * at.X) + (at.Z * at.Z));
-        bool isOrbiting = _isFlyingItself && Orbit != 0 && fromMiddle >= Radius;
-        float cruise = _isFlyingItself && fromMiddle < Radius ? Cruise * frame.DeltaSeconds : 0;
-        if (isOrbiting)
-        {
-            at = Vector3.Transform(
-                at,
-                Quaternion.CreateFromAxisAngle(Vector3.UnitY, Orbit * frame.DeltaSeconds * (MathF.PI / 180)));
-            float most = TurnToMiddle * frame.DeltaSeconds;
-            turn.X = Math.Clamp(MathF.IEEERemainder(MathF.Atan2(-at.X, -at.Z) - _yaw, MathF.Tau), -most, most);
-            turn.Y = Math.Clamp(MathF.Atan2(at.Y, fromMiddle) - _pitch, -most, most);
-        }
-
         _yaw += turn.X;
         _pitch = Math.Clamp(_pitch + turn.Y, -MaxPitch, MaxPitch);
         Quaternion rotation = Quaternion.CreateFromYawPitchRoll(_yaw, _pitch, 0);
@@ -126,9 +79,9 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
         if (move.LengthSquared() > 1) move = Vector3.Normalize(move);
 
         bool isFast = _input[Control.KeyLeftShift].IsDown || _input[Control.GamepadLeftShoulder].IsDown;
+        ref Transform transform = ref _world.Get<Transform>(owner);
         transform.Rotation = rotation;
-        transform.Position = at + (move * (Speed * (isFast ? FastFactor : 1) * frame.DeltaSeconds))
-            + (Vector3.Transform(Vector3.UnitZ, rotation) * cruise);
+        transform.Position += move * (Speed * (isFast ? FastFactor : 1) * frame.DeltaSeconds);
     }
 
     /// <summary>

@@ -1,0 +1,7 @@
+{
+    // The mountains' sky: the engine's procedural one, its clouds' bases above the valley and under the peaks.
+    "shader": { "id": 15635633544374067520 },
+    "params": {
+        "cloudHeight": { "x": 2400 }
+    }
+}

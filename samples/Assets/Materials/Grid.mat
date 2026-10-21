@@ -1,0 +1,4 @@
+{
+    // The samples' floor: a grid of metres drawn in world space (Shaders/Grid.surf.hlsl).
+    "shader": { "id": 3652 }
+}

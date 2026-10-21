@@ -1,5 +1,0 @@
-{
-    "entities": [
-        { "prefab": { "id": 3359 }, "components": { "Transform": { "position": { "x": 27.741, "y": 0, "z": 15.679 } } } }
-    ]
-}

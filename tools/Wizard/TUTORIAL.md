@@ -48,7 +48,7 @@ all of it from Claude Code as well.
 | Off until the `Mcp.port` setting names a port | A gem setting, as LogMetrics' `enabled` is: a project lists the gem, and only a run given a port opens one. It shows in F4 and is followed live. Wizard passes it on the engine's command line. |
 | Projects list the gem | A project names the gems it runs. Part 1 adds `Mcp` to the samples and to the project template. |
 | Components through `World`, by their type's name | `World` already reads and writes components whose type is known only at run time, and `Assemblies` finds a type by name. Reflection is left for removing a component and for the list's filter. |
-| Entities by id, labelled by their components | Entities have no names or parents. The list says what each holds and filters by a component, a page at a time: the samples' world holds about 60,000. |
+| Entities by id, labelled by their components | Entities have no names or parents. The list says what each holds and filters by a component, a page at a time: the samples' largest world, the Valley, holds about 33,000. |
 | Blazor Server inside the official Electron | C# logic, a web UI, cross-platform, and both halves have large backing; no community wrapper in between. |
 | The engine keeps its own window | No viewport work in this pass: an in-editor viewport means streaming frames, and is its own project. |
 
@@ -79,7 +79,7 @@ and the MCP SDK 2.2.0, in a worktree of `dev` at 8523d660, with every listing ex
 - The shell from source and packaged: the page in the window, the preload bridge, Play from inside it, a project that
   cannot start reporting why, and closing the window ending the server and the engine.
 - What it costs the engine: with every panel polling, the tool work on the main thread averaged 0.65 ms and peaked at
-  3.3 ms, the list walking all 60,685 entities, about four calls a second, measured by LogMetrics in a Debug build.
+  3.3 ms, the list walking a world of 60,685 entities, about four calls a second, measured by LogMetrics in a Debug build.
 
 Not verified, so treat as "should work":
 
@@ -328,7 +328,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
                 MakeTool("command_run", "Runs a console command as if typed at the terminal; 'help' lists them. What it says goes to the log: read it with log_read.",
                     ([Description("The command and its words, such as: help")] string line) => OnMainThreadAsync(() => RunCommand(line))),
                 MakeTool("domain_open", "Starts opening a domain by its asset path; engine_info says once the world has loaded.",
-                    ([Description("Path under the project's Assets folder or a Resources folder, with forward slashes, such as Domains/Grid/Grid.domain.")] string path,
+                    ([Description("Path under the project's Assets folder or a Resources folder, with forward slashes, such as Domains/Valley/Valley.domain.")] string path,
                      [Description("True to open it beside the open domains; false to replace them.")] bool additive = false) => OpenDomain(path, additive)),
                 MakeTool("domain_close", "Closes an open domain by its asset path, destroying what it spawned.",
                     ([Description("Path under the project's Assets folder or a Resources folder, with forward slashes.")] string path) => OnMainThreadAsync(() => CloseDomain(path))),
@@ -1008,11 +1008,11 @@ Each prints an `event: message` line and a `data:` line holding the JSON-RPC ans
 
 ```
 event: message
-data: {"result":{"content":[{"type":"text","text":"{"project":"Samples","root":"samples","frame":14297,"entities":60686,"domains":["Domains/Grid/Grid.domain"],"isLoading":false,"isLoaded":true}"}]},"id":1,"jsonrpc":"2.0"}
+data: {"result":{"content":[{"type":"text","text":"{"project":"Samples","root":"samples","frame":14297,"entities":49,"domains":["Domains/Hub/Hub.domain"],"isLoading":false,"isLoaded":true}"}]},"id":1,"jsonrpc":"2.0"}
 ```
 
 The tool's own answer is the `text` value: JSON inside a JSON string, so its quotes arrive escaped as `"`. That
-one reads `{"project":"Samples","root":"samples","frame":14297,"entities":60686,"domains":["Domains/Grid/Grid.domain"],"isLoading":false,"isLoaded":true}`.
+one reads `{"project":"Samples","root":"samples","frame":14297,"entities":49,"domains":["Domains/Hub/Hub.domain"],"isLoading":false,"isLoaded":true}`.
 `component_types` answers `Camera`, `Contacts`, `DirectionalLight`, `Physics`, `PointLight`, `PostProcessing`,
 `Renderer`, `Scripts`, `Sky`, `Spin`, `SpotLight`, `Tags`, `Transform` and `Weather`.
 
@@ -2146,10 +2146,10 @@ dotnet run --project Wizard
 It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 
 1. Paste the full path of the samples into the box, the folder or its `Samples.magic`, and press **Play**.
-2. The engine window opens on the Grid. The status on the right reads `Samples · frame N · 60686 entities`, the frame
+2. The engine window opens on the Hub. The status on the right reads `Samples · frame N · 49 entities`, the frame
    counting up (` · loading` follows while a domain is still opening).
 3. The console fills with the engine's log from the gem's first line on: `Gem Mcp 1.0.0 by Konfus started`, `MCP
-   clients reach the engine at http://localhost:<port>/mcp`, `Opened Domains/Grid/Grid.domain: 58184 entities in 1025
+   clients reach the engine at http://localhost:<port>/mcp`, `Opened Domains/Hub/Hub.domain: 48 entities in 1
    prefabs.` The terminal running Wizard shows the engine's whole log.
 4. Type `help` in the command box and press Enter: the engine's commands are listed.
 5. Type `nope`: a yellow line says there is no such command.
@@ -2593,8 +2593,8 @@ Create `tools/Wizard/Wizard/Components/Editor/EntityList.razor`:
 
 Why it is shaped this way:
 
-- **A page at a time.** The samples' world holds 60,686 entities, more than a list should draw, so the panel asks for
-  the first hundred that match and **Show 100 more** asks for more. The count in the header is how many match.
+- **A page at a time.** The samples' largest world, the Valley, holds about 33,000 entities, more than a list should
+  draw, so the panel asks for the first hundred that match and **Show 100 more** asks for more. The count in the header is how many match.
 - **The filter is the hierarchy's stand-in.** Entities have no names or parents, so what tells them apart is what they
   hold: "With DirectionalLight" finds the sun and the moon, "With Camera" the player's camera. The types come from
   `component_types`, asked again whenever the engine starts.
@@ -2922,9 +2922,9 @@ The page owns the selection and hands it to both panels. That is the whole of Wi
 
 Run Wizard (in a browser or the shell), Play the samples, then:
 
-1. The entity list shows `60686` and, first, the player and the domain's globals: the player's camera
-   (`Camera, Scripts, Tags, Transform`), the sun and the moon (`DirectionalLight, Spin, Transform`), `PostProcessing`, `Weather`,
-   then the point lights.
+1. Open the Valley (key 6). The entity list shows about 32,700 and, first, the player and the domain's globals: the
+   player's camera (`Camera, Scripts, Tags, Transform`), the sun and the moon (`DirectionalLight, Spin, Transform`),
+   `PostProcessing`, `Weather`, then the point lights.
 2. Choose **With Camera**: one entity. Choose **Every entity** again.
 3. Select the sun. The inspector shows `Transform` (position, rotation and scale, no matrix), `DirectionalLight` and
    `Spin`.

@@ -1,0 +1,8 @@
+{
+    // A blue glow, for the lights' fixtures.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.05, "g": 0.05, "b": 0.05, "a": 1 },
+        "emissive": { "x": 0.25, "y": 0.5, "z": 1.4 }
+    }
+}

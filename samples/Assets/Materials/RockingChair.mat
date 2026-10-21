@@ -1,0 +1,10 @@
+{
+    // The rocking chair.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3536 } },
+        "normalMap": { "texture": { "id": 3537 } },
+        "ormMap": { "texture": { "id": 3538 } },
+        "roughness": { "x": 1 }
+    }
+}

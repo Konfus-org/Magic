@@ -1,0 +1,10 @@
+{
+    // The shelf.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3539 } },
+        "normalMap": { "texture": { "id": 3540 } },
+        "ormMap": { "texture": { "id": 3541 } },
+        "roughness": { "x": 1 }
+    }
+}

@@ -1,0 +1,16 @@
+{
+    "entities": [
+        {"name": "Systems", "scripts": [{"id": 3313}]},
+        {"name": "Sky", "components": {"Sky": {"material": {"id": 3620}}}},
+        {"name": "Weather", "components": {"Weather": {"wind": {"x": 6, "y": 0, "z": 3}, "coverage": 0.3, "fog": 0.00012, "fogFalloff": {"id": 3680}}}},
+        {"name": "PostProcessing", "components": {"PostProcessing": {"effects": {"id": 3670}}}},
+        {"name": "Sun", "components": {"Transform": {"rotation": {"x": 0.41554, "y": 0.2661, "z": -0.12854, "w": 0.86023}}, "DirectionalLight": {"mode": "sun", "color": {"r": 1, "g": 0.97, "b": 0.93}, "intensity": 120000}}},
+        {"name": "Landscape", "prefab": {"id": 3724}, "components": {"Transform": {}}},
+        {"name": "Cabin", "prefab": {"id": 3725}, "components": {"Transform": {"position": {"x": -2897.898, "y": 61.359, "z": -1816.817}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
+        {"name": "Controls", "scripts": [{"id": 3448}, {"id": 3445, "options": [{"name": "Clear"}, {"name": "Golden", "exposure": 0.35, "bloom": 0.09, "saturation": 1.15, "contrast": 1.08, "tint": {"x": 1.08, "y": 0.97, "z": 0.82}, "vignette": 0.25}, {"name": "Winter", "exposure": 0.2, "saturation": 0.7, "contrast": 0.92, "tint": {"x": 0.88, "y": 0.96, "z": 1.1}}, {"name": "Noir", "saturation": 0, "contrast": 1.35, "vignette": 0.55}]}, {"id": 3446, "materials": [{"id": 3600}, {"id": 3601}, {"id": 3602}, {"id": 3603}, {"id": 3604}], "snowLine": 2700}, {"id": 3447, "haze": 1, "cloudHeight": 2400}]},
+        {"name": "Help", "scripts": [{"id": 3450, "isOnScreen": true, "text": "The terrain and the trees are the samples' own shaders; the trees darken wet as cloud covers the sky.\nL eases to the next look; up and down bring the snow down, left and right the haze, page up and down the clouds;\n[ and ] change the cloud cover, - and = the wind, , and . the fog."}]},
+        {"name": "Spawn", "tags": ["spawn"], "components": {"Transform": {"position": {"x": -6761.601, "y": 1410.349, "z": -2852.093}, "rotation": {"x": 0.06225, "y": 0.60688, "z": -0.04776, "w": 0.79091}}}},
+        {"name": "Arch to Hub", "prefab": {"id": 3730}, "components": {"Transform": {"position": {"x": -6763.931, "y": 1396.942, "z": -2843.4}, "rotation": {"x": 0, "y": 0.60876, "z": 0, "w": 0.79335}}}},
+        {"name": "Gate to Hub", "components": {"Transform": {"position": {"x": -6763.931, "y": 1398.942, "z": -2843.4}}}, "scripts": [{"id": 3430, "destination": {"id": 3400}, "label": "Hub", "radius": 1.7, "labelHeight": 3.4}]}
+    ]
+}

@@ -1,0 +1,8 @@
+{
+    // The lantern's glass, lit from within.
+    "shader": { "id": 10001 },
+    "params": {
+        "color": { "r": 0.05, "g": 0.05, "b": 0.05, "a": 1 },
+        "emissive": { "x": 1.4, "y": 0.9, "z": 0.45 }
+    }
+}

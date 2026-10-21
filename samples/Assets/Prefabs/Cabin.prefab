@@ -1,0 +1,12 @@
+{
+    "entities": [
+        {"name": "Cabin", "components": {"Transform": {}, "Renderer": {"model": {"id": 3474}, "materials": [{"id": 3605}, {"id": 3608}, {"id": 3607}, {"id": 3606}, {"id": 3609}, {"id": 3320}]}, "Physics": {"shape": "mesh"}, "Acoustics": {"material": "wood"}}},
+        {"name": "Bench", "components": {"Transform": {"position": {"x": -1.55, "y": 0.45, "z": -0.2}, "rotation": {"x": 0, "y": 0.70711, "z": 0, "w": 0.70711}}, "Renderer": {"model": {"id": 3475}, "materials": [{"id": 3610}]}, "Physics": {}}},
+        {"name": "Rocking chair", "components": {"Transform": {"position": {"x": -1.3, "y": 0.45, "z": 1.6}, "rotation": {"x": 0, "y": -0.84339, "z": 0, "w": 0.5373}}, "Renderer": {"model": {"id": 3476}, "materials": [{"id": 3611}]}, "Physics": {}}},
+        {"name": "Shelf", "components": {"Transform": {"position": {"x": 2.9, "y": 0.45, "z": -2.84}}, "Renderer": {"model": {"id": 3477}, "materials": [{"id": 3612}]}, "Physics": {}}},
+        {"name": "Lantern", "components": {"Transform": {"position": {"x": -1.55, "y": 1.0, "z": -0.6}, "scale": {"x": 1.6, "y": 1.6, "z": 1.6}}, "Renderer": {"model": {"id": 3478}, "materials": [{"id": 3613}, {"id": 3614}]}}},
+        {"name": "Lantern light", "components": {"Transform": {"position": {"x": -1.55, "y": 1.17, "z": -0.6}}, "PointLight": {"color": {"r": 1, "g": 0.72, "b": 0.42}, "intensity": 30, "range": 9}}},
+        {"name": "Embers", "components": {"Transform": {"position": {"x": -3.45, "y": 0.52, "z": 0}, "scale": {"x": 0.18, "y": 0.04, "z": 0.3}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 3616}]}}},
+        {"name": "Fire", "components": {"Transform": {"position": {"x": -3.2, "y": 0.9, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.55, "b": 0.25}, "intensity": 90, "range": 12}, "Sound": {"audio": {"id": 3705}, "loop": true, "volume": 0.7, "near": 1.5, "range": 18}}, "scripts": [{"id": 3449, "intensity": 90}]}
+    ]
+}

@@ -12,12 +12,14 @@ float4 main(PieceVaryings input, bool isFrontFace : SV_IsFrontFace) : SV_Target0
 {
     float2 uvDdx = ddx(input.uv);
     float2 uvDdy = ddy(input.uv);
+    float3 positionDdx = ddx(input.position);
+    float3 positionDdy = ddy(input.position);
     float3 normal = NormalizeOrZero(input.normal);
     float3 normalDdx = ddx(normal) * TextureMipScale;
     float3 normalDdy = ddy(normal) * TextureMipScale;
     float cover;
     float surfaceDepth;
-    SurfaceInputs inputs = PieceInputsOf(input, uvDdx, uvDdy, isFrontFace, cover, surfaceDepth);
+    SurfaceInputs inputs = PieceInputsOf(input, uvDdx, uvDdy, positionDdx, positionDdy, isFrontFace, cover, surfaceDepth);
     Surface surface = EvaluateSurface(inputs, LoadMaterialParams(input.material));
     clip(min(cover - 0.5, DissolveKeep(input.dissolve, input.clip.xy)));
 

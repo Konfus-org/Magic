@@ -33,7 +33,10 @@ coverage, a world-space unit normal, perceptual roughness and how metallic, a di
 reflection off, as an unlit surface does), baked or authored occlusion, light given off, pre-exposed, so 1 reads as
 white whatever the lighting, the alpha cutoff a masked material discards below, and which shading model lights it
 with what that model takes ([Shaders](../Shaders/README.md#lighting-a-pixel)). The inputs give it the unit direction
-from the surface toward the camera, among the rest.
+from the surface toward the camera, among the rest. They also give it its position's screen-space derivatives beside
+its uv's, so a surface can map its textures in world space, as a terrain without uvs does, projected from above and
+from the sides by how its slope faces; and the world's weather, its wind and cloud cover, so a surface can answer the
+weather, as leaves that darken wet under cloud do, without a frame block of its own.
 
 A transparent surface is compiled as a forward surface and may read what was drawn behind it, pre-exposed and blurred
 by roughness, through the contract's helpers for that, as the engine's glass surface does: it emits what it lets

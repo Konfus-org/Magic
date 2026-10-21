@@ -1,0 +1,10 @@
+{
+    // The valley's boulders.
+    "shader": { "id": 10001 },
+    "params": {
+        "colorMap": { "texture": { "id": 3545 } },
+        "normalMap": { "texture": { "id": 3546 } },
+        "ormMap": { "texture": { "id": 3547 } },
+        "roughness": { "x": 1 }
+    }
+}

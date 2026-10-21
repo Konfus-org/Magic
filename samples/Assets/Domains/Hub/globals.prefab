@@ -1,0 +1,28 @@
+{
+    "entities": [
+        {"name": "Systems", "scripts": [{"id": 3313}]},
+        {"name": "Sky", "components": {"Sky": {"material": {"id": 4569236087865836549}}}},
+        {"name": "Weather", "components": {"Weather": {"wind": {"x": 3, "y": 0, "z": 1}, "coverage": 0.25}}},
+        {"name": "PostProcessing", "components": {"PostProcessing": {"effects": {"id": 3362}}}},
+        {"name": "Sun", "components": {"Transform": {"rotation": {"x": 0.41808, "y": 0.27027, "z": -0.13182, "w": 0.8572}}, "DirectionalLight": {"mode": "sun", "color": {"r": 1, "g": 0.97, "b": 0.93}, "intensity": 120000}}},
+        {"name": "Floor", "components": {"Transform": {"position": {"x": 0, "y": 0.0, "z": 0}, "scale": {"x": 40.0, "y": 0.01, "z": 40.0}}, "Renderer": {"model": {"id": 519}, "materials": [{"id": 3619}]}, "Physics": {}}},
+        {"name": "Arch to Audio", "prefab": {"id": 3730}, "components": {"Transform": {"position": {"x": -13.0228, "y": 0.0, "z": 6.9274}, "rotation": {"x": 0.0, "y": -0.42262, "z": 0.0, "w": 0.90631}}}},
+        {"name": "Gate to Audio", "components": {"Transform": {"position": {"x": -13.0228, "y": 2.0, "z": 6.9274}}}, "scripts": [{"id": 3430, "destination": {"id": 3406}, "label": "Audio", "radius": 1.7, "labelHeight": 3.4}]},
+        {"name": "Arch to Scripting", "prefab": {"id": 3730}, "components": {"Transform": {"position": {"x": -8.5, "y": 0.0, "z": 10.7224}, "rotation": {"x": 0.0, "y": -0.25882, "z": 0.0, "w": 0.96593}}}},
+        {"name": "Gate to Scripting", "components": {"Transform": {"position": {"x": -8.5, "y": 2.0, "z": 10.7224}}}, "scripts": [{"id": 3430, "destination": {"id": 3408}, "label": "Scripting", "radius": 1.7, "labelHeight": 3.4}]},
+        {"name": "Arch to Physics", "prefab": {"id": 3730}, "components": {"Transform": {"position": {"x": -2.952, "y": 0.0, "z": 12.7417}, "rotation": {"x": 0.0, "y": -0.08716, "z": 0.0, "w": 0.99619}}}},
+        {"name": "Gate to Physics", "components": {"Transform": {"position": {"x": -2.952, "y": 2.0, "z": 12.7417}}}, "scripts": [{"id": 3430, "destination": {"id": 3410}, "label": "Physics", "radius": 1.7, "labelHeight": 3.4}]},
+        {"name": "Arch to Lights", "prefab": {"id": 3730}, "components": {"Transform": {"position": {"x": 2.952, "y": 0.0, "z": 12.7417}, "rotation": {"x": 0.0, "y": 0.08716, "z": -0.0, "w": 0.99619}}}},
+        {"name": "Gate to Lights", "components": {"Transform": {"position": {"x": 2.952, "y": 2.0, "z": 12.7417}}}, "scripts": [{"id": 3430, "destination": {"id": 3412}, "label": "Lights", "radius": 1.7, "labelHeight": 3.4}]},
+        {"name": "Arch to Terrain", "prefab": {"id": 3730}, "components": {"Transform": {"position": {"x": 8.5, "y": 0.0, "z": 10.7224}, "rotation": {"x": 0.0, "y": 0.25882, "z": -0.0, "w": 0.96593}}}},
+        {"name": "Gate to Terrain", "components": {"Transform": {"position": {"x": 8.5, "y": 2.0, "z": 10.7224}}}, "scripts": [{"id": 3430, "destination": {"id": 3414}, "label": "Terrain", "radius": 1.7, "labelHeight": 3.4}]},
+        {"name": "Arch to Valley", "prefab": {"id": 3730}, "components": {"Transform": {"position": {"x": 13.0228, "y": 0.0, "z": 6.9274}, "rotation": {"x": 0.0, "y": 0.42262, "z": -0.0, "w": 0.90631}}}},
+        {"name": "Gate to Valley", "components": {"Transform": {"position": {"x": 13.0228, "y": 2.0, "z": 6.9274}}}, "scripts": [{"id": 3430, "destination": {"id": 3416}, "label": "Valley", "radius": 1.7, "labelHeight": 3.4}]},
+        {"name": "Plate", "components": {"Transform": {"position": {"x": 0, "y": 0.04, "z": 3.0}, "scale": {"x": 1.2, "y": 0.04, "z": 1.2}}, "Renderer": {"model": {"id": 515}, "materials": [{"id": 3322}]}, "Physics": {}}},
+        {"name": "Plate switch", "components": {"Transform": {"position": {"x": 0, "y": 1.6, "z": 3.0}}}, "scripts": [{"id": 3433, "domain": {"id": 3404}, "radius": 1.6}]},
+        {"name": "Label", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": 3.0}}}, "scripts": [{"id": 3450, "text": "The Annex: fly over the plate", "height": 1.2}]},
+        {"name": "Centrepiece", "components": {"Transform": {"position": {"x": 0, "y": 2.2, "z": 9.0}, "rotation": {"x": 0.57358, "y": 0, "z": 0, "w": 0.81915}, "scale": {"x": 0.8, "y": 0.8, "z": 0.8}}, "Renderer": {"model": {"id": 518}, "materials": [{"id": 3325}]}, "Spin": {"degreesPerSecond": 30}}},
+        {"name": "Help", "scripts": [{"id": 3450, "text": "Fly through an arch to open its sample; keys 1 to 6 jump to one, and 0 comes back here.\nThe plate opens the Annex beside the plaza, a domain opened beside the world, and closes it again.", "isOnScreen": true}]},
+        {"name": "Spawn", "tags": ["spawn"], "components": {"Transform": {"position": {"x": 0, "y": 2.0, "z": -11.0}, "rotation": {"x": 0.05234, "y": 0.0, "z": -0.0, "w": 0.99863}}}}
+    ]
+}

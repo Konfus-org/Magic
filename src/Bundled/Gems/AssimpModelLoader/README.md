@@ -18,6 +18,9 @@ nothing else, which the project's item says.
   takes the right-handed frame to the engine's: a model's front, Blender's -Y, faces +Z, and Blender's +X is -X.
 - A transform that mirrors turns a triangle's winding over, so its corners are swapped back: triangles are clockwise
   seen from outside. Then the `.meta`'s `origin` is moved to (0, 0, 0).
-- A mesh's material slot is its material's place in the file's list, and one past the last slot is the last.
+- A mesh's material slot is its material's place in the file's list as Assimp reads it, and one past the last slot is
+  the last. For an FBX mesh of several materials that is the order its faces first use them, not the order of the
+  tool's material slots: a model exported from Blender keeps its slots when its faces are in slot order, the first
+  faces using the first slot.
 - Each file is an import of its own, read from where it lies in memory and released once its meshes are baked, so
   files load on workers, several at once. `Dispose` waits for the imports running; a file asked for after that fails.

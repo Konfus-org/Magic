@@ -48,11 +48,15 @@ struct SurfaceInputs
     float2 uv;
     float2 uvDdx;          // screen-space derivatives of uv, taken once outside any branch
     float2 uvDdy;
+    float3 positionDdx;    // screen-space derivatives of worldPosition, as uv's are: for textures mapped in world space
+    float3 positionDdy;
     float2 screenUv;
     float time;            // seconds, for animated surfaces
     float3 cameraPosition; // absolute, like worldPosition
     float3 viewDirection;  // unit length, from the surface toward the camera
     bool isFrontFace;
+    float3 wind;           // the world's weather: metres per second, its direction and strength
+    float coverage;        // the world's weather: how much of the sky clouds cover, 0 clear to 1 overcast
 };
 
 // What a surface hands back: what it is made of, in linear colour.

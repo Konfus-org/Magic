@@ -203,7 +203,7 @@ settings, with dots between levels. On the command line and in a console, `Gem.p
 when it parses as JSON, and a string when it does not.
 
 A preset is an asset, read like any other: a JSON file of settings by key, with its `.meta` beside it, the project's
-before the engine's; the samples' presets are the examples. The default and the applied one are read before any gem
+before the engine's; the engine's presets are the examples. The default and the applied one are read before any gem
 is made, so even a setting a gem reads only as it starts takes them, and are applied again when their files change,
 keeping what was set while running.
 
@@ -395,19 +395,19 @@ type named like the file in the code loaded (`Assemblies`), as Core reads a comp
 components do: a prefab's part holds its scripts with their values, and each entity spawned from the part gets its
 own copy of each, made for it.
 
-A script's constructor takes the entity it is attached to first, then the services it needs, and only keeps them: it
-does no work, as its values are not set yet. Its public settable properties are its values, each initialiser the
-default a prefab's value replaces; `Start()` is where it begins, on the main thread, with its values set and the
-entity's components there to read. An `IBehavior` runs each frame: `Update`, `FixedUpdate` and `LateUpdate`, each
-optional, called on the main thread, `FixedUpdate` every step and the others each frame, handed the time since the
-last call as the frame's delta. A system script is a script that is also a system, of any kind the world takes:
-added to the ECS while its entity lives; the entity it is made for holds it and is no entity it runs over. An
-`IPipelineScript` records part of a frame: a pass of kind `script` names it, and the renderer makes it for each
-listing of the frame it builds and calls it on the render thread to draw into the pass's target, with pipelines of
-its own, never on an entity; it is the hook at a point of the frame for code that is no gem, a HUD or an overlay. A
-class marked `[Impatient]` starts even while a domain loads in place of the world; any other waits until the domain
-is there, so it never sees a world half loaded. The loading domain's own scripts, such as a progress bar, are
-impatient, or never run. The samples' scripts are the examples of each kind.
+A script's constructor takes the entity it is attached to first, when it uses it, then the services it needs, and only
+keeps them: it does no work, as its values are not set yet. Its public settable properties are its values, each
+initialiser the default a prefab's value replaces; `Start()` is where it begins, on the main thread, with its values set
+and the entity's components there to read. An `IBehavior` runs each frame: `Update`, `FixedUpdate` and `LateUpdate`,
+each optional, called on the main thread, `FixedUpdate` every step and the others each frame, handed the time since the
+last call as the frame's delta. A system script is a script that is also a system, of any kind the world takes: added to
+the ECS while its entity lives; the entity it is made for holds it and is no entity it runs over. An `IPipelineScript`
+records part of a frame: a pass of kind `script` names it, and the renderer makes it for each listing of the frame it
+builds and calls it on the render thread to draw into the pass's target, with pipelines of its own, never on an entity;
+it is the hook at a point of the frame for code that is no gem, a HUD or an overlay. A class marked `[Impatient]` starts
+even while a domain loads in place of the world; any other waits until the domain is there, so it never sees a world
+half loaded. The loading domain's own scripts, such as a progress bar, are impatient, or never run. The samples' scripts
+are the examples of each kind.
 
 The `Scripts` component says which scripts an entity has, by their `.cs` assets: the gem that runs scripts makes a
 copy of each named and has no copy of, and ends a copy whose handle is gone or whose entity is destroyed, disposing

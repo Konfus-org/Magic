@@ -44,16 +44,19 @@ runs it first, so an agent's change is formatted before it is validated.
 `Validate.ps1` runs the checks [AGENTS.md](../AGENTS.md) asks of every change, in order, and stops at the first failure:
 builds the solution, where every warning is already an error; checks the whole tree's formatting with `dotnet format`,
 writing nothing, which fails on what `Format.ps1` would change, what no build can check among it, such as a file's line
-endings; runs the tests against that build; runs the samples
-headless under `--fail-on-error`, which exits 2 when any error was logged, until their world has loaded; and runs them
-with a window through `Screenshot.ps1`, which needs a display and a GPU. Both runs wait for the world rather than for a
-number of frames, through the console's `wait loaded`, so they prove the shaders compile and the domain opens, and a
-world that never loads fails rather than passing on the loading screen. What bounds them is a time limit, Magic's
-`--seconds`, only a ceiling: a frame count would be none, as a headless loading screen costs next to nothing to draw,
-so thousands of frames go by while a cold shader cache compiles, and how many depends on the machine. It ends
-with one line per step and its exit code, `PASSED` or which step failed, and the screenshot's path, which is to be
-opened and looked at: the run is the evidence that the change works, and the image is what shows it. Its parameters,
-documented in the script, pick the steps, the build and another project.
+endings; runs the tests against that build; runs the samples headless under `--fail-on-error`, which exits 2 when any
+error was logged, until their world has loaded; and runs them with a window through `Screenshot.ps1`, which needs a
+display and a GPU. Both runs wait for the world rather than for a number of frames, through the console's `wait loaded`,
+so they prove the shaders compile and the domain opens, and a world that never loads fails rather than passing on the
+loading screen. What bounds them is a time limit, Magic's `--seconds`, only a ceiling: a frame count would be none, as
+a headless loading screen costs next to nothing to draw, so thousands of frames go by while a cold shader cache
+compiles, and how many depends on the machine. Each run then opens every other domain the project's assets hold, all
+but its loading domain, in place of the world, one after another through the console's `open`, so a change that
+breaks any sample fails, and the windowed run takes a screenshot of each; the time limit is per domain, as a cold
+cache makes a large model's clusters again for minutes. It ends with one line per step and its exit code, `PASSED` or
+which step failed, and the screenshots' paths, the entry point's first, each to be opened and looked at: the run is
+the evidence that the change works, and the images are what show it. Its parameters, documented in the script, pick
+the steps, the build and another project.
 
 The build is incremental and never starts over: what is built is reused, and the native libraries are built once
 per machine, in a folder every checkout and worktree shares
@@ -63,12 +66,13 @@ project ends, so which native library is building, and for how long, shows as it
 
 ## Screenshot.ps1
 
-`Screenshot.ps1` is the visual check: it runs the project with a window, pipes console lines in, and prints the PNG's
-path as its only output, so `$png = tools/Screenshot.ps1` keeps it. It waits until the world has loaded, however long a
-cold shader cache takes, then a while longer for what fades in to settle, takes the screenshot and quits; a world that
-never loads within the time limit fails the run. The wait to settle is counted in frames, so every run's image is
-taken at the same point. Console lines can be sent before the screenshot, such as choosing a debug view, so what the
-image shows is chosen rather than found. It does not build: run the build step first.
+`Screenshot.ps1` is the visual check: it runs the project with a window, pipes console lines in, and prints the PNGs'
+paths as its only output, one a line, so `$png = tools/Screenshot.ps1` keeps them. It waits until the world has loaded,
+however long a cold shader cache takes, then a while longer for what fades in to settle, takes the screenshot, then
+opens each domain it is given in turn and takes one of each once it has settled, and quits; a world that never loads
+within the time limit fails the run. The wait to settle is counted in frames, so every run's images are taken at the
+same point. Console lines can be sent before the first screenshot, such as choosing a debug view, so what the image
+shows is chosen rather than found. It does not build: run the build step first.
 
 ## AgentTaskComplete.ps1
 
@@ -77,7 +81,7 @@ formats the change with `Format.ps1` first, so what is validated, stamped and re
 runs `Validate.ps1` in full, and when every step passes it stamps the state it validated: the git tree of every file in
 the checkout, new ones included, so the stamp names content, not a time, and any edit after the run, or a rebase onto
 new work, leaves the new state unstamped. A checkout whose files changed during the run is not stamped. It ends with
-the screenshot's path, to open and look at.
+the screenshots' paths, to open and look at.
 
 The project's `.claude/settings.json` runs the same script with `-Hook` before an agent's `git commit` or `git merge`,
 and it refuses the command, with the reason, unless the checkout's state, or for a merge the merged branch's last

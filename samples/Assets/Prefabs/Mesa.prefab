@@ -1,5 +1,0 @@
-{
-    "entities": [
-        { "name": "Mesa", "components": { "Transform": { "position": { "x": 0, "y": 0.5, "z": 0 }, "scale": { "x": 1, "y": 0.5, "z": 1 } }, "Renderer": { "model": { "id": 515 }, "materials": [ { "id": 3338 } ] }, "Physics": { "shape": "mesh" } } }
-    ]
-}
