@@ -18,7 +18,10 @@ Each setting is documented on `ClusterRenderingSettings` and shown in the settin
 allocates, so they belong to the machine, and every one is read every frame: a newly named pipeline runs once it is
 built, a new anisotropy makes the material sampler again. The frame runs the pipeline the settings name, before the
 world's effects: by default the clusters pipeline in the bundled resources, the whole frame described here, so a
-project names a pipeline only to run another.
+project names a pipeline only to run another. Each view is drawn at a share of its target's size rather than at a
+number of pixels, so one setting is right on any display and any render texture, and by default below it, upscaled
+([Temporal upscaling](#temporal-upscaling)); a width or height in pixels takes the share's place where a look should
+hold whatever the display.
 
 ## Passes and pipelines
 
@@ -192,11 +195,20 @@ facing the sun does not shadow itself.
 
 ### Temporal upscaling
 
-The view is drawn a sub-pixel off each frame (Halton 2, 3), and textures are read a little sharper as it is drawn
-smaller. An upscale (Karis 2014) gathers the view's pixels about each pixel of the target, weighed by how near their
-samples really were, and blends them into what it held there last frame, found by the nearest surface's velocity and
-read through a Catmull-Rom filter, clipped toward the colours about it now (Salvi 2016), both weighed by their
-brightness. Tonemapping reads what it made, at the target's size.
+A view is drawn smaller than its target by default, so fewer pixels are lit, shadowed and traced, and upscaled to it;
+drawn larger, the same pass scales it down, supersampled. The view is drawn a sub-pixel off each frame (Halton 2, 3),
+and textures are read a little sharper as it is drawn smaller. An upscale (Karis 2014) gathers the view's pixels about
+each pixel of the target, weighed by how near their samples really were, and blends them into what it held there last
+frame, found by the nearest surface's velocity and read through a Catmull-Rom filter, clipped toward the colours about
+it now (Salvi 2016), both weighed by their brightness.
+
+What it made is then sharpened (Lottes 2019) by as much as the view was upscaled, not at all for a view drawn at its
+target's size or larger: each pixel is pushed away from its four neighbours, less where they already span the range,
+and kept within what they hold, so an edge steepens without a halo. Only what is shown is sharpened, never what the
+upscale keeps for the next frame, which would sharpen again each frame. Tonemapping reads that, at the target's size.
+
+With the upscale off, the post stage runs at the size the view is drawn at, nothing is sharpened, and the output shows
+each drawn pixel as a crisp block of the target's: drawn a few hundred pixels high, a pixelated look.
 
 ### Transparency
 

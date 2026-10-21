@@ -163,13 +163,14 @@ public enum PassResource : byte
 public enum PassSize : byte
 {
     /// <summary>
-    /// The size the view is drawn at, its target's scaled by the renderer's render scale.
+    /// The size the view is drawn at: its target's scaled by the renderer's render scale, or the size the renderer is
+    /// told to draw at.
     /// </summary>
     View,
 
     /// <summary>
     /// The size the view is shown at, its target's: what upscales the view, and what follows it. The drawn size instead
-    /// while the renderer's output filter is nearest, which leaves the scaling to the output pass.
+    /// while the renderer's upscale is off, which leaves the scaling to the output pass.
     /// </summary>
     Output,
 }

@@ -105,7 +105,7 @@ cbuffer Frame : UNIFORM(0)
 
     float2 Jitter;           // this frame's sub-pixel offset of ViewProj, in clip space
     float2 OutputSize;       // the view's size in pixels as it is shown, which upscaling fills; the drawn size when the
-                             // output filter is nearest, so only the output pass scales
+                             // upscale is off, so only the output pass scales
 
     WeatherConstants Weather;
 

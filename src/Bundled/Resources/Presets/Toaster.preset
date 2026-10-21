@@ -1,11 +1,11 @@
 {
-    // An integrated GPU, or a GTX 1660: drawn at 720p and scaled up, coarser clusters, coarser sun
-    // shadows in a smaller pool drawn fewer pages a frame, fewer point and spot lights lit pixel by pixel, textures
-    // filtered with fewer taps, global illumination three levels deep with fewer rays traced less often, and ambient
-    // occlusion searching one slice.
+    // An integrated GPU, or a GTX 1660: drawn at half the screen's size each way and scaled up, coarser clusters,
+    // coarser sun shadows in a smaller pool drawn fewer pages a frame, fewer point and spot lights lit pixel by pixel,
+    // textures filtered with fewer taps, global illumination three levels deep with fewer rays traced less often, and
+    // ambient occlusion searching one slice.
     "settings": {
         "PipelineLoader.params": { "Gtao": { "slices": { "x": 1 }, "steps": { "x": 3 } } },
-        "ClusterRendering.renderHeight": 720,
+        "ClusterRendering.renderScale": 0.5,
         "ClusterRendering.clusterError": 2,
         "ClusterRendering.pieceCapacity": 524288,
         "ClusterRendering.lightCapacity": 4096,

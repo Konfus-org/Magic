@@ -1,14 +1,13 @@
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Gpu;
 using Magic.Interfaces;
 
 namespace Magic.ClusterRendering;
 
 /// <summary>
 /// Which pipeline the renderer runs, and what it computes and allocates: set in the project's
-/// <c>Presets/Default.preset</c>, by another preset, or with <c>--set ClusterRendering.renderHeight=720</c>.
+/// <c>Presets/Default.preset</c>, by another preset, or with <c>--set ClusterRendering.renderScale=1</c>.
 /// </summary>
 [Category("Render")]
 internal sealed class ClusterRenderingSettings : ISettings
@@ -30,26 +29,38 @@ internal sealed class ClusterRenderingSettings : ISettings
     public Handle<Pipeline> Overlay { get; set; }
 
     /// <summary>
-    /// Pixels across each view is drawn at, then scaled to fill its target; 0 for its target's width, or, with a
-    /// height, the width that keeps the target's proportions.
+    /// The share of its target's size each view is drawn at, across and down, then scaled to fill it: 1 for the
+    /// target's own, less to draw fewer pixels and upscale them, more to draw more and scale them down. A share rather
+    /// than pixels, so it is right on any display and any render texture. A width or height named below takes its
+    /// place.
+    /// </summary>
+    [Category("Render/Display")]
+    [Range(0.1, 2)]
+    public float RenderScale { get; set; } = 2f / 3;
+
+    /// <summary>
+    /// Pixels across each view is drawn at in place of its render scale, then scaled to fill its target, for a look
+    /// that holds whatever the display; 0 for the scale's, or, with a height, the width that keeps the target's
+    /// proportions.
     /// </summary>
     [Category("Render/Display")]
     public int RenderWidth { get; set; }
 
     /// <summary>
-    /// Pixels down each view is drawn at, then scaled to fill its target: 720 for a slower GPU, 2160 to supersample; 0
-    /// for its target's height, or, with a width, the height that keeps the target's proportions.
+    /// Pixels down each view is drawn at in place of its render scale, then scaled to fill its target: 180 with the
+    /// upscale off for a crunchy, pixelated look; 0 for the scale's, or, with a width, the height that keeps the
+    /// target's proportions.
     /// </summary>
     [Category("Render/Display")]
     public int RenderHeight { get; set; }
 
     /// <summary>
-    /// How a view's image is read as it is scaled onto its target: between its pixels, or the nearest, which keeps a
-    /// low resolution crisp. Nearest also keeps the post stage at the drawn size, so nothing upscales before the
-    /// output.
+    /// Whether each view is scaled to its target's size by the frame's temporal upscale, smooth, the post stage run at
+    /// the target's size; or else shown as it is drawn, the post stage run at the drawn size and each of its pixels a
+    /// crisp block of the target's.
     /// </summary>
     [Category("Render/Display")]
-    public GpuFilter OutputFilter { get; set; } = GpuFilter.Linear;
+    public bool Upscale { get; set; } = true;
 
     /// <summary>
     /// Pixels a cluster's error may cover on screen before a finer one is drawn in its place: lower is finer, and more

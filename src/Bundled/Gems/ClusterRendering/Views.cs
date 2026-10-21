@@ -229,21 +229,17 @@ internal sealed class View : IDisposable
     /// <summary>
     /// Works out the frame for this view: its sizes, the targets drawn at the size it is drawn at, its constants, and
     /// its transparent pieces. The size it is shown at is its target's, which the post stage upscales to, unless the
-    /// output filter is nearest: then it is the drawn size, and only the output pass scales, crisply.
+    /// settings turn the upscale off: then it is the drawn size, and only the output pass scales, crisply.
     /// </summary>
     internal void Prepare(CameraCopy camera, ViewTarget target, ClusterRenderingSettings settings, in ViewFrame frame)
     {
         Target = target;
-        (uint width, uint height) = GetDrawnSize(
-            target.Area.Width,
-            target.Area.Height,
-            settings.RenderWidth,
-            settings.RenderHeight);
-        // Nearest keeps the low resolution to the output pass, so the post stage runs at the drawn size, not the
-        // target's.
-        Vector2 output = settings.OutputFilter == GpuFilter.Nearest
-            ? new Vector2(width, height)
-            : new Vector2(target.Area.Width, target.Area.Height);
+        (uint width, uint height) = GetDrawnSize(target.Area.Width, target.Area.Height, settings);
+        // Without the upscale the low resolution is kept to the output pass, so the post stage runs at the drawn
+        // size, not the target's.
+        Vector2 output = settings.Upscale
+            ? new Vector2(target.Area.Width, target.Area.Height)
+            : new Vector2(width, height);
         Make(GpuContract.Depth, width, height);
         Make(GpuContract.Visibility, width, height);
         Make(GpuContract.Albedo, width, height);
@@ -345,31 +341,29 @@ internal sealed class View : IDisposable
     }
 
     /// <summary>
-    /// The size a view is drawn at: its target's, or the width and height the settings ask for, one of them alone
-    /// keeping the target's proportions; a pixel at least, and four times the target each way at most.
+    /// The size a view is drawn at: the width and height the settings name, one of them alone keeping the target's
+    /// proportions, or else the target's times the render scale; a pixel at least, and four times the target each way
+    /// at most. Rounded to the nearest pixel, not up, as a share of a size worked out in floats can land a hair past a
+    /// whole one.
     /// </summary>
     private static (uint Width, uint Height) GetDrawnSize(
         float targetWidth,
         float targetHeight,
-        int wantedWidth,
-        int wantedHeight)
+        ClusterRenderingSettings settings)
     {
         float proportion = targetHeight > 0 ? targetWidth / targetHeight : 1;
-        float width = (wantedWidth, wantedHeight) switch
+        float scale = Math.Clamp(settings.RenderScale, 0.1f, 2);
+        (float Width, float Height) wanted = (settings.RenderWidth, settings.RenderHeight) switch
         {
-            ( > 0, _) => wantedWidth,
-            (_, > 0) => wantedHeight * proportion,
-            _ => targetWidth,
+            ( > 0, > 0) => (settings.RenderWidth, settings.RenderHeight),
+            ( > 0, _) => (settings.RenderWidth, settings.RenderWidth / proportion),
+            (_, > 0) => (settings.RenderHeight * proportion, settings.RenderHeight),
+            _ => (targetWidth * scale, targetHeight * scale),
         };
-        float height = (wantedHeight, wantedWidth) switch
-        {
-            ( > 0, _) => wantedHeight,
-            (_, > 0) => wantedWidth / proportion,
-            _ => targetHeight,
-        };
-        return (
-            (uint)Math.Clamp(MathF.Ceiling(width), 1, Math.Max(1, MathF.Ceiling(targetWidth * 4))),
-            (uint)Math.Clamp(MathF.Ceiling(height), 1, Math.Max(1, MathF.Ceiling(targetHeight * 4))));
+        return (ToPixels(wanted.Width, targetWidth), ToPixels(wanted.Height, targetHeight));
+
+        static uint ToPixels(float size, float target)
+            => (uint)Math.Clamp(MathF.Round(size), 1, Math.Max(1, MathF.Ceiling(target * 4)));
     }
 
     /// <summary>

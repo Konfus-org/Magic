@@ -1,8 +1,9 @@
 {
-    // The cluster renderer's frame: the sky's shadow on the world and its light, from everywhere and as rough surfaces
-    // reflect it, then each view culled and drawn into its visibility buffer in two phases, shaded once a pixel into the
-    // G-buffer, its lights binned, its shadows' pages drawn, lit, the sky, the air and the weather's fog in front of
-    // what it shows, transparent surfaces, and the view upscaled to the size it is shown at.
+    // The cluster renderer's frame: the sky's shadow on the world and its light, from everywhere and as rough
+    // surfaces reflect it, then each view culled and drawn into its visibility buffer in two phases, shaded once a
+    // pixel into the G-buffer, its lights binned, its shadows' pages drawn, lit, the sky, the air and the weather's
+    // fog in front of what it shows, transparent surfaces, and the view upscaled to the size it is shown at and
+    // sharpened by as much as it was upscaled.
     "entries": [
         { "pass": { "id": 11110 } },
         { "pass": { "id": 11119 } },
@@ -58,6 +59,7 @@
         { "pass": { "id": 11199 } },
         { "pass": { "id": 11160 } },
         { "pass": { "id": 60180 } },
-        { "pass": { "id": 60190 } }
+        { "pass": { "id": 60190 } },
+        { "pass": { "id": 60191 } }
     ]
 }

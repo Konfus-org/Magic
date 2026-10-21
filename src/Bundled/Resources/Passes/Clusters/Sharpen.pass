@@ -1,0 +1,10 @@
+{
+    // The view as it is shown, sharpened by as much as it was upscaled (Shaders/Post/Sharpen.comp.hlsl), which the
+    // tonemap reads in place of the upscale's own.
+    "stage": "post",
+    "kind": "compute",
+    "shader": { "id": 60051 },
+    "creates": [ { "name": "Sharpened", "format": "rgba16_float", "size": "output" } ],
+    "writes": [ { "name": "Sharpened" } ],
+    "dispatch": { "per": "output:Sharpened" }
+}

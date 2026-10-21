@@ -439,7 +439,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
         BoundResource? image = _debugView.Length > 0 ? DebugImage(view) : GetFinished(view);
         bool clears = _cleared.Add(view.Target.Texture);
-        _output.Draw(view.Target, view.Constants, image, _settings.OutputFilter, clears);
+        GpuFilter filter = _settings.Upscale ? GpuFilter.Linear : GpuFilter.Nearest;
+        _output.Draw(view.Target, view.Constants, image, filter, clears);
 
         view.Resources.Swap();
     }

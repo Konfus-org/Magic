@@ -1,9 +1,9 @@
 {
-    // Everything up: drawn at 2160p and scaled down, the finest clusters, the sharpest sun
-    // shadows close up, twice the pages of shadow drawn a frame, and global illumination traced with more rays, its
-    // finest probes every frame. Bring a fan.
+    // Everything up: drawn at one and a half times the screen's size each way and scaled down, the finest clusters,
+    // the sharpest sun shadows close up, twice the pages of shadow drawn a frame, and global illumination traced with
+    // more rays, its finest probes every frame. Bring a fan.
     "settings": {
-        "ClusterRendering.renderHeight": 2160,
+        "ClusterRendering.renderScale": 1.5,
         "ClusterRendering.clusterError": 0.5,
         "ClusterRendering.shadowFinest": 4,
         "ClusterRendering.shadowUpdates": 1024,

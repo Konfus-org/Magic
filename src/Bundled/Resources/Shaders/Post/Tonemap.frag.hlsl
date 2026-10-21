@@ -2,9 +2,10 @@
 // towards white smoothly rather than skewing its hue. The colour is taken into Rec. 2020 (ITU-R BT.2087), AgX's
 // working space, then into its inset primaries, encoded in log2 over its 16.5 stops, put through its contrast curve (a
 // polynomial fit of it, Wrensch 2023), and turned back out; the curve's output is display-encoded, so it is decoded to
-// the linear Ldr the output encodes again, back in Rec. 709. It reads the view as it is shown (Taa) when the frame
-// upscales it, else the scene colour as it was drawn, and where the world's effects bloom it, lays the glow over it
-// first (Post/Bloom.frag.hlsl).
+// the linear Ldr the output encodes again, back in Rec. 709. It reads the view as it is shown, sharpened where the
+// frame sharpens it (Sharpened, Post/Sharpen.comp.hlsl), else upscaled where the frame upscales it (Taa), else the
+// scene colour as it was drawn, and where the world's effects bloom it, lays the glow over it first
+// (Post/Bloom.frag.hlsl).
 
 #include "Include/Fullscreen.hlsli"
 
@@ -54,7 +55,9 @@ float3 AgX(float3 color)
 float4 main(PassVaryings input) : SV_Target0
 {
     PassParams params = LoadPassParams();
-#if defined(HAS_Taa)
+#if defined(HAS_Sharpened)
+    float3 color = Sharpened.SampleLevel(SharpenedSampler, input.uv, 0.0).rgb;
+#elif defined(HAS_Taa)
     float3 color = Taa.SampleLevel(TaaSampler, input.uv, 0.0).rgb;
 #else
     float3 color = Hdr.SampleLevel(HdrSampler, input.uv, 0.0).rgb;
