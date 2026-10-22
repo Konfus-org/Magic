@@ -22,6 +22,7 @@ public static class CString
     {
         byte[] bytes = new byte[Encoding.UTF8.GetByteCount(text) + 1];
         Encoding.UTF8.GetBytes(text, bytes);
+
         return bytes;
     }
 }

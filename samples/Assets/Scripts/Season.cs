@@ -37,10 +37,7 @@ internal sealed class Season(Services.Assets assets, IInput input, IDebugUI? deb
 
     public float Highest { get; set; } = 4400;
 
-    public void Start()
-    {
-        LoadAsync().FireAndForget();
-    }
+    public void Start() => LoadAsync().FireAndForget();
 
     public void Update(in Frame frame)
     {

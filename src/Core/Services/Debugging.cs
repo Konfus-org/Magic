@@ -65,6 +65,7 @@ public static class Debugging
         get
         {
             ulong stamp = Volatile.Read(ref _frameStamp);
+
             return stamp == 0 ? null : stamp - 1;
         }
 
@@ -93,10 +94,7 @@ public static class Debugging
         string message,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0)
-    {
-        Write(LogLevel.Info, message, member, file, line);
-    }
+        [CallerLineNumber] int line = 0) => Write(LogLevel.Info, message, member, file, line);
 
     /// <summary>
     /// Something works, only worse.
@@ -105,10 +103,7 @@ public static class Debugging
         string message,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0)
-    {
-        Write(LogLevel.Warn, message, member, file, line);
-    }
+        [CallerLineNumber] int line = 0) => Write(LogLevel.Warn, message, member, file, line);
 
     /// <summary>
     /// Something failed: what it was is skipped or stood in for, and the frame goes on.
@@ -134,10 +129,7 @@ public static class Debugging
         string message,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0)
-    {
-        Crash(Stamp(LogLevel.Critical, message, member, file, line));
-    }
+        [CallerLineNumber] int line = 0) => Crash(Stamp(LogLevel.Critical, message, member, file, line));
 
     /// <summary>
     /// State that cannot be: when <paramref name="condition"/> is false, the run is <see cref="Critical"/>, with the
@@ -165,6 +157,7 @@ public static class Debugging
         void AddSink()
         {
             _sinks.Add(sink);
+
             if (_startup is not { } startup) return;
 
             _startup = null;
@@ -213,19 +206,13 @@ public static class Debugging
     }
 
     private static LogLine Stamp(LogLevel level, string message, string member, string file, int line)
-    {
-        return new(DateTime.Now, level, message, Frame, Environment.CurrentManagedThreadId, file, line, member);
-    }
+        => new(DateTime.Now, level, message, Frame, Environment.CurrentManagedThreadId, file, line, member);
 
     private static void Write(LogLevel level, string message, string member, string file, int line)
-    {
-        _entries.Writer.TryWrite(new Entry(Stamp(level, message, member, file, line), null));
-    }
+        => _entries.Writer.TryWrite(new Entry(Stamp(level, message, member, file, line), null));
 
     private static string FormatFailed(string expression, string message)
-    {
-        return message.Length == 0 ? $"Assert failed: {expression}" : $"Assert failed: {expression}: {message}";
-    }
+        => message.Length == 0 ? $"Assert failed: {expression}" : $"Assert failed: {expression}: {message}";
 
     private static async Task PrintAsync()
     {
@@ -238,6 +225,7 @@ public static class Debugging
                 if (entry.Change is { } change)
                 {
                     change();
+
                     continue;
                 }
 
@@ -324,6 +312,7 @@ public static class Debugging
         {
             Directory.CreateDirectory(folder);
             File.WriteAllText(path, text);
+
             return $"Crash file: {path}";
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

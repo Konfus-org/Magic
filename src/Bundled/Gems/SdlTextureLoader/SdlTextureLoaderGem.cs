@@ -20,29 +20,25 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
         string path,
         ReadOnlyMemory<byte> bytes,
         JsonElement settings,
-        CancellationToken cancel)
-    {
-        return new(Load(path, bytes.Span, settings));
-    }
+        CancellationToken cancel) => new(Load(path, bytes.Span, settings));
 
     private static Result<Texture> Load(string path, ReadOnlySpan<byte> file, JsonElement settings)
     {
         Result<TextureMeta> meta = Json.Read<TextureMeta>(settings);
+
         if (!meta.Ok) return Result.Failure<Texture>($"its .meta is not a texture's: {meta.Error}");
 
         SDL.Surface* decoded = Decode(path, file, meta.Value.Size);
+
         if (decoded == null)
-        {
             return Result.Failure<Texture>($"SDL_image could not read it: {CString.Read(SDL.GetError())}");
-        }
 
         // R, G, B, A bytes in memory whatever the machine's byte order: what the GPU formats below are.
         SDL.Surface* level0 = SDL.ConvertSurface(decoded, SDL.PixelFormat.Rgba32);
         SDL.DestroySurface(decoded);
+
         if (level0 == null)
-        {
             return Result.Failure<Texture>($"SDL could not convert it to RGBA8: {CString.Read(SDL.GetError())}");
-        }
 
         try
         {
@@ -64,12 +60,14 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
         fixed (byte* bytes = file)
         {
             SDL.IOStream* io = SDL.IOFromConstMem(bytes, (ulong)file.Length);
+
             if (io == null) return null;
 
             if (!path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)) return IMG.LoadIo(io, closeio: true);
 
             SDL.Surface* drawn = IMG.LoadSizedSVGIo(io, width, 0);
             SDL.CloseIO(io);
+
             return drawn;
         }
     }
@@ -100,9 +98,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
             if (above != level0) SDL.DestroySurface(above);
 
             if (level == null)
-            {
                 return Result.Failure<Texture>($"SDL could not scale it to mip {i}: {CString.Read(SDL.GetError())}");
-            }
 
             Copy(level, pixels.AsSpan(levels[i].Offset, levels[i].Size));
             above = level;

@@ -52,19 +52,21 @@ internal sealed class WorldLights(GpuResources resources)
         foreach (ref readonly Delta<LightCopy>.Change change in lights.Changed)
         {
             (int slot, LightCopy light) = change;
-            _rows.Set(slot, new GpuWorldLight
-            {
-                Position = light.Position,
-                Range = light.Range,
-                Radius = light.Radius,
-                Intensity = light.Intensity,
-                SpotScale = light.SpotScale,
-                Forward = light.Forward,
-                SpotOffset = light.SpotOffset,
-                Flags = (uint)(GpuWorldLightFlags.Live
-                    | (light.IsSpot ? GpuWorldLightFlags.Spot : GpuWorldLightFlags.None)
-                    | (light.Shadowless ? GpuWorldLightFlags.Shadowless : GpuWorldLightFlags.None)),
-            });
+            _rows.Set(
+                slot,
+                new GpuWorldLight
+                {
+                    Position = light.Position,
+                    Range = light.Range,
+                    Radius = light.Radius,
+                    Intensity = light.Intensity,
+                    SpotScale = light.SpotScale,
+                    Forward = light.Forward,
+                    SpotOffset = light.SpotOffset,
+                    Flags = (uint)(GpuWorldLightFlags.Live
+                        | (light.IsSpot ? GpuWorldLightFlags.Spot : GpuWorldLightFlags.None)
+                        | (light.Shadowless ? GpuWorldLightFlags.Shadowless : GpuWorldLightFlags.None)),
+                });
             _changed.Add(slot);
         }
 

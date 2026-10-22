@@ -47,6 +47,7 @@ internal sealed class GemLoadContext(
             Debugging.Verbose($"Native library {unmanagedDllName} loads from {path}.");
             nint handle = LoadUnmanagedDllFromPath(path);
             _natives[unmanagedDllName] = handle;
+
             return handle;
         }
     }
@@ -62,11 +63,13 @@ internal sealed class GemLoadContext(
             "runtimes",
             RuntimeInformation.RuntimeIdentifier,
             "native");
+
         if (!files.FolderExists(folder)) return null;
 
         foreach (string file in files.Find(folder, ""))
         {
             string stem = Path.GetFileNameWithoutExtension(file);
+
             if (string.Equals(stem, name, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(stem, "lib" + name, StringComparison.OrdinalIgnoreCase))
             {

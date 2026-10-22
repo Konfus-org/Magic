@@ -47,9 +47,11 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         }
 
         Result<PrefabFile> read = Json.Read<PrefabFile>(bytes.Span);
+
         if (!read.Ok) return Result.Failure<Prefab>(read.Error);
 
         Result<List<PrefabPart>> parts = await PartsOfAsync(read.Value.Entities, path, cancel).ConfigureAwait(false);
+
         return parts.Ok ? Result.Success(new Prefab { Parts = parts.Value }) : Result.Failure<Prefab>(parts.Error);
     }
 
@@ -136,6 +138,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         foreach (PrefabFileEntity entity in entities)
         {
             Result<PrefabPart> part = await PartOfAsync(entity, path, cancel).ConfigureAwait(false);
+
             if (!part.Ok) return Result.Failure<List<PrefabPart>>(part.Error);
 
             parts.Add(part.Value);
@@ -161,9 +164,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
             if (!read.Ok)
             {
                 if (_unread.TryAdd(component, true))
-                {
                     Debugging.Error($"{path}'s {name} goes without component {component}: {read.Error}");
-                }
 
                 continue;
             }
@@ -187,6 +188,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
             {
                 string named = _assets.GetPath(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture);
                 Debugging.Error($"{path}'s {name} goes without script {named}: {script.Error}");
+
                 continue;
             }
 
@@ -199,18 +201,19 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         if (entity.Prefab != Handle<Prefab>.None)
         {
             Result<Prefab> placed = await _assets.LoadAsync(entity.Prefab, cancel).ConfigureAwait(false);
+
             if (!placed.Ok)
-            {
                 return Result.Failure<PrefabPart>($"{name} places a prefab that does not load: {placed.Error}");
-            }
 
             children.AddRange(placed.Value.Parts);
         }
 
         Result<List<PrefabPart>> under = await PartsOfAsync(entity.Children, path, cancel).ConfigureAwait(false);
+
         if (!under.Ok) return Result.Failure<PrefabPart>(under.Error);
 
         children.AddRange(under.Value);
+
         return Result.Success(
             new PrefabPart { Name = entity.Name, Components = components, Scripts = scripts, Children = children });
     }
@@ -226,13 +229,13 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         CancellationToken cancel)
     {
         Result<Script> loaded = await _assets.LoadAsync(handle, cancel).ConfigureAwait(false);
+
         if (!loaded.Ok) return Result.Failure<PrefabScript>(loaded.Error);
 
         Type type = loaded.Value.Type;
+
         if (!type.IsAssignableTo(typeof(IScript)))
-        {
             return Result.Failure<PrefabScript>($"{type.Name} is no script: a script is a class implementing IScript.");
-        }
 
         Dictionary<string, object?> values = new(StringComparer.Ordinal);
         foreach ((string key, JsonElement json) in entry)

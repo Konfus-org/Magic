@@ -7,6 +7,8 @@
   <Project Path="samples/Samples.csproj" />
   <Project Path="src/Core/Core.csproj" />
   <Folder Name="/Tools/">
+    <Project Path="tools/Analyzers/Analyzers.csproj" />
+    <Project Path="tools/Analyzers.CodeFixes/Analyzers.CodeFixes.csproj" />
     <Project Path="tools/NativeBindingsGenerator/NativeBindingsGenerator.csproj" />
   </Folder>
   <Folder Name="/Gems/">

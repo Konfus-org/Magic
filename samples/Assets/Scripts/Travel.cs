@@ -35,6 +35,7 @@ internal sealed class Travel(World world, IInput input) : IBehavior
             if (!input[_keys[i]].WasPressed) continue;
 
             Going.ToAsync(world, Domains[i], DomainOpenMode.Replace).FireAndForget();
+
             return;
         }
     }

@@ -24,6 +24,13 @@
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
   </ItemGroup>
 
+  <!-- The compiler and workspace the repository's own analyzers build against (tools/Analyzers): no newer than the ones
+       the SDK in global.json and Visual Studio run, or neither could load them. -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.14.0" />
+  </ItemGroup>
+
   <!-- Analyzers every project runs; their rules are configured in .editorconfig. -->
   <ItemGroup>
     <GlobalPackageReference Include="Meziantou.Analyzer" Version="3.0.294" />

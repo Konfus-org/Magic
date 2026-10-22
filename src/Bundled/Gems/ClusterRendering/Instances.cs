@@ -219,6 +219,7 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         entry.IsLive = true;
         entry.FadeStart = wasLive ? entry.FadeStart : time;
         entry.Look = isNewLook ? Take(slot, new Look(renderer.Model, renderer.Materials), time) : entry.Look;
+
         if (entry.Look is not { } look) return;
 
         float distance = Vector3.Distance(transform.Position, player);
@@ -248,9 +249,7 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
 
         _nearer.Clear();
         if (_rows.Length < _changed.Count)
-        {
             Array.Resize(ref _rows, (int)BitOperations.RoundUpToPowerOf2((uint)_changed.Count));
-        }
 
         if (_changed.Count >= ParallelRows)
         {
@@ -313,6 +312,7 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         row.PrevRow2 = last.Row2;
         row.Model = (uint)look.ModelRow;
         row.Materials = look.Rows;
+
         return row;
     }
 
@@ -333,6 +333,7 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
 
         entry.Slots.Add(slot);
         Classify(slot, entry);
+
         return entry;
     }
 
@@ -366,14 +367,9 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
             rows[i >> 1] |= (uint)resources.GetRow(drawn) << ((i & 1) * 16);
             areShown &= resources.IsShown(drawn);
             isTransparent |= !hasFailed && !isSky && resources.Get(material) is { Type: MaterialType.Transparent };
-            if (isSky)
-            {
-                failure ??= ("Sky material on a mesh", assets.GetPath(material) ?? string.Empty);
-            }
+            if (isSky) failure ??= ("Sky material on a mesh", assets.GetPath(material) ?? string.Empty);
             else if (!hasFailed && resources.GetFailure(material) is { } why)
-            {
                 failure ??= (why, assets.GetPath(material) ?? string.Empty);
-            }
         }
 
         entry.HasFailed = hasFailed;
@@ -381,6 +377,7 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
         entry.Rows = rows;
         entry.IsTransparent = isTransparent;
         entry.Failure = failure;
+
         if (entry.IsReady || !areShown || !resources.IsDrawable(look.Model)) return;
 
         entry.IsReady = true;
@@ -424,11 +421,13 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
     private MovedSphere? GetSphere(Transform transform, Handle<Model> model)
     {
         Vector4 bounds = resources.GetBounds(model);
+
         if (bounds.W <= 0) return null;
 
         Vector3 centre = transform.Position
             + Vector3.Transform(new Vector3(bounds.X, bounds.Y, bounds.Z) * transform.Scale, transform.Rotation);
         Vector3 scale = Vector3.Abs(transform.Scale);
+
         return new MovedSphere(centre, bounds.W * MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z)));
     }
 
@@ -465,10 +464,9 @@ internal sealed class Instances(GpuResources resources, FailureHandler failures,
             Resolve(entry, time);
             bool isRowChanged = entry.HasFailed != hadFailed || entry.IsReady != wasReady;
             bool isRemade = entry.IsReady;
+
             if (!isRowChanged && !isRemade && entry.IsTransparent == wasTransparent && entry.Failure == failure)
-            {
                 continue;
-            }
 
             foreach (int slot in entry.Slots)
             {

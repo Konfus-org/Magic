@@ -26,6 +26,7 @@ internal sealed class Clock(World world, IInput input) : IBehavior
     public void Update(in Frame frame)
     {
         float rate = input[Key].IsDown ? Faster : 1;
+
         if (rate == _rate) return;
 
         foreach ((_, Span<Spin> spins, _) in world.Query<Spin, DirectionalLight>())

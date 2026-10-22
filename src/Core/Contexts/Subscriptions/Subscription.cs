@@ -16,8 +16,5 @@ public sealed class Subscription(Action end) : IDisposable
     /// <summary>
     /// Ends it; only the first call does anything.
     /// </summary>
-    public void Dispose()
-    {
-        Interlocked.Exchange(ref _end, null)?.Invoke();
-    }
+    public void Dispose() => Interlocked.Exchange(ref _end, null)?.Invoke();
 }

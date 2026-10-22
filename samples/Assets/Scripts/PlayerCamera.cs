@@ -20,11 +20,13 @@ internal static class PlayerCamera
                 if (!tags[i].Has(Tag.Player)) continue;
 
                 position = transforms[i].Position;
+
                 return true;
             }
         }
 
         position = default;
+
         return false;
     }
 }

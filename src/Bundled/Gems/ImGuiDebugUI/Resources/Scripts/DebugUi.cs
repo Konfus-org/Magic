@@ -85,13 +85,12 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     public void Record(in PipelineScriptContext context)
     {
         if (_sampler == GpuSampler.None)
-        {
             _sampler = _gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
-        }
 
         Follow();
 
         GpuPipeline pipeline = GetPipeline(context.Format);
+
         if (_lists.Calls.Length == 0 || context.Area.IsEmpty || pipeline == GpuPipeline.None) return;
 
         Upload(ref _vertexBuffer, ref _vertexBytes, GpuBufferUsage.Vertex, MemoryMarshal.AsBytes(_lists.Vertices));
@@ -128,6 +127,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
         foreach ((uint id, TextureChange texture) in _lists.Known)
         {
             _textures.TryGetValue(id, out (GpuTexture Texture, int Width, int Height, uint Version) known);
+
             if (known.Version == texture.Version) continue;
 
             if (known.Texture == GpuTexture.None || known.Width != texture.Width || known.Height != texture.Height)

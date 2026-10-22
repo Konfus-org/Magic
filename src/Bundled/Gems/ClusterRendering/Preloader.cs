@@ -72,6 +72,7 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
             () => _told.Writer.TryWrite(new Told(Cancelled: preload, Cancel: cancel))).ConfigureAwait(false);
         _told.Writer.TryWrite(new Told(Begun: preload));
         await preload.Done.Task.ConfigureAwait(false);
+
         return new Subscription(() => _told.Writer.TryWrite(new Told(Ended: preloaded)));
     }
 
@@ -118,6 +119,7 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
         if (_readying is not { } readying) return;
 
         readying.Frames++;
+
         if (!isSettled) return;
 
         readying.Done.TrySetResult();
@@ -127,19 +129,13 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     /// <summary>
     /// The world is shown: the window shows it from this frame, no longer the kept image. Render thread.
     /// </summary>
-    internal void Show()
-    {
-        IsHolding = false;
-    }
+    internal void Show() => IsHolding = false;
 
     /// <summary>
     /// The effects the frame is built for: the world's, else those of the latest domain being taken in, so its listing
     /// is compiled under the loading domain, which names none of its own.
     /// </summary>
-    internal Handle<Pipeline> GetEffects(Handle<Pipeline> world)
-    {
-        return world == Handle<Pipeline>.None ? _effects : world;
-    }
+    internal Handle<Pipeline> GetEffects(Handle<Pipeline> world) => world == Handle<Pipeline>.None ? _effects : world;
 
     /// <summary>
     /// Checks each domain being taken in: each model that can be drawn, its field in, or failed and is drawn as the
@@ -253,6 +249,7 @@ internal sealed class Preloader(GpuResources resources, PassGraph graph)
     private void CancelReadying(Readying readying, CancellationToken cancel)
     {
         readying.Done.TrySetCanceled(cancel);
+
         if (_readying != readying) return;
 
         _readying = null;

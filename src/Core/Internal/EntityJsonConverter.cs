@@ -27,15 +27,11 @@ internal sealed class EntityJsonConverter : JsonConverter<Entity>
     public override Entity Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (Remap is not { } remap)
-        {
             throw new JsonException("An entity is read only as the world is restored: a file names no entity.");
-        }
 
         return remap.TryGetValue(reader.GetInt32(), out Entity entity) ? entity : default;
     }
 
     public override void Write(Utf8JsonWriter writer, Entity value, JsonSerializerOptions options)
-    {
-        writer.WriteNumberValue(value.Id);
-    }
+        => writer.WriteNumberValue(value.Id);
 }

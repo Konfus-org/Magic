@@ -28,20 +28,19 @@ internal sealed class ToolWindow(string name, Control key, IDebugUI ui, IInput? 
         if (input?[key].WasPressed == true) _isOpen = !_isOpen;
 
         copy = false;
+
         if (!_isOpen) return false;
 
         ui.Begin(_title, ref _isOpen, scrollable: true);
         copy = ui.MenuItem("Copy");
+
         return true;
     }
 
     /// <summary>
     /// Ends what Begin began. Closed by its button, the window stays closed from the next frame.
     /// </summary>
-    internal void End()
-    {
-        ui.End();
-    }
+    internal void End() => ui.End();
 
     /// <summary>
     /// Puts <paramref name="text"/> on the clipboard; without a window there is none, and it goes nowhere.

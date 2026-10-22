@@ -147,9 +147,11 @@ internal sealed partial class ParamLayout
         foreach (string raw in StripComments(body.Value).Split(';'))
         {
             string declaration = raw.Trim();
+
             if (declaration.Length == 0) continue;
 
             Match member = MemberPattern().Match(declaration);
+
             if (!member.Success)
             {
                 return Result.Failure<ParamLayout?>(
@@ -158,6 +160,7 @@ internal sealed partial class ParamLayout
 
             string name = member.Groups["name"].Value;
             string typeName = member.Groups["type"].Value;
+
             if (!_types.TryGetValue(typeName, out ParamType type))
             {
                 return Result.Failure<ParamLayout?>($"{structName}.{name} is a {typeName}; a param is float, int, "
@@ -177,29 +180,26 @@ internal sealed partial class ParamLayout
             }
 
             if (fields.Exists(field => string.Equals(field.Name, name, StringComparison.Ordinal)))
-            {
                 return Result.Failure<ParamLayout?>($"{structName} declares {name} twice.");
-            }
 
             ParamField field = new(name, type, 0, new MaterialParam());
             int align = field.Components switch { 1 => 4, 2 => 8, _ => 16 };
             offset = RoundUp(offset, align);
-            fields.Add(field with
-            {
-                Offset = offset,
-                Default = GetDefault(
-                field,
-                member.Groups["default"].Success ? member.Groups["default"].Value.Trim() : null),
-                Role = member.Groups["role"].Value
-            });
+            string? defaultText = member.Groups["default"].Success ? member.Groups["default"].Value.Trim() : null;
+            fields.Add(
+                field with
+                {
+                    Offset = offset,
+                    Default = GetDefault(field, defaultText),
+                    Role = member.Groups["role"].Value
+                });
             offset += field.Size;
         }
 
         int size = RoundUp(offset, 16);
+
         if (size > maxBytes)
-        {
             return Result.Failure<ParamLayout?>($"{structName} packs to {size} bytes, past the {maxBytes} it may.");
-        }
 
         return Result.Success<ParamLayout?>(
             new ParamLayout(hlsl, structName, fields, size, body.Index, body.Index + body.Length));
@@ -245,6 +245,7 @@ internal sealed partial class ParamLayout
 
         string loader = MakeLoader(signature, prologue, rows);
         int structEnd = _hlsl.IndexOf(';', _bodyEnd) + 1;
+
         return new StringBuilder(_hlsl.Length + loader.Length + 1)
             .Append(_hlsl, 0, _bodyStart)
             .Append(blanked)
@@ -313,6 +314,7 @@ internal sealed partial class ParamLayout
         // A dielectric reflects 4 % head on; a fully rough reflection sends back 0.45 of that colour.
         Vector3 albedo = isMapped ? color * 0.5f : color;
         Vector3 reflected = Vector3.Lerp(new Vector3(0.04f), albedo, metallic);
+
         return ((albedo * (1 - metallic)) + (reflected * 0.45f), emission);
     }
 
@@ -336,27 +338,18 @@ internal sealed partial class ParamLayout
                 if (layer is not null && layer.TryGetValue(field.Name, out MaterialParam? given))
                 {
                     value = given;
+
                     break;
                 }
             }
 
             Span<byte> destination = record.Slice(field.Offset, field.Size);
             if (field.Type == ParamType.TextureRef)
-            {
                 BinaryPrimitives.WriteUInt32LittleEndian(destination, texture(value));
-            }
             else if (field.Type == ParamType.Bool)
-            {
                 BinaryPrimitives.WriteUInt32LittleEndian(destination, value.X != 0 ? 1u : 0u);
-            }
-            else if (field.Type == ParamType.Curve)
-            {
-                WriteCurve(curve(value), destination);
-            }
-            else
-            {
-                WriteComponents(field, value, destination);
-            }
+            else if (field.Type == ParamType.Curve) WriteCurve(curve(value), destination);
+            else WriteComponents(field, value, destination);
         }
     }
 
@@ -366,18 +359,9 @@ internal sealed partial class ParamLayout
         {
             float number = GetComponent(field, value, component);
             Span<byte> word = destination[(component * 4)..];
-            if (field.IsFloat)
-            {
-                BinaryPrimitives.WriteSingleLittleEndian(word, number);
-            }
-            else if (field.IsInt)
-            {
-                BinaryPrimitives.WriteInt32LittleEndian(word, (int)number);
-            }
-            else
-            {
-                BinaryPrimitives.WriteUInt32LittleEndian(word, (uint)MathF.Max(0, number));
-            }
+            if (field.IsFloat) BinaryPrimitives.WriteSingleLittleEndian(word, number);
+            else if (field.IsInt) BinaryPrimitives.WriteInt32LittleEndian(word, (int)number);
+            else BinaryPrimitives.WriteUInt32LittleEndian(word, (uint)MathF.Max(0, number));
         }
     }
 
@@ -405,9 +389,7 @@ internal sealed partial class ParamLayout
         if (text is null || field.Type is ParamType.TextureRef or ParamType.Curve) return new MaterialParam();
 
         if (field.Type == ParamType.Bool)
-        {
             return new MaterialParam { X = string.Equals(text, "true", StringComparison.Ordinal) ? 1 : 0 };
-        }
 
         // A whole number in hex, as HLSL writes a mask or a none (0xFFFFu), which the names below would take apart.
         if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)

@@ -126,6 +126,7 @@ internal static unsafe class ImGuiInput
         AddRun(keys, Control.Key0, ImGuiKey.Key0, 10);
         AddRun(keys, Control.KeyNumpad0, ImGuiKey.Keypad0, 10);
         AddRun(keys, Control.KeyF1, ImGuiKey.F1, 24);
+
         return [.. keys];
     }
 

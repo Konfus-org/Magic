@@ -96,10 +96,7 @@ internal sealed class Surroundings(Assets assets)
     /// <summary>
     /// Whether <paramref name="model"/> has been fitted, asking for it if it has not been asked for.
     /// </summary>
-    internal bool IsFitted(Handle<Model> model)
-    {
-        return GetMesh(model) is not null;
-    }
+    internal bool IsFitted(Handle<Model> model) => GetMesh(model) is not null;
 
     /// <summary>
     /// Lists into <paramref name="into"/> every solid near <paramref name="listeners"/>, or every solid when there are
@@ -122,6 +119,7 @@ internal sealed class Surroundings(Assets assets)
                 Handle<Model> model = world.Has<Renderer>(entity)
                     ? world.Get<Renderer>(entity).Model
                     : Handle<Model>.None;
+
                 if (GetMesh(model) is not { } mesh
                     || !IsNear(transforms[i], mesh, listeners, _wasNear.Contains(entity) ? farthest : range))
                 {

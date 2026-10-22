@@ -61,6 +61,7 @@ internal sealed class Options
         foreach (string raw in lines)
         {
             string line = raw.Trim();
+
             if (line.Length == 0 || !line.StartsWith("--", StringComparison.Ordinal)) continue;
 
             int equals = line.IndexOf('=', StringComparison.Ordinal);
@@ -138,6 +139,7 @@ internal sealed class Options
     {
         List<(string Prefix, string Owner)> prefixes = PairList(value, "cPrefix=Owner");
         prefixes.Sort((a, b) => b.Prefix.Length.CompareTo(a.Prefix.Length));
+
         return prefixes;
     }
 
@@ -147,10 +149,9 @@ internal sealed class Options
         foreach (string item in ParseList(value))
         {
             int equals = item.IndexOf('=', StringComparison.Ordinal);
+
             if (equals <= 0 || equals == item.Length - 1)
-            {
                 throw new ArgumentException($"An entry is written {shape}, not '{item}'.", nameof(value));
-            }
 
             pairs.Add((item[..equals], item[(equals + 1)..]));
         }

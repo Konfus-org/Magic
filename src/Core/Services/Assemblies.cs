@@ -42,6 +42,7 @@ public sealed class Assemblies
     public Result<Type> Get<T>(string name)
     {
         Result<Type> type = Get(name);
+
         if (!type.Ok || type.Value.IsAssignableTo(typeof(T))) return type;
 
         return Result.Failure<Type>($"{name} is a {type.Value.FullName}, not a {typeof(T).Name}.");
@@ -113,6 +114,7 @@ public sealed class Assemblies
     private Result<Type> Get(string name)
     {
         Code code = _code;
+
         return code.Named.GetOrAdd(name, Search, code.All);
     }
 

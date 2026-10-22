@@ -132,16 +132,14 @@ internal sealed class FailureHandler
     {
         float wave = (MathF.Sin(time * 2f * MathF.PI / PulsePeriod) * 0.5f) + 0.5f;
         float pulse = PulseMin + ((1f - PulseMin) * wave);
+
         return new Color(pulse, 0f, pulse);
     }
 
     /// <summary>
     /// Says that <paramref name="what"/> does not load, and why: in the log, as it is found.
     /// </summary>
-    internal static void Report(string what, string why)
-    {
-        Debugging.Error($"{what}: {why}");
-    }
+    internal static void Report(string what, string why) => Debugging.Error($"{what}: {why}");
 
     /// <summary>
     /// The material drawn in a broken one's place when <paramref name="type"/> broke: what a model that does not load
@@ -163,6 +161,7 @@ internal sealed class FailureHandler
     {
         Debugging.Error(
             $"A surface does not compile for pass {pass}, so its materials are drawn as the failure: {why}");
+
         if (surface == Handle<Shader>.None) return;
 
         _broken.Add(surface);
@@ -177,10 +176,7 @@ internal sealed class FailureHandler
     /// <summary>
     /// <paramref name="surface"/>'s shader changed: no longer broken until it fails again.
     /// </summary>
-    internal void Repair(Handle<Shader> surface)
-    {
-        _broken.Remove(surface);
-    }
+    internal void Repair(Handle<Shader> surface) => _broken.Remove(surface);
 
     /// <summary>
     /// The surfaces that broke since this was last asked, whose materials are packed anew, handed to
@@ -192,6 +188,7 @@ internal sealed class FailureHandler
 
         broke.UnionWith(_broke);
         _broke.Clear();
+
         return true;
     }
 
@@ -207,6 +204,7 @@ internal sealed class FailureHandler
         if (broken == Handle<Material>.None)
         {
             _skyLine = null;
+
             return;
         }
 
@@ -217,18 +215,12 @@ internal sealed class FailureHandler
     /// <summary>
     /// Marks the instance at <paramref name="slot"/> as drawn as the failure, why and what failed.
     /// </summary>
-    internal void Mark(int slot, (string Why, string What) failure)
-    {
-        _marked[slot] = failure;
-    }
+    internal void Mark(int slot, (string Why, string What) failure) => _marked[slot] = failure;
 
     /// <summary>
     /// The instance at <paramref name="slot"/> is no longer drawn as the failure, or is gone.
     /// </summary>
-    internal void Unmark(int slot)
-    {
-        _marked.Remove(slot);
-    }
+    internal void Unmark(int slot) => _marked.Remove(slot);
 
     /// <summary>
     /// Says, at each instance drawn as the failure, why, with what failed while the mouse rests on it: for this frame,

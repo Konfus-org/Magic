@@ -76,6 +76,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
                 writer.Write(mesh.Indices.Length);
                 writer.Write(MemoryMarshal.AsBytes(mesh.Vertices.Span));
                 writer.Write(MemoryMarshal.AsBytes(mesh.Indices.Span));
+
                 if (mesh.Card is not { } card) throw new InvalidOperationException("A card mesh has no card.");
 
                 WriteAtlas(card.Surface);
@@ -84,6 +85,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         }
 
         writer.Write(value.Clusters is not null);
+
         if (value.Clusters is not { } clusters) return;
 
         writer.Write(clusters.PositionStep);
@@ -150,6 +152,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
             ulong id = reader.ReadUInt64();
             byte[] pixels = new byte[reader.ReadInt32()];
             bytes.ReadExactly(pixels);
+
             return MakeAtlas(id, pixels);
         }
     }
@@ -189,6 +192,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         }
 
         HandOut(made.Cards);
+
         return Result.Success(
             new Model { Handle = asset.Handle, Meshes = asset.Meshes, Clusters = made.Clusters, Cards = made.Cards });
     }
@@ -202,6 +206,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         XxHash3 hash = new();
         hash.Append(BitConverter.GetBytes(version));
         hash.Append(BitConverter.GetBytes(cardHeight));
+
         return hash.GetCurrentHashAsUInt64();
     }
 
@@ -215,19 +220,23 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         (Vector3 min, Vector3 max) = GetBounds(model);
         Vector3 size = max - min;
         float radius = min.X > max.X ? 0 : MathF.Max(size.X, MathF.Max(size.Y, size.Z)) / 2;
+
         if (radius <= 0 || size.Y < radius * 2 * FlatShare) return null;
 
         Mesh[] cards = new Mesh[model.Meshes.Count];
-        Parallel.For(0, cards.Length, i =>
-        {
-            (Vector3 centre, float half, byte[] surface, byte[] normals) = CardBaker.Bake(model.Meshes[i]);
-            Card card = new()
+        Parallel.For(
+            0,
+            cards.Length,
+            i =>
             {
-                Surface = MakeAtlas(HandleOf(model.Handle, i, 1), surface),
-                Normals = MakeAtlas(HandleOf(model.Handle, i, 2), normals),
-            };
-            cards[i] = MakeCardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
-        });
+                (Vector3 centre, float half, byte[] surface, byte[] normals) = CardBaker.Bake(model.Meshes[i]);
+                Card card = new()
+                {
+                    Surface = MakeAtlas(HandleOf(model.Handle, i, 1), surface),
+                    Normals = MakeAtlas(HandleOf(model.Handle, i, 2), normals),
+                };
+                cards[i] = MakeCardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
+            });
 
         return new ModelCards { Distance = radius / (cardHeight * MathF.Tan(HalfFieldOfView)), Meshes = cards };
     }
@@ -247,6 +256,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
             new() { Position = centre, Normal = sides, Tangent = marker, Uv = new Vector2(1, 1) },
             new() { Position = centre, Normal = sides, Tangent = marker, Uv = new Vector2(-1, 1) },
         ];
+
         return new Mesh
         {
             Vertices = vertices,
@@ -285,6 +295,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         hash.Append(BitConverter.GetBytes(mesh));
         hash.Append(BitConverter.GetBytes(atlas));
         ulong value = hash.GetCurrentHashAsUInt64();
+
         return value == 0 ? 1 : value;
     }
 

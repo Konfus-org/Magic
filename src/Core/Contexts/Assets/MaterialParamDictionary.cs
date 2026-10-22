@@ -72,6 +72,7 @@ public sealed class MaterialParamDictionary
     {
         int count = _values.Count;
         Change(_values.Remove(key));
+
         return _values.Count < count;
     }
 

@@ -16,6 +16,7 @@ public static class CurveExtensions
         public float At(float place)
         {
             IReadOnlyList<CurveKey> keys = curve.Keys;
+
             if (keys.Count == 0) return 0;
 
             if (place <= keys[0].At) return keys[0].Value;
@@ -27,6 +28,7 @@ public static class CurveExtensions
                 if (place <= after.At)
                 {
                     float span = after.At - before.At;
+
                     return span > 0
                         ? before.Value + ((after.Value - before.Value) * ((place - before.At) / span))
                         : after.Value;

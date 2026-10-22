@@ -29,18 +29,22 @@ internal readonly record struct CameraView(
     {
         pixel = default;
         Vector3 relative = point - Position;
+
         if (relative.LengthSquared() > distance * distance) return false;
 
         // The camera looks along its +Z, +Y up.
         Vector3 local = Vector3.Transform(relative, Inverse);
+
         if (local.Z <= Near) return false;
 
         Vector2 ndc = new(local.X / (local.Z * Tangents.X), local.Y / (local.Z * Tangents.Y));
+
         if (MathF.Abs(ndc.X) > 1 || MathF.Abs(ndc.Y) > 1) return false;
 
         pixel = new Vector2(
             Area.X + (((ndc.X * 0.5f) + 0.5f) * Area.Width),
             Area.Y + ((0.5f - (ndc.Y * 0.5f)) * Area.Height));
+
         return true;
     }
 }
@@ -64,6 +68,7 @@ internal sealed class CameraViews(IWindow window) : ISystem<Transform, Camera>
             for (int i = 0; i < cameras.Length; i++)
             {
                 Rectangle area = cameras[i].Target.Section.AreaIn(size);
+
                 if (!cameras[i].Target.IsWindow || area.Width <= 0 || area.Height <= 0) continue;
 
                 // As the renderer frames a view: the field of view is vertical, and the width follows the area's shape.

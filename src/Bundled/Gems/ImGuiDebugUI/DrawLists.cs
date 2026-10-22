@@ -68,13 +68,17 @@ internal sealed unsafe class DrawLists
             for (int commandIndex = 0; commandIndex < list->CmdBuffer.Size; commandIndex++)
             {
                 ImDrawCmd command = list->CmdBuffer.Data[commandIndex];
+
                 if (command.UserCallback != null || command.ElemCount == 0) continue;
 
-                Rectangle clip = Rectangle.Intersect(window, Rectangle.FromLTRB(
-                    (int)MathF.Floor(command.ClipRect.X),
-                    (int)MathF.Floor(command.ClipRect.Y),
-                    (int)MathF.Ceiling(command.ClipRect.Z),
-                    (int)MathF.Ceiling(command.ClipRect.W)));
+                Rectangle clip = Rectangle.Intersect(
+                    window,
+                    Rectangle.FromLTRB(
+                        (int)MathF.Floor(command.ClipRect.X),
+                        (int)MathF.Floor(command.ClipRect.Y),
+                        (int)MathF.Ceiling(command.ClipRect.Z),
+                        (int)MathF.Ceiling(command.ClipRect.W)));
+
                 if (clip.Width <= 0 || clip.Height <= 0) continue;
 
                 ulong texture = command.TexRef.TexData != null ? command.TexRef.TexData->TexID : command.TexRef.TexID;
@@ -106,6 +110,7 @@ internal sealed unsafe class DrawLists
     {
         int count = texture->Width * texture->Height;
         ReadOnlySpan<byte> pixels = new(texture->Pixels, count * texture->BytesPerPixel);
+
         if (texture->BytesPerPixel == 4) return pixels.ToArray();
 
         byte[] rgba = new byte[count * 4];

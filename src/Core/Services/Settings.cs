@@ -98,10 +98,7 @@ public sealed class Settings : IDisposable
         Debugging.Info($"Preset {GetName(applied)}");
         _reloads = events.Watch<AssetReloaded<Preset>>(Reloaded);
 
-        static string GetPath(string preset)
-        {
-            return $"{PresetFolder}/{preset}{Contexts.Assets.Preset.Extensions[0]}";
-        }
+        static string GetPath(string preset) => $"{PresetFolder}/{preset}{Contexts.Assets.Preset.Extensions[0]}";
     }
 
     /// <summary>
@@ -136,10 +133,7 @@ public sealed class Settings : IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        _reloads.Dispose();
-    }
+    public void Dispose() => _reloads.Dispose();
 
     /// <summary>
     /// The setting at <paramref name="key"/>, <c>Get&lt;bool&gt;("SdlPlatform.vsync")</c>. One just set reads back at
@@ -162,9 +156,7 @@ public sealed class Settings : IDisposable
         foreach (string name in GetPath(key).Split('.'))
         {
             if (node is not JsonObject level || !level.TryGetPropertyValue(name, out node))
-            {
                 return Result.Failure<T>($"{GetGem(key)} has no setting {GetPath(key)}.");
-            }
         }
 
         T? value;
@@ -193,6 +185,7 @@ public sealed class Settings : IDisposable
         lock (_lock)
         {
             int index = _gems.IndexOf(GetGem(key));
+
             if (index < 0) return Result.Failure(FormatNoGem(key));
 
             // Under the gem's name as listed, so the key replaces the same setting however its gem was spelt.
@@ -201,6 +194,7 @@ public sealed class Settings : IDisposable
             live[$"{gem}.{GetPath(key)}"] = JsonSerializer.SerializeToNode(value, Json.Options);
             Layers layers = _layers with { Live = live };
             Result<ISettings> changed = Read(gem, held.GetType(), layers);
+
             if (!changed.Ok) return Result.Failure($"{key} does not fit {gem}'s settings: {changed.Error}");
 
             _layers = layers;
@@ -218,6 +212,7 @@ public sealed class Settings : IDisposable
     public Result Set(string line)
     {
         Result<(string Key, JsonNode? Value)> parsed = Parse(line);
+
         return parsed.Ok ? Set(parsed.Value.Key, parsed.Value.Value) : Result.Failure(parsed.Error);
     }
 
@@ -229,17 +224,20 @@ public sealed class Settings : IDisposable
     public async Task<Result> ApplyAsync(Handle<Preset> preset, CancellationToken cancel = default)
     {
         Result<JsonObject> read = await ReadAsync(preset, cancel).ConfigureAwait(false);
+
         if (!read.Ok) return Result.Failure(read.Error);
 
         lock (_lock)
         {
             Result remade = Remake(_layers with { Preset = read.Value, Live = [] });
+
             if (!remade.Ok) return Result.Failure($"Preset {GetName(preset)} {remade.Error}");
 
             Preset = preset;
         }
 
         Debugging.Info($"Preset {GetName(preset)}");
+
         return Result.Success();
     }
 
@@ -251,6 +249,7 @@ public sealed class Settings : IDisposable
     {
         int equals = line.IndexOf('=', StringComparison.Ordinal);
         string key = equals < 0 ? string.Empty : line[..equals];
+
         return IsKey(key)
             ? Result.Success((key, ParseValue(line[(equals + 1)..])))
             : Result.Failure<(string, JsonNode?)>($"A setting is Gem.setting=value; '{line}' is not one.");
@@ -268,14 +267,13 @@ public sealed class Settings : IDisposable
             if (type is null)
             {
                 if (GetSection(gem, _layers).Count > 0)
-                {
                     Debugging.Error($"Gem {gem} takes no settings, but is given some; they are ignored.");
-                }
 
                 return Result.Success<ISettings?>(null);
             }
 
             Result<ISettings> values = Read(gem, type, _layers);
+
             if (!values.Ok) return Result.Failure<ISettings?>($"its settings are not valid: {values.Error}");
 
             _gems.Add(gem, values.Value);
@@ -343,6 +341,7 @@ public sealed class Settings : IDisposable
             }
 
             string preset = Preset == _default ? string.Empty : Path.GetFileNameWithoutExtension(GetName(Preset));
+
             return new Args
             {
                 ProjectPath = _args.ProjectPath,
@@ -361,28 +360,18 @@ public sealed class Settings : IDisposable
     private static bool IsKey(string key)
     {
         int dot = key.IndexOf('.', StringComparison.Ordinal);
+
         return dot > 0 && !key.EndsWith('.') && !key.Contains("..", StringComparison.Ordinal);
     }
 
-    private static string GetGem(string key)
-    {
-        return key[..key.IndexOf('.', StringComparison.Ordinal)];
-    }
+    private static string GetGem(string key) => key[..key.IndexOf('.', StringComparison.Ordinal)];
 
-    private static string GetPath(string key)
-    {
-        return key[(key.IndexOf('.', StringComparison.Ordinal) + 1)..];
-    }
+    private static string GetPath(string key) => key[(key.IndexOf('.', StringComparison.Ordinal) + 1)..];
 
-    private static string FormatNotKey(string key)
-    {
-        return $"A setting is named Gem.setting; '{key}' is not one.";
-    }
+    private static string FormatNotKey(string key) => $"A setting is named Gem.setting; '{key}' is not one.";
 
     private static string FormatNoGem(string key)
-    {
-        return $"{GetGem(key)} is no gem with settings, so it has no {GetPath(key)}.";
-    }
+        => $"{GetGem(key)} is no gem with settings, so it has no {GetPath(key)}.";
 
     /// <summary>
     /// The settings a class of settings holds: its public properties that can be both read and set.
@@ -397,9 +386,7 @@ public sealed class Settings : IDisposable
     /// A setting's name in its key and a preset: its property's name in Core's JSON dialect.
     /// </summary>
     private static string GetName(PropertyInfo property)
-    {
-        return Json.Options.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
-    }
+        => Json.Options.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
 
     /// <summary>
     /// <paramref name="value"/> as JSON when it is JSON (1920, true, ["a"], "quoted"), and as a string when it is not.
@@ -429,6 +416,7 @@ public sealed class Settings : IDisposable
             if (!parsed.Ok)
             {
                 Debugging.Error($"--set {line}: {parsed.Error}");
+
                 continue;
             }
 
@@ -437,6 +425,7 @@ public sealed class Settings : IDisposable
             {
                 Debugging.Error(
                     $"--set {key} names {GetGem(key)}, which {project.Name} does not list as a gem; it is ignored.");
+
                 continue;
             }
 
@@ -502,6 +491,7 @@ public sealed class Settings : IDisposable
             if (!read.Ok)
             {
                 Debugging.Error($"{read.Error}; the settings stay as they were.");
+
                 return;
             }
 
@@ -513,6 +503,7 @@ public sealed class Settings : IDisposable
             {
                 Debugging.Error(
                     $"Preset {GetName(preset)} was changed, but {remade.Error}; the settings stay as they were.");
+
                 return;
             }
         }
@@ -530,6 +521,7 @@ public sealed class Settings : IDisposable
         foreach ((string gem, ISettings held) in _gems)
         {
             Result<ISettings> changed = Read(gem, held.GetType(), layers);
+
             if (!changed.Ok) return Result.Failure($"does not fit {gem}'s settings: {changed.Error}");
 
             changes.Add((held, changed.Value));
@@ -578,6 +570,7 @@ public sealed class Settings : IDisposable
         WriteInto(section, gem, layers.Preset);
         WriteInto(section, gem, _commandLine);
         WriteInto(section, gem, layers.Live);
+
         return section;
     }
 
@@ -611,6 +604,7 @@ public sealed class Settings : IDisposable
         if (!read.Ok)
         {
             Debugging.Error(read.Error);
+
             return [];
         }
 
@@ -620,15 +614,14 @@ public sealed class Settings : IDisposable
     private async Task<Result<JsonObject>> ReadAsync(Handle<Preset> preset, CancellationToken cancel)
     {
         Result<Preset> loaded = await _assets.LoadAsync(preset, cancel).ConfigureAwait(false);
+
         return loaded.Ok
             ? GetSettings(loaded.Value, GetName(preset))
             : Result.Failure<JsonObject>($"Preset {GetName(preset)} could not be read: {loaded.Error}");
     }
 
     private string GetName(Handle<Preset> preset)
-    {
-        return _assets.GetPath(preset) ?? preset.Id.ToString(CultureInfo.InvariantCulture);
-    }
+        => _assets.GetPath(preset) ?? preset.Id.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// What the gems' settings are made from, but the command line's, which never changes: the default preset's

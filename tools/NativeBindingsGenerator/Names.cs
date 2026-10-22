@@ -14,13 +14,83 @@ internal static class Names
 {
     private static readonly HashSet<string> _keywords = new(StringComparer.Ordinal)
     {
-        "abstract", "as", "base", "bool", "break", "byte", "case", "catch", "char", "checked", "class", "const",
-        "continue", "decimal", "default", "delegate", "do", "double", "else", "enum", "event", "explicit", "extern",
-        "false", "finally", "fixed", "float", "for", "foreach", "goto", "if", "implicit", "in", "int", "interface",
-        "internal", "is", "lock", "long", "namespace", "new", "null", "object", "operator", "out", "override", "params",
-        "private", "protected", "public", "readonly", "ref", "return", "sbyte", "sealed", "short", "sizeof",
-        "stackalloc", "static", "string", "struct", "switch", "this", "throw", "true", "try", "typeof", "uint", "ulong",
-        "unchecked", "unsafe", "ushort", "using", "virtual", "void", "volatile", "while",
+        "abstract",
+        "as",
+        "base",
+        "bool",
+        "break",
+        "byte",
+        "case",
+        "catch",
+        "char",
+        "checked",
+        "class",
+        "const",
+        "continue",
+        "decimal",
+        "default",
+        "delegate",
+        "do",
+        "double",
+        "else",
+        "enum",
+        "event",
+        "explicit",
+        "extern",
+        "false",
+        "finally",
+        "fixed",
+        "float",
+        "for",
+        "foreach",
+        "goto",
+        "if",
+        "implicit",
+        "in",
+        "int",
+        "interface",
+        "internal",
+        "is",
+        "lock",
+        "long",
+        "namespace",
+        "new",
+        "null",
+        "object",
+        "operator",
+        "out",
+        "override",
+        "params",
+        "private",
+        "protected",
+        "public",
+        "readonly",
+        "ref",
+        "return",
+        "sbyte",
+        "sealed",
+        "short",
+        "sizeof",
+        "stackalloc",
+        "static",
+        "string",
+        "struct",
+        "switch",
+        "this",
+        "throw",
+        "true",
+        "try",
+        "typeof",
+        "uint",
+        "ulong",
+        "unchecked",
+        "unsafe",
+        "ushort",
+        "using",
+        "virtual",
+        "void",
+        "volatile",
+        "while",
     };
 
     /// <summary>
@@ -37,11 +107,13 @@ internal static class Names
             if (name.StartsWith(prefix, StringComparison.Ordinal))
             {
                 string rest = name[prefix.Length..].TrimStart('_');
+
                 if (rest.Length > 0) return (owner, rest);
             }
         }
 
         int underscore = name.IndexOf('_', StringComparison.Ordinal);
+
         if (underscore > 0 && underscore < name.Length - 1) return (name[..underscore], name[(underscore + 1)..]);
 
         return ("", name);
@@ -55,11 +127,13 @@ internal static class Names
     internal static string ToPascal(string name)
     {
         name = name.Trim('_');
+
         if (name.Length == 0) return "_";
 
         string text = name.Contains('_', StringComparison.Ordinal)
             ? ToTitle(name)
             : char.ToUpperInvariant(name[0]) + name[1..];
+
         return ToLegal(text);
     }
 
@@ -70,6 +144,7 @@ internal static class Names
     {
         string pascal = ToPascal(name).TrimEnd('_');
         string text = char.ToLowerInvariant(pascal[0]) + pascal[1..];
+
         return _keywords.Contains(text) ? "@" + text : text;
     }
 

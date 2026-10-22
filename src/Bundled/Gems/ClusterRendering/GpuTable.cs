@@ -76,10 +76,7 @@ internal sealed class GpuTable<T> : IGpuTable
     /// <summary>
     /// Releases the buffer: the manager's, when what holds the table goes.
     /// </summary>
-    public void Release()
-    {
-        _gpu.Release(Buffer);
-    }
+    public void Release() => _gpu.Release(Buffer);
 
     /// <summary>
     /// Sends the rows set since the last upload, a run of neighbours at a time; they reach the buffer at the start of
@@ -91,6 +88,7 @@ internal sealed class GpuTable<T> : IGpuTable
         {
             _gpu.Upload(Buffer, 0, MemoryMarshal.AsBytes(_rows.AsSpan()));
             Clean();
+
             return;
         }
 
@@ -107,6 +105,7 @@ internal sealed class GpuTable<T> : IGpuTable
         {
             Send(_dirty[0], _dirty[^1] + 1);
             Clean();
+
             return;
         }
 
@@ -154,9 +153,7 @@ internal sealed class GpuTable<T> : IGpuTable
     }
 
     private void Send(int start, int end)
-    {
-        _gpu.Upload(Buffer, (uint)(start * RowBytes), MemoryMarshal.AsBytes(_rows.AsSpan(start, end - start)));
-    }
+        => _gpu.Upload(Buffer, (uint)(start * RowBytes), MemoryMarshal.AsBytes(_rows.AsSpan(start, end - start)));
 
     private void Clean()
     {

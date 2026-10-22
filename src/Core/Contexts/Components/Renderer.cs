@@ -79,6 +79,7 @@ public struct MaterialSlots : IEquatable<MaterialSlots>, IEnumerable<Handle<Mate
             if (this[i] == Handle<Material>.None)
             {
                 this[i] = material;
+
                 return true;
             }
         }

@@ -49,10 +49,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
     /// Where its first part tagged <paramref name="tag"/> is, a part before the parts under it, in the prefab's own
     /// space; null when no part is.
     /// </summary>
-    public Transform? PlaceOf(Tag tag)
-    {
-        return PlaceIn(Parts, new Transform(), tag);
-    }
+    public Transform? PlaceOf(Tag tag) => PlaceIn(Parts, new Transform(), tag);
 
     private static void Make(
         World world,

@@ -39,6 +39,7 @@ internal static class Png
 
         Chunk(png, "IDAT"u8, rows.GetBuffer().AsSpan(0, (int)rows.Length));
         Chunk(png, "IEND"u8, []);
+
         return png.ToArray();
     }
 

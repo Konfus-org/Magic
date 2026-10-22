@@ -71,6 +71,7 @@ internal sealed class FileSystem : IFileSystem
             Directory.CreateDirectory(GetParent(path));
             await File.WriteAllBytesAsync(beside, bytes, cancel).ConfigureAwait(false);
             File.Move(beside, path, overwrite: true);
+
             return Result.Success();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -90,6 +91,7 @@ internal sealed class FileSystem : IFileSystem
         try
         {
             File.Delete(path);
+
             return Result.Success();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -152,6 +154,7 @@ internal sealed class FileSystem : IFileSystem
         };
         watcher.Error += (_, e) => Debugging.Warn($"Watching {folder} missed changes: {e.GetException().Message}");
         watcher.EnableRaisingEvents = true;
+
         return new Subscription(watcher.Dispose);
     }
 
@@ -169,7 +172,5 @@ internal sealed class FileSystem : IFileSystem
     /// <paramref name="path"/> from <paramref name="folder"/>, with <c>/</c> between folders on every OS.
     /// </summary>
     private static string MakeRelative(string folder, string path)
-    {
-        return Path.GetRelativePath(folder, path).Replace(Path.DirectorySeparatorChar, '/');
-    }
+        => Path.GetRelativePath(folder, path).Replace(Path.DirectorySeparatorChar, '/');
 }

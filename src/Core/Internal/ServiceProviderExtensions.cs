@@ -18,11 +18,13 @@ internal static class ServiceProviderExtensions
             try
             {
                 isMade = true;
+
                 return services.GetService(typeof(T)) as T;
             }
             catch (InvalidOperationException)
             {
                 isMade = false;
+
                 return null;
             }
         }

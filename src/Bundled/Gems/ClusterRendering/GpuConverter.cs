@@ -61,6 +61,7 @@ internal static class GpuConverter
         Add(hierarchy, packedVertex);
         List<PackedCard> packedCards = PackCards(model, ref bounds);
         float clusterReach = ComputeReach(bounds, clusters);
+
         return new PackedModel(
             [.. words],
             [.. clusters],
@@ -144,6 +145,7 @@ internal static class GpuConverter
     internal static ModelField? Convert(IReadOnlyList<Mesh> meshes)
     {
         Vector3[] corners = GetCorners(meshes);
+
         if (corners.Length == 0) return null;
 
         Vector3 min = new(float.MaxValue);
@@ -209,16 +211,18 @@ internal static class GpuConverter
             for (int i = 0; i + 3 < corners.Length; i += 4)
             {
                 Vertex corner = corners[i];
-                packedCards.Add(new PackedCard(card, new GpuCard
-                {
-                    Centre = corner.Position,
-                    HalfWidth = corner.Normal.X,
-                    HalfHeight = corner.Normal.Y,
-                    Turn = corner.Normal.Z,
-                    Slot = (uint)mesh.MaterialSlot,
-                    Surface = GpuContract.NoTexture,
-                    Normals = GpuContract.NoTexture,
-                }));
+                packedCards.Add(new PackedCard(
+                    card,
+                    new GpuCard
+                    {
+                        Centre = corner.Position,
+                        HalfWidth = corner.Normal.X,
+                        HalfHeight = corner.Normal.Y,
+                        Turn = corner.Normal.Z,
+                        Slot = (uint)mesh.MaterialSlot,
+                        Surface = GpuContract.NoTexture,
+                        Normals = GpuContract.NoTexture,
+                    }));
                 float reach = new Vector2(corner.Normal.X, corner.Normal.Y).Length();
                 bounds = Enclose(bounds, new Vector4(corner.Position, reach));
             }
@@ -310,9 +314,7 @@ internal static class GpuConverter
             {
                 int count = (indices.Count - firstIndex) / 3;
                 if (count > 0)
-                {
                     clusters.Add(MakeFlatCluster(vertices, firstVertex, firstIndex, count, mesh.MaterialSlot));
-                }
 
                 firstVertex = vertices.Count;
                 firstIndex = indices.Count;
@@ -343,6 +345,7 @@ internal static class GpuConverter
         at = local.Count;
         local[index] = at;
         vertices.Add(source[(int)index]);
+
         return (byte)at;
     }
 
@@ -352,6 +355,7 @@ internal static class GpuConverter
     private static Cluster MakeFlatCluster(List<Vertex> vertices, int firstVertex, int firstIndex, int count, int slot)
     {
         Vector4 sphere = ComputeSphere(vertices, firstVertex, vertices.Count - firstVertex);
+
         return new Cluster
         {
             FirstVertex = firstVertex,
@@ -398,6 +402,7 @@ internal static class GpuConverter
     private static Vector2 EncodeOctahedral(Vector3 direction)
     {
         float sum = MathF.Abs(direction.X) + MathF.Abs(direction.Y) + MathF.Abs(direction.Z);
+
         if (sum <= 0) return new Vector2(0.5f, 0.5f);
 
         Vector3 folded = direction / sum;
@@ -445,12 +450,14 @@ internal static class GpuConverter
         Vector3 from = new(a.X, a.Y, a.Z);
         Vector3 to = new(b.X, b.Y, b.Z);
         float apart = Vector3.Distance(from, to);
+
         if (apart + b.W <= a.W) return a;
 
         if (apart + a.W <= b.W) return b;
 
         float radius = (apart + a.W + b.W) / 2;
         Vector3 centre = from + ((to - from) * ((radius - a.W) / MathF.Max(apart, 1e-6f)));
+
         return new Vector4(centre, radius);
     }
 
@@ -584,6 +591,7 @@ internal static class GpuConverter
             MUseMode7ForAlpha = 1,
         };
         new Span<uint>(options.MWeights, 4).Fill(1);
+
         return options;
     }
 
@@ -627,6 +635,7 @@ internal static class GpuConverter
                     Vector3 point = min + (new Vector3(x, y, z) * step);
                     float distance = Vector3.DistanceSquared(point, FindClosestOnTriangle(point, a, b, c));
                     int index = x + (FieldResolution * (y + (FieldResolution * z)));
+
                     if (distance >= squared[index]) continue;
 
                     squared[index] = distance;
@@ -669,6 +678,7 @@ internal static class GpuConverter
     {
         int first = Math.Max(0, (int)MathF.Ceiling((low - origin) / step));
         int last = Math.Min(FieldResolution - 1, (int)MathF.Floor((high - origin) / step));
+
         return (first, last);
     }
 
@@ -742,6 +752,7 @@ internal static class GpuConverter
         Vector3 b = corners[(triangle * 3) + 1];
         Vector3 c = corners[(triangle * 3) + 2];
         Vector3 facing = Vector3.Cross(b - a, c - a);
+
         return Vector3.Dot(point - FindClosestOnTriangle(point, a, b, c), facing) >= 0;
     }
 
@@ -756,32 +767,40 @@ internal static class GpuConverter
         Vector3 ap = p - a;
         float d1 = Vector3.Dot(ab, ap);
         float d2 = Vector3.Dot(ac, ap);
+
         if (d1 <= 0 && d2 <= 0) return a;
 
         Vector3 bp = p - b;
         float d3 = Vector3.Dot(ab, bp);
         float d4 = Vector3.Dot(ac, bp);
+
         if (d3 >= 0 && d4 <= d3) return b;
 
         float vc = (d1 * d4) - (d3 * d2);
+
         if (vc <= 0 && d1 >= 0 && d3 <= 0) return a + (ab * (d1 / (d1 - d3)));
 
         Vector3 cp = p - c;
         float d5 = Vector3.Dot(ab, cp);
         float d6 = Vector3.Dot(ac, cp);
+
         if (d6 >= 0 && d5 <= d6) return c;
 
         float vb = (d5 * d2) - (d1 * d6);
+
         if (vb <= 0 && d2 >= 0 && d6 <= 0) return a + (ac * (d2 / (d2 - d6)));
 
         float va = (d3 * d6) - (d5 * d4);
+
         if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) return b + ((c - b) * ((d4 - d3) / (d4 - d3 + (d5 - d6))));
 
         float denominator = va + vb + vc;
+
         if (MathF.Abs(denominator) < 1e-20f) return a;
 
         float v = vb / denominator;
         float w = vc / denominator;
+
         return a + (ab * v) + (ac * w);
     }
 }

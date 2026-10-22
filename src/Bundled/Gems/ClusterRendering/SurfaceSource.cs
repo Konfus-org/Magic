@@ -26,6 +26,7 @@ internal sealed partial record SurfaceSource(string Name, string Text, ParamLayo
         CancellationToken cancel)
     {
         Result<Shader> loaded = await assets.LoadAsync(surface, cancel).ConfigureAwait(false);
+
         if (!loaded.Ok) return Result.Failure<SurfaceSource>(loaded.Error);
 
         string name = assets.GetPath(surface) ?? $"surface {surface.Id}";
@@ -36,6 +37,7 @@ internal sealed partial record SurfaceSource(string Name, string Text, ParamLayo
             allowTextures: true,
             allowCurves: false,
             ParamLayout.RecordBytes);
+
         if (!layout.Ok) return Result.Failure<SurfaceSource>($"{name}: {layout.Error}");
 
         if (layout.Value is { } parsed)

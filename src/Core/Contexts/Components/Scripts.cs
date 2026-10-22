@@ -85,6 +85,7 @@ public struct Scripts : IComponent, IEquatable<Scripts>
             if (this[i] == Handle<Script>.None)
             {
                 this[i] = script;
+
                 return true;
             }
         }
@@ -104,6 +105,7 @@ public struct Scripts : IComponent, IEquatable<Scripts>
             if (this[i] == script)
             {
                 this[i] = Handle<Script>.None;
+
                 return true;
             }
         }

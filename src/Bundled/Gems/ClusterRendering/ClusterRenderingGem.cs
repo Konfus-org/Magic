@@ -215,18 +215,12 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// The copy is done: what is gone and what outgrew it is taken in, after the systems that copied the world ran in
     /// the ECS's LateUpdate, before this.
     /// </summary>
-    public void LateUpdate(in Frame frame)
-    {
-        _world.Finish();
-    }
+    public void LateUpdate(in Frame frame) => _world.Finish();
 
     /// <summary>
     /// Hands the copy to Render, now that the render thread is done with the one before.
     /// </summary>
-    public void Sync(in Frame frame)
-    {
-        _world.Swap();
-    }
+    public void Sync(in Frame frame) => _world.Swap();
 
     /// <summary>
     /// Takes in what changed, places the key light's shadow about the main camera, then for every camera with somewhere
@@ -272,6 +266,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         {
             ClearWindow();
             _resources.EndFrame();
+
             return;
         }
 
@@ -280,6 +275,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             ClearWindow();
             RecordOverlays(listing, views, null, frame);
             _resources.EndFrame();
+
             return;
         }
 
@@ -303,14 +299,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             RenderView(view, listing, skySurface, frame);
         }
 
-        if (_preloader.IsHolding)
-        {
-            DrawKept(shown);
-        }
-        else if (copy.IsLoading && shown.Target.IsWindow)
-        {
-            _output.Keep(GetFinished(shown));
-        }
+        if (_preloader.IsHolding) DrawKept(shown);
+        else if (copy.IsLoading && shown.Target.IsWindow) _output.Keep(GetFinished(shown));
 
         _resources.Frame.ReleaseUnlisted(listing);
         ClearWindow();
@@ -323,10 +313,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// as the world loaded, until all that builds up over frames has settled (<see cref="Settle"/>), the window showing
     /// it once the world is shown.
     /// </summary>
-    public Task ReadyAsync(CancellationToken cancel)
-    {
-        return _preloader.ReadyAsync(cancel);
-    }
+    public Task ReadyAsync(CancellationToken cancel) => _preloader.ReadyAsync(cancel);
 
     /// <summary>
     /// Takes in what <paramref name="prefabs"/> draw before they spawn, so they are drawn whole in their first frame:
@@ -337,10 +324,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     public Task<Subscription> PreloadAsync(
         IReadOnlyList<Prefab> prefabs,
         IProgress<float> progress,
-        CancellationToken cancel)
-    {
-        return _preloader.PreloadAsync(prefabs, progress, cancel);
-    }
+        CancellationToken cancel) => _preloader.PreloadAsync(prefabs, progress, cancel);
 
     /// <summary>
     /// The view's finished image: what the post stage made, else the lit scene as it is; none until either is made.
@@ -437,6 +421,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
                 _settings);
             _isForgetting = false;
             _giRays.Add(_gi.Rays);
+
             return;
         }
 
@@ -537,6 +522,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     {
         int pages = Math.Max(_settings.ShadowUpdates, 1);
         int shadows = 2 * ((_shadows.WholePages + pages - 1) / pages);
+
         return Math.Max(GiVolume.SettleTracings, Math.Max(2 * View.JitterPhases, shadows));
     }
 
@@ -598,18 +584,14 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// running, the next listing built runs it.
     /// </summary>
     private Handle<Pipeline> GetOverlay()
-    {
-        return _settings.Overlay == Handle<Pipeline>.None ? _assets.Find<Pipeline>(OverlayPath) : _settings.Overlay;
-    }
+        => _settings.Overlay == Handle<Pipeline>.None ? _assets.Find<Pipeline>(OverlayPath) : _settings.Overlay;
 
     /// <summary>
     /// The pipeline the settings name, else the one at <see cref="PipelinePath"/>, else none; changed while running,
     /// the next listing built runs it.
     /// </summary>
     private Handle<Pipeline> GetPipeline()
-    {
-        return _settings.Pipeline == Handle<Pipeline>.None ? _assets.Find<Pipeline>(PipelinePath) : _settings.Pipeline;
-    }
+        => _settings.Pipeline == Handle<Pipeline>.None ? _assets.Find<Pipeline>(PipelinePath) : _settings.Pipeline;
 
     /// <summary>
     /// Clears the window to black when no view drew into it this frame, so it never shows what its image held before.
@@ -662,10 +644,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// <summary>
     /// Tells the render thread <paramref name="change"/>, from any thread; it is taken in as the next Render starts.
     /// </summary>
-    private void Tell(in Change change)
-    {
-        _changes.Writer.TryWrite(change);
-    }
+    private void Tell(in Change change) => _changes.Writer.TryWrite(change);
 
     /// <summary>
     /// Takes in what the main thread and workers told the render thread since the last frame, in the order told.
@@ -698,6 +677,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private Curve? GetFogFalloff(Handle<Curve> named)
     {
         Handle<Curve> asked = named == Handle<Curve>.None ? _assets.Find<Curve>(FogFalloffPath) : named;
+
         if (asked == _fogFalloffAsked) return _fogFalloff;
 
         _fogFalloffAsked = asked;
@@ -710,14 +690,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private async Task LoadFogFalloffAsync(Handle<Curve> asked)
     {
         Result<Curve> loaded = await _assets.LoadAsync(asked, _stopping).ConfigureAwait(false);
-        if (loaded.Ok)
-        {
-            Tell(new Change(Curve: loaded.Value));
-        }
-        else
-        {
-            Debugging.Warn($"The weather's fog falloff cannot be loaded, so it has no fog: {loaded.Error}");
-        }
+        if (loaded.Ok) Tell(new Change(Curve: loaded.Value));
+        else Debugging.Warn($"The weather's fog falloff cannot be loaded, so it has no fog: {loaded.Error}");
     }
 
     /// <summary>

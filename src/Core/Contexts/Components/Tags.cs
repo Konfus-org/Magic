@@ -83,6 +83,7 @@ public struct Tags : IComponent, IEquatable<Tags>
             if (!this[i].IsValid)
             {
                 this[i] = tag;
+
                 return true;
             }
         }

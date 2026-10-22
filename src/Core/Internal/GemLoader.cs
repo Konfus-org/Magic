@@ -84,6 +84,7 @@ internal sealed class GemLoader : IDisposable
             if (!listed.Add(name))
             {
                 Debugging.Error($"Gem {name} is listed twice in {project.Name}; it is made once.");
+
                 continue;
             }
 
@@ -91,6 +92,7 @@ internal sealed class GemLoader : IDisposable
             if (!loaded.Ok)
             {
                 Debugging.Error(loaded.Error);
+
                 continue;
             }
 
@@ -99,12 +101,14 @@ internal sealed class GemLoader : IDisposable
             {
                 Debugging.Error(
                     $"Gem {name} is {gem.Version.ToString(3)}, and {project.Name} asks for {wanted}; it is not made.");
+
                 continue;
             }
 
             if (FindClash(services, gem) is { } clash)
             {
                 Debugging.Error(clash);
+
                 continue;
             }
 
@@ -160,6 +164,7 @@ internal sealed class GemLoader : IDisposable
     {
         ReadOnlySpan<int> parts = [version.Major, version.Minor, version.Build, version.Revision];
         string[] asked = wanted.Split('.');
+
         if (asked.Length > parts.Length) return false;
 
         for (int i = 0; i < asked.Length; i++)
@@ -187,6 +192,7 @@ internal sealed class GemLoader : IDisposable
                 // Core's services are instances, or made as their own class, and a gem is registered as its class
                 // before the interfaces it provides, so what is found is the class that provides the interface.
                 Type provider = service.ImplementationInstance?.GetType() ?? service.ServiceType;
+
                 if (provider.IsAssignableTo(contract))
                 {
                     return $"Gem {gem.Name} provides {GetName(contract)}, "
@@ -207,6 +213,7 @@ internal sealed class GemLoader : IDisposable
         if (!type.IsGenericType) return type.Name;
 
         string name = type.Name[..type.Name.IndexOf('`', StringComparison.Ordinal)];
+
         return $"{name}<{string.Join(", ", Array.ConvertAll(type.GetGenericArguments(), GetName))}>";
     }
 
@@ -230,6 +237,7 @@ internal sealed class GemLoader : IDisposable
     {
         int change = code.Note();
         await Task.Delay(_settle).ConfigureAwait(false);
+
         if (!code.IsLatest(change)
             || GemAssembly.LoadCode(_files, code.Path, code.What, again: true) is not { } assembly)
         {
@@ -266,6 +274,7 @@ internal sealed class GemLoader : IDisposable
         if (!settings.Ok)
         {
             Debugging.Error($"Gem {gem.Name} was not made: {settings.Error}");
+
             throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
         }
 
@@ -284,6 +293,7 @@ internal sealed class GemLoader : IDisposable
             // else is a bug in the gem, and its stack says where.
             Debugging.Error(
                 $"Gem {gem.Name} was not made: {(ex is InvalidOperationException ? ex.Message : ex.ToString())}");
+
             throw new InvalidOperationException($"it needs {gem.Name}, which was not made.", ex);
         }
         finally
@@ -296,6 +306,7 @@ internal sealed class GemLoader : IDisposable
 
         string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
         Debugging.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
+
         return made;
     }
 
@@ -314,14 +325,8 @@ internal sealed class GemLoader : IDisposable
         /// <summary>
         /// Notes one more change to its folder: which one, to ask <see cref="IsLatest"/> of after the settle.
         /// </summary>
-        internal int Note()
-        {
-            return Interlocked.Increment(ref _changes);
-        }
+        internal int Note() => Interlocked.Increment(ref _changes);
 
-        internal bool IsLatest(int change)
-        {
-            return change == Volatile.Read(ref _changes);
-        }
+        internal bool IsLatest(int change) => change == Volatile.Read(ref _changes);
     }
 }

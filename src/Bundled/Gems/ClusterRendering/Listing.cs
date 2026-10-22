@@ -93,6 +93,7 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     internal static string GetFirstLine(string error)
     {
         int end = error.IndexOf('\n', StringComparison.Ordinal);
+
         return (end < 0 ? error : error[..end]).Trim();
     }
 
@@ -159,6 +160,7 @@ internal sealed class Listing(IGpu gpu) : IDisposable
                 {
                     Debugging.Error($"Pass {pass.Name} does not run: {why}");
                     Failures.Add($"Pass {pass.Name} does not run: {GetFirstLine(why)}");
+
                     continue;
                 }
 
@@ -203,10 +205,7 @@ internal sealed class Listing(IGpu gpu) : IDisposable
     /// <summary>
     /// One of the pipelines still to come back has, or the build has asked for them all. Any thread.
     /// </summary>
-    internal void Done()
-    {
-        Interlocked.Decrement(ref _pending);
-    }
+    internal void Done() => Interlocked.Decrement(ref _pending);
 
     /// <summary>
     /// A pass's own pipeline came back, or why not, which is said once and leaves it out: it never runs, and what it
@@ -220,12 +219,14 @@ internal sealed class Listing(IGpu gpu) : IDisposable
             Debugging.Error($"Pass {pass.Name} does not run: {made.Error}");
             Failures.Add($"Pass {pass.Name} does not run: {GetFirstLine(made.Error)}");
             pass.HasFailed = true;
+
             return;
         }
 
         if (_isDisposed)
         {
             gpu.Release(made.Value);
+
             return;
         }
 
@@ -243,21 +244,13 @@ internal sealed class Listing(IGpu gpu) : IDisposable
         if (made.Ok && _isDisposed)
         {
             gpu.Release(made.Value);
+
             return;
         }
 
-        if (made.Ok)
-        {
-            pass.Surfaces[variant] = made.Value;
-        }
-        else if (made.Error.Length == 0)
-        {
-            pass.Surfaces.Remove(variant);
-        }
-        else
-        {
-            pass.Broken.Add(variant);
-        }
+        if (made.Ok) pass.Surfaces[variant] = made.Value;
+        else if (made.Error.Length == 0) pass.Surfaces.Remove(variant);
+        else pass.Broken.Add(variant);
     }
 
     private static List<ListedPass>[] MakeStages()
@@ -445,10 +438,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// </summary>
     internal StageBindings? GetBindings(GpuStage stage) => _bound[(int)stage];
 
-    internal void SetBound(GpuStage stage, StageBindings? bound)
-    {
-        _bound[(int)stage] = bound;
-    }
+    internal void SetBound(GpuStage stage, StageBindings? bound) => _bound[(int)stage] = bound;
 
     /// <summary>
     /// Resolves what the pass writes and draws with, and gathers what it can see; why not, when a name stands for
@@ -461,9 +451,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
         foreach (ResourceInfo info in names)
         {
             if (made.ContainsKey(info.Name))
-            {
                 return $"it makes {info.Name}, which the renderer or a pass before it already has.";
-            }
 
             if (CanSee(info, isFrame, isTarget)) Visible.Add(info);
         }
@@ -478,9 +466,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
         foreach (PassWrite write in Pass.Writes)
         {
             if (FindMade(names, made, write.Name, isFrame, isTarget) is not { } info)
-            {
                 return $"it writes {write.Name}, which neither it nor anything before it makes.";
-            }
 
             (info.IsBuffer ? BufferWrites : TextureWrites).Add(
                 new PassBinding(info, write.Level, write.Layer, write.Contents, write.Mipmaps));
@@ -491,9 +477,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
             foreach (string color in Pass.Draw.Colors)
             {
                 if (FindMade(names, made, color, isFrame, isTarget) is not { } info)
-                {
                     return $"it draws into {color}, which neither it nor anything before it makes.";
-                }
 
                 ColorFormats.Add(info.Format);
                 DrawsCube |= info.Shape == GpuTextureKind.Cube;
@@ -502,9 +486,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
             foreach (string name in (string[])[Pass.Draw.Depth, Pass.Draw.Args, Pass.Draw.Instances])
             {
                 if (name.Length > 0 && FindMade(names, made, name, isFrame, isTarget) is null)
-                {
                     return $"it draws with {name}, which neither it nor anything before it makes.";
-                }
             }
         }
 
@@ -608,9 +590,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
         }
 
         if (Pass.Kind == PassKind.Compute && Pass.Dispatch.Args.Length > 0)
-        {
             Add(created, Pass.Dispatch.Args, GpuTextureUsage.None, GpuBufferUsage.Arguments);
-        }
 
         if (Pass.Kind != PassKind.Draw) return;
 
@@ -629,9 +609,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// its target.
     /// </summary>
     internal IReadOnlyList<PassBinding> GetWrites(GpuStage stage)
-    {
-        return stage == GpuStage.Compute ? [.. TextureWrites, .. BufferWrites] : [];
-    }
+        => stage == GpuStage.Compute ? [.. TextureWrites, .. BufferWrites] : [];
 
     /// <summary>
     /// Whether a dispatch's <paramref name="per"/> names a count, not the view or what it writes.
@@ -645,18 +623,14 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
     /// stages the targets'.
     /// </summary>
     private static bool CanSee(ResourceInfo info, bool isFrame, bool isTarget)
-    {
-        return info.IsFrame || (isTarget ? info.IsTarget : !isFrame && !info.IsTarget);
-    }
+        => info.IsFrame || (isTarget ? info.IsTarget : !isFrame && !info.IsTarget);
 
     private static ResourceInfo? Find(List<ResourceInfo> names, string name, bool isFrame, bool isTarget)
     {
         foreach (ResourceInfo info in names)
         {
             if (string.Equals(info.Name, name, StringComparison.Ordinal) && CanSee(info, isFrame, isTarget))
-            {
                 return info;
-            }
         }
 
         return null;
@@ -678,9 +652,7 @@ internal sealed class ListedPass(Loaded loaded, Listing listing)
         foreach (PassCreate kept in made.Values)
         {
             if (kept.History && string.Equals(ResourceInfo.GetHistoryName(kept.Name), name, StringComparison.Ordinal))
-            {
                 return ResourceInfo.Of(kept, isFrame, isTarget) with { Name = name };
-            }
         }
 
         return Find(names, name, isFrame, isTarget);

@@ -248,6 +248,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _world.Clear();
         _lines.Clear();
         _reports.Take(GetNow(), _world, _lines);
+
         if (!_isShowing) return;
 
         DrawWorld();
@@ -266,14 +267,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     }
 
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null)
-    {
-        _reports.Add(text, ReportKind.Plain, color ?? _white, position, tooltip, 0, GetNow());
-    }
+        => _reports.Add(text, ReportKind.Plain, color ?? _white, position, tooltip, 0, GetNow());
 
     public void Text(string text, Color? color = null)
-    {
-        _reports.Add(text, ReportKind.Plain, color ?? _white, null, null, 0, GetNow());
-    }
+        => _reports.Add(text, ReportKind.Plain, color ?? _white, null, null, 0, GetNow());
 
     public void Info(
         string text,
@@ -334,10 +331,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         Debugging.Error(text, member, file, line);
     }
 
-    public unsafe void Begin(string title, bool scrollable = false)
-    {
-        Begin(title, null, scrollable);
-    }
+    public unsafe void Begin(string title, bool scrollable = false) => Begin(title, null, scrollable);
 
     public unsafe void Begin(string title, ref bool visible, bool scrollable = false)
     {
@@ -363,6 +357,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         if (_depth == 0)
         {
             ImGui.End();
+
             return;
         }
 
@@ -379,6 +374,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         if (color is not { } tint)
         {
             ImGui.TextUnformatted(_text.Of(text));
+
             return;
         }
 
@@ -390,6 +386,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public unsafe bool Button(string label)
     {
         ThrowIfOutsideFrame();
+
         return ImGui.Button(_text.Of(label));
     }
 
@@ -412,9 +409,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         }
 
         if (isEntered || ImGui.IsItemEdited())
-        {
             text = Encoding.UTF8.GetString(_typed, 0, Array.IndexOf(_typed, (byte)0));
-        }
 
         if (isEntered)
         {
@@ -455,6 +450,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         text = Encoding.UTF8.GetString(document.Bytes, 0, Array.IndexOf(document.Bytes, (byte)0));
         _documents[label] = new DocumentBuffer(text, readOnly);
+
         return true;
     }
 
@@ -488,6 +484,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         ThrowIfOutsideFrame();
         byte* id = LabelField(label);
+
         if (!ImGui.BeginCombo(
             id,
             _text.Of(index >= 0 && index < options.Length ? options[index] : string.Empty),
@@ -503,9 +500,11 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         }
 
         ImGui.EndCombo();
+
         if (chosen == index) return false;
 
         index = chosen;
+
         return true;
     }
 
@@ -514,6 +513,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ThrowIfOutsideFrame();
         byte* title = _text.Of(label);
         uint id = ImGui.GetID(title);
+
         if (!ImGui.BeginTabBar(title, ImGuiTabBarFlags.None)) return false;
 
         // ImGui keeps its own selection: the caller's index is pushed only when it is not the tab ImGui last showed.
@@ -524,6 +524,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             ImGuiTabItemFlags flags = i == index && index != shown
                 ? ImGuiTabItemFlags.SetSelected
                 : ImGuiTabItemFlags.None;
+
             if (!ImGui.BeginTabItem(_text.Of(options[i]), null, flags)) continue;
 
             chosen = i;
@@ -532,9 +533,11 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         ImGui.EndTabBar();
         _tabs[id] = chosen;
+
         if (chosen == index) return false;
 
         index = chosen;
+
         return true;
     }
 
@@ -554,6 +557,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             _text.Of(label),
             columns.Length,
             ImGuiTableFlags.Resizable | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.RowBg);
+
         if (!_isTableShown) return;
 
         foreach (string column in columns)
@@ -567,6 +571,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public unsafe void Row(ReadOnlySpan<string> cells)
     {
         ThrowIfOutsideFrame();
+
         if (!_isTableShown) return;
 
         ImGui.TableNextRow();
@@ -613,24 +618,20 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             | ImGuiHoveredFlags.AllowWhenBlockedByPopup;
         byte* menu = Literal("##context"u8);
         if (ImGui.IsMouseReleased(ImGuiMouseButton.Right) && ImGui.IsWindowHovered(Over))
-        {
             ImGui.OpenPopup(menu, ImGuiPopupFlags.None);
-        }
 
         if (!ImGui.BeginPopup(menu, ImGuiWindowFlags.None)) return false;
 
         bool isClicked = ImGui.MenuItem(_text.Of(label));
         ImGui.EndPopup();
+
         return isClicked;
     }
 
     /// <summary>
     /// The time reports are kept by, in seconds.
     /// </summary>
-    private static double GetNow()
-    {
-        return Environment.TickCount64 / 1000d;
-    }
+    private static double GetNow() => Environment.TickCount64 / 1000d;
 
     /// <summary>
     /// A linear colour as ImGui packs one, encoded to sRGB as the window's image wants: alpha, blue, green, red from
@@ -642,14 +643,9 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             | Byte(Encode(color.R));
 
         static float Encode(float linear)
-        {
-            return linear <= 0.0031308f ? linear * 12.92f : (1.055f * MathF.Pow(linear, 1 / 2.4f)) - 0.055f;
-        }
+            => linear <= 0.0031308f ? linear * 12.92f : (1.055f * MathF.Pow(linear, 1 / 2.4f)) - 0.055f;
 
-        static uint Byte(float value)
-        {
-            return (uint)MathF.Round(Math.Clamp(value, 0, 1) * 255);
-        }
+        static uint Byte(float value) => (uint)MathF.Round(Math.Clamp(value, 0, 1) * 255);
     }
 
     /// <summary>
@@ -657,17 +653,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// move, so no copy and no pinning is needed. For <c>u8</c> literals only.
     /// </summary>
     private static unsafe byte* Literal(ReadOnlySpan<byte> utf8)
-    {
-        return (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(utf8));
-    }
+        => (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(utf8));
 
     /// <summary>
     /// The gem ImGui's clipboard callbacks are for: the one the platform's user data names, set as the context is made.
     /// </summary>
     private static unsafe ImGuiDebugUIGem? GetSelf()
-    {
-        return GCHandle.FromIntPtr((nint)ImGui.GetPlatformIO()->PlatformClipboardUserData).Target as ImGuiDebugUIGem;
-    }
+        => GCHandle.FromIntPtr((nint)ImGui.GetPlatformIO()->PlatformClipboardUserData).Target as ImGuiDebugUIGem;
 
     [UnmanagedCallersOnly]
     private static unsafe void SetClipboard(ImGuiContext* context, byte* text)
@@ -684,6 +676,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         byte[] bytes = Encoding.UTF8.GetBytes(gem._window.Clipboard + '\0');
         gem._pasted = GCHandle.Alloc(bytes, GCHandleType.Pinned);
+
         return (byte*)gem._pasted.AddrOfPinnedObject();
     }
 
@@ -708,6 +701,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         }
 
         ImGui.SetNextItemWidth(Stretch);
+
         return _text.Of(field.Id);
     }
 
@@ -750,14 +744,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             }
 
             if (scrollable)
-            {
                 ImGui.SetNextWindowSize((new Vector2(32, 18) * _settings.FontSize).Im, ImGuiCond.FirstUseEver);
-            }
 
             ImGui.Begin(
                 _text.Of(title),
                 visible,
                 scrollable ? ImGuiWindowFlags.None : ImGuiWindowFlags.AlwaysAutoResize);
+
             return;
         }
 
@@ -865,6 +858,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         if (!font.Ok)
         {
             Debugging.Warn($"The debug UI writes in the font it did: its font does not load: {font.Error}");
+
             return;
         }
 

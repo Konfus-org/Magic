@@ -148,17 +148,20 @@ internal readonly record struct CountName(PassCount Count, uint Number = 0)
     internal static bool TryParse(string name, out CountName count)
     {
         count = default;
+
         if (name.Length == 0) return true;
 
         if (uint.TryParse(name, System.Globalization.CultureInfo.InvariantCulture, out uint number))
         {
             count = new CountName(PassCount.Number, number);
+
             return true;
         }
 
         if (!_names.TryGetValue(name, out PassCount named)) return false;
 
         count = new CountName(named);
+
         return true;
     }
 
@@ -305,10 +308,7 @@ internal sealed class PassGraph(
     /// build under way, if any, is swapped in, so a burst of changes (a remake of every shader, one at a time) is one
     /// further build, not one each.
     /// </summary>
-    internal void Invalidate()
-    {
-        _isStale = true;
-    }
+    internal void Invalidate() => _isStale = true;
 
     /// <summary>
     /// Runs <paramref name="pass"/> after the world's effects from now on, as a debug view is; none to stop. The
@@ -348,10 +348,9 @@ internal sealed class PassGraph(
         // A curve the listing drawn did not load asks for a build once; the build under way, if any, loads it.
         bool isFollowed = Current?.TryFollowParams() ?? true;
         _isStale |= !isFollowed && _next is null;
+
         if ((!_isStale && effects == Effects && pipeline == _pipeline && overlay == _overlay) || _next is not null)
-        {
             return;
-        }
 
         _isStale = false;
         Effects = effects;
@@ -414,6 +413,7 @@ internal sealed class PassGraph(
             if (!pass.IsReady)
             {
                 isDrawable &= listing == Current;
+
                 continue;
             }
 
@@ -455,6 +455,7 @@ internal sealed class PassGraph(
                     PassKind.Script => TryRecordScript(pass, scope),
                     _ => false,
                 };
+
                 if (!isRecorded) break;
             }
 
@@ -464,28 +465,17 @@ internal sealed class PassGraph(
 
     private static void Keep(ListedPass pass, GpuStage stage, Result<StageBindings> bound)
     {
-        if (bound.Ok)
-        {
-            pass.SetBound(stage, bound.Value);
-        }
-        else
-        {
-            pass.ProbeError = bound.Error;
-        }
+        if (bound.Ok) pass.SetBound(stage, bound.Value);
+        else pass.ProbeError = bound.Error;
     }
 
     /// <summary>
     /// The pass's own shader's text, named as its errors name it.
     /// </summary>
-    private static string GetPassBody(ListedPass pass)
-    {
-        return $"#line 1 \"{pass.Name}\"\n{pass.Body}";
-    }
+    private static string GetPassBody(ListedPass pass) => $"#line 1 \"{pass.Name}\"\n{pass.Body}";
 
     private static string GetPiecesText(bool placeOnly)
-    {
-        return $"#define PIECES_PLACE_ONLY {(placeOnly ? 1 : 0)}\n#include \"{PiecesPath}\"\n";
-    }
+        => $"#define PIECES_PLACE_ONLY {(placeOnly ? 1 : 0)}\n#include \"{PiecesPath}\"\n";
 
     /// <summary>
     /// The template a draw composes its surfaces into.
@@ -513,9 +503,7 @@ internal sealed class PassGraph(
         foreach (string name in pass.Pass.Draw.Colors)
         {
             if (pass.Visible.Find(seen => string.Equals(seen.Name, name, StringComparison.Ordinal)) is { } info)
-            {
                 colors.Add(new PassBinding(info, 0, 0, GpuContents.Clear, false));
-            }
         }
 
         return colors;
@@ -537,6 +525,7 @@ internal sealed class PassGraph(
         if (resource.Sampler != GpuSampler.None) return resource.Sampler;
 
         bool isNearest = info.IsDepth || info.Format is GpuFormat.R32Float or GpuFormat.R32Uint or GpuFormat.R16Float;
+
         return info.Filter switch
         {
             PassFilter.Nearest => resources.GetSampler(_nearest),
@@ -555,11 +544,13 @@ internal sealed class PassGraph(
     {
         PassDispatch dispatch = pass.Pass.Dispatch;
         (uint threadsX, uint threadsY, uint threadsZ) = pass.Threads;
+
         if (dispatch.Groups.Count > 0)
         {
-            return (dispatch.Groups[0], dispatch.Groups.Count > 1 ? dispatch.Groups[1] : 1, dispatch.Groups.Count > 2
-                ? dispatch.Groups[2]
-                : 1);
+            return (
+                dispatch.Groups[0],
+                dispatch.Groups.Count > 1 ? dispatch.Groups[1] : 1,
+                dispatch.Groups.Count > 2 ? dispatch.Groups[2] : 1);
         }
 
         bool isView = pass.DispatchesPerView;
@@ -568,9 +559,7 @@ internal sealed class PassGraph(
             Vector2 view = scope.Constants.ViewSize;
             (uint width, uint height) = ((uint)view.X, (uint)view.Y);
             if (!isView && TryGetResource(scope, pass.DispatchOutput, out BoundResource output))
-            {
                 (width, height) = (output.Width, output.Height);
-            }
 
             return dispatch.Tile > 0
                 ? (CeilingDivide(width, dispatch.Tile), CeilingDivide(height, dispatch.Tile), 1u)
@@ -578,6 +567,7 @@ internal sealed class PassGraph(
         }
 
         uint groups = CeilingDivide(scope.Counts.GetCount(pass.DispatchPer), threadsX * threadsY * threadsZ);
+
         return (Math.Min(groups, MaxGroupsX), CeilingDivide(groups, MaxGroupsX), 1);
     }
 
@@ -610,6 +600,7 @@ internal sealed class PassGraph(
                 ? create.Rows
                 : BitOperations.RoundUpToPowerOf2(Math.Max(1, scope.Counts.GetCount(created.Per)));
             uint copies = created.Copies.IsNone ? 1 : Math.Max(1, scope.Counts.GetCount(created.Copies));
+
             return new ResourceKey(
                 true,
                 GpuFormat.Invalid,
@@ -651,6 +642,7 @@ internal sealed class PassGraph(
             | (created.Info.IsStorageRead ? GpuTextureUsage.None : GpuTextureUsage.Sampled)
             | (created.Info.IsDepth ? GpuTextureUsage.DepthTarget : GpuTextureUsage.None)
             | (create.History ? GpuTextureUsage.ColorTarget : GpuTextureUsage.None);
+
         return new ResourceKey(
             false,
             create.Format,
@@ -694,6 +686,7 @@ internal sealed class PassGraph(
 
         pass.Surfaces[variant] = GpuPipeline.None;
         CompileSurfaceAsync(pass, variant, isCounted: false).FireAndForget();
+
         return GpuPipeline.None;
     }
 
@@ -721,9 +714,7 @@ internal sealed class PassGraph(
     /// compile, so nothing waits for it for ever; compiling it the first time it is asked for.
     /// </summary>
     private bool IsMade(ListedPass pass, SurfaceKey variant)
-    {
-        return GetSurfacePipeline(pass, variant) != GpuPipeline.None || pass.Broken.Contains(variant);
-    }
+        => GetSurfacePipeline(pass, variant) != GpuPipeline.None || pass.Broken.Contains(variant);
 
     /// <summary>
     /// Loads the passes of the frame pipeline, the world's effects and the pipeline appended after them and their
@@ -774,6 +765,7 @@ internal sealed class PassGraph(
         async Task<Result<GpuShader>> CompilePiecesAsync(bool placeOnly, string name)
         {
             Result<StageBindings> bound = await piecesProbe.ConfigureAwait(false);
+
             return await CompileBoundAsync(
                 _engineVisible,
                 [],
@@ -813,6 +805,7 @@ internal sealed class PassGraph(
             {
                 Debugging.Error($"A pipeline does not load, so its passes do not run: {frame.Error}");
                 failures.Add($"A pipeline does not load: {Listing.GetFirstLine(frame.Error)}");
+
                 continue;
             }
 
@@ -837,9 +830,7 @@ internal sealed class PassGraph(
             {
                 Debugging.Error($"Debug view {name} does not load, so it is not shown: {view.Error}");
             }
-            else if (await LoadPassAsync(
-                    new PipelinePass(view.Value, name, [.. view.Value.Params]),
-                    failures)
+            else if (await LoadPassAsync(new PipelinePass(view.Value, name, [.. view.Value.Params]), failures)
                 .ConfigureAwait(false) is { } ready)
             {
                 loaded.Add(ready);
@@ -871,6 +862,7 @@ internal sealed class PassGraph(
         {
             Debugging.Error($"Pass {pass.Name} does not run: {layout.Error}");
             failures.Add($"Pass {pass.Name} does not run: {Listing.GetFirstLine(layout.Error)}");
+
             return null;
         }
 
@@ -885,6 +877,7 @@ internal sealed class PassGraph(
         }
 
         PassParams packed = new(pass.Name, pass.Params, version, layout.Value, curves, assets.Default<Curve>());
+
         return new Loaded(pass.Pass, pass.Name, body, packed);
     }
 
@@ -900,12 +893,14 @@ internal sealed class PassGraph(
             Handle<Curve> handle = field.Type == ParamType.Curve
                 ? GetCurve(pass.Params.GetValueOrDefault(field.Name) ?? field.Default)
                 : Handle<Curve>.None;
+
             if (handle == Handle<Curve>.None || curves.ContainsKey(handle)) continue;
 
             Result<Curve> loaded = await assets.LoadAsync(handle, stopping).ConfigureAwait(false);
             if (!loaded.Ok)
             {
                 Debugging.Error($"Pass {pass.Name}'s {field.Name} has no curve: {loaded.Error}");
+
                 continue;
             }
 
@@ -919,9 +914,7 @@ internal sealed class PassGraph(
     /// The curve a param names, the default curve for none.
     /// </summary>
     private Handle<Curve> GetCurve(MaterialParam param)
-    {
-        return param.Curve == Handle<Curve>.None ? assets.Default<Curve>() : param.Curve;
-    }
+        => param.Curve == Handle<Curve>.None ? assets.Default<Curve>() : param.Curve;
 
     /// <summary>
     /// Compiles a pass's own shaders and makes its pipeline on the render thread; a draw of surfaces, the sky, pieces
@@ -943,6 +936,7 @@ internal sealed class PassGraph(
             make = () =>
             {
                 pass.Script = script.Ok ? script.Value : null;
+
                 return script.Ok ? Result.Success(GpuPipeline.None) : Result.Failure<GpuPipeline>(script.Error);
             };
         }
@@ -955,6 +949,7 @@ internal sealed class PassGraph(
                 if (!shader.Ok) return Result.Failure<GpuPipeline>(shader.Error);
 
                 pass.Threads = (shader.Value.ThreadCountX, shader.Value.ThreadCountY, shader.Value.ThreadCountZ);
+
                 return gpu.CreatePipeline(shader.Value);
             };
         }
@@ -980,15 +975,20 @@ internal sealed class PassGraph(
             {
                 pass.Vertex = vertex.Ok ? vertex.Value : null;
                 pass.PlaceVertex = place.Ok ? place.Value : null;
+
                 return vertex.Ok ? Result.Success(GpuPipeline.None) : Result.Failure<GpuPipeline>(vertex.Error);
             };
         }
 
-        SurfaceKey[] variants = await threads.InvokeAsync(EngineThread.Render, () =>
-        {
-            listing.Take(pass, make());
-            return pass.DrawsSurfaces ? [.. pass.Surfaces.Keys] : Array.Empty<SurfaceKey>();
-        }, stopping).ConfigureAwait(false);
+        SurfaceKey[] variants = await threads.InvokeAsync(
+            EngineThread.Render,
+            () =>
+            {
+                listing.Take(pass, make());
+
+                return pass.DrawsSurfaces ? [.. pass.Surfaces.Keys] : Array.Empty<SurfaceKey>();
+            },
+            stopping).ConfigureAwait(false);
         foreach (SurfaceKey variant in variants)
         {
             CompileSurfaceAsync(pass, variant, isCounted: true).FireAndForget();
@@ -1003,22 +1003,21 @@ internal sealed class PassGraph(
     private async Task<Result<IPipelineScript>> ScriptAsync(ListedPass pass)
     {
         if (scripts is null)
-        {
             return Result.Failure<IPipelineScript>("a script pass needs a scripting gem, and the project lists none.");
-        }
 
         Result<Script> asset = await assets.LoadAsync(pass.Pass.Script, stopping).ConfigureAwait(false);
+
         if (!asset.Ok) return Result.Failure<IPipelineScript>($"its script does not load: {asset.Error}");
 
         Result<IScript> made = scripts.Make(asset.Value);
+
         if (!made.Ok)
-        {
             return Result.Failure<IPipelineScript>($"its script {asset.Value.Type.Name} cannot be made: {made.Error}");
-        }
 
         if (made.Value is not IPipelineScript script)
         {
             (made.Value as IDisposable)?.Dispose();
+
             return Result.Failure<IPipelineScript>($"its script {asset.Value.Type.Name} is no IPipelineScript.");
         }
 
@@ -1029,10 +1028,9 @@ internal sealed class PassGraph(
     {
         Result<GpuShader> fragment = await CompileBoundAsync(pass, GpuStage.Fragment, GetPassBody(pass), pass.Name)
             .ConfigureAwait(false);
+
         if (!vertex.Ok || !fragment.Ok)
-        {
             return Result.Failure<GpuPipelineDescription>(vertex.Ok ? fragment.Error : vertex.Error);
-        }
 
         return Result.Success(new GpuPipelineDescription
         {
@@ -1061,12 +1059,12 @@ internal sealed class PassGraph(
 
         // The fragment stage is written by hand to bind nothing, as what only writes depth needs nothing.
         Result<GpuShader> fragment = compiled.Ok ? new StageBindings().Check(compiled.Value, pass.Name) : compiled;
+
         if (!vertex.Ok || !fragment.Ok)
-        {
             return Result.Failure<GpuPipelineDescription>(vertex.Ok ? fragment.Error : vertex.Error);
-        }
 
         PassDraw draw = pass.Pass.Draw;
+
         return Result.Success(new GpuPipelineDescription
         {
             Vertex = vertex.Value,
@@ -1092,16 +1090,19 @@ internal sealed class PassGraph(
     private async Task CompileSurfaceAsync(ListedPass pass, SurfaceKey variant, bool isCounted)
     {
         Result<GpuPipelineDescription> desc = await SurfaceAsync(pass, variant).ConfigureAwait(false);
-        await threads.InvokeAsync(EngineThread.Render, () =>
-        {
-            if (!desc.Ok && desc.Error.Length > 0) failureHandler.Break(variant.Shader, pass.Name, desc.Error);
+        await threads.InvokeAsync(
+            EngineThread.Render,
+            () =>
+            {
+                if (!desc.Ok && desc.Error.Length > 0) failureHandler.Break(variant.Shader, pass.Name, desc.Error);
 
-            pass.Listing.TakeSurface(
-                pass,
-                variant,
-                desc.Ok ? gpu.CreatePipeline(desc.Value) : Result.Failure<GpuPipeline>(desc.Error),
-                isCounted);
-        }, stopping).ConfigureAwait(false);
+                pass.Listing.TakeSurface(
+                    pass,
+                    variant,
+                    desc.Ok ? gpu.CreatePipeline(desc.Value) : Result.Failure<GpuPipeline>(desc.Error),
+                    isCounted);
+            },
+            stopping).ConfigureAwait(false);
     }
 
     private async Task<Result<GpuPipelineDescription>> SurfaceAsync(ListedPass pass, SurfaceKey variant)
@@ -1109,9 +1110,11 @@ internal sealed class PassGraph(
         PassDrawn drawn = pass.Pass.Draw.Drawn;
         bool hasSurface = variant.Shader != Handle<Shader>.None;
         GpuShader? vertex = drawn == PassDrawn.Visibility && !hasSurface ? pass.PlaceVertex : pass.Vertex;
+
         if (vertex is null) return Result.Failure<GpuPipelineDescription>(string.Empty);
 
         Result<(string Text, string Name)> source = await ComposeAsync(pass, variant).ConfigureAwait(false);
+
         if (!source.Ok) return Result.Failure<GpuPipelineDescription>(source.Error);
 
         Result<GpuShader> fragment = await CompileBoundAsync(
@@ -1119,6 +1122,7 @@ internal sealed class PassGraph(
             GpuStage.Fragment,
             source.Value.Text,
             source.Value.Name).ConfigureAwait(false);
+
         if (!fragment.Ok) return Result.Failure<GpuPipelineDescription>(fragment.Error);
 
         return Result.Success(new GpuPipelineDescription
@@ -1157,6 +1161,7 @@ internal sealed class PassGraph(
         {
             Result<SurfaceSource> source = await SurfaceSource.ReadAsync(assets, shader, stopping)
                 .ConfigureAwait(false);
+
             if (!source.Ok) return Result.Failure<(string Text, string Name)>(source.Error);
 
             surface = source.Value.Text;
@@ -1171,6 +1176,7 @@ internal sealed class PassGraph(
             .Append("#include \"Include/SurfaceBindings.hlsli\"\n")
             .Append("#line 1 \"").Append(name).Append("\"\n").Append(surface).Append('\n')
             .Append("#include \"Templates/").Append(GetTemplate(drawn, hasSurface)).Append(".frag.hlsl\"\n");
+
         return Result.Success((text.ToString(), $"{pass.Name} with {name}"));
     }
 
@@ -1188,6 +1194,7 @@ internal sealed class PassGraph(
         {
             pass.SetBound(GpuStage.Vertex, none);
             pass.SetBound(GpuStage.Fragment, none);
+
             return;
         }
 
@@ -1197,6 +1204,7 @@ internal sealed class PassGraph(
                 pass,
                 GpuStage.Compute,
                 await ProbeAsync(pass, GpuStage.Compute, [(GetPassBody(pass), pass.Name)]).ConfigureAwait(false));
+
             return;
         }
 
@@ -1207,6 +1215,7 @@ internal sealed class PassGraph(
                 pass,
                 GpuStage.Fragment,
                 await ProbeAsync(pass, GpuStage.Fragment, [(GetPassBody(pass), pass.Name)]).ConfigureAwait(false));
+
             return;
         }
 
@@ -1217,6 +1226,7 @@ internal sealed class PassGraph(
                 pass,
                 GpuStage.Vertex,
                 await ProbeAsync(pass, GpuStage.Vertex, [(GetPassBody(pass), pass.Name)]).ConfigureAwait(false));
+
             return;
         }
 
@@ -1248,6 +1258,7 @@ internal sealed class PassGraph(
         foreach (SurfaceKey variant in variants)
         {
             Result<(string Text, string Name)> source = await ComposeAsync(pass, variant).ConfigureAwait(false);
+
             if (!source.Ok) return Result.Failure<StageBindings>(source.Error);
 
             sources.Add(source.Value);
@@ -1306,9 +1317,7 @@ internal sealed class PassGraph(
         GpuStage stage,
         IReadOnlyList<(string Text, string Name)> sources,
         IReadOnlyList<GpuShaderBinding>? also = null)
-    {
-        return ProbeAsync(pass.Visible, pass.GetWrites(stage), stage, sources, also);
-    }
+        => ProbeAsync(pass.Visible, pass.GetWrites(stage), stage, sources, also);
 
     /// <summary>
     /// A shader compiled for the GPU, bound to what its stage binds: every name declared, those it binds at their
@@ -1330,12 +1339,14 @@ internal sealed class PassGraph(
             stage,
             gpu.ShaderFormat,
             stopping).ConfigureAwait(false);
+
         return compiled.Ok ? bound.Value.Check(compiled.Value, name) : compiled;
     }
 
     private Task<Result<GpuShader>> CompileBoundAsync(ListedPass pass, GpuStage stage, string text, string name)
     {
         StageBindings? bound = pass.GetBindings(stage);
+
         return CompileBoundAsync(
             pass.Visible,
             pass.GetWrites(stage),
@@ -1348,6 +1359,7 @@ internal sealed class PassGraph(
     private async Task<Result<string>> TextOfAsync(Handle<Shader> shader)
     {
         Result<Shader> loaded = await assets.LoadAsync(shader, stopping).ConfigureAwait(false);
+
         return loaded.Ok ? Result.Success(loaded.Value.Text) : Result.Failure<string>(loaded.Error);
     }
 
@@ -1393,6 +1405,7 @@ internal sealed class PassGraph(
     private void Fill(Listing listing, ListedPass pass, in RecordScope scope)
     {
         Make(listing, pass, scope);
+
         if (pass.Pass.Kind is not (PassKind.Fullscreen or PassKind.Draw)) return;
 
         using GpuDebugGroup group = gpu.Commands.DebugGroup(pass.Name);
@@ -1438,10 +1451,12 @@ internal sealed class PassGraph(
         }
 
         Reads reads = default;
+
         if (!reads.TryGather(bound, scope)) return false;
 
         BoundResource args = default;
         bool isIndirect = pass.Pass.Dispatch.Args.Length > 0;
+
         if (isIndirect && !TryGetResource(scope, pass.Pass.Dispatch.Args, out args)) return false;
 
         using GpuComputePass compute = gpu.Commands
@@ -1465,6 +1480,7 @@ internal sealed class PassGraph(
     {
         PassBinding write = pass.TextureWrites[0];
         Reads reads = default;
+
         if (pass.GetBindings(GpuStage.Fragment) is not { } bound
             || !TryGetResource(scope, write.Info.Name, out BoundResource target)
             || !reads.TryGather(bound, scope))
@@ -1483,6 +1499,7 @@ internal sealed class PassGraph(
         render.Viewport(area).Scissor(area).Pipeline(pass.Pipeline).Constants(GpuStage.Fragment, constants);
         reads.Bind(render, GpuStage.Fragment, bound);
         render.Draw(3);
+
         return true;
     }
 
@@ -1493,10 +1510,9 @@ internal sealed class PassGraph(
     private bool TryRecordScript(ListedPass pass, in RecordScope scope)
     {
         PassBinding write = pass.TextureWrites[0];
+
         if (pass.Script is not { } script || !TryGetResource(scope, write.Info.Name, out BoundResource target))
-        {
             return false;
-        }
 
         bool isTarget = write.Info.IsTarget;
         Rectangle area = new(0, 0, (int)Math.Max(1, target.Width), (int)Math.Max(1, target.Height));
@@ -1508,6 +1524,7 @@ internal sealed class PassGraph(
             isTarget ? scope.TargetEncoding : TargetEncoding.Linear,
             write.Contents,
             scope.Now));
+
         return true;
     }
 
@@ -1532,10 +1549,12 @@ internal sealed class PassGraph(
         }
 
         BoundResource depth = default;
+
         if (draw.Depth.Length > 0 && !TryGetResource(scope, draw.Depth, out depth)) return false;
 
         BoundResource args = default;
         BoundResource instances = default;
+
         if (pass.DrawsIndirect
             && (!TryGetResource(scope, draw.Args, out args) || !TryGetResource(scope, draw.Instances, out instances)))
         {
@@ -1544,6 +1563,7 @@ internal sealed class PassGraph(
 
         Reads vertexReads = default;
         Reads fragmentReads = default;
+
         if (pass.GetBindings(GpuStage.Vertex) is not { } vertexBound
             || pass.GetBindings(GpuStage.Fragment) is not { } fragmentBound
             || !vertexReads.TryGather(vertexBound, scope)
@@ -1611,9 +1631,7 @@ internal sealed class PassGraph(
         {
             DrawBin(key, bin);
             if (bin >= GpuContract.FixedRasterBins)
-            {
                 DrawBin(key, GpuContract.CardBins + bin - GpuContract.FixedRasterBins);
-            }
 
             bin++;
         }
@@ -1621,6 +1639,7 @@ internal sealed class PassGraph(
         void DrawBin(SurfaceKey key, int bin)
         {
             GpuPipeline pipeline = GetSurfacePipeline(pass, key);
+
             if (pipeline == GpuPipeline.None) return;
 
             render.Pipeline(pipeline).DrawIndexedFromBuffer(
@@ -1678,6 +1697,7 @@ internal sealed class PassGraph(
         foreach (TransparentRun run in scope.TransparentRuns)
         {
             GpuPipeline pipeline = GetSurfacePipeline(pass, run.Surface);
+
             if (pipeline == GpuPipeline.None) continue;
 
             if (pipeline != bound)
@@ -1695,9 +1715,7 @@ internal sealed class PassGraph(
         foreach (PassBinding write in pass.TextureWrites)
         {
             if (write.Mipmaps && TryGetResource(scope, write.Info.Name, out BoundResource bound))
-            {
                 gpu.Commands.GenerateMipmaps(bound.Texture);
-            }
         }
 
         if (pass.Pass.Kind != PassKind.Draw || !pass.Pass.Draw.Mipmaps) return;

@@ -15,13 +15,17 @@ none says to build first.
 `Format.ps1` formats the C# a change touches by the rules in `.editorconfig`, the ones the build and Validate's format
 check hold the code to, so formatting is never a second rulebook. It takes the `.cs` files that differ from the last
 commit, new ones included, and leaves every other file alone: it formats what is about to be reviewed, never someone
-else's code. `dotnet format`, which comes with the SDK, makes four passes over them: the ordering analyzers' fixes,
-which move a type's members into the order the code standards give; the line-length analyzer's fix, which wraps a line
-of code longer than the limit at its argument lists, operators or arrows, a pass of its own so it wraps the lines where
-the move left them; the code-style fixes, which order the usings, shorten names and apply every style rule that has
-one right answer; and whitespace, line endings and the final newline. A style fix that would delete code, invent it or
-rename it across the solution is left out, as it needs a person, and the build still reports what it would have
-fixed; so are the other analyzers' fixes, which change what code does.
+else's code; `-All` takes every file, for the change that adds a rule. `dotnet format`, which comes with the SDK, makes
+five passes over them, each a pass of its own as each measures the code the one before it left: the ordering
+analyzers' fixes, which move a type's members into the order the code standards give; the code-style fixes, which
+order the usings, shorten names and apply every style rule that has one right answer, a one-statement method's `=>`
+among them; the repository's own layout analyzers' fixes ([Analyzers](#analyzers)), which put a blank line before a
+way out of a block and lay out an `if` and its `else`s, a body too long for its header's line below it; the
+line-length analyzer's fix, which wraps a line of code longer than the limit at its argument lists, operators or
+arrows, and the list analyzer's, which puts every item of a list that spans lines on a line of its own; and whitespace,
+line endings and the final newline. A style fix that would delete code, invent it or rename it across the solution is
+left out, as it needs a person, and the build still reports what it would have fixed; so are the other analyzers'
+fixes, which change what code does.
 
 Moving members changes nothing a type does but in one case the fix cannot see: static fields and properties with
 initializers are set in the order they are written, so a static moved above one its initializer reads, directly or
@@ -29,15 +33,19 @@ through a method, reads it unset, and the type fails as it starts. What other st
 the order puts first, with a property over it where other types read it; and a moved static is worth a look in review,
 as the build passes it and only a run that uses the type shows it.
 
-The wrap is mechanical. It breaks a line at the first place that fits, which is not always where a person would:
-inside an initializer the style pass can leave the wrapped arguments unindented, and an expression-bodied member too
-long for its line is broken at its parameters, which leaves it too long, where its body belongs on the next line after
-`=>`. A wrap that reads badly is reshaped by hand, and a line that fits is never wrapped again. It cannot wrap a string
-literal or a comment: a long string is split by hand, the next part starting with `+`, and a comment at a word, as the
-build checks the first and nothing checks the second.
+The wrap is mechanical. It breaks a line at the first place that fits, which is not always where a person would, and
+never joins one back: a list inside an initializer can be indented a level too deep, a line that a later fix
+shortened stays broken, and a fix that makes another possible (a body made `=>`, whose `new T()` can then be `new()`)
+is left for the next run, which can break an initializer's brace onto a line of its own. One shape the list fix and the
+whitespace pass each undo, so the build fails however often it runs: a call whose one argument is a `with` and its
+initializer, begun beside the parenthesis, which goes on a line of its own instead. A wrap that reads badly is reshaped
+by hand, and a line that fits is never wrapped again. It cannot wrap a string literal or a comment, and moving
+one in can take it past the limit: a long string is split by hand, the next part starting with `+`, and a comment at a
+word, as nothing checks either.
 
-It reads the code as the last build left it, generated bindings included, and builds nothing. `AgentTaskComplete.ps1`
-runs it first, so an agent's change is formatted before it is validated.
+It reads the code as the last build left it, generated bindings included, and builds only the repository's own
+analyzers, which `dotnet format` loads from their build. `AgentTaskComplete.ps1` runs it first, so an agent's change is
+formatted before it is validated.
 
 ## Validate.ps1
 
@@ -109,6 +117,20 @@ its templates, Visual Studio's New Project among them, and sets `MagicDir` to th
 user's environment variables; on Linux and macOS it prints the line for the shell's profile instead. An IDE or shell
 keeps the environment it started with, so it must be started again to see `MagicDir`. It says to build first when the
 folder holds no Magic yet.
+
+## Analyzers
+
+`Analyzers` and `Analyzers.CodeFixes` are the repository's own analyzers and their fixes: rules no maintained analyzer
+has, which every project in the solution runs as it builds, beside the packages `Directory.Packages.props` lists, so
+they fail the build like any other rule and `Format.ps1` applies their fixes. A rule belongs here only when neither
+those packages nor the SDK has it, as a maintained analyzer is one less to keep working; each rule's summary says what
+it asks and why, and `.editorconfig` turns it on with the rest.
+
+The analyzers reference the compiler alone, as the command-line compiler loads them where the IDE's workspace is
+missing, and the fixes, which need the workspace, are an assembly of their own. Both build against a compiler no newer
+than the SDK's and Visual Studio's, or neither could load them. A rule and its fix share how they read the code, so
+what is reported is what is fixed. Visual Studio keeps the analyzers it loaded as it opened the solution, so a change
+to one shows there once the solution is opened again.
 
 ## NativeBindingsGenerator
 

@@ -55,19 +55,15 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         Follow();
     }
 
-    public void Dispose()
-    {
-        Stop();
-    }
+    public void Dispose() => Stop();
 
     public void Update(in Frame frame)
     {
         _slowest.Current = frame.Index;
         Follow();
+
         if (_listener is null || Stopwatch.GetElapsedTime(_windowStart).TotalSeconds < _settings.IntervalSeconds)
-        {
             return;
-        }
 
         Report();
     }
@@ -113,6 +109,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     private bool HasSameMeters()
     {
         IReadOnlyList<string> meters = _settings.Meters;
+
         if (meters.Count != _meters.Count) return false;
 
         for (int i = 0; i < meters.Count; i++)
@@ -340,6 +337,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             if (instrument.IsObservable) return Summary.Latest;
 
             Type kind = instrument.GetType().GetGenericTypeDefinition();
+
             if (kind == typeof(Histogram<>)) return Summary.Distribution;
 
             return kind == typeof(Counter<>) || kind == typeof(UpDownCounter<>) ? Summary.Total : Summary.Latest;
@@ -357,6 +355,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
             Series added = new(tags.ToArray());
             _series.Add(added);
+
             return added;
         }
 
@@ -374,13 +373,17 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             switch (_summary)
             {
                 case Summary.Distribution:
-                    text.Append(CultureInfo.InvariantCulture, $"{series.Count} in {seconds:0.##} s, "
-                        + $"mean {FormatAmount(series.Sum / series.Count, unit)}, "
-                        + $"min {FormatAmount(series.Min, unit)}, max {FormatAmount(series.Max, unit)}");
+                    text.Append(
+                        CultureInfo.InvariantCulture,
+                        $"{series.Count} in {seconds:0.##} s, "
+                            + $"mean {FormatAmount(series.Sum / series.Count, unit)}, "
+                            + $"min {FormatAmount(series.Min, unit)}, max {FormatAmount(series.Max, unit)}");
                     break;
                 case Summary.Total:
-                    text.Append(CultureInfo.InvariantCulture, $"{FormatAmount(series.Sum, unit)} in {seconds:0.##} s, "
-                        + $"{FormatAmount(series.Sum / seconds, unit)}/s");
+                    text.Append(
+                        CultureInfo.InvariantCulture,
+                        $"{FormatAmount(series.Sum, unit)} in {seconds:0.##} s, "
+                            + $"{FormatAmount(series.Sum / seconds, unit)}/s");
                     break;
                 case Summary.Latest:
                 default:
@@ -514,14 +517,8 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             bool isRender = FindTag(tags, Metrics.ThreadNameTag) is "render";
             lock (_lock)
             {
-                if (isRender)
-                {
-                    _renderWork += seconds;
-                }
-                else
-                {
-                    _mainWork += seconds;
-                }
+                if (isRender) _renderWork += seconds;
+                else _mainWork += seconds;
             }
         }
 
@@ -565,8 +562,10 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
                 _slowestHooks.Sort(static (first, second) => second.Seconds.CompareTo(first.Seconds));
                 StringBuilder text = new();
-                text.Append(CultureInfo.InvariantCulture, $"Slowest frame f{_index} took "
-                    + $"{FormatAmount(_seconds, "s")}, {_seconds * _count / _sum:0.#}x the mean:");
+                text.Append(
+                    CultureInfo.InvariantCulture,
+                    $"Slowest frame f{_index} took "
+                        + $"{FormatAmount(_seconds, "s")}, {_seconds * _count / _sum:0.#}x the mean:");
                 double hooked = 0;
                 for (int i = 0; i < _slowestHooks.Count; i++)
                 {
@@ -584,14 +583,10 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
                 text.Append(" outside the main thread's hooks ").Append(FormatAmount(_seconds - hooked, "s"));
                 if (_slowestMainWork > 0)
-                {
                     text.Append(", of it work handed to the main thread ").Append(FormatAmount(_slowestMainWork, "s"));
-                }
 
                 if (_slowestRenderWork > 0)
-                {
                     text.Append("; work handed to the render thread ").Append(FormatAmount(_slowestRenderWork, "s"));
-                }
 
                 text.Append("; GC paused ").Append(FormatAmount(_paused.TotalSeconds, "s"));
                 Debugging.Info(text.ToString());

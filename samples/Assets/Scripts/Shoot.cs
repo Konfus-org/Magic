@@ -63,6 +63,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
     public void Update(in Frame frame)
     {
         bool isClick = input[Control.MouseLeft].WasPressed;
+
         if (!isClick && !input[Control.GamepadSouth].WasPressed) return;
 
         Transform camera = world.Get<Transform>(owner);

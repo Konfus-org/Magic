@@ -55,6 +55,7 @@ public sealed class Threads : IDisposable
     public bool IsCurrent(EngineThread thread)
     {
         int owner = Queue(thread).Owner;
+
         return owner == 0 || owner == Environment.CurrentManagedThreadId;
     }
 
@@ -65,11 +66,15 @@ public sealed class Threads : IDisposable
     /// </summary>
     public Task InvokeAsync(EngineThread thread, Action work, CancellationToken cancel = default)
     {
-        return InvokeAsync<object?>(thread, () =>
-        {
-            work();
-            return null;
-        }, cancel);
+        return InvokeAsync<object?>(
+            thread,
+            () =>
+            {
+                work();
+
+                return null;
+            },
+            cancel);
     }
 
     /// <inheritdoc cref="InvokeAsync(EngineThread, Action, CancellationToken)"/>
@@ -87,6 +92,7 @@ public sealed class Threads : IDisposable
             if (cancel.IsCancellationRequested)
             {
                 done.SetCanceled(cancel);
+
                 return;
             }
 
@@ -145,6 +151,7 @@ public sealed class Threads : IDisposable
             Name = name,
         };
         thread.Start();
+
         return ended.Task;
     }
 
@@ -162,10 +169,7 @@ public sealed class Threads : IDisposable
     /// <summary>
     /// Runs what the main thread was handed so far. On the main thread, at the start of each frame.
     /// </summary>
-    internal void RunMainWork()
-    {
-        _main.RunPending();
-    }
+    internal void RunMainWork() => _main.RunPending();
 
     /// <summary>
     /// Runs <paramref name="frames"/> on a new thread, the main thread, and the render thread's work on the calling
@@ -244,10 +248,7 @@ public sealed class Threads : IDisposable
             set => Volatile.Write(ref field, value);
         }
 
-        public void Dispose()
-        {
-            _arrived.Dispose();
-        }
+        public void Dispose() => _arrived.Dispose();
 
         /// <summary>
         /// Adds <paramref name="work"/>, timed unless <paramref name="isTimed"/> says not; false once the thread has
@@ -258,6 +259,7 @@ public sealed class Threads : IDisposable
             if (!_work.Writer.TryWrite(new Pending(work, isTimed))) return false;
 
             _arrived.Set();
+
             return true;
         }
 

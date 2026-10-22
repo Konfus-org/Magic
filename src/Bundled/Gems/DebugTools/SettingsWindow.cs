@@ -134,6 +134,7 @@ internal sealed class SettingsWindow : IDisposable
         }
 
         DescribeViewsAsync(assets, passes, stopping).FireAndForget();
+
         if (commands is null) return;
 
         _commands.Add(commands.Register(
@@ -155,15 +156,13 @@ internal sealed class SettingsWindow : IDisposable
             RunView));
     }
 
-    public void Dispose()
-    {
-        _commands.Dispose();
-    }
+    public void Dispose() => _commands.Dispose();
 
     internal void Update()
     {
         StepView();
         ShowView();
+
         if (!_window.Begin(out bool copy)) return;
 
         IReadOnlyList<Setting> all = _settings.All;
@@ -181,10 +180,7 @@ internal sealed class SettingsWindow : IDisposable
         else if (_filter.Length > 0)
         {
             DrawRows(all);
-            if (copy)
-            {
-                _window.Copy(GetLines(setting => Matches(setting, ToWords(setting.Name))));
-            }
+            if (copy) _window.Copy(GetLines(setting => Matches(setting, ToWords(setting.Name))));
         }
         else
         {
@@ -241,6 +237,7 @@ internal sealed class SettingsWindow : IDisposable
     {
         string? category = setting.Attributes.OfType<CategoryAttribute>().FirstOrDefault()?.Category;
         int slash = category?.IndexOf('/', StringComparison.Ordinal) ?? -1;
+
         if (category is null) return (setting.Owner, setting.Owner);
         if (slash < 0) return (category, setting.Owner);
 
@@ -298,10 +295,9 @@ internal sealed class SettingsWindow : IDisposable
         foreach (Row row in _rows)
         {
             Setting setting = all[row.Index];
+
             if (tab is null ? !Matches(setting, row.Label) : !string.Equals(row.Tab, tab, StringComparison.Ordinal))
-            {
                 continue;
-            }
 
             string under = tab is null ? row.Heading : row.Header;
             if (hasHeaders && !string.Equals(under, header, StringComparison.Ordinal))
@@ -397,6 +393,7 @@ internal sealed class SettingsWindow : IDisposable
     private void DrawPreset()
     {
         int index = Array.IndexOf(_presets, _settings.Preset);
+
         if (!_ui.Choice("Preset", ref index, _presetNames) || index < 0) return;
 
         ApplyAsync(_presets[index], _stopping).FireAndForget();
@@ -442,6 +439,7 @@ internal sealed class SettingsWindow : IDisposable
         if (_input is not { } input) return;
 
         bool isForward = input[Control.KeyF5].WasPressed;
+
         if (!isForward && !input[Control.KeyF6].WasPressed) return;
 
         int step = isForward ? 1 : -1;
@@ -540,6 +538,7 @@ internal sealed class SettingsWindow : IDisposable
         string draft = row.Draft ?? string.Empty;
         bool isEntered = _ui.Input(row.Id, ref draft);
         row.Draft = draft;
+
         if (!isEntered) return;
 
         Change(setting, setting.Type == typeof(string) ? draft : ParseValue(draft));
@@ -591,6 +590,7 @@ internal sealed class SettingsWindow : IDisposable
                 ", ",
                 _settings.All.Select(setting => setting.Owner).Distinct(StringComparer.Ordinal));
             Debugging.Warn($"get takes a gem with settings: {gems}.");
+
             return;
         }
 
@@ -605,6 +605,7 @@ internal sealed class SettingsWindow : IDisposable
         if (words.Length != 1)
         {
             Debugging.Warn("set takes one Gem.setting=value, the value JSON: set DebugTools.frameRate=false.");
+
             return;
         }
 
@@ -621,6 +622,7 @@ internal sealed class SettingsWindow : IDisposable
             int applied = Array.IndexOf(_presets, _settings.Preset);
             string current = applied < 0 ? "none" : _presetNames[applied];
             Debugging.Info($"Preset: {current}. Presets: {string.Join(", ", _presetNames)}.");
+
             return;
         }
 
@@ -631,6 +633,7 @@ internal sealed class SettingsWindow : IDisposable
         if (chosen < 0)
         {
             Debugging.Warn($"There is no preset {wanted}; there are {string.Join(", ", _presetNames)}.");
+
             return;
         }
 
@@ -647,6 +650,7 @@ internal sealed class SettingsWindow : IDisposable
         {
             Show(string.Empty);
             Debugging.Info("View: the frame as it is.");
+
             return;
         }
 
@@ -655,6 +659,7 @@ internal sealed class SettingsWindow : IDisposable
         if (view is null)
         {
             Debugging.Warn($"view takes one of the debug views: {string.Join(", ", _viewNames)}.");
+
             return;
         }
 

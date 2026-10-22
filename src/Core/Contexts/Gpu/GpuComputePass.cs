@@ -19,6 +19,7 @@ public readonly record struct GpuComputePass : IDisposable
     public GpuComputePass Pipeline(GpuPipeline pipeline)
     {
         _commands.Pipeline(pipeline);
+
         return this;
     }
 
@@ -29,6 +30,7 @@ public readonly record struct GpuComputePass : IDisposable
     public GpuComputePass Buffers(ReadOnlySpan<GpuBuffer> buffers)
     {
         _commands.Buffers(GpuStage.Compute, buffers);
+
         return this;
     }
 
@@ -39,6 +41,7 @@ public readonly record struct GpuComputePass : IDisposable
     public GpuComputePass RawTextures(ReadOnlySpan<GpuTexture> textures)
     {
         _commands.RawTextures(GpuStage.Compute, textures);
+
         return this;
     }
 
@@ -49,6 +52,7 @@ public readonly record struct GpuComputePass : IDisposable
     public GpuComputePass Textures(ReadOnlySpan<GpuSampledTexture> textures)
     {
         _commands.Textures(GpuStage.Compute, textures);
+
         return this;
     }
 
@@ -60,12 +64,14 @@ public readonly record struct GpuComputePass : IDisposable
         where T : unmanaged
     {
         _commands.Constants(GpuStage.Compute, in constants);
+
         return this;
     }
 
     public GpuComputePass Dispatch(uint groupsX, uint groupsY = 1, uint groupsZ = 1)
     {
         _commands.Dispatch(groupsX, groupsY, groupsZ);
+
         return this;
     }
 
@@ -75,6 +81,7 @@ public readonly record struct GpuComputePass : IDisposable
     public GpuComputePass DispatchFromBuffer(GpuBuffer arguments, uint offset = 0)
     {
         _commands.DispatchFromBuffer(arguments, offset);
+
         return this;
     }
 }

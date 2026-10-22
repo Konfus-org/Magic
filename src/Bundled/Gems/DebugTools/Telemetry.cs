@@ -118,6 +118,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             _listener = null;
             _lines.Clear();
             _tabs = [];
+
             return;
         }
 
@@ -147,6 +148,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         }
 
         double seconds = Stopwatch.GetElapsedTime(_secondStart).TotalSeconds;
+
         if (_listener is not { } listener || seconds < 1) return;
 
         _secondStart = Stopwatch.GetTimestamp();
@@ -260,6 +262,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
                 }
 
                 listener.EnableMeasurementEvents(instrument, measured);
+
                 return;
             }
 
@@ -281,6 +284,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             if (listed.Order > added.Order)
             {
                 listedLater = i;
+
                 continue;
             }
 
@@ -403,6 +407,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         {
             Type type = instrument.GetType();
             Type kind = type.IsGenericType ? type.GetGenericTypeDefinition() : type;
+
             if (kind == typeof(Histogram<>)) return Summary.Distribution;
 
             if (kind == typeof(Counter<>) || kind == typeof(UpDownCounter<>)) return Summary.Total;
@@ -430,6 +435,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
                 : name[(name.IndexOf('.', StringComparison.Ordinal) + 1)..];
             int dot = rest.IndexOf('.', StringComparison.Ordinal);
             string area = dot < 0 ? rest : rest[..dot];
+
             return (
                 area,
                 dot < 0 ? rest : rest[(dot + 1)..],
@@ -448,6 +454,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
             Series added = new(tags.ToArray());
             _series.Add(added);
+
             return added;
         }
 
@@ -483,6 +490,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
                     string.Empty),
                 Summary.Latest or _ => (FormatAmount(series.Last, unit), string.Empty, string.Empty),
             };
+
             return new TelemetryLine(Tab, _parts.Header, name.ToString(), value, rate, max, instrument.Description);
         }
     }

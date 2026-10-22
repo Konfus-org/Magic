@@ -93,6 +93,7 @@ public sealed class GpuCommands
         CollectionsMarshal.SetCount(_bytes, start + length);
         Encoding.UTF8.GetBytes(name, CollectionsMarshal.AsSpan(_bytes)[start..]);
         _commands.Add(new GpuCommand(GpuCommandType.BeginDebugGroup, RunStart: start, RunLength: length));
+
         return new GpuDebugGroup(this);
     }
 
@@ -117,6 +118,7 @@ public sealed class GpuCommands
             Clear: clear,
             RunStart: start,
             RunLength: colors.Length));
+
         return new GpuRenderPass(this);
     }
 
@@ -136,6 +138,7 @@ public sealed class GpuCommands
             RunLength: textures.Length,
             SecondRunStart: bufferStart,
             SecondRunLength: buffers.Length));
+
         return new GpuComputePass(this);
     }
 
@@ -149,6 +152,7 @@ public sealed class GpuCommands
         _regions.Add(from);
         _regions.Add(to);
         _commands.Add(new GpuCommand(GpuCommandType.CopyTexture, RunStart: start, RunLength: 2));
+
         return this;
     }
 
@@ -168,6 +172,7 @@ public sealed class GpuCommands
             Count: bytes,
             First: fromOffset,
             Offset: toOffset));
+
         return this;
     }
 
@@ -179,6 +184,7 @@ public sealed class GpuCommands
     public GpuCommands GenerateMipmaps(GpuTexture texture)
     {
         _commands.Add(new GpuCommand(GpuCommandType.GenerateMipmaps, Texture: texture));
+
         return this;
     }
 

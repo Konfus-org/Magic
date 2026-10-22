@@ -106,6 +106,7 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
             1 => 0.5698402910f,
             _ => 0.6180339887f + (sequence * 0.1234567f),
         };
+
         return (0.5f + (index * step)) % 1;
     }
 
@@ -117,6 +118,7 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
         float r = Math.Clamp(MathF.Abs((hue * 6) - 3) - 1, 0, 1);
         float g = Math.Clamp(2 - MathF.Abs((hue * 6) - 2), 0, 1);
         float b = Math.Clamp(2 - MathF.Abs((hue * 6) - 4), 0, 1);
+
         return new Color(r, g, b);
     }
 }

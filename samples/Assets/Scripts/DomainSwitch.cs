@@ -36,11 +36,13 @@ internal sealed class DomainSwitch(Entity owner, World world) : IBehavior
             && Vector3.DistanceSquared(player, world.Get<Transform>(owner).Position) < Radius * Radius;
         bool isStepping = isOn && !_wasOn;
         _wasOn = isOn;
+
         if (!isStepping || world.IsLoading) return;
 
         if (IsOpen())
         {
             world.Close(Domain);
+
             return;
         }
 

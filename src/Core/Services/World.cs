@@ -112,10 +112,7 @@ public sealed class World : IDisposable
     /// </summary>
     internal IReadOnlyList<IPreloader> Preloaders { get; set; } = [];
 
-    public void Dispose()
-    {
-        _domains?.Dispose();
-    }
+    public void Dispose() => _domains?.Dispose();
 
     /// <summary>
     /// Opens <paramref name="domain"/> as <paramref name="mode"/> says, telling <paramref name="progress"/> how far it
@@ -138,18 +135,12 @@ public sealed class World : IDisposable
     /// <summary>
     /// Closes <paramref name="domain"/>, destroying what it spawned; nothing happens when it is not open.
     /// </summary>
-    public void Close(Handle<Domain> domain)
-    {
-        _domains?.Close(domain);
-    }
+    public void Close(Handle<Domain> domain) => _domains?.Close(domain);
 
     /// <summary>
     /// Ends the game: the frames stop, and the gems end.
     /// </summary>
-    public void End(string reason)
-    {
-        _lifetime.Stop(reason);
-    }
+    public void End(string reason) => _lifetime.Stop(reason);
 
     /// <summary>
     /// The world as data (<see cref="WorldState"/>), to put back with <see cref="Restore"/>: the domains open, and
@@ -165,6 +156,7 @@ public sealed class World : IDisposable
         if (_ecs is null || _domains is null)
         {
             progress?.Report(1);
+
             return new WorldState { Domains = [], Entities = [] };
         }
 
@@ -200,6 +192,7 @@ public sealed class World : IDisposable
         if (_domains is null)
         {
             Debugging.Warn("The world is not restored: no gem the project lists provides the ECS.");
+
             return;
         }
 
@@ -249,10 +242,7 @@ public sealed class World : IDisposable
     /// Puts <paramref name="asset"/> in the world at <paramref name="at"/>, as it says
     /// (<see cref="ISpawnable.Spawn"/>), and hands back the entities made: the caller's to destroy.
     /// </summary>
-    public Entity[] Spawn(ISpawnable asset, Transform at)
-    {
-        return asset.Spawn(this, at);
-    }
+    public Entity[] Spawn(ISpawnable asset, Transform at) => asset.Spawn(this, at);
 
     /// <summary>
     /// <see cref="Spawn"/> of <paramref name="asset"/>, loaded first; why not when it does not load. Any thread.
@@ -261,6 +251,7 @@ public sealed class World : IDisposable
         where T : IAsset<T>, ISpawnable
     {
         Result<T> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
+
         return loaded.Ok
             ? Result.Success(await _threads.InvokeAsync(EngineThread.Main, () => Spawn(loaded.Value, at), cancel)
                 .ConfigureAwait(false))
@@ -274,218 +265,131 @@ public sealed class World : IDisposable
     /// runs it until the entity is destroyed. Without a gem that runs scripts, the entity goes without it, which is
     /// warned about once.
     /// </summary>
-    public void Attach(Entity entity, PrefabScript script)
-    {
-        _scripts?.Attach(entity, script);
-    }
+    public void Attach(Entity entity, PrefabScript script) => _scripts?.Attach(entity, script);
 
     /// <inheritdoc cref="IEcs.Create()"/>
-    public Entity Create()
-    {
-        return GetEcs().Create();
-    }
+    public Entity Create() => GetEcs().Create();
 
     /// <inheritdoc cref="IEcs.Create(ReadOnlySpan{IComponent})"/>
-    public Entity Create(ReadOnlySpan<IComponent> components)
-    {
-        return GetEcs().Create(components);
-    }
+    public Entity Create(ReadOnlySpan<IComponent> components) => GetEcs().Create(components);
 
     /// <inheritdoc cref="IEcs.Create{T1}(ReadOnlySpan{T1})"/>
     public ReadOnlySpan<Entity> Create<T1>(ReadOnlySpan<T1> first)
-        where T1 : unmanaged, IComponent
-    {
-        return GetEcs().Create(first);
-    }
+        where T1 : unmanaged, IComponent => GetEcs().Create(first);
 
     /// <inheritdoc cref="IEcs.Create{T1, T2}(ReadOnlySpan{T1}, ReadOnlySpan{T2})"/>
     public ReadOnlySpan<Entity> Create<T1, T2>(ReadOnlySpan<T1> first, ReadOnlySpan<T2> second)
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-    {
-        return GetEcs().Create(first, second);
-    }
+        where T2 : unmanaged, IComponent => GetEcs().Create(first, second);
 
     /// <inheritdoc cref="IEcs.Destroy"/>
-    public void Destroy(Entity entity)
-    {
-        GetEcs().Destroy(entity);
-    }
+    public void Destroy(Entity entity) => GetEcs().Destroy(entity);
 
     /// <inheritdoc cref="IEcs.IsAlive"/>
-    public bool IsAlive(Entity entity)
-    {
-        return GetEcs().IsAlive(entity);
-    }
+    public bool IsAlive(Entity entity) => GetEcs().IsAlive(entity);
 
     /// <inheritdoc cref="IEcs.Set(Entity, ReadOnlySpan{IComponent})"/>
-    public void Set(Entity entity, ReadOnlySpan<IComponent> components)
-    {
-        GetEcs().Set(entity, components);
-    }
+    public void Set(Entity entity, ReadOnlySpan<IComponent> components) => GetEcs().Set(entity, components);
 
     /// <inheritdoc cref="IEcs.GetComponents"/>
-    public IComponent[] GetComponents(Entity entity)
-    {
-        return GetEcs().GetComponents(entity);
-    }
+    public IComponent[] GetComponents(Entity entity) => GetEcs().GetComponents(entity);
 
     /// <inheritdoc cref="IEcs.Set{T}"/>
     public void Set<T>(Entity entity, in T component)
-        where T : unmanaged, IComponent
-    {
-        GetEcs().Set(entity, component);
-    }
+        where T : unmanaged, IComponent => GetEcs().Set(entity, component);
 
     /// <inheritdoc cref="IEcs.Get{T}"/>
     public ref T Get<T>(Entity entity)
-        where T : unmanaged, IComponent
-    {
-        return ref GetEcs().Get<T>(entity);
-    }
+        where T : unmanaged, IComponent => ref GetEcs().Get<T>(entity);
 
     /// <inheritdoc cref="IEcs.Has{T}"/>
     public bool Has<T>(Entity entity)
-        where T : unmanaged, IComponent
-    {
-        return GetEcs().Has<T>(entity);
-    }
+        where T : unmanaged, IComponent => GetEcs().Has<T>(entity);
 
     /// <inheritdoc cref="IEcs.Remove{T}"/>
     public void Remove<T>(Entity entity)
-        where T : unmanaged, IComponent
-    {
-        GetEcs().Remove<T>(entity);
-    }
+        where T : unmanaged, IComponent => GetEcs().Remove<T>(entity);
 
     /// <inheritdoc cref="IEcs.Query()"/>
-    public EcsQuery Query()
-    {
-        return GetEcs().Query();
-    }
+    public EcsQuery Query() => GetEcs().Query();
 
     /// <inheritdoc cref="IEcs.Query{T1}"/>
     public EcsQuery<T1> Query<T1>()
-        where T1 : unmanaged, IComponent
-    {
-        return GetEcs().Query<T1>();
-    }
+        where T1 : unmanaged, IComponent => GetEcs().Query<T1>();
 
     /// <inheritdoc cref="IEcs.Query{T1, T2}"/>
     public EcsQuery<T1, T2> Query<T1, T2>()
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-    {
-        return GetEcs().Query<T1, T2>();
-    }
+        where T2 : unmanaged, IComponent => GetEcs().Query<T1, T2>();
 
     /// <inheritdoc cref="IEcs.Query{T1, T2, T3}"/>
     public EcsQuery<T1, T2, T3> Query<T1, T2, T3>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-    {
-        return GetEcs().Query<T1, T2, T3>();
-    }
+        where T3 : unmanaged, IComponent => GetEcs().Query<T1, T2, T3>();
 
     /// <inheritdoc cref="IEcs.Query{T1, T2, T3, T4}"/>
     public EcsQuery<T1, T2, T3, T4> Query<T1, T2, T3, T4>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent
-    {
-        return GetEcs().Query<T1, T2, T3, T4>();
-    }
+        where T4 : unmanaged, IComponent => GetEcs().Query<T1, T2, T3, T4>();
 
     /// <inheritdoc cref="IEcs.Add(ISystem)"/>
-    public Subscription Add(ISystem system)
-    {
-        return GetEcs().Add(system);
-    }
+    public Subscription Add(ISystem system) => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add{T1}(ISystem{T1})"/>
     public Subscription Add<T1>(ISystem<T1> system)
-        where T1 : unmanaged, IComponent
-    {
-        return GetEcs().Add(system);
-    }
+        where T1 : unmanaged, IComponent => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add{T1, T2}(ISystem{T1, T2})"/>
     public Subscription Add<T1, T2>(ISystem<T1, T2> system)
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-    {
-        return GetEcs().Add(system);
-    }
+        where T2 : unmanaged, IComponent => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add{T1, T2, T3}(ISystem{T1, T2, T3})"/>
     public Subscription Add<T1, T2, T3>(ISystem<T1, T2, T3> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-    {
-        return GetEcs().Add(system);
-    }
+        where T3 : unmanaged, IComponent => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add{T1, T2, T3, T4}(ISystem{T1, T2, T3, T4})"/>
     public Subscription Add<T1, T2, T3, T4>(ISystem<T1, T2, T3, T4> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent
-    {
-        return GetEcs().Add(system);
-    }
+        where T4 : unmanaged, IComponent => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add(IParallelSystem)"/>
-    public Subscription Add(IParallelSystem system)
-    {
-        return GetEcs().Add(system);
-    }
+    public Subscription Add(IParallelSystem system) => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add{T1}(IParallelSystem{T1})"/>
     public Subscription Add<T1>(IParallelSystem<T1> system)
-        where T1 : unmanaged, IComponent
-    {
-        return GetEcs().Add(system);
-    }
+        where T1 : unmanaged, IComponent => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add{T1, T2}(IParallelSystem{T1, T2})"/>
     public Subscription Add<T1, T2>(IParallelSystem<T1, T2> system)
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-    {
-        return GetEcs().Add(system);
-    }
+        where T2 : unmanaged, IComponent => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add{T1, T2, T3}(IParallelSystem{T1, T2, T3})"/>
     public Subscription Add<T1, T2, T3>(IParallelSystem<T1, T2, T3> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-    {
-        return GetEcs().Add(system);
-    }
+        where T3 : unmanaged, IComponent => GetEcs().Add(system);
 
     /// <inheritdoc cref="IEcs.Add{T1, T2, T3, T4}(IParallelSystem{T1, T2, T3, T4})"/>
     public Subscription Add<T1, T2, T3, T4>(IParallelSystem<T1, T2, T3, T4> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent
-    {
-        return GetEcs().Add(system);
-    }
+        where T4 : unmanaged, IComponent => GetEcs().Add(system);
 
     /// <summary>
     /// Takes in what workers finished for the domains since the last frame. Core calls it on the main thread at the
     /// start of each frame.
     /// </summary>
-    internal void TakeArrived()
-    {
-        _domains?.TakeArrived();
-    }
+    internal void TakeArrived() => _domains?.TakeArrived();
 
     /// <summary>
     /// Opens the project's entry point in place of the world; the default domain when it does not open. Core calls it
@@ -498,11 +402,13 @@ public sealed class World : IDisposable
         {
             Debugging.Warn(
                 "No gem the project lists provides the ECS, so the world holds no entities, and no domain opens.");
+
             return;
         }
 
         Result<Domain> opened = await OpenAsync(_project.EntryPoint, DomainOpenMode.Replace, null, _lifetime.Stopping)
             .ConfigureAwait(false);
+
         if (opened.Ok) return;
 
         Debugging.Error($"The entry point does not open, so the default domain does. {opened.Error}");
@@ -568,6 +474,7 @@ public sealed class World : IDisposable
         }
 
         progress?.Report(1);
+
         return written;
     }
 
@@ -604,6 +511,7 @@ public sealed class World : IDisposable
     {
         Result<Type> type = _assemblies.Get<IComponent>(saved.Type);
         Result<object> read = type.Ok ? Json.Read(saved.Values, type.Value) : Result.Failure<object>(type.Error);
+
         if (read.Ok) return (IComponent)read.Value;
 
         if (!failed.Add(saved.Type)) return null;

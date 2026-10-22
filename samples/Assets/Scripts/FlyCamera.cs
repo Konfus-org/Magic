@@ -87,8 +87,5 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
     /// <summary>
     /// One control's value less another's: -1 to 1 for a pair of keys.
     /// </summary>
-    private float ReadAxis(Control positive, Control negative)
-    {
-        return _input[positive].Value - _input[negative].Value;
-    }
+    private float ReadAxis(Control positive, Control negative) => _input[positive].Value - _input[negative].Value;
 }

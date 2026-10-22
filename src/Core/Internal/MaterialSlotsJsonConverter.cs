@@ -21,18 +21,14 @@ internal sealed class MaterialSlotsJsonConverter : JsonConverter<MaterialSlots>
     public override MaterialSlots Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType != JsonTokenType.StartArray)
-        {
             throw new JsonException("Material slots are an array of handles.");
-        }
 
         MaterialSlots slots = default;
         int slot = 0;
         while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
         {
             if (slot == MaterialSlots.Capacity)
-            {
                 throw new JsonException($"Material slots are at most {MaterialSlots.Capacity} handles.");
-            }
 
             slots[slot++] = JsonSerializer.Deserialize<Handle<Material>>(ref reader, options);
         }

@@ -62,10 +62,12 @@ internal static class ClusterBuilder
     internal static ClusterHierarchy? Build(Model model, CancellationToken cancel)
     {
         float step = StepOf(model);
+
         if (step <= 0) return null;
 
         (Vertex[] vertices, int[] slots, List<uint[]> meshes) = Gather(model, step);
         List<Part> current = SplitFinest(vertices, slots, meshes, cancel);
+
         if (current.Count == 0) return null;
 
         // The border of a group that stops simplifying is frozen: its clusters are drawn as they are from then on, so
@@ -77,6 +79,7 @@ internal static class ClusterBuilder
         {
             cancel.ThrowIfCancellationRequested();
             all.AddRange(current);
+
             if (current.Count <= 1 || level + 1 >= MaxLevels) break;
 
             List<List<Part>> groups = Group(current, vertices, places);
@@ -90,14 +93,8 @@ internal static class ClusterBuilder
             current = [];
             for (int g = 0; g < made.Length; g++)
             {
-                if (made[g] is { } parts)
-                {
-                    current.AddRange(parts);
-                }
-                else
-                {
-                    Freeze(groups[g], places, locks, frozen);
-                }
+                if (made[g] is { } parts) current.AddRange(parts);
+                else Freeze(groups[g], places, locks, frozen);
             }
 
             if (current.Count == 0) break;
@@ -190,6 +187,7 @@ internal static class ClusterBuilder
         float SnapAxis(float value)
         {
             float snapped = (float)(Math.Round(value / (double)step) * step);
+
             return snapped == 0 ? 0 : snapped;
         }
     }
@@ -248,6 +246,7 @@ internal static class ClusterBuilder
             if (mesh.Length <= ChunkTriangles * 3)
             {
                 chunks.Add(mesh);
+
                 continue;
             }
 
@@ -272,11 +271,15 @@ internal static class ClusterBuilder
         }
 
         List<Part>[] made = new List<Part>[chunks.Count];
-        Parallel.For(0, chunks.Count, new ParallelOptions { CancellationToken = cancel }, c =>
-        {
-            (Vertex[] own, uint[] triangles, uint[] sources) = Localize(chunks[c], vertices);
-            made[c] = Split(own, triangles, sources, slots[chunks[c][0]], 0, 0, null);
-        });
+        Parallel.For(
+            0,
+            chunks.Count,
+            new ParallelOptions { CancellationToken = cancel },
+            c =>
+            {
+                (Vertex[] own, uint[] triangles, uint[] sources) = Localize(chunks[c], vertices);
+                made[c] = Split(own, triangles, sources, slots[chunks[c][0]], 0, 0, null);
+            });
         List<Part> parts = [];
         foreach (List<Part> chunk in made)
         {
@@ -669,12 +672,14 @@ internal static class ClusterBuilder
         Vector3 a = new(first.X, first.Y, first.Z);
         Vector3 b = new(second.X, second.Y, second.Z);
         float distance = Vector3.Distance(a, b);
+
         if (distance + second.W <= first.W) return first;
 
         if (distance + first.W <= second.W) return second;
 
         float radius = (distance + first.W + second.W) / 2;
         Vector3 centre = a + ((b - a) * ((radius - first.W) / distance));
+
         return new Vector4(centre, radius);
     }
 

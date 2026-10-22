@@ -24,10 +24,7 @@ internal sealed class Mover(Entity owner, World world) : IBehavior
 
     public float Seconds { get; set; } = 4;
 
-    public void Start()
-    {
-        _start = world.Get<Transform>(owner).Position;
-    }
+    public void Start() => _start = world.Get<Transform>(owner).Position;
 
     public void FixedUpdate(in Frame frame)
     {

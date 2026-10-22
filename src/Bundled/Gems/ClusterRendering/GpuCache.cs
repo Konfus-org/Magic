@@ -395,12 +395,15 @@ internal sealed class GpuCache
     /// </summary>
     internal int Record(Handle<Model> model)
     {
-        return _models.Record(model, () =>
-        {
-            ModelEntry entry = new(model, _modelRows.Allocate(1));
-            _modelTable.Set(entry.Row, default);
-            return entry;
-        }).Row;
+        return _models.Record(
+            model,
+            () =>
+            {
+                ModelEntry entry = new(model, _modelRows.Allocate(1));
+                _modelTable.Set(entry.Row, default);
+
+                return entry;
+            }).Row;
     }
 
     /// <summary>
@@ -423,12 +426,15 @@ internal sealed class GpuCache
     {
         if (material == Handle<Material>.None) material = _defaultMaterial;
 
-        return _materials.Record(material, () =>
-        {
-            MaterialEntry entry = new(_materialRows.Allocate(1));
-            _binTable.Set(entry.Row, 0);
-            return entry;
-        }).Row;
+        return _materials.Record(
+            material,
+            () =>
+            {
+                MaterialEntry entry = new(_materialRows.Allocate(1));
+                _binTable.Set(entry.Row, 0);
+
+                return entry;
+            }).Row;
     }
 
     /// <summary>
@@ -436,9 +442,7 @@ internal sealed class GpuCache
     /// <see cref="GetTexture(Handle{RenderTexture})"/> has it.
     /// </summary>
     internal void Record(Handle<RenderTexture> texture)
-    {
-        _renderTextures.Record(texture, static () => new RenderTextureEntry());
-    }
+        => _renderTextures.Record(texture, static () => new RenderTextureEntry());
 
     /// <summary>
     /// Lets one hold of <paramref name="model"/> go: once none holds it, <see cref="Purge"/> lets it leave.
@@ -504,26 +508,17 @@ internal sealed class GpuCache
     /// <summary>
     /// The model's file changed and it loaded again: it is packed again, and taken in in place of what it had.
     /// </summary>
-    internal void Reload(Model model)
-    {
-        _models.Reload(model);
-    }
+    internal void Reload(Model model) => _models.Reload(model);
 
     /// <summary>
     /// The texture's file changed and it loaded again: it is resampled into the layer it has.
     /// </summary>
-    internal void Reload(Texture texture)
-    {
-        _textures.Reload(texture);
-    }
+    internal void Reload(Texture texture) => _textures.Reload(texture);
 
     /// <summary>
     /// The material's file changed and it loaded again.
     /// </summary>
-    internal void Reload(Material material)
-    {
-        _materials.Reload(material);
-    }
+    internal void Reload(Material material) => _materials.Reload(material);
 
     /// <summary>
     /// A shader changed: a surface materials use is read again, no longer broken until it fails again, and its
@@ -532,6 +527,7 @@ internal sealed class GpuCache
     internal void Reload(Shader shader)
     {
         _failures.Repair(shader.Handle);
+
         if (!_surfaces.ContainsKey(shader.Handle)) return;
 
         _surfaces[shader.Handle] = new SurfaceEntry();
@@ -604,6 +600,7 @@ internal sealed class GpuCache
         MaterialEntry found = _materials.Entries.TryGetValue(held, out MaterialEntry? entry)
             ? entry
             : _materials.Entries[_defaultMaterial];
+
         return found.Row;
     }
 
@@ -614,6 +611,7 @@ internal sealed class GpuCache
     internal DrawnMaterial? Get(Handle<Material> material)
     {
         Handle<Material> held = material == Handle<Material>.None ? _defaultMaterial : material;
+
         return _materials.Entries.TryGetValue(held, out MaterialEntry? entry) ? entry.Drawn : null;
     }
 
@@ -623,6 +621,7 @@ internal sealed class GpuCache
     internal bool IsShown(Handle<Material> material)
     {
         Handle<Material> held = material == Handle<Material>.None ? _defaultMaterial : material;
+
         return _materials.Entries.TryGetValue(held, out MaterialEntry? entry)
             && (_binTable.Rows[entry.Row] & BinReady) != 0;
     }
@@ -639,6 +638,7 @@ internal sealed class GpuCache
     internal string? GetFailure(Handle<Material> material)
     {
         Handle<Material> held = material == Handle<Material>.None ? _defaultMaterial : material;
+
         return _materials.Entries.TryGetValue(held, out MaterialEntry? entry) ? entry.Failure : null;
     }
 
@@ -729,6 +729,7 @@ internal sealed class GpuCache
     {
         bool wasTransparent = before.Drawn.Type == MaterialType.Transparent;
         bool isTransparent = after.Drawn.Type == MaterialType.Transparent;
+
         return !string.Equals(before.Failure, after.Failure, StringComparison.Ordinal)
             || before.Drawn.IsSky != after.Drawn.IsSky
             || wasTransparent != isTransparent;
@@ -753,6 +754,7 @@ internal sealed class GpuCache
         }
 
         ulong value = hash.GetCurrentHashAsUInt64();
+
         return value == 0 ? 1 : value;
     }
 
@@ -775,6 +777,7 @@ internal sealed class GpuCache
     private void FollowSettings()
     {
         float clamped = Math.Clamp(_settings.Anisotropy, 1, 16);
+
         if (clamped == _anisotropy) return;
 
         _anisotropy = clamped;
@@ -820,6 +823,7 @@ internal sealed class GpuCache
         {
             entry.HasFailed = true;
             ChangedModels.Add(model);
+
             return;
         }
 
@@ -915,6 +919,7 @@ internal sealed class GpuCache
         WriteRow(entry);
         ChangedModels.Add(entry.Handle);
         MakeFieldAsync(entry, packed).FireAndForget();
+
         return (packed.Words.Length * sizeof(uint)) + (packed.Clusters.Length * GpuTable<GpuCluster>.RowBytes);
     }
 
@@ -950,20 +955,22 @@ internal sealed class GpuCache
     {
         if (entry.In is not { } packed) return;
 
-        _modelTable.Set(entry.Row, new GpuModel
-        {
-            Bounds = packed.Bounds,
-            ClusterReach = packed.ClusterReach,
-            FirstCluster = (uint)entry.FirstCluster,
-            ClusterCount = (uint)packed.Clusters.Length,
-            FirstLevel = (uint)entry.FirstLevel,
-            LevelCount = (uint)packed.Levels.Length,
-            FirstCard = (uint)entry.FirstCard,
-            CardCount = entry.AreCardsIn ? (uint)packed.Cards.Length : 0,
-            CardDistance = packed.CardDistance,
-            PositionStep = packed.Step,
-            Field = entry.Field,
-        });
+        _modelTable.Set(
+            entry.Row,
+            new GpuModel
+            {
+                Bounds = packed.Bounds,
+                ClusterReach = packed.ClusterReach,
+                FirstCluster = (uint)entry.FirstCluster,
+                ClusterCount = (uint)packed.Clusters.Length,
+                FirstLevel = (uint)entry.FirstLevel,
+                LevelCount = (uint)packed.Levels.Length,
+                FirstCard = (uint)entry.FirstCard,
+                CardCount = entry.AreCardsIn ? (uint)packed.Cards.Length : 0,
+                CardDistance = packed.CardDistance,
+                PositionStep = packed.Step,
+                Field = entry.Field,
+            });
     }
 
     /// <summary>
@@ -1070,9 +1077,9 @@ internal sealed class GpuCache
             if (entry.In is { } packed)
             {
                 _resources.Upload(
-                _geometry,
-                (uint)entry.FirstWord * sizeof(uint),
-                MemoryMarshal.AsBytes(packed.Words.AsSpan()));
+                    _geometry,
+                    (uint)entry.FirstWord * sizeof(uint),
+                    MemoryMarshal.AsBytes(packed.Words.AsSpan()));
             }
         }
     }
@@ -1081,10 +1088,7 @@ internal sealed class GpuCache
     /// Takes in what workers finished for textures since the last frame: each texture prepared is placed in its pool,
     /// and each that did not load is counted failed.
     /// </summary>
-    private void TakeTextures()
-    {
-        _textures.Take(TakeTexture);
-    }
+    private void TakeTextures() => _textures.Take(TakeTexture);
 
     /// <summary>
     /// The texture's levels at its pool's size, compressed, from the cache or made on a worker, for the render thread
@@ -1094,6 +1098,7 @@ internal sealed class GpuCache
     {
         int pool = GetPool(texture);
         byte[][] levels = await Task.Run(() => ReadOrCompressAsync(texture, pool), _stopping).ConfigureAwait(false);
+
         return new PreparedTexture(pool, levels);
     }
 
@@ -1105,6 +1110,7 @@ internal sealed class GpuCache
     {
         ulong version = _assets.GetVersion(texture.Handle);
         version = (version != 0 ? version : XxHash3.HashToUInt64(texture.Pixels.Span)) ^ (ulong)pool;
+
         if (await _caches.ReadAsync<CompressedTexture>(texture.Handle.Id, version, _stopping)
             .ConfigureAwait(false) is { Ok: true } cached)
         {
@@ -1115,6 +1121,7 @@ internal sealed class GpuCache
         byte[][] levels = GpuConverter.Convert(texture, size, GetMipCount(size));
         await _caches.WriteAsync(texture.Handle.Id, version, new CompressedTexture(levels), _stopping)
             .ConfigureAwait(false);
+
         return levels;
     }
 
@@ -1127,6 +1134,7 @@ internal sealed class GpuCache
         {
             entry.HasFailed = true;
             _changedTextures.Add(texture);
+
             return;
         }
 
@@ -1164,6 +1172,7 @@ internal sealed class GpuCache
         if (pool.HasGrown && layer < pool.Copied)
         {
             _heldBack.Add((texture, levels));
+
             return;
         }
 
@@ -1225,6 +1234,7 @@ internal sealed class GpuCache
                 || entry.Waiting is not { } waiting)
             {
                 _waiting.RemoveAt(i);
+
                 continue;
             }
 
@@ -1244,9 +1254,7 @@ internal sealed class GpuCache
         foreach ((Handle<Material> handle, MaterialEntry entry) in _materials.Entries)
         {
             if (entry.Asset is { } material && entry.Read != MaterialRead.Of(material))
-            {
                 TakeMaterial(handle, entry, material);
-            }
         }
     }
 
@@ -1263,6 +1271,7 @@ internal sealed class GpuCache
         {
             _surfaces[material.Shader] = new SurfaceEntry();
             ReadSurfaceAsync(material.Shader).FireAndForget();
+
             return;
         }
 
@@ -1298,8 +1307,8 @@ internal sealed class GpuCache
         if (!source.Ok)
         {
             FailureHandler.Report(
-            "A surface cannot be drawn, so its materials are drawn as the failure",
-            source.Error);
+                "A surface cannot be drawn, so its materials are drawn as the failure",
+                source.Error);
         }
 
         _surfacesRead.Writer.TryWrite((surface, source.Ok ? source.Value : null));
@@ -1327,6 +1336,7 @@ internal sealed class GpuCache
         if (entry.Asset is not { } material)
         {
             PackAsFailure(handle, entry, FailureType.Shader, "Material does not load", doubleSided: false);
+
             return;
         }
 
@@ -1335,6 +1345,7 @@ internal sealed class GpuCache
         if (surface.Source is not { } source || _failures.IsBroken(material.Shader))
         {
             PackAsFailure(handle, entry, FailureType.Shader, "Surface does not compile", material.DoubleSided);
+
             return;
         }
 
@@ -1342,6 +1353,7 @@ internal sealed class GpuCache
         if (hasFailedTexture)
         {
             PackAsFailure(handle, entry, FailureType.Texture, "Texture does not load", material.DoubleSided);
+
             return;
         }
 
@@ -1404,6 +1416,7 @@ internal sealed class GpuCache
     {
         entry.Broken = type;
         Handle<Material> failure = _failures.GetMaterial(type);
+
         if (handle == failure || !_materials.Entries.TryGetValue(failure, out MaterialEntry? failed)
             || failed.Packed is not { } packed)
         {
@@ -1428,6 +1441,7 @@ internal sealed class GpuCache
         if (_graph.IsDrawable(packed.Drawn))
         {
             Show(handle, entry, packed);
+
             return;
         }
 
@@ -1450,14 +1464,8 @@ internal sealed class GpuCache
         _materialTable.Set(entry.Row, packed.Record);
         _materialGiTable.Set(entry.Row, packed.Gi);
         WriteBins(packed.Drawn);
-        if (shown is null || IsLookChanged(shown, packed))
-        {
-            ChangedMaterials.Add(handle);
-        }
-        else if (IsRecoloured(shown, packed))
-        {
-            RecolouredMaterials.Add(handle);
-        }
+        if (shown is null || IsLookChanged(shown, packed)) ChangedMaterials.Add(handle);
+        else if (IsRecoloured(shown, packed)) RecolouredMaterials.Add(handle);
 
         if (!_failures.IsMaterial(handle)) return;
 
@@ -1481,6 +1489,7 @@ internal sealed class GpuCache
         if (drawn.IsSky)
         {
             _binTable.Set(drawn.Row, BinReady);
+
             return;
         }
 
@@ -1490,6 +1499,7 @@ internal sealed class GpuCache
         {
             TransparentSurfaces.Add(surface);
             _binTable.Set(drawn.Row, flags | BinTransparent);
+
             return;
         }
 
@@ -1507,11 +1517,13 @@ internal sealed class GpuCache
             {
                 Debugging.Warn(
                     $"A frame has more than {most} kinds of surface, so the rest are drawn with the last kind.");
+
                 return order.Count - 1;
             }
 
             bins[key] = order.Count;
             order.Add(key);
+
             return order.Count - 1;
         }
     }
@@ -1537,6 +1549,7 @@ internal sealed class GpuCache
     {
         ulong version = _assets.GetVersion(model);
         version = version != 0 ? version : HashOf(meshes);
+
         if (await _caches.ReadAsync<ModelField>(model.Id, version, _stopping)
             .ConfigureAwait(false) is { Ok: true } cached)
         {
@@ -1556,6 +1569,7 @@ internal sealed class GpuCache
     private uint PlaceField(Handle<Model> model, ModelField? field)
     {
         FreeField(model);
+
         if (field is null || !_freeFieldSlots.TryPop(out int slot)) return 0;
 
         _fieldSlots[model] = slot;
@@ -1566,6 +1580,7 @@ internal sealed class GpuCache
             new GpuTextureRegion(_fieldAtlas, 0, 0, x, y, z, FieldResolution, FieldResolution, FieldResolution),
             MemoryMarshal.AsBytes(field.Distances.AsSpan()));
         _fieldTable.Set(slot, new GpuMeshField { Min = field.Min, Size = field.Size, Corner = new Vector3(x, y, z) });
+
         return (uint)slot;
     }
 
@@ -1614,6 +1629,7 @@ internal sealed class GpuCache
         internal static MaterialRead Of(Material material)
         {
             long version = material.Params.Version;
+
             return new MaterialRead(version, material.Type, material.DoubleSided);
         }
     }
@@ -1661,11 +1677,13 @@ internal sealed class GpuCache
         internal TEntry Record(Handle<T> handle, Func<TEntry> make)
         {
             _holds[handle] = _holds.GetValueOrDefault(handle) + 1;
+
             if (Entries.TryGetValue(handle, out TEntry? entry)) return entry;
 
             entry = make();
             Entries[handle] = entry;
             LoadAsync(handle, entry).FireAndForget();
+
             return entry;
         }
 
@@ -1679,6 +1697,7 @@ internal sealed class GpuCache
             if (count > 1)
             {
                 _holds[handle] = count - 1;
+
                 return;
             }
 
@@ -1735,6 +1754,7 @@ internal sealed class GpuCache
             if (loaded.Ok)
             {
                 await PrepareAsync(handle, entry, loaded.Value).ConfigureAwait(false);
+
                 return;
             }
 
@@ -1841,10 +1861,7 @@ internal sealed class GpuCache
             return (int)_used++;
         }
 
-        internal void Free(uint layer)
-        {
-            _free.Push(layer);
-        }
+        internal void Free(uint layer) => _free.Push(layer);
 
         /// <summary>
         /// Doubles the pool's layers, under its entry in place of the array it had, which the manager releases once the
@@ -2003,6 +2020,7 @@ internal sealed record ModelField(Vector3 Min, Vector3 Size, Half[] Distances)
         Vector3 size = new(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
         Half[] distances = new Half[GpuCache.FieldResolution * GpuCache.FieldResolution * GpuCache.FieldResolution];
         bytes.ReadExactly(MemoryMarshal.AsBytes(distances.AsSpan()));
+
         return Result.Success(new ModelField(min, size, distances));
     }
 

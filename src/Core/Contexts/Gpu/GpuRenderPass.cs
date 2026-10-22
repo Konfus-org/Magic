@@ -21,6 +21,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass Viewport(Rectangle area)
     {
         _commands.Viewport(area);
+
         return this;
     }
 
@@ -30,6 +31,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass Scissor(Rectangle area)
     {
         _commands.Scissor(area);
+
         return this;
     }
 
@@ -39,6 +41,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass Pipeline(GpuPipeline pipeline)
     {
         _commands.Pipeline(pipeline);
+
         return this;
     }
 
@@ -49,6 +52,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass VertexBuffers(ReadOnlySpan<GpuBuffer> buffers)
     {
         _commands.VertexBuffers(buffers);
+
         return this;
     }
 
@@ -58,6 +62,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass IndexBuffer(GpuBuffer buffer, GpuIndexSize size)
     {
         _commands.IndexBuffer(buffer, size);
+
         return this;
     }
 
@@ -68,6 +73,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass Buffers(GpuStage stage, ReadOnlySpan<GpuBuffer> buffers)
     {
         _commands.Buffers(stage, buffers);
+
         return this;
     }
 
@@ -78,6 +84,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass RawTextures(GpuStage stage, ReadOnlySpan<GpuTexture> textures)
     {
         _commands.RawTextures(stage, textures);
+
         return this;
     }
 
@@ -88,6 +95,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass Textures(GpuStage stage, ReadOnlySpan<GpuSampledTexture> textures)
     {
         _commands.Textures(stage, textures);
+
         return this;
     }
 
@@ -99,12 +107,14 @@ public readonly record struct GpuRenderPass : IDisposable
         where T : unmanaged
     {
         _commands.Constants(stage, in constants);
+
         return this;
     }
 
     public GpuRenderPass Draw(uint vertices, uint instances = 1, uint firstVertex = 0, uint firstInstance = 0)
     {
         _commands.Draw(vertices, instances, firstVertex, firstInstance);
+
         return this;
     }
 
@@ -116,6 +126,7 @@ public readonly record struct GpuRenderPass : IDisposable
         uint firstInstance = 0)
     {
         _commands.DrawIndexed(indices, firstIndex, vertexOffset, instances, firstInstance);
+
         return this;
     }
 
@@ -126,6 +137,7 @@ public readonly record struct GpuRenderPass : IDisposable
     public GpuRenderPass DrawIndexedFromBuffer(GpuBuffer arguments, uint offset, uint count)
     {
         _commands.DrawIndexedFromBuffer(arguments, offset, count);
+
         return this;
     }
 }

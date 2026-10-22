@@ -29,10 +29,7 @@ internal sealed class Flicker(Entity owner, World world) : IBehavior
     /// </summary>
     public float Depth { get; set; } = 0.35f;
 
-    public void Start()
-    {
-        _home = world.Get<Transform>(owner).Position;
-    }
+    public void Start() => _home = world.Get<Transform>(owner).Position;
 
     public void Update(in Frame frame)
     {

@@ -25,6 +25,7 @@ internal sealed class RangeAllocator
         {
             int start = _free.Keys[i];
             int length = _free.Values[i];
+
             if (length < count) continue;
 
             _free.RemoveAt(i);
@@ -35,6 +36,7 @@ internal sealed class RangeAllocator
 
         int end = End;
         End += count;
+
         return end;
     }
 
@@ -67,6 +69,7 @@ internal sealed class RangeAllocator
         if (start + count == End)
         {
             End = start;
+
             return;
         }
 

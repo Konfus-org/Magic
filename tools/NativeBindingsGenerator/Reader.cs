@@ -84,6 +84,7 @@ internal sealed class Reader
     {
         Reader reader = new(options, target);
         reader.Read();
+
         return reader;
     }
 
@@ -139,9 +140,7 @@ internal sealed class Reader
     private static string MakeConstantText(string type, string name, string expression)
     {
         if (!string.Equals(type, "string", StringComparison.Ordinal))
-        {
             return $"public const {type} {name} = {expression};\n";
-        }
 
         return expression.StartsWith('"')
             ? $"public static byte* {name} => (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference({expression}));\n"
@@ -272,6 +271,7 @@ internal sealed class Reader
         string Write(string value)
             => $"{backing} = ({backingType})(({backing} & ~({mask} << {bitsOffset})) | "
                 + $"((({backingType}){value} & {mask}) << {bitsOffset}))";
+
         if (string.Equals(storage, "bool", StringComparison.Ordinal))
         {
             return $"public bool {name}\n{{\n    get => ({read}) != 0;\n    set => {backing} = "
@@ -281,10 +281,9 @@ internal sealed class Reader
 
         bool signed = storage is "int" or "short" or "sbyte";
         string get = signed ? signedRead : read;
+
         if (string.Equals(storage, type, StringComparison.Ordinal))
-        {
             return $"public {type} {name}\n{{\n    get => ({type})({get});\n    set => {Write("value")};\n}}\n";
-        }
 
         return $"public {type} {name}\n{{\n    get => ({type})({storage})({get});\n    set => "
             + $"{Write($"({storage})value")};\n}}\n";
@@ -390,6 +389,7 @@ internal sealed class Reader
     private static string MakeSummary(CppComment? comment)
     {
         string? raw = comment?.ToString();
+
         if (string.IsNullOrWhiteSpace(raw)) return "";
 
         StringBuilder text = new("/// <summary>\n");
@@ -400,6 +400,7 @@ internal sealed class Reader
             if (line.Length == 0)
             {
                 blank = text.Length > "/// <summary>\n".Length;
+
                 continue;
             }
 
@@ -517,10 +518,7 @@ internal sealed class Reader
 
         foreach (CppTypedef typedef in compilation.Typedefs)
         {
-            if (IsOurs(typedef))
-            {
-                Attempt(typedef, () => Alias(typedef));
-            }
+            if (IsOurs(typedef)) Attempt(typedef, () => Alias(typedef));
 
             CppType element = Unqualify(typedef.ElementType);
             if (element is CppPointerType pointer
@@ -557,35 +555,25 @@ internal sealed class Reader
 
         foreach (CppEnum cppEnum in compilation.Enums)
         {
-            if (IsOurs(cppEnum))
-            {
-                Attempt(cppEnum, () => Enum(cppEnum));
-            }
+            if (IsOurs(cppEnum)) Attempt(cppEnum, () => Enum(cppEnum));
         }
 
         HashSet<string> declared = new(StringComparer.Ordinal);
         foreach (CppClass cppClass in compilation.Classes)
         {
             if (IsOurs(cppClass) && GetName(cppClass) is { } name && declared.Add(name))
-            {
                 Attempt(cppClass, () => Struct(cppClass, name));
-            }
         }
 
         foreach ((CppClass opaque, CppTypedef handle) in _opaqueNames)
         {
             if ((IsOurs(opaque) || IsOurs(handle)) && !declared.Contains(opaque.Name) && declared.Add(opaque.Name))
-            {
                 Attempt(opaque, () => Opaque(handle.Name, opaque));
-            }
         }
 
         foreach (CppFunction function in compilation.Functions)
         {
-            if (IsOurs(function))
-            {
-                Attempt(function, () => Function(function));
-            }
+            if (IsOurs(function)) Attempt(function, () => Function(function));
         }
 
         ResolveClashes();
@@ -608,12 +596,14 @@ internal sealed class Reader
     private bool IsOurs(CppElement element)
     {
         string? file = element.Span.Start.File;
+
         if (string.IsNullOrEmpty(file)) return false;
 
         StringComparison comparison = OperatingSystem.IsWindows()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
         string full = Path.GetFullPath(file);
+
         return full.StartsWith(_options.Root, comparison) || full.StartsWith(ShimFolder, comparison);
     }
 
@@ -625,6 +615,7 @@ internal sealed class Reader
         if (value is null)
         {
             _skipped.Add(new($"macro {macro.Name} ({reason})", DescribeWhere(macro)));
+
             return;
         }
 
@@ -651,10 +642,12 @@ internal sealed class Reader
         if (_flagEnums.TryGetValue(typedef.Name, out string? flagEnum))
         {
             _names.Add((typedef.Name, Qualify(flagEnum)));
+
             return;
         }
 
         CppType element = Unqualify(typedef.ElementType);
+
         if (element is CppClass or CppEnum || (element is CppPointerType pointer
             && Unqualify(pointer.ElementType) is CppClass { IsDefinition: false }))
         {
@@ -688,6 +681,7 @@ internal sealed class Reader
         try
         {
             string type = TranslateType(typedef, false);
+
             return type.Contains('*', StringComparison.Ordinal) || type.Contains('.', StringComparison.Ordinal)
                 ? null
                 : type;
@@ -751,6 +745,7 @@ internal sealed class Reader
         if (GetName(cppEnum) is not { } cName)
         {
             Constants(cppEnum);
+
             return;
         }
 
@@ -830,6 +825,7 @@ internal sealed class Reader
         if (!cppClass.IsDefinition)
         {
             Opaque(_opaqueNames.TryGetValue(cppClass, out CppTypedef? handle) ? handle.Name : cName, cppClass);
+
             return;
         }
 
@@ -850,6 +846,7 @@ internal sealed class Reader
 
         _declarations.Add(new(DeclarationKind.Type, cName, owner, false, name, Unshadow(text, owner, name)));
         _names.Add((cName, Qualify(cName)));
+
         if (cppClass.Name.Length == 0 || string.Equals(cppClass.Name, cName, StringComparison.Ordinal)) return;
 
         _names.Add((cppClass.Name, Qualify(cName)));
@@ -877,6 +874,7 @@ internal sealed class Reader
         }
 
         result.Length--;
+
         return result.ToString();
     }
 
@@ -909,6 +907,7 @@ internal sealed class Reader
             {
                 string bitType = TranslateType(Unqualify(field.Type), false);
                 string storage = GetStorage(bitType, Unqualify(field.Type));
+
                 if (bits is not null && GetSize(bits.Value.Type) != GetSize(storage))
                 {
                     // MSVC starts a new unit when a bit field's type changes size; GCC packs on. No one layout serves.
@@ -929,9 +928,15 @@ internal sealed class Reader
                 string bitName = Names.ToPascal(field.Name);
                 _names.Add(($"{cName}.{field.Name}", bitName));
                 text.Append('\n').Append(Indent(MakeSummary(field.Comment)))
-                    .Append(Indent(
-                    MakeBitField(storage, bitType, bits.Value.Name, bitName, bits.Value.Offset, field.BitFieldWidth)));
+                    .Append(Indent(MakeBitField(
+                        storage,
+                        bitType,
+                        bits.Value.Name,
+                        bitName,
+                        bits.Value.Offset,
+                        field.BitFieldWidth)));
                 bits = (storage, bits.Value.Offset + field.BitFieldWidth, bits.Value.Name);
+
                 continue;
             }
 
@@ -949,9 +954,7 @@ internal sealed class Reader
             if (fieldName.Length == 0) throw new UnsupportedException($"{cName} has an unnamed member");
 
             if (string.Equals(fieldName, name, StringComparison.Ordinal) || !fieldNames.Add(fieldName))
-            {
                 fieldName += "_";
-            }
 
             // The nested type is named from the field as it ends up, so a struct's second unnamed union, Union_, is a
             // Union_Type.
@@ -981,6 +984,7 @@ internal sealed class Reader
         }
 
         text.Append("}\n");
+
         return text.ToString();
     }
 
@@ -990,6 +994,7 @@ internal sealed class Reader
         if (type is not CppArrayType array)
         {
             string fieldType = TranslateType(type, false);
+
             return $"public {fieldType} {fieldName};\n";
         }
 
@@ -998,9 +1003,7 @@ internal sealed class Reader
         while (Unqualify(element) is CppArrayType dimension)
         {
             if (dimension.Size <= 0)
-            {
                 throw new UnsupportedException($"{structName}.{field.Name} is an array without a size");
-            }
 
             count *= dimension.Size;
             element = dimension.ElementType;
@@ -1008,6 +1011,7 @@ internal sealed class Reader
 
         string elementType = TranslateType(Unqualify(element), false);
         string size = count.ToString(CultureInfo.InvariantCulture);
+
         if (_fixedBufferTypes.Contains(elementType)) return $"public fixed {elementType} {fieldName}[{size}];\n";
 
         return $"[InlineArray({size})]\npublic partial struct {fieldName}Array\n{{\n    private {elementType} "
@@ -1029,12 +1033,14 @@ internal sealed class Reader
         if (function.Flags.HasFlag(CppFunctionFlags.Variadic))
         {
             _skipped.Add(new($"variadic function {function.Name}", DescribeWhere(function)));
+
             return;
         }
 
         if (function.Flags.HasFlag(CppFunctionFlags.Inline) || function.StorageQualifier == CppStorageQualifier.Static)
         {
             _skipped.Add(new($"inline function {function.Name}", DescribeWhere(function)));
+
             return;
         }
 
@@ -1043,6 +1049,7 @@ internal sealed class Reader
             if (IsVaList(parameter.Type))
             {
                 _skipped.Add(new($"function {function.Name} (takes a va_list)", DescribeWhere(function)));
+
                 return;
             }
         }
@@ -1109,14 +1116,14 @@ internal sealed class Reader
                 return TranslateType(qualified.ElementType, voidAllowed);
             case CppPrimitiveType primitive:
                 string text = TranslatePrimitive(primitive);
+
                 if (string.Equals(text, "void", StringComparison.Ordinal) && !voidAllowed)
-                {
                     throw new UnsupportedException("void where a value is needed");
-                }
 
                 return text;
             case CppPointerType pointer:
                 CppType element = Unqualify(pointer.ElementType);
+
                 return FindFunctionType(element) is { } functionType
                     ? MakeFunctionPointer(functionType)
                     : TranslateType(element, true) + "*";
@@ -1128,6 +1135,7 @@ internal sealed class Reader
                 if (_signedSizeTypedefs.Contains(typedef.Name)) return "nint";
 
                 CppType target = Unqualify(typedef.ElementType);
+
                 if (target is CppPointerType handle
                     && Unqualify(handle.ElementType) is CppClass { IsDefinition: false } opaque)
                 {
@@ -1138,9 +1146,7 @@ internal sealed class Reader
                 return TranslateType(target, voidAllowed);
             case CppClass cppClass:
                 if (!cppClass.IsDefinition && _opaqueNames.TryGetValue(cppClass, out CppTypedef? handleTypedef))
-                {
                     return Qualify(handleTypedef.Name);
-                }
 
                 return Qualify(
                     GetName(cppClass) ?? throw new UnsupportedException("a struct with neither a name nor a typedef"));
@@ -1165,6 +1171,7 @@ internal sealed class Reader
         }
 
         text.Append(TranslateType(Unqualify(functionType.ReturnType), true)).Append('>');
+
         return text.ToString();
     }
 
@@ -1217,6 +1224,7 @@ internal sealed class Reader
     {
         (string owner, string rest) = Names.Split(cName, _options.Prefixes);
         string name = Names.ToPascal(rest);
+
         return owner.Length == 0 ? name : GetContainer(owner) + "." + name;
     }
 

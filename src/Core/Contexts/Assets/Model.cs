@@ -36,10 +36,7 @@ public sealed class Model : IAsset<Model>, ISpawnable
     /// <summary>
     /// Makes one entity at <paramref name="at"/> that draws it.
     /// </summary>
-    public Entity[] Spawn(World world, Transform at)
-    {
-        return [world.Create([at, new Renderer { Model = Handle }])];
-    }
+    public Entity[] Spawn(World world, Transform at) => [world.Create([at, new Renderer { Model = Handle }])];
 }
 
 /// <summary>

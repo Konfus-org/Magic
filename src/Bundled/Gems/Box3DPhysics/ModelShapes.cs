@@ -62,6 +62,7 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
             if (_disposed)
             {
                 fitted.Shape.Free();
+
                 continue;
             }
 
@@ -185,6 +186,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
             def.VertexCount = vertexCount;
             def.TriangleCount = indexCount / 3;
             def.IdentifyEdges = true;
+
             return new ModelShape(min, max) { Mesh = B3.CreateMesh(&def, null, 0) };
         }
     }

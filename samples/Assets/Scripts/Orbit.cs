@@ -23,10 +23,7 @@ internal sealed class Orbit(Entity owner, World world) : IBehavior
 
     public float DegreesPerSecond { get; set; } = 30;
 
-    public void Start()
-    {
-        _middle = world.Get<Transform>(owner).Position;
-    }
+    public void Start() => _middle = world.Get<Transform>(owner).Position;
 
     public void Update(in Frame frame)
     {

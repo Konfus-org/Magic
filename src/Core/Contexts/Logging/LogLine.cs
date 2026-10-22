@@ -36,6 +36,7 @@ public readonly record struct LogLine(
     {
         string frame = Frame is { } index ? index.ToString(CultureInfo.InvariantCulture) : "-";
         string file = Path.GetFileName(File);
+
         return string.Create(
             CultureInfo.InvariantCulture,
             $"{Time:HH:mm:ss.fff} {Level,-8} f{frame} t{ThreadId} {Message} ({file}:{Line} {Member})");

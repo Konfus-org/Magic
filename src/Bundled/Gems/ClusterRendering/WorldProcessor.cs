@@ -146,10 +146,7 @@ internal sealed class WorldProcessor : IDisposable
     /// Hands the copy just finished to Render, and takes the one Render is done with to write next. Sync, when neither
     /// thread is touching either.
     /// </summary>
-    internal void Swap()
-    {
-        (Front, _back) = (_back, Front);
-    }
+    internal void Swap() => (Front, _back) = (_back, Front);
 
     private static Vector3 GetIntensity(Color color, float intensity)
         => new Vector3(color.R, color.G, color.B) * intensity;
@@ -162,6 +159,7 @@ internal sealed class WorldProcessor : IDisposable
         _back.Clear();
         _instances.Begin(_back.Instances);
         _lights.Begin(_back.Lights);
+
         return _back;
     }
 
@@ -212,13 +210,12 @@ internal sealed class WorldProcessor : IDisposable
         private static KeyLightCopy? PickKeyLight(Renderables next)
         {
             if (next.Sun is { } sun && IsUp(sun.Direction))
-            {
                 return new KeyLightCopy(sun.Direction, sun.Illuminance, sun.AngularRadius, IsSkyLight: true);
-            }
 
             if (next.Moon is { } moon && IsUp(moon.Direction))
             {
                 float share = next.Sun is { } lighting ? GetMoonPhaseShare(lighting.Direction, moon.Direction) : 1;
+
                 return new KeyLightCopy(moon.Direction, moon.Illuminance * share, moon.AngularRadius, IsSkyLight: true);
             }
 
@@ -228,6 +225,7 @@ internal sealed class WorldProcessor : IDisposable
             {
                 Vector3 illuminance = next.Directional[i].Illuminance;
                 float lux = illuminance.X + illuminance.Y + illuminance.Z;
+
                 if (lux <= most) continue;
 
                 brightest = i;
@@ -238,6 +236,7 @@ internal sealed class WorldProcessor : IDisposable
 
             DirectionalCopy light = next.Directional[brightest];
             next.Directional.RemoveAt(brightest);
+
             return new KeyLightCopy(light.Direction, light.Illuminance, 0, IsSkyLight: false);
         }
 
@@ -256,6 +255,7 @@ internal sealed class WorldProcessor : IDisposable
         {
             float cosAngle = Math.Clamp(Vector3.Dot(-sunDirection, moonDirection), -1, 1);
             float angle = MathF.Acos(cosAngle);
+
             return Math.Clamp((MathF.Sin(angle) + ((MathF.PI - angle) * cosAngle)) / MathF.PI, 0, 1);
         }
 
@@ -290,8 +290,10 @@ internal sealed class WorldProcessor : IDisposable
                     }
                     else if (light.Mode == DirectionalLightMode.Sun)
                     {
-                        WarnOnce(ref _hasWarnedOfSuns, "The world has more than one directional light in sun mode; "
-                            + "its sky has one sun, the first, and the others light nothing.");
+                        WarnOnce(
+                            ref _hasWarnedOfSuns,
+                            "The world has more than one directional light in sun mode; "
+                                + "its sky has one sun, the first, and the others light nothing.");
                     }
                     else if (light.Mode == DirectionalLightMode.Moon && next.Moon is null)
                     {
@@ -299,8 +301,10 @@ internal sealed class WorldProcessor : IDisposable
                     }
                     else if (light.Mode == DirectionalLightMode.Moon)
                     {
-                        WarnOnce(ref _hasWarnedOfMoons, "The world has more than one directional light in moon mode; "
-                            + "its sky has one moon, the first, and the others light nothing.");
+                        WarnOnce(
+                            ref _hasWarnedOfMoons,
+                            "The world has more than one directional light in moon mode; "
+                                + "its sky has one moon, the first, and the others light nothing.");
                     }
                     else if (next.Directional.Count < DirectionalLights.Capacity)
                     {
@@ -308,9 +312,11 @@ internal sealed class WorldProcessor : IDisposable
                     }
                     else
                     {
-                        WarnOnce(ref _hasWarnedOfLights, $"The world has more than {DirectionalLights.Capacity} "
-                            + "directional lights besides its sun and moon; a frame lights by that many, and the "
-                            + "others light nothing.");
+                        WarnOnce(
+                            ref _hasWarnedOfLights,
+                            $"The world has more than {DirectionalLights.Capacity} "
+                                + "directional lights besides its sun and moon; a frame lights by that many, and the "
+                                + "others light nothing.");
                     }
                 }
             }
@@ -562,9 +568,7 @@ internal sealed class Delta<T>
     /// slot once (<see cref="Reserve"/>).
     /// </summary>
     internal void Add(int slot, in T value)
-    {
-        _changed[Interlocked.Increment(ref _changedCount) - 1] = new Change(slot, value);
-    }
+        => _changed[Interlocked.Increment(ref _changedCount) - 1] = new Change(slot, value);
 
     /// <summary>
     /// Makes room for <paramref name="slots"/> changes, and says there are that many slots.
@@ -622,6 +626,7 @@ internal sealed class Slots<T>(Delta<T> into)
         if (entity.Id >= _mirrors.Length)
         {
             _outgrew.Enqueue((entity, value));
+
             return;
         }
 

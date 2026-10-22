@@ -1,0 +1,19 @@
+<!-- The fixes for the repository's own analyzers (tools/Analyzers), which tools/Format.ps1 applies and the IDE offers.
+     They need the workspace, which the command-line compiler does not load, so they are an assembly of their own. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Magic.Tools.Analyzers.CodeFixes</RootNamespace>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsRoslynComponent>true</IsRoslynComponent>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Analyzers/Analyzers.csproj" />
+  </ItemGroup>
+</Project>

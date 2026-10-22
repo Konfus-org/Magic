@@ -79,13 +79,18 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         _window = window;
         _commands.Add("help", new Command("Lists every command and what it does.", _ => Help()));
         _commands.Add("quit", new Command("Stops the run.", _ => lifetime.Stop("quit typed in the terminal")));
-        _commands.Add("wait", new Command(
-            "Holds the lines after it back for that many frames, or until the world has loaded: wait 100, wait loaded.",
-            Wait));
-        _commands.Add("open", new Command(
-            "Opens a domain in place of the world, by its asset path, and holds the lines after it back until it is "
-                + "there: open Domains/Hub/Hub.domain.",
-            Open));
+        _commands.Add(
+            "wait",
+            new Command(
+                "Holds the lines after it back for that many frames, or until the world has loaded: "
+                    + "wait 100, wait loaded.",
+                Wait));
+        _commands.Add(
+            "open",
+            new Command(
+                "Opens a domain in place of the world, by its asset path, and holds the lines after it back until it "
+                    + "is there: open Domains/Hub/Hub.domain.",
+                Open));
         _commands.Add(
             "screenshot",
             new Command("Saves the window's next image as Screenshots/<time>.png beside Magic.", _ => Screenshot()));
@@ -101,9 +106,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     public Subscription Register(string name, string description, Action<ReadOnlySpan<string>> run)
     {
         if (!_commands.TryAdd(name, new Command(description, run)))
-        {
             throw new ArgumentException($"There is already a command named {name}.", nameof(name));
-        }
 
         return new Subscription(() => _commands.Remove(name));
     }
@@ -111,11 +114,13 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     public void Run(string line)
     {
         string[] words = Split(line);
+
         if (words.Length == 0) return;
 
         if (!_commands.TryGetValue(words[0], out Command? command))
         {
             Debugging.Warn($"There is no command {words[0]}; help lists them.");
+
             return;
         }
 
@@ -127,6 +132,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         if (_waiting > 0)
         {
             _waiting--;
+
             return;
         }
 
@@ -170,17 +176,12 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         {
             if (character == '"')
             {
-                if (!hasAny)
-                {
-                    isWrapped = true;
-                }
-                else if (!isWrapped || !isQuoted)
-                {
-                    word.Append(character);
-                }
+                if (!hasAny) isWrapped = true;
+                else if (!isWrapped || !isQuoted) word.Append(character);
 
                 isQuoted = !isQuoted;
                 hasAny = true;
+
                 continue;
             }
 
@@ -191,13 +192,11 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
                 word.Clear();
                 hasAny = false;
                 isWrapped = false;
+
                 continue;
             }
 
-            if (!isQuoted)
-            {
-                depth = Math.Max(0, depth + character switch { '{' or '[' => 1, '}' or ']' => -1, _ => 0 });
-            }
+            if (!isQuoted) depth = Math.Max(0, depth + character switch { '{' or '[' => 1, '}' or ']' => -1, _ => 0 });
 
             word.Append(character);
             hasAny = true;
@@ -247,6 +246,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         if (words.Length == 1 && string.Equals(words[0], "loaded", StringComparison.OrdinalIgnoreCase))
         {
             _isWaitingForWorld = true;
+
             return;
         }
 
@@ -254,6 +254,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
             || !int.TryParse(words[0], NumberStyles.None, CultureInfo.InvariantCulture, out int frames))
         {
             Debugging.Warn("wait takes a number of frames, or loaded: wait 100, wait loaded");
+
             return;
         }
 
@@ -270,6 +271,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         if (words.Length != 1)
         {
             Debugging.Warn("open takes a domain's asset path: open Domains/Hub/Hub.domain");
+
             return;
         }
 
@@ -277,6 +279,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         if (domain == Handle<Domain>.None)
         {
             Debugging.Error($"There is no domain at {words[0]}.");
+
             return;
         }
 
@@ -299,6 +302,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         if (_gpu is not { } gpu || _window is not { } window)
         {
             Debugging.Warn("There is no window to take a screenshot of.");
+
             return;
         }
 
@@ -316,18 +320,13 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         if (!image.Ok)
         {
             Debugging.Error($"No screenshot was taken: {image.Error}");
+
             return;
         }
 
         Result written = await _files.WriteAsync(path, Png.Encode(image.Value), _stopping).ConfigureAwait(false);
-        if (written.Ok)
-        {
-            Debugging.Info($"Screenshot: {path}");
-        }
-        else
-        {
-            Debugging.Error($"The screenshot was not saved: {written.Error}");
-        }
+        if (written.Ok) Debugging.Info($"Screenshot: {path}");
+        else Debugging.Error($"The screenshot was not saved: {written.Error}");
     }
 
     /// <summary>

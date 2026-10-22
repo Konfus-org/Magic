@@ -55,6 +55,7 @@ internal sealed unsafe class TextArena : IDisposable
         int written = Encoding.UTF8.GetBytes(text, new Span<byte>(at, most - 1));
         at[written] = 0;
         _used += written + 1;
+
         return at;
     }
 

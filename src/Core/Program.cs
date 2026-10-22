@@ -45,6 +45,7 @@ internal static class Program
                     || limit >= TimeSpan.MaxValue.TotalSeconds)
                 {
                     result.AddError("--seconds takes a number of seconds above 0.");
+
                     return null;
                 }
 
@@ -101,6 +102,7 @@ internal static class Program
 
         // Help, version and bad arguments are answered here and exit.
         ParseResult parsed = command.Parse(rawArgs);
+
         if (parsed.Action is not null) return await parsed.InvokeAsync().ConfigureAwait(false);
 
         Debugging.IsVerbose = parsed.GetValue(verbose);

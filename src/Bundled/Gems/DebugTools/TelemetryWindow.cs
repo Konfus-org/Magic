@@ -27,15 +27,13 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
     private readonly HashSet<string> _folded = new(StringComparer.Ordinal);
     private int _tab;
 
-    public void Dispose()
-    {
-        _telemetry.Dispose();
-    }
+    public void Dispose() => _telemetry.Dispose();
 
     internal void Update()
     {
         bool isOpen = window.Begin(out bool copy);
         _telemetry.Listen(isOpen);
+
         if (!isOpen) return;
 
         _telemetry.Refresh();
@@ -66,6 +64,7 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
         for (int i = 0; i < lines.Count; i++)
         {
             TelemetryLine line = lines[i];
+
             if (!string.Equals(line.Tab, tab, StringComparison.Ordinal)) continue;
 
             if (!string.Equals(line.Header, header, StringComparison.Ordinal))

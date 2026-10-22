@@ -138,9 +138,7 @@ internal sealed class Output : IDisposable
     /// Clears a target to black, as a window nothing is drawn into this frame is.
     /// </summary>
     internal void Clear(GpuTexture target)
-    {
-        _gpu.Commands.RenderPass([new GpuTextureLevel(target)], GpuContents.Clear).Dispose();
-    }
+        => _gpu.Commands.RenderPass([new GpuTextureLevel(target)], GpuContents.Clear).Dispose();
 
     /// <summary>
     /// Copies <paramref name="image"/>, the finished image of the view shown in the window, into <see cref="Kept"/>,
@@ -207,9 +205,7 @@ internal sealed class Output : IDisposable
     private GpuPipeline GetPipeline(GpuFormat format, bool isNothing)
     {
         if (_pipelines.TryGetValue((format, isNothing), out GpuPipeline pipeline) || _shaders is not { } shaders)
-        {
             return pipeline;
-        }
 
         Result<GpuShader> vertex = shaders.Vertex;
         Result<GpuShader> fragment = isNothing ? shaders.Nothing : shaders.Fragment;
@@ -223,12 +219,11 @@ internal sealed class Output : IDisposable
             })
             : Result.Failure<GpuPipeline>(vertex.Ok ? fragment.Error : vertex.Error);
         if (!made.Ok)
-        {
             Debugging.Error($"Views are not shown: {(isNothing ? Nothing : Fragment)} does not compile: {made.Error}");
-        }
 
         pipeline = made.Ok ? made.Value : GpuPipeline.None;
         _pipelines[(format, isNothing)] = pipeline;
+
         return pipeline;
     }
 

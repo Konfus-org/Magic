@@ -86,6 +86,7 @@ internal sealed class Reports
                 Kind = kind,
                 Order = _reported++,
             };
+
             return isNew;
         }
     }
@@ -105,6 +106,7 @@ internal sealed class Reports
                 {
                     // Removing while enumerating a Dictionary is allowed.
                     _reports.Remove((text, position));
+
                     continue;
                 }
 

@@ -45,6 +45,7 @@ internal static unsafe class Materials
         material.Transmission[0] = passLow;
         material.Transmission[1] = passMid;
         material.Transmission[2] = passHigh;
+
         return material;
     }
 }

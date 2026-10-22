@@ -90,10 +90,7 @@ internal sealed class SoundWorld : IDisposable
     /// <summary>
     /// <paramref name="position"/> in Steam Audio's space: the world mirrored along Z.
     /// </summary>
-    internal static IPL.Vector3 ToVector(Vector3 position)
-    {
-        return new IPL.Vector3 { X = position.X, Y = position.Y, Z = -position.Z };
-    }
+    internal static IPL.Vector3 ToVector(Vector3 position) => new() { X = position.X, Y = position.Y, Z = -position.Z };
 
     /// <summary>
     /// <paramref name="transform"/> in Steam Audio's space, as it takes a matrix: mirrored along Z on both sides, so it
@@ -145,17 +142,20 @@ internal sealed class SoundWorld : IDisposable
                 && held.Material == solid.Material)
             {
                 held.Seen = _update;
+
                 if (held.Transform == solid.Transform) continue;
 
                 IPL.InstancedMeshUpdateTransform(held.Mesh, _scene, ToMatrix(solid.Transform));
                 held.Transform = solid.Transform;
                 isChanged = true;
+
                 continue;
             }
 
             if (Stopwatch.GetElapsedTime(start).TotalSeconds > seconds)
             {
                 IsWhole = false;
+
                 continue;
             }
 
@@ -174,6 +174,7 @@ internal sealed class SoundWorld : IDisposable
         }
 
         _gone.Clear();
+
         return isChanged;
     }
 
@@ -192,6 +193,7 @@ internal sealed class SoundWorld : IDisposable
         if (!_subScenes.TryGetValue((solid.Model, solid.Material), out SubScene? subScene))
         {
             subScene = SubScene.Make(_context, _settings, solid.Mesh, solid.Material);
+
             if (subScene is null) return false;
 
             _subScenes.Add((solid.Model, solid.Material), subScene);
@@ -202,18 +204,22 @@ internal sealed class SoundWorld : IDisposable
         if (IPL.InstancedMeshCreate(_scene, &settings, &instance) != IPL.Error.Success)
         {
             Debugging.Error($"Entity {solid.Entity.Id} is not heard against: Steam Audio could not place its model.");
+
             return false;
         }
 
         IPL.InstancedMeshAdd(instance, _scene);
-        _instances.Add(solid.Entity, new Instance
-        {
-            Mesh = instance,
-            Model = solid.Model,
-            Material = solid.Material,
-            Transform = solid.Transform,
-            Seen = _update
-        });
+        _instances.Add(
+            solid.Entity,
+            new Instance
+            {
+                Mesh = instance,
+                Model = solid.Model,
+                Material = solid.Material,
+                Transform = solid.Transform,
+                Seen = _update
+            });
+
         return true;
     }
 
@@ -224,6 +230,7 @@ internal sealed class SoundWorld : IDisposable
         IPL.InstancedMesh* mesh = instance.Mesh;
         IPL.InstancedMeshRemove(mesh, _scene);
         IPL.InstancedMeshRelease(&mesh);
+
         return true;
     }
 
@@ -266,6 +273,7 @@ internal sealed class SoundWorld : IDisposable
             if (IPL.SceneCreate(context, &settings, &scene) != IPL.Error.Success)
             {
                 Debugging.Error("Steam Audio could not make a scene for a model, so it is not heard against.");
+
                 return null;
             }
 
@@ -294,11 +302,13 @@ internal sealed class SoundWorld : IDisposable
                 IPL.SceneRelease(&scene);
                 Debugging.Error($"Steam Audio could not take a model's {mesh.Triangles.Length} triangles ({error}), "
                     + "so it is not heard against.");
+
                 return null;
             }
 
             IPL.StaticMeshAdd(staticMesh, scene);
             IPL.SceneCommit(scene);
+
             return new SubScene { Scene = scene, _mesh = staticMesh };
         }
 

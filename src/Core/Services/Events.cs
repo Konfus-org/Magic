@@ -53,6 +53,7 @@ public sealed class Events
     {
         Mailbox<T> mailbox = (Mailbox<T>)_mailboxes.GetOrAdd(typeof(T), static _ => new Mailbox<T>());
         mailbox.Add(watcher);
+
         return new Subscription(() => mailbox.Remove(watcher));
     }
 
@@ -107,9 +108,7 @@ public sealed class Events
             {
                 int index = Array.IndexOf(_watchers, watcher);
                 if (index >= 0)
-                {
                     Volatile.Write(ref _watchers, [.. _watchers.AsSpan(0, index), .. _watchers.AsSpan(index + 1)]);
-                }
             }
         }
 

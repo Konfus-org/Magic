@@ -35,10 +35,7 @@ public sealed class TagTests
     }
 
     [Fact]
-    public void An_empty_name_is_refused()
-    {
-        Assert.Throws<ArgumentException>(() => Tag.Of(string.Empty));
-    }
+    public void An_empty_name_is_refused() => Assert.Throws<ArgumentException>(() => Tag.Of(string.Empty));
 
     [Fact]
     public void A_tag_made_from_a_name_is_valid()

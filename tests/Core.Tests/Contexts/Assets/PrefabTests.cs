@@ -97,15 +97,13 @@ public sealed class PrefabTests
         Assert.Null(place);
     }
 
-    private static Transform At(float x, float y, float z)
-    {
-        return new Transform { Position = new Vector3(x, y, z) };
-    }
+    private static Transform At(float x, float y, float z) => new() { Position = new Vector3(x, y, z) };
 
     private static Tags Tagged(Tag tag)
     {
         Tags tags = default;
         tags.Add(tag);
+
         return tags;
     }
 }

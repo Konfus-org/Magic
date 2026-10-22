@@ -29,6 +29,7 @@ public static class VectorExtensions
             float tanX = tanY * area.Width / area.Height;
             float x = (((screen.X - area.X) / area.Width * 2) - 1) * tanX;
             float y = (1 - ((screen.Y - area.Y) / area.Height * 2)) * tanY;
+
             return transform.Position + Vector3.Transform(new Vector3(x, y, 1) * depth, transform.Rotation);
         }
     }

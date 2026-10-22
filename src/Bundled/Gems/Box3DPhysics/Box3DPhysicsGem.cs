@@ -212,9 +212,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         _shapes.TakeArrived();
         CheckPreloads();
         if (_settings.Gravity != -B3.WorldGetGravity(_box3d).Y)
-        {
             B3.WorldSetGravity(_box3d, new B3.Vec3 { Y = -_settings.Gravity });
-        }
 
         _cameras.Clear();
         foreach ((_, _, Span<Transform> transforms, Span<Tags> tags) in _world.Query<Camera, Transform, Tags>())
@@ -232,9 +230,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             for (int i = 0; i < entities.Length; i++)
             {
                 if (CanBeNear(transforms[i], farthest))
-                {
                     Follow(entities[i], ref transforms[i], ref physics[i], frame.DeltaSeconds);
-                }
             }
         }
 
@@ -249,14 +245,13 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         }
 
         if (_gone.Count > 0)
-        {
             Debugging.Verbose($"{_gone.Count} bodies dropped: their entities gone, or out of range of the player.");
-        }
 
         _gone.Clear();
         if (!_isHeld)
         {
             Kick(frame.DeltaSeconds);
+
             return;
         }
 
@@ -283,9 +278,11 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         WaitForStep();
         B3.RayResult result = B3.WorldCastRayClosest(_box3d, ToVec(from), ToVec(to - from), FilterOf(motions));
+
         if (!result.Hit) return null;
 
         Entity entity = _bodies[GetSlot(result.ShapeId)].Entity;
+
         return new RayHit(
             entity,
             FromVec(result.Point),
@@ -330,15 +327,18 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         HashSet<Handle<Model>> models = GetModels(prefabs);
         Preload preload = new(models, progress, cancel);
-        await _threads.InvokeAsync(EngineThread.Main, () =>
-        {
-            foreach (Handle<Model> model in models)
+        await _threads.InvokeAsync(
+            EngineThread.Main,
+            () =>
             {
-                _shapes.Get(model);
-            }
+                foreach (Handle<Model> model in models)
+                {
+                    _shapes.Get(model);
+                }
 
-            _preloads.Add(preload);
-        }, cancel).ConfigureAwait(false);
+                _preloads.Add(preload);
+            },
+            cancel).ConfigureAwait(false);
         await preload.Done.Task.ConfigureAwait(false);
 
         return Subscription.None;
@@ -355,28 +355,18 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         TaskCompletionSource readied = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _readied?.TrySetCanceled(CancellationToken.None);
         _readied = readied;
+
         return readied.Task.WaitAsync(cancel);
     }
 
-    internal static B3.Vec3 ToVec(Vector3 vector)
-    {
-        return new() { X = vector.X, Y = vector.Y, Z = vector.Z };
-    }
+    internal static B3.Vec3 ToVec(Vector3 vector) => new() { X = vector.X, Y = vector.Y, Z = vector.Z };
 
-    private static Vector3 FromVec(B3.Vec3 vector)
-    {
-        return new(vector.X, vector.Y, vector.Z);
-    }
+    private static Vector3 FromVec(B3.Vec3 vector) => new(vector.X, vector.Y, vector.Z);
 
     private static B3.Quat ToQuat(Quaternion rotation)
-    {
-        return new() { V = new B3.Vec3 { X = rotation.X, Y = rotation.Y, Z = rotation.Z }, S = rotation.W };
-    }
+        => new() { V = new B3.Vec3 { X = rotation.X, Y = rotation.Y, Z = rotation.Z }, S = rotation.W };
 
-    private static Quaternion FromQuat(B3.Quat rotation)
-    {
-        return new(rotation.V.X, rotation.V.Y, rotation.V.Z, rotation.S);
-    }
+    private static Quaternion FromQuat(B3.Quat rotation) => new(rotation.V.X, rotation.V.Y, rotation.V.Z, rotation.S);
 
     /// <summary>
     /// Whether the components changed in a way that shapes the body, which is then made again.
@@ -463,9 +453,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         foreach (Contact held in contacts)
         {
             if (held.Phase is ContactPhase.None or ContactPhase.Exit || GetPhase(now, held.Other) != ContactPhase.None)
-            {
                 continue;
-            }
 
             if (written == Contacts.Capacity) break;
 
@@ -489,10 +477,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// <summary>
     /// The body slot a shape belongs to, kept one up in its body's user data so that 0 is no body.
     /// </summary>
-    private static unsafe int GetSlot(B3.ShapeId shape)
-    {
-        return (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
-    }
+    private static unsafe int GetSlot(B3.ShapeId shape) => (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
 
     /// <summary>
     /// A query's filter: Box3D's default, accepting the shapes whose category, their body's motion, is among
@@ -502,6 +487,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         B3.QueryFilter filter = B3.DefaultQueryFilter();
         filter.MaskBits = (ulong)motions;
+
         return filter;
     }
 
@@ -534,6 +520,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             _ => (0.6f, 0f),
         };
         material.Restitution = Math.Clamp(bounce, 0, 1);
+
         return material;
     }
 
@@ -571,9 +558,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     private static B3.Vec3 Scale(B3.Vec3 vector, float scale)
-    {
-        return new() { X = vector.X * scale, Y = vector.Y * scale, Z = vector.Z * scale };
-    }
+        => new() { X = vector.X * scale, Y = vector.Y * scale, Z = vector.Z * scale };
 
     /// <summary>
     /// A failed Box3D assert is a bug, in the gem or in Box3D, that leaves the world in a state it cannot go on from:
@@ -583,14 +568,12 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     private static unsafe int OnAssert(byte* condition, byte* file, int line)
     {
         Debugging.Critical($"Box3D failed an assert, {CString.Read(condition)}, at {CString.Read(file)}:{line}.");
+
         return 1;
     }
 
     [UnmanagedCallersOnly]
-    private static unsafe void OnLog(byte* message)
-    {
-        Debugging.Warn($"Box3D: {CString.Read(message)}");
-    }
+    private static unsafe void OnLog(byte* message) => Debugging.Warn($"Box3D: {CString.Read(message)}");
 
     /// <summary>
     /// Takes one shape an overlap found into the query's entities, and asks for more while there is room. A byte
@@ -601,6 +584,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         OverlapQuery* query = (OverlapQuery*)context;
         query->Found[query->Count++] = query->Bodies[GetSlot(shape)].Entity;
+
         return query->Count < query->Capacity ? (byte)1 : (byte)0;
     }
 
@@ -613,11 +597,13 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         Handle<Model> model = GetModel(entity);
         ModelShape? shape = _shapes.Get(model);
         bool hasBody = _slots.TryGetValue(entity, out int slot);
+
         if (!IsNear(transform, shape, hasBody ? _settings.Range * Leave : _settings.Range)) return;
 
         if (!hasBody)
         {
             Create(entity, model, shape, transform, physics);
+
             return;
         }
 
@@ -627,6 +613,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         {
             Destroy(entity);
             Create(entity, model, shape, transform, physics);
+
             return;
         }
 
@@ -836,6 +823,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             // and before the world is destroyed. Were it to leave on the token, a kick between the run starting to end
             // and Stop() would reset the step event with no thread left to set it, and WaitForStep would wait forever.
             _kick.Wait(CancellationToken.None);
+
             if (_isEnding) return;
 
             bool timed = _stepDuration.Enabled;
@@ -911,6 +899,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         foreach (ref readonly Moved moved in CollectionsMarshal.AsSpan(_moves))
         {
             ref Body body = ref bodies[moved.Slot];
+
             if (!_world.IsAlive(body.Entity)) continue;
 
             ref Transform transform = ref _world.Get<Transform>(body.Entity);
@@ -982,6 +971,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         if (points == 0) return default;
 
         normal = Vector3.Normalize(normal);
+
         return new Contact
         {
             Other = _bodies[other].Entity,
@@ -993,9 +983,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     private Handle<Model> GetModel(Entity entity)
-    {
-        return _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
-    }
+        => _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
 
     /// <summary>
     /// Checks each domain whose models are being fitted: one whose open was cancelled is let go, and whoever waited is
@@ -1011,6 +999,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             {
                 _preloads.RemoveAt(i);
                 preload.Done.TrySetCanceled(preload.Cancel);
+
                 continue;
             }
 

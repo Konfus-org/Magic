@@ -246,6 +246,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         if (run.Headless)
         {
             Debugging.Info("Sound is not played headless: every sound goes on in silence.");
+
             return;
         }
 
@@ -253,6 +254,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         {
             Debugging.Warn("Sound is not played, as SDL could not start this machine's audio: "
                 + $"{CString.Read(SDL.GetError())}. Every sound goes on in silence.");
+
             return;
         }
 
@@ -327,6 +329,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 + $"{CString.Read(SDL.GetError())}. Every sound goes on in silence.");
             _self.Free();
             sounds.Dispose();
+
             return;
         }
 
@@ -417,6 +420,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         FollowSounds(_isHeld ? 0 : frame.DeltaSeconds);
+
         if (_sounds is null) return;
 
         if (!_isHeld) Assign();
@@ -444,6 +448,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         Volatile.Write(ref _isNewest, 1);
         _wake.Set();
         _heard.Record(_holds.Length - _free.Count);
+
         if (_readied is null || Volatile.Read(ref _placed) < _readyAt) return;
 
         _readied.TrySetResult();
@@ -487,15 +492,18 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         Preload preload = new(audios, models, progress, cancel);
-        await _threads.InvokeAsync(EngineThread.Main, () =>
-        {
-            foreach (Handle<Audio> audio in audios)
+        await _threads.InvokeAsync(
+            EngineThread.Main,
+            () =>
             {
-                GetAudio(audio);
-            }
+                foreach (Handle<Audio> audio in audios)
+                {
+                    GetAudio(audio);
+                }
 
-            _preloads.Add(preload);
-        }, cancel).ConfigureAwait(false);
+                _preloads.Add(preload);
+            },
+            cancel).ConfigureAwait(false);
         await preload.Done.Task.ConfigureAwait(false);
 
         return Subscription.None;
@@ -510,6 +518,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     public Task ReadyAsync(CancellationToken cancel)
     {
         _isHeld = true;
+
         if (_sounds is null) return Task.CompletedTask;
 
         _sinceGathered = GatherSeconds;
@@ -517,6 +526,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         TaskCompletionSource readied = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _readied?.TrySetCanceled(CancellationToken.None);
         _readied = readied;
+
         return readied.Task.WaitAsync(cancel);
     }
 
@@ -527,6 +537,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     {
         bool isAEverywhere = a.Sound.Space == SoundSpace.Everywhere;
         bool isBEverywhere = b.Sound.Space == SoundSpace.Everywhere;
+
         if (isAEverywhere != isBEverywhere) return isAEverywhere ? -1 : 1;
 
         return a.Distance.CompareTo(b.Distance);
@@ -574,11 +585,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     private static void RunSilently(Voice voice, ref Sound sound, Audio audio, float seconds)
     {
         voice.Time += seconds * Math.Clamp(sound.Pitch, 0.5f, 2);
+
         if (voice.Time < audio.Seconds) return;
 
         if (sound.Loop && audio.Seconds > 0)
         {
             voice.Time %= audio.Seconds;
+
             return;
         }
 
@@ -642,6 +655,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             if (arrived.Loaded.Ok)
             {
                 _audios[arrived.Handle] = arrived.Loaded.Value;
+
                 continue;
             }
 
@@ -664,6 +678,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             {
                 _preloads.RemoveAt(i);
                 preload.Done.TrySetCanceled(preload.Cancel);
+
                 continue;
             }
 
@@ -720,6 +735,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 for (int i = 0; i < cameras.Length; i++)
                 {
                     if (listener is null || cameras[i].Target.IsWindow) listener = transforms[i];
+
                     if (cameras[i].Target.IsWindow) break;
                 }
             }
@@ -741,6 +757,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         for (int i = 0; i < _holds.Length; i++)
         {
             Hold hold = _holds[i];
+
             if (hold.Stream == 0) continue;
 
             Voices.Slot slot = sounds.Slots[i];
@@ -749,7 +766,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 if (hold.IsFreeing && !hold.IsFreeTold)
                 {
                     hold.IsFreeTold = sounds.TryTell(
-                    new VoiceCommand { Action = VoiceAction.Free, Slot = i, Generation = hold.Generation });
+                        new VoiceCommand { Action = VoiceAction.Free, Slot = i, Generation = hold.Generation });
                 }
 
                 continue;
@@ -918,6 +935,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             _audios[voice.Sound.Audio] = null;
             _failed.Add(voice.Sound.Audio);
             voice.Audio = null;
+
             return;
         }
 
@@ -940,6 +958,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         {
             pin.Dispose();
             SDL.DestroyAudioStream(stream);
+
             return;
         }
 
@@ -981,6 +1000,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         for (int i = 0; i < _holds.Length; i++)
         {
             filling.Slots[i] = default;
+
             if (_holds[i].Voice is not { } voice) continue;
 
             Voices.Slot slot = sounds.Slots[i];
@@ -1109,6 +1129,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             {
                 _wake.Wait(CancellationToken.None);
                 _wake.Reset();
+
                 if (Volatile.Read(ref _isEnding)) return;
                 if (Interlocked.Exchange(ref _isNewest, 0) == 0) continue;
 

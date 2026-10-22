@@ -54,10 +54,7 @@ internal sealed class ConsoleWindow : IDisposable
         _clearing = commands?.Register("clear", "Empties the console's view; the log keeps its lines.", _ => Clear());
     }
 
-    public void Dispose()
-    {
-        _clearing?.Dispose();
-    }
+    public void Dispose() => _clearing?.Dispose();
 
     /// <summary>
     /// A line of the log, on the log's thread: its time and its message, after its level when it is a warning or worse.
@@ -130,9 +127,7 @@ internal sealed class ConsoleWindow : IDisposable
             foreach (Line line in _lines)
             {
                 if (_filter.Length == 0 || line.Text.Contains(_filter, StringComparison.OrdinalIgnoreCase))
-                {
                     _shown.Add(line);
-                }
             }
 
             if (_shown.Count > ShownLines) _shown.RemoveRange(0, _shown.Count - ShownLines);

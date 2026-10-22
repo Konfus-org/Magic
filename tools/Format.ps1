@@ -1,24 +1,34 @@
 <#
 .SYNOPSIS
-Formats the C# a change touches by the repository's .editorconfig: orders members and wraps long lines, then applies
-the code-style rules and the whitespace ones.
+Formats the C# a change touches by the repository's .editorconfig: orders members, applies the code style, lays out
+blank lines and if/else chains, wraps long lines, then fixes the whitespace.
 
 .DESCRIPTION
 The files are the .cs files that differ from HEAD, staged, unstaged or new, so the change being made is formatted and
-no other code is touched. dotnet format makes four passes over them: the member-order analyzers' fixes, which put a
-type's members in order; the line-length analyzer's fix, which wraps a line of code that is too long, once its member
-has moved; the code-style fixes, except the few that need a person's judgment, which the build still reports; and
-whitespace, line endings and the final newline. The rules are
-.editorconfig's, the ones the build and Validate's Format step check, so what it leaves passes them unless a fix needed
-judgment. It reads the code as the last build left it, generated bindings included, and builds nothing.
-tools/AgentTaskComplete.ps1 runs it first, so an agent's change is formatted before it is validated. Runs from any
-current directory.
+no other code is touched; -All formats every file, for when a rule is added. dotnet format makes five passes over them:
+the member-order analyzers' fixes, which put a type's members in order; the code-style fixes, except the few that need
+a person's judgment, which the build still reports; the repository's own layout analyzers' fixes (tools/Analyzers),
+which put a blank line before a way out of a block and lay out an if/else whose bodies are one statement; the
+line-length and list analyzers' fixes, which wrap a line of code that is too long and put a wrapped list's items on
+lines of their own; and whitespace, line endings and the final newline. The rules are .editorconfig's, the ones the
+build and Validate's Format step check, so what it leaves passes them unless a fix needed judgment. It reads the code
+as the last build left it, generated bindings included, and builds only the repository's own analyzers, which dotnet
+format loads from their build. tools/AgentTaskComplete.ps1 runs it first, so an agent's change is formatted before it
+is validated. Runs from any current directory.
+
+.PARAMETER All
+Formats every C# file in the solution rather than the changed ones.
 
 .EXAMPLE
 tools/Format.ps1
+
+.EXAMPLE
+tools/Format.ps1 -All
 #>
 [CmdletBinding()]
-param()
+param(
+    [switch] $All
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -30,33 +40,41 @@ $env:MSBUILDDISABLENODEREUSE = '1'
 $root = Split-Path -Parent $PSScriptRoot
 $solution = Join-Path $root 'Magic.slnx'
 
-$changed = @(git -C $root -c core.quotepath=off diff --name-only --diff-filter=d HEAD)
-$new = @(git -C $root -c core.quotepath=off ls-files --others --exclude-standard)
-$files = @(($changed + $new) | Where-Object { $_ -like '*.cs' } | Sort-Object -Unique)
-if ($files.Count -eq 0) {
-    Write-Output 'No C# file has changed: nothing to format.'
-    exit 0
+# Each pass names the files it formats, and what it formatted.
+$common = @('--verbosity', 'normal')
+if (-not $All) {
+    $changed = @(git -C $root -c core.quotepath=off diff --name-only --diff-filter=d HEAD)
+    $new = @(git -C $root -c core.quotepath=off ls-files --others --exclude-standard)
+    $files = @(($changed + $new) | Where-Object { $_ -like '*.cs' } | Sort-Object -Unique)
+    if ($files.Count -eq 0) {
+        Write-Output 'No C# file has changed: nothing to format.'
+        exit 0
+    }
+    $common = @('--include') + $files + $common
 }
 
-# The member-order and line-length rules .editorconfig turns on are the only analyzer fixes that run: the others change
-# what code does. Each is a pass of its own, as one pass wraps lines where they were before their members moved.
+# The member-order, layout, line-length and list rules .editorconfig turns on are the only analyzer fixes that run: the
+# others change what code does. Each kind is a pass of its own, in this order: members move before anything is measured;
+# a style fix (a one-line body made =>) can make a line too long; the layout puts a long if's body below its header,
+# which the wrap would otherwise break inside; and the wrap measures lines as the passes before it left them.
 $editorConfig = Join-Path $root '.editorconfig'
 function Get-Rules([string] $prefix) {
     @(Select-String -Path $editorConfig -Pattern "^dotnet_diagnostic\.($prefix\d+)\.severity = warning" |
         ForEach-Object { $_.Matches[0].Groups[1].Value })
 }
 $orderRules = Get-Rules 'SA1'
+$layoutRules = Get-Rules 'MG'
 $wrapRules = Get-Rules 'RCS0'
 # Style fixes that delete code, invent it or rename it across the solution, which a person decides: missing switch
 # cases, unreachable code, unused members, values and parameters, and names.
 $judged = 'IDE0010', 'IDE0072', 'IDE0035', 'IDE0051', 'IDE0052', 'IDE0059', 'IDE0060', 'IDE1006'
 
-# Each pass names the files it formats, and what it formatted.
-$common = @('--include') + $files + @('--verbosity', 'normal')
 $passes = @(
+    @{ Name = 'Analyzers'; Run = { dotnet build (Join-Path $root 'tools/Analyzers.CodeFixes') --nologo --verbosity quiet } }
     @{ Name = 'Order'; Run = { dotnet format analyzers $solution --diagnostics $orderRules @common } }
-    @{ Name = 'Wrap'; Run = { dotnet format analyzers $solution --no-restore --diagnostics $wrapRules @common } }
     @{ Name = 'Style'; Run = { dotnet format style $solution --no-restore --exclude-diagnostics $judged @common } }
+    @{ Name = 'Layout'; Run = { dotnet format analyzers $solution --no-restore --diagnostics $layoutRules @common } }
+    @{ Name = 'Wrap'; Run = { dotnet format analyzers $solution --no-restore --diagnostics $wrapRules @common } }
     @{ Name = 'Whitespace'; Run = { dotnet format whitespace $solution --no-restore @common } }
 )
 

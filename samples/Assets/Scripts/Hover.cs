@@ -28,10 +28,7 @@ internal sealed class Hover(Entity owner, World world) : IBehavior
     /// </summary>
     public float Seconds { get; set; } = 2;
 
-    public void Start()
-    {
-        _restY = world.Get<Transform>(owner).Position.Y;
-    }
+    public void Start() => _restY = world.Get<Transform>(owner).Position.Y;
 
     public void Update(in Frame frame)
     {

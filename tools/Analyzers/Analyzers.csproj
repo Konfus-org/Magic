@@ -1,0 +1,16 @@
+<!-- The repository's own analyzers: rules no maintained analyzer has, which every project runs (Directory.Build.props).
+     A compiler extension, so it targets what every compiler loads and references the compiler alone; the code fixes
+     that need the IDE's workspace are tools/Analyzers.CodeFixes. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Magic.Tools.Analyzers</RootNamespace>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IsRoslynComponent>true</IsRoslynComponent>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" PrivateAssets="all" />
+  </ItemGroup>
+</Project>

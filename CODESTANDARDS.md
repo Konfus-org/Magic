@@ -271,12 +271,34 @@ query, makes a delegate, subscribes).
 Within what the order leaves free, keep related members next to each other, and fields that belong together under the
 comment that says what they are for.
 
+### Lines
+
+A line of code fits within `.editorconfig`'s `max_line_length`, and `tools/Format.ps1` wraps one that does not. A
+list of arguments or parameters that does not fit on its line has every item on a line of its own, one indent in, the
+first on the line after the opening parenthesis; so does every list that spans lines, a call whose last argument is a
+lambda or an initializer among them, so a list reads the same however it came to be wrapped:
+
+```csharp
+Parallel.For(
+    0,
+    cards.Length,
+    i =>
+    {
+        cards[i] = Bake(model.Meshes[i]);
+    });
+```
+
+An operator, `?:` or `=>` that a line is broken at starts the next line; an `=` ends its line. The build holds all of
+it (`RCS0056`, `RCS0053`) but for a comment or a string, which no tool measures or wraps: a long string is split by
+hand, the next part starting with `+`.
+
 ### State
 
 - Public and internal state is exposed as `PascalCase` properties, never as fields.
 - If a value is set once, use `{ get; }` and assign it in the constructor.
 - If a value can change, use `{ get; set; }`, or `{ get; private set; }` when writes need a tighter scope.
-- If a value is derived from other state, use an expression-bodied property (`=>`).
+- If a value is derived from other state, use an expression-bodied property (`=>`): a getter that only returns
+  something is never written out as `get { return ...; }`.
 - Private state is a private field (`_camelCase`), declared with the other fields at the top of the type, whatever it
   holds: an injected dependency, a lock, a collection, a delegate made once and kept (`_renderFrame = RenderFrame`,
   so a frame allocates no closure), a flag, this frame's values for a callback. `{ get; set; }` is for what other code
@@ -297,25 +319,50 @@ A method should read from top to bottom:
 
 Separate these steps with a blank line.
 
+A way out of a block, a `return`, `continue`, `break` or `throw`, has a blank line before it, so where a block ends
+early stands out from the work before it. An early-out `if`, whose body is a way out and nothing else, has the blank
+line in its place, and a run of them shares one, as guard clauses read as one step:
+
+```csharp
+Prepare(frame);
+
+if (frame.IsEmpty) return;
+if (!_isReady) return;
+
+Draw(frame);
+
+return frame.Count;
+```
+
+What opens its block needs none, and nor does the `break` that ends a switch section, which is the section's syntax
+rather than a way out. The build holds this (`MG0001`).
+
 A method is one step of its caller's story, small enough to take in at a glance. A long method that is a sequence
 of steps becomes those steps as methods, called in order from the original, so the original reads as its outline;
 each step gets a summary saying why, where that is not obvious. A table-shaped method (one `switch` over many cases)
 stays whole. A loop body nested three deep or more is an early `continue`, or a method named for the step.
 
-An `if` whose body is one short statement is one line, with no braces: `if (count == 0) return;`,
-`if (!TryGetResource(name, out resource)) continue;`. Its `else`, when that is one short statement too, is the next
-line, also with no braces, so a choice between two actions reads as a pair:
+A method, local function or operator whose body is one statement on one line says it with `=>`, as a property does:
+`private float ReadAxis(Control positive, Control negative) => _input[positive].Value - _input[negative].Value;`. The
+build holds this (`IDE0022`, `IDE0061`, `IDE0023`, `IDE0024`).
+
+An `if` or `else` whose body is one statement has no braces. The body is on the header's line when that fits within
+`.editorconfig`'s `max_line_length`, as in `if (count == 0) return;`, and on the next line, one indent in, when it does
+not, so it is never lost off the end of a long line. An `else` starts its own line, so a choice between two actions
+reads as a pair:
 
 ```csharp
 if (state is { } saved) world.Restore(saved);
 else world.OpenEntryPointAsync().FireAndForget();
+
+if (_settings.ShadowResolution != _shadowMap.Width || _settings.ShadowCascades != _shadowMap.Layers)
+    _shadowMap = MakeShadowMap(_settings.ShadowResolution, _settings.ShadowCascades);
 ```
 
-Anything longer, and every loop (`for`, `foreach`, `while`), has braces on their own lines, however short the body, so
-that what repeats always reads as a block; where one branch of an `if` needs braces, every branch has them. An `if` or
-`else` that would not fit on one line within `.editorconfig`'s `max_line_length`, whatever makes it long, the condition
-or the body, puts its body in braces on the lines below, so the body is never lost off the end of a long line. The
-build requires braces around any multi-line body (`IDE0011`).
+A body of more than one statement, a body or a condition too long for a line of its own, and every loop (`for`,
+`foreach`, `while`) has braces on their own lines, however short the body, so that what repeats always reads as a
+block; where one branch of an `if` needs braces, every branch has them. The build holds all of it (`MG0002` lays out
+the chain without braces, `IDE0011` asks for them where they are needed), and `tools/Format.ps1` puts it right.
 
 A choice between two values is a `?:`; among more, it is a switch expression, on a tuple of the conditions where they
 are not one value, or early returns, never a `?:` inside a `?:`, which the build refuses. An `if` that ends a method or
@@ -354,6 +401,15 @@ asks for too.
 ### Comments
 
 - XML doc comments on types and non-obvious members. Say why, not what.
+- Code whose purpose is not obvious at a glance has a `//` comment above it saying what it does and, where that is not
+  plain either, why: a loop that does more than one thing, a calculation, an order that matters, a workaround. The
+  comment speaks for the block below it, up to the next blank line. One that restates the line under it says nothing
+  the code does not, and is not written.
+
+  ```csharp
+  // Each entity's components as JSON; a type JSON cannot hold is logged once and left out of every entity.
+  foreach (Saving entity in entities)
+  ```
 - `<summary>` tags sit on their own lines, even for a one-line summary:
 
   ```csharp

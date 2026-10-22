@@ -229,6 +229,7 @@ internal sealed class GpuResources : IDisposable
     {
         ResourceScope scope = new(_gpu);
         _scopes.Add(scope);
+
         return scope;
     }
 
@@ -249,6 +250,7 @@ internal sealed class GpuResources : IDisposable
     {
         GpuTable<T> table = new(_gpu, info.BufferUsage, rows);
         (scope ?? Frame).Add(info, table);
+
         return table;
     }
 
@@ -260,6 +262,7 @@ internal sealed class GpuResources : IDisposable
     {
         GpuTable<T> table = new(_gpu, usage, rows);
         (scope ?? Frame).Add(null, table);
+
         return table;
     }
 
@@ -271,6 +274,7 @@ internal sealed class GpuResources : IDisposable
     {
         GpuBuffer buffer = _gpu.CreateBuffer(info.BufferUsage, bytes);
         Retire((scope ?? Frame).Own(info, BoundResource.Of(buffer, bytes)));
+
         return buffer;
     }
 
@@ -281,6 +285,7 @@ internal sealed class GpuResources : IDisposable
     {
         GpuBuffer buffer = _gpu.CreateBuffer(usage, bytes);
         _buffers.Add(buffer);
+
         return buffer;
     }
 
@@ -301,6 +306,7 @@ internal sealed class GpuResources : IDisposable
         GpuTexture texture = _gpu.CreateTexture(
             new GpuTextureDescription(info.Format, info.TextureUsage, width, height, levels, depth, info.Shape));
         Retire((scope ?? Frame).Own(info, BoundResource.Of(texture, width, height, sampler)));
+
         return texture;
     }
 
@@ -312,6 +318,7 @@ internal sealed class GpuResources : IDisposable
     {
         GpuTexture texture = _gpu.CreateTexture(description);
         _textures.Add(texture);
+
         return texture;
     }
 
@@ -319,10 +326,7 @@ internal sealed class GpuResources : IDisposable
     /// Releases what <paramref name="info"/> was made as in the frame's scope or <paramref name="scope"/>, at the next
     /// <see cref="Upload()"/>.
     /// </summary>
-    internal void Release(ResourceInfo info, ResourceScope? scope = null)
-    {
-        Retire((scope ?? Frame).Disown(info));
-    }
+    internal void Release(ResourceInfo info, ResourceScope? scope = null) => Retire((scope ?? Frame).Disown(info));
 
     internal void Release(GpuTexture texture)
     {
@@ -343,6 +347,7 @@ internal sealed class GpuResources : IDisposable
 
         sampler = _gpu.CreateSampler(description);
         _samplers[description] = sampler;
+
         return sampler;
     }
 
@@ -356,32 +361,21 @@ internal sealed class GpuResources : IDisposable
         return _window;
     }
 
-    internal void Upload(GpuBuffer buffer, uint offset, ReadOnlySpan<byte> bytes)
-    {
-        _gpu.Upload(buffer, offset, bytes);
-    }
+    internal void Upload(GpuBuffer buffer, uint offset, ReadOnlySpan<byte> bytes) => _gpu.Upload(buffer, offset, bytes);
 
-    internal void Upload(in GpuTextureRegion region, ReadOnlySpan<byte> bytes)
-    {
-        _gpu.Upload(region, bytes);
-    }
+    internal void Upload(in GpuTextureRegion region, ReadOnlySpan<byte> bytes) => _gpu.Upload(region, bytes);
 
     /// <summary>
     /// Copies texels on the GPU, in the order commands run, after every upload of the frame: what a pool's growing
     /// keeps.
     /// </summary>
-    internal void Copy(in GpuTextureRegion from, in GpuTextureRegion to)
-    {
-        _gpu.Commands.CopyTexture(from, to);
-    }
+    internal void Copy(in GpuTextureRegion from, in GpuTextureRegion to) => _gpu.Commands.CopyTexture(from, to);
 
     /// <summary>
     /// Copies bytes on the GPU, in the order commands run: what a pass seeds what it makes with.
     /// </summary>
     internal void Copy(GpuBuffer from, uint fromOffset, GpuBuffer to, uint toOffset, uint bytes)
-    {
-        _gpu.Commands.CopyBuffer(from, fromOffset, to, toOffset, bytes);
-    }
+        => _gpu.Commands.CopyBuffer(from, fromOffset, to, toOffset, bytes);
 
     /// <summary>
     /// Once a frame, after every row is set and before anything records: releases what was made again, and sends every
@@ -474,10 +468,12 @@ internal sealed class ResourceScope(IGpu gpu)
         if (_bound.TryGetValue(name, out Named? named))
         {
             resource = named.Table?.Bound ?? named.Resource;
+
             return true;
         }
 
         resource = default;
+
         return false;
     }
 
@@ -486,10 +482,7 @@ internal sealed class ResourceScope(IGpu gpu)
     /// <summary>
     /// Binds <paramref name="info"/> to what is made elsewhere and only drawn into here: a target's image.
     /// </summary>
-    internal void Set(ResourceInfo info, BoundResource resource)
-    {
-        _bound[info.Name] = new Named(resource, null);
-    }
+    internal void Set(ResourceInfo info, BoundResource resource) => _bound[info.Name] = new Named(resource, null);
 
     /// <summary>
     /// What a pass makes, made now unless it was made with the same key; returns whether it was made now, so whoever
@@ -506,6 +499,7 @@ internal sealed class ResourceScope(IGpu gpu)
 
         ReleaseMade(name);
         Make(name, key);
+
         if (!key.HasHistory) return true;
 
         string history = ResourceInfo.GetHistoryName(name);
@@ -569,6 +563,7 @@ internal sealed class ResourceScope(IGpu gpu)
         BoundResource replaced = _owned.GetValueOrDefault(info.Name);
         _owned[info.Name] = made;
         _bound[info.Name] = new Named(made, null);
+
         return replaced;
     }
 
@@ -578,6 +573,7 @@ internal sealed class ResourceScope(IGpu gpu)
     internal BoundResource Disown(ResourceInfo info)
     {
         _bound.Remove(info.Name);
+
         return _owned.Remove(info.Name, out BoundResource owned) ? owned : default;
     }
 
@@ -625,6 +621,7 @@ internal sealed class ResourceScope(IGpu gpu)
         _bound.Remove(name);
         gpu.Release(made.Resource.Texture);
         gpu.Release(made.Resource.Buffer);
+
         if (!made.Key.HasHistory) return;
 
         _histories.RemoveAll(kept => string.Equals(kept.Name, name, StringComparison.Ordinal));

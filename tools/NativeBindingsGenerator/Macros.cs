@@ -84,6 +84,7 @@ internal sealed class Macros
         catch (UnsupportedException ex)
         {
             reason = ex.Message;
+
             return null;
         }
 
@@ -102,6 +103,7 @@ internal sealed class Macros
         for (int i = 0; i < tokens.Count; i++)
         {
             (CppTokenKind kind, string text) = tokens[i];
+
             if (kind == CppTokenKind.Comment) continue;
 
             bool value = false;
@@ -112,6 +114,7 @@ internal sealed class Macros
                 expression.Append("unchecked((").Append(castType).Append(")(");
                 casts.Push(0);
                 i = castEnd;
+
                 continue;
             }
 
@@ -164,6 +167,7 @@ internal sealed class Macros
             else
             {
                 reason = $"uses {text}";
+
                 return null;
             }
 
@@ -177,6 +181,7 @@ internal sealed class Macros
         if (casts.Count > 0)
         {
             reason = "casts nothing";
+
             return null;
         }
 
@@ -185,6 +190,7 @@ internal sealed class Macros
             if (expression.Length > 0 || cast is not null)
             {
                 reason = "mixes text and numbers";
+
                 return null;
             }
 
@@ -197,6 +203,7 @@ internal sealed class Macros
                     if (strings.Count > 1)
                     {
                         reason = "joins text to a constant";
+
                         return null;
                     }
 
@@ -212,6 +219,7 @@ internal sealed class Macros
         if (expression.Length == 0)
         {
             reason = "has no value";
+
             return null;
         }
 
@@ -224,6 +232,7 @@ internal sealed class Macros
             (_, _, true, false) => "uint",
             _ => "int",
         };
+
         return new(type, expression.ToString());
     }
 
@@ -250,6 +259,7 @@ internal sealed class Macros
                 if (depth == 0)
                 {
                     close = i;
+
                     return arguments;
                 }
 
@@ -347,6 +357,7 @@ internal sealed class Macros
         if (floating)
         {
             bool isFloat = string.Equals(suffix, "F", StringComparison.Ordinal);
+
             return (digits + (isFloat ? "f" : ""), false, false, isFloat, !isFloat);
         }
 
@@ -399,11 +410,13 @@ internal sealed class Macros
         for (int i = 0; i < tokens.Count; i++)
         {
             (CppTokenKind kind, string text) = tokens[i];
+
             if (kind == CppTokenKind.Comment) continue;
 
             if (kind != CppTokenKind.Identifier || !_known.TryGetValue(text, out CppMacro? macro))
             {
                 output.Add(tokens[i]);
+
                 continue;
             }
 
@@ -412,10 +425,12 @@ internal sealed class Macros
                 if (i + 1 >= tokens.Count || !string.Equals(tokens[i + 1].Text, "(", StringComparison.Ordinal))
                 {
                     output.Add(tokens[i]);
+
                     continue;
                 }
 
                 List<List<(CppTokenKind Kind, string Text)>> arguments = Arguments(tokens, i + 1, out int end);
+
                 if (arguments.Count != parameters.Count)
                 {
                     throw new UnsupportedException(
@@ -451,12 +466,14 @@ internal sealed class Macros
                 // A cast is followed by what it casts: a value, a parenthesis or a sign, never a binary operator.
                 string next = tokens[i + 1].Text;
                 bool operand = next is "(" or "-" or "~" || !_operators.Contains(next);
+
                 if (!operand) return false;
 
                 string spelled = words.ToString();
                 string? mapped = _keywordCasts.TryGetValue(spelled, out string? keyword)
                     ? keyword
                     : _typedefType(spelled);
+
                 if (mapped is null) return false;
 
                 // A constant has no pointer-sized type in C#: a size_t cast makes a 64-bit one.
@@ -467,6 +484,7 @@ internal sealed class Macros
                     _ => mapped,
                 };
                 close = i;
+
                 return true;
             }
 

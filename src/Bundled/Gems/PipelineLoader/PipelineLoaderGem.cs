@@ -44,19 +44,14 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
             bool isPass = entry.Pass != Handle<Pass>.None;
             string name = Path.GetFileNameWithoutExtension(
                 (isPass ? assets.GetPath(entry.Pass) : assets.GetPath(entry.Pipeline)) ?? string.Empty);
+
             if (IsOff(name)) continue;
 
             if (isPass)
             {
                 Result<Pass> pass = await assets.LoadAsync(entry.Pass, cancel).ConfigureAwait(false);
-                if (pass.Ok)
-                {
-                    passes.Add(new PipelinePass(pass.Value, name, Merge(name, entry, pass.Value.Params)));
-                }
-                else
-                {
-                    Debugging.Error($"Pass {name} does not run: {pass.Error}");
-                }
+                if (pass.Ok) passes.Add(new PipelinePass(pass.Value, name, Merge(name, entry, pass.Value.Params)));
+                else Debugging.Error($"Pass {name} does not run: {pass.Error}");
 
                 continue;
             }
@@ -65,6 +60,7 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
             if (!nested.Ok)
             {
                 Debugging.Error($"Pipeline {name} does not load, so its passes do not run: {nested.Error}");
+
                 continue;
             }
 
@@ -121,6 +117,7 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
         Add(merged, settings.Params.GetValueOrDefault(name));
         Add(merged, entry.Params.GetValueOrDefault(name));
         Add(merged, inner);
+
         return [.. merged];
     }
 

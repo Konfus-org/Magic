@@ -38,6 +38,7 @@ internal sealed class Label(Entity owner, World world, IDebugUI? debugUI = null)
         if (!IsOnScreen)
         {
             debugUI.Text(world.Get<Transform>(owner).Position + (Vector3.UnitY * Height), Text);
+
             return;
         }
 

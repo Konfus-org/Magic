@@ -8,9 +8,9 @@ the code and docs follow. Most rules give their reason. When a case isn't covere
 The tools run under `pwsh` and Windows PowerShell. [Tools](tools/README.md) covers them in full, including where
 the `Magic` executable is built.
 
-- **Format:** `tools/Format.ps1` formats the C# a change touches by `.editorconfig`: it wraps lines that are too
-  long, orders the members and the usings, applies the code style and fixes the whitespace. Agents never need to run
-  it on its own, as the next command does.
+- **Format:** `tools/Format.ps1` formats the C# a change touches by `.editorconfig`: it orders the members and the
+  usings, applies the code style, lays out blank lines and `if`/`else` bodies, wraps lines that are too long and fixes
+  the whitespace. Agents never need to run it on its own, as the next command does.
 - **Validate:** `tools/Validate.ps1` builds `Magic.slnx`, checks the whole tree's formatting, runs the tests, runs the
   samples headless through every one of their domains until each has loaded, and runs them with a window through every
   domain, ending in a screenshot of each whose paths it prints. It reports each step's exit code. Every step must pass,
@@ -108,9 +108,9 @@ want to question as you make it.
   boundaries, since it also conflicts with the smallest change and with other agents' work:
   - **Where:** inside the members and files the task already changes, and what they directly call. Not a sweep of
     the folder, the gem or the repository.
-  - **What:** what these documents already forbid and you are now looking at: a misleading name, a stale or
-    what-not-why comment, a dead member, a `!`, a nested `if` a guard clause flattens, a duplicate of the line you are
-    fixing, a docstring the change made wrong.
+  - **What:** what these documents already forbid and you are now looking at: a misleading name, a stale comment or
+    one that restates its line, a block whose purpose is not obvious with no comment saying it, a dead member, a `!`,
+    a nested `if` a guard clause flattens, a duplicate of the line you are fixing, a docstring the change made wrong.
   - **How:** never a change in behaviour, and never mixed in silently. The summary and the diff review say which
     hunks are the fix and which are the cleanup, so a reviewer can accept one and question the other.
   - **When to stop:** a cleanup that grows past a few lines, crosses into files the task does not touch, or needs a

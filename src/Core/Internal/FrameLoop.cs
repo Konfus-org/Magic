@@ -150,10 +150,7 @@ internal sealed class FrameLoop : IDisposable
     /// </summary>
     internal double Seconds { get; private set; }
 
-    public void Dispose()
-    {
-        _rendered.Dispose();
-    }
+    public void Dispose() => _rendered.Dispose();
 
     /// <summary>
     /// Runs frames until the run stops, the frame limit is reached or the frame clock reaches the time limit, then
@@ -169,6 +166,7 @@ internal sealed class FrameLoop : IDisposable
             if (index == _frameLimit)
             {
                 _lifetime.Stop($"ran {_frameLimit} frames");
+
                 break;
             }
 
@@ -176,6 +174,7 @@ internal sealed class FrameLoop : IDisposable
             if (seconds >= _timeLimit.TotalSeconds)
             {
                 _lifetime.Stop($"ran {_timeLimit.TotalSeconds} s");
+
                 break;
             }
 
@@ -228,6 +227,7 @@ internal sealed class FrameLoop : IDisposable
             catch (Exception ex)
             {
                 Debugging.Error($"Gem {_names[i]} threw in Stop: {ex}");
+
                 continue;
             }
 
@@ -279,6 +279,7 @@ internal sealed class FrameLoop : IDisposable
             if (step == MaxFixedSteps)
             {
                 _fixedSeconds = frame.Seconds;
+
                 break;
             }
 
@@ -335,6 +336,7 @@ internal sealed class FrameLoop : IDisposable
             {
                 Debugging.Error($"Gem {_names[i]} threw in {_phases[(int)phase]} and left the frame loop: {ex}");
                 Volatile.Write(ref _left[i], true);
+
                 continue;
             }
 

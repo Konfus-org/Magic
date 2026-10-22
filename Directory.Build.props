@@ -85,6 +85,14 @@
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" Visible="false" />
   </ItemGroup>
 
+  <!-- The repository's own analyzers and their fixes (tools/Analyzers), which every project runs beside the packages
+       Directory.Packages.props lists. Referenced as analyzers, so each is built before what it checks; nothing of them
+       is compiled against or copied. -->
+  <ItemGroup Condition="'$(IsRoslynComponent)' != 'true'">
+    <ProjectReference Include="$(MSBuildThisFileDirectory)tools/Analyzers/Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Private="false" />
+    <ProjectReference Include="$(MSBuildThisFileDirectory)tools/Analyzers.CodeFixes/Analyzers.CodeFixes.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
   <!-- A namespace matches its folder: the project's RootNamespace, then each folder below the project (CODESTANDARDS
        Folders). Checked here rather than by IDE0130, which goes quiet when the checkout's path holds a # or ;: the
        analyzers read the project's folder from a file in which either starts a comment. Code compiled from outside

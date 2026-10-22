@@ -264,7 +264,7 @@ internal sealed unsafe class Voices : IDisposable
             if (Interlocked.Exchange(ref voices._hasFailed, 1) == 0)
             {
                 Debugging.Error(
-                $"Sound stopped: the audio thread failed: {ex}");
+                    $"Sound stopped: the audio thread failed: {ex}");
             }
         }
     }
@@ -273,16 +273,14 @@ internal sealed unsafe class Voices : IDisposable
     /// Hands the audio thread <paramref name="command"/>, for the start of its next frame; false when it has not taken
     /// in enough of those before, and the main thread tries again next frame.
     /// </summary>
-    internal bool TryTell(in VoiceCommand command)
-    {
-        return _commands.Writer.TryWrite(command);
-    }
+    internal bool TryTell(in VoiceCommand command) => _commands.Writer.TryWrite(command);
 
     private static IPL.Error Allocate(IPL.Context* context, int channels, int frameSize, out IPL.AudioBuffer buffer)
     {
         IPL.AudioBuffer made;
         IPL.Error error = IPL.AudioBufferAllocate(context, channels, frameSize, &made);
         buffer = made;
+
         return error;
     }
 
@@ -294,9 +292,7 @@ internal sealed unsafe class Voices : IDisposable
     }
 
     private IPL.Error Allocate(int channels, out IPL.AudioBuffer buffer)
-    {
-        return Allocate(_context, channels, _frameSize, out buffer);
-    }
+        => Allocate(_context, channels, _frameSize, out buffer);
 
     /// <summary>
     /// Fills the device with frames until it has <paramref name="additional"/> bytes more, and measures how long that
@@ -337,16 +333,11 @@ internal sealed unsafe class Voices : IDisposable
         for (int i = 0; i < _slots.Length; i++)
         {
             Slot slot = _slots[i];
+
             if (!slot.IsActive) continue;
 
-            if (slot.IsEverywhere)
-            {
-                MixEverywhere(slot);
-            }
-            else
-            {
-                MixWorld(slot, i, isReflecting);
-            }
+            if (slot.IsEverywhere) MixEverywhere(slot);
+            else MixWorld(slot, i, isReflecting);
 
             if (slot.IsDone) slot.Let(hasEnded: true);
         }
@@ -437,6 +428,7 @@ internal sealed unsafe class Voices : IDisposable
             }
 
             int at = slot.Reflector;
+
             if (!isReflecting || at < 0 || at >= _reflectors.Length) return;
 
             Reflector reflector = _reflectors[at];
@@ -448,6 +440,7 @@ internal sealed unsafe class Voices : IDisposable
 
             IPL.SourceGetOutputs(reflector.Source, IPL.SimulationFlags.Reflections, &outputs);
             IPL.ReflectionEffectParams echo = outputs.Reflections;
+
             if (echo.Ir is null) return;
 
             echo.Type = IPL.ReflectionEffectType.Convolution;
@@ -757,6 +750,7 @@ internal sealed unsafe class Voices : IDisposable
             if (Loop && _count > 0)
             {
                 _fed = 0;
+
                 return;
             }
 

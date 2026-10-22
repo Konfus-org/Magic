@@ -89,6 +89,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         // An entity becomes Arch's and back by reinterpreting its bits, so an Arch that laid its own out differently
         // would scramble every handle.
         ArchEntity probe = Unsafe.BitCast<Entity, ArchEntity>(new Entity(1, 2, 3));
+
         if (probe.Id != 1 || probe.WorldId != 2 || probe.Version != 3)
         {
             throw new InvalidOperationException(
@@ -99,10 +100,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         _world = ArchWorld.Create();
     }
 
-    public void Dispose()
-    {
-        _world.Dispose();
-    }
+    public void Dispose() => _world.Dispose();
 
     public void Update(in Frame frame)
     {
@@ -131,6 +129,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         ThrowIfNotMain();
         ThrowIfQuerying();
+
         return Unsafe.BitCast<ArchEntity, Entity>(_world.Create());
     }
 
@@ -148,6 +147,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
         ArchEntity created = _world.Create(types);
         _world.SetRange(created, values);
+
         return Unsafe.BitCast<ArchEntity, Entity>(created);
     }
 
@@ -196,6 +196,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public bool IsAlive(Entity entity)
     {
         ThrowIfCannotRead();
+
         return _world.IsAlive(Unsafe.BitCast<Entity, ArchEntity>(entity));
     }
 
@@ -209,6 +210,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         {
             // Not structural, so it is fine inside a query.
             existing = component;
+
             return;
         }
 
@@ -258,6 +260,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         ThrowIfCannotRead();
         ref T component = ref _world.TryGetRef<T>(GetAlive(entity), out bool has);
+
         if (!has) throw new InvalidOperationException($"{entity} has no {typeof(T).Name}.");
 
         return ref component;
@@ -272,6 +275,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         ThrowIfNotMain();
         ArchEntity alive = GetAlive(entity);
+
         if (!_world.Has<T>(alive)) return;
 
         ThrowIfQuerying();
@@ -426,6 +430,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private Subscription Schedule(object system, Phase phase, Action<Frame> run)
     {
         ThrowIfNotMain();
+
         if (phase > Phase.LateUpdate)
         {
             throw new ArgumentException(
@@ -437,6 +442,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         int index = (int)phase;
         Scheduled scheduled = new(system, run);
         _systems[index] = [.. _systems[index], scheduled];
+
         return new Subscription(() => TakeOff(index, scheduled));
     }
 
@@ -451,6 +457,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         Scheduled[] systems = _systems[phase];
         int index = Array.IndexOf(systems, scheduled);
+
         if (index < 0) return;
 
         _systems[phase] = [.. systems.AsSpan(0, index), .. systems.AsSpan(index + 1)];
@@ -466,6 +473,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         ThrowIfNotMain();
         ref object? walk = ref CollectionsMarshal.GetValueRefOrAddDefault(_walks, typeof(TChunk), out _);
         walk ??= new Walk<TChunk>(this, description, cut);
+
         return (Walk<TChunk>)walk;
     }
 
@@ -525,6 +533,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private ArchEntity GetAlive(Entity entity)
     {
         ArchEntity arch = Unsafe.BitCast<Entity, ArchEntity>(entity);
+
         if (!_world.IsAlive(arch)) throw new InvalidOperationException($"{entity} is not alive.");
 
         return arch;
@@ -689,6 +698,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         {
             Walk<TChunk> walk = _isWalking ? new Walk<TChunk>(ecs, description, cut) : this;
             walk.Start();
+
             return walk;
         }
 

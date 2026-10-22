@@ -41,6 +41,7 @@ internal static class CardBaker
         byte[] surface = new byte[Card.Size * Card.Size * 4];
         byte[] normals = new byte[Card.Size * Card.Size * 4];
         Parallel.For(0, Card.Views, view => BakeView(mesh, view, centre, half, surface, normals));
+
         return (centre, half, surface, normals);
     }
 
@@ -108,10 +109,9 @@ internal static class CardBaker
                 for (int x = 0; x < CellSize; x++)
                 {
                     int at = (y * CellSize) + x;
+
                     if (filled[at] || !TryAverageNeighbours(atlas, filled, cellX, cellY, x, y, out Vector3 mean))
-                    {
                         continue;
-                    }
 
                     int texel = GetTexel(cellX, cellY, x, y);
                     atlas[texel] = (byte)mean.X;
@@ -147,6 +147,7 @@ internal static class CardBaker
                 int nx = x + dx;
                 int ny = y + dy;
                 bool inCell = nx >= 0 && ny >= 0 && nx < CellSize && ny < CellSize;
+
                 if (!inCell || !filled[(ny * CellSize) + nx]) continue;
 
                 int texel = GetTexel(cellX, cellY, nx, ny);
@@ -156,6 +157,7 @@ internal static class CardBaker
         }
 
         mean = count == 0 ? Vector3.Zero : sum / count;
+
         return count > 0;
     }
 
@@ -197,6 +199,7 @@ internal static class CardBaker
             Vector3 pb = Project(b.Position, right, forward);
             Vector3 pc = Project(c.Position, right, forward);
             float area = EdgeFunction(pa, pb, pc);
+
             if (MathF.Abs(area) < 1e-12f) return;
 
             int fromX = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.X, MathF.Min(pb.X, pc.X))));
@@ -211,10 +214,12 @@ internal static class CardBaker
                     float wa = EdgeFunction(pb, pc, point) / area;
                     float wb = EdgeFunction(pc, pa, point) / area;
                     float wc = 1 - wa - wb;
+
                     if (wa < 0 || wb < 0 || wc < 0) continue;
 
                     float depth = (wa * pa.Z) + (wb * pb.Z) + (wc * pc.Z);
                     int at = (y * Size) + x;
+
                     if (depth >= _depths[at]) continue;
 
                     _depths[at] = depth;
@@ -245,6 +250,7 @@ internal static class CardBaker
             Vector3 local = position - Centre;
             float x = Vector3.Dot(local, right) / Half;
             float y = local.Y / Half;
+
             return new Vector3(((x * 0.5f) + 0.5f) * Size, (0.5f - (y * 0.5f)) * Size, Vector3.Dot(local, forward));
         }
 
@@ -259,6 +265,7 @@ internal static class CardBaker
                 for (int sx = 0; sx < Samples; sx++)
                 {
                     int at = (((y * Samples) + sy) * Size) + (x * Samples) + sx;
+
                     if (float.IsPositiveInfinity(_depths[at])) continue;
 
                     covered++;

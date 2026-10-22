@@ -68,10 +68,7 @@ internal sealed class DebugToolsGem(
         _settings.Update();
     }
 
-    public void Write(in LogLine line)
-    {
-        _console.Add(line);
-    }
+    public void Write(in LogLine line) => _console.Add(line);
 
     /// <summary>
     /// The frame rate and a frame's time, over the last half second, worked out twice a second so it can be read.

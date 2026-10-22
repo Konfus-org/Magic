@@ -118,14 +118,14 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         uint systems = run.Headless
             ? SDL.InitGamepad
             : SDL.InitVideo | SDL.InitGamepad;
+
         if (!SDL.Init(systems))
-        {
             throw new InvalidOperationException($"SDL could not start: {CString.Read(SDL.GetError())}");
-        }
 
         // The headers the binding was generated from are the oldest SDL that serves it; SDL keeps its ABI, so a newer
         // one does.
         int version = SDL.GetVersion();
+
         if (version < SDL.VERSION)
         {
             throw new InvalidOperationException($"SDL {version / 1000000}.{version / 1000 % 1000}.{version % 1000} is "
@@ -147,6 +147,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         {
             string error = CString.Read(SDL.GetError());
             SDL.Quit();
+
             throw new InvalidOperationException($"SDL could not open a window: {error}");
         }
 
@@ -272,6 +273,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         get
         {
             int index = device.Kind == control.DeviceKind ? FindIndex(device.Kind, device.Id) : -1;
+
             return index < 0 ? default : _controls[index][control.Index];
         }
     }
@@ -337,9 +339,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     break;
                 case SDL.EventType.WindowPixelSizeChanged:
                     if (TryReadWindowSize(out int width, out int height))
-                    {
                         Write(new Change(ChangeKind.Resized, Width: width, Height: height));
-                    }
 
                     break;
                 case SDL.EventType.KeyboardAdded:
@@ -363,17 +363,13 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                 case SDL.EventType.KeyDown:
                 case SDL.EventType.KeyUp:
                     if (!sdlEvent.Key.Repeat && sdlEvent.Key.Scancode.Control is { } key)
-                    {
                         Set(DeviceKind.Keyboard, sdlEvent.Key.Which, key, sdlEvent.Key.Down ? 1 : 0);
-                    }
 
                     break;
                 case SDL.EventType.MouseButtonDown:
                 case SDL.EventType.MouseButtonUp:
                     if (SdlControlExtensions.ToMouseControl(sdlEvent.Button.Button) is { } button)
-                    {
                         Set(DeviceKind.Mouse, sdlEvent.Button.Which, button, sdlEvent.Button.Down ? 1 : 0);
-                    }
 
                     break;
                 case SDL.EventType.MouseMotion:
@@ -384,6 +380,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     float motion = _pixelDensity * Math.Clamp(_settings.MouseSensitivity, 0.1f, 10);
                     Add(mouse, Control.MouseMotionX, sdlEvent.Motion.Xrel * motion);
                     Add(mouse, Control.MouseMotionY, sdlEvent.Motion.Yrel * motion * (_settings.InvertMouseY ? -1 : 1));
+
                     break;
                 }
 
@@ -393,6 +390,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     float direction = sdlEvent.Wheel.Direction == SDL.MouseWheelDirection.Flipped ? -1 : 1;
                     Add(mouse, Control.MouseWheelX, sdlEvent.Wheel.X * direction);
                     Add(mouse, Control.MouseWheelY, sdlEvent.Wheel.Y * direction);
+
                     break;
                 }
 
@@ -463,6 +461,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         byte* text = SDL.GetClipboardText();
         string value = CString.Read(text);
         SDL.Free(text);
+
         return value;
     }
 
@@ -499,9 +498,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         }
 
         if (Interlocked.Exchange(ref _wantedSize, null) is { } size)
-        {
             SDL.SetWindowSize(_window, size.Width, size.Height);
-        }
 
         if (Interlocked.Exchange(ref _wantedIcon, null) is { } icon) SetIcon(icon);
     }
@@ -515,6 +512,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         float raw = Math.Max(value / 32767f, -1f);
         float deadZone = Math.Clamp(_settings.StickDeadZone, 0, 0.5f);
         float past = MathF.Abs(raw) - deadZone;
+
         return past <= 0 ? 0 : MathF.CopySign(past / (1 - deadZone), raw);
     }
 
@@ -590,10 +588,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// <summary>
     /// Hands a change to the main thread. Render thread, like everything below but <see cref="ShowAsync"/>.
     /// </summary>
-    private void Write(in Change change)
-    {
-        _changes.Writer.TryWrite(change);
-    }
+    private void Write(in Change change) => _changes.Writer.TryWrite(change);
 
     /// <summary>
     /// A control's new value. A keyboard or mouse is announced first if this is the first the main thread hears of it;
@@ -639,6 +634,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         if (gamepad == null)
         {
             Debugging.Warn($"A gamepad was connected but could not be opened: {CString.Read(SDL.GetError())}");
+
             return;
         }
 
@@ -702,6 +698,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         bool isRead = SDL.GetWindowSizeInPixels(_window, &pixelsWide, &pixelsHigh);
         width = pixelsWide;
         height = pixelsHigh;
+
         return isRead;
     }
 
@@ -720,6 +717,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         if (!image.Ok)
         {
             Debugging.Error($"The window's icon is not shown: {image.Error}");
+
             return;
         }
 
@@ -734,6 +732,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         if (image.Format is not (GpuFormat.Rgba8Srgb or GpuFormat.Rgba8Unorm))
         {
             Debugging.Error($"The window's icon is not shown: its image is {image.Format}, not RGBA8.");
+
             return;
         }
 
@@ -747,9 +746,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                 pixels + level.Offset,
                 level.Width * 4);
             if (surface == null || !SDL.SetWindowIcon(_window, surface))
-            {
                 Debugging.Error($"The window's icon is not shown: {CString.Read(SDL.GetError())}");
-            }
 
             SDL.DestroySurface(surface);
         }

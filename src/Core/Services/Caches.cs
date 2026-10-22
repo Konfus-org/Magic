@@ -73,11 +73,10 @@ public sealed class Caches
     public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, CancellationToken cancel)
     {
         if (_services.GetProvided<ICache<T>>(out _) is not { } cache)
-        {
             return Result.Failure<T>($"no gem the project lists caches {typeof(T).Name}s.");
-        }
 
         Result<T> bundled = await ReadAsync(cache, GetFile<T>(_bundled, key), version, cancel).ConfigureAwait(false);
+
         return bundled.Ok
             ? bundled
             : await ReadAsync(cache, GetFile<T>(_folder, key), version, cancel).ConfigureAwait(false);
@@ -94,6 +93,7 @@ public sealed class Caches
         if (_services.GetProvided<ICache<T>>(out _) is not { } cache)
         {
             Debugging.Warn($"No gem the project lists caches {typeof(T).Name}s, so one is not kept.");
+
             return;
         }
 
@@ -113,6 +113,7 @@ public sealed class Caches
         BinaryPrimitives.WriteInt32LittleEndian(header[sizeof(ulong)..], cache.Version);
         stream.Write(header);
         cache.Write(value, stream);
+
         return stream.GetBuffer().AsMemory(0, (int)stream.Length);
     }
 
@@ -137,6 +138,7 @@ public sealed class Caches
         try
         {
             using MemoryStream stream = new(bytes, HeaderSize, bytes.Length - HeaderSize, writable: false);
+
             return cache.Read(stream);
         }
         catch (Exception ex)
@@ -149,9 +151,7 @@ public sealed class Caches
     /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is under <paramref name="folder"/>.
     /// </summary>
     private string GetFile<T>(string folder, ulong key)
-    {
-        return _files.Combine(folder, typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
-    }
+        => _files.Combine(folder, typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>
     /// What the entry at <paramref name="file"/> holds, read by <paramref name="cache"/>, made from
@@ -162,11 +162,13 @@ public sealed class Caches
         if (!_files.FileExists(file)) return Result.Failure<T>($"nothing is cached at {file}.");
 
         Result<byte[]> bytes = await _files.ReadAsync(file, cancel).ConfigureAwait(false);
+
         if (!bytes.Ok) return Result.Failure<T>($"{file} could not be read: {bytes.Error}");
 
         // A dirty entry is left for the write that follows to replace: deleting it here would collide with another
         // reader of the same entry, and it is never read as valid anyway.
         Result<T> read = Read(cache, bytes.Value, version);
+
         return read.Ok ? read : Result.Failure<T>($"{file} is dirty: {read.Error}");
     }
 }

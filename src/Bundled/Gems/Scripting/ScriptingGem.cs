@@ -163,10 +163,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         _watching.Add(events.Watch<WorldLoading>(FollowLoading));
     }
 
-    public void Dispose()
-    {
-        _watching.Dispose();
-    }
+    public void Dispose() => _watching.Dispose();
 
     /// <summary>
     /// The <c>.cs</c> file at <paramref name="path"/> as a <see cref="Script"/>: the class named like the file, an
@@ -189,10 +186,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         return new(TryGetClass(path, Handle<Script>.None));
     }
 
-    public Result<IScript> Make(Script script)
-    {
-        return MakeOf(script.Type, entity: null);
-    }
+    public Result<IScript> Make(Script script) => MakeOf(script.Type, entity: null);
 
     public void Attach(Entity entity, PrefabScript script)
     {
@@ -206,6 +200,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             {
                 Debugging.Error($"Script {script.Script.Type.Name} is left off entity {entity.Id}: "
                     + $"an entity has at most {Scripts.Capacity} scripts.");
+
                 return;
             }
 
@@ -225,9 +220,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         foreach (Handle<Script> handle in scripts)
         {
             if (_attached.TryGetValue((entity, handle), out Attached? attached))
-            {
                 into.Add(new ScriptState(handle, GetState(attached.Instance)));
-            }
         }
     }
 
@@ -262,6 +255,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         CancellationToken cancel)
     {
         progress.Report(1);
+
         return Task.FromResult(Subscription.None);
     }
 
@@ -278,6 +272,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         TaskCompletionSource readied = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _readied?.TrySetCanceled(CancellationToken.None);
         _readied = readied;
+
         return readied.Task.WaitAsync(cancel);
     }
 
@@ -298,15 +293,9 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         Run(Phase.Update, frame);
     }
 
-    public void FixedUpdate(in Frame frame)
-    {
-        Run(Phase.FixedUpdate, frame);
-    }
+    public void FixedUpdate(in Frame frame) => Run(Phase.FixedUpdate, frame);
 
-    public void LateUpdate(in Frame frame)
-    {
-        Run(Phase.LateUpdate, frame);
-    }
+    public void LateUpdate(in Frame frame) => Run(Phase.LateUpdate, frame);
 
     /// <summary>
     /// Ends every script, as the run ends. On the main thread, the ECS's.
@@ -381,9 +370,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// What <paramref name="ex"/> was: what a script threw, when reflection wrapped it.
     /// </summary>
     private static Exception Unwrap(Exception ex)
-    {
-        return ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
-    }
+        => ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
     /// <summary>
     /// <paramref name="type"/>'s public property with a getter and a setter that a file names <paramref name="key"/>,
@@ -425,6 +412,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private static FieldInfo? FindField(Type type, string name)
     {
         const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+
         return type.GetField(name, Any)
             ?? type.GetField($"<{name}>k__BackingField", Any) ?? type.GetField($"<{name}>P", Any);
     }
@@ -432,10 +420,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// <summary>
     /// A value's name as a file gives it, in Core's dialect.
     /// </summary>
-    private static string GetName(PropertyInfo property)
-    {
-        return JsonNamingPolicy.CamelCase.ConvertName(property.Name);
-    }
+    private static string GetName(PropertyInfo property) => JsonNamingPolicy.CamelCase.ConvertName(property.Name);
 
     /// <summary>
     /// A field's name as it is saved: its own, or for one the compiler made, the name of the property or primary
@@ -444,6 +429,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private static string GetName(FieldInfo field)
     {
         int end = field.Name.IndexOf('>', StringComparison.Ordinal);
+
         return field.Name.StartsWith('<') && end > 1 ? field.Name[1..end] : field.Name;
     }
 
@@ -461,6 +447,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private Result<IScript> MakeOf(Type type, Entity? entity)
     {
         ConstructorInfo[] constructors = type.GetConstructors();
+
         if (constructors.Length != 1)
         {
             return Result.Failure<IScript>(
@@ -514,9 +501,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// A script asset's path, for messages; its id when no asset has it.
     /// </summary>
     private string GetName(Handle<Script> script)
-    {
-        return _assets.GetPath(script) ?? script.Id.ToString(CultureInfo.InvariantCulture);
-    }
+        => _assets.GetPath(script) ?? script.Id.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The <c>.cs</c> file at <paramref name="path"/> as the <see cref="Script"/> with <paramref name="handle"/>: the
@@ -526,6 +511,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private Result<Script> TryGetClass(string path, Handle<Script> handle)
     {
         Result<Type> type = _assemblies.Get<IScript>(Path.GetFileNameWithoutExtension(path));
+
         return type.Ok
             ? Result.Success(new Script { Handle = handle, Type = type.Value })
             : Result.Failure<Script>(type.Error);
@@ -539,6 +525,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private Result<Script> Find(Handle<Script> handle)
     {
         string? path = _assets.GetPath(handle);
+
         if (path is null) return Result.Failure<Script>("no asset has its id.");
 
         return TryGetClass(path, handle);
@@ -594,6 +581,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             if (!_loaded.TryGetValue(handle, out Result<Script>? known))
             {
                 Fetch(handle);
+
                 continue;
             }
 
@@ -643,11 +631,13 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     {
         _isLoading = loading.IsLoading;
         _isReadying = false;
+
         if (_isLoading) return;
 
         for (int i = 0; i < _attached.Count; i++)
         {
             Attached attached = _attached.GetAt(i).Value;
+
             if (!attached.IsHeld) continue;
 
             attached.IsHeld = false;
@@ -688,6 +678,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         {
             Debugging.Error($"Script {script.Type.Name} is left off entity {entity.Id}: {attached.Error}");
             _failed.Add((entity, script.Handle));
+
             return;
         }
 
@@ -717,6 +708,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     {
         Type type = script.Type;
         Result<IScript> made = MakeOf(type, entity);
+
         if (!made.Ok) return Result.Failure<Attached>(made.Error);
 
         try
@@ -747,6 +739,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     {
         Type type = script.Type;
         Result<IScript> made = MakeOf(type, entity);
+
         if (!made.Ok) return Result.Failure<Attached>(made.Error);
 
         Dictionary<string, object?> values = new(StringComparer.Ordinal);
@@ -796,6 +789,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         {
             IsHeld = _isReadying || (_isLoading && !IsImpatient(made.GetType())),
         };
+
         return attached.IsHeld ? Result.Success(attached) : TryAddSystems(attached);
     }
 
@@ -822,6 +816,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         catch (Exception ex)
         {
             attached.Systems.Dispose();
+
             return Result.Failure<Attached>($"it threw as it started: {Unwrap(ex)}");
         }
     }
@@ -846,9 +841,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
         {
             if (!backing.Contains(field.Name) && !IsHanded(field.FieldType))
-            {
                 Write(values, type, GetName(field), field.FieldType, field.GetValue(script));
-            }
         }
 
         return values;
@@ -885,6 +878,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         {
             // A reference the script had none of: what it is put back as.
             value = null;
+
             return true;
         }
 
@@ -892,11 +886,13 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         if (read.Ok)
         {
             value = read.Value;
+
             return true;
         }
 
         WarnOnce(type, name, $"Script {type.Name}'s saved {name} is not put back, as it no longer fits: {read.Error}");
         value = null;
+
         return false;
     }
 
@@ -923,18 +919,14 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         foreach (Attached attached in _attached.Values)
         {
             if (attached.Script == script.Handle && attached.Instance.GetType() != script.Type)
-            {
                 restarting.Add(attached);
-            }
         }
 
         foreach (Attached attached in restarting)
         {
             Drop(attached);
             if (_ecs.IsAlive(attached.Entity))
-            {
                 Keep(attached.Entity, script, Start(attached.Entity, script, attached.Values));
-            }
         }
     }
 
@@ -976,6 +968,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         float interval = MathF.Min(
             MathF.Ceiling(MathF.Sqrt(nearest) / _settings.FullRateDistance),
             _settings.MaxInterval);
+
         return interval < 2 || float.IsNaN(interval) || (index + (ulong)entity.Id) % (ulong)interval == 0;
     }
 
@@ -1000,6 +993,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             {
                 Drop(attached);
                 i--;
+
                 continue;
             }
 
@@ -1031,6 +1025,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         if (phase == Phase.FixedUpdate)
         {
             behavior.FixedUpdate(frame);
+
             return true;
         }
 
@@ -1038,18 +1033,22 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         {
             attached.IsDue = IsDue(attached.Entity, frame.Index);
             attached.UpdateWaited += frame.DeltaSeconds;
+
             if (!attached.IsDue) return false;
 
             behavior.Update(frame with { DeltaSeconds = attached.UpdateWaited });
             attached.UpdateWaited = 0;
+
             return true;
         }
 
         attached.LateUpdateWaited += frame.DeltaSeconds;
+
         if (!attached.IsDue) return false;
 
         behavior.LateUpdate(frame with { DeltaSeconds = attached.LateUpdateWaited });
         attached.LateUpdateWaited = 0;
+
         return true;
     }
 

@@ -61,6 +61,7 @@ internal readonly record struct GemAssembly(
     {
         string path = files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
         Result<Assembly> loaded = LoadAssembly(files, path, $"Gem {name}", isCode: false, again: false);
+
         if (!loaded.Ok) return Result.Failure<GemAssembly>(loaded.Error);
 
         Assembly assembly = loaded.Value;
@@ -78,6 +79,7 @@ internal readonly record struct GemAssembly(
 
         Type gem = gems[0];
         ConstructorInfo[] constructors = gem.GetConstructors();
+
         if (constructors.Length != 1)
         {
             return Result.Failure<GemAssembly>(
@@ -88,6 +90,7 @@ internal readonly record struct GemAssembly(
         foreach (ParameterInfo parameter in constructors[0].GetParameters())
         {
             Type type = parameter.ParameterType;
+
             if (!type.IsAssignableTo(typeof(ISettings))) continue;
 
             if (settings is not null)
@@ -112,6 +115,7 @@ internal readonly record struct GemAssembly(
         string author = GetMetadata(assembly, AuthorKey) ?? name;
         string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
+
         return Result.Success(new GemAssembly(
             name,
             path,
@@ -143,10 +147,12 @@ internal readonly record struct GemAssembly(
         if (!loaded.Ok)
         {
             Debugging.Error(loaded.Error);
+
             return null;
         }
 
         Debugging.Info(again ? $"Loaded {what} again" : $"Loaded {what}");
+
         return loaded.Value;
     }
 
@@ -156,9 +162,7 @@ internal readonly record struct GemAssembly(
     /// <c>Resources/</c> beside it, where a release copies them.
     /// </summary>
     internal static string GetResources(IFileSystem files, Assembly assembly)
-    {
-        return GetMetadata(assembly, ResourcesKey) ?? files.Combine(files.GetParent(assembly.Location), "Resources");
-    }
+        => GetMetadata(assembly, ResourcesKey) ?? files.Combine(files.GetParent(assembly.Location), "Resources");
 
     /// <summary>
     /// What <paramref name="assembly"/>'s build recorded as <paramref name="key"/>; null when nothing, or nothing but
@@ -169,9 +173,7 @@ internal readonly record struct GemAssembly(
         foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
         {
             if (string.Equals(metadata.Key, key, StringComparison.Ordinal) && metadata.Value is { Length: > 0 } value)
-            {
                 return value;
-            }
         }
 
         return null;
@@ -197,6 +199,7 @@ internal readonly record struct GemAssembly(
                 GemLoadContext context = new(path, files);
                 Assembly assembly = isCode ? LoadFromBytes(files, context, path) : context.LoadFromAssemblyPath(path);
                 _loaded[path] = assembly;
+
                 return Result.Success(assembly);
             }
             catch (Exception ex) when (ex is BadImageFormatException or FileLoadException or IOException)
@@ -213,16 +216,17 @@ internal readonly record struct GemAssembly(
     private static Assembly LoadFromBytes(IFileSystem files, GemLoadContext context, string path)
     {
         Result<byte[]> read = files.Read(path);
+
         if (!read.Ok) throw new IOException(read.Error);
 
         using MemoryStream assembly = new(read.Value);
         string symbolsPath = System.IO.Path.ChangeExtension(path, ".pdb");
+
         if (!files.FileExists(symbolsPath) || files.Read(symbolsPath) is not { Ok: true } symbols)
-        {
             return context.LoadFromStream(assembly);
-        }
 
         using MemoryStream pdb = new(symbols.Value);
+
         return context.LoadFromStream(assembly, pdb);
     }
 }

@@ -141,6 +141,7 @@ internal sealed class Shadows(GpuResources resources)
     {
         double texels = Math.Max(settings.ShadowBudget, 0) * 1024 * 1024 / sizeof(float);
         int side = 1 << (int)Math.Floor(Math.Log2(Math.Sqrt(Math.Max(texels, 1))));
+
         return Math.Clamp(side, 1024, 16384);
     }
 
@@ -217,6 +218,7 @@ internal sealed class Shadows(GpuResources resources)
         Vector3 direction = Vector3.Normalize(light);
         Vector3 reference = MathF.Abs(direction.Y) < 0.99f ? Vector3.UnitY : Vector3.UnitZ;
         Vector3 right = Vector3.Normalize(Vector3.Cross(reference, direction));
+
         return (direction, right, Vector3.Cross(direction, right));
     }
 

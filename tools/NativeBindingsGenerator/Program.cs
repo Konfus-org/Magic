@@ -16,6 +16,7 @@ internal static class Program
         if (args.Length != 1 || !args[0].StartsWith('@'))
         {
             Console.Error.WriteLine("Bindings : error BND000: usage: Bindings @response.rsp");
+
             return 1;
         }
 
@@ -27,6 +28,7 @@ internal static class Program
         catch (ArgumentException ex)
         {
             Console.Error.WriteLine($"{args[0][1..]} : error BND000: {ex.Message}");
+
             return 1;
         }
 
@@ -37,6 +39,7 @@ internal static class Program
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Console.Error.WriteLine($"Bindings : error BND999: {ex}");
+
             return 1;
         }
     }
@@ -75,6 +78,7 @@ internal static class Program
             foreach (Declaration declaration in reader.Declarations)
             {
                 (DeclarationKind Kind, string CName) key = (declaration.Kind, declaration.CName);
+
                 if (dropped.Contains(key)) continue;
 
                 if (!merged.TryGetValue(key, out (Declaration Declaration, string Target) seen))
@@ -89,6 +93,7 @@ internal static class Program
                         Declaration reconciled = seen.Declaration with { Text = reconciledText };
                         merged[key] = (reconciled, seen.Target);
                         ordered[ordered.IndexOf(seen.Declaration)] = reconciled;
+
                         continue;
                     }
 
@@ -97,9 +102,13 @@ internal static class Program
                         merged.Remove(key);
                         ordered.Remove(seen.Declaration);
                         dropped.Add(key);
-                        skipped.TryAdd($"macro {declaration.CName}", new(
-                            $"macro {declaration.CName} (its value differs between {seen.Target} and {target.Name})",
-                            "Bindings"));
+                        skipped.TryAdd(
+                            $"macro {declaration.CName}",
+                            new(
+                                $"macro {declaration.CName} (its value differs between {seen.Target} and "
+                                    + $"{target.Name})",
+                                "Bindings"));
+
                         continue;
                     }
 
@@ -138,18 +147,9 @@ internal static class Program
         int functions = 0;
         foreach (Declaration declaration in ordered)
         {
-            if (declaration.Kind == DeclarationKind.Constant)
-            {
-                constants++;
-            }
-            else if (declaration.Kind == DeclarationKind.Type)
-            {
-                types++;
-            }
-            else
-            {
-                functions++;
-            }
+            if (declaration.Kind == DeclarationKind.Constant) constants++;
+            else if (declaration.Kind == DeclarationKind.Type) types++;
+            else functions++;
         }
 
         StringBuilder skips = new();
@@ -157,14 +157,8 @@ internal static class Program
         foreach (Skip skip in skipped.Values)
         {
             skips.Append(skip.What).Append(" (").Append(skip.Where).Append(")\n");
-            if (skip.What.StartsWith("macro ", StringComparison.Ordinal))
-            {
-                skippedMacros++;
-            }
-            else
-            {
-                Console.WriteLine($"Bindings: {options.Library}: skipped {skip.What} ({skip.Where})");
-            }
+            if (skip.What.StartsWith("macro ", StringComparison.Ordinal)) skippedMacros++;
+            else Console.WriteLine($"Bindings: {options.Library}: skipped {skip.What} ({skip.Where})");
         }
 
         string skippedPath = Path.ChangeExtension(options.Output, ".skipped.txt");
@@ -176,9 +170,12 @@ internal static class Program
         }
 
         WriteWhenChanged(Path.ChangeExtension(options.Output, ".names.txt"), nameMap.ToString());
-        Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Bindings: {options.Library}: {types} types, "
-            + $"{functions} functions, {constants} constants -> {options.Output}; {skippedMacros} macros skipped, "
-            + $"listed in {skippedPath}"));
+        Console.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"Bindings: {options.Library}: {types} types, "
+                + $"{functions} functions, {constants} constants -> {options.Output}; {skippedMacros} macros skipped, "
+                + $"listed in {skippedPath}"));
+
         return true;
     }
 
@@ -207,6 +204,7 @@ internal static class Program
     {
         List<string> firstTokens = Tokenize(first);
         List<string> secondTokens = Tokenize(second);
+
         if (firstTokens.Count != secondTokens.Count) return null;
 
         StringBuilder text = new(first.Length);
@@ -278,6 +276,7 @@ internal static class Program
         {
             string a = i < firstLines.Length ? firstLines[i].Trim() : "";
             string b = i < secondLines.Length ? secondLines[i].Trim() : "";
+
             if (!string.Equals(a, b, StringComparison.Ordinal)) return (a, b);
         }
 

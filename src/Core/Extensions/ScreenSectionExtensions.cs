@@ -21,6 +21,7 @@ public static class ScreenSectionExtensions
         {
             int halfWidth = size.Width / 2;
             int halfHeight = size.Height / 2;
+
             return section switch
             {
                 ScreenSection.TopLeft => new Rectangle(0, 0, halfWidth, halfHeight),

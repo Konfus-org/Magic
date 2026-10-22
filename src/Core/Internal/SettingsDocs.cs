@@ -43,6 +43,7 @@ internal sealed class SettingsDocs(IFileSystem files)
         if (node is XText run)
         {
             text.Append(run.Value);
+
             return;
         }
 
@@ -51,12 +52,14 @@ internal sealed class SettingsDocs(IFileSystem files)
         if (element.Attribute("cref") is { } cref)
         {
             text.Append(cref.Value[(cref.Value.LastIndexOf('.') + 1)..]);
+
             return;
         }
 
         if (element.Attribute("name") is { } name && element.IsEmpty)
         {
             text.Append(name.Value);
+
             return;
         }
 
@@ -73,9 +76,11 @@ internal sealed class SettingsDocs(IFileSystem files)
     {
         Dictionary<string, string> summaries = new(StringComparer.Ordinal);
         string path = Path.ChangeExtension(assembly.Location, ".xml");
+
         if (!files.FileExists(path)) return summaries;
 
         Result<byte[]> bytes = files.Read(path);
+
         if (!bytes.Ok) return summaries;
 
         XDocument document;

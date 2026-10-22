@@ -84,6 +84,9 @@ dotnet_diagnostic.RCS0028.severity = warning
 roslynator_arrow_token_new_line = before
 dotnet_diagnostic.RCS0032.severity = warning
 roslynator_equals_token_new_line = after
+# A list of arguments or parameters that spans lines has every item on a line of its own, the first on the line after
+# the opening parenthesis, as the wrap leaves one, so a list reads the same wrapped by hand or by the tool.
+dotnet_diagnostic.RCS0053.severity = warning
 
 # Layout: the order of a type's members (CODESTANDARDS Type layout) and of the usings, which StyleCop's ordering rules
 # check. They are the only StyleCop rules on: the others repeat the rules here or contradict them. The member order,
@@ -108,7 +111,9 @@ dotnet_diagnostic.SA1206.severity = none
 # moving a static field can change what its initializer reads.
 dotnet_diagnostic.SA1214.severity = none
 
-# Blank lines: one between members and between the steps of a method, never two
+# Blank lines: one between members and between the steps of a method, never two, and one before a way out of a block
+# (return, continue, break, throw), or before the guard clauses that hold one (MG0001, tools/Analyzers)
+dotnet_diagnostic.MG0001.severity = warning
 dotnet_style_allow_multiple_blank_lines_experimental = false
 dotnet_diagnostic.IDE2000.severity = warning
 csharp_style_allow_embedded_statements_on_same_line_experimental = true
@@ -124,9 +129,11 @@ dotnet_diagnostic.IDE2005.severity = warning
 csharp_style_allow_blank_line_after_token_in_arrow_expression_clause_experimental = false
 dotnet_diagnostic.IDE2006.severity = warning
 
-# An if or an else whose body is one short statement is one line without braces (CODESTANDARDS Methods); a multi-line
-# body always has them, and so do the branches beside it. Loops always have them too, which no option can ask for, so
-# the standard says it.
+# An if or an else whose body is one statement has no braces: the body is on its header's line when that fits, and on
+# the next when not (MG0002, tools/Analyzers; CODESTANDARDS Methods). A body or header that spans lines always has
+# them, and so do the branches beside it. Loops always have them too, which no option can ask for, so the standard
+# says it.
+dotnet_diagnostic.MG0002.severity = warning
 csharp_prefer_braces = when_multiline
 dotnet_diagnostic.IDE0011.severity = warning
 
@@ -172,6 +179,15 @@ csharp_style_prefer_primary_constructors = true
 dotnet_diagnostic.IDE0290.severity = warning
 dotnet_style_prefer_auto_properties = true
 dotnet_diagnostic.IDE0032.severity = warning
+# A member that only returns or does one thing says it with =>: a property, indexer or accessor always, and a method,
+# local function or operator whose body is one statement on one line
+csharp_style_expression_bodied_methods = when_on_single_line
+dotnet_diagnostic.IDE0022.severity = warning
+csharp_style_expression_bodied_local_functions = when_on_single_line
+dotnet_diagnostic.IDE0061.severity = warning
+csharp_style_expression_bodied_operators = when_on_single_line
+dotnet_diagnostic.IDE0023.severity = warning
+dotnet_diagnostic.IDE0024.severity = warning
 csharp_style_expression_bodied_properties = true
 dotnet_diagnostic.IDE0025.severity = warning
 csharp_style_expression_bodied_indexers = true
@@ -455,6 +471,10 @@ dotnet_diagnostic.RCS1243.severity = none
 dotnet_diagnostic.RCS1247.severity = none
 # A formula from a paper keeps the paper's form.
 dotnet_diagnostic.RCS1268.severity = none
+
+[tools/Analyzers/**.cs]
+# Release tracking is for analyzers published in a package; these ship with nothing.
+dotnet_diagnostic.RS2008.severity = none
 
 [src/Core/**.cs]
 # Core is an executable whose public types are the API gems compile against.

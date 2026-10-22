@@ -60,10 +60,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         string path,
         ReadOnlyMemory<byte> bytes,
         JsonElement settings,
-        CancellationToken cancel)
-    {
-        return new(Load(path, bytes.Span, settings));
-    }
+        CancellationToken cancel) => new(Load(path, bytes.Span, settings));
 
     private static Result<Model> Import(string path, ReadOnlySpan<byte> file, Vector3 origin)
     {
@@ -92,20 +89,17 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         }
 
         if (scene is null)
-        {
             return Result.Failure<Model>($"Assimp could not import it: {CString.Read(Assimp.GetErrorString())}");
-        }
 
         try
         {
             if (scene->MRootNode is null || (scene->MFlags & Assimp.SceneFlagsIncomplete) != 0)
-            {
                 return Result.Failure<Model>("Assimp could not import it.");
-            }
 
             for (uint i = 0; i < scene->MNumMeshes; i++)
             {
                 Assimp.Mesh* mesh = scene->MMeshes[i];
+
                 if (IsTriangles(mesh) && mesh->MNormals is null)
                 {
                     return Result.Failure<Model>($"its mesh {CString.Read(mesh->MName.Data)} has no normals, "
@@ -115,6 +109,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
 
             List<Mesh> meshes = [];
             Walk(scene, scene->MRootNode, Matrix4x4.Identity, ToEngine(scene, format), origin, meshes);
+
             return Result.Success(new Model { Meshes = meshes });
         }
         finally
@@ -252,6 +247,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     private static double GetNumber(Assimp.Scene* scene, string key, double fallback)
     {
         Assimp.Metadata* metadata = scene->MMetaData;
+
         if (metadata is null) return fallback;
 
         for (uint i = 0; i < metadata->MNumProperties; i++)
@@ -260,6 +256,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
 
             Assimp.MetadataType type = metadata->MValues[i].MType;
             void* data = metadata->MValues[i].MData;
+
             if (type == Assimp.MetadataType.AiBool) return *(byte*)data != 0 ? 1 : 0;
 
             if (type == Assimp.MetadataType.AiInt32) return *(int*)data;
@@ -281,6 +278,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     private Result<Model> Load(string path, ReadOnlySpan<byte> bytes, JsonElement settings)
     {
         Result<ModelMeta> meta = Json.Read<ModelMeta>(settings);
+
         if (!meta.Ok) return Result.Failure<Model>($"its .meta is not a model's: {meta.Error}");
 
         lock (_importing)

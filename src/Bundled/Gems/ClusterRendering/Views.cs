@@ -102,6 +102,7 @@ internal sealed class Views(
             }
 
             view.Hold(camera.Camera.Target);
+
             if (GetTarget(camera.Camera.Target) is not { } target) continue;
 
             view.Prepare(camera, target, settings, frame);
@@ -134,6 +135,7 @@ internal sealed class Views(
         if (!target.IsWindow)
         {
             BoundResource texture = resources.GetTexture(target.Texture);
+
             return texture.Texture == GpuTexture.None ? null : new ViewTarget(
                 texture.Texture,
                 new Rectangle(0, 0, (int)texture.Width, (int)texture.Height),
@@ -143,6 +145,7 @@ internal sealed class Views(
 
         GpuTexture image = GetWindow();
         Size size = image == GpuTexture.None ? Size.Empty : gpu.GetSize(image);
+
         return size.IsEmpty ? null : new ViewTarget(image, target.Section.AreaIn(size), gpu.GetFormat(image), true);
     }
 }
@@ -219,6 +222,7 @@ internal sealed class View : IDisposable
     internal void Hold(CameraTarget target)
     {
         Handle<RenderTexture> texture = target.IsWindow ? default : target.Texture;
+
         if (texture == _held) return;
 
         if (texture != Handle<RenderTexture>.None) _resources.Record(texture);
@@ -362,6 +366,7 @@ internal sealed class View : IDisposable
             (_, > 0) => (settings.RenderHeight * proportion, settings.RenderHeight),
             _ => (targetWidth * scale, targetHeight * scale),
         };
+
         return (ToPixels(wanted.Width, targetWidth), ToPixels(wanted.Height, targetHeight));
 
         static uint ToPixels(float size, float target)
@@ -412,6 +417,7 @@ internal sealed class View : IDisposable
         {
             texels += w * h;
             levels++;
+
             if (w == 1 && h == 1) return (texels, levels);
 
             (w, h) = (Math.Max(1, (w + 1) / 2), Math.Max(1, (h + 1) / 2));
@@ -424,6 +430,7 @@ internal sealed class View : IDisposable
     private static Vector2 GetJitter(ulong frame, uint width, uint height)
     {
         int phase = (int)(frame % JitterPhases) + 1;
+
         return new Vector2((Halton(phase, 2) - 0.5f) * 2 / width, (Halton(phase, 3) - 0.5f) * 2 / height);
 
         static float Halton(int index, int radix)
@@ -446,17 +453,19 @@ internal sealed class View : IDisposable
     /// </summary>
     private void Make(ResourceInfo info, uint width, uint height)
     {
-        Resources.MakeIfChanged(info.Name, new ResourceKey(
-            false,
-            info.Format,
-            GpuTextureKind.Texture2D,
-            info.TextureUsage,
-            GpuBufferUsage.None,
-            width,
-            height,
-            1,
-            1,
-            0));
+        Resources.MakeIfChanged(
+            info.Name,
+            new ResourceKey(
+                false,
+                info.Format,
+                GpuTextureKind.Texture2D,
+                info.TextureUsage,
+                GpuBufferUsage.None,
+                width,
+                height,
+                1,
+                1,
+                0));
     }
 
     /// <summary>
@@ -479,6 +488,7 @@ internal sealed class View : IDisposable
         foreach ((int slot, _) in _transparentOrder)
         {
             Renderer renderer = _instances.GetRenderer(slot);
+
             if (_resources.FindInPool(renderer.Model) is not ({ } firstCluster, { } packed)
                 || packed.Levels.Length == 0)
             {
@@ -489,6 +499,7 @@ internal sealed class View : IDisposable
             for (int i = (int)finest.FirstCluster; i < finest.FirstCluster + finest.Count; i++)
             {
                 GpuCluster cluster = packed.Clusters[i];
+
                 if (_resources.Get(renderer.Materials[(int)((cluster.Counts >> 17) & 7)])
                     is not { Type: MaterialType.Transparent } drawn)
                 {

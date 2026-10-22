@@ -21,8 +21,5 @@ public sealed class SubscriptionList : IDisposable
         _subscriptions.Clear();
     }
 
-    public void Add(Subscription subscription)
-    {
-        _subscriptions.Add(subscription);
-    }
+    public void Add(Subscription subscription) => _subscriptions.Add(subscription);
 }

@@ -73,12 +73,14 @@ internal sealed class PassParams
     internal bool TryFollow()
     {
         long version = _values.Version;
+
         if (version == _version) return true;
 
         if (!AreCurvesLoaded()) return false;
 
         _version = version;
         Words = Pack();
+
         return true;
     }
 
@@ -88,14 +90,13 @@ internal sealed class PassParams
     private PassWords Pack()
     {
         PassWords words = default;
+
         if (_layout is null) return words;
 
         foreach (string unknown in _layout.FindUnknown(_values.Keys))
         {
             if (_unknown.Add(unknown))
-            {
                 Debugging.Warn($"Pass {_name} is given {unknown}, which its shader's PassParams does not declare.");
-            }
         }
 
         _layout.Write(
@@ -103,6 +104,7 @@ internal sealed class PassParams
             static _ => GpuContract.NoTexture,
             _findCurve,
             MemoryMarshal.AsBytes(new Span<PassWords>(ref words)));
+
         return words;
     }
 

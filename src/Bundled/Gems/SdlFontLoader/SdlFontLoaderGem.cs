@@ -34,6 +34,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     {
         // SDL itself first, so SDL_ttf binds to the SDL every gem shares.
         _ = SDL.GetVersion();
+
         if (TTF.Init()) return;
 
         throw new InvalidOperationException($"SDL_ttf could not start: {CString.Read(SDL.GetError())}");
@@ -55,10 +56,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         string path,
         ReadOnlyMemory<byte> bytes,
         JsonElement settings,
-        CancellationToken cancel)
-    {
-        return new(Load(bytes.Span, settings));
-    }
+        CancellationToken cancel) => new(Load(bytes.Span, settings));
 
     /// <summary>
     /// The characters of the font in <paramref name="file"/>, drawn <paramref name="size"/> pixels high and packed into
@@ -71,6 +69,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         {
             SDL.IOStream* io = SDL.IOFromConstMem(bytes, (ulong)file.Length);
             TTF.Font* font = io == null ? null : TTF.OpenFontIO(io, closeio: true, size);
+
             if (font == null) return Result.Failure<Font>($"SDL_ttf could not read it: {CString.Read(SDL.GetError())}");
 
             try
@@ -82,6 +81,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
                     if (codepoint is > 126 and < 160 || !TTF.FontHasGlyph(font, codepoint)) continue;
 
                     Result<Drawn> glyph = DrawGlyph(font, codepoint);
+
                     if (!glyph.Ok) return Result.Failure<Font>(glyph.Error);
 
                     drawn.Add(glyph.Value);
@@ -107,10 +107,9 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         int minY;
         int maxY;
         int advance;
+
         if (!TTF.GetGlyphMetrics(font, codepoint, &minX, &maxX, &minY, &maxY, &advance))
-        {
             return Result.Failure<Drawn>($"SDL_ttf could not measure U+{codepoint:X4}: {CString.Read(SDL.GetError())}");
-        }
 
         TTF.ImageType type;
         SDL.Surface* image = TTF.GetGlyphImage(font, codepoint, &type);
@@ -124,6 +123,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         // R, G, B, A bytes in memory whatever the machine's byte order.
         SDL.Surface* rgba = SDL.ConvertSurface(image, SDL.PixelFormat.Rgba32);
         SDL.DestroySurface(image);
+
         if (rgba == null)
         {
             return Result.Failure<Drawn>(
@@ -139,6 +139,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
 
         Drawn drawn = new(codepoint, pixels, rgba->W, rgba->H, minX, maxY, advance);
         SDL.DestroySurface(rgba);
+
         return Result.Success(drawn);
     }
 
@@ -152,14 +153,8 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         List<(int X, int Y)> places = [];
         while (!TryPlace(drawn, width, height, places))
         {
-            if (width <= height)
-            {
-                width *= 2;
-            }
-            else
-            {
-                height *= 2;
-            }
+            if (width <= height) width *= 2;
+            else height *= 2;
         }
 
         byte[] atlas = new byte[width * height * 4];
@@ -222,6 +217,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     private Result<Font> Load(ReadOnlySpan<byte> bytes, JsonElement settings)
     {
         Result<FontMeta> meta = Json.Read<FontMeta>(settings);
+
         if (!meta.Ok) return Result.Failure<Font>($"its .meta is not a font's: {meta.Error}");
 
         lock (_loading)

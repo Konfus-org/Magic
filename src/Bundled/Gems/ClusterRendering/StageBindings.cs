@@ -70,11 +70,10 @@ internal sealed class StageBindings
             if (binding.Kind == GpuBindingKind.Uniform) continue;
 
             if (kinds.TryGetValue(binding.Name, out GpuBindingKind kind) && kind != binding.Kind)
-            {
                 return Result.Failure<StageBindings>($"{binding.Name} is read as two kinds of thing.");
-            }
 
             kinds[binding.Name] = binding.Kind;
+
             if (GetKindError(binding, seen, written) is { } why) return Result.Failure<StageBindings>(why);
         }
 
@@ -134,9 +133,7 @@ internal sealed class StageBindings
         foreach (ResourceInfo info in visible)
         {
             if (!written.Contains(info.Name))
-            {
                 header.Append(CultureInfo.InvariantCulture, $"#define HAS_{info.Name} 1\n");
-            }
         }
 
         uint sampled = (uint)(bound?.Sampled.Count ?? 0);
@@ -158,8 +155,10 @@ internal sealed class StageBindings
         {
             if (!info.IsBuffer && info.IsStorageRead && !written.Contains(info.Name))
             {
-                header.Append(CultureInfo.InvariantCulture, $"{info.ReadType} {info.Name} : "
-                    + $"READ({GetSlot(bound?.StorageReads, info.Name, sampled, ref next)});\n");
+                header.Append(
+                    CultureInfo.InvariantCulture,
+                    $"{info.ReadType} {info.Name} : "
+                        + $"READ({GetSlot(bound?.StorageReads, info.Name, sampled, ref next)});\n");
             }
         }
 
@@ -167,8 +166,10 @@ internal sealed class StageBindings
         {
             if (info.IsBuffer && !written.Contains(info.Name))
             {
-                header.Append(CultureInfo.InvariantCulture, $"{info.ReadType} {info.Name} : "
-                    + $"READ({GetSlot(bound?.Buffers, info.Name, sampled + storageReads, ref next)});\n");
+                header.Append(
+                    CultureInfo.InvariantCulture,
+                    $"{info.ReadType} {info.Name} : "
+                        + $"READ({GetSlot(bound?.Buffers, info.Name, sampled + storageReads, ref next)});\n");
             }
         }
 
@@ -180,8 +181,10 @@ internal sealed class StageBindings
         {
             if (!write.Info.IsBuffer)
             {
-                header.Append(CultureInfo.InvariantCulture, $"{write.Info.WriteType} {write.Info.Name} : "
-                    + $"WRITE({GetSlot(bound?.TextureWrites, write.Info.Name, 0, ref nextWrite)});\n");
+                header.Append(
+                    CultureInfo.InvariantCulture,
+                    $"{write.Info.WriteType} {write.Info.Name} : "
+                        + $"WRITE({GetSlot(bound?.TextureWrites, write.Info.Name, 0, ref nextWrite)});\n");
             }
         }
 
@@ -189,8 +192,10 @@ internal sealed class StageBindings
         {
             if (write.Info.IsBuffer)
             {
-                header.Append(CultureInfo.InvariantCulture, $"{write.Info.WriteType} {write.Info.Name} : "
-                    + $"WRITE({GetSlot(bound?.BufferWrites, write.Info.Name, writtenTextures, ref nextWrite)});\n");
+                header.Append(
+                    CultureInfo.InvariantCulture,
+                    $"{write.Info.WriteType} {write.Info.Name} : "
+                        + $"WRITE({GetSlot(bound?.BufferWrites, write.Info.Name, writtenTextures, ref nextWrite)});\n");
             }
         }
 
@@ -210,10 +215,12 @@ internal sealed class StageBindings
             if (binding.Kind == GpuBindingKind.Uniform)
             {
                 bindings.Add(binding);
+
                 continue;
             }
 
             List<BoundName> list = GetList(binding.Kind);
+
             if (!list.Exists(bound => string.Equals(bound.Binding.Info.Name, binding.Name, StringComparison.Ordinal)
                 && RegisterOf(binding.Kind, bound.Slot) == binding.Register))
             {
@@ -238,20 +245,17 @@ internal sealed class StageBindings
         if (isWrite)
         {
             if (!written.TryGetValue(binding.Name, out PassBinding write))
-            {
                 return $"its shader writes {binding.Name}, which its file does not write.";
-            }
 
             if (write.Info.IsBuffer == (binding.Kind == GpuBindingKind.ReadWriteStorageBuffer)) return null;
 
             string kind = write.Info.IsBuffer ? "texture" : "buffer";
+
             return $"its shader writes {binding.Name} as a {kind}, which it is not.";
         }
 
         if (!seen.TryGetValue(binding.Name, out ResourceInfo? info))
-        {
             return $"its shader reads {binding.Name}, which it cannot see.";
-        }
 
         if (binding.Kind == GpuBindingKind.Sampled && (info.IsBuffer || info.IsStorageRead))
         {
@@ -260,9 +264,7 @@ internal sealed class StageBindings
         }
 
         if (binding.Kind == GpuBindingKind.StorageTexture && (info.IsBuffer || !info.IsStorageRead))
-        {
             return $"its shader reads {binding.Name} as a storage texture, which it is not.";
-        }
 
         return binding.Kind == GpuBindingKind.StorageBuffer && !info.IsBuffer
             ? $"its shader reads {binding.Name} as a buffer, which it is not."
@@ -318,6 +320,7 @@ internal sealed class StageBindings
         Add(Buffers, GpuBindingKind.StorageBuffer);
         Add(TextureWrites, GpuBindingKind.ReadWriteStorageTexture);
         Add(BufferWrites, GpuBindingKind.ReadWriteStorageBuffer);
+
         return bindings;
 
         void Add(List<BoundName> list, GpuBindingKind kind)

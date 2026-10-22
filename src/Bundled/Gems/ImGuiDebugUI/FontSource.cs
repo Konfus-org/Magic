@@ -62,21 +62,13 @@ internal sealed unsafe class FontSource : IDisposable
     /// Takes the font out of ImGui's atlas, for another to take its place; before <see cref="Dispose"/>, while the
     /// context is still there.
     /// </summary>
-    internal void Remove()
-    {
-        ImFontAtlas.RemoveFont(ImGui.GetIO()->Fonts, _added);
-    }
+    internal void Remove() => ImFontAtlas.RemoveFont(ImGui.GetIO()->Fonts, _added);
 
-    private static Font? GetFont(ImFontConfig* source)
-    {
-        return GCHandle.FromIntPtr(*(nint*)source->FontData).Target as Font;
-    }
+    private static Font? GetFont(ImFontConfig* source) => GCHandle.FromIntPtr(*(nint*)source->FontData).Target as Font;
 
     [UnmanagedCallersOnly]
     private static bool ContainsGlyph(ImFontAtlas* atlas, ImFontConfig* source, uint codepoint)
-    {
-        return GetFont(source) is { } font && font.Glyphs.ContainsKey(codepoint);
-    }
+        => GetFont(source) is { } font && font.Glyphs.ContainsKey(codepoint);
 
     /// <summary>
     /// The font's line, scaled to the size ImGui draws it at.
@@ -89,6 +81,7 @@ internal sealed unsafe class FontSource : IDisposable
         float scale = baked->Size / font.LineHeight;
         baked->Ascent = font.Ascent * scale;
         baked->Descent = (font.Ascent - font.LineHeight) * scale;
+
         return true;
     }
 
@@ -112,14 +105,17 @@ internal sealed unsafe class FontSource : IDisposable
         if (advance != null)
         {
             *advance = loaded.Advance * scale;
+
             return true;
         }
 
         glyph->Codepoint = codepoint;
         glyph->AdvanceX = loaded.Advance * scale;
+
         if (loaded.Width == 0 || loaded.Height == 0) return true;
 
         int rectangle = ImFontAtlas.PackAddRect(atlas, loaded.Width, loaded.Height);
+
         if (rectangle < 0) return false;
 
         glyph->X0 = loaded.BearingX * scale;

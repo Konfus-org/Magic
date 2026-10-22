@@ -114,6 +114,7 @@ public static class Json
             TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { WithoutAssetHandle } },
         };
         options.MakeReadOnly();
+
         return options;
     }
 
@@ -128,9 +129,7 @@ public static class Json
         for (int i = type.Properties.Count - 1; i >= 0; i--)
         {
             if (type.Properties[i].AttributeProvider is PropertyInfo { Name: nameof(IAsset<Domain>.Handle) })
-            {
                 type.Properties.RemoveAt(i);
-            }
         }
     }
 

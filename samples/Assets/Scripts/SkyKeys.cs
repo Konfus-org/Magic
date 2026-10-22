@@ -54,6 +54,7 @@ internal sealed class SkyKeys(World world, IInput input, Services.Assets assets,
         // A param set to the value it has counts nothing, so while no key is held nothing is redone.
         sky.Params["haze"] = Haze;
         sky.Params["cloudHeight"] = CloudHeight;
+
         if (debugUI is not { Enabled: true }) return;
 
         debugUI.Text($"Haze {Haze:0.0} (left and right), clouds at {CloudHeight:0} m (page up and down)");

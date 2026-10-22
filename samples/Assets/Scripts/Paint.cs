@@ -29,10 +29,7 @@ internal sealed class Paint(Entity owner, World world) : IBehavior
 
     public float Seconds { get; set; } = 1.5f;
 
-    public void Start()
-    {
-        _own = world.Get<Renderer>(owner).Materials[0];
-    }
+    public void Start() => _own = world.Get<Renderer>(owner).Materials[0];
 
     public void Update(in Frame frame)
     {

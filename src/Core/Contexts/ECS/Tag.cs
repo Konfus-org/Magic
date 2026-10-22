@@ -40,6 +40,7 @@ public readonly record struct Tag(int Id)
         }
 
         int id = unchecked((int)hash);
+
         return new Tag(id == 0 ? 1 : id);
     }
 }

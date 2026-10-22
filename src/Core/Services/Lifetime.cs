@@ -30,19 +30,13 @@ public sealed class Lifetime : IDisposable
     /// </summary>
     public bool IsRestarting { get; private set; }
 
-    public void Dispose()
-    {
-        _stopping.Dispose();
-    }
+    public void Dispose() => _stopping.Dispose();
 
     /// <summary>
     /// Ends the run after this frame. <paramref name="reason"/> goes to the log, so a run never stops unexplained;
     /// only the first is logged, since the run is already ending.
     /// </summary>
-    public void Stop(string reason)
-    {
-        End(reason, restart: false);
-    }
+    public void Stop(string reason) => End(reason, restart: false);
 
     /// <summary>
     /// Ends the run to start it again at once, every setting as it is now and the world as it is, saved as the last
@@ -50,10 +44,7 @@ public sealed class Lifetime : IDisposable
     /// goes on where it was: for a setting read only as the engine starts, or for whatever else wants the gems made
     /// again. Nothing, when the run is ending already.
     /// </summary>
-    public void Restart(string reason)
-    {
-        End(reason, restart: true);
-    }
+    public void Restart(string reason) => End(reason, restart: true);
 
     private void End(string reason, bool restart)
     {
