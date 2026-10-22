@@ -12,6 +12,11 @@ using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.SdlBindings;
 using Magic.Services;
+using static Magic.SdlBindings.SDL_EventType;
+using static Magic.SdlBindings.SDL_GamepadAxis;
+using static Magic.SdlBindings.SDL_MouseWheelDirection;
+using static Magic.SdlBindings.SDL_PixelFormat;
+using static Magic.SdlBindings.SDL3;
 
 namespace Magic.SdlPlatform;
 
@@ -31,7 +36,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     private readonly SdlPlatformSettings _settings;
     private readonly Lifetime _lifetime;
     private readonly Assets _assets;
-    private readonly unsafe SDL.Window* _window;
+    private readonly unsafe SDL_Window* _window;
 
     /// <summary>
     /// What the render thread's pump saw, in the order it happened, for the main thread to apply.
@@ -112,50 +117,51 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         // Ctrl+C is Core's to handle (--headless); left alone, SDL would turn it into a quit event.
         fixed (byte* on = "1"u8)
         {
-            SDL.SetHint(SDL.HintNoSignalHandlers, on);
+            SDL_SetHint(CString.Constant(SDL_HINT_NO_SIGNAL_HANDLERS), on);
         }
 
         uint systems = run.Headless
-            ? SDL.InitGamepad
-            : SDL.InitVideo | SDL.InitGamepad;
+            ? SDL_INIT_GAMEPAD
+            : SDL_INIT_VIDEO | SDL_INIT_GAMEPAD;
 
-        if (!SDL.Init(systems))
-            throw new InvalidOperationException($"SDL could not start: {CString.Read(SDL.GetError())}");
+        if (!SDL_Init(systems))
+            throw new InvalidOperationException($"SDL could not start: {CString.Read(SDL_GetError())}");
 
         // The headers the binding was generated from are the oldest SDL that serves it; SDL keeps its ABI, so a newer
         // one does.
-        int version = SDL.GetVersion();
+        int version = SDL_GetVersion();
 
-        if (version < SDL.VERSION)
+        if (version < SDL_VERSION)
         {
             throw new InvalidOperationException($"SDL {version / 1000000}.{version / 1000 % 1000}.{version % 1000} is "
-                + $"older than the {SDL.MajorVersion}.{SDL.MinorVersion}.{SDL.MicroVersion} Magic was built against.");
+                + $"older than the {SDL_MAJOR_VERSION}.{SDL_MINOR_VERSION}.{SDL_MICRO_VERSION} "
+                + "Magic was built against.");
         }
 
         if (run.Headless) return;
 
         fixed (byte* title = CString.ToBytes(project.Name))
         {
-            _window = SDL.CreateWindow(
+            _window = SDL_CreateWindow(
                 title,
                 settings.Width,
                 settings.Height,
-                SDL.WindowResizable | SDL.WindowHighPixelDensity);
+                SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
         }
 
         if (_window == null)
         {
-            string error = CString.Read(SDL.GetError());
-            SDL.Quit();
+            string error = CString.Read(SDL_GetError());
+            SDL_Quit();
 
             throw new InvalidOperationException($"SDL could not open a window: {error}");
         }
 
-        Id = SDL.GetWindowID(_window);
+        Id = SDL_GetWindowID(_window);
 
         // Typed characters come as text events only while text input is on: always, as a desktop has no on-screen
         // keyboard for it to bring up.
-        if (!SDL.StartTextInput(_window)) Debugging.Warn($"Typed text is not read: {CString.Read(SDL.GetError())}");
+        if (!SDL_StartTextInput(_window)) Debugging.Warn($"Typed text is not read: {CString.Read(SDL_GetError())}");
 
         // The main thread has not started: its state is set here, before anything reads it.
         if (TryReadWindowSize(out int width, out int height))
@@ -167,22 +173,22 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         _clipboard = ReadClipboard();
 
         int keyboardsCount;
-        uint* keyboards = SDL.GetKeyboards(&keyboardsCount);
+        uint* keyboards = SDL_GetKeyboards(&keyboardsCount);
         for (int i = 0; i < keyboardsCount; i++)
         {
             Announce(DeviceKind.Keyboard, keyboards[i]);
         }
 
-        SDL.Free(keyboards);
+        SDL_free(keyboards);
 
         int miceCount;
-        uint* mice = SDL.GetMice(&miceCount);
+        uint* mice = SDL_GetMice(&miceCount);
         for (int i = 0; i < miceCount; i++)
         {
             Announce(DeviceKind.Mouse, mice[i]);
         }
 
-        SDL.Free(mice);
+        SDL_free(mice);
     }
 
     /// <summary>
@@ -282,12 +288,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         foreach (nint gamepad in _gamepads.Values)
         {
-            SDL.CloseGamepad((SDL.Gamepad*)gamepad);
+            SDL_CloseGamepad((SDL_Gamepad*)gamepad);
         }
 
-        if (_window != null) SDL.DestroyWindow(_window);
+        if (_window != null) SDL_DestroyWindow(_window);
 
-        SDL.Quit();
+        SDL_Quit();
     }
 
     /// <summary>
@@ -326,87 +332,87 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     public unsafe void Render(in Frame frame)
     {
         ApplyWanted();
-        SDL.Event sdlEvent;
-        while (SDL.PollEvent(&sdlEvent))
+        SDL_Event sdlEvent;
+        while (SDL_PollEvent(&sdlEvent))
         {
-            switch ((SDL.EventType)sdlEvent.Type)
+            switch ((SDL_EventType)sdlEvent.type)
             {
-                case SDL.EventType.Quit:
+                case SDL_EVENT_QUIT:
                     _lifetime.Stop("the system asked Magic to quit");
                     break;
-                case SDL.EventType.WindowCloseRequested:
+                case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                     _lifetime.Stop("window closed");
                     break;
-                case SDL.EventType.WindowPixelSizeChanged:
+                case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                     if (TryReadWindowSize(out int width, out int height))
                         Write(new Change(ChangeKind.Resized, Width: width, Height: height));
 
                     break;
-                case SDL.EventType.KeyboardAdded:
-                    Announce(DeviceKind.Keyboard, sdlEvent.Kdevice.Which);
+                case SDL_EVENT_KEYBOARD_ADDED:
+                    Announce(DeviceKind.Keyboard, sdlEvent.kdevice.which);
                     break;
-                case SDL.EventType.KeyboardRemoved:
-                    Forget(DeviceKind.Keyboard, sdlEvent.Kdevice.Which);
+                case SDL_EVENT_KEYBOARD_REMOVED:
+                    Forget(DeviceKind.Keyboard, sdlEvent.kdevice.which);
                     break;
-                case SDL.EventType.MouseAdded:
-                    Announce(DeviceKind.Mouse, sdlEvent.Mdevice.Which);
+                case SDL_EVENT_MOUSE_ADDED:
+                    Announce(DeviceKind.Mouse, sdlEvent.mdevice.which);
                     break;
-                case SDL.EventType.MouseRemoved:
-                    Forget(DeviceKind.Mouse, sdlEvent.Mdevice.Which);
+                case SDL_EVENT_MOUSE_REMOVED:
+                    Forget(DeviceKind.Mouse, sdlEvent.mdevice.which);
                     break;
-                case SDL.EventType.GamepadAdded:
-                    OpenGamepad(sdlEvent.Gdevice.Which);
+                case SDL_EVENT_GAMEPAD_ADDED:
+                    OpenGamepad(sdlEvent.gdevice.which);
                     break;
-                case SDL.EventType.GamepadRemoved:
-                    CloseGamepad(sdlEvent.Gdevice.Which);
+                case SDL_EVENT_GAMEPAD_REMOVED:
+                    CloseGamepad(sdlEvent.gdevice.which);
                     break;
-                case SDL.EventType.KeyDown:
-                case SDL.EventType.KeyUp:
-                    if (!sdlEvent.Key.Repeat && sdlEvent.Key.Scancode.Control is { } key)
-                        Set(DeviceKind.Keyboard, sdlEvent.Key.Which, key, sdlEvent.Key.Down ? 1 : 0);
+                case SDL_EVENT_KEY_DOWN:
+                case SDL_EVENT_KEY_UP:
+                    if (!sdlEvent.key.repeat && sdlEvent.key.scancode.Control is { } key)
+                        Set(DeviceKind.Keyboard, sdlEvent.key.which, key, sdlEvent.key.down ? 1 : 0);
 
                     break;
-                case SDL.EventType.MouseButtonDown:
-                case SDL.EventType.MouseButtonUp:
-                    if (SdlControlExtensions.ToMouseControl(sdlEvent.Button.Button) is { } button)
-                        Set(DeviceKind.Mouse, sdlEvent.Button.Which, button, sdlEvent.Button.Down ? 1 : 0);
+                case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                case SDL_EVENT_MOUSE_BUTTON_UP:
+                    if (SdlControlExtensions.ToMouseControl(sdlEvent.button.button) is { } button)
+                        Set(DeviceKind.Mouse, sdlEvent.button.which, button, sdlEvent.button.down ? 1 : 0);
 
                     break;
-                case SDL.EventType.MouseMotion:
+                case SDL_EVENT_MOUSE_MOTION:
                 {
-                    uint mouse = sdlEvent.Motion.Which;
-                    Set(DeviceKind.Mouse, mouse, Control.MouseX, sdlEvent.Motion.X * _pixelDensity);
-                    Set(DeviceKind.Mouse, mouse, Control.MouseY, sdlEvent.Motion.Y * _pixelDensity);
+                    uint mouse = sdlEvent.motion.which;
+                    Set(DeviceKind.Mouse, mouse, Control.MouseX, sdlEvent.motion.x * _pixelDensity);
+                    Set(DeviceKind.Mouse, mouse, Control.MouseY, sdlEvent.motion.y * _pixelDensity);
                     float motion = _pixelDensity * Math.Clamp(_settings.MouseSensitivity, 0.1f, 10);
-                    Add(mouse, Control.MouseMotionX, sdlEvent.Motion.Xrel * motion);
-                    Add(mouse, Control.MouseMotionY, sdlEvent.Motion.Yrel * motion * (_settings.InvertMouseY ? -1 : 1));
+                    Add(mouse, Control.MouseMotionX, sdlEvent.motion.xrel * motion);
+                    Add(mouse, Control.MouseMotionY, sdlEvent.motion.yrel * motion * (_settings.InvertMouseY ? -1 : 1));
 
                     break;
                 }
 
-                case SDL.EventType.MouseWheel:
+                case SDL_EVENT_MOUSE_WHEEL:
                 {
-                    uint mouse = sdlEvent.Wheel.Which;
-                    float direction = sdlEvent.Wheel.Direction == SDL.MouseWheelDirection.Flipped ? -1 : 1;
-                    Add(mouse, Control.MouseWheelX, sdlEvent.Wheel.X * direction);
-                    Add(mouse, Control.MouseWheelY, sdlEvent.Wheel.Y * direction);
+                    uint mouse = sdlEvent.wheel.which;
+                    float direction = sdlEvent.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1;
+                    Add(mouse, Control.MouseWheelX, sdlEvent.wheel.x * direction);
+                    Add(mouse, Control.MouseWheelY, sdlEvent.wheel.y * direction);
 
                     break;
                 }
 
-                case SDL.EventType.TextInput:
-                    Write(new Change(ChangeKind.Typed, Text: CString.Read(sdlEvent.Text.Text)));
+                case SDL_EVENT_TEXT_INPUT:
+                    Write(new Change(ChangeKind.Typed, Text: CString.Read(sdlEvent.text.text)));
                     break;
-                case SDL.EventType.ClipboardUpdate:
+                case SDL_EVENT_CLIPBOARD_UPDATE:
                     Write(new Change(ChangeKind.Clipboard, Text: ReadClipboard()));
                     break;
-                case SDL.EventType.GamepadButtonDown:
-                case SDL.EventType.GamepadButtonUp:
+                case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+                case SDL_EVENT_GAMEPAD_BUTTON_UP:
                     // Only a pad that is open: one that could not be opened is no device.
-                    if (_gamepads.ContainsKey(sdlEvent.Gbutton.Which)
-                        && ((SDL.GamepadButton)sdlEvent.Gbutton.Button).Control is { } gamepadButton)
+                    if (_gamepads.ContainsKey(sdlEvent.gbutton.which)
+                        && ((SDL_GamepadButton)sdlEvent.gbutton.button).Control is { } gamepadButton)
                     {
-                        Set(DeviceKind.Gamepad, sdlEvent.Gbutton.Which, gamepadButton, sdlEvent.Gbutton.Down ? 1 : 0);
+                        Set(DeviceKind.Gamepad, sdlEvent.gbutton.which, gamepadButton, sdlEvent.gbutton.down ? 1 : 0);
                     }
 
                     break;
@@ -416,7 +422,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         // Sticks and triggers are read as they stand now, rather than added up from events.
         foreach ((uint id, nint gamepad) in _gamepads)
         {
-            ReadAxes(id, (SDL.Gamepad*)gamepad);
+            ReadAxes(id, (SDL_Gamepad*)gamepad);
         }
     }
 
@@ -458,9 +464,9 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     private static unsafe string ReadClipboard()
     {
-        byte* text = SDL.GetClipboardText();
+        byte* text = SDL_GetClipboardText();
         string value = CString.Read(text);
-        SDL.Free(text);
+        SDL_free(text);
 
         return value;
     }
@@ -485,7 +491,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         {
             fixed (byte* text = CString.ToBytes(title))
             {
-                SDL.SetWindowTitle(_window, text);
+                SDL_SetWindowTitle(_window, text);
             }
         }
 
@@ -493,12 +499,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         {
             fixed (byte* text = CString.ToBytes(clipboard))
             {
-                SDL.SetClipboardText(text);
+                SDL_SetClipboardText(text);
             }
         }
 
         if (Interlocked.Exchange(ref _wantedSize, null) is { } size)
-            SDL.SetWindowSize(_window, size.Width, size.Height);
+            SDL_SetWindowSize(_window, size.Width, size.Height);
 
         if (Interlocked.Exchange(ref _wantedIcon, null) is { } icon) SetIcon(icon);
     }
@@ -617,7 +623,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         if (!_announced.Add((kind, id))) return;
 
-        byte* named = kind == DeviceKind.Keyboard ? SDL.GetKeyboardNameForID(id) : SDL.GetMouseNameForID(id);
+        byte* named = kind == DeviceKind.Keyboard ? SDL_GetKeyboardNameForID(id) : SDL_GetMouseNameForID(id);
         Write(new Change(ChangeKind.Added, kind, id, Name: CString.Read(named)));
     }
 
@@ -630,16 +636,16 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         if (_gamepads.ContainsKey(id)) return;
 
-        SDL.Gamepad* gamepad = SDL.OpenGamepad(id);
+        SDL_Gamepad* gamepad = SDL_OpenGamepad(id);
         if (gamepad == null)
         {
-            Debugging.Warn($"A gamepad was connected but could not be opened: {CString.Read(SDL.GetError())}");
+            Debugging.Warn($"A gamepad was connected but could not be opened: {CString.Read(SDL_GetError())}");
 
             return;
         }
 
         _gamepads[id] = (nint)gamepad;
-        string name = CString.Read(SDL.GetGamepadName(gamepad));
+        string name = CString.Read(SDL_GetGamepadName(gamepad));
         Write(new Change(ChangeKind.Added, DeviceKind.Gamepad, id, Name: name));
         Debugging.Info($"Gamepad connected: {name}");
     }
@@ -648,41 +654,41 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         if (!_gamepads.Remove(id, out nint gamepad)) return;
 
-        Debugging.Info($"Gamepad disconnected: {CString.Read(SDL.GetGamepadName((SDL.Gamepad*)gamepad))}");
-        SDL.CloseGamepad((SDL.Gamepad*)gamepad);
+        Debugging.Info($"Gamepad disconnected: {CString.Read(SDL_GetGamepadName((SDL_Gamepad*)gamepad))}");
+        SDL_CloseGamepad((SDL_Gamepad*)gamepad);
         Write(new Change(ChangeKind.Removed, DeviceKind.Gamepad, id));
     }
 
-    private unsafe void ReadAxes(uint id, SDL.Gamepad* gamepad)
+    private unsafe void ReadAxes(uint id, SDL_Gamepad* gamepad)
     {
         // SDL's stick y grows downward; Magic's is up positive, unless the settings invert it.
         float up = _settings.InvertStickY ? 1 : -1;
-        Set(DeviceKind.Gamepad, id, Control.GamepadLeftX, ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Leftx)));
+        Set(DeviceKind.Gamepad, id, Control.GamepadLeftX, ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX)));
         Set(
             DeviceKind.Gamepad,
             id,
             Control.GamepadLeftY,
-            up * ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Lefty)));
+            up * ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY)));
         Set(
             DeviceKind.Gamepad,
             id,
             Control.GamepadRightX,
-            ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Rightx)));
+            ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX)));
         Set(
             DeviceKind.Gamepad,
             id,
             Control.GamepadRightY,
-            up * ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.Righty)));
+            up * ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY)));
         Set(
             DeviceKind.Gamepad,
             id,
             Control.GamepadLeftTrigger,
-            ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.LeftTrigger)));
+            ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER)));
         Set(
             DeviceKind.Gamepad,
             id,
             Control.GamepadRightTrigger,
-            ToStick(SDL.GetGamepadAxis(gamepad, SDL.GamepadAxis.RightTrigger)));
+            ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)));
     }
 
     /// <summary>
@@ -690,12 +696,12 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     private unsafe bool TryReadWindowSize(out int width, out int height)
     {
-        float density = SDL.GetWindowPixelDensity(_window);
+        float density = SDL_GetWindowPixelDensity(_window);
         _pixelDensity = density > 0 ? density : 1;
 
         int pixelsWide;
         int pixelsHigh;
-        bool isRead = SDL.GetWindowSizeInPixels(_window, &pixelsWide, &pixelsHigh);
+        bool isRead = SDL_GetWindowSizeInPixels(_window, &pixelsWide, &pixelsHigh);
         width = pixelsWide;
         height = pixelsHigh;
 
@@ -739,16 +745,16 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         TextureLevel level = image.Levels[0];
         fixed (byte* pixels = image.Pixels.Span)
         {
-            SDL.Surface* surface = SDL.CreateSurfaceFrom(
+            SDL_Surface* surface = SDL_CreateSurfaceFrom(
                 level.Width,
                 level.Height,
-                SDL.PixelFormat.Rgba32,
+                SDL_PIXELFORMAT_RGBA32,
                 pixels + level.Offset,
                 level.Width * 4);
-            if (surface == null || !SDL.SetWindowIcon(_window, surface))
-                Debugging.Error($"The window's icon is not shown: {CString.Read(SDL.GetError())}");
+            if (surface == null || !SDL_SetWindowIcon(_window, surface))
+                Debugging.Error($"The window's icon is not shown: {CString.Read(SDL_GetError())}");
 
-            SDL.DestroySurface(surface);
+            SDL_DestroySurface(surface);
         }
     }
 

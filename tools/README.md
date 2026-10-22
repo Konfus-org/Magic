@@ -1,10 +1,10 @@
 # Tools
 
 What the build runs, what checks a change, and what a gem or project of one's own starts from; nothing here ships. A
-tool is a `dotnet` project the build invokes, such as the bindings generator, or one cross-platform PowerShell script
-that runs the same under `pwsh` on Linux and macOS and under Windows PowerShell 5.1, so it avoids what 5.1 lacks
-(`&&`, `?:`, `??`). A script runs from any current directory, finds the repository from its own folder, and reports
-with its exit code: 0 passed, else the failing command's code.
+tool is a `dotnet` project the build invokes, such as the analyzers, or one cross-platform PowerShell script that runs
+the same under `pwsh` on Linux and macOS and under Windows PowerShell 5.1, so it avoids what 5.1 lacks (`&&`, `?:`,
+`??`). A script runs from any current directory, finds the repository from its own folder, and reports with its exit
+code: 0 passed, else the failing command's code.
 
 A script that runs Magic runs the one the build made, `Build/bin/<Configuration>/Magic` under the repository
 (`Magic.exe` on Windows): the `Debug` one unless `-Configuration` says `Optimize` or `Release`. A script that finds
@@ -132,9 +132,3 @@ than the SDK's and Visual Studio's, or neither could load them. A rule and its f
 what is reported is what is fixed. Visual Studio keeps the analyzers it loaded as it opened the solution, so a change
 to one shows there once the solution is opened again.
 
-## NativeBindingsGenerator
-
-The generator behind the native libraries Magic binds that have not moved to Microsoft's ClangSharpPInvokeGenerator
-([Gems](../src/Bundled/Gems/README.md#native-libraries)): a `dotnet` project the build runs for each such library a
-project declares, turning the library's C headers into the C# the project compiles. How it reads the headers and what
-each C declaration becomes is in [its README](NativeBindingsGenerator/README.md).

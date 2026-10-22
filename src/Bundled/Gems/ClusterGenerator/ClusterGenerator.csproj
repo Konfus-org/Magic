@@ -15,14 +15,10 @@
     <PackageReference Include="System.IO.Hashing" />
   </ItemGroup>
 
-  <!-- meshoptimizer as a shared library, its stable API alone: clusters, their grouping and their simplification. The
-       simplifier's option and vertex bits get owners of their own, as C tells meshopt_SimplifyPrune, a bit, from
-       meshopt_simplifyPrune, a function, by case alone. -->
+  <!-- meshoptimizer as a shared library, its stable API alone: clusters, their grouping and their simplification. -->
   <ItemGroup>
     <NativeLibrary Include="meshoptimizer" Repository="https://github.com/zeux/meshoptimizer" Tag="v1.3"
                    CMakeOptions="-DMESHOPT_BUILD_SHARED_LIBS=ON;-DMESHOPT_STABLE_EXPORTS=ON"
-                   CMakeTarget="meshoptimizer" Headers="src/meshoptimizer.h" IncludePath="src"
-                   Prefixes="meshopt_SimplifyVertex_=SimplifyVertex;meshopt_Simplify=SimplifyOptions;meshopt_=Meshopt"
-                   Class="Meshopt" />
+                   CMakeTarget="meshoptimizer" Headers="src/meshoptimizer.h" IncludePath="src" Class="Meshopt" />
   </ItemGroup>
 </Project>

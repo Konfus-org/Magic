@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
@@ -14,6 +15,8 @@ using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
+using static Magic.Box3DPhysics.B3;
+using static Magic.Box3DPhysics.b3BodyType;
 
 namespace Magic.Box3DPhysics;
 
@@ -132,7 +135,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// What each listening body touches after the last step, by slot, read as the moves are.
     /// </summary>
     private readonly Dictionary<int, Contacts> _touched = [];
-    private B3.WorldId _box3d;
+    private b3WorldId _box3d;
 
     /// <summary>
     /// Which step this is, stamped on each body seen in it: a body not stamped is of an entity that is gone, or out
@@ -181,16 +184,16 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         _shapes = new ModelShapes(assets);
         _watching = events.Watch<WorldLoading>(loading => _isHeld &= loading.IsLoading);
 
-        B3.SetAssertFcn(&OnAssert);
-        B3.SetLogFcn(&OnLog);
-        B3.WorldDef def = B3.DefaultWorldDef();
-        def.Gravity = new B3.Vec3 { Y = -settings.Gravity };
-        def.WorkerCount = (uint)Math.Clamp(settings.Workers, 1, B3.MaxWorkers);
-        _box3d = B3.CreateWorld(&def);
+        b3SetAssertFcn(&OnAssert);
+        b3SetLogFcn(&OnLog);
+        b3WorldDef def = b3DefaultWorldDef();
+        def.gravity = new b3Vec3 { y = -settings.Gravity };
+        def.workerCount = (uint)Math.Clamp(settings.Workers, 1, B3_MAX_WORKERS);
+        _box3d = b3CreateWorld(&def);
 
-        B3.Version version = B3.GetVersion();
-        Debugging.Info($"Box3D {version.Major}.{version.Minor}.{version.Revision} is simulating, "
-            + $"on a thread of its own, with {def.WorkerCount} solver thread(s).");
+        b3Version version = b3GetVersion();
+        Debugging.Info($"Box3D {version.major}.{version.minor}.{version.revision} is simulating, "
+            + $"on a thread of its own, with {def.workerCount} solver thread(s).");
         threads.RunAsync("Physics", RunSteps).FireAndForget();
     }
 
@@ -211,8 +214,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         _step++;
         _shapes.TakeArrived();
         CheckPreloads();
-        if (_settings.Gravity != -B3.WorldGetGravity(_box3d).Y)
-            B3.WorldSetGravity(_box3d, new B3.Vec3 { Y = -_settings.Gravity });
+        if (_settings.Gravity != -b3World_GetGravity(_box3d).y)
+            b3World_SetGravity(_box3d, new b3Vec3 { y = -_settings.Gravity });
 
         _cameras.Clear();
         foreach ((_, _, Span<Transform> transforms, Span<Tags> tags) in _world.Query<Camera, Transform, Tags>())
@@ -270,24 +273,24 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         WaitForStep();
         _isEnding = true;
         _kick.Release();
-        B3.DestroyWorld(_box3d);
+        b3DestroyWorld(_box3d);
         _shapes.Dispose();
     }
 
     public RayHit? RayCast(Vector3 from, Vector3 to, Motions motions = Motions.All)
     {
         WaitForStep();
-        B3.RayResult result = B3.WorldCastRayClosest(_box3d, ToVec(from), ToVec(to - from), FilterOf(motions));
+        b3RayResult result = b3World_CastRayClosest(_box3d, ToVec(from), ToVec(to - from), FilterOf(motions));
 
-        if (!result.Hit) return null;
+        if (!result.hit) return null;
 
-        Entity entity = _bodies[GetSlot(result.ShapeId)].Entity;
+        Entity entity = _bodies[GetSlot(result.shapeId)].Entity;
 
         return new RayHit(
             entity,
-            FromVec(result.Point),
-            FromVec(result.Normal),
-            result.Fraction * Vector3.Distance(from, to));
+            FromVec(result.point),
+            FromVec(result.normal),
+            result.fraction * Vector3.Distance(from, to));
     }
 
     public unsafe int SphereCast(Vector3 center, float radius, Span<Entity> found, Motions motions = Motions.All)
@@ -295,20 +298,21 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         if (found.IsEmpty) return 0;
 
         WaitForStep();
-        B3.Vec3 point = default;
-        B3.ShapeProxy proxy = new() { Points = &point, Count = 1, Radius = radius };
+        b3Vec3 point = default;
+        b3ShapeProxy proxy = new() { points = &point, count = 1, radius = radius };
         OverlapQuery query = new() { Capacity = found.Length };
         fixed (Entity* into = found)
         fixed (Body* bodies = CollectionsMarshal.AsSpan(_bodies))
         {
             query.Found = into;
             query.Bodies = bodies;
-            B3.WorldOverlapShape(
+            b3World_OverlapShape(
                 _box3d,
                 ToVec(center),
                 &proxy,
                 FilterOf(motions),
-                (delegate* unmanaged<B3.ShapeId, void*, bool>)(delegate* unmanaged<B3.ShapeId, void*, byte>)&OnOverlap,
+                (delegate* unmanaged[Cdecl]<b3ShapeId, void*, bool>)
+                    (delegate* unmanaged[Cdecl]<b3ShapeId, void*, byte>)&OnOverlap,
                 &query);
         }
 
@@ -359,14 +363,14 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         return readied.Task.WaitAsync(cancel);
     }
 
-    internal static B3.Vec3 ToVec(Vector3 vector) => new() { X = vector.X, Y = vector.Y, Z = vector.Z };
+    internal static b3Vec3 ToVec(Vector3 vector) => new() { x = vector.X, y = vector.Y, z = vector.Z };
 
-    private static Vector3 FromVec(B3.Vec3 vector) => new(vector.X, vector.Y, vector.Z);
+    private static Vector3 FromVec(b3Vec3 vector) => new(vector.x, vector.y, vector.z);
 
-    private static B3.Quat ToQuat(Quaternion rotation)
-        => new() { V = new B3.Vec3 { X = rotation.X, Y = rotation.Y, Z = rotation.Z }, S = rotation.W };
+    private static b3Quat ToQuat(Quaternion rotation)
+        => new() { v = new b3Vec3 { x = rotation.X, y = rotation.Y, z = rotation.Z }, s = rotation.W };
 
-    private static Quaternion FromQuat(B3.Quat rotation) => new(rotation.V.X, rotation.V.Y, rotation.V.Z, rotation.S);
+    private static Quaternion FromQuat(b3Quat rotation) => new(rotation.v.x, rotation.v.y, rotation.v.z, rotation.s);
 
     /// <summary>
     /// Whether the components changed in a way that shapes the body, which is then made again.
@@ -386,7 +390,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// Adds the shape to the body: the model's bounds at the entity's scale as a box, a sphere or a capsule, or its
     /// triangles at that scale. A bound with no size, a plane's thickness, is given a little, as a shape needs some.
     /// </summary>
-    private static unsafe void AddShape(B3.BodyId body, B3.ShapeDef* def, ModelShape shape, Shape kind, Vector3 scale)
+    private static unsafe void AddShape(b3BodyId body, b3ShapeDef* def, ModelShape shape, Shape kind, Vector3 scale)
     {
         const float Least = 0.01f;
         scale = Vector3.Abs(scale);
@@ -395,31 +399,31 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         switch (kind)
         {
             case Shape.Sphere:
-                B3.Sphere sphere = new()
+                b3Sphere sphere = new()
                 {
-                    Center = ToVec(centre),
-                    Radius = Math.Max(half.X, Math.Max(half.Y, half.Z))
+                    center = ToVec(centre),
+                    radius = Math.Max(half.X, Math.Max(half.Y, half.Z))
                 };
-                B3.CreateSphereShape(body, def, &sphere);
+                b3CreateSphereShape(body, def, &sphere);
                 break;
             case Shape.Capsule:
                 float radius = Math.Max(half.X, half.Z);
                 float reach = Math.Max(half.Y - radius, 0);
-                B3.Capsule capsule = new()
+                b3Capsule capsule = new()
                 {
-                    Center1 = ToVec(centre - new Vector3(0, reach, 0)),
-                    Center2 = ToVec(centre + new Vector3(0, reach, 0)),
-                    Radius = radius,
+                    center1 = ToVec(centre - new Vector3(0, reach, 0)),
+                    center2 = ToVec(centre + new Vector3(0, reach, 0)),
+                    radius = radius,
                 };
-                B3.CreateCapsuleShape(body, def, &capsule);
+                b3CreateCapsuleShape(body, def, &capsule);
                 break;
             case Shape.Mesh:
-                B3.CreateMeshShape(body, def, shape.Mesh, ToVec(scale));
+                b3CreateMeshShape(body, def, shape.Mesh, ToVec(scale));
                 break;
             case Shape.Box:
             default:
-                B3.BoxHull box = B3.MakeOffsetBoxHull(half.X, half.Y, half.Z, ToVec(centre));
-                B3.CreateHullShape(body, def, &box.Base);
+                b3BoxHull box = b3MakeOffsetBoxHull(half.X, half.Y, half.Z, ToVec(centre));
+                b3CreateHullShape(body, def, &box.@base);
                 break;
         }
     }
@@ -477,16 +481,16 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// <summary>
     /// The body slot a shape belongs to, kept one up in its body's user data so that 0 is no body.
     /// </summary>
-    private static unsafe int GetSlot(B3.ShapeId shape) => (int)(nuint)B3.BodyGetUserData(B3.ShapeGetBody(shape)) - 1;
+    private static unsafe int GetSlot(b3ShapeId shape) => (int)(nuint)b3Body_GetUserData(b3Shape_GetBody(shape)) - 1;
 
     /// <summary>
     /// A query's filter: Box3D's default, accepting the shapes whose category, their body's motion, is among
     /// <paramref name="motions"/>.
     /// </summary>
-    private static B3.QueryFilter FilterOf(Motions motions)
+    private static b3QueryFilter FilterOf(Motions motions)
     {
-        B3.QueryFilter filter = B3.DefaultQueryFilter();
-        filter.MaskBits = (ulong)motions;
+        b3QueryFilter filter = b3DefaultQueryFilter();
+        filter.maskBits = (ulong)motions;
 
         return filter;
     }
@@ -507,10 +511,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// little rolling resistance, so a sticky ball stops rolling. Two surfaces that touch take the geometric mean of
     /// their frictions and the larger of their bounces, so a sticky box on ice still slides, a little.
     /// </summary>
-    private static B3.SurfaceMaterial GetMaterial(Surface surface, float bounce)
+    private static b3SurfaceMaterial GetMaterial(Surface surface, float bounce)
     {
-        B3.SurfaceMaterial material = B3.DefaultSurfaceMaterial();
-        (material.Friction, material.RollingResistance) = surface switch
+        b3SurfaceMaterial material = b3DefaultSurfaceMaterial();
+        (material.friction, material.rollingResistance) = surface switch
         {
             Surface.Slippery => (0.05f, 0f),
             Surface.Slick => (0.2f, 0f),
@@ -519,7 +523,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             Surface.Normal => (0.6f, 0f),
             _ => (0.6f, 0f),
         };
-        material.Restitution = Math.Clamp(bounce, 0, 1);
+        material.restitution = Math.Clamp(bounce, 0, 1);
 
         return material;
     }
@@ -557,14 +561,14 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         }
     }
 
-    private static B3.Vec3 Scale(B3.Vec3 vector, float scale)
-        => new() { X = vector.X * scale, Y = vector.Y * scale, Z = vector.Z * scale };
+    private static b3Vec3 Scale(b3Vec3 vector, float scale)
+        => new() { x = vector.x * scale, y = vector.y * scale, z = vector.z * scale };
 
     /// <summary>
     /// A failed Box3D assert is a bug, in the gem or in Box3D, that leaves the world in a state it cannot go on from:
     /// the process ends with a crash file, as the engine's own asserts do.
     /// </summary>
-    [UnmanagedCallersOnly]
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static unsafe int OnAssert(byte* condition, byte* file, int line)
     {
         Debugging.Critical($"Box3D failed an assert, {CString.Read(condition)}, at {CString.Read(file)}:{line}.");
@@ -572,15 +576,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         return 1;
     }
 
-    [UnmanagedCallersOnly]
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static unsafe void OnLog(byte* message) => Debugging.Warn($"Box3D: {CString.Read(message)}");
 
     /// <summary>
     /// Takes one shape an overlap found into the query's entities, and asks for more while there is room. A byte
     /// rather than a bool, which cannot cross into native code from a method called only from it; C's bool is a byte.
     /// </summary>
-    [UnmanagedCallersOnly]
-    private static unsafe byte OnOverlap(B3.ShapeId shape, void* context)
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe byte OnOverlap(b3ShapeId shape, void* context)
     {
         OverlapQuery* query = (OverlapQuery*)context;
         query->Found[query->Count++] = query->Bodies[GetSlot(shape)].Entity;
@@ -620,25 +624,25 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         bool isMoved = transform.Position != body.Transform.Position || transform.Rotation != body.Transform.Rotation;
         if (physics.Motion == Motion.Kinematic)
         {
-            B3.Transform target = new() { P = ToVec(transform.Position), Q = ToQuat(transform.Rotation) };
-            B3.BodySetTargetTransform(body.Id, target, step, isMoved);
+            b3Transform target = new() { p = ToVec(transform.Position), q = ToQuat(transform.Rotation) };
+            b3Body_SetTargetTransform(body.Id, target, step, isMoved);
         }
         else if (isMoved)
         {
-            B3.BodySetTransform(body.Id, ToVec(transform.Position), ToQuat(transform.Rotation));
-            B3.BodySetAwake(body.Id, true);
+            b3Body_SetTransform(body.Id, ToVec(transform.Position), ToQuat(transform.Rotation));
+            b3Body_SetAwake(body.Id, true);
         }
 
         if (physics.Velocity != body.Physics.Velocity)
         {
-            B3.BodySetLinearVelocity(body.Id, ToVec(physics.Velocity));
-            B3.BodySetAwake(body.Id, true);
+            b3Body_SetLinearVelocity(body.Id, ToVec(physics.Velocity));
+            b3Body_SetAwake(body.Id, true);
         }
 
         if (physics.AngularVelocity != body.Physics.AngularVelocity)
         {
-            B3.BodySetAngularVelocity(body.Id, ToVec(physics.AngularVelocity));
-            B3.BodySetAwake(body.Id, true);
+            b3Body_SetAngularVelocity(body.Id, ToVec(physics.AngularVelocity));
+            b3Body_SetAwake(body.Id, true);
         }
 
         body.Transform = transform;
@@ -710,23 +714,23 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             _bodies.Add(default);
         }
 
-        B3.BodyDef def = B3.DefaultBodyDef();
-        def.Type = physics.Motion switch
+        b3BodyDef def = b3DefaultBodyDef();
+        def.type = physics.Motion switch
         {
-            Motion.Dynamic => B3.BodyType.DynamicBody,
-            Motion.Kinematic => B3.BodyType.KinematicBody,
-            Motion.Static => B3.BodyType.StaticBody,
-            _ => B3.BodyType.StaticBody,
+            Motion.Dynamic => b3_dynamicBody,
+            Motion.Kinematic => b3_kinematicBody,
+            Motion.Static => b3_staticBody,
+            _ => b3_staticBody,
         };
-        def.Position = ToVec(transform.Position);
-        def.Rotation = ToQuat(transform.Rotation);
-        def.LinearVelocity = ToVec(physics.Velocity);
-        def.AngularVelocity = ToVec(physics.AngularVelocity);
-        def.UserData = (void*)(nuint)(slot + 1);
-        B3.BodyId id = B3.CreateBody(_box3d, &def);
-        B3.ShapeDef shapeDef = B3.DefaultShapeDef();
-        shapeDef.BaseMaterial = GetMaterial(physics.Surface, physics.Bounce);
-        shapeDef.Filter.CategoryBits = (ulong)GetMotions(physics.Motion);
+        def.position = ToVec(transform.Position);
+        def.rotation = ToQuat(transform.Rotation);
+        def.linearVelocity = ToVec(physics.Velocity);
+        def.angularVelocity = ToVec(physics.AngularVelocity);
+        def.userData = (void*)(nuint)(slot + 1);
+        b3BodyId id = b3CreateBody(_box3d, &def);
+        b3ShapeDef shapeDef = b3DefaultShapeDef();
+        shapeDef.baseMaterial = GetMaterial(physics.Surface, physics.Bounce);
+        shapeDef.filter.categoryBits = (ulong)GetMotions(physics.Motion);
         Shape kind = physics.Shape;
         if (kind == Shape.Mesh && (physics.Motion != Motion.Static || shape.Mesh is null))
         {
@@ -741,15 +745,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         AddShape(id, &shapeDef, shape, kind, transform.Scale);
         if (physics.Mass > 0 && physics.Motion == Motion.Dynamic)
         {
-            B3.MassData mass = B3.BodyGetMassData(id);
-            if (mass.Mass > 0)
+            b3MassData mass = b3Body_GetMassData(id);
+            if (mass.mass > 0)
             {
-                float scale = physics.Mass / mass.Mass;
-                mass.Mass = physics.Mass;
-                mass.Inertia.Cx = Scale(mass.Inertia.Cx, scale);
-                mass.Inertia.Cy = Scale(mass.Inertia.Cy, scale);
-                mass.Inertia.Cz = Scale(mass.Inertia.Cz, scale);
-                B3.BodySetMassData(id, mass);
+                float scale = physics.Mass / mass.mass;
+                mass.mass = physics.Mass;
+                mass.inertia.cx = Scale(mass.inertia.cx, scale);
+                mass.inertia.cy = Scale(mass.inertia.cy, scale);
+                mass.inertia.cz = Scale(mass.inertia.cz, scale);
+                b3Body_SetMassData(id, mass);
             }
         }
 
@@ -763,7 +767,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             Seen = _step
         };
         _slots.Add(entity, slot);
-        Debugging.Verbose($"Entity {entity.Id} has a {physics.Motion} {kind} body, {B3.BodyGetMass(id):0.###} kg, "
+        Debugging.Verbose($"Entity {entity.Id} has a {physics.Motion} {kind} body, {b3Body_GetMass(id):0.###} kg, "
             + $"at ({transform.Position.X:0.###}, {transform.Position.Y:0.###}, {transform.Position.Z:0.###}).");
     }
 
@@ -771,7 +775,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         if (!_slots.Remove(entity, out int slot)) return;
 
-        B3.DestroyBody(_bodies[slot].Id);
+        b3DestroyBody(_bodies[slot].Id);
         _bodies[slot] = default;
         _free.Push(slot);
     }
@@ -841,21 +845,21 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private unsafe void Step()
     {
-        B3.WorldStep(_box3d, _stepSeconds, _substeps);
-        B3.BodyEvents events = B3.WorldGetBodyEvents(_box3d);
+        b3World_Step(_box3d, _stepSeconds, _substeps);
+        b3BodyEvents events = b3World_GetBodyEvents(_box3d);
         _moves.Clear();
-        for (int i = 0; i < events.MoveCount; i++)
+        for (int i = 0; i < events.moveCount; i++)
         {
-            ref B3.BodyMoveEvent moved = ref events.MoveEvents[i];
-            int slot = (int)(nuint)moved.UserData - 1;
-            B3.BodyId id = _bodies[slot].Id;
+            ref b3BodyMoveEvent moved = ref events.moveEvents[i];
+            int slot = (int)(nuint)moved.userData - 1;
+            b3BodyId id = _bodies[slot].Id;
             _moves.Add(new Moved(
                 slot,
-                FromVec(moved.Transform.P),
-                FromQuat(moved.Transform.Q),
-                FromVec(B3.BodyGetLinearVelocity(id)),
-                FromVec(B3.BodyGetAngularVelocity(id)),
-                moved.FellAsleep));
+                FromVec(moved.transform.p),
+                FromQuat(moved.transform.q),
+                FromVec(b3Body_GetLinearVelocity(id)),
+                FromVec(b3Body_GetAngularVelocity(id)),
+                moved.fellAsleep));
         }
 
         _touched.Clear();
@@ -873,10 +877,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         Contacts now = default;
         int written = 0;
-        B3.BodyId id = _bodies[slot].Id;
-        int capacity = Math.Min(B3.BodyGetContactCapacity(id), MostTouching);
-        B3.ContactData* data = stackalloc B3.ContactData[capacity];
-        int count = B3.BodyGetContactData(id, data, capacity);
+        b3BodyId id = _bodies[slot].Id;
+        int capacity = Math.Min(b3Body_GetContactCapacity(id), MostTouching);
+        b3ContactData* data = stackalloc b3ContactData[capacity];
+        int count = b3Body_GetContactData(id, data, capacity);
         for (int i = 0; i < count && written < Contacts.Capacity; i++)
         {
             Contact contact = GetContact(slot, data[i]);
@@ -947,23 +951,23 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// mean of the contact points, the normal turned to point away from the other body, and the impulse along it;
     /// a contact with no points, the two only near, is <see cref="ContactPhase.None"/>.
     /// </summary>
-    private unsafe Contact GetContact(int slot, in B3.ContactData data)
+    private unsafe Contact GetContact(int slot, in b3ContactData data)
     {
-        bool isA = GetSlot(data.ShapeIdA) == slot;
-        int other = isA ? GetSlot(data.ShapeIdB) : GetSlot(data.ShapeIdA);
-        Vector3 centre = FromVec(B3.BodyGetWorldCenterOfMass(B3.ShapeGetBody(data.ShapeIdA)));
+        bool isA = GetSlot(data.shapeIdA) == slot;
+        int other = isA ? GetSlot(data.shapeIdB) : GetSlot(data.shapeIdA);
+        Vector3 centre = FromVec(b3Body_GetWorldCenterOfMass(b3Shape_GetBody(data.shapeIdA)));
         Vector3 point = Vector3.Zero;
         Vector3 normal = Vector3.Zero;
         float impulse = 0;
         int points = 0;
-        for (int i = 0; i < data.ManifoldCount; i++)
+        for (int i = 0; i < data.manifoldCount; i++)
         {
-            ref B3.Manifold manifold = ref data.Manifolds[i];
-            for (int j = 0; j < manifold.PointCount; j++)
+            ref b3Manifold manifold = ref data.manifolds[i];
+            for (int j = 0; j < manifold.pointCount; j++)
             {
-                point += centre + FromVec(manifold.Points[j].AnchorA);
-                impulse += manifold.Points[j].TotalNormalImpulse;
-                normal += FromVec(manifold.Normal);
+                point += centre + FromVec(manifold.points[j].anchorA);
+                impulse += manifold.points[j].totalNormalImpulse;
+                normal += FromVec(manifold.normal);
                 points++;
             }
         }
@@ -1041,7 +1045,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private struct Body
     {
-        internal B3.BodyId Id;
+        internal b3BodyId Id;
 
         internal Entity Entity;
 

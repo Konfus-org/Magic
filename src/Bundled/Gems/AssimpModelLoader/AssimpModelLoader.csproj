@@ -19,14 +19,21 @@
 
   <!-- Assimp's C API: the importers of the formats Model lists, no exporters, tools or tests, the library named plainly
        rather than by compiler. Its config.h, which the library's build generates, is read made from the template with
-       every option off. -->
+       every option off. The macros that name an enum's members are left unbound, as the generator writes them as
+       integers the members do not convert to; the enums themselves are bound. -->
   <ItemGroup>
     <NativeLibrary Include="assimp" Repository="https://github.com/assimp/assimp" Tag="v6.0.5" CMakeTarget="assimp"
                    CMakeOptions="-DASSIMP_BUILD_TESTS=OFF;-DASSIMP_BUILD_ASSIMP_TOOLS=OFF;-DASSIMP_INSTALL=OFF;-DASSIMP_BUILD_ZLIB=$(AssimpOwnZlib);
                                  -DASSIMP_WARNINGS_AS_ERRORS=OFF;-DASSIMP_INJECT_DEBUG_POSTFIX=OFF;-DLIBRARY_SUFFIX=;-DASSIMP_NO_EXPORT=ON;
                                  -DASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT=OFF;-DASSIMP_BUILD_FBX_IMPORTER=ON;-DASSIMP_BUILD_GLTF_IMPORTER=ON;-DASSIMP_BUILD_OBJ_IMPORTER=ON"
-                   Headers="include/assimp/cimport.h;include/assimp/scene.h;include/assimp/postprocess.h;assimp/config.h"
-                   IncludePath="include" Shims="assimp/config.h=include/assimp/config.h.in"
-                   Prefixes="ai=Assimp;AI=Assimp;ASSIMP=Assimp" Class="Assimp" />
+                   Headers="include/assimp/cimport.h;include/assimp/scene.h;include/assimp/postprocess.h"
+                   IncludePath="include" Shims="assimp/config.h=include/assimp/config.h.in" Class="Assimp"
+                   Unbound="AI_SUCCESS;AI_FAILURE;AI_OUTOFMEMORY;DLS_FILE;DLS_STDOUT;DLS_STDERR;DLS_DEBUGGER;AI_TEXTURE_TYPE_MAX;
+                            AI_MATKEY_BASE_COLOR_TEXTURE;AI_MATKEY_METALLIC_TEXTURE;AI_MATKEY_ROUGHNESS_TEXTURE;
+                            AI_MATKEY_ANISOTROPY_TEXTURE;AI_MATKEY_SHEEN_COLOR_TEXTURE;AI_MATKEY_SHEEN_ROUGHNESS_TEXTURE;
+                            AI_MATKEY_CLEARCOAT_TEXTURE;AI_MATKEY_CLEARCOAT_ROUGHNESS_TEXTURE;AI_MATKEY_CLEARCOAT_NORMAL_TEXTURE;
+                            AI_MATKEY_TRANSMISSION_TEXTURE;AI_MATKEY_VOLUME_THICKNESS_TEXTURE;
+                            aiProcess_ConvertToLeftHanded;aiProcessPreset_TargetRealtime_Fast;aiProcessPreset_TargetRealtime_Quality;
+                            aiProcessPreset_TargetRealtime_MaxQuality" />
   </ItemGroup>
 </Project>

@@ -9,7 +9,6 @@
   <Folder Name="/Tools/">
     <Project Path="tools/Analyzers/Analyzers.csproj" />
     <Project Path="tools/Analyzers.CodeFixes/Analyzers.CodeFixes.csproj" />
-    <Project Path="tools/NativeBindingsGenerator/NativeBindingsGenerator.csproj" />
   </Folder>
   <Folder Name="/Gems/">
     <Project Path="src/Bundled/Gems/ArchEcs/ArchEcs.csproj" />

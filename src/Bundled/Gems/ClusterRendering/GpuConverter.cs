@@ -1,5 +1,6 @@
 using System.Numerics;
 using Magic.Contexts.Assets;
+using static Magic.ClusterRendering.bc7enc;
 
 namespace Magic.ClusterRendering;
 
@@ -43,7 +44,7 @@ internal static class GpuConverter
     /// of the pools' textures are data rather than colour. Made, with the tables the encoder needs before its first
     /// block, the first time a texture is compressed, so a model's conversion never loads the encoder.
     /// </summary>
-    private static readonly Bc7Enc.CompressBlockParams _blockOptions = MakeBlockOptions();
+    private static readonly bc7enc_compress_block_params _blockOptions = MakeBlockOptions();
 
     /// <summary>
     /// A model packed for the pool: its clusters, or for one with none its meshes split into clusters; its levels; its
@@ -562,7 +563,7 @@ internal static class GpuConverter
     /// </summary>
     private static unsafe void CompressRow(byte[] pixels, byte[] blocks, int side, int row)
     {
-        Bc7Enc.CompressBlockParams options = _blockOptions;
+        bc7enc_compress_block_params options = _blockOptions;
         Span<byte> texels = stackalloc byte[64];
         for (int column = 0; column < side / 4; column++)
         {
@@ -574,23 +575,23 @@ internal static class GpuConverter
             fixed (byte* block = &blocks[((row * (side / 4)) + column) * 16])
             fixed (byte* source = texels)
             {
-                Bc7Enc.CompressBlock(block, source, &options);
+                bc7enc_compress_block(block, source, &options);
             }
         }
     }
 
-    private static unsafe Bc7Enc.CompressBlockParams MakeBlockOptions()
+    private static unsafe bc7enc_compress_block_params MakeBlockOptions()
     {
-        Bc7Enc.CompressBlockInit();
-        Bc7Enc.CompressBlockParams options = new()
+        bc7enc_compress_block_init();
+        bc7enc_compress_block_params options = new()
         {
-            MMaxPartitionsMode = Bc7Enc.MaxPartitions1,
-            MTryLeastSquares = 1,
-            MModePartitionEstimationFilterbank = 1,
-            MUseMode5ForAlpha = 1,
-            MUseMode7ForAlpha = 1,
+            m_max_partitions_mode = BC7ENC_MAX_PARTITIONS1,
+            m_try_least_squares = 1,
+            m_mode_partition_estimation_filterbank = 1,
+            m_use_mode5_for_alpha = 1,
+            m_use_mode7_for_alpha = 1,
         };
-        new Span<uint>(options.MWeights, 4).Fill(1);
+        ((Span<uint>)options.m_weights).Fill(1);
 
         return options;
     }

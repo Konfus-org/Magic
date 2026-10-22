@@ -4,6 +4,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Services;
+using static Magic.Box3DPhysics.B3;
 
 namespace Magic.Box3DPhysics;
 
@@ -130,7 +131,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
     /// <summary>
     /// The model's triangles, shared by every mesh shape made from it; null for a model with none, and once freed.
     /// </summary>
-    internal B3.MeshData* Mesh { get; private set; }
+    internal b3MeshData* Mesh { get; private set; }
 
     /// <summary>
     /// The shape fitted to <paramref name="model"/>: its bounds to every mesh's vertices, and one Box3D mesh of all
@@ -150,7 +151,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
 
         if (vertexCount == 0 || indexCount < 3) return null;
 
-        B3.Vec3[] vertices = new B3.Vec3[vertexCount];
+        b3Vec3[] vertices = new b3Vec3[vertexCount];
         int[] indices = new int[indexCount];
         Vector3 min = new(float.PositiveInfinity);
         Vector3 max = new(float.NegativeInfinity);
@@ -177,17 +178,17 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
             indexAt += meshIndices.Length;
         }
 
-        fixed (B3.Vec3* vertexData = vertices)
+        fixed (b3Vec3* vertexData = vertices)
         fixed (int* indexData = indices)
         {
-            B3.MeshDef def = default;
-            def.Vertices = vertexData;
-            def.Indices = indexData;
-            def.VertexCount = vertexCount;
-            def.TriangleCount = indexCount / 3;
-            def.IdentifyEdges = true;
+            b3MeshDef def = default;
+            def.vertices = vertexData;
+            def.indices = indexData;
+            def.vertexCount = vertexCount;
+            def.triangleCount = indexCount / 3;
+            def.identifyEdges = true;
 
-            return new ModelShape(min, max) { Mesh = B3.CreateMesh(&def, null, 0) };
+            return new ModelShape(min, max) { Mesh = b3CreateMesh(&def, null, 0) };
         }
     }
 
@@ -195,7 +196,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
     {
         if (Mesh is null) return;
 
-        B3.DestroyMesh(Mesh);
+        b3DestroyMesh(Mesh);
         Mesh = null;
     }
 }

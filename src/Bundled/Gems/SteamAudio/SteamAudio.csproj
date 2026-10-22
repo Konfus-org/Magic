@@ -28,7 +28,6 @@
     <NativeLibrary Include="phonon" Url="https://github.com/ValveSoftware/steam-audio/releases/download/v4.8.1/steamaudio_4.8.1.zip"
                    Sha256="4a0aa5ec1176f38f0b0993a37c2259d9e86f27e22d5e24f83ec4c3cb9a1d5449"
                    Library="lib/$(SteamAudioPlatform)/$(MagicNativePrefix)phonon$(MagicNativeSuffix)"
-                   Headers="include/phonon.h" IncludePath="include"
-                   Prefixes="ipl=IPL;IPL=IPL;STEAMAUDIO=IPL" Class="IPL" />
+                   Headers="include/phonon.h" IncludePath="include" Class="IPL" />
   </ItemGroup>
 </Project>

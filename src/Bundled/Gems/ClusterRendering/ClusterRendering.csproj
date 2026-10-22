@@ -21,6 +21,6 @@
   <ItemGroup>
     <NativeLibrary Include="bc7enc" Url="https://github.com/richgel999/bc7enc/archive/f66c2e489b07138f2673a2fb3d27c1aa1d565c48.tar.gz"
                    Sha256="5c3632dcf5227c15ef987696c23d34be993f2341278ff8a5a37bd23ea714dce9"
-                   Sources="bc7enc.c" Headers="bc7enc.h" IncludePath="." Prefixes="bc7enc=Bc7Enc;BC7ENC=Bc7Enc" />
+                   Sources="bc7enc.c" Headers="bc7enc.h" IncludePath="." />
   </ItemGroup>
 </Project>

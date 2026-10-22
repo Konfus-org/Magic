@@ -5,6 +5,8 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Services;
+using static Magic.SteamAudio.IPL;
+using static Magic.SteamAudio.IPLerror;
 
 namespace Magic.SteamAudio;
 
@@ -25,9 +27,9 @@ namespace Magic.SteamAudio;
 /// </summary>
 internal sealed class SoundWorld : IDisposable
 {
-    private readonly unsafe IPL.Context* _context;
-    private readonly unsafe IPL.Scene* _scene;
-    private readonly IPL.SceneSettings _settings;
+    private readonly unsafe _IPLContext_t* _context;
+    private readonly unsafe _IPLScene_t* _scene;
+    private readonly IPLSceneSettings _settings;
     private readonly Dictionary<(Handle<Model> Model, AcousticMaterial Material), SubScene> _subScenes = [];
     private readonly Dictionary<Entity, Instance> _instances = [];
     private readonly List<Entity> _gone = [];
@@ -48,7 +50,7 @@ internal sealed class SoundWorld : IDisposable
     /// </summary>
     private uint _update;
 
-    internal unsafe SoundWorld(IPL.Context* context, IPL.Scene* scene, IPL.SceneSettings settings)
+    internal unsafe SoundWorld(_IPLContext_t* context, _IPLScene_t* scene, IPLSceneSettings settings)
     {
         _context = context;
         _scene = scene;
@@ -73,9 +75,9 @@ internal sealed class SoundWorld : IDisposable
     {
         foreach (Instance instance in _instances.Values)
         {
-            IPL.InstancedMesh* mesh = instance.Mesh;
-            IPL.InstancedMeshRemove(mesh, _scene);
-            IPL.InstancedMeshRelease(&mesh);
+            _IPLInstancedMesh_t* mesh = instance.Mesh;
+            iplInstancedMeshRemove(mesh, _scene);
+            iplInstancedMeshRelease(&mesh);
         }
 
         _instances.Clear();
@@ -90,23 +92,23 @@ internal sealed class SoundWorld : IDisposable
     /// <summary>
     /// <paramref name="position"/> in Steam Audio's space: the world mirrored along Z.
     /// </summary>
-    internal static IPL.Vector3 ToVector(Vector3 position) => new() { X = position.X, Y = position.Y, Z = -position.Z };
+    internal static IPLVector3 ToVector(Vector3 position) => new() { x = position.X, y = position.Y, z = -position.Z };
 
     /// <summary>
     /// <paramref name="transform"/> in Steam Audio's space, as it takes a matrix: mirrored along Z on both sides, so it
     /// takes a mirrored point to the mirrored place, and written row by row for column vectors, the transpose of the
     /// engine's row-vector matrix.
     /// </summary>
-    internal static unsafe IPL.Matrix4x4 ToMatrix(in Transform transform)
+    internal static unsafe IPLMatrix4x4 ToMatrix(in Transform transform)
     {
         Matrix4x4 mirror = Matrix4x4.CreateScale(1, 1, -1);
         Matrix4x4 world = mirror * transform.Matrix * mirror;
-        IPL.Matrix4x4 matrix = default;
+        IPLMatrix4x4 matrix = default;
         for (int row = 0; row < 4; row++)
         {
             for (int column = 0; column < 4; column++)
             {
-                matrix.Elements[(row * 4) + column] = world[column, row];
+                matrix.elements[(row * 4) + column] = world[column, row];
             }
         }
 
@@ -145,7 +147,7 @@ internal sealed class SoundWorld : IDisposable
 
                 if (held.Transform == solid.Transform) continue;
 
-                IPL.InstancedMeshUpdateTransform(held.Mesh, _scene, ToMatrix(solid.Transform));
+                iplInstancedMeshUpdateTransform(held.Mesh, _scene, ToMatrix(solid.Transform));
                 held.Transform = solid.Transform;
                 isChanged = true;
 
@@ -199,16 +201,16 @@ internal sealed class SoundWorld : IDisposable
             _subScenes.Add((solid.Model, solid.Material), subScene);
         }
 
-        IPL.InstancedMeshSettings settings = new() { SubScene = subScene.Scene, Transform = ToMatrix(solid.Transform) };
-        IPL.InstancedMesh* instance;
-        if (IPL.InstancedMeshCreate(_scene, &settings, &instance) != IPL.Error.Success)
+        IPLInstancedMeshSettings settings = new() { subScene = subScene.Scene, transform = ToMatrix(solid.Transform) };
+        _IPLInstancedMesh_t* instance;
+        if (iplInstancedMeshCreate(_scene, &settings, &instance) != IPL_STATUS_SUCCESS)
         {
             Debugging.Error($"Entity {solid.Entity.Id} is not heard against: Steam Audio could not place its model.");
 
             return false;
         }
 
-        IPL.InstancedMeshAdd(instance, _scene);
+        iplInstancedMeshAdd(instance, _scene);
         _instances.Add(
             solid.Entity,
             new Instance
@@ -227,9 +229,9 @@ internal sealed class SoundWorld : IDisposable
     {
         if (!_instances.Remove(entity, out Instance instance)) return false;
 
-        IPL.InstancedMesh* mesh = instance.Mesh;
-        IPL.InstancedMeshRemove(mesh, _scene);
-        IPL.InstancedMeshRelease(&mesh);
+        _IPLInstancedMesh_t* mesh = instance.Mesh;
+        iplInstancedMeshRemove(mesh, _scene);
+        iplInstancedMeshRelease(&mesh);
 
         return true;
     }
@@ -239,7 +241,7 @@ internal sealed class SoundWorld : IDisposable
     /// </summary>
     private unsafe struct Instance
     {
-        internal IPL.InstancedMesh* Mesh;
+        internal _IPLInstancedMesh_t* Mesh;
 
         internal Handle<Model> Model;
 
@@ -255,70 +257,70 @@ internal sealed class SoundWorld : IDisposable
     /// </summary>
     private sealed unsafe class SubScene
     {
-        private IPL.StaticMesh* _mesh;
+        private _IPLStaticMesh_t* _mesh;
 
-        internal IPL.Scene* Scene { get; private set; }
+        internal _IPLScene_t* Scene { get; private set; }
 
         /// <summary>
         /// The sub-scene of <paramref name="mesh"/>'s triangles, all made of <paramref name="material"/>, committed;
         /// null, with the error logged, when Steam Audio cannot make it.
         /// </summary>
         internal static SubScene? Make(
-            IPL.Context* context,
-            IPL.SceneSettings settings,
+            _IPLContext_t* context,
+            IPLSceneSettings settings,
             AcousticMesh mesh,
             AcousticMaterial material)
         {
-            IPL.Scene* scene;
-            if (IPL.SceneCreate(context, &settings, &scene) != IPL.Error.Success)
+            _IPLScene_t* scene;
+            if (iplSceneCreate(context, &settings, &scene) != IPL_STATUS_SUCCESS)
             {
                 Debugging.Error("Steam Audio could not make a scene for a model, so it is not heard against.");
 
                 return null;
             }
 
-            IPL.Material made = Materials.Get(material);
-            IPL.StaticMesh* staticMesh;
-            IPL.Error error;
-            fixed (IPL.Vector3* vertices = mesh.Vertices)
-            fixed (IPL.Triangle* triangles = mesh.Triangles)
+            IPLMaterial made = Materials.Get(material);
+            _IPLStaticMesh_t* staticMesh;
+            IPLerror error;
+            fixed (IPLVector3* vertices = mesh.Vertices)
+            fixed (IPLTriangle* triangles = mesh.Triangles)
             fixed (int* materials = mesh.Materials)
             {
-                IPL.StaticMeshSettings meshSettings = new()
+                IPLStaticMeshSettings meshSettings = new()
                 {
-                    NumVertices = mesh.Vertices.Length,
-                    NumTriangles = mesh.Triangles.Length,
-                    NumMaterials = 1,
-                    Vertices = vertices,
-                    Triangles = triangles,
-                    MaterialIndices = materials,
-                    Materials = &made,
+                    numVertices = mesh.Vertices.Length,
+                    numTriangles = mesh.Triangles.Length,
+                    numMaterials = 1,
+                    vertices = vertices,
+                    triangles = triangles,
+                    materialIndices = materials,
+                    materials = &made,
                 };
-                error = IPL.StaticMeshCreate(scene, &meshSettings, &staticMesh);
+                error = iplStaticMeshCreate(scene, &meshSettings, &staticMesh);
             }
 
-            if (error != IPL.Error.Success)
+            if (error != IPL_STATUS_SUCCESS)
             {
-                IPL.SceneRelease(&scene);
+                iplSceneRelease(&scene);
                 Debugging.Error($"Steam Audio could not take a model's {mesh.Triangles.Length} triangles ({error}), "
                     + "so it is not heard against.");
 
                 return null;
             }
 
-            IPL.StaticMeshAdd(staticMesh, scene);
-            IPL.SceneCommit(scene);
+            iplStaticMeshAdd(staticMesh, scene);
+            iplSceneCommit(scene);
 
             return new SubScene { Scene = scene, _mesh = staticMesh };
         }
 
         internal void Release()
         {
-            IPL.StaticMesh* mesh = _mesh;
-            IPL.Scene* scene = Scene;
-            IPL.StaticMeshRemove(mesh, scene);
-            IPL.StaticMeshRelease(&mesh);
-            IPL.SceneRelease(&scene);
+            _IPLStaticMesh_t* mesh = _mesh;
+            _IPLScene_t* scene = Scene;
+            iplStaticMeshRemove(mesh, scene);
+            iplStaticMeshRelease(&mesh);
+            iplSceneRelease(&scene);
             _mesh = null;
             Scene = null;
         }

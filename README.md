@@ -115,7 +115,7 @@ src/Bundled/Gems/<Name>/   the gems that ship with Magic, one project each
 src/Bundled/Resources/     the engine's built-in default assets, as one project
 samples/                   sample projects, each a .magic file, its Assets/ (data, settings and scripts), and a csproj
 tests/                     tests, one project per project tested
-tools/                     what the build runs, such as the native bindings generator, and the scripts that check a change; nothing here ships
+tools/                     what the build runs, such as the analyzers, and the scripts that check a change; nothing here ships
 Build/                     build output, not in git: bin/ and obj/ by configuration, and what the tests write
 ```
 

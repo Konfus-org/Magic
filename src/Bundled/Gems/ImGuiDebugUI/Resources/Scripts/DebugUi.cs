@@ -23,7 +23,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     private const string VertexShader = "Shaders/Overlay/Overlay.vert.hlsl";
     private const string FragmentShader = "Shaders/Overlay/Overlay.frag.hlsl";
 
-    private static readonly GpuVertexBuffer[] _buffers = [new(0, (uint)Unsafe.SizeOf<ImDrawVert>())];
+    private static readonly GpuVertexBuffer[] _buffers = [new(0, (uint)Unsafe.SizeOf<ImDrawVert_t>())];
 
     private static readonly GpuVertexInput[] _inputs =
     [

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Contexts.Assets;
@@ -17,6 +18,22 @@ using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.SdlBindings;
 using Magic.Services;
+using static Magic.SdlBindings.SDL_AudioFormat;
+using static Magic.SdlBindings.SDL3;
+using static Magic.SteamAudio.IPL;
+using static Magic.SteamAudio.IPLAirAbsorptionModelType;
+using static Magic.SteamAudio.IPLDirectEffectFlags;
+using static Magic.SteamAudio.IPLDirectSimulationFlags;
+using static Magic.SteamAudio.IPLDistanceAttenuationModelType;
+using static Magic.SteamAudio.IPLerror;
+using static Magic.SteamAudio.IPLHRTFNormType;
+using static Magic.SteamAudio.IPLHRTFType;
+using static Magic.SteamAudio.IPLLogLevel;
+using static Magic.SteamAudio.IPLOcclusionType;
+using static Magic.SteamAudio.IPLReflectionEffectType;
+using static Magic.SteamAudio.IPLSceneType;
+using static Magic.SteamAudio.IPLSIMDLevel;
+using static Magic.SteamAudio.IPLSimulationFlags;
 
 namespace Magic.SteamAudio;
 
@@ -153,11 +170,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// Set by the simulation thread as it returns, which Stop waits for.
     /// </summary>
     private readonly ManualResetEventSlim _simulationEnded = new();
-    private readonly unsafe IPL.Context* _context;
-    private readonly unsafe IPL.HRTF* _hrtf;
-    private readonly unsafe IPL.EmbreeDevice* _embree;
-    private readonly unsafe IPL.Scene* _scene;
-    private readonly unsafe IPL.Simulator* _simulator;
+    private readonly unsafe _IPLContext_t* _context;
+    private readonly unsafe _IPLHRTF_t* _hrtf;
+    private readonly unsafe _IPLEmbreeDevice_t* _embree;
+    private readonly unsafe _IPLScene_t* _scene;
+    private readonly unsafe _IPLSimulator_t* _simulator;
     private readonly Voices? _sounds;
     private readonly SoundWorld? _soundWorld;
     private readonly bool _isAudioStarted;
@@ -180,13 +197,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// and the third is the newest filled, swapped whole between them.
     /// </summary>
     private readonly SimulationFrame[] _frames = [];
-    private unsafe SDL.AudioStream* _device;
+    private unsafe SDL_AudioStream* _device;
     private GCHandle _self;
-    private IPL.CoordinateSpace3 _listener = new()
+    private IPLCoordinateSpace3 _listener = new()
     {
-        Right = new IPL.Vector3 { X = 1 },
-        Up = new IPL.Vector3 { Y = 1 },
-        Ahead = new IPL.Vector3 { Z = -1 }
+        right = new IPLVector3 { x = 1 },
+        up = new IPLVector3 { y = 1 },
+        ahead = new IPLVector3 { z = -1 }
     };
     private Vector3 _listenerPosition;
     private int _filling;
@@ -250,75 +267,75 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             return;
         }
 
-        if (!SDL.InitSubSystem(SDL.InitAudio))
+        if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
         {
             Debugging.Warn("Sound is not played, as SDL could not start this machine's audio: "
-                + $"{CString.Read(SDL.GetError())}. Every sound goes on in silence.");
+                + $"{CString.Read(SDL_GetError())}. Every sound goes on in silence.");
 
             return;
         }
 
         _isAudioStarted = true;
-        IPL.ContextSettings contextSettings = new()
+        IPLContextSettings contextSettings = new()
         {
-            Version = IPL.VERSION,
-            LogCallback = &OnLog,
-            SimdLevel = IPL.SIMDLevel.Avx2
+            version = STEAMAUDIO_VERSION,
+            logCallback = &OnLog,
+            simdLevel = IPL_SIMDLEVEL_AVX2
         };
-        IPL.Context* context;
-        Check(IPL.ContextCreate(&contextSettings, &context), "its context");
+        _IPLContext_t* context;
+        Check(iplContextCreate(&contextSettings, &context), "its context");
         _context = context;
 
-        IPL.AudioSettings audio = new() { SamplingRate = settings.SampleRate, FrameSize = settings.FrameSize };
-        IPL.HRTFSettings hrtfSettings = new()
+        IPLAudioSettings audio = new() { samplingRate = settings.SampleRate, frameSize = settings.FrameSize };
+        IPLHRTFSettings hrtfSettings = new()
         {
-            Type = IPL.HRTFType.Default,
-            Volume = 1,
-            NormType = IPL.HRTFNormType.None
+            type = IPL_HRTFTYPE_DEFAULT,
+            volume = 1,
+            normType = IPL_HRTFNORMTYPE_NONE
         };
-        IPL.HRTF* hrtf;
-        Check(IPL.HRTFCreate(context, &audio, &hrtfSettings, &hrtf), "the head the listener hears with");
+        _IPLHRTF_t* hrtf;
+        Check(iplHRTFCreate(context, &audio, &hrtfSettings, &hrtf), "the head the listener hears with");
         _hrtf = hrtf;
 
         // Embree traces several times faster than Steam Audio's own tracer, which stands in where it cannot start.
-        IPL.EmbreeDevice* embree;
-        IPL.SceneSettings sceneSettings = IPL.EmbreeDeviceCreate(context, null, &embree) == IPL.Error.Success
-            ? new IPL.SceneSettings { Type = IPL.SceneType.Embree, EmbreeDevice = embree }
-            : new IPL.SceneSettings { Type = IPL.SceneType.Default };
-        _embree = sceneSettings.EmbreeDevice;
-        IPL.Scene* scene;
-        Check(IPL.SceneCreate(context, &sceneSettings, &scene), "the scene");
+        _IPLEmbreeDevice_t* embree;
+        IPLSceneSettings sceneSettings = iplEmbreeDeviceCreate(context, null, &embree) == IPL_STATUS_SUCCESS
+            ? new IPLSceneSettings { type = IPL_SCENETYPE_EMBREE, embreeDevice = embree }
+            : new IPLSceneSettings { type = IPL_SCENETYPE_DEFAULT };
+        _embree = sceneSettings.embreeDevice;
+        _IPLScene_t* scene;
+        Check(iplSceneCreate(context, &sceneSettings, &scene), "the scene");
         _scene = scene;
 
-        IPL.SimulationSettings simulation = new()
+        IPLSimulationSettings simulation = new()
         {
-            Flags = settings.ReflectionSources > 0
-                ? IPL.SimulationFlags.Direct | IPL.SimulationFlags.Reflections
-                : IPL.SimulationFlags.Direct,
-            SceneType = sceneSettings.Type,
-            ReflectionType = IPL.ReflectionEffectType.Convolution,
-            MaxNumOcclusionSamples = OcclusionSamples,
-            MaxNumRays = settings.Rays,
-            NumDiffuseSamples = 32,
-            MaxDuration = settings.ReverbSeconds,
-            MaxOrder = settings.Order,
-            MaxNumSources = Math.Max(1, settings.ReflectionSources),
-            NumThreads = Math.Max(1, Environment.ProcessorCount / 4),
-            SamplingRate = settings.SampleRate,
-            FrameSize = settings.FrameSize,
+            flags = settings.ReflectionSources > 0
+                ? IPL_SIMULATIONFLAGS_DIRECT | IPL_SIMULATIONFLAGS_REFLECTIONS
+                : IPL_SIMULATIONFLAGS_DIRECT,
+            sceneType = sceneSettings.type,
+            reflectionType = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION,
+            maxNumOcclusionSamples = OcclusionSamples,
+            maxNumRays = settings.Rays,
+            numDiffuseSamples = 32,
+            maxDuration = settings.ReverbSeconds,
+            maxOrder = settings.Order,
+            maxNumSources = Math.Max(1, settings.ReflectionSources),
+            numThreads = Math.Max(1, Environment.ProcessorCount / 4),
+            samplingRate = settings.SampleRate,
+            frameSize = settings.FrameSize,
         };
-        IPL.Simulator* simulator;
-        Check(IPL.SimulatorCreate(context, &simulation, &simulator), "the simulator");
+        _IPLSimulator_t* simulator;
+        Check(iplSimulatorCreate(context, &simulation, &simulator), "the simulator");
         _simulator = simulator;
-        IPL.SceneCommit(scene);
-        IPL.SimulatorSetScene(simulator, scene);
+        iplSceneCommit(scene);
+        iplSimulatorSetScene(simulator, scene);
         Voices sounds = new(context, hrtf, simulator, settings);
-        IPL.SimulatorCommit(simulator);
+        iplSimulatorCommit(simulator);
 
         _self = GCHandle.Alloc(sounds);
-        SDL.AudioSpec device = new() { Format = SDL.AudioFormat.F32, Channels = 2, Freq = settings.SampleRate };
-        _device = SDL.OpenAudioDeviceStream(
-            SDL.AudioDeviceDefaultPlayback,
+        SDL_AudioSpec device = new() { format = SDL_AUDIO_F32, channels = 2, freq = settings.SampleRate };
+        _device = SDL_OpenAudioDeviceStream(
+            SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
             &device,
             &Voices.OnAudio,
             (void*)GCHandle.ToIntPtr(_self));
@@ -326,7 +343,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         {
             // With nothing to play them, the voices go, and every sound runs on in silence, as one out of reach does.
             Debugging.Warn("Sound is not played, as SDL could not open this machine's audio device: "
-                + $"{CString.Read(SDL.GetError())}. Every sound goes on in silence.");
+                + $"{CString.Read(SDL_GetError())}. Every sound goes on in silence.");
             _self.Free();
             sounds.Dispose();
 
@@ -345,12 +362,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         _reflected = new int[settings.ReflectionSources];
         Array.Fill(_reflected, -1);
         _frames = [new SimulationFrame(settings), new SimulationFrame(settings), new SimulationFrame(settings)];
-        SDL.ResumeAudioStreamDevice(_device);
+        SDL_ResumeAudioStreamDevice(_device);
         _isSimulating = true;
         threads.RunAsync("Audio simulation", RunSimulation).FireAndForget();
-        string tracer = sceneSettings.Type == IPL.SceneType.Embree ? "Embree" : "its own tracer";
-        Debugging.Info($"Steam Audio {IPL.VersionMajor}.{IPL.VersionMinor}.{IPL.VersionPatch} is playing up to "
-            + $"{settings.Voices} sounds at {settings.SampleRate} Hz, "
+        string tracer = sceneSettings.type == IPL_SCENETYPE_EMBREE ? "Embree" : "its own tracer";
+        Debugging.Info($"Steam Audio {STEAMAUDIO_VERSION_MAJOR}.{STEAMAUDIO_VERSION_MINOR}.{STEAMAUDIO_VERSION_PATCH} "
+            + $"is playing up to {settings.Voices} sounds at {settings.SampleRate} Hz, "
             + $"echoing the nearest {settings.ReflectionSources}, traced with {tracer}.");
     }
 
@@ -386,23 +403,23 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         _simulationEnded.Dispose();
         if (_context is not null)
         {
-            IPL.Simulator* simulator = _simulator;
-            IPL.SimulatorRelease(&simulator);
-            IPL.Scene* scene = _scene;
-            IPL.SceneRelease(&scene);
+            _IPLSimulator_t* simulator = _simulator;
+            iplSimulatorRelease(&simulator);
+            _IPLScene_t* scene = _scene;
+            iplSceneRelease(&scene);
             if (_embree is not null)
             {
-                IPL.EmbreeDevice* embree = _embree;
-                IPL.EmbreeDeviceRelease(&embree);
+                _IPLEmbreeDevice_t* embree = _embree;
+                iplEmbreeDeviceRelease(&embree);
             }
 
-            IPL.HRTF* hrtf = _hrtf;
-            IPL.HRTFRelease(&hrtf);
-            IPL.Context* context = _context;
-            IPL.ContextRelease(&context);
+            _IPLHRTF_t* hrtf = _hrtf;
+            iplHRTFRelease(&hrtf);
+            _IPLContext_t* context = _context;
+            iplContextRelease(&context);
         }
 
-        if (_isAudioStarted) SDL.QuitSubSystem(SDL.InitAudio);
+        if (_isAudioStarted) SDL_QuitSubSystem(SDL_INIT_AUDIO);
     }
 
     public void LateUpdate(in Frame frame)
@@ -464,7 +481,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     {
         if (_device is not null)
         {
-            SDL.DestroyAudioStream(_device);
+            SDL_DestroyAudioStream(_device);
             _device = null;
         }
 
@@ -543,9 +560,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         return a.Distance.CompareTo(b.Distance);
     }
 
-    private static void Check(IPL.Error error, string what)
+    private static void Check(IPLerror error, string what)
     {
-        if (error == IPL.Error.Success) return;
+        if (error == IPL_STATUS_SUCCESS) return;
 
         throw new InvalidOperationException($"Steam Audio could not make {what}: {error}.");
     }
@@ -567,14 +584,14 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// Where something at <paramref name="position"/> turned by <paramref name="rotation"/> is and faces, in Steam
     /// Audio's space: the world mirrored along Z, its axes mirrored with it.
     /// </summary>
-    private static IPL.CoordinateSpace3 ToSpace(Vector3 position, Quaternion rotation)
+    private static IPLCoordinateSpace3 ToSpace(Vector3 position, Quaternion rotation)
     {
-        return new IPL.CoordinateSpace3
+        return new IPLCoordinateSpace3
         {
-            Right = SoundWorld.ToVector(Vector3.Transform(Vector3.UnitX, rotation)),
-            Up = SoundWorld.ToVector(Vector3.Transform(Vector3.UnitY, rotation)),
-            Ahead = SoundWorld.ToVector(Vector3.Transform(Vector3.UnitZ, rotation)),
-            Origin = SoundWorld.ToVector(position),
+            right = SoundWorld.ToVector(Vector3.Transform(Vector3.UnitX, rotation)),
+            up = SoundWorld.ToVector(Vector3.Transform(Vector3.UnitY, rotation)),
+            ahead = SoundWorld.ToVector(Vector3.Transform(Vector3.UnitZ, rotation)),
+            origin = SoundWorld.ToVector(position),
         };
     }
 
@@ -602,20 +619,20 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// <summary>
     /// What Steam Audio logs: a warning or an error as one, and the rest only when asked for.
     /// </summary>
-    [UnmanagedCallersOnly]
-    private static unsafe void OnLog(IPL.LogLevel level, byte* message)
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static unsafe void OnLog(IPLLogLevel level, byte* message)
     {
         string text = $"Steam Audio: {CString.Read(message).TrimEnd()}";
         switch (level)
         {
-            case IPL.LogLevel.Error:
+            case IPL_LOGLEVEL_ERROR:
                 Debugging.Error(text);
                 break;
-            case IPL.LogLevel.Warning:
+            case IPL_LOGLEVEL_WARNING:
                 Debugging.Warn(text);
                 break;
-            case IPL.LogLevel.Info:
-            case IPL.LogLevel.Debug:
+            case IPL_LOGLEVEL_INFO:
+            case IPL_LOGLEVEL_DEBUG:
             default:
                 Debugging.Verbose(text);
                 break;
@@ -920,18 +937,18 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         int index = _free.Peek();
         Hold hold = _holds[index];
-        SDL.AudioSpec from = new() { Format = SDL.AudioFormat.F32, Channels = audio.Channels, Freq = audio.SampleRate };
-        SDL.AudioSpec to = new()
+        SDL_AudioSpec from = new() { format = SDL_AUDIO_F32, channels = audio.Channels, freq = audio.SampleRate };
+        SDL_AudioSpec to = new()
         {
-            Format = SDL.AudioFormat.F32,
-            Channels = voice.Sound.Space == SoundSpace.Everywhere ? 2 : 1,
-            Freq = _settings.SampleRate
+            format = SDL_AUDIO_F32,
+            channels = voice.Sound.Space == SoundSpace.Everywhere ? 2 : 1,
+            freq = _settings.SampleRate
         };
-        SDL.AudioStream* stream = SDL.CreateAudioStream(&from, &to);
+        SDL_AudioStream* stream = SDL_CreateAudioStream(&from, &to);
         if (stream is null)
         {
             Debugging.Error($"Sounds that play an audio of {audio.Channels} channel(s) at {audio.SampleRate} Hz are "
-                + $"silent: SDL cannot convert it to the device: {CString.Read(SDL.GetError())}");
+                + $"silent: SDL cannot convert it to the device: {CString.Read(SDL_GetError())}");
             _audios[voice.Sound.Audio] = null;
             _failed.Add(voice.Sound.Audio);
             voice.Audio = null;
@@ -957,7 +974,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         if (!_sounds.TryTell(command))
         {
             pin.Dispose();
-            SDL.DestroyAudioStream(stream);
+            SDL_DestroyAudioStream(stream);
 
             return;
         }
@@ -996,7 +1013,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private unsafe void Steer(Voices sounds, SimulationFrame filling)
     {
-        IPL.Vector3 listener = _listener.Origin;
+        IPLVector3 listener = _listener.origin;
         for (int i = 0; i < _holds.Length; i++)
         {
             filling.Slots[i] = default;
@@ -1023,39 +1040,39 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
             if (!isWorld) continue;
 
-            IPL.Vector3 position = SoundWorld.ToVector(voice.Position);
+            IPLVector3 position = SoundWorld.ToVector(voice.Position);
             slot.Direction = voice.Distance < Closest
-                ? new IPL.Vector3 { Z = -1 }
-                : IPL.CalculateRelativeDirection(_context, position, listener, _listener.Ahead, _listener.Up);
-            IPL.DirectSimulationFlags simulated = IPL.DirectSimulationFlags.Distanceattenuation
-                | IPL.DirectSimulationFlags.Airabsorption
-                | IPL.DirectSimulationFlags.Directivity;
-            IPL.DirectEffectFlags applied = IPL.DirectEffectFlags.Applydistanceattenuation
-                | IPL.DirectEffectFlags.Applyairabsorption
-                | IPL.DirectEffectFlags.Applydirectivity;
+                ? new IPLVector3 { z = -1 }
+                : iplCalculateRelativeDirection(_context, position, listener, _listener.ahead, _listener.up);
+            IPLDirectSimulationFlags simulated = IPL_DIRECTSIMULATIONFLAGS_DISTANCEATTENUATION
+                | IPL_DIRECTSIMULATIONFLAGS_AIRABSORPTION
+                | IPL_DIRECTSIMULATIONFLAGS_DIRECTIVITY;
+            IPLDirectEffectFlags applied = IPL_DIRECTEFFECTFLAGS_APPLYDISTANCEATTENUATION
+                | IPL_DIRECTEFFECTFLAGS_APPLYAIRABSORPTION
+                | IPL_DIRECTEFFECTFLAGS_APPLYDIRECTIVITY;
             if (!sound.Unoccluded)
             {
-                simulated |= IPL.DirectSimulationFlags.Occlusion | IPL.DirectSimulationFlags.Transmission;
-                applied |= IPL.DirectEffectFlags.Applyocclusion | IPL.DirectEffectFlags.Applytransmission;
+                simulated |= IPL_DIRECTSIMULATIONFLAGS_OCCLUSION | IPL_DIRECTSIMULATIONFLAGS_TRANSMISSION;
+                applied |= IPL_DIRECTEFFECTFLAGS_APPLYOCCLUSION | IPL_DIRECTEFFECTFLAGS_APPLYTRANSMISSION;
             }
 
             slot.Flags = applied;
-            filling.Slots[i] = new IPL.SimulationInputs
+            filling.Slots[i] = new IPLSimulationInputs
             {
-                Flags = IPL.SimulationFlags.Direct,
-                DirectFlags = simulated,
-                Source = ToSpace(voice.Position, voice.Rotation),
-                DistanceAttenuationModel = new IPL.DistanceAttenuationModel
+                flags = IPL_SIMULATIONFLAGS_DIRECT,
+                directFlags = simulated,
+                source = ToSpace(voice.Position, voice.Rotation),
+                distanceAttenuationModel = new IPLDistanceAttenuationModel
                 {
-                    Type = IPL.DistanceAttenuationModelType.Inversedistance,
-                    MinDistance = sound.Near
+                    type = IPL_DISTANCEATTENUATIONTYPE_INVERSEDISTANCE,
+                    minDistance = sound.Near
                 },
-                AirAbsorptionModel = new IPL.AirAbsorptionModel { Type = IPL.AirAbsorptionModelType.Default },
-                Directivity = new IPL.Directivity { DipoleWeight = Math.Clamp(sound.Focus, 0, 1), DipolePower = 1 },
-                OcclusionType = IPL.OcclusionType.Volumetric,
-                OcclusionRadius = 0.5f,
-                NumOcclusionSamples = OcclusionSamples,
-                NumTransmissionRays = 3,
+                airAbsorptionModel = new IPLAirAbsorptionModel { type = IPL_AIRABSORPTIONTYPE_DEFAULT },
+                directivity = new IPLDirectivity { dipoleWeight = Math.Clamp(sound.Focus, 0, 1), dipolePower = 1 },
+                occlusionType = IPL_OCCLUSIONTYPE_VOLUMETRIC,
+                occlusionRadius = 0.5f,
+                numOcclusionSamples = OcclusionSamples,
+                numTransmissionRays = 3,
             };
         }
     }
@@ -1166,21 +1183,21 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         if (soundWorld.Update(frame.ListenerPosition, frame.PlacingSeconds))
         {
-            IPL.SceneCommit(_scene);
-            IPL.SimulatorCommit(_simulator);
+            iplSceneCommit(_scene);
+            iplSimulatorCommit(_simulator);
         }
 
-        IPL.SimulationSharedInputs shared = new() { Listener = frame.Listener };
-        IPL.SimulatorSetSharedInputs(_simulator, IPL.SimulationFlags.Direct, &shared);
-        fixed (IPL.SimulationInputs* inputs = frame.Slots)
+        IPLSimulationSharedInputs shared = new() { listener = frame.Listener };
+        iplSimulatorSetSharedInputs(_simulator, IPL_SIMULATIONFLAGS_DIRECT, &shared);
+        fixed (IPLSimulationInputs* inputs = frame.Slots)
         {
             for (int i = 0; i < frame.Slots.Length; i++)
             {
-                IPL.SourceSetInputs(sounds.Slots[i].Source, IPL.SimulationFlags.Direct, &inputs[i]);
+                iplSourceSetInputs(sounds.Slots[i].Source, IPL_SIMULATIONFLAGS_DIRECT, &inputs[i]);
             }
         }
 
-        IPL.SimulatorRunDirect(_simulator);
+        iplSimulatorRunDirect(_simulator);
         _simulateDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
         _solids.Record(soundWorld.Count);
     }
@@ -1192,36 +1209,36 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     private unsafe void Trace(Voices sounds, SimulationFrame frame)
     {
         long start = Stopwatch.GetTimestamp();
-        IPL.SimulationSharedInputs shared = new()
+        IPLSimulationSharedInputs shared = new()
         {
-            Listener = frame.Listener,
-            NumRays = _settings.Rays,
-            NumBounces = frame.Bounces,
-            Duration = _settings.ReverbSeconds,
-            Order = _settings.Order,
-            IrradianceMinDistance = 1,
+            listener = frame.Listener,
+            numRays = _settings.Rays,
+            numBounces = frame.Bounces,
+            duration = _settings.ReverbSeconds,
+            order = _settings.Order,
+            irradianceMinDistance = 1,
         };
-        IPL.SimulatorSetSharedInputs(_simulator, IPL.SimulationFlags.Reflections, &shared);
+        iplSimulatorSetSharedInputs(_simulator, IPL_SIMULATIONFLAGS_REFLECTIONS, &shared);
         IReadOnlyList<Voices.Reflector> reflectors = sounds.Reflectors;
         for (int k = 0; k < reflectors.Count; k++)
         {
-            IPL.SimulationInputs source = new()
+            IPLSimulationInputs source = new()
             {
-                Flags = frame.IsEchoing[k] ? IPL.SimulationFlags.Reflections : default,
-                Source = frame.Echoes[k],
-                DistanceAttenuationModel = new IPL.DistanceAttenuationModel
+                flags = frame.IsEchoing[k] ? IPL_SIMULATIONFLAGS_REFLECTIONS : default,
+                source = frame.Echoes[k],
+                distanceAttenuationModel = new IPLDistanceAttenuationModel
                 {
-                    Type = IPL.DistanceAttenuationModelType.Default
+                    type = IPL_DISTANCEATTENUATIONTYPE_DEFAULT
                 },
-                AirAbsorptionModel = new IPL.AirAbsorptionModel { Type = IPL.AirAbsorptionModelType.Default },
+                airAbsorptionModel = new IPLAirAbsorptionModel { type = IPL_AIRABSORPTIONTYPE_DEFAULT },
             };
-            source.ReverbScale[0] = 1;
-            source.ReverbScale[1] = 1;
-            source.ReverbScale[2] = 1;
-            IPL.SourceSetInputs(reflectors[k].Source, IPL.SimulationFlags.Reflections, &source);
+            source.reverbScale[0] = 1;
+            source.reverbScale[1] = 1;
+            source.reverbScale[2] = 1;
+            iplSourceSetInputs(reflectors[k].Source, IPL_SIMULATIONFLAGS_REFLECTIONS, &source);
         }
 
-        IPL.SimulatorRunReflections(_simulator);
+        iplSimulatorRunReflections(_simulator);
         _traceDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
     }
 
@@ -1298,7 +1315,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         internal bool IsFreeTold { get; set; }
 
-        internal unsafe void Take(Voice voice, int generation, SDL.AudioStream* stream, MemoryHandle pin)
+        internal unsafe void Take(Voice voice, int generation, SDL_AudioStream* stream, MemoryHandle pin)
         {
             Voice = voice;
             Generation = generation;
@@ -1313,7 +1330,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         /// </summary>
         internal unsafe void Let()
         {
-            if (Stream != 0) SDL.DestroyAudioStream((SDL.AudioStream*)Stream);
+            if (Stream != 0) SDL_DestroyAudioStream((SDL_AudioStream*)Stream);
 
             _pin.Dispose();
             _pin = default;
@@ -1331,13 +1348,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private sealed class SimulationFrame(SteamAudioSettings settings)
     {
-        internal IPL.CoordinateSpace3 Listener { get; set; }
+        internal IPLCoordinateSpace3 Listener { get; set; }
 
         internal Vector3 ListenerPosition { get; set; }
 
-        internal IPL.SimulationInputs[] Slots { get; } = new IPL.SimulationInputs[settings.Voices];
+        internal IPLSimulationInputs[] Slots { get; } = new IPLSimulationInputs[settings.Voices];
 
-        internal IPL.CoordinateSpace3[] Echoes { get; } = new IPL.CoordinateSpace3[settings.ReflectionSources];
+        internal IPLCoordinateSpace3[] Echoes { get; } = new IPLCoordinateSpace3[settings.ReflectionSources];
 
         internal bool[] IsEchoing { get; } = new bool[settings.ReflectionSources];
 

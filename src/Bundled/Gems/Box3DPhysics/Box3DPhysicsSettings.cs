@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Magic.Attributes;
 using Magic.Interfaces;
+using static Magic.Box3DPhysics.B3;
 
 namespace Magic.Box3DPhysics;
 
@@ -33,6 +34,6 @@ internal sealed class Box3DPhysicsSettings : ISettings
     /// Threads the solver runs on, its own; 1 solves on the step's thread alone, which small worlds are best with.
     /// </summary>
     [RequireRestart]
-    [Range(1, B3.MaxWorkers)]
+    [Range(1, B3_MAX_WORKERS)]
     public int Workers { get; set; } = 1;
 }

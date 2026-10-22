@@ -3,6 +3,9 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.SdlBindings;
+using static Magic.SdlBindings.SDL_AudioFormat;
+using static Magic.SdlBindings.SDL3;
+using static Magic.SdlBindings.SDL3_mixer;
 
 namespace Magic.SdlAudioLoader;
 
@@ -31,15 +34,11 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
     public SdlAudioLoaderGem()
     {
         // SDL itself first, so SDL_mixer binds to the SDL every gem shares.
-        _ = SDL.GetVersion();
+        _ = SDL_GetVersion();
 
-        if (MIX
-            .Init())
-        {
-            return;
-        }
+        if (MIX_Init()) return;
 
-        throw new InvalidOperationException($"SDL_mixer could not start: {CString.Read(SDL.GetError())}");
+        throw new InvalidOperationException($"SDL_mixer could not start: {CString.Read(SDL_GetError())}");
     }
 
     /// <summary>
@@ -51,7 +50,7 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
         try
         {
             _isStopped = true;
-            MIX.Quit();
+            MIX_Quit();
         }
         finally
         {
@@ -88,32 +87,32 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
         // The decoder reads the file for as long as it is open, so the file stays pinned until then.
         fixed (byte* bytes = file)
         {
-            SDL.IOStream* io = SDL.IOFromConstMem(bytes, (ulong)file.Length);
-            MIX.AudioDecoder* decoder = io == null ? null : MIX.CreateAudioDecoderIo(io, closeio: true, props: 0);
+            SDL_IOStream* io = SDL_IOFromConstMem(bytes, (nuint)file.Length);
+            MIX_AudioDecoder* decoder = io == null ? null : MIX_CreateAudioDecoder_IO(io, closeio: true, props: 0);
 
             if (decoder == null)
             {
                 return Result.Failure<Audio>(
-                    $"SDL_mixer could not read it: {CString.Read(SDL.GetError())}");
+                    $"SDL_mixer could not read it: {CString.Read(SDL_GetError())}");
             }
 
             try
             {
-                SDL.AudioSpec spec;
+                SDL_AudioSpec spec;
 
-                if (!MIX.GetAudioDecoderFormat(decoder, &spec))
+                if (!MIX_GetAudioDecoderFormat(decoder, &spec))
                 {
                     return Result.Failure<Audio>(
-                        $"SDL_mixer could not tell its format: {CString.Read(SDL.GetError())}");
+                        $"SDL_mixer could not tell its format: {CString.Read(SDL_GetError())}");
                 }
 
-                if (spec.Channels <= 0 || spec.Freq <= 0)
+                if (spec.channels <= 0 || spec.freq <= 0)
                 {
                     return Result.Failure<Audio>(
-                        $"it says it has {spec.Channels} channel(s) at {spec.Freq} Hz.");
+                        $"it says it has {spec.channels} channel(s) at {spec.freq} Hz.");
                 }
 
-                spec.Format = SDL.AudioFormat.F32;
+                spec.format = SDL_AUDIO_F32;
                 float[] samples = new float[Chunk / sizeof(float)];
                 int count = 0;
                 while (true)
@@ -124,13 +123,13 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
                     int read;
                     fixed (float* into = &samples[count])
                     {
-                        read = MIX.DecodeAudio(decoder, into, Chunk, &spec);
+                        read = MIX_DecodeAudio(decoder, into, Chunk, &spec);
                     }
 
                     if (read < 0)
                     {
                         return Result.Failure<Audio>(
-                            $"SDL_mixer could not decode it: {CString.Read(SDL.GetError())}");
+                            $"SDL_mixer could not decode it: {CString.Read(SDL_GetError())}");
                     }
 
                     if (read == 0) break;
@@ -139,18 +138,18 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
                 }
 
                 // A frame left half written by a file cut short is dropped, so every frame has every channel.
-                count -= count % spec.Channels;
+                count -= count % spec.channels;
 
                 return Result.Success(new Audio
                 {
-                    SampleRate = spec.Freq,
-                    Channels = spec.Channels,
+                    SampleRate = spec.freq,
+                    Channels = spec.channels,
                     Samples = samples.AsMemory(0, count),
                 });
             }
             finally
             {
-                MIX.DestroyAudioDecoder(decoder);
+                MIX_DestroyAudioDecoder(decoder);
             }
         }
     }

@@ -3094,7 +3094,7 @@ change's checks. How it is built and run is in [its README](Wizard/README.md).
 In the root `README.md`'s folder structure, make the `tools/` line:
 
 ```
-tools/                     what the build runs, such as the native bindings generator, the scripts that check a change, and the editor (tools/Wizard); nothing here ships with Magic
+tools/                     what the build runs, such as the analyzers, the scripts that check a change, and the editor (tools/Wizard); nothing here ships with Magic
 ```
 
 Once these exist, this tutorial has done its job: delete it.

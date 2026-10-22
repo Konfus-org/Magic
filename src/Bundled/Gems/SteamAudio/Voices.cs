@@ -1,10 +1,20 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.SdlBindings;
 using Magic.Services;
+using static Magic.SdlBindings.SDL3;
+using static Magic.SteamAudio.IPL;
+using static Magic.SteamAudio.IPLbool;
+using static Magic.SteamAudio.IPLerror;
+using static Magic.SteamAudio.IPLHRTFInterpolation;
+using static Magic.SteamAudio.IPLReflectionEffectType;
+using static Magic.SteamAudio.IPLSimulationFlags;
+using static Magic.SteamAudio.IPLSpeakerLayoutType;
+using static Magic.SteamAudio.IPLTransmissionType;
 
 namespace Magic.SteamAudio;
 
@@ -98,12 +108,12 @@ internal sealed unsafe class Voices : IDisposable
         "{fill}",
         "Fills of the device that took longer than the sound they made lasts, which the device hears as a gap.");
 
-    private readonly IPL.Context* _context;
-    private readonly IPL.HRTF* _hrtf;
+    private readonly _IPLContext_t* _context;
+    private readonly _IPLHRTF_t* _hrtf;
     private readonly Slot[] _slots;
     private readonly Reflector[] _reflectors;
-    private readonly IPL.ReflectionMixer* _mixer;
-    private readonly IPL.AmbisonicsDecodeEffect* _decoder;
+    private readonly _IPLReflectionMixer_t* _mixer;
+    private readonly _IPLAmbisonicsDecodeEffect_t* _decoder;
     private readonly Channel<VoiceCommand> _commands;
     private readonly int _sampleRate;
     private readonly int _frameSize;
@@ -120,15 +130,15 @@ internal sealed unsafe class Voices : IDisposable
     /// A sound everywhere's frame as its stream gives it, interleaved, before it is mixed in.
     /// </summary>
     private readonly float[] _stereo;
-    private IPL.AudioBuffer _ambisonics;
-    private IPL.AudioBuffer _decoded;
+    private IPLAudioBuffer _ambisonics;
+    private IPLAudioBuffer _decoded;
 
     /// <summary>
     /// The audio thread's own failure, logged once.
     /// </summary>
     private int _hasFailed;
 
-    internal Voices(IPL.Context* context, IPL.HRTF* hrtf, IPL.Simulator* simulator, SteamAudioSettings settings)
+    internal Voices(_IPLContext_t* context, _IPLHRTF_t* hrtf, _IPLSimulator_t* simulator, SteamAudioSettings settings)
     {
         _context = context;
         _hrtf = hrtf;
@@ -146,18 +156,18 @@ internal sealed unsafe class Voices : IDisposable
             FullMode = BoundedChannelFullMode.Wait
         });
 
-        IPL.AudioSettings audio = new() { SamplingRate = _sampleRate, FrameSize = _frameSize };
+        IPLAudioSettings audio = new() { samplingRate = _sampleRate, frameSize = _frameSize };
         _slots = new Slot[settings.Voices];
         for (int i = 0; i < _slots.Length; i++)
         {
             _slots[i] = new Slot(context, hrtf, simulator, &audio);
         }
 
-        IPL.ReflectionEffectSettings reflection = new()
+        IPLReflectionEffectSettings reflection = new()
         {
-            Type = IPL.ReflectionEffectType.Convolution,
-            IrSize = _irSize,
-            NumChannels = _ambisonicChannels
+            type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION,
+            irSize = _irSize,
+            numChannels = _ambisonicChannels
         };
         _reflectors = new Reflector[settings.ReflectionSources];
         for (int i = 0; i < _reflectors.Length; i++)
@@ -167,17 +177,17 @@ internal sealed unsafe class Voices : IDisposable
 
         if (_reflectors.Length == 0) return;
 
-        IPL.ReflectionMixer* mixer;
-        Check(IPL.ReflectionMixerCreate(context, &audio, &reflection, &mixer), "the reflection mixer");
+        _IPLReflectionMixer_t* mixer;
+        Check(iplReflectionMixerCreate(context, &audio, &reflection, &mixer), "the reflection mixer");
         _mixer = mixer;
-        IPL.AmbisonicsDecodeEffectSettings decode = new()
+        IPLAmbisonicsDecodeEffectSettings decode = new()
         {
-            SpeakerLayout = new IPL.SpeakerLayout { Type = IPL.SpeakerLayoutType.Stereo },
-            Hrtf = hrtf,
-            MaxOrder = _order
+            speakerLayout = new IPLSpeakerLayout { type = IPL_SPEAKERLAYOUTTYPE_STEREO },
+            hrtf = hrtf,
+            maxOrder = _order
         };
-        IPL.AmbisonicsDecodeEffect* decoder;
-        Check(IPL.AmbisonicsDecodeEffectCreate(context, &audio, &decode, &decoder), "the echoes' decoder");
+        _IPLAmbisonicsDecodeEffect_t* decoder;
+        Check(iplAmbisonicsDecodeEffectCreate(context, &audio, &decode, &decoder), "the echoes' decoder");
         _decoder = decoder;
         Check(Allocate(_ambisonicChannels, out _ambisonics), "the echoes' buffer");
         Check(Allocate(2, out _decoded), "the echoes' buffer");
@@ -205,7 +215,7 @@ internal sealed unsafe class Voices : IDisposable
     /// Where the listener is and which way it faces, in Steam Audio's space, which the echoes are heard around; written
     /// by the main thread each frame, whole enough for sound that a frame read halfway hears no difference.
     /// </summary>
-    internal IPL.CoordinateSpace3 Listener { get; set; }
+    internal IPLCoordinateSpace3 Listener { get; set; }
 
     internal IReadOnlyList<Slot> Slots => _slots;
 
@@ -229,15 +239,15 @@ internal sealed unsafe class Voices : IDisposable
 
         if (_mixer is null) return;
 
-        IPL.ReflectionMixer* mixer = _mixer;
-        IPL.ReflectionMixerRelease(&mixer);
-        IPL.AmbisonicsDecodeEffect* decoder = _decoder;
-        IPL.AmbisonicsDecodeEffectRelease(&decoder);
-        fixed (IPL.AudioBuffer* ambisonics = &_ambisonics)
-        fixed (IPL.AudioBuffer* decoded = &_decoded)
+        _IPLReflectionMixer_t* mixer = _mixer;
+        iplReflectionMixerRelease(&mixer);
+        _IPLAmbisonicsDecodeEffect_t* decoder = _decoder;
+        iplAmbisonicsDecodeEffectRelease(&decoder);
+        fixed (IPLAudioBuffer* ambisonics = &_ambisonics)
+        fixed (IPLAudioBuffer* decoded = &_decoded)
         {
-            IPL.AudioBufferFree(_context, ambisonics);
-            IPL.AudioBufferFree(_context, decoded);
+            iplAudioBufferFree(_context, ambisonics);
+            iplAudioBufferFree(_context, decoded);
         }
     }
 
@@ -245,13 +255,13 @@ internal sealed unsafe class Voices : IDisposable
     /// SDL's audio thread asking for more: frames are made until it has what it asked for. Whatever goes wrong is
     /// logged once and the device hears silence, as an exception must not cross into SDL.
     /// </summary>
-    [UnmanagedCallersOnly]
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Nothing may be thrown back into SDL's audio thread; a failure is logged once and the "
             + "device hears silence.")]
-    internal static void OnAudio(void* self, SDL.AudioStream* device, int additional, int _)
+    internal static void OnAudio(void* self, SDL_AudioStream* device, int additional, int _)
     {
         if (GCHandle.FromIntPtr((nint)self).Target is not Voices voices) return;
 
@@ -275,30 +285,30 @@ internal sealed unsafe class Voices : IDisposable
     /// </summary>
     internal bool TryTell(in VoiceCommand command) => _commands.Writer.TryWrite(command);
 
-    private static IPL.Error Allocate(IPL.Context* context, int channels, int frameSize, out IPL.AudioBuffer buffer)
+    private static IPLerror Allocate(_IPLContext_t* context, int channels, int frameSize, out IPLAudioBuffer buffer)
     {
-        IPL.AudioBuffer made;
-        IPL.Error error = IPL.AudioBufferAllocate(context, channels, frameSize, &made);
+        IPLAudioBuffer made;
+        IPLerror error = iplAudioBufferAllocate(context, channels, frameSize, &made);
         buffer = made;
 
         return error;
     }
 
-    private static void Check(IPL.Error error, string what)
+    private static void Check(IPLerror error, string what)
     {
-        if (error == IPL.Error.Success) return;
+        if (error == IPL_STATUS_SUCCESS) return;
 
         throw new InvalidOperationException($"Steam Audio could not make {what}: {error}.");
     }
 
-    private IPL.Error Allocate(int channels, out IPL.AudioBuffer buffer)
+    private IPLerror Allocate(int channels, out IPLAudioBuffer buffer)
         => Allocate(_context, channels, _frameSize, out buffer);
 
     /// <summary>
     /// Fills the device with frames until it has <paramref name="additional"/> bytes more, and measures how long that
     /// took against how long it plays.
     /// </summary>
-    private void Render(SDL.AudioStream* device, int additional)
+    private void Render(SDL_AudioStream* device, int additional)
     {
         if (_hasFailed != 0 || additional <= 0) return;
 
@@ -310,7 +320,7 @@ internal sealed unsafe class Voices : IDisposable
             RenderFrame();
             fixed (float* mixed = _mixed)
             {
-                SDL.PutAudioStreamData(device, mixed, bytes);
+                SDL_PutAudioStreamData(device, mixed, bytes);
             }
 
             additional -= bytes;
@@ -395,7 +405,7 @@ internal sealed unsafe class Voices : IDisposable
     /// </summary>
     private void MixWorld(Slot slot, int index, bool isReflecting)
     {
-        float* input = slot.Input.Data[0];
+        float* input = slot.Input.data[0];
         slot.Pull(input, _frameSize, 1, _sampleRate);
         float gain = slot.Gain;
         for (int i = 0; i < _frameSize; i++)
@@ -403,24 +413,24 @@ internal sealed unsafe class Voices : IDisposable
             input[i] *= gain;
         }
 
-        IPL.SimulationOutputs outputs;
-        IPL.SourceGetOutputs(slot.Source, IPL.SimulationFlags.Direct, &outputs);
-        IPL.DirectEffectParams direct = outputs.Direct;
-        direct.Flags = slot.Flags;
-        direct.TransmissionType = IPL.TransmissionType.Freqdependent;
-        IPL.BinauralEffectParams binaural = new()
+        IPLSimulationOutputs outputs;
+        iplSourceGetOutputs(slot.Source, IPL_SIMULATIONFLAGS_DIRECT, &outputs);
+        IPLDirectEffectParams direct = outputs.direct;
+        direct.flags = slot.Flags;
+        direct.transmissionType = IPL_TRANSMISSIONTYPE_FREQDEPENDENT;
+        IPLBinauralEffectParams binaural = new()
         {
-            Direction = slot.Direction,
-            Interpolation = IPL.HRTFInterpolation.Bilinear,
-            SpatialBlend = 1,
-            Hrtf = _hrtf
+            direction = slot.Direction,
+            interpolation = IPL_HRTFINTERPOLATION_BILINEAR,
+            spatialBlend = 1,
+            hrtf = _hrtf
         };
-        fixed (IPL.AudioBuffer* buffers = slot.Buffers)
+        fixed (IPLAudioBuffer* buffers = slot.Buffers)
         {
-            IPL.DirectEffectApply(slot.Direct, &direct, &buffers[0], &buffers[1]);
-            IPL.BinauralEffectApply(slot.Binaural, &binaural, &buffers[1], &buffers[2]);
-            float* left = buffers[2].Data[0];
-            float* right = buffers[2].Data[1];
+            iplDirectEffectApply(slot.Direct, &direct, &buffers[0], &buffers[1]);
+            iplBinauralEffectApply(slot.Binaural, &binaural, &buffers[1], &buffers[2]);
+            float* left = buffers[2].data[0];
+            float* right = buffers[2].data[1];
             for (int i = 0; i < _frameSize; i++)
             {
                 _mixed[i * 2] += left[i];
@@ -434,21 +444,21 @@ internal sealed unsafe class Voices : IDisposable
             Reflector reflector = _reflectors[at];
             if (reflector.Slot != index)
             {
-                IPL.ReflectionEffectReset(reflector.Effect);
+                iplReflectionEffectReset(reflector.Effect);
                 reflector.Slot = index;
             }
 
-            IPL.SourceGetOutputs(reflector.Source, IPL.SimulationFlags.Reflections, &outputs);
-            IPL.ReflectionEffectParams echo = outputs.Reflections;
+            iplSourceGetOutputs(reflector.Source, IPL_SIMULATIONFLAGS_REFLECTIONS, &outputs);
+            IPLReflectionEffectParams echo = outputs.reflections;
 
-            if (echo.Ir is null) return;
+            if (echo.ir is null) return;
 
-            echo.Type = IPL.ReflectionEffectType.Convolution;
-            echo.NumChannels = _ambisonicChannels;
-            echo.IrSize = _irSize;
-            fixed (IPL.AudioBuffer* ambisonics = &_ambisonics)
+            echo.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
+            echo.numChannels = _ambisonicChannels;
+            echo.irSize = _irSize;
+            fixed (IPLAudioBuffer* ambisonics = &_ambisonics)
             {
-                IPL.ReflectionEffectApply(reflector.Effect, &echo, &buffers[0], ambisonics, _mixer);
+                iplReflectionEffectApply(reflector.Effect, &echo, &buffers[0], ambisonics, _mixer);
             }
         }
     }
@@ -458,26 +468,26 @@ internal sealed unsafe class Voices : IDisposable
     /// </summary>
     private void MixEchoes()
     {
-        IPL.ReflectionEffectParams mix = new()
+        IPLReflectionEffectParams mix = new()
         {
-            Type = IPL.ReflectionEffectType.Convolution,
-            NumChannels = _ambisonicChannels,
-            IrSize = _irSize
+            type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION,
+            numChannels = _ambisonicChannels,
+            irSize = _irSize
         };
-        IPL.AmbisonicsDecodeEffectParams decode = new()
+        IPLAmbisonicsDecodeEffectParams decode = new()
         {
-            Order = _order,
-            Hrtf = _hrtf,
-            Orientation = Listener,
-            Binaural = IPL.Bool.True
+            order = _order,
+            hrtf = _hrtf,
+            orientation = Listener,
+            binaural = IPL_TRUE
         };
-        fixed (IPL.AudioBuffer* ambisonics = &_ambisonics)
-        fixed (IPL.AudioBuffer* decoded = &_decoded)
+        fixed (IPLAudioBuffer* ambisonics = &_ambisonics)
+        fixed (IPLAudioBuffer* decoded = &_decoded)
         {
-            IPL.ReflectionMixerApply(_mixer, &mix, ambisonics);
-            IPL.AmbisonicsDecodeEffectApply(_decoder, &decode, ambisonics, decoded);
-            float* left = decoded->Data[0];
-            float* right = decoded->Data[1];
+            iplReflectionMixerApply(_mixer, &mix, ambisonics);
+            iplAmbisonicsDecodeEffectApply(_decoder, &decode, ambisonics, decoded);
+            float* left = decoded->data[0];
+            float* right = decoded->data[1];
             for (int i = 0; i < _frameSize; i++)
             {
                 _mixed[i * 2] += left[i];
@@ -493,7 +503,7 @@ internal sealed unsafe class Voices : IDisposable
     /// </summary>
     internal sealed class Slot
     {
-        private SDL.AudioStream* _stream;
+        private SDL_AudioStream* _stream;
         private float* _samples;
         private int _count;
         private int _channels;
@@ -504,39 +514,39 @@ internal sealed unsafe class Voices : IDisposable
         private float _appliedPitch;
         private int _flags;
 
-        internal Slot(IPL.Context* context, IPL.HRTF* hrtf, IPL.Simulator* simulator, IPL.AudioSettings* audio)
+        internal Slot(_IPLContext_t* context, _IPLHRTF_t* hrtf, _IPLSimulator_t* simulator, IPLAudioSettings* audio)
         {
-            IPL.SourceSettings source = new() { Flags = IPL.SimulationFlags.Direct };
-            IPL.Source* made;
-            Check(IPL.SourceCreate(simulator, &source, &made), "a sound's source");
+            IPLSourceSettings source = new() { flags = IPL_SIMULATIONFLAGS_DIRECT };
+            _IPLSource_t* made;
+            Check(iplSourceCreate(simulator, &source, &made), "a sound's source");
             Source = made;
-            IPL.SourceAdd(made, simulator);
-            IPL.DirectEffectSettings direct = new() { NumChannels = 1 };
-            IPL.DirectEffect* directEffect;
-            Check(IPL.DirectEffectCreate(context, audio, &direct, &directEffect), "a sound's direct effect");
+            iplSourceAdd(made, simulator);
+            IPLDirectEffectSettings direct = new() { numChannels = 1 };
+            _IPLDirectEffect_t* directEffect;
+            Check(iplDirectEffectCreate(context, audio, &direct, &directEffect), "a sound's direct effect");
             Direct = directEffect;
-            IPL.BinauralEffectSettings binaural = new() { Hrtf = hrtf };
-            IPL.BinauralEffect* binauralEffect;
-            Check(IPL.BinauralEffectCreate(context, audio, &binaural, &binauralEffect), "a sound's binaural effect");
+            IPLBinauralEffectSettings binaural = new() { hrtf = hrtf };
+            _IPLBinauralEffect_t* binauralEffect;
+            Check(iplBinauralEffectCreate(context, audio, &binaural, &binauralEffect), "a sound's binaural effect");
             Binaural = binauralEffect;
-            Buffers = new IPL.AudioBuffer[3];
-            Check(Allocate(context, 1, audio->FrameSize, out Buffers[0]), "a sound's buffer");
-            Check(Allocate(context, 1, audio->FrameSize, out Buffers[1]), "a sound's buffer");
-            Check(Allocate(context, 2, audio->FrameSize, out Buffers[2]), "a sound's buffer");
+            Buffers = new IPLAudioBuffer[3];
+            Check(Allocate(context, 1, audio->frameSize, out Buffers[0]), "a sound's buffer");
+            Check(Allocate(context, 1, audio->frameSize, out Buffers[1]), "a sound's buffer");
+            Check(Allocate(context, 2, audio->frameSize, out Buffers[2]), "a sound's buffer");
         }
 
-        internal IPL.Source* Source { get; }
+        internal _IPLSource_t* Source { get; }
 
-        internal IPL.DirectEffect* Direct { get; }
+        internal _IPLDirectEffect_t* Direct { get; }
 
-        internal IPL.BinauralEffect* Binaural { get; }
+        internal _IPLBinauralEffect_t* Binaural { get; }
 
         /// <summary>
         /// The frame's sound as it comes, mono; after the direct effect, mono; and placed around the head, stereo.
         /// </summary>
-        internal IPL.AudioBuffer[] Buffers { get; }
+        internal IPLAudioBuffer[] Buffers { get; }
 
-        internal IPL.AudioBuffer Input => Buffers[0];
+        internal IPLAudioBuffer Input => Buffers[0];
 
         /// <summary>
         /// Which start this is: the main thread's count for the slot, which the audio thread's word back names.
@@ -585,16 +595,16 @@ internal sealed unsafe class Voices : IDisposable
         /// <summary>
         /// What of the direct effect it hears; written by the main thread.
         /// </summary>
-        internal IPL.DirectEffectFlags Flags
+        internal IPLDirectEffectFlags Flags
         {
-            get => (IPL.DirectEffectFlags)Volatile.Read(ref _flags);
+            get => (IPLDirectEffectFlags)Volatile.Read(ref _flags);
             set => Volatile.Write(ref _flags, (int)value);
         }
 
         /// <summary>
         /// Which way it is from the listener's head, in the head's own space; written by the main thread.
         /// </summary>
-        internal IPL.Vector3 Direction { get; set; } = new() { Z = -1 };
+        internal IPLVector3 Direction { get; set; } = new() { z = -1 };
 
         /// <summary>
         /// The reflector whose echo it is heard through, or -1; written by the main thread.
@@ -646,7 +656,7 @@ internal sealed unsafe class Voices : IDisposable
         /// </summary>
         internal void Begin(in VoiceCommand command)
         {
-            _stream = (SDL.AudioStream*)command.Stream;
+            _stream = (SDL_AudioStream*)command.Stream;
             _samples = (float*)command.Samples;
             _count = command.Count;
             _channels = command.Channels;
@@ -657,8 +667,8 @@ internal sealed unsafe class Voices : IDisposable
             IsEverywhere = command.IsEverywhere;
             IsActive = true;
             IsDone = false;
-            IPL.DirectEffectReset(Direct);
-            IPL.BinauralEffectReset(Binaural);
+            iplDirectEffectReset(Direct);
+            iplBinauralEffectReset(Binaural);
             SeekTo(command.Seconds);
             Started = command.Generation;
         }
@@ -668,7 +678,7 @@ internal sealed unsafe class Voices : IDisposable
         /// </summary>
         internal void SeekTo(double seconds)
         {
-            SDL.ClearAudioStream(_stream);
+            SDL_ClearAudioStream(_stream);
             long frame = (long)(Math.Clamp(seconds, 0, _duration) * _rate);
             _fed = (int)Math.Min(frame * _channels, _count);
             _isFlushed = false;
@@ -685,17 +695,17 @@ internal sealed unsafe class Voices : IDisposable
             float pitch = Math.Clamp(Pitch, 0.5f, 2);
             if (pitch != _appliedPitch)
             {
-                SDL.SetAudioStreamFrequencyRatio(_stream, pitch);
+                SDL_SetAudioStreamFrequencyRatio(_stream, pitch);
                 _appliedPitch = pitch;
             }
 
             int want = frameSize * channels * sizeof(float);
-            while (!_isFlushed && SDL.GetAudioStreamAvailable(_stream) < want)
+            while (!_isFlushed && SDL_GetAudioStreamAvailable(_stream) < want)
             {
                 FeedMore();
             }
 
-            int got = Math.Max(0, SDL.GetAudioStreamData(_stream, into, want));
+            int got = Math.Max(0, SDL_GetAudioStreamData(_stream, into, want));
             new Span<float>(into + (got / sizeof(float)), (want - got) / sizeof(float)).Clear();
             double seconds = Seconds + ((double)got / (channels * sizeof(float)) * pitch / sampleRate);
             Seconds = Loop && _duration > 0 ? seconds % _duration : Math.Min(seconds, _duration);
@@ -715,19 +725,19 @@ internal sealed unsafe class Voices : IDisposable
             Released = Generation;
         }
 
-        internal void Release(IPL.Context* context)
+        internal void Release(_IPLContext_t* context)
         {
-            IPL.Source* source = Source;
-            IPL.SourceRelease(&source);
-            IPL.DirectEffect* direct = Direct;
-            IPL.DirectEffectRelease(&direct);
-            IPL.BinauralEffect* binaural = Binaural;
-            IPL.BinauralEffectRelease(&binaural);
-            fixed (IPL.AudioBuffer* buffers = Buffers)
+            _IPLSource_t* source = Source;
+            iplSourceRelease(&source);
+            _IPLDirectEffect_t* direct = Direct;
+            iplDirectEffectRelease(&direct);
+            _IPLBinauralEffect_t* binaural = Binaural;
+            iplBinauralEffectRelease(&binaural);
+            fixed (IPLAudioBuffer* buffers = Buffers)
             {
                 for (int i = 0; i < Buffers.Length; i++)
                 {
-                    IPL.AudioBufferFree(context, &buffers[i]);
+                    iplAudioBufferFree(context, &buffers[i]);
                 }
             }
         }
@@ -741,7 +751,7 @@ internal sealed unsafe class Voices : IDisposable
             int chunk = Math.Min(Feed * _channels, _count - _fed);
             if (chunk > 0)
             {
-                SDL.PutAudioStreamData(_stream, _samples + _fed, chunk * sizeof(float));
+                SDL_PutAudioStreamData(_stream, _samples + _fed, chunk * sizeof(float));
                 _fed += chunk;
             }
 
@@ -754,7 +764,7 @@ internal sealed unsafe class Voices : IDisposable
                 return;
             }
 
-            SDL.FlushAudioStream(_stream);
+            SDL_FlushAudioStream(_stream);
             _isFlushed = true;
         }
     }
@@ -767,24 +777,24 @@ internal sealed unsafe class Voices : IDisposable
     internal sealed class Reflector
     {
         internal Reflector(
-            IPL.Context* context,
-            IPL.Simulator* simulator,
-            IPL.AudioSettings* audio,
-            IPL.ReflectionEffectSettings* reflection)
+            _IPLContext_t* context,
+            _IPLSimulator_t* simulator,
+            IPLAudioSettings* audio,
+            IPLReflectionEffectSettings* reflection)
         {
-            IPL.SourceSettings source = new() { Flags = IPL.SimulationFlags.Reflections };
-            IPL.Source* made;
-            Check(IPL.SourceCreate(simulator, &source, &made), "an echo's source");
+            IPLSourceSettings source = new() { flags = IPL_SIMULATIONFLAGS_REFLECTIONS };
+            _IPLSource_t* made;
+            Check(iplSourceCreate(simulator, &source, &made), "an echo's source");
             Source = made;
-            IPL.SourceAdd(made, simulator);
-            IPL.ReflectionEffect* effect;
-            Check(IPL.ReflectionEffectCreate(context, audio, reflection, &effect), "an echo's effect");
+            iplSourceAdd(made, simulator);
+            _IPLReflectionEffect_t* effect;
+            Check(iplReflectionEffectCreate(context, audio, reflection, &effect), "an echo's effect");
             Effect = effect;
         }
 
-        internal IPL.Source* Source { get; }
+        internal _IPLSource_t* Source { get; }
 
-        internal IPL.ReflectionEffect* Effect { get; }
+        internal _IPLReflectionEffect_t* Effect { get; }
 
         /// <summary>
         /// The slot whose sound the effect last echoed, so an effect given to another sound starts clean. Audio thread.
@@ -793,10 +803,10 @@ internal sealed unsafe class Voices : IDisposable
 
         internal void Release()
         {
-            IPL.Source* source = Source;
-            IPL.SourceRelease(&source);
-            IPL.ReflectionEffect* effect = Effect;
-            IPL.ReflectionEffectRelease(&effect);
+            _IPLSource_t* source = Source;
+            iplSourceRelease(&source);
+            _IPLReflectionEffect_t* effect = Effect;
+            iplReflectionEffectRelease(&effect);
         }
     }
 }

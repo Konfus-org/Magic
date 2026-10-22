@@ -9,7 +9,7 @@ namespace Magic.SteamAudio;
 /// </summary>
 internal static unsafe class Materials
 {
-    internal static IPL.Material Get(AcousticMaterial material)
+    internal static IPLMaterial Get(AcousticMaterial material)
     {
         return material switch
         {
@@ -28,7 +28,7 @@ internal static unsafe class Materials
         };
     }
 
-    private static IPL.Material Make(
+    private static IPLMaterial Make(
         float absorbLow,
         float absorbMid,
         float absorbHigh,
@@ -37,14 +37,14 @@ internal static unsafe class Materials
         float passMid,
         float passHigh)
     {
-        IPL.Material material = default;
-        material.Absorption[0] = absorbLow;
-        material.Absorption[1] = absorbMid;
-        material.Absorption[2] = absorbHigh;
-        material.Scattering = scattering;
-        material.Transmission[0] = passLow;
-        material.Transmission[1] = passMid;
-        material.Transmission[2] = passHigh;
+        IPLMaterial material = default;
+        material.absorption[0] = absorbLow;
+        material.absorption[1] = absorbMid;
+        material.absorption[2] = absorbHigh;
+        material.scattering = scattering;
+        material.transmission[0] = passLow;
+        material.transmission[1] = passMid;
+        material.transmission[2] = passHigh;
 
         return material;
     }

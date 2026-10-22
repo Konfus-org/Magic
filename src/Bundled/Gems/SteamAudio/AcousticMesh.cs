@@ -10,7 +10,7 @@ namespace Magic.SteamAudio;
 /// </summary>
 internal sealed class AcousticMesh
 {
-    private AcousticMesh(IPL.Vector3[] vertices, IPL.Triangle[] triangles, float reach)
+    private AcousticMesh(IPLVector3[] vertices, IPLTriangle[] triangles, float reach)
     {
         Vertices = vertices;
         Triangles = triangles;
@@ -18,9 +18,9 @@ internal sealed class AcousticMesh
         Reach = reach;
     }
 
-    internal IPL.Vector3[] Vertices { get; }
+    internal IPLVector3[] Vertices { get; }
 
-    internal IPL.Triangle[] Triangles { get; }
+    internal IPLTriangle[] Triangles { get; }
 
     /// <summary>
     /// Each triangle's material: all 0, the one material of its sub-scene.
@@ -47,8 +47,8 @@ internal sealed class AcousticMesh
 
         if (vertexCount == 0 || triangleCount == 0) return null;
 
-        IPL.Vector3[] vertices = new IPL.Vector3[vertexCount];
-        IPL.Triangle[] triangles = new IPL.Triangle[triangleCount];
+        IPLVector3[] vertices = new IPLVector3[vertexCount];
+        IPLTriangle[] triangles = new IPLTriangle[triangleCount];
         float reach = 0;
         int vertexAt = 0;
         int triangleAt = 0;
@@ -65,10 +65,10 @@ internal sealed class AcousticMesh
             ReadOnlySpan<uint> indices = mesh.Indices.Span;
             for (int i = 0; i + 2 < indices.Length; i += 3)
             {
-                ref IPL.Triangle triangle = ref triangles[triangleAt++];
-                triangle.Indices[0] = vertexAt + (int)indices[i];
-                triangle.Indices[1] = vertexAt + (int)indices[i + 2];
-                triangle.Indices[2] = vertexAt + (int)indices[i + 1];
+                ref IPLTriangle triangle = ref triangles[triangleAt++];
+                triangle.indices[0] = vertexAt + (int)indices[i];
+                triangle.indices[1] = vertexAt + (int)indices[i + 2];
+                triangle.indices[2] = vertexAt + (int)indices[i + 1];
             }
 
             vertexAt += meshVertices.Length;
@@ -82,7 +82,7 @@ internal sealed class AcousticMesh
     /// </summary>
     internal static unsafe AcousticMesh MakeCube()
     {
-        IPL.Vector3[] vertices = new IPL.Vector3[8];
+        IPLVector3[] vertices = new IPLVector3[8];
         for (int i = 0; i < 8; i++)
         {
             Vector3 corner = new((i & 1) == 0 ? -0.5f : 0.5f, (i & 2) == 0 ? -0.5f : 0.5f, (i & 4) == 0 ? -0.5f : 0.5f);
@@ -92,18 +92,18 @@ internal sealed class AcousticMesh
         // Each face's corners in the engine's space, (x, y, z) being corner x + 2y + 4z, clockwise seen from outside as
         // the engine winds its models; each triangle is turned as a model's are once mirrored.
         ReadOnlySpan<int> faces = [0, 4, 6, 2, 1, 3, 7, 5, 0, 1, 5, 4, 2, 6, 7, 3, 0, 2, 3, 1, 4, 5, 7, 6];
-        IPL.Triangle[] triangles = new IPL.Triangle[12];
+        IPLTriangle[] triangles = new IPLTriangle[12];
         for (int face = 0; face < 6; face++)
         {
             ReadOnlySpan<int> corners = faces.Slice(face * 4, 4);
-            ref IPL.Triangle first = ref triangles[face * 2];
-            first.Indices[0] = corners[0];
-            first.Indices[1] = corners[2];
-            first.Indices[2] = corners[1];
-            ref IPL.Triangle second = ref triangles[(face * 2) + 1];
-            second.Indices[0] = corners[0];
-            second.Indices[1] = corners[3];
-            second.Indices[2] = corners[2];
+            ref IPLTriangle first = ref triangles[face * 2];
+            first.indices[0] = corners[0];
+            first.indices[1] = corners[2];
+            first.indices[2] = corners[1];
+            ref IPLTriangle second = ref triangles[(face * 2) + 1];
+            second.indices[0] = corners[0];
+            second.indices[1] = corners[3];
+            second.indices[2] = corners[2];
         }
 
         return new AcousticMesh(vertices, triangles, MathF.Sqrt(0.75f));

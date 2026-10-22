@@ -4,6 +4,7 @@ using Magic.Contexts.Gpu;
 using Magic.SdlBindings;
 using Magic.Services;
 using Vortice.Vulkan;
+using static Magic.SdlBindings.SDL3;
 using VkSurfaceKHR = Vortice.Vulkan.VkSurfaceKHR;
 
 namespace Magic.VulkanGpu;
@@ -98,7 +99,7 @@ internal sealed unsafe class VulkanWindows(
     /// <summary>
     /// <paramref name="native"/>, SDL's window number <paramref name="id"/>, as a window the GPU draws into.
     /// </summary>
-    internal VulkanWindow Claim(uint id, SDL.Window* native)
+    internal VulkanWindow Claim(uint id, SDL_Window* native)
     {
         VkSurfaceKHR surface = _device.CreateSurface(native);
         _device.InstanceApi.vkGetPhysicalDeviceSurfaceSupportKHR(
@@ -163,7 +164,7 @@ internal sealed unsafe class VulkanWindows(
 
         window.IsAsked = true;
 
-        if ((SDL.GetWindowFlags((SDL.Window*)window.Native) & SDL.WindowMinimized) != 0) return false;
+        if ((SDL_GetWindowFlags((SDL_Window*)window.Native) & SDL_WINDOW_MINIMIZED) != 0) return false;
 
         if (window.IsStale || HasResized(window)) Create(window);
 
@@ -248,7 +249,7 @@ internal sealed unsafe class VulkanWindows(
         int width;
         int height;
 
-        if (!SDL.GetWindowSizeInPixels((SDL.Window*)window.Native, &width, &height)) return false;
+        if (!SDL_GetWindowSizeInPixels((SDL_Window*)window.Native, &width, &height)) return false;
 
         return (uint)width != window.Extent.width || (uint)height != window.Extent.height;
     }
@@ -263,7 +264,7 @@ internal sealed unsafe class VulkanWindows(
         int width;
         int height;
 
-        if (!SDL.GetWindowSizeInPixels((SDL.Window*)window.Native, &width, &height)) return default;
+        if (!SDL_GetWindowSizeInPixels((SDL_Window*)window.Native, &width, &height)) return default;
 
         return new VkExtent2D(
             Math.Clamp((uint)width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width),

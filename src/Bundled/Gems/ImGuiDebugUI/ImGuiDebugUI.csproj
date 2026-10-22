@@ -14,7 +14,10 @@
        dear_bindings, the Dear ImGui team's generator, makes of its headers, which it publishes generated for each ImGui
        release: the public API and the internal one, in their own files. Those and ImGui's own sources are compiled into
        one library, with the defines the headers are read with. ImGui itself is fetched for its sources and for the
-       imconfig.h the generated header includes, and the two pins name the same ImGui release. -->
+       imconfig.h the generated header includes, and the two pins name the same ImGui release. It is built and read
+       without SSE, as the CPU intrinsics header it would include is the C compiler's own, which on Linux is GCC's and
+       cannot be read. What takes a va_list, each OS's own, is left unbound, as are two macros naming C library
+       functions and the docking nodes' private flags, whose C# does not compile where an enum is unsigned. -->
   <ItemGroup>
     <NativeLibrary Include="imgui" Repository="https://github.com/ocornut/imgui" Tag="v1.92.9b-docking" IncludePath="." HeadersOnly="true" />
     <NativeLibrary Include="dcimgui" DependsOn="imgui"
@@ -24,7 +27,11 @@
                             $(MagicNativeLibs)imgui/source/imgui.cpp;$(MagicNativeLibs)imgui/source/imgui_draw.cpp;$(MagicNativeLibs)imgui/source/imgui_tables.cpp;
                             $(MagicNativeLibs)imgui/source/imgui_widgets.cpp;$(MagicNativeLibs)imgui/source/imgui_demo.cpp"
                    Headers="dcimgui.h;dcimgui_internal.h" IncludePath="."
-                   Defines="IMGUI_USE_WCHAR32;IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1"
-                   Prefixes="IMGUI=ImGui;cImFontAtlas=ImFontAtlas" Class="ImGui" />
+                   Defines="IMGUI_USE_WCHAR32;IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1;IMGUI_DISABLE_SSE" Class="ImGui"
+                   Unbound="ImGui_TextV;ImGui_TextColoredV;ImGui_TextDisabledV;ImGui_TextWrappedV;ImGui_TextAlignedV;ImGui_LabelTextV;
+                            ImGui_BulletTextV;ImGui_TreeNodeV;ImGui_TreeNodeVPtr;ImGui_TreeNodeExV;ImGui_TreeNodeExVPtr;
+                            ImGui_SetTooltipV;ImGui_SetItemTooltipV;ImGui_LogTextV;ImGui_DebugLogV;ImGuiTextBuffer_appendfv;
+                            cImFormatStringV;cImFormatStringToTempBufferV;
+                            ImStrlen;ImMemchr;ImGuiDockNodeFlagsPrivate_" />
   </ItemGroup>
 </Project>

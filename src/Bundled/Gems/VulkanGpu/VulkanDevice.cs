@@ -3,8 +3,9 @@ using Magic.Contexts.Utils;
 using Magic.SdlBindings;
 using Magic.Services;
 using Vortice.Vulkan;
-using SdlVkInstance = Magic.SdlBindings.VkInstance;
-using SdlVkSurfaceKHR = Magic.SdlBindings.VkSurfaceKHR;
+using static Magic.SdlBindings.SDL3;
+using SdlVkInstance = Magic.SdlBindings.VkInstance_T;
+using SdlVkSurfaceKHR = Magic.SdlBindings.VkSurfaceKHR_T;
 using VkInstance = Vortice.Vulkan.VkInstance;
 using VkPhysicalDevice = Vortice.Vulkan.VkPhysicalDevice;
 using VkSurfaceKHR = Vortice.Vulkan.VkSurfaceKHR;
@@ -51,8 +52,8 @@ internal sealed unsafe class VulkanDevice
                 $"The Vulkan installed is {Vulkan.vkEnumerateInstanceVersion()}; Magic needs 1.3: update the GPU's driver.");
         }
 
-        _hasVideo = SDL.InitSubSystem(SDL.InitVideo);
-        _hasSdlVulkan = _hasVideo && SDL.VulkanLoadLibrary(null);
+        _hasVideo = SDL_InitSubSystem(SDL_INIT_VIDEO);
+        _hasSdlVulkan = _hasVideo && SDL_Vulkan_LoadLibrary(null);
         List<VkUtf8String> extensions = GetSurfaceExtensions();
         HasSurfaces = extensions.Count > 0;
         HasDebugUtils = HasInstanceExtension(Vulkan.VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -158,8 +159,8 @@ internal sealed unsafe class VulkanDevice
         if (_messenger.IsNotNull) InstanceApi.vkDestroyDebugUtilsMessengerEXT(_messenger);
 
         InstanceApi.vkDestroyInstance();
-        if (_hasSdlVulkan) SDL.VulkanUnloadLibrary();
-        if (_hasVideo) SDL.QuitSubSystem(SDL.InitVideo);
+        if (_hasSdlVulkan) SDL_Vulkan_UnloadLibrary();
+        if (_hasVideo) SDL_QuitSubSystem(SDL_INIT_VIDEO);
     }
 
     /// <summary>
@@ -203,14 +204,14 @@ internal sealed unsafe class VulkanDevice
     /// <summary>
     /// A window's surface, made by SDL, whose window it is; none when SDL has no Vulkan.
     /// </summary>
-    internal VkSurfaceKHR CreateSurface(SDL.Window* window)
+    internal VkSurfaceKHR CreateSurface(SDL_Window* window)
     {
         SdlVkSurfaceKHR* surface = null;
 
-        if (!HasSurfaces || !SDL.VulkanCreateSurface(window, (SdlVkInstance*)Instance.Handle, null, &surface))
+        if (!HasSurfaces || !SDL_Vulkan_CreateSurface(window, (SdlVkInstance*)Instance.Handle, null, &surface))
         {
             throw new InvalidOperationException(
-                $"SDL could not make the window a Vulkan surface: {CString.Read(SDL.GetError())}");
+                $"SDL could not make the window a Vulkan surface: {CString.Read(SDL_GetError())}");
         }
 
         return new VkSurfaceKHR((ulong)surface);
@@ -303,7 +304,7 @@ internal sealed unsafe class VulkanDevice
         if (!_hasSdlVulkan) return [];
 
         uint count;
-        byte** names = SDL.VulkanGetInstanceExtensions(&count);
+        byte** names = SDL_Vulkan_GetInstanceExtensions(&count);
         List<VkUtf8String> extensions = [];
         for (int i = 0; names != null && i < count; i++)
         {

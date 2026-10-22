@@ -10,11 +10,12 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
-  <!-- Box3D as a shared library; its samples, tests and heavy validation are left out. -->
+  <!-- Box3D as a shared library; its samples, tests and heavy validation are left out. Two functions its headers
+       declare twice are left unbound, as the generator binds both declarations. -->
   <ItemGroup>
     <NativeLibrary Include="box3d" Repository="https://github.com/erincatto/box3d" Tag="v0.1.0"
                    CMakeOptions="-DBUILD_SHARED_LIBS=ON;-DBOX3D_SAMPLES=OFF;-DBOX3D_UNIT_TESTS=OFF;-DBOX3D_VALIDATE=OFF"
-                   Headers="include/box3d/box3d.h;include/box3d/collision.h" IncludePath="include"
-                   Prefixes="b3=B3" Class="B3" />
+                   Headers="include/box3d/box3d.h;include/box3d/collision.h" IncludePath="include" Class="B3"
+                   Unbound="b3IsValidFloat;b3DynamicTree_Validate" />
   </ItemGroup>
 </Project>

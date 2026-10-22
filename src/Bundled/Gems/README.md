@@ -36,30 +36,25 @@ the repository: the superbuild, in the project's intermediate folder, and the pr
 sources, beside it, are what the build writes from the items, to read when a library misbehaves and never to edit.
 
 How its API is generated: `Headers` are the root headers to read, relative to the checkout; `IncludePath` the folder
-their includes are found in; `Defines` what to define first. Every item's include folder serves every generation in
-the project, so a library whose headers include another's declares that one too. An item with no `Headers` is built
-for its binary alone. `Prefixes` names the owner of C names that have no underscore prefix (`abc=Abc`); names with
-one need nothing. `Class` is where a name with no owner at all goes, the library's name unless it says. `Shims`
-makes a header the library's build would generate from a template, as `header=template`, with every CMake option
-off.
+their includes are found in; `Defines` what to define first. What is declared under the item's own include folder is
+bound. Every item's include folder serves every generation in the project, so a library whose headers include
+another's declares that one too. `Class` is the static class its functions and constants go in, the library's name
+unless it says. `Shims` makes a header the library's build would generate from a template, as `header=template`, with
+every CMake option off. `Unbound` names declarations to leave out, with a comment saying why.
 
-The generated API is C with Magic's names, in the gem's own namespace: nothing is wrapped, so the gem encodes its
-strings, frees what it allocates and reads errors as the library reports them, and the generated doc
-comments are the header's. A gem that hands the library callbacks of its own (`[UnmanagedCallersOnly]` methods) finds
-them blittable, as runtime marshalling is off for every project that declares a library. How C names become C# ones,
-how the headers are read, and what the generator refuses and why, is in the
-[generator](../../../tools/NativeBindingsGenerator/README.md): it fails rather than guess, naming the header line,
-and each refusal gets a rule in the generator, never a hand edit.
+The build generates the API with Microsoft's [ClangSharpPInvokeGenerator](https://github.com/dotnet/ClangSharp), which
+the restore downloads. It reads the headers with the machine's own C headers: Visual Studio's on Windows, the system's
+and the C compiler's on Linux, the SDK's on macOS. A declaration only one platform's headers have is generated on that
+platform alone, so a gem calls only what every platform declares. To run it by hand, give the tool the
+`<library>.bindings.rsp` the build writes in the project's intermediate folder: `ClangSharpPInvokeGenerator
+@<library>.bindings.rsp`.
 
-An item whose `Generator` names Microsoft's ClangSharpPInvokeGenerator is bound by that instead, a maintained tool
-the libraries are moving to one by one, so the repository keeps no generator of its own; the build downloads it with
-the restore. Its API is C as the header spells it: every type, enum member, function and constant under its C name,
-the functions and constants in a static class the item's `Class` names. A gem writes `using static` for that class
-and for the enums it uses, so its calls read as the library's own documentation does. C's `bool` is `bool` and its
-`char` is `byte`, as the repository's generator writes them, nothing is wrapped, and no doc comments come with it.
-The headers are read once, for one target every platform shares, so the API is the same everywhere. A declaration it
-has no faithful C# for, it warns of, and the warning fails the build until the item's `Unbound` lists the
-declaration, so what is left out is written down beside the library.
+The API is C as the header spells it, in the gem's namespace: every type, enum member, function and constant under its
+C name, and a struct under its tag where C names a pointer to it (`IPLContext` is a `_IPLContext_t*`). A gem writes
+`using static` for the library's class and for the enums it uses. Nothing is wrapped: the gem encodes its strings,
+frees what it allocates and reads errors as the library reports them. A C string is a `byte*`, read and made with
+`CString`, and a string macro is passed with `CString.Constant`. A callback is an
+`[UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]` method.
 
 ### Building a library
 
@@ -115,10 +110,8 @@ must hold:
   that hides what it logs and skips the compiler. Such a build compiles the API the last real build generated, and
   neither builds a library nor generates one, as a native build in it would run unseen. So the editor knows a
   library's API from the first real build on.
-- **The generator is a reference.** A gem that declares a library references the bindings generator for the order it
-  builds in alone, so the generator is restored with everything else and built once per build, only where a library
-  is declared. Generation reruns when the generator, the item or the library's binary changed, but rewrites only a
-  file whose text changed, so a gem compiles again only when its API did.
+- **The generator is a download.** The restore downloads the bindings generator where a library is declared. It runs
+  again when the tool, the item, the headers made for it or the library's binary changed.
 - **Long steps yield.** A native build and a generation give their MSBuild node back while they run, since a project
   waiting on a reference resumes only on the node it started on: one gem's long step never holds up gems that have
   nothing to do with it.

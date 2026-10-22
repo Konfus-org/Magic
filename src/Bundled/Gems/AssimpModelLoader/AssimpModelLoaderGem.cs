@@ -7,6 +7,10 @@ using Magic.Contexts.Components;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 using Magic.Services;
+using static Magic.AssimpModelLoader.aiMetadataType;
+using static Magic.AssimpModelLoader.aiPostProcessSteps;
+using static Magic.AssimpModelLoader.aiPrimitiveType;
+using static Magic.AssimpModelLoader.Assimp;
 
 namespace Magic.AssimpModelLoader;
 
@@ -21,12 +25,12 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     /// What Assimp does to a file as it reads it. Normals are the file's, never made: a mesh without them is refused.
     /// Tangents are made only where the file has none.
     /// </summary>
-    private const Assimp.PostProcessSteps Steps = Assimp.PostProcessSteps.Triangulate
-        | Assimp.PostProcessSteps.JoinIdenticalVertices
-        | Assimp.PostProcessSteps.CalcTangentSpace
-        | Assimp.PostProcessSteps.FlipUVs
-        | Assimp.PostProcessSteps.SortByPType
-        | Assimp.PostProcessSteps.ImproveCacheLocality;
+    private const aiPostProcessSteps Steps = aiProcess_Triangulate
+        | aiProcess_JoinIdenticalVertices
+        | aiProcess_CalcTangentSpace
+        | aiProcess_FlipUVs
+        | aiProcess_SortByPType
+        | aiProcess_ImproveCacheLocality;
 
     /// <summary>
     /// Held while an import starts or ends, and while the loader stops.
@@ -67,15 +71,15 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         // The file's extension tells Assimp its format; FBX pivots are baked into the nodes, not kept as nodes of
         // their own.
         string format = Path.GetExtension(path).TrimStart('.');
-        Assimp.Scene* scene;
-        Assimp.PropertyStore* properties = Assimp.CreatePropertyStore();
+        aiScene* scene;
+        aiPropertyStore* properties = aiCreatePropertyStore();
         try
         {
-            Assimp.SetImportPropertyInteger(properties, Assimp.ConfigImportFbxPreservePivots, 0);
+            aiSetImportPropertyInteger(properties, CString.Constant(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS), 0);
             fixed (byte* bytes = file)
             fixed (byte* hint = CString.ToBytes(format))
             {
-                scene = Assimp.ImportFileFromMemoryWithProperties(
+                scene = aiImportFileFromMemoryWithProperties(
                     bytes,
                     (uint)file.Length,
                     (uint)Steps,
@@ -85,66 +89,66 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         }
         finally
         {
-            Assimp.ReleasePropertyStore(properties);
+            aiReleasePropertyStore(properties);
         }
 
         if (scene is null)
-            return Result.Failure<Model>($"Assimp could not import it: {CString.Read(Assimp.GetErrorString())}");
+            return Result.Failure<Model>($"Assimp could not import it: {CString.Read(aiGetErrorString())}");
 
         try
         {
-            if (scene->MRootNode is null || (scene->MFlags & Assimp.SceneFlagsIncomplete) != 0)
+            if (scene->mRootNode is null || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0)
                 return Result.Failure<Model>("Assimp could not import it.");
 
-            for (uint i = 0; i < scene->MNumMeshes; i++)
+            for (uint i = 0; i < scene->mNumMeshes; i++)
             {
-                Assimp.Mesh* mesh = scene->MMeshes[i];
+                aiMesh* mesh = scene->mMeshes[i];
 
-                if (IsTriangles(mesh) && mesh->MNormals is null)
+                if (IsTriangles(mesh) && mesh->mNormals is null)
                 {
-                    return Result.Failure<Model>($"its mesh {CString.Read(mesh->MName.Data)} has no normals, "
+                    return Result.Failure<Model>($"its mesh {CString.Read((byte*)&mesh->mName.data)} has no normals, "
                         + "which are imported, never made: export it with them.");
                 }
             }
 
             List<Mesh> meshes = [];
-            Walk(scene, scene->MRootNode, Matrix4x4.Identity, ToEngine(scene, format), origin, meshes);
+            Walk(scene, scene->mRootNode, Matrix4x4.Identity, ToEngine(scene, format), origin, meshes);
 
             return Result.Success(new Model { Meshes = meshes });
         }
         finally
         {
-            Assimp.ReleaseImport(scene);
+            aiReleaseImport(scene);
         }
     }
 
-    private static bool IsTriangles(Assimp.Mesh* mesh)
-        => (mesh->MPrimitiveTypes & (uint)Assimp.PrimitiveType.Triangle) != 0;
+    private static bool IsTriangles(aiMesh* mesh)
+        => (mesh->mPrimitiveTypes & (uint)aiPrimitiveType_TRIANGLE) != 0;
 
     /// <summary>
     /// Bakes the triangle meshes of <paramref name="node"/> and those under it into <paramref name="meshes"/>, each
     /// with its node's transform under <paramref name="parent"/>.
     /// </summary>
     private static void Walk(
-        Assimp.Scene* scene,
-        Assimp.Node* node,
+        aiScene* scene,
+        aiNode* node,
         Matrix4x4 parent,
         Matrix4x4 toEngine,
         Vector3 origin,
         List<Mesh> meshes)
     {
         // Assimp's matrices have the translation in the last column; transposed, they are System.Numerics' row vectors.
-        Matrix4x4 world = Matrix4x4.Transpose(Unsafe.BitCast<Assimp.Matrix4x4, Matrix4x4>(node->MTransformation))
+        Matrix4x4 world = Matrix4x4.Transpose(Unsafe.BitCast<aiMatrix4x4, Matrix4x4>(node->mTransformation))
             * parent;
-        for (uint i = 0; i < node->MNumMeshes; i++)
+        for (uint i = 0; i < node->mNumMeshes; i++)
         {
-            Assimp.Mesh* source = scene->MMeshes[node->MMeshes[i]];
-            if (IsTriangles(source) && source->MNumVertices > 0) meshes.Add(Bake(source, world * toEngine, origin));
+            aiMesh* source = scene->mMeshes[node->mMeshes[i]];
+            if (IsTriangles(source) && source->mNumVertices > 0) meshes.Add(Bake(source, world * toEngine, origin));
         }
 
-        for (uint i = 0; i < node->MNumChildren; i++)
+        for (uint i = 0; i < node->mNumChildren; i++)
         {
-            Walk(scene, node->MChildren[i], world, toEngine, origin, meshes);
+            Walk(scene, node->mChildren[i], world, toEngine, origin, meshes);
         }
     }
 
@@ -152,7 +156,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     /// <paramref name="source"/> in the engine's frame, moved by <paramref name="transform"/> and then by
     /// <paramref name="origin"/> to (0, 0, 0).
     /// </summary>
-    private static Mesh Bake(Assimp.Mesh* source, Matrix4x4 transform, Vector3 origin)
+    private static Mesh Bake(aiMesh* source, Matrix4x4 transform, Vector3 origin)
     {
         // Directions along the surface move with the transform; normals with its inverse transpose.
         Matrix4x4 normals = Matrix4x4.Invert(transform, out Matrix4x4 inverse)
@@ -160,35 +164,35 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
             : transform;
         // The texture coordinate channels are an array of pointers, read as one: an inline array of pointers has no
         // indexer.
-        Assimp.Vector3D* uvs = *(Assimp.Vector3D**)&source->MTextureCoords;
-        bool hasTangents = source->MTangents is not null && source->MBitangents is not null;
-        Vertex[] vertices = new Vertex[source->MNumVertices];
+        aiVector3D* uvs = *(aiVector3D**)&source->mTextureCoords;
+        bool hasTangents = source->mTangents is not null && source->mBitangents is not null;
+        Vertex[] vertices = new Vertex[source->mNumVertices];
         for (int i = 0; i < vertices.Length; i++)
         {
-            Vector3 normal = Vector3.Normalize(Vector3.TransformNormal(ToVector3(source->MNormals[i]), normals));
+            Vector3 normal = Vector3.Normalize(Vector3.TransformNormal(ToVector3(source->mNormals[i]), normals));
             Vector4 tangent = new(1, 0, 0, 1);
             if (hasTangents)
             {
-                Vector3 along = Vector3.Normalize(Vector3.TransformNormal(ToVector3(source->MTangents[i]), transform));
-                Vector3 bitangent = Vector3.TransformNormal(ToVector3(source->MBitangents[i]), transform);
+                Vector3 along = Vector3.Normalize(Vector3.TransformNormal(ToVector3(source->mTangents[i]), transform));
+                Vector3 bitangent = Vector3.TransformNormal(ToVector3(source->mBitangents[i]), transform);
                 tangent = new Vector4(along, Vector3.Dot(Vector3.Cross(normal, along), bitangent) < 0 ? -1 : 1);
             }
 
             vertices[i] = new Vertex
             {
-                Position = Vector3.Transform(ToVector3(source->MVertices[i]), transform) - origin,
+                Position = Vector3.Transform(ToVector3(source->mVertices[i]), transform) - origin,
                 Normal = normal,
                 Tangent = tangent,
-                Uv = uvs is null ? Vector2.Zero : new Vector2(uvs[i].X, uvs[i].Y),
+                Uv = uvs is null ? Vector2.Zero : new Vector2(uvs[i].x, uvs[i].y),
             };
         }
 
         // A transform that mirrors turns each triangle's winding over; swapping two corners turns it back.
         bool mirrored = transform.GetDeterminant() < 0;
-        uint[] indices = new uint[source->MNumFaces * 3];
-        for (int face = 0; face < source->MNumFaces; face++)
+        uint[] indices = new uint[source->mNumFaces * 3];
+        for (int face = 0; face < source->mNumFaces; face++)
         {
-            uint* corners = source->MFaces[face].MIndices;
+            uint* corners = source->mFaces[face].mIndices;
             indices[face * 3] = corners[0];
             indices[(face * 3) + 1] = corners[mirrored ? 2 : 1];
             indices[(face * 3) + 2] = corners[mirrored ? 1 : 2];
@@ -199,11 +203,11 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         {
             Vertices = vertices,
             Indices = indices,
-            MaterialSlot = Math.Min((int)source->MMaterialIndex, MaterialSlots.Capacity - 1)
+            MaterialSlot = Math.Min((int)source->mMaterialIndex, MaterialSlots.Capacity - 1)
         };
     }
 
-    private static Vector3 ToVector3(Assimp.Vector3D vector) => Unsafe.BitCast<Assimp.Vector3D, Vector3>(vector);
+    private static Vector3 ToVector3(aiVector3D vector) => Unsafe.BitCast<aiVector3D, Vector3>(vector);
 
     /// <summary>
     /// What Assimp hands over, to the engine's frame. glTF and OBJ come right-handed, in metres, +Y up, the front at
@@ -212,7 +216,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     /// so a model exported from Blender is its size there whatever the export's scale and axes. Then an X mirror takes
     /// the right-handed frame to the engine's left-handed one, the front staying at +Z.
     /// </summary>
-    private static Matrix4x4 ToEngine(Assimp.Scene* scene, string format)
+    private static Matrix4x4 ToEngine(aiScene* scene, string format)
     {
         Matrix4x4 frame = Matrix4x4.Identity;
         float scale = 1;
@@ -234,7 +238,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     /// <paramref name="to"/>: what the file calls right to X, up to Y, front to Z. A file that names none is that axis
     /// already.
     /// </summary>
-    private static void Turn(ref Matrix4x4 frame, Assimp.Scene* scene, string key, int to)
+    private static void Turn(ref Matrix4x4 frame, aiScene* scene, string key, int to)
     {
         int from = (int)GetNumber(scene, key, to);
         frame[from is >= 0 and <= 2 ? from : to, to] = GetNumber(scene, key + "Sign", 1) < 0 ? -1 : 1;
@@ -244,32 +248,32 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     /// The number the scene's metadata holds under <paramref name="key"/>, whatever its width, or
     /// <paramref name="fallback"/> where there is none or it is not a number.
     /// </summary>
-    private static double GetNumber(Assimp.Scene* scene, string key, double fallback)
+    private static double GetNumber(aiScene* scene, string key, double fallback)
     {
-        Assimp.Metadata* metadata = scene->MMetaData;
+        aiMetadata* metadata = scene->mMetaData;
 
         if (metadata is null) return fallback;
 
-        for (uint i = 0; i < metadata->MNumProperties; i++)
+        for (uint i = 0; i < metadata->mNumProperties; i++)
         {
-            if (!string.Equals(CString.Read(metadata->MKeys[i].Data), key, StringComparison.Ordinal)) continue;
+            if (!string.Equals(CString.Read((byte*)&metadata->mKeys[i].data), key, StringComparison.Ordinal)) continue;
 
-            Assimp.MetadataType type = metadata->MValues[i].MType;
-            void* data = metadata->MValues[i].MData;
+            aiMetadataType type = metadata->mValues[i].mType;
+            void* data = metadata->mValues[i].mData;
 
-            if (type == Assimp.MetadataType.AiBool) return *(byte*)data != 0 ? 1 : 0;
+            if (type == AI_BOOL) return *(byte*)data != 0 ? 1 : 0;
 
-            if (type == Assimp.MetadataType.AiInt32) return *(int*)data;
+            if (type == AI_INT32) return *(int*)data;
 
-            if (type == Assimp.MetadataType.AiUint32) return *(uint*)data;
+            if (type == AI_UINT32) return *(uint*)data;
 
-            if (type == Assimp.MetadataType.AiInt64) return *(long*)data;
+            if (type == AI_INT64) return *(long*)data;
 
-            if (type == Assimp.MetadataType.AiUint64) return *(ulong*)data;
+            if (type == AI_UINT64) return *(ulong*)data;
 
-            if (type == Assimp.MetadataType.AiFloat) return *(float*)data;
+            if (type == AI_FLOAT) return *(float*)data;
 
-            return type == Assimp.MetadataType.AiDouble ? *(double*)data : fallback;
+            return type == AI_DOUBLE ? *(double*)data : fallback;
         }
 
         return fallback;

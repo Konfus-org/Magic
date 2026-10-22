@@ -13,26 +13,38 @@
   <!-- SDL is installed, so the three built on it find it there. SDL_image reads its formats itself, so none of its
        vendored codecs is built or fetched; SDL_ttf builds FreeType and HarfBuzz from its submodules, without the SVG
        ones; SDL_mixer decodes WAV itself and Ogg Vorbis, MP3 and FLAC with the single-file decoders in its own source,
-       so it needs no other library. Each of the three is its shared library alone. -->
+       so it needs no other library. Each of the three is its shared library alone. Of SDL's own API, what no one C#
+       declaration is right for on every platform is left unbound: what takes a wchar_t (two bytes on Windows, four
+       elsewhere), a C long (four bytes on Windows, eight elsewhere) or a va_list (each OS's own), and the macros the
+       generator writes as C# that does not compile. -->
   <ItemGroup>
     <NativeLibrary Include="SDL3" Repository="https://github.com/libsdl-org/SDL" Tag="release-3.4.18"
                    CMakeOptions="-DSDL_TEST_LIBRARY=OFF;-DSDL_EXAMPLES=OFF;-DSDL_INSTALL_TESTS=OFF"
-                   Headers="include/SDL3/SDL.h;include/SDL3/SDL_vulkan.h" IncludePath="include" />
+                   Headers="include/SDL3/SDL.h;include/SDL3/SDL_vulkan.h" IncludePath="include"
+                   Unbound="SDL_wcslen;SDL_wcsnlen;SDL_wcslcpy;SDL_wcslcat;SDL_wcsdup;SDL_wcsstr;SDL_wcsnstr;
+                            SDL_wcscmp;SDL_wcsncmp;SDL_wcscasecmp;SDL_wcsncasecmp;SDL_wcstol;
+                            SDL_hid_open;SDL_hid_get_manufacturer_string;SDL_hid_get_product_string;SDL_hid_get_serial_number_string;
+                            SDL_hid_get_indexed_string;
+                            SDL_ltoa;SDL_ultoa;SDL_strtol;SDL_strtoul;SDL_lround;SDL_lroundf;
+                            SDL_vsscanf;SDL_vsnprintf;SDL_vswprintf;SDL_vasprintf;SDL_SetErrorV;SDL_IOvprintf;SDL_LogMessageV;
+                            __inline__;SDL_FUNCTION;SDL_WINAPI_FAMILY_PHONE;WINAPI_FAMILY_WINRT;
+                            SDL_memcpy;SDL_memmove;SDL_memset;SDL_BeginThreadFunction;SDL_EndThreadFunction;
+                            HAS_BUILTIN_BSWAP16;HAS_BUILTIN_BSWAP32;HAS_BUILTIN_BSWAP64;HAS_BROKEN_BSWAP" />
     <NativeLibrary Include="SDL3_image" Repository="https://github.com/libsdl-org/SDL_image" Tag="release-3.4.8"
                    DependsOn="SDL3" CMakeTarget="SDL3_image-shared"
                    CMakeOptions="-DSDLIMAGE_VENDORED=OFF;-DSDLIMAGE_SAMPLES=OFF;-DSDLIMAGE_AVIF=OFF;-DSDLIMAGE_WEBP=OFF;-DSDLIMAGE_TIF=OFF;-DSDLIMAGE_JXL=OFF;
                                  -DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
-                   Headers="include/SDL3_image/SDL_image.h" IncludePath="include" Prefixes="SDL_IMAGE=IMG" />
+                   Headers="include/SDL3_image/SDL_image.h" IncludePath="include" />
     <NativeLibrary Include="SDL3_ttf" Repository="https://github.com/libsdl-org/SDL_ttf" Tag="release-3.2.2"
                    Submodules="external/freetype;external/harfbuzz" DependsOn="SDL3" CMakeTarget="SDL3_ttf-shared"
                    CMakeOptions="-DSDLTTF_VENDORED=ON;-DSDLTTF_SAMPLES=OFF;-DSDLTTF_PLUTOSVG=OFF;-DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
-                   Headers="include/SDL3_ttf/SDL_ttf.h;include/SDL3_ttf/SDL_textengine.h" IncludePath="include" Prefixes="SDL_TTF=TTF" />
+                   Headers="include/SDL3_ttf/SDL_ttf.h;include/SDL3_ttf/SDL_textengine.h" IncludePath="include" />
     <NativeLibrary Include="SDL3_mixer" Repository="https://github.com/libsdl-org/SDL_mixer" Tag="release-3.2.4"
                    DependsOn="SDL3" CMakeTarget="SDL3_mixer-shared"
                    CMakeOptions="-DSDLMIXER_VENDORED=OFF;-DSDLMIXER_EXAMPLES=OFF;-DSDLMIXER_TESTS=OFF;-DSDLMIXER_INSTALL=OFF;
                                  -DSDLMIXER_VORBIS_STB=ON;-DSDLMIXER_VORBIS_VORBISFILE=OFF;-DSDLMIXER_MP3_DRMP3=ON;-DSDLMIXER_MP3_MPG123=OFF;
                                  -DSDLMIXER_FLAC_DRFLAC=ON;-DSDLMIXER_FLAC_LIBFLAC=OFF;-DSDLMIXER_OPUS=OFF;-DSDLMIXER_WAVPACK=OFF;
                                  -DSDLMIXER_MOD=OFF;-DSDLMIXER_MIDI=OFF;-DSDLMIXER_GME=OFF;-DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
-                   Headers="include/SDL3_mixer/SDL_mixer.h" IncludePath="include" Prefixes="SDL_MIXER=MIX" />
+                   Headers="include/SDL3_mixer/SDL_mixer.h" IncludePath="include" />
   </ItemGroup>
 </Project>

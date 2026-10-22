@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -9,6 +10,13 @@ namespace Magic.Contexts.Utils;
 /// </summary>
 public static class CString
 {
+    /// <summary>
+    /// A binding's string constant as C takes it. A binding gives each C string macro as a UTF-8 literal, which sits in
+    /// the assembly's static data, never moves and ends in a zero, so its address needs no pinning.
+    /// </summary>
+    public static unsafe byte* Constant(ReadOnlySpan<byte> text)
+        => (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetReference(text));
+
     /// <summary>
     /// The text at a C string, or empty for a null one.
     /// </summary>

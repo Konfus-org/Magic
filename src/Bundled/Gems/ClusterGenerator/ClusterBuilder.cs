@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
+using static Magic.ClusterGenerator.Meshopt;
 
 namespace Magic.ClusterGenerator;
 
@@ -224,7 +225,7 @@ internal static class ClusterBuilder
         fixed (uint* destination = places)
         fixed (Vertex* first = vertices)
         {
-            Meshopt.GeneratePositionRemap(destination, (float*)first, (ulong)vertices.Length, Vertex.Size);
+            meshopt_generatePositionRemap(destination, (float*)first, (nuint)vertices.Length, Vertex.Size);
         }
 
         return places;
@@ -255,12 +256,12 @@ internal static class ClusterBuilder
             fixed (uint* indices = mesh)
             fixed (Vertex* first = vertices)
             {
-                Meshopt.SpatialSortTriangles(
+                meshopt_spatialSortTriangles(
                     destination,
                     indices,
-                    (ulong)mesh.Length,
+                    (nuint)mesh.Length,
                     (float*)first,
-                    (ulong)vertices.Length,
+                    (nuint)vertices.Length,
                     Vertex.Size);
             }
 
@@ -337,25 +338,25 @@ internal static class ClusterBuilder
         float error,
         Vector4? errorBounds)
     {
-        ulong bound = Meshopt.BuildMeshletsBound((ulong)triangles.Length, ClusterHierarchy.MaxVertices, MinTriangles);
-        Meshopt.Meshlet[] meshlets = new Meshopt.Meshlet[bound];
+        nuint bound = meshopt_buildMeshletsBound((nuint)triangles.Length, ClusterHierarchy.MaxVertices, MinTriangles);
+        meshopt_Meshlet[] meshlets = new meshopt_Meshlet[bound];
         uint[] meshletVertices = new uint[triangles.Length];
         byte[] meshletTriangles = new byte[triangles.Length];
         int count;
-        fixed (Meshopt.Meshlet* made = meshlets)
+        fixed (meshopt_Meshlet* made = meshlets)
         fixed (uint* madeVertices = meshletVertices)
         fixed (byte* madeTriangles = meshletTriangles)
         fixed (uint* indices = triangles)
         fixed (Vertex* first = own)
         {
-            count = (int)Meshopt.BuildMeshletsFlex(
+            count = (int)meshopt_buildMeshletsFlex(
                 made,
                 madeVertices,
                 madeTriangles,
                 indices,
-                (ulong)triangles.Length,
+                (nuint)triangles.Length,
                 (float*)first,
-                (ulong)own.Length,
+                (nuint)own.Length,
                 Vertex.Size,
                 ClusterHierarchy.MaxVertices,
                 MinTriangles,
@@ -367,29 +368,29 @@ internal static class ClusterBuilder
         List<Part> parts = new(count);
         for (int i = 0; i < count; i++)
         {
-            Meshopt.Meshlet meshlet = meshlets[i];
-            fixed (uint* vertices = &meshletVertices[meshlet.VertexOffset])
-            fixed (byte* corners = &meshletTriangles[meshlet.TriangleOffset])
+            meshopt_Meshlet meshlet = meshlets[i];
+            fixed (uint* vertices = &meshletVertices[meshlet.vertex_offset])
+            fixed (byte* corners = &meshletTriangles[meshlet.triangle_offset])
             {
-                Meshopt.OptimizeMeshlet(vertices, corners, meshlet.TriangleCount, meshlet.VertexCount);
+                meshopt_optimizeMeshlet(vertices, corners, meshlet.triangle_count, meshlet.vertex_count);
             }
 
-            uint[] held = new uint[meshlet.VertexCount];
-            Vertex[] placed = new Vertex[meshlet.VertexCount];
+            uint[] held = new uint[meshlet.vertex_count];
+            Vertex[] placed = new Vertex[meshlet.vertex_count];
             for (int v = 0; v < held.Length; v++)
             {
-                uint local = meshletVertices[meshlet.VertexOffset + v];
+                uint local = meshletVertices[meshlet.vertex_offset + v];
                 held[v] = sources[local];
                 placed[v] = own[local];
             }
 
             Vector4 bounds = ComputeSphere(placed);
             Vector4 errorSphere = errorBounds ?? bounds;
-            int offset = (int)meshlet.TriangleOffset;
+            int offset = (int)meshlet.triangle_offset;
             parts.Add(new Part
             {
                 Vertices = held,
-                Indices = meshletTriangles[offset..(offset + ((int)meshlet.TriangleCount * 3))],
+                Indices = meshletTriangles[offset..(offset + ((int)meshlet.triangle_count * 3))],
                 Slot = slot,
                 Level = level,
                 Bounds = bounds,
@@ -433,14 +434,14 @@ internal static class ClusterBuilder
         fixed (uint* clusterCounts = counts)
         fixed (Vertex* first = vertices)
         {
-            count = (int)Meshopt.PartitionClusters(
+            count = (int)meshopt_partitionClusters(
                 destination,
                 clusterIndices,
-                (ulong)total,
+                (nuint)total,
                 clusterCounts,
-                (ulong)parts.Count,
+                (nuint)parts.Count,
                 (float*)first,
-                (ulong)vertices.Length,
+                (nuint)vertices.Length,
                 Vertex.Size,
                 GroupSize);
         }
@@ -489,7 +490,7 @@ internal static class ClusterBuilder
                 foreach (uint vertex in part.Vertices)
                 {
                     uint place = places[vertex];
-                    if (groupAt[place] == Shared || frozen[place]) locks[vertex] = SimplifyVertex.Lock;
+                    if (groupAt[place] == Shared || frozen[place]) locks[vertex] = meshopt_SimplifyVertex_Lock;
                 }
             }
         }
@@ -556,21 +557,21 @@ internal static class ClusterBuilder
         fixed (Vertex* first = own)
         fixed (byte* locked = ownLocks)
         {
-            keptCount = (int)Meshopt.SimplifyWithAttributes(
+            keptCount = (int)meshopt_simplifyWithAttributes(
                 destination,
                 indices,
-                (ulong)triangles.Length,
+                (nuint)triangles.Length,
                 (float*)first,
-                (ulong)own.Length,
+                (nuint)own.Length,
                 Vertex.Size,
                 null,
                 0,
                 null,
                 0,
                 locked,
-                (ulong)(triangleCount / 2 * 3),
+                (nuint)(triangleCount / 2 * 3),
                 float.MaxValue,
-                SimplifyOptions.ErrorAbsolute | SimplifyOptions.LockBorder,
+                meshopt_SimplifyErrorAbsolute | meshopt_SimplifyLockBorder,
                 &moved);
         }
 

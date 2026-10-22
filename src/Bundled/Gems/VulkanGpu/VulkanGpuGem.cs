@@ -8,6 +8,7 @@ using Magic.Interfaces;
 using Magic.SdlBindings;
 using Magic.Services;
 using Vortice.Vulkan;
+using static Magic.SdlBindings.SDL3;
 
 namespace Magic.VulkanGpu;
 
@@ -269,7 +270,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         if (_windowTargets.TryGetValue(window.Id, out GpuTexture target)) return target;
 
         // A headless window is none of SDL's: a target with no image, ever.
-        SDL.Window* native = window.Id == 0 ? null : SDL.GetWindowFromID(window.Id);
+        SDL_Window* native = window.Id == 0 ? null : SDL_GetWindowFromID(window.Id);
 
         if (window.Id != 0 && native == null)
         {
@@ -302,14 +303,14 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         if (stored.Window is not { } window)
             return new Size((int)stored.Description.Width, (int)stored.Description.Height);
 
-        SDL.Window* native = (SDL.Window*)window.Native;
+        SDL_Window* native = (SDL_Window*)window.Native;
 
-        if ((SDL.GetWindowFlags(native) & SDL.WindowMinimized) != 0) return Size.Empty;
+        if ((SDL_GetWindowFlags(native) & SDL_WINDOW_MINIMIZED) != 0) return Size.Empty;
 
         int width;
         int height;
 
-        return SDL.GetWindowSizeInPixels(native, &width, &height) ? new Size(width, height) : Size.Empty;
+        return SDL_GetWindowSizeInPixels(native, &width, &height) ? new Size(width, height) : Size.Empty;
     }
 
     public void Upload(GpuBuffer buffer, uint offset, ReadOnlySpan<byte> data)
@@ -432,7 +433,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
     {
         try
         {
-            return (SDL.WasInit(SDL.InitEvents) & SDL.InitEvents) != 0;
+            return (SDL_WasInit(SDL_INIT_EVENTS) & SDL_INIT_EVENTS) != 0;
         }
         catch (DllNotFoundException)
         {

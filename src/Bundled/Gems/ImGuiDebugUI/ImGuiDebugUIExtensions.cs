@@ -10,11 +10,11 @@ internal static class ImGuiDebugUIExtensions
 {
     extension(Vector2 vector)
     {
-        internal ImVec2 Im => Unsafe.BitCast<Vector2, ImVec2>(vector);
+        internal ImVec2_t Im => Unsafe.BitCast<Vector2, ImVec2_t>(vector);
     }
 
-    extension(ImVec2 vector)
+    extension(ImVec2_t vector)
     {
-        internal Vector2 Vector => Unsafe.BitCast<ImVec2, Vector2>(vector);
+        internal Vector2 Vector => Unsafe.BitCast<ImVec2_t, Vector2>(vector);
     }
 }
