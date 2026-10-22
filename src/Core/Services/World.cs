@@ -109,7 +109,7 @@ public sealed class World : IDisposable
     /// shown (<see cref="IPreloader"/>), set by whoever made the gems once every one is, since the world is made while
     /// they are; none until then.
     /// </summary>
-    internal IReadOnlyList<IPreloader> Preloaders { get; set; } = [];
+    internal IReadOnlyList<IPreloader> Preloaders { get; internal set; } = [];
 
     public void Dispose()
     {
@@ -174,6 +174,7 @@ public sealed class World : IDisposable
             : await _threads.InvokeAsync(EngineThread.Main, () => Take(ecs, domains), cancel).ConfigureAwait(false);
         List<EntityState> entities = await Task.Run(() => Write(taken.Entities, progress, cancel), cancel)
             .ConfigureAwait(false);
+
         return new WorldState { Domains = taken.Domains, Entities = entities };
     }
 
