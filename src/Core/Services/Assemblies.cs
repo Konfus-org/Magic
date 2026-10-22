@@ -9,10 +9,9 @@ namespace Magic.Services;
 /// The code loaded: Magic's own assembly, and each gem's, the project's and the bundled scripts' as it loads, by the
 /// path it was loaded from, so one loaded again, as the project's is when it is built while the engine runs, replaces
 /// its last build. What a file names from code, a script's class or a component's struct, is found here by the name
-/// of its type, checked to be what the file is for (<see cref="Get{T}"/>): the assemblies are
-/// searched once per name, what each resolved to is kept for the run, and forgotten when an assembly is added or
-/// replaced. A gem asks for it as it asks for any service, as the one that reads <c>.cs</c> files does to find a
-/// script's class. Safe from any thread.
+/// of its type, checked to be what the file is for (<see cref="Get{T}"/>): the assemblies are searched once per name,
+/// what each resolved to is kept for the run, and forgotten when an assembly is added or replaced. A gem asks for it as
+/// it asks for any service, as the one that reads <c>.cs</c> files does to find a script's class. Safe from any thread.
 /// </summary>
 public sealed class Assemblies
 {

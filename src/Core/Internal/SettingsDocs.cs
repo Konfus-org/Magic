@@ -30,13 +30,15 @@ internal sealed class SettingsDocs(IFileSystem files)
             _summaries[declaring.Assembly] = summaries;
         }
 
+        // The id the documentation file gives a property: P:, its type's full name with a dot for the + before a
+        // nested type, then its name.
         return summaries.GetValueOrDefault($"P:{declaring.FullName?.Replace('+', '.')}.{property.Name}")
             ?? string.Empty;
     }
 
     /// <summary>
-    /// The text of <paramref name="node"/>: a reference is the last part of what it names, and every run of white space
-    /// one space.
+    /// The text of <paramref name="node"/>, onto <paramref name="text"/>: a reference is the last part of what it
+    /// names, and a reference to a parameter is its name.
     /// </summary>
     private static void AppendText(StringBuilder text, XNode node)
     {
@@ -83,6 +85,7 @@ internal sealed class SettingsDocs(IFileSystem files)
 
         if (!bytes.Ok) return summaries;
 
+        // What is trimmed is the byte order mark a file may start with, which does not show here.
         XDocument document;
         try
         {
@@ -93,6 +96,7 @@ internal sealed class SettingsDocs(IFileSystem files)
             return summaries;
         }
 
+        // Each member's summary as plain text, every run of white space one space, as the file wraps and indents it.
         StringBuilder text = new();
         foreach (XElement member in document.Descendants("member"))
         {

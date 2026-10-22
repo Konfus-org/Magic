@@ -184,6 +184,8 @@ internal sealed class Domains : IDisposable
             _events.Publish(new WorldLoading(false));
         }
 
+        // An arrival with no domain is a world put back, readied; one with a placement, a prefab read; one ready, a
+        // domain readied; any other, a domain that is not coming, its reading failed or its open cancelled.
         while (_arrived.Reader.TryRead(out Arrived arrived))
         {
             if (arrived.Open is not { } open)
@@ -277,8 +279,13 @@ internal sealed class Domains : IDisposable
     /// </summary>
     internal void Restore(IReadOnlyList<DomainState> saved, Dictionary<int, Entity> made)
     {
+        // Held out of sight from now: every gem readies the world at once, so nothing that runs it runs until it is
+        // shown.
         BeginLoading();
         ReadyAllAsync("the world put back", _lifetime.Stopping).FireAndForget();
+
+        // A domain that had spawned nothing opens again from the start; any other opens around the entities made for
+        // what its prefabs and its player had spawned.
         List<Task> restoring = new(saved.Count);
         foreach (DomainState state in saved)
         {
@@ -342,6 +349,7 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private static Transform SpawnOf(Open open)
     {
+        // The prefabs that are not cells first, then the cells.
         foreach (bool cells in (ReadOnlySpan<bool>)[false, true])
         {
             foreach (Placed placed in open.Prefabs.Values)
@@ -451,6 +459,8 @@ internal sealed class Domains : IDisposable
             throw;
         }
 
+        // Whatever the token: what was read holds what the gems took in, which arriving keeps, or lets go when the
+        // domain was closed meanwhile.
         Result<Domain> arrived = await _threads.InvokeAsync(
             EngineThread.Main,
             () => Arrive(open, read, cancel),
@@ -513,6 +523,8 @@ internal sealed class Domains : IDisposable
 
         if (player is not null) spawning.Add(player);
 
+        // The models they draw are loaded too, and held by the domain while it is open, so whatever draws them has them
+        // the frame they spawn.
         HashSet<Handle<Model>> drawn = [];
         foreach (Prefab prefab in spawning)
         {
@@ -624,6 +636,8 @@ internal sealed class Domains : IDisposable
             return Result.Failure<Domain>("It was closed before it was there.");
         }
 
+        // What the gems took in is kept while the domain is open. Each prefab spawns, but one a domain put back already
+        // has entities for, which only takes its prefab as it is now.
         open.Holds = read.Holds;
         int entities = 0;
         for (int i = 0; i < read.Placements.Count; i++)
@@ -841,6 +855,8 @@ internal sealed class Domains : IDisposable
         open.Readying?.Cancel();
         open.Readying?.Dispose();
         open.Readying = null;
+
+        // One closed before it replaced the world is not coming: the world waits for it no more.
         if (!open.IsShown && open.IsReplacing) Replaced();
     }
 
@@ -912,8 +928,8 @@ internal sealed class Domains : IDisposable
 
                 keeping.Kept = new Resident(keeping.Handle, name, file.Value, read);
 
-                // Nor once the domain replacing the world is there, being readied behind the loading domain's last
-                // image.
+                // Shown only while the world loads with no loading domain shown, and not once the domain replacing the
+                // world is there, being readied behind the loading domain's last image.
                 if (!IsLoading || _loading is not null || _domains.Exists(static open => open.Readying is not null))
                     return;
 
@@ -1028,6 +1044,8 @@ internal sealed class Domains : IDisposable
         {
             if (!open.IsThere) continue;
 
+            // Each prefab in its folder now: one spawned where it still is stays, and any other, come, moved or not
+            // loaded, is read again and spawned in its place.
             HashSet<Handle<Prefab>> present = [];
             foreach (Placement placement in GetPlacements(open.Handle, open.Domain))
             {

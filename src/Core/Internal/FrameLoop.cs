@@ -194,6 +194,8 @@ internal sealed class FrameLoop : IDisposable
             RunPhase(Phase.LateUpdate, frame);
             WaitForRender();
 
+            // The render thread is done with the frame before, so both hold still: the settings changed since are
+            // copied in, then the gems swap what Render reads.
             _settings.ApplyChanges();
             RunPhase(Phase.Sync, frame);
 
@@ -365,6 +367,7 @@ internal sealed class FrameLoop : IDisposable
             InterfaceMapping map = _gems[i].GetType().GetInterfaceMap(typeof(IGem));
             for (int method = 0; method < map.InterfaceMethods.Length; method++)
             {
+                // Hooked when the gem's class has the method, not when it leaves it to IGem's own, which does nothing.
                 if (string.Equals(map.InterfaceMethods[method].Name, name, StringComparison.Ordinal)
                     && map.TargetMethods[method].DeclaringType != typeof(IGem))
                 {

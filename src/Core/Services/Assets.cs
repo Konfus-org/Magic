@@ -36,9 +36,8 @@ namespace Magic.Services;
 /// </para>
 /// <para>
 /// The roots are watched until the assets are disposed, at the end of the run. Once their changes settle, they are
-/// indexed again, and every asset asked for whose file
-/// changed, or that was made from one that did, is made again, each after what it is made from, and told on
-/// <see cref="Events"/>.
+/// indexed again, and every asset asked for whose file changed, or that was made from one that did, is made again,
+/// each after what it is made from, and told on <see cref="Events"/>.
 /// </para>
 /// </summary>
 public sealed class Assets : IDisposable
@@ -254,6 +253,8 @@ public sealed class Assets : IDisposable
         ulong maker = _maker.Value;
         lock (_lock)
         {
+            // Loaded as another asset is made, it is recorded as what that one is made from, and refused when it is
+            // that one or is made from it, as each would wait for the other for ever.
             if (maker != 0 && !HasRecorded(maker, new AssetRef(typeof(T), asset.Id)))
             {
                 return new(Result.Failure<T>(
@@ -272,6 +273,8 @@ public sealed class Assets : IDisposable
                     $"{GetName(asset.Id)} is loaded as a {found.Type.Name}, so it is not a {typeof(T).Name}."));
             }
 
+            // Held, and not being made again, it is handed out at once; else the caller waits for the make on its way,
+            // the failure kept from the last until its file changes, or a make started now.
             if (slot.Loading is null && slot.Loaded?.Target is T held) return new(Result.Success(held));
 
             return new((slot.Loading ?? MakeAsync(slot, asset.Id, isRemake: false)).WaitAsync(cancel));
@@ -422,6 +425,7 @@ public sealed class Assets : IDisposable
     /// </summary>
     private static HashSet<ulong> AddMadeFrom(HashSet<ulong> changed, Dictionary<ulong, List<AssetRef>> madeFrom)
     {
+        // Pass after pass, each adding what is made from one found already, until a pass adds nothing.
         HashSet<ulong> found = [.. changed];
         bool grew = true;
         while (grew)
@@ -507,6 +511,8 @@ public sealed class Assets : IDisposable
             bool isProject = string.Equals(roots[i].Folder, project, StringComparison.OrdinalIgnoreCase);
             foreach (Indexed indexed in reads[i])
             {
+                // An id an earlier root has already: at the same path, that root's file overrides this one, and is
+                // found as the engine's own when this one is; at another path, it is an error.
                 string path = indexed.Path;
                 if (index.ById.TryGetValue(indexed.Id, out Indexed? other))
                 {
@@ -528,6 +534,7 @@ public sealed class Assets : IDisposable
 
                 if (isProject) index.Project.Add(path);
 
+                // The first root to have a path wins it, and only that one's file is listed in its folder.
                 if (index.ByPath.TryAdd(path, indexed))
                 {
                     int slash = path.LastIndexOf('/');
@@ -638,6 +645,8 @@ public sealed class Assets : IDisposable
         ChannelReader<string> changes = _changes.Reader;
         while (await changes.WaitToReadAsync(_stopping).ConfigureAwait(false))
         {
+            // What the watches saw, taken until nothing more has come for the settle time; a sidecar's change is its
+            // file's.
             HashSet<string> touched = new(StringComparer.OrdinalIgnoreCase);
             do
             {
@@ -676,6 +685,7 @@ public sealed class Assets : IDisposable
         Index now = Merge(roots, Array.ConvertAll(roots, root => ReadRoot(_files, root.Folder)), _engine, _project);
         _index = now;
 
+        // An asset whose file is gone is let go below, and whatever was made from it is made again.
         bool filesChanged = false;
         HashSet<ulong> changed = [];
         HashSet<ulong> gone = [];
@@ -689,6 +699,7 @@ public sealed class Assets : IDisposable
             }
         }
 
+        // An asset now read from another file, or whose file the watches saw, is made again.
         foreach (Indexed file in now.ById.Values)
         {
             before.ById.TryGetValue(file.Id, out Indexed? old);
@@ -766,11 +777,13 @@ public sealed class Assets : IDisposable
     {
         if (before is not null) await before.ConfigureAwait(false);
 
+        // What it was made from last time is forgotten: this make records its own.
         lock (_lock)
         {
             _madeFrom[id] = [];
         }
 
+        // Whatever loads on this flow from here, as it is read, is recorded as what it is made from.
         _maker.Value = id;
         Result<T> made = await ReadAsync<T>(id).ConfigureAwait(false);
         bool isReload;

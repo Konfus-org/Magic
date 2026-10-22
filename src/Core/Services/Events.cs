@@ -62,6 +62,8 @@ public sealed class Events
     /// </summary>
     internal void Deliver()
     {
+        // As many as were published before it began, each the oldest in its type's mailbox, so they are heard in the
+        // order they were published; what a watcher publishes now waits for the next frame.
         for (
             int waiting = Interlocked.Exchange(ref _waiting, 0);
             waiting > 0 && _published.TryDequeue(out Mailbox? mailbox);

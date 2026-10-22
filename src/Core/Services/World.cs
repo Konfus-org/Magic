@@ -197,6 +197,9 @@ public sealed class World : IDisposable
         }
 
         _domains.CloseAll();
+
+        // Every saved entity is made empty first, so a component or a script read below that refers to another finds
+        // it made, whichever comes first.
         Dictionary<int, Entity> made = new(state.Entities.Count);
         foreach (EntityState saved in state.Entities)
         {
@@ -206,9 +209,13 @@ public sealed class World : IDisposable
         // The domains before the components and the scripts, as putting them back holds the world out of sight: a
         // script put back then waits until the world is shown, as one started while a domain is readied does.
         _domains.Restore(state.Domains, made);
+
+        // While the components and scripts are read, an entity in their JSON reads as the one made for its saved id.
         EntityJsonConverter.Remap = made;
         try
         {
+            // Each entity's components read back as the types they name; one no code loaded declares, or whose values
+            // no longer fit it, is logged once and left out of every entity.
             HashSet<string> failed = new(StringComparer.Ordinal);
             List<IComponent> components = [];
             foreach (EntityState saved in state.Entities)
@@ -448,6 +455,7 @@ public sealed class World : IDisposable
     /// </summary>
     private static List<EntityState> Write(List<Saving> entities, IProgress<float>? progress, CancellationToken cancel)
     {
+        // Each entity's components as JSON; a type JSON cannot hold is logged once and left out of every entity.
         List<EntityState> written = new(entities.Count);
         HashSet<string> failed = new(StringComparer.Ordinal);
         foreach (Saving entity in entities)

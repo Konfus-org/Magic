@@ -26,8 +26,8 @@ namespace Magic.Services;
 /// with dots between levels. <see cref="All"/> lists every setting as it is now, for a UI.
 /// <para>
 /// A change is checked at once, and copied into the objects the gems hold at the frame's sync point, after the main
-/// thread has waited for the render thread and before LateUpdate, so a gem reads its settings on either engine thread
-/// and never sees one change halfway. A setting a gem reads only as it starts is marked
+/// thread has waited for the render thread and before Sync, so a gem reads its settings on either engine thread and
+/// never sees one change halfway. A setting a gem reads only as it starts is marked
 /// <see cref="RequireRestartAttribute"/>: changed, the run ends and starts again at once with every setting as it is
 /// (<see cref="RestartArgs"/>). The default and the applied preset are applied again when their files change. Any
 /// thread.
@@ -144,6 +144,7 @@ public sealed class Settings : IDisposable
     {
         if (!IsKey(key)) return Result.Failure<T>(FormatNotKey(key));
 
+        // The gem's settings as JSON, a change not yet copied into them included, so one just set reads back at once.
         JsonNode? node;
         lock (_lock)
         {
@@ -306,6 +307,8 @@ public sealed class Settings : IDisposable
         {
             if (_changes.Count == 0) return;
 
+            // Each setting of a changed gem is copied into the object the gem holds; the first that asks for a restart
+            // and now holds another value is why the run restarts.
             foreach ((Setting setting, PropertyInfo property, ISettings held) in _all)
             {
                 if (!_changes.TryGetValue(held, out ISettings? changed)) continue;
@@ -445,6 +448,7 @@ public sealed class Settings : IDisposable
         {
             if (!string.Equals(GetGem(key), gem, StringComparison.OrdinalIgnoreCase)) continue;
 
+            // Down the setting's path to the object that holds it, made where no layer before had it.
             string[] path = GetPath(key).Split('.');
             JsonObject parent = section;
             for (int i = 0; i < path.Length - 1; i++)
@@ -495,6 +499,7 @@ public sealed class Settings : IDisposable
                 return;
             }
 
+            // The default, the applied preset, or both, when the default is the one applied.
             Layers layers = _layers;
             layers = preset == _default ? layers with { Default = read.Value } : layers;
             layers = preset == Preset ? layers with { Preset = read.Value } : layers;
@@ -517,6 +522,7 @@ public sealed class Settings : IDisposable
     /// </summary>
     private Result Remake(Layers layers)
     {
+        // Every gem's read before any is kept, so one that does not fit them leaves every gem as it was.
         List<(ISettings Held, ISettings Changed)> changes = [];
         foreach ((string gem, ISettings held) in _gems)
         {

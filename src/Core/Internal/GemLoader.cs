@@ -14,16 +14,16 @@ namespace Magic.Internal;
 /// Loads the gems a project lists into the service provider <see cref="Engine"/> builds, and makes them once it has.
 /// Each gem's assembly (<see cref="GemAssembly"/>) is registered as its class and as every interface it provides; one
 /// that provides what Core or a gem listed before it provides is refused, as is a name listed twice, and one that is
-/// not the version the project asks for (<see cref="Project.Gems"/>). The types a gem's
-/// assembly is taken in as it loads (<see cref="Assemblies"/>), so files can name its components and scripts before
-/// any gem is made, and the folder of its own assets is added to the assets (<see cref="Assets.AddRoot"/>), which read
-/// it while the next gem loads. Magic's own scripts and the project's own code, its scripts and components, are loaded
-/// first the same way, though neither is a gem, and loaded again when they are built while the engine runs, until the
-/// loader is disposed. The provider makes each gem after whatever its constructor asks for, so <see cref="Load"/>
-/// returns the gems in dependency order. A constructor parameter that is an <see cref="ISettings"/> is the gem's
-/// settings object, made by <see cref="Settings"/> as the gem is. A gem that is an <see cref="ILogSink"/> is added to
-/// the log once it is made, instead of provided, and one that is an <see cref="IPreloader"/> is given to the world by
-/// whoever made the gems. Whatever goes wrong with one gem is logged, and the others are made without it.
+/// not the version the project asks for (<see cref="Project.Gems"/>). A gem's assembly is taken in as it loads
+/// (<see cref="Assemblies"/>), so files can name its components and scripts before any gem is made, and the folder of
+/// its own assets is added to the assets (<see cref="Assets.AddRoot"/>), which read it while the next gem loads.
+/// Magic's own scripts and the project's own code, its scripts and components, are loaded first the same way, though
+/// neither is a gem, and loaded again when they are built while the engine runs, until the loader is disposed. The
+/// provider makes each gem after whatever its constructor asks for, so <see cref="Load"/> returns the gems in
+/// dependency order. A constructor parameter that is an <see cref="ISettings"/> is the gem's settings object, made by
+/// <see cref="Settings"/> as the gem is. A gem that is an <see cref="ILogSink"/> is added to the log once it is made,
+/// instead of provided, and one that is an <see cref="IPreloader"/> is given to the world by whoever made the gems.
+/// Whatever goes wrong with one gem is logged, and the others are made without it.
 /// </summary>
 internal sealed class GemLoader : IDisposable
 {
@@ -78,6 +78,7 @@ internal sealed class GemLoader : IDisposable
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
         foreach (string listing in project.Gems)
         {
+            // A gem is listed by its name, then @ and the version it must be where that matters.
             int at = listing.IndexOf('@', StringComparison.Ordinal);
             string name = at < 0 ? listing : listing[..at];
             string wanted = at < 0 ? string.Empty : listing[(at + 1)..];
@@ -112,6 +113,7 @@ internal sealed class GemLoader : IDisposable
                 continue;
             }
 
+            // Registered as its class, made once, and as each interface it provides, which hands out that one gem.
             services.AddSingleton(gem.Type, provider => MakeGem(provider, gem));
             foreach (Type contract in gem.Provides)
             {

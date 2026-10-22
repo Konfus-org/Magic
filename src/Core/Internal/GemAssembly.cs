@@ -180,11 +180,11 @@ internal readonly record struct GemAssembly(
     }
 
     /// <summary>
-    /// The assembly at <paramref name="path"/>, loaded into a context of its own the first time it is
-    /// asked for, or once more when asked <paramref name="again"/>, beside the context before. Code
-    /// (<paramref name="isCode"/>) is read into memory and loaded from there, so a build can write the file while it is
-    /// loaded; a gem is loaded from its file, so its assembly knows where it is, which its native libraries are found
-    /// by. Why not when there is no such file or it is not one .NET can load, naming <paramref name="what"/> it is.
+    /// The assembly at <paramref name="path"/>, loaded into a context of its own the first time it is asked for, or
+    /// once more when asked <paramref name="again"/>, beside the context before. Code (<paramref name="isCode"/>) is
+    /// read into memory and loaded from there, so a build can write the file while it is loaded; a gem is loaded from
+    /// its file, so its assembly knows where it is, which its native libraries are found by. Why not when there is no
+    /// such file or it is not one .NET can load, naming <paramref name="what"/> it is.
     /// </summary>
     private static Result<Assembly> LoadAssembly(IFileSystem files, string path, string what, bool isCode, bool again)
     {
