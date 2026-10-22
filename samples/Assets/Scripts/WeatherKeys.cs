@@ -8,9 +8,10 @@ using Magic.Services;
 namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
-/// Changes the world's weather while keys are held: [ and ] the cloud cover, - and = the wind, which carries the clouds
-/// and ruffles the trees, and , and . the fog. The weather is a component, read by whatever draws the sky and the air
-/// every frame, so writing it is all it takes, every frame if need be. <c>{ "id": 3448 }</c>.
+/// Changes the world's weather while keys are held: [ and ] the cloud cover, - and = the wind, which carries the
+/// clouds, ruffles the trees and sends waves over the grass, and , and . the fog. The weather is a component, read by
+/// whatever draws the sky and the air every frame, so writing it is all it takes, every frame if need be.
+/// <c>{ "id": 3448 }</c>.
 /// </summary>
 internal sealed class WeatherKeys(World world, IInput input) : IBehavior
 {

@@ -65,16 +65,18 @@ light, and past the wall a field of thousands of balls and hundreds of lights, t
 
 **Terrain** is the samples' own shaders. The terrain, 30 kilometres of mountains round a basin, has no uvs, so its
 surface maps its textures in world space from the surface's position and its derivatives, from above on level ground
-and from the sides on cliffs, and lays grass, forest floor, rock and snow by height, slope and the way the ground faces,
-reading each texture again larger with distance so the far hillsides do not show it repeating. The forest's surface
-answers the weather: under cloud its bark, needles and leaves darken and gloss as if wet, wind flecks the needles
-lighter, and snow lies on whatever faces up above the snow line its material says
-([Materials](../src/Bundled/Resources/Materials/README.md#writing-a-surface)). Its keys change all of it while it runs,
-each the way the engine offers for it: the weather is a component, read every frame, so the sky, the fog and the trees
-follow at once; the snow line is a param of the terrain's and the trees' materials, and the sky's haze and its clouds'
-height params of its material, set on them while they are drawn; and a look is the params of the passes the world's
-effects pipeline runs, the tonemap's exposure, the bloom and the samples' own grade, a pass after the tonemap, set by
-the passes' names and eased from one look to the next ([assets](../src/Core/README.md#assets)).
+and from the sides on cliffs, and lays grass, forest floor, rock and snow by height, slope and the way the ground faces.
+Each texture is laid as splats, copies of it each moved and turned its own way, so no tile repeats near or far, and is
+read again larger with distance so the far hillsides show its broad shapes. The grass and the forest answer the
+weather: gusts of the wind run over the grass, laying it over as they pass; under cloud the trees' bark, needles and
+leaves darken and gloss as if wet, wind flecks the needles lighter, and snow lies on whatever faces up above the snow
+line its material says ([Materials](../src/Bundled/Resources/Materials/README.md#writing-a-surface)). Its keys change
+all of it while it runs, each the way the engine offers for it: the weather is a component, read every frame, so the
+sky, the fog, the trees and the grass follow at once; the snow line is a param of the terrain's and the trees'
+materials, and the sky's haze and its clouds' height params of its material, set on them while they are drawn; and a
+look is the params of the passes the world's effects pipeline runs, the tonemap's exposure, the bloom and the samples'
+own grade, a pass after the tonemap, set by the passes' names and eased from one look to the next
+([assets](../src/Core/README.md#assets)).
 
 **Valley** is day, night and light from everywhere. The player starts inside a log cabin on the basin's floor; the sun
 and the moon, directional lights at their real brightness, are turned about a tilted axis by the spin system, so a day
