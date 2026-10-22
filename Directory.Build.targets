@@ -511,6 +511,10 @@ if (!Enumerable.Range(0, count).All(ready))
         BuildEngine3.Reacquire();
     }
 }
+
+// What a fragment returns is Success, true unless set, not whether it logged an error. A library that failed fails the
+// task, so its target stamps nothing as prepared and no bindings are generated from headers that are not there.
+Success = !Log.HasLoggedErrors;
 ]]></Code>
     </Task>
   </UsingTask>
