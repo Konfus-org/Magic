@@ -1,5 +1,4 @@
 using System.Numerics;
-using BCnEncoder.Encoder;
 using Magic.Contexts.Assets;
 
 namespace Magic.ClusterRendering;
@@ -38,6 +37,13 @@ internal static class GpuConverter
     /// The shaders' MeshFieldBand (Probes/GiJobs.hlsli).
     /// </summary>
     private const float FieldBand = 2.5f;
+
+    /// <summary>
+    /// What the BC7 encoder is told for every block: its own defaults, but every channel's error weighed alike, as most
+    /// of the pools' textures are data rather than colour. Made, with the tables the encoder needs before its first
+    /// block, the first time a texture is compressed, so a model's conversion never loads the encoder.
+    /// </summary>
+    private static readonly Bc7Enc.CompressBlockParams _blockOptions = MakeBlockOptions();
 
     /// <summary>
     /// A model packed for the pool: its clusters, or for one with none its meshes split into clusters; its levels; its
@@ -526,24 +532,59 @@ internal static class GpuConverter
     }
 
     /// <summary>
-    /// Each level of a <paramref name="size"/> square compressed to BC7, the encoder's quickest search, which is still
-    /// far from the blocks a slower one finds only in the sharpest edges.
+    /// Each level of a <paramref name="size"/> square compressed to BC7, a row of blocks to a worker.
     /// </summary>
     private static byte[][] Compress(byte[][] levels, uint size)
     {
-        BcEncoder encoder = new();
-        encoder.OutputOptions.Format = BCnEncoder.Shared.CompressionFormat.Bc7;
-        encoder.OutputOptions.Quality = CompressionQuality.Fast;
-        encoder.OutputOptions.GenerateMipMaps = false;
-        encoder.Options.IsParallel = true;
         byte[][] compressed = new byte[levels.Length][];
         for (int level = 0; level < levels.Length; level++)
         {
             int side = (int)Math.Max(1, size >> level);
-            compressed[level] = encoder.EncodeToRawBytes(levels[level], side, side, PixelFormat.Rgba32)[0];
+            byte[] pixels = levels[level];
+            byte[] blocks = new byte[side * side];
+            Parallel.For(0, side / 4, row => CompressRow(pixels, blocks, side, row));
+            compressed[level] = blocks;
         }
 
         return compressed;
+    }
+
+    /// <summary>
+    /// A row of the 4 x 4 blocks of a <paramref name="side"/> square into <paramref name="blocks"/>, sixteen bytes
+    /// each, the encoder taking a block's texels together.
+    /// </summary>
+    private static unsafe void CompressRow(byte[] pixels, byte[] blocks, int side, int row)
+    {
+        Bc7Enc.CompressBlockParams options = _blockOptions;
+        Span<byte> texels = stackalloc byte[64];
+        for (int column = 0; column < side / 4; column++)
+        {
+            for (int y = 0; y < 4; y++)
+            {
+                pixels.AsSpan(((((row * 4) + y) * side) + (column * 4)) * 4, 16).CopyTo(texels[(y * 16)..]);
+            }
+
+            fixed (byte* block = &blocks[((row * (side / 4)) + column) * 16])
+            fixed (byte* source = texels)
+            {
+                Bc7Enc.CompressBlock(block, source, &options);
+            }
+        }
+    }
+
+    private static unsafe Bc7Enc.CompressBlockParams MakeBlockOptions()
+    {
+        Bc7Enc.CompressBlockInit();
+        Bc7Enc.CompressBlockParams options = new()
+        {
+            MMaxPartitionsMode = Bc7Enc.MaxPartitions1,
+            MTryLeastSquares = 1,
+            MModePartitionEstimationFilterbank = 1,
+            MUseMode5ForAlpha = 1,
+            MUseMode7ForAlpha = 1,
+        };
+        new Span<uint>(options.MWeights, 4).Fill(1);
+        return options;
     }
 
     /// <summary>

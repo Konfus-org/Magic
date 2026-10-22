@@ -6,7 +6,6 @@
 
   <ItemGroup>
     <PackageVersion Include="Arch" Version="2.1.0" />
-    <PackageVersion Include="BCnEncoder.Net" Version="2.3.0" />
     <PackageVersion Include="CppAst" Version="0.26.0" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageVersion Include="System.CommandLine" Version="2.0.12" />

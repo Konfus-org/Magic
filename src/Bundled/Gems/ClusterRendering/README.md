@@ -388,8 +388,10 @@ the world sees it exposed from its first frame rather than adapting from a defau
 ### Textures
 
 Layers of a few texture arrays every surface pipeline binds, colour or data, one per size from small to large, with
-mips, compressed to BC7 on a worker as they load and kept in the cache, so they are compressed once and take a
-quarter of the memory and of the reads.
+mips, compressed to BC7 on the workers as they load and kept in the cache, so they are compressed once and take a
+quarter of the memory and of the reads. A native encoder compresses each level, a row of blocks to a worker, so a
+load is not left waiting on its textures; it weighs every channel's error alike, as most of the textures are data
+rather than colour.
 
 ### Nothing pops
 

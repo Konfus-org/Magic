@@ -5,10 +5,22 @@
     <Version>1.0.0</Version>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!-- A generated C API is pointers and fixed buffers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- XxHash3: what a field of a model a gem made is kept by, as such a model has no file to be versioned by. -->
     <PackageReference Include="System.IO.Hashing" />
-    <!-- BC7: what the textures materials sample are compressed into, a quarter of their size in memory and in reads. -->
-    <PackageReference Include="BCnEncoder.Net" />
+  </ItemGroup>
+
+  <!-- bc7enc: what compresses the textures materials sample to BC7, a quarter of their size in memory and in reads.
+       One C file with no build of its own, so built from its source, which has no tags: pinned to the archive of its
+       repository's last commit. -->
+  <ItemGroup>
+    <NativeLibrary Include="bc7enc" Url="https://github.com/richgel999/bc7enc/archive/f66c2e489b07138f2673a2fb3d27c1aa1d565c48.tar.gz"
+                   Sha256="5c3632dcf5227c15ef987696c23d34be993f2341278ff8a5a37bd23ea714dce9"
+                   Sources="bc7enc.c" Headers="bc7enc.h" IncludePath="." Prefixes="bc7enc=Bc7Enc;BC7ENC=Bc7Enc" />
   </ItemGroup>
 </Project>

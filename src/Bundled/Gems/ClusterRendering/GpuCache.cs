@@ -1955,7 +1955,7 @@ internal sealed record CompressedTexture(byte[][] Levels)
     /// <summary>
     /// Raised whenever how a texture is resampled or compressed changes, so the cache's are made again.
     /// </summary>
-    internal const int CacheVersion = 2;
+    internal const int CacheVersion = 3;
 
     internal static Result<CompressedTexture> Read(Stream bytes)
     {
