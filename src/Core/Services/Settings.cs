@@ -3,8 +3,11 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Xml;
+using System.Xml.Linq;
 using Magic.Attributes;
 using Magic.Contexts.Assets;
 using Magic.Contexts.CmdLine;
@@ -12,7 +15,6 @@ using Magic.Contexts.Settings;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
-using Magic.Internal;
 
 namespace Magic.Services;
 
@@ -40,7 +42,7 @@ public sealed class Settings : IDisposable
 
     private readonly Assets _assets;
     private readonly Args _args;
-    private readonly SettingsDocs _docs;
+    private readonly IFileSystem _files;
     private readonly Handle<Preset> _default;
     private readonly JsonObject _commandLine;
     private readonly Lifetime _lifetime;
@@ -68,6 +70,12 @@ public sealed class Settings : IDisposable
     /// </summary>
     private readonly Dictionary<ISettings, ISettings> _changes = new(ReferenceEqualityComparer.Instance);
 
+    /// <summary>
+    /// Every member's summary in each assembly's documentation file, by the id the file gives it, read the first time
+    /// one of the assembly's settings is made (<see cref="GetSummary"/>).
+    /// </summary>
+    private readonly Dictionary<Assembly, Dictionary<string, string>> _summaries = [];
+
     private Layers _layers;
 
     /// <summary>
@@ -80,7 +88,7 @@ public sealed class Settings : IDisposable
         _assets = assets;
         _args = args;
         _lifetime = lifetime;
-        _docs = new SettingsDocs(files);
+        _files = files;
         _default = assets.Find<Preset>(GetPath(DefaultPreset));
         _commandLine = ParseCommandLine(project, args.Settings);
 
@@ -283,7 +291,7 @@ public sealed class Settings : IDisposable
                 // Its own attributes first, then its class's, so one on the class marks every setting in it.
                 Setting setting = new(
                     GetName(property),
-                    _docs.GetSummary(property),
+                    GetSummary(property),
                     gem,
                     property.PropertyType,
                     null,
@@ -481,6 +489,41 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
+    /// The text of <paramref name="node"/>, onto <paramref name="text"/>: a reference is the last part of what it
+    /// names, and a reference to a parameter is its name.
+    /// </summary>
+    private static void AppendText(StringBuilder text, XNode node)
+    {
+        if (node is XText run)
+        {
+            text.Append(run.Value);
+
+            return;
+        }
+
+        if (node is not XElement element) return;
+
+        if (element.Attribute("cref") is { } cref)
+        {
+            text.Append(cref.Value[(cref.Value.LastIndexOf('.') + 1)..]);
+
+            return;
+        }
+
+        if (element.Attribute("name") is { } name && element.IsEmpty)
+        {
+            text.Append(name.Value);
+
+            return;
+        }
+
+        foreach (XNode child in element.Nodes())
+        {
+            AppendText(text, child);
+        }
+    }
+
+    /// <summary>
     /// Takes in the default or the applied preset as its file now says, keeping what was set while running. One that no
     /// longer fits is an error, and the settings stay as they were. Main thread.
     /// </summary>
@@ -628,6 +671,68 @@ public sealed class Settings : IDisposable
 
     private string GetName(Handle<Preset> preset)
         => _assets.GetPath(preset) ?? preset.Id.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// <paramref name="property"/>'s summary as plain text, as its doc comment says it: the build writes every
+    /// assembly's comments into a documentation file beside it, so a settings UI shows a setting's summary and nothing
+    /// repeats the comment. Empty when it has none, or its assembly has no such file. Under the lock.
+    /// </summary>
+    private string GetSummary(PropertyInfo property)
+    {
+        Type declaring = property.DeclaringType
+            ?? throw new ArgumentException($"{property.Name} belongs to no type.", nameof(property));
+        if (!_summaries.TryGetValue(declaring.Assembly, out Dictionary<string, string>? summaries))
+        {
+            summaries = ReadSummaries(declaring.Assembly);
+            _summaries[declaring.Assembly] = summaries;
+        }
+
+        // The id the documentation file gives a property: P:, its type's full name with a dot for the + before a
+        // nested type, then its name.
+        return summaries.GetValueOrDefault($"P:{declaring.FullName?.Replace('+', '.')}.{property.Name}")
+            ?? string.Empty;
+    }
+
+    /// <summary>
+    /// Every member's summary in <paramref name="assembly"/>'s documentation file, by the id the file gives it.
+    /// </summary>
+    private Dictionary<string, string> ReadSummaries(Assembly assembly)
+    {
+        Dictionary<string, string> summaries = new(StringComparer.Ordinal);
+        string path = Path.ChangeExtension(assembly.Location, ".xml");
+
+        if (!_files.FileExists(path)) return summaries;
+
+        Result<byte[]> bytes = _files.Read(path);
+
+        if (!bytes.Ok) return summaries;
+
+        // What is trimmed is the byte order mark a file may start with, which does not show here.
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(Encoding.UTF8.GetString(bytes.Value).TrimStart('﻿'));
+        }
+        catch (XmlException)
+        {
+            return summaries;
+        }
+
+        // Each member's summary as plain text, every run of white space one space, as the file wraps and indents it.
+        StringBuilder text = new();
+        foreach (XElement member in document.Descendants("member"))
+        {
+            if (member.Attribute("name") is not { } id || member.Element("summary") is not { } summary) continue;
+
+            text.Clear();
+            AppendText(text, summary);
+            summaries[id.Value] = string.Join(
+                ' ',
+                text.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        return summaries;
+    }
 
     /// <summary>
     /// What the gems' settings are made from, but the command line's, which never changes: the default preset's
