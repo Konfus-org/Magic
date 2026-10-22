@@ -99,9 +99,7 @@ internal sealed unsafe class VulkanTimer : IDisposable
     }
 
     internal void End(VkCommandBuffer commandBuffer)
-    {
-        _device.Api.vkCmdWriteTimestamp2(commandBuffer, VkPipelineStageFlags2.BottomOfPipe, _pools[_slot], 1);
-    }
+        => _device.Api.vkCmdWriteTimestamp2(commandBuffer, VkPipelineStageFlags2.BottomOfPipe, _pools[_slot], 1);
 
     /// <summary>
     /// Starts timing a group named <paramref name="group"/>; false when the frame has no room left for it, which
@@ -110,11 +108,13 @@ internal sealed unsafe class VulkanTimer : IDisposable
     internal bool Start(VkCommandBuffer commandBuffer, string group)
     {
         uint count = _counts[_slot];
+
         if (count >= _groups[_slot].Length) return false;
 
         _groups[_slot][count] = group;
         _device.Api
             .vkCmdWriteTimestamp2(commandBuffer, VkPipelineStageFlags2.TopOfPipe, _pools[_slot], 2 + (count * 2));
+
         return true;
     }
 
@@ -136,10 +136,12 @@ internal sealed unsafe class VulkanTimer : IDisposable
         Span<char> chars = stackalloc char[Encoding.UTF8.GetMaxCharCount(utf8.Length)];
         chars = chars[..Encoding.UTF8.GetChars(utf8, chars)];
         HashSet<string>.AlternateLookup<ReadOnlySpan<char>> lookup = _names.GetAlternateLookup<ReadOnlySpan<char>>();
+
         if (lookup.TryGetValue(chars, out string? name)) return name;
 
         name = chars.ToString();
         _names.Add(name);
+
         return name;
     }
 
@@ -167,6 +169,7 @@ internal sealed unsafe class VulkanTimer : IDisposable
         }
 
         _device.Api.vkResetQueryPool(_pools[slot], 0, queries);
+
         if (result != VkResult.Success) return;
 
         for (int i = 0; i < _counts[slot]; i++)

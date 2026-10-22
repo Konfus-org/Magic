@@ -109,12 +109,11 @@ internal sealed unsafe class VulkanDescriptors : IDisposable
             };
             VkDescriptorSet set;
             VkResult result = _device.Api.vkAllocateDescriptorSets(&info, &set);
+
             if (result == VkResult.Success) return set;
 
             if (result is not (VkResult.ErrorOutOfPoolMemory or VkResult.ErrorFragmentedPool))
-            {
                 throw new InvalidOperationException($"The GPU could not make a descriptor set: {result}.");
-            }
 
             _poolInUse[slot]++;
         }
@@ -134,6 +133,7 @@ internal sealed unsafe class VulkanDescriptors : IDisposable
 
         constants.CopyTo(new Span<byte>(ring.Mapped + offset, constants.Length));
         _ringUsed[slot] = offset + (ulong)constants.Length;
+
         return (uint)offset;
     }
 
@@ -158,6 +158,7 @@ internal sealed unsafe class VulkanDescriptors : IDisposable
         };
         _device.Api.vkUpdateDescriptorSets(1, &write, 0, null);
         _uniformSets[slot] = set;
+
         return set;
     }
 
@@ -182,6 +183,7 @@ internal sealed unsafe class VulkanDescriptors : IDisposable
         _rings[slot] = ring;
         _ringUsed[slot] = 0;
         _uniformSets[slot] = VkDescriptorSet.Null;
+
         return ring;
     }
 
@@ -198,6 +200,7 @@ internal sealed unsafe class VulkanDescriptors : IDisposable
         VkDescriptorPoolCreateInfo info = new() { maxSets = SetsPerPool, poolSizeCount = 5, pPoolSizes = sizes };
         VkDescriptorPool pool;
         VkResult result = _device.Api.vkCreateDescriptorPool(&info, &pool);
+
         return result == VkResult.Success
             ? pool
             : throw new InvalidOperationException($"The GPU could not make a descriptor pool: {result}.");

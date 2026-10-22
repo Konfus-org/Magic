@@ -99,15 +99,14 @@ internal sealed unsafe class VulkanPipelines : IDisposable
         try
         {
             if (vertex.IsNull || fragment.IsNull)
-            {
                 return Result.Failure<VulkanPipeline>("The GPU would not take the shaders' code.");
-            }
 
             VkPipelineLayout layout = CreateLayout(sets);
             VkPipeline pipeline = CreateGraphicsPipeline(description, vertex, fragment, layout, out VkResult result);
             if (result != VkResult.Success)
             {
                 _device.Api.vkDestroyPipelineLayout(layout);
+
                 return Result.Failure<VulkanPipeline>($"The GPU would not make the pipeline: {result}.");
             }
 
@@ -129,6 +128,7 @@ internal sealed unsafe class VulkanPipelines : IDisposable
             ToUniformShape(compute),
         ];
         VkShaderModule module = CreateModule(compute);
+
         if (module.IsNull) return Result.Failure<VulkanPipeline>("The GPU would not take the compute shader's code.");
 
         VkPipelineLayout layout = CreateLayout(sets);
@@ -148,12 +148,12 @@ internal sealed unsafe class VulkanPipelines : IDisposable
             VkPipeline pipeline;
             VkResult result = _device.Api.vkCreateComputePipelines(VkPipelineCache.Null, 1, &info, &pipeline);
             _device.Api.vkDestroyShaderModule(module);
+
             if (result == VkResult.Success)
-            {
                 return Result.Success(new VulkanPipeline(pipeline, layout, VkPipelineBindPoint.Compute, sets));
-            }
 
             _device.Api.vkDestroyPipelineLayout(layout);
+
             return Result.Failure<VulkanPipeline>($"The GPU would not make the compute pipeline: {result}.");
         }
     }
@@ -189,6 +189,7 @@ internal sealed unsafe class VulkanPipelines : IDisposable
         VkDescriptorSetLayout layout;
         _device.Api.vkCreateDescriptorSetLayout(&info, &layout);
         _setLayouts[shape] = layout;
+
         return layout;
     }
 
@@ -204,6 +205,7 @@ internal sealed unsafe class VulkanPipelines : IDisposable
         {
             VkShaderModuleCreateInfo info = new() { codeSize = (nuint)shader.Code.Length, pCode = (uint*)code };
             VkShaderModule module;
+
             return _device.Api.vkCreateShaderModule(&info, &module) == VkResult.Success ? module : VkShaderModule.Null;
         }
     }
@@ -228,6 +230,7 @@ internal sealed unsafe class VulkanPipelines : IDisposable
         VkPipelineLayoutCreateInfo info = new() { setLayoutCount = (uint)count, pSetLayouts = layouts };
         VkPipelineLayout layout;
         _device.Api.vkCreatePipelineLayout(&info, &layout);
+
         return layout;
     }
 
@@ -361,6 +364,7 @@ internal sealed unsafe class VulkanPipelines : IDisposable
             };
             VkPipeline pipeline;
             result = _device.Api.vkCreateGraphicsPipelines(VkPipelineCache.Null, 1, &info, &pipeline);
+
             return pipeline;
         }
     }

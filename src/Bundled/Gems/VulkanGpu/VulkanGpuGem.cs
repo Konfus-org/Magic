@@ -174,6 +174,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         get
         {
             ThrowIfNotRender();
+
             return _commands;
         }
     }
@@ -221,6 +222,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         ThrowIfNotRender();
 
         VulkanBuffer buffer = _resources.CreateBuffer(bytes, usage.ToVulkan(), isHost: false);
+
         return new GpuBuffer(_resources.Buffers.Add(buffer));
     }
 
@@ -243,6 +245,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         ThrowIfNotRender();
 
         Result<VulkanPipeline> made = _pipelines.CreateGraphics(description);
+
         return made.Ok && made.Value is { } pipeline
             ? Result.Success(new GpuPipeline(_resources.Pipelines.Add(pipeline)))
             : Result.Failure<GpuPipeline>(made.Error);
@@ -253,6 +256,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         ThrowIfNotRender();
 
         Result<VulkanPipeline> made = _pipelines.CreateCompute(compute);
+
         return made.Ok && made.Value is { } pipeline
             ? Result.Success(new GpuPipeline(_resources.Pipelines.Add(pipeline)))
             : Result.Failure<GpuPipeline>(made.Error);
@@ -266,6 +270,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
 
         // A headless window is none of SDL's: a target with no image, ever.
         SDL.Window* native = window.Id == 0 ? null : SDL.GetWindowFromID(window.Id);
+
         if (window.Id != 0 && native == null)
         {
             throw new InvalidOperationException(
@@ -277,6 +282,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         VulkanTexture texture = new(description, VkImage.Null, VkDeviceMemory.Null, claimed);
         target = new GpuTexture(_resources.Textures.Add(texture));
         _windowTargets[window.Id] = target;
+
         return target;
     }
 
@@ -294,15 +300,15 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         if (_resources.Textures[texture.Id] is not { } stored) return Size.Empty;
 
         if (stored.Window is not { } window)
-        {
             return new Size((int)stored.Description.Width, (int)stored.Description.Height);
-        }
 
         SDL.Window* native = (SDL.Window*)window.Native;
+
         if ((SDL.GetWindowFlags(native) & SDL.WindowMinimized) != 0) return Size.Empty;
 
         int width;
         int height;
+
         return SDL.GetWindowSizeInPixels(native, &width, &height) ? new Size(width, height) : Size.Empty;
     }
 
@@ -340,6 +346,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         if (stored.Window is null && stored.Image.IsNotNull)
         {
             _releasing.Add((Kind.Texture, texture.Id));
+
             return;
         }
 
@@ -348,6 +355,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
             if (target != texture) continue;
 
             _windowTargets.Remove(id);
+
             break;
         }
 
@@ -373,9 +381,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         ThrowIfNotRender();
 
         if (_resources.Buffers[buffer.Id] is not { } stored || bytes == 0 || bytes > stored.Size)
-        {
             return Result.Failure<byte[]>($"Buffer {buffer.Id} is not one the GPU made, or none of it was asked for.");
-        }
 
         return _transfers.Read(stored, bytes, _barriers);
     }
@@ -476,6 +482,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
     private int TakeSlot()
     {
         int slot = (int)(_frame % FramesInFlight);
+
         if (_isSlotTaken) return slot;
 
         _isSlotTaken = true;
@@ -485,6 +492,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         _device.Api.vkResetCommandPool(_pools[slot], VkCommandPoolResetFlags.None);
         _descriptors.Reset(slot);
         _transfers.Reset(slot);
+
         return slot;
     }
 
@@ -497,6 +505,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         if (_commands.Count == 0 && _transfers.Count == 0)
         {
             FreeReleased();
+
             return;
         }
 
@@ -547,6 +556,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
             {
                 done.SetResult(Result.Failure<GpuImage>("The window's images cannot be copied on this GPU."));
                 _capturing.Add(new Capture(id, null, 0, 0, GpuFormat.Invalid, done));
+
                 continue;
             }
 

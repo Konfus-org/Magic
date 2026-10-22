@@ -170,9 +170,7 @@ internal sealed unsafe class VulkanDevice
         for (int i = 0; i < _memory.memoryTypeCount; i++)
         {
             if ((typeBits & (1u << i)) != 0 && (_memory.memoryTypes[i].propertyFlags & required) == required)
-            {
                 return (uint)i;
-            }
         }
 
         throw new InvalidOperationException($"The GPU has no memory that is {required}.");
@@ -185,6 +183,7 @@ internal sealed unsafe class VulkanDevice
     {
         ulong value;
         Api.vkGetSemaphoreCounterValue(Timeline, &value);
+
         return value;
     }
 
@@ -207,6 +206,7 @@ internal sealed unsafe class VulkanDevice
     internal VkSurfaceKHR CreateSurface(SDL.Window* window)
     {
         SdlVkSurfaceKHR* surface = null;
+
         if (!HasSurfaces || !SDL.VulkanCreateSurface(window, (SdlVkInstance*)Instance.Handle, null, &surface))
         {
             throw new InvalidOperationException(
@@ -340,6 +340,7 @@ internal sealed unsafe class VulkanDevice
             };
             VkInstance instance;
             VkResult result = Vulkan.vkCreateInstance(&info, &instance);
+
             return result == VkResult.Success
                 ? instance
                 : throw new InvalidOperationException($"Vulkan would not open: {result}.");
@@ -351,6 +352,7 @@ internal sealed unsafe class VulkanDevice
         VkDebugUtilsMessengerCreateInfoEXT info = MakeMessengerInfo();
         VkDebugUtilsMessengerEXT messenger;
         InstanceApi.vkCreateDebugUtilsMessengerEXT(&info, &messenger);
+
         return messenger;
     }
 
@@ -378,6 +380,7 @@ internal sealed unsafe class VulkanDevice
         foreach (VkPhysicalDevice device in devices)
         {
             InstanceApi.vkGetPhysicalDeviceProperties(device, out VkPhysicalDeviceProperties properties);
+
             if (properties.apiVersion < VkVersion.Version_1_3 || !HasRequiredFeatures(device)) continue;
 
             string name = CString.Read(properties.deviceName);
@@ -390,6 +393,7 @@ internal sealed unsafe class VulkanDevice
                 (false, VkPhysicalDeviceType.Cpu) => 0,
                 _ => 1,
             };
+
             if (score <= bestScore) continue;
 
             best = device;
@@ -410,6 +414,7 @@ internal sealed unsafe class VulkanDevice
         VkPhysicalDeviceVulkan12Features features12 = new() { pNext = &features13 };
         VkPhysicalDeviceFeatures2 features = new() { pNext = &features12 };
         InstanceApi.vkGetPhysicalDeviceFeatures2(device, &features);
+
         return features13.dynamicRendering
             && features13.synchronization2
             && features12.timelineSemaphore
@@ -436,6 +441,7 @@ internal sealed unsafe class VulkanDevice
         for (uint i = 0; i < count; i++)
         {
             VkQueueFlags flags = families[i].queueFlags;
+
             if ((flags & VkQueueFlags.Graphics) == VkQueueFlags.None
                 || (flags & VkQueueFlags.Compute) == VkQueueFlags.None)
             {
@@ -443,6 +449,7 @@ internal sealed unsafe class VulkanDevice
             }
 
             timestampBits = families[i].timestampValidBits;
+
             return i;
         }
 
@@ -499,6 +506,7 @@ internal sealed unsafe class VulkanDevice
         };
         VkDevice device;
         VkResult result = InstanceApi.vkCreateDevice(PhysicalDevice, &info, &device);
+
         return result == VkResult.Success
             ? device
             : throw new InvalidOperationException($"The GPU would not open: {result}.");
@@ -510,6 +518,7 @@ internal sealed unsafe class VulkanDevice
         VkSemaphoreCreateInfo info = new() { pNext = &type };
         VkSemaphore timeline;
         Api.vkCreateSemaphore(&info, &timeline);
+
         return timeline;
     }
 }

@@ -234,9 +234,7 @@ internal sealed unsafe class VulkanRecorder(
             case GpuCommandType.DispatchFromBuffer:
                 BindSets();
                 if (_resources.Buffers[command.Buffer.Id] is { } groups)
-                {
                     _device.Api.vkCmdDispatchIndirect(_commandBuffer, groups.Handle, command.Offset);
-                }
 
                 break;
             case GpuCommandType.CopyTexture:
@@ -276,6 +274,7 @@ internal sealed unsafe class VulkanRecorder(
             if (target.Window is { } window ? _windows.TryAcquire(window, _slot) : target.Image.IsNotNull) continue;
 
             _isSkipping = true;
+
             return;
         }
 
@@ -353,6 +352,7 @@ internal sealed unsafe class VulkanRecorder(
         foreach (GpuTextureLevel level in _commands.GetLevels(begin))
         {
             _writtenTextures.Add(level);
+
             if (_resources.Textures[level.Texture.Id] is not { } texture) continue;
 
             _barriers.UseOne(
@@ -369,9 +369,7 @@ internal sealed unsafe class VulkanRecorder(
         {
             _writtenBuffers.Add(written);
             if (_resources.Buffers[written.Id] is { } buffer)
-            {
                 _barriers.Use(ref buffer.State, VkPipelineStageFlags2.ComputeShader, Writes, isWrite: true);
-            }
         }
 
         UseReads(list, index + 1, FindEnd(list, index, GpuCommandType.EndComputePass));
@@ -496,6 +494,7 @@ internal sealed unsafe class VulkanRecorder(
                 access,
                 isWrite: true,
                 isDiscard);
+
             return (window.Views[image], window.Extent);
         }
 
@@ -509,6 +508,7 @@ internal sealed unsafe class VulkanRecorder(
             isWrite: true,
             isDiscard);
         (uint width, uint height, _) = texture.GetSize(target.Level);
+
         return (texture.TargetViews[texture.GetTargetIndex(target.Level, target.Layer)], new VkExtent2D(width, height));
     }
 
@@ -576,6 +576,7 @@ internal sealed unsafe class VulkanRecorder(
         for (int set = 0; set < pipeline.Sets.Length; set++)
         {
             SetShape shape = pipeline.Sets[set];
+
             if (shape.IsEmpty) continue;
 
             GpuStage stage = (pipeline.BindPoint, set) switch
@@ -598,6 +599,7 @@ internal sealed unsafe class VulkanRecorder(
                     &uniforms,
                     1,
                     &offset);
+
                 continue;
             }
 
@@ -637,6 +639,7 @@ internal sealed unsafe class VulkanRecorder(
             GpuTexture id = isSampled
                 ? _sampled[(int)stage][binding].Texture
                 : _textures[(int)stage][binding - shape.Sampled];
+
             if (_resources.Textures[id.Id] is not { Window: null } texture) continue;
 
             images[binding] = new VkDescriptorImageInfo
@@ -677,6 +680,7 @@ internal sealed unsafe class VulkanRecorder(
         for (int i = 0; i < shape.Textures && i < _writtenTextures.Count; i++)
         {
             GpuTextureLevel level = _writtenTextures[i];
+
             if (_resources.Textures[level.Texture.Id] is not { } texture || texture.StorageViews.Length == 0) continue;
 
             uint layer = texture.GetArrayLayer(level.Layer);
@@ -710,6 +714,7 @@ internal sealed unsafe class VulkanRecorder(
     private void CopyTexture(in GpuCommand command)
     {
         ReadOnlySpan<GpuTextureRegion> run = _commands.GetRegions(command);
+
         if (_resources.Textures[run[0].Texture.Id] is not { } source
             || _resources.Textures[run[1].Texture.Id] is not { } destination)
         {
@@ -771,10 +776,9 @@ internal sealed unsafe class VulkanRecorder(
     private void CopyBuffer(in GpuCommand command)
     {
         ReadOnlySpan<GpuBuffer> run = _commands.GetBuffers(command);
+
         if (_resources.Buffers[run[0].Id] is not { } source || _resources.Buffers[run[1].Id] is not { } destination)
-        {
             return;
-        }
 
         _barriers.Use(ref source.State, VkPipelineStageFlags2.Copy, VkAccessFlags2.TransferRead, isWrite: false);
         _barriers.Use(ref destination.State, VkPipelineStageFlags2.Copy, VkAccessFlags2.TransferWrite, isWrite: true);

@@ -124,6 +124,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             ThreadCountZ = threadsZ,
             Code = reader.ReadBytes(length),
         };
+
         return shader.Code.Length == length
             ? Result.Success(shader)
             : Result.Failure<GpuShader>("its code is cut short.");
@@ -136,9 +137,11 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         CancellationToken cancel)
     {
         Handle<Shader> asset = _assets.Find<Shader>(path);
+
         if (asset == Handle<Shader>.None) return Result.Failure<GpuShader>($"{path}: no asset is there.");
 
         Result<Shader> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
+
         return loaded.Ok
             ? await CompileAsync(loaded.Value.Text, path, stage, format, cancel).ConfigureAwait(false)
             : Result.Failure<GpuShader>(loaded.Error);
@@ -161,12 +164,14 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
         HashSet<string> including = new(StringComparer.OrdinalIgnoreCase) { name };
         Result<string> spliced = await SpliceAsync(hlsl, name, including, cancel).ConfigureAwait(false);
+
         if (!spliced.Ok) return Result.Failure<GpuShader>(spliced.Error);
 
         string source = $"#define {define} 1\n#line 1 \"{name}\"\n{spliced.Value}";
         ulong key = XxHash3.HashToUInt64(Encoding.UTF8.GetBytes($"{name}\n{stage}\n{format}\n{source}"));
         TaskCompletionSource<Result<GpuShader>> own = new(TaskCreationOptions.RunContinuationsAsynchronously);
         Task<Result<GpuShader>> compiling = _compiling.GetOrAdd(key, own.Task);
+
         if (compiling != own.Task) return await compiling.WaitAsync(cancel).ConfigureAwait(false);
 
         try
@@ -174,11 +179,13 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             Result<GpuShader> made = await ReadOrCompileAsync(key, source, name, profile, stage, format).ConfigureAwait(
                 false);
             own.SetResult(made);
+
             return made;
         }
         catch (Exception ex)
         {
             own.SetException(ex);
+
             throw;
         }
         finally
@@ -196,10 +203,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// <summary>
     /// A COM method of a DXC object: the function at <paramref name="slot"/> of its table.
     /// </summary>
-    private static unsafe nint GetMethod(nint instance, int slot)
-    {
-        return (*(nint**)instance)[slot];
-    }
+    private static unsafe nint GetMethod(nint instance, int slot) => (*(nint**)instance)[slot];
 
     private static unsafe void Release(nint instance)
     {
@@ -213,6 +217,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     {
         nint output;
         ((delegate* unmanaged<nint, nint*, int>)GetMethod(result, slot))(result, &output);
+
         return output;
     }
 
@@ -223,6 +228,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     {
         void* start = ((delegate* unmanaged<nint, void*>)GetMethod(blob, 3))(blob);
         nuint size = ((delegate* unmanaged<nint, nuint>)GetMethod(blob, 4))(blob);
+
         return new ReadOnlySpan<byte>(start, (int)size);
     }
 
@@ -237,6 +243,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         byte[] bytes = encoding.GetBytes(text);
         byte* copy = (byte*)NativeMemory.AllocZeroed((nuint)(bytes.Length + terminator));
         bytes.CopyTo(new Span<byte>(copy, bytes.Length));
+
         return (nint)copy;
     }
 
@@ -254,6 +261,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         GpuShaderFormat format)
     {
         ulong version = _settings.DebugInfo ? 1UL : 0UL;
+
         if (await _caches.ReadAsync<GpuShader>(key, version, CancellationToken.None)
             .ConfigureAwait(false) is { Ok: true } cached)
         {
@@ -263,9 +271,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         Result<GpuShader> compiled = await Task.Run(() => Compile(source, name, profile, stage, format))
             .ConfigureAwait(false);
         if (compiled.Ok)
-        {
             await _caches.WriteAsync(key, version, compiled.Value, CancellationToken.None).ConfigureAwait(false);
-        }
 
         return compiled;
     }
@@ -300,16 +306,19 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             if (asset == Handle<Shader>.None)
             {
                 spliced.Append(line).Append('\n');
+
                 continue;
             }
 
             Result<Shader> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
+
             if (!loaded.Ok) return Result.Failure<string>($"{name}:{number}: {loaded.Error}");
 
             including.Add(path);
             Result<string> included = await SpliceAsync(loaded.Value.Text, path, including, cancel).ConfigureAwait(
                 false);
             including.Remove(path);
+
             if (!included.Ok) return included;
 
             spliced.Append(CultureInfo.InvariantCulture, $"#line 1 \"{path}\"\n")
@@ -333,13 +342,13 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         GpuShaderFormat format)
     {
         Result<byte[]> spirv = CompileWithDxc(source, name, profile);
+
         if (!spirv.Ok) return Result.Failure<GpuShader>(spirv.Error);
 
         Result<GpuShader> reflected = SpirvBindings.Read(spirv.Value, stage);
+
         if (!reflected.Ok)
-        {
             return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {reflected.Error}");
-        }
 
         return format == GpuShaderFormat.Spirv
             ? Result.Success(reflected.Value with { Code = spirv.Value, EntryPoint = "main" })
@@ -376,6 +385,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             Guid compilerInterface = _compilerInterface;
             Guid resultInterface = _resultInterface;
             int created = NativeMethods.DxcCreateInstance(&compilerClass, &compilerInterface, &compiler);
+
             if (created < 0) return Result.Failure<byte[]>($"{name}: DXC could not start (0x{created:X8}).");
 
             fixed (byte* bytes = text)
@@ -391,6 +401,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
                     0,
                     &resultInterface,
                     &result);
+
                 if (compiled < 0) return Result.Failure<byte[]>($"{name}: DXC failed to run (0x{compiled:X8}).");
             }
 
@@ -402,10 +413,12 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
                 string message = errors == 0
                     ? $"0x{status:X8}"
                     : Encoding.UTF8.GetString(GetBytes(errors)).TrimEnd('\0', '\n', ' ');
+
                 return Result.Failure<byte[]>(message);
             }
 
             output = GetOutput(result, 4);
+
             if (output == 0) return Result.Failure<byte[]>($"{name}: DXC compiled nothing.");
 
             return Result.Success(GetBytes(output).ToArray());

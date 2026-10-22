@@ -39,6 +39,7 @@ internal sealed unsafe class VulkanBarriers
                 WriteStages = stages,
                 WriteAccess = access & Writes,
             };
+
             return;
         }
 
@@ -71,6 +72,7 @@ internal sealed unsafe class VulkanBarriers
         if (state.Layout == layout && !isDiscard)
         {
             Use(ref state, stages, access, isWrite);
+
             return;
         }
 
@@ -115,6 +117,7 @@ internal sealed unsafe class VulkanBarriers
         {
             VkImageSubresourceRange all = new(aspect, 0, texture.Description.Levels, 0, texture.Layers);
             Use(texture.Image, all, ref texture.Whole, layout, stages, access, isWrite);
+
             return;
         }
 
@@ -173,6 +176,7 @@ internal sealed unsafe class VulkanBarriers
     internal void Record(VkDeviceApi api, VkCommandBuffer commandBuffer)
     {
         bool hasMemory = _memory.dstStageMask != VkPipelineStageFlags2.None;
+
         if (!hasMemory && _images.Count == 0) return;
 
         VkMemoryBarrier2 memory = _memory;

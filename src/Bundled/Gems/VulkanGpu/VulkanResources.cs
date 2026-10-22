@@ -141,7 +141,10 @@ internal sealed class VulkanTexture
     internal (uint Width, uint Height, uint Depth) GetSize(uint level)
     {
         uint depth = Description.Kind == GpuTextureKind.Texture3D ? Description.Layers : 1;
-        return (Math.Max(1, Description.Width >> (int)level), Math.Max(1, Description.Height >> (int)level),
+
+        return (
+            Math.Max(1, Description.Width >> (int)level),
+            Math.Max(1, Description.Height >> (int)level),
             Math.Max(1, depth >> (int)level));
     }
 
@@ -227,8 +230,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device) : IDisposable
         if (isHost)
         {
             Check(
-            _device.Api.vkMapMemory(memory, 0, Vulkan.VK_WHOLE_SIZE, VkMemoryMapFlags.None, &mapped),
-            "staging memory");
+                _device.Api.vkMapMemory(memory, 0, Vulkan.VK_WHOLE_SIZE, VkMemoryMapFlags.None, &mapped),
+                "staging memory");
         }
 
         return new VulkanBuffer(buffer, memory, info.size, (byte*)mapped);
@@ -315,6 +318,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device) : IDisposable
         };
         VkSampler sampler;
         Check(_device.Api.vkCreateSampler(&info, &sampler), "a sampler");
+
         return sampler;
     }
 
@@ -368,6 +372,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device) : IDisposable
         };
         VkDeviceMemory memory;
         Check(_device.Api.vkAllocateMemory(&info, &memory), what);
+
         return memory;
     }
 
@@ -393,6 +398,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device) : IDisposable
         };
         VkImageView view;
         Check(_device.Api.vkCreateImageView(&info, &view), "a texture view");
+
         return view;
     }
 
@@ -468,11 +474,13 @@ internal sealed class Table<T>
         {
             _items[(int)id] = item;
             _isLive[(int)id] = true;
+
             return id;
         }
 
         _items.Add(item);
         _isLive.Add(true);
+
         return (uint)(_items.Count - 1);
     }
 
@@ -487,6 +495,7 @@ internal sealed class Table<T>
         _items[(int)id] = default;
         _isLive[(int)id] = false;
         _free.Push(id);
+
         return item;
     }
 }

@@ -109,6 +109,7 @@ internal sealed unsafe class VulkanWindows(
         if (!isSupported)
         {
             _device.InstanceApi.vkDestroySurfaceKHR(surface);
+
             throw new InvalidOperationException($"The GPU cannot present to window {id}.");
         }
 
@@ -123,6 +124,7 @@ internal sealed unsafe class VulkanWindows(
 
         Create(window);
         _windows.Add(window);
+
         return window;
     }
 
@@ -160,9 +162,11 @@ internal sealed unsafe class VulkanWindows(
         if (window.IsAsked) return window.Image >= 0;
 
         window.IsAsked = true;
+
         if ((SDL.GetWindowFlags((SDL.Window*)window.Native) & SDL.WindowMinimized) != 0) return false;
 
         if (window.IsStale || HasResized(window)) Create(window);
+
         if (window.Swapchain.IsNull) return false;
 
         long start = Stopwatch.GetTimestamp();
@@ -175,6 +179,7 @@ internal sealed unsafe class VulkanWindows(
         if (result == VkResult.ErrorOutOfDateKHR)
         {
             Create(window);
+
             if (window.Swapchain.IsNull) return false;
 
             result = _device.Api.vkAcquireNextImageKHR(
@@ -189,6 +194,7 @@ internal sealed unsafe class VulkanWindows(
         if (result is not (VkResult.Success or VkResult.SuboptimalKHR))
         {
             Debugging.Warn($"Window {window.Id}'s image was not acquired: {result}");
+
             return false;
         }
 
@@ -199,6 +205,7 @@ internal sealed unsafe class VulkanWindows(
             Layout = VkImageLayout.Undefined,
             WriteStages = VkPipelineStageFlags2.ColorAttachmentOutput,
         };
+
         return true;
     }
 
@@ -211,6 +218,7 @@ internal sealed unsafe class VulkanWindows(
         foreach (VulkanWindow window in _windows)
         {
             window.IsAsked = false;
+
             if (window.Image < 0) continue;
 
             VkSemaphore drawn = window.Drawn[window.Image];
@@ -239,6 +247,7 @@ internal sealed unsafe class VulkanWindows(
     {
         int width;
         int height;
+
         if (!SDL.GetWindowSizeInPixels((SDL.Window*)window.Native, &width, &height)) return false;
 
         return (uint)width != window.Extent.width || (uint)height != window.Extent.height;
@@ -253,6 +262,7 @@ internal sealed unsafe class VulkanWindows(
 
         int width;
         int height;
+
         if (!SDL.GetWindowSizeInPixels((SDL.Window*)window.Native, &width, &height)) return default;
 
         return new VkExtent2D(
@@ -297,6 +307,7 @@ internal sealed unsafe class VulkanWindows(
             if (old.IsNotNull) _device.Api.vkDestroySwapchainKHR(old);
 
             window.Swapchain = VkSwapchainKHR.Null;
+
             return;
         }
 
@@ -333,6 +344,7 @@ internal sealed unsafe class VulkanWindows(
         {
             Debugging.Warn($"Window {window.Id} has no images: the GPU would not make its swapchain: {result}");
             window.Swapchain = VkSwapchainKHR.Null;
+
             return;
         }
 
@@ -364,12 +376,11 @@ internal sealed unsafe class VulkanWindows(
 
         Composition asked = _settings.Composition;
         bool canAsk = asked is Composition.Sdr or Composition.SdrLinear || _device.HasColorSpaces;
+
         if (canAsk && FindFormat(formats, asked.ToVulkan()) is { } found) return found;
 
         if (asked != Composition.Sdr)
-        {
             Debugging.Warn($"Window {window.Id} does not support the {asked} composition: it is composed SDR.");
-        }
 
         return FindFormat(formats, Composition.Sdr.ToVulkan()) ?? formats[0];
     }
@@ -389,6 +400,7 @@ internal sealed unsafe class VulkanWindows(
         _device.InstanceApi
             .vkGetPhysicalDeviceSurfacePresentModesKHR(_device.PhysicalDevice, window.Surface, &count, modes);
         ReadOnlySpan<VkPresentModeKHR> offered = new(modes, (int)count);
+
         if (offered.Contains(VkPresentModeKHR.Immediate)) return VkPresentModeKHR.Immediate;
 
         return offered.Contains(VkPresentModeKHR.Mailbox) ? VkPresentModeKHR.Mailbox : VkPresentModeKHR.Fifo;
@@ -460,6 +472,7 @@ internal sealed unsafe class VulkanWindows(
         VkSemaphoreCreateInfo info = new();
         VkSemaphore semaphore;
         _device.Api.vkCreateSemaphore(&info, &semaphore);
+
         return semaphore;
     }
 }

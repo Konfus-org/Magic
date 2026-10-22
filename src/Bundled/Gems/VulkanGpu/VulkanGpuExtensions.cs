@@ -128,9 +128,7 @@ internal static class VulkanGpuExtensions
             }
 
             if ((usage & GpuTextureUsage.DepthTarget) != GpuTextureUsage.None)
-            {
                 flags |= VkImageUsageFlags.DepthStencilAttachment;
-            }
 
             if ((usage & GpuTextureUsage.ComputeWrite) != GpuTextureUsage.None) flags |= VkImageUsageFlags.Storage;
 

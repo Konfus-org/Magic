@@ -113,6 +113,7 @@ internal sealed unsafe class VulkanTransfers : IDisposable
             if (transfer.Buffer is { } buffer)
             {
                 barriers.Use(ref buffer.State, VkPipelineStageFlags2.Copy, VkAccessFlags2.TransferWrite, isWrite: true);
+
                 continue;
             }
 
@@ -146,6 +147,7 @@ internal sealed unsafe class VulkanTransfers : IDisposable
             barriers.Record(_device.Api, commandBuffer);
             VkBufferCopy copy = new() { size = bytes };
             _device.Api.vkCmdCopyBuffer(commandBuffer, buffer.Handle, read.Handle, 1, &copy);
+
             return Finish(commandBuffer, read, bytes);
         }
         finally
@@ -188,6 +190,7 @@ internal sealed unsafe class VulkanTransfers : IDisposable
                 read.Handle,
                 1,
                 &copy);
+
             return Finish(commandBuffer, read, bytes);
         }
         finally
@@ -245,6 +248,7 @@ internal sealed unsafe class VulkanTransfers : IDisposable
 
         data.CopyTo(new Span<byte>(staging.Mapped + offset, data.Length));
         _used[slot] = offset + (ulong)data.Length;
+
         return (staging, offset);
     }
 
@@ -266,6 +270,7 @@ internal sealed unsafe class VulkanTransfers : IDisposable
                     size = transfer.Bytes,
                 };
                 _device.Api.vkCmdCopyBuffer(commandBuffer, transfer.Staging.Handle, buffer.Handle, 1, &copy);
+
                 continue;
             }
 
@@ -308,6 +313,7 @@ internal sealed unsafe class VulkanTransfers : IDisposable
         VkCommandBuffer commandBuffer;
         _device.Api.vkAllocateCommandBuffers(&info, &commandBuffer);
         _device.Api.vkBeginCommandBuffer(commandBuffer, VkCommandBufferUsageFlags.OneTimeSubmit);
+
         return commandBuffer;
     }
 
@@ -323,6 +329,7 @@ internal sealed unsafe class VulkanTransfers : IDisposable
         if (result == VkResult.Success) result = _device.Api.vkQueueWaitIdle(_device.Queue);
 
         _device.Api.vkFreeCommandBuffers(_pool, 1, &commandBuffer);
+
         return result == VkResult.Success
             ? Result.Success(new ReadOnlySpan<byte>(read.Mapped, (int)bytes).ToArray())
             : Result.Failure<byte[]>($"The read never arrived: {result}.");
