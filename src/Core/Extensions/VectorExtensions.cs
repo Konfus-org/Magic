@@ -22,6 +22,8 @@ public static class VectorExtensions
         /// </summary>
         public Vector3 ToWorld(in Camera camera, in Transform transform, Size size, float depth)
         {
+            // The pixel as a direction from the camera at a depth of 1: its place across the area the camera draws
+            // into, -1 to 1 each way with +Y up, times the tangent of half the field of view along each axis.
             Rectangle area = camera.Target.IsWindow
                 ? camera.Target.Section.AreaIn(size)
                 : new Rectangle(Point.Empty, size);

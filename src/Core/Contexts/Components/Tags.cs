@@ -28,6 +28,7 @@ public struct Tags : IComponent, IEquatable<Tags>
     /// </summary>
     public readonly bool Equals(Tags other)
     {
+        // Every tag this has, the other has too, and the other has no more than this.
         int count = 0;
         foreach (Tag held in this)
         {
@@ -50,6 +51,7 @@ public struct Tags : IComponent, IEquatable<Tags>
 
     public override readonly int GetHashCode()
     {
+        // In no order, as Equals ignores which slot holds each.
         int hash = 0;
         foreach (Tag held in this)
         {

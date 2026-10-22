@@ -24,7 +24,7 @@ internal static class Program
         AppDomain.CurrentDomain.UnhandledException += static (_, e) => Debugging.Critical(
             $"Magic crashed: {e.ExceptionObject}");
 
-        // Configure default cmd line args and parser.
+        // The options, whose descriptions are what --help prints.
         Option<string> project = new("--project")
         {
             Description = "The project to run: its .magic file, or the folder holding it.",

@@ -32,6 +32,7 @@ public static class TaskExtensions
                     return;
                 }
 
+                // What it threw, rather than the aggregate that wraps it, unless it threw more than one.
                 Exception thrown = failure.InnerExceptions.Count == 1 ? failure.InnerExceptions[0] : failure;
                 Debugging.Error($"A task let go with FireAndForget failed: {thrown}", member, file, line);
             });

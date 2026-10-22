@@ -30,6 +30,7 @@ public struct Scripts : IComponent, IEquatable<Scripts>
     /// </summary>
     public readonly bool Equals(Scripts other)
     {
+        // Every script this has, the other has too, and the other has no more than this.
         int count = 0;
         foreach (Handle<Script> held in this)
         {
@@ -52,6 +53,7 @@ public struct Scripts : IComponent, IEquatable<Scripts>
 
     public override readonly int GetHashCode()
     {
+        // In no order, as Equals ignores which slot holds each.
         ulong hash = 0;
         foreach (Handle<Script> held in this)
         {

@@ -4,8 +4,8 @@ using Magic.Services;
 namespace Magic.Interfaces;
 
 /// <summary>
-/// Work on an asset once its <see cref="IAssetLoader{T}"/> has made it, before anyone gets it, such as making its
-/// levels of detail. A gem provides one for a type as it provides any interface, by implementing it;
+/// Work on an asset once its <see cref="IAssetLoader{T}"/> has made it, before anyone gets it, such as making a model's
+/// clusters. A gem provides one for a type as it provides any interface, by implementing it;
 /// <see cref="Assets"/> asks for the one of a type (through <see cref="IServiceProvider"/>) each time it loads one, and
 /// runs it on every load and reload of the type.
 /// </summary>

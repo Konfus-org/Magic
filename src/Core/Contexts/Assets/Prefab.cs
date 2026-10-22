@@ -17,8 +17,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
     public Handle<Prefab> Handle { get; init; }
 
     /// <summary>
-    /// The things that compose a prefab.
-    /// These are the root parts, each with child parts under them.
+    /// Its top parts, each with the parts under it.
     /// </summary>
     public required IReadOnlyList<PrefabPart> Parts { get; init; }
 

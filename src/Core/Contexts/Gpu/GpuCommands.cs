@@ -88,6 +88,7 @@ public sealed class GpuCommands
     /// </summary>
     public GpuDebugGroup DebugGroup(string name)
     {
+        // The name's UTF-8 written straight into the frame's bytes, which the command points at.
         int start = _bytes.Count;
         int length = Encoding.UTF8.GetByteCount(name);
         CollectionsMarshal.SetCount(_bytes, start + length);

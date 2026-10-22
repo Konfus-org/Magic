@@ -223,10 +223,9 @@ public enum PassDrawn : byte
 /// One step of a renderer's frame, as data: a <c>.pass</c> file. It says when in the frame it runs
 /// (<see cref="Stage"/>), what it is (<see cref="Kind"/>), the shader it runs or the script that records it, the
 /// textures and buffers it writes by name, those it makes for itself and the passes after it, and values for its
-/// shader's <c>PassParams</c>. A
-/// <see cref="Pipeline"/> lists passes; the renderer runs each in its stage, in the order listed. What a pass reads its
-/// shader says: the renderer declares to it, ahead of it, every name the frame has by then, the renderer's own and what
-/// the passes before it made, and binds whichever the shader uses:
+/// shader's <c>PassParams</c>. A <see cref="Pipeline"/> lists passes; the renderer runs each in its stage, in the order
+/// listed. What a pass reads its shader says: the renderer declares to it, ahead of it, every name the frame has by
+/// then, the renderer's own and what the passes before it made, and binds whichever the shader uses:
 /// <c>{ "stage": "post", "kind": "fullscreen", "shader": { "id": 10230 },
 /// "creates": [ { "name": "Ldr", "format": "rgba16_float" } ], "writes": [ { "name": "Ldr" } ] }</c>.
 /// </summary>

@@ -49,6 +49,8 @@ public static class Engine
         }
 
         Project project = opened.Value;
+
+        // A run that restarts runs again at once, with the command line, the world and the frame clock it ended with.
         (Args Args, WorldState? State, double Seconds)? next = (args, null, 0);
         while (next is { } run)
         {
@@ -79,7 +81,10 @@ public static class Engine
     {
         using Lifetime lifetime = new();
         using Threads threads = new(lifetime);
-        using PosixSignalRegistration? interrupt = args.Headless // only allow Ctrl+C to kill when headless
+
+        // Headless, Ctrl+C stops the run, and its gems end; with a window it ends the process at once, as in any
+        // program.
+        using PosixSignalRegistration? interrupt = args.Headless
             ? PosixSignalRegistration.Create(
                 PosixSignal.SIGINT,
                 context =>

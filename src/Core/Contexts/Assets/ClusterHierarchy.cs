@@ -124,6 +124,7 @@ public sealed class ClusterHierarchy
                 bySlot[cluster.MaterialSlot] = into;
             }
 
+            // Its vertices go after those its slot's mesh has, so its indices, into its own, move up by as many.
             uint first = (uint)into.Vertices.Count;
             into.Vertices.AddRange(vertices.Slice(cluster.FirstVertex, cluster.VertexCount));
             foreach (byte index in indices.Slice(cluster.FirstIndex, cluster.TriangleCount * 3))

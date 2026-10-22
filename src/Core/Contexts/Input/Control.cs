@@ -6,8 +6,8 @@ namespace Magic.Contexts.Input;
 /// <summary>
 /// Every control Magic knows, on every kind of device, read through <see cref="IInput"/>. Each
 /// <see cref="DeviceKind"/> has a block of 256 values, so a control's value says its device kind and its number
-/// within it (<see cref="ControlExtensions"/>). The names are what an input map binds to in data: "KeySpace",
-/// "GamepadSouth".
+/// within it (<see cref="ControlExtensions"/>). A file names a control as it names any enum's value, in snake case:
+/// "key_space", "gamepad_south".
 /// </summary>
 public enum Control
 {

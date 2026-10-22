@@ -27,6 +27,7 @@ public static class CurveExtensions
                 CurveKey after = keys[i];
                 if (place <= after.At)
                 {
+                    // Two keys at one place are a step, to the later key's value.
                     float span = after.At - before.At;
 
                     return span > 0
