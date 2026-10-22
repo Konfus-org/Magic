@@ -66,6 +66,8 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
 
         if (!isClick && !input[Control.GamepadSouth].WasPressed) return;
 
+        // The ball starts just past the camera, clear of it, and goes where the camera looks, or on a click at what the
+        // pointer's ray hits.
         Transform camera = world.Get<Transform>(owner);
         Vector3 forward = Vector3.Transform(Vector3.UnitZ, camera.Rotation);
         Transform at = new()

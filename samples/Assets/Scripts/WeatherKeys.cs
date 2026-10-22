@@ -32,6 +32,7 @@ internal sealed class WeatherKeys(World world, IInput input) : IBehavior
 
     public void Update(in Frame frame)
     {
+        // How far each pair of keys moves its part of the weather this frame, a share of that part's range.
         float step = Rate * frame.DeltaSeconds;
         float cover = Read(Control.KeyRightBracket, Control.KeyLeftBracket) * step;
         float wind = Read(Control.KeyEquals, Control.KeyMinus) * step * MostWind;
@@ -45,6 +46,7 @@ internal sealed class WeatherKeys(World world, IInput input) : IBehavior
             {
                 ref Weather weather = ref weathers[i];
                 weather.Coverage = Math.Clamp(weather.Coverage + cover, 0, 1);
+                // The wind keeps its way and changes only its speed, blowing along +X when it had none.
                 Vector3 way = weather.Wind == Vector3.Zero ? Vector3.UnitX : Vector3.Normalize(weather.Wind);
                 weather.Wind = way * Math.Clamp(weather.Wind.Length() + wind, 0, MostWind);
                 weather.Fog = Math.Clamp(weather.Fog + fog, 0, MostFog);

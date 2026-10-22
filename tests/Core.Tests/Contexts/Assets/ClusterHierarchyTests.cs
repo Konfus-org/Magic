@@ -119,6 +119,7 @@ public sealed class ClusterHierarchyTests
             vertices[i] = new Vertex { Position = new Vector3(i, 0, 0) };
         }
 
+        // A cluster's indices count from its first vertex, so every cluster's are 0, 1, 2.
         byte[] indices = new byte[clusters.Length * 3];
         for (int i = 0; i < indices.Length; i++)
         {

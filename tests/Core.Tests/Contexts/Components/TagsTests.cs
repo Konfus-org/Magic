@@ -51,6 +51,7 @@ public sealed class TagsTests
     [Fact]
     public void Adding_the_last_tag_the_capacity_allows_is_accepted()
     {
+        // Every room but one filled.
         Tags tags = default;
         for (int i = 1; i < Tags.Capacity; i++)
         {

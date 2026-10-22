@@ -50,6 +50,8 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
     /// </summary>
     public void Start()
     {
+        // Each instance spread evenly over the square, half to one and a half times the model's size, turned any way
+        // about the up, and resting on the ground at its size.
         Vector3 centre = world.Get<Transform>(owner).Position;
         Transform[] transforms = new Transform[Instances];
         Renderer[] renderers = new Renderer[Instances];
@@ -66,6 +68,8 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
             renderers[i] = new Renderer { Model = Model, Materials = { Material } };
         }
 
+        // Each light spread over the square from past the instances' places in the sequence, so none stands on one,
+        // 1.5 to 3.5 m up, with a hue, brightness and range of its own.
         Transform[] places = new Transform[Lights];
         PointLight[] lights = new PointLight[Lights];
         for (int i = 0; i < Lights; i++)
@@ -100,6 +104,8 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
     /// </summary>
     private static float GetSpread(int index, int sequence)
     {
+        // Sequences 0 and 1 are R2's two axes, steps of 1/g and 1/g² for g the plastic number; the rest step by the
+        // golden ratio's fraction, each offset from the last so no two line up.
         float step = sequence switch
         {
             0 => 0.7548776662f,
@@ -115,6 +121,7 @@ internal sealed class Field(Entity owner, World world) : IScript, IDisposable
     /// </summary>
     private static Color GetHueColor(float hue)
     {
+        // Each channel a ramp of the hue round the colour wheel: red at 0 and 1, green at a third, blue at two thirds.
         float r = Math.Clamp(MathF.Abs((hue * 6) - 3) - 1, 0, 1);
         float g = Math.Clamp(2 - MathF.Abs((hue * 6) - 2), 0, 1);
         float b = Math.Clamp(2 - MathF.Abs((hue * 6) - 4), 0, 1);

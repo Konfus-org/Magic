@@ -72,6 +72,8 @@ internal sealed class Spawner(Entity owner, World world) : IBehavior, IDisposabl
     {
         if (frame.Seconds < _next) return;
 
+        // Each throw goes the golden angle round from the last, up at the speed and out at a quarter of it, from half a
+        // metre up and turned a way of its own. The bodies the system has ended since are let go from the front.
         _next = frame.Seconds + Every;
         Transform from = world.Get<Transform>(owner);
         float angle = _made++ * Turn;

@@ -28,6 +28,7 @@ internal sealed class Mover(Entity owner, World world) : IBehavior
 
     public void FixedUpdate(in Frame frame)
     {
+        // 0 to 1 and back once a period, easing at each end.
         float along = (1 - MathF.Cos((float)(frame.Seconds * Math.Tau / Seconds))) / 2;
         world.Get<Transform>(owner).Position = _start + (Offset * along);
     }

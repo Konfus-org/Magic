@@ -48,6 +48,7 @@ internal sealed class Looks(World world, IInput input, Services.Assets assets, I
 
     public void Start()
     {
+        // The world's effects pipeline, from the first post-processing there is.
         foreach ((_, Span<PostProcessing> effects) in world.Query<PostProcessing>())
         {
             if (effects.Length > 0) LoadAsync(effects[0].Effects).FireAndForget();
@@ -62,6 +63,7 @@ internal sealed class Looks(World world, IInput input, Services.Assets assets, I
 
         if (input[Key].WasPressed) _shown = (_shown + 1) % Options.Count;
 
+        // Eased toward the look at a pace no frame rate changes, nearly there once the seconds have gone by.
         Look to = Options[_shown];
         float t = 1 - MathF.Exp(-frame.DeltaSeconds * 3 / Seconds);
         _now = new Look

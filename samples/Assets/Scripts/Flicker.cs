@@ -33,6 +33,8 @@ internal sealed class Flicker(Entity owner, World world) : IBehavior
 
     public void Update(in Frame frame)
     {
+        // Three waves at rates that never fall in step, -1 to 1 together, swing the intensity across the depth; two
+        // more sway the light a few centimetres.
         float t = (float)frame.Seconds;
         float wave = (MathF.Sin(t * 7.3f) * 0.5f) + (MathF.Sin((t * 13.1f) + 1.7f) * 0.3f)
             + (MathF.Sin((t * 23.7f) + 4.1f) * 0.2f);

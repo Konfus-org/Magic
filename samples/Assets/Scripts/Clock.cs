@@ -29,6 +29,7 @@ internal sealed class Clock(World world, IInput input) : IBehavior
 
         if (rate == _rate) return;
 
+        // Each spin scaled from the rate it ran at to the new one, so letting go brings back what its prefab gave.
         foreach ((_, Span<Spin> spins, _) in world.Query<Spin, DirectionalLight>())
         {
             for (int i = 0; i < spins.Length; i++)

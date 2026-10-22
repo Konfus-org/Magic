@@ -34,6 +34,7 @@ internal sealed class SkyKeys(World world, IInput input, Services.Assets assets,
 
     public void Start()
     {
+        // The world's sky material, from the first sky there is.
         foreach ((_, Span<Sky> skies) in world.Query<Sky>())
         {
             if (skies.Length > 0) LoadAsync(skies[0].Material).FireAndForget();
@@ -46,6 +47,8 @@ internal sealed class SkyKeys(World world, IInput input, Services.Assets assets,
     {
         if (_sky is not { } sky) return;
 
+        // The haze grows and shrinks by a share of itself, so a step looks alike whether the air is clear or thick; the
+        // clouds move at a steady rate.
         float hazier = input[Control.KeyRight].Value - input[Control.KeyLeft].Value;
         float higher = input[Control.KeyPageUp].Value - input[Control.KeyPageDown].Value;
         Haze = Math.Clamp(Haze * MathF.Exp(hazier * frame.DeltaSeconds), 0.2f, 12);

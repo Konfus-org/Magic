@@ -31,6 +31,7 @@ internal sealed class Turret(Entity owner, World world) : IBehavior
     {
         if (!PlayerCamera.TryGetPosition(world, out Vector3 player)) return;
 
+        // Toward the camera the short way round, no more than the rate allows this frame.
         ref Transform transform = ref world.Get<Transform>(owner);
         Vector3 toward = player - transform.Position;
         float wanted = MathF.Atan2(toward.X, toward.Z);

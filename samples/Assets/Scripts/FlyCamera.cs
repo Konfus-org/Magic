@@ -60,6 +60,8 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
 
     public void Update(in Frame frame)
     {
+        // The turn: the mouse's motion while its right button is held, and the right stick's push over the frame, up
+        // looking up, as the tilt is down positive. The move: each pair of keys and the stick for it, added.
         Vector2 mouse = _input[Control.MouseRight].IsDown
             ? new Vector2(_input[Control.MouseMotionX].Value, _input[Control.MouseMotionY].Value) * MouseTurn
             : Vector2.Zero;

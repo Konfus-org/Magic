@@ -31,6 +31,7 @@ public sealed class JsonTests
     [Fact]
     public void Read_refuses_a_key_the_type_lacks()
     {
+        // The key differs from the type's cellSize by its case alone.
         Result<Domain> read = Json.Read<Domain>("{ \"cellsize\": 32 }"u8);
 
         Assert.False(read.Ok);
@@ -79,6 +80,7 @@ public sealed class JsonTests
     [Fact]
     public void Read_of_an_element_refuses_a_key_the_type_lacks()
     {
+        // The key differs from the type's cellSize by its case alone.
         using JsonDocument document = JsonDocument.Parse("{ \"cellsize\": 32 }");
 
         Result<Domain> read = Json.Read<Domain>(document.RootElement);

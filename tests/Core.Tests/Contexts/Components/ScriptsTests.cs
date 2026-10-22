@@ -51,6 +51,7 @@ public sealed class ScriptsTests
     [Fact]
     public void Adding_the_last_script_the_capacity_allows_is_accepted()
     {
+        // Every room but one filled.
         Scripts scripts = default;
         for (int i = 1; i < Scripts.Capacity; i++)
         {

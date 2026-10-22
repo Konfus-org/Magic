@@ -19,6 +19,8 @@ internal sealed class SpinSystem : IParallelSystemScript<Transform, Spin>
         (_, Span<Transform> transforms, Span<Spin> spins) = chunk;
         for (int i = 0; i < transforms.Length; i++)
         {
+            // This frame's turn about its axis, the world's up when it has none, after the rotation it has, normalised
+            // so rounding never builds up.
             Vector3 axis = spins[i].Axis == Vector3.Zero ? Vector3.UnitY : Vector3.Normalize(spins[i].Axis);
             float radians = spins[i].DegreesPerSecond * frame.DeltaSeconds * (MathF.PI / 180);
             transforms[i].Rotation = Quaternion.Normalize(

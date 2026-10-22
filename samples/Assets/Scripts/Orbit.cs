@@ -27,6 +27,7 @@ internal sealed class Orbit(Entity owner, World world) : IBehavior
 
     public void Update(in Frame frame)
     {
+        // Round the circle at its rate, turned a quarter on from its angle so it faces the way it goes.
         float angle = (float)(frame.Seconds * DegreesPerSecond * (Math.PI / 180));
         ref Transform transform = ref world.Get<Transform>(owner);
         transform.Position = _middle + new Vector3(MathF.Sin(angle) * Radius, 0, MathF.Cos(angle) * Radius);
