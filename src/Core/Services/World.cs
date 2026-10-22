@@ -513,6 +513,28 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
+    /// Opens the project's entry point, then each other domain of the project's own but its loading domain, in place of
+    /// the world, one after another, each once the last is shown, every gem having readied it, then stops the run:
+    /// everything the domains show first is so made, and kept in the cache (--bake). Core calls it in place of
+    /// <see cref="OpenEntryPointAsync"/>.
+    /// </summary>
+    internal async Task BakeAsync()
+    {
+        await OpenEntryPointAsync().ConfigureAwait(false);
+        IReadOnlyList<Handle<Domain>> domains = _domains is null ? [] : _assets.GetProjectAssets<Domain>();
+        foreach (Handle<Domain> domain in domains)
+        {
+            if (domain == _project.EntryPoint || domain == _project.Loading) continue;
+
+            Result<Domain> opened = await OpenAsync(domain, DomainOpenMode.Replace, null, _lifetime.Stopping)
+                .ConfigureAwait(false);
+            if (!opened.Ok) Debugging.Error($"{_assets.GetPath(domain)} does not open to be baked: {opened.Error}");
+        }
+
+        _lifetime.Stop("every domain of the project is baked");
+    }
+
+    /// <summary>
     /// Each of <paramref name="entities"/> as the saved world holds it, its components written as JSON, telling
     /// <paramref name="progress"/> how far it is. Any thread: it touches nothing of the world.
     /// </summary>

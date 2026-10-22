@@ -79,6 +79,11 @@ internal static class Program
         {
             Description = "Exit with code 2 if any error was logged.",
         };
+        Option<bool> bake = new("--bake")
+        {
+            Description = "Open each of the project's domains in turn, each once the last is shown, then stop: "
+                + "everything they use is made and cached, as a Release build bakes it.",
+        };
         Option<bool> verbose = new("--verbose")
         {
             Description = "Also log Verbose lines: detail that is usually noise.",
@@ -91,6 +96,7 @@ internal static class Program
             settings,
             preset,
             failOnError,
+            bake,
             verbose };
 
         // Help, version and bad arguments are answered here and exit.
@@ -110,6 +116,7 @@ internal static class Program
             Headless = parsed.GetValue(headless),
             Settings = parsed.GetValue(settings) ?? [],
             Preset = parsed.GetValue(preset) ?? string.Empty,
+            Bake = parsed.GetValue(bake),
         };
 
         // Nothing is awaited before the engine runs, so it runs on the process's first thread, which the OS ties

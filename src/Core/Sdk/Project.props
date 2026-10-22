@@ -12,4 +12,7 @@
     <RunArguments>--project "$(MSBuildProjectDirectory)"</RunArguments>
     <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
   </PropertyGroup>
+
+  <!-- A Release build copies the project into Projects/<Name>/ and bakes its caches there. -->
+  <Import Project="Project.targets" />
 </Project>

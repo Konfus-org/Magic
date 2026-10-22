@@ -71,6 +71,11 @@ public sealed class Assets
     private readonly string _engine;
 
     /// <summary>
+    /// The project's own <c>Assets/</c>: what is under it is the project's, not the engine's or a gem's.
+    /// </summary>
+    private readonly string _project;
+
+    /// <summary>
     /// The default and failure assets found missing, by path, each said once.
     /// </summary>
     private readonly ConcurrentDictionary<string, bool> _missingNamed = new(StringComparer.Ordinal);
@@ -113,7 +118,8 @@ public sealed class Assets
         _services = services;
         _stopping = lifetime.Stopping;
 
-        string[] folders = [files.Combine(project.Root, "Assets"), .. resources];
+        _project = files.Combine(project.Root, "Assets");
+        string[] folders = [_project, .. resources];
         List<string> roots = [];
         foreach (string folder in folders)
         {
@@ -126,7 +132,7 @@ public sealed class Assets
 
         _roots = [.. roots];
         _engine = resources.Count > 0 ? resources[0] : string.Empty;
-        _index = Build(files, _roots, _engine);
+        _index = Build(files, _roots, _engine, _project);
 
         Channel<string> changes = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
         SubscriptionList watches = new();
@@ -339,6 +345,18 @@ public sealed class Assets
     }
 
     /// <summary>
+    /// The project's own assets of type <typeparamref name="T"/>, those under its <c>Assets/</c> rather than the
+    /// engine's or a gem's, in the order of their paths.
+    /// </summary>
+    internal IReadOnlyList<Handle<T>> GetProjectAssets<T>()
+        where T : IAsset<T>
+    {
+        List<string> paths = _index.Project.FindAll(IsOf<T>);
+        paths.Sort(StringComparer.OrdinalIgnoreCase);
+        return paths.ConvertAll(Find<T>);
+    }
+
+    /// <summary>
     /// Whether <paramref name="asset"/> is <paramref name="source"/>, or is made from it, directly or through others,
     /// as <paramref name="madeFrom"/> says.
     /// </summary>
@@ -404,17 +422,18 @@ public sealed class Assets
     }
 
     /// <summary>
-    /// Every file with a sidecar under <paramref name="roots"/>, by its id, its path and its folder, and those under
-    /// <paramref name="engine"/> by their path besides. A sidecar without its file is warned about; a broken one, or
-    /// one with an id another file has already, is an error and gives no asset, unless it is at that file's path under
-    /// a later root, which the first then overrides.
+    /// Every file with a sidecar under <paramref name="roots"/>, by its id, its path and its folder, those under
+    /// <paramref name="engine"/> by their path besides, and the paths of those under <paramref name="project"/>. A
+    /// sidecar without its file is warned about; a broken one, or one with an id another file has already, is an error
+    /// and gives no asset, unless it is at that file's path under a later root, which the first then overrides.
     /// </summary>
-    private static Index Build(IFileSystem files, string[] roots, string engine)
+    private static Index Build(IFileSystem files, string[] roots, string engine, string project)
     {
         Index index = new();
         foreach (string root in roots)
         {
             bool isEngine = string.Equals(root, engine, StringComparison.OrdinalIgnoreCase);
+            bool isProject = string.Equals(root, project, StringComparison.OrdinalIgnoreCase);
             foreach (string sidecar in FileSystem.FindUnder(root, Sidecar))
             {
                 string path = sidecar[..^Sidecar.Length];
@@ -450,6 +469,8 @@ public sealed class Assets
                 Indexed indexed = new(read.Value.Id, path, file, read.Value.Settings);
                 index.ById.Add(indexed.Id, indexed);
                 if (isEngine) index.Engine.TryAdd(path, indexed);
+
+                if (isProject) index.Project.Add(path);
 
                 if (index.ByPath.TryAdd(path, indexed))
                 {
@@ -598,7 +619,7 @@ public sealed class Assets
     private async Task ApplyAsync(HashSet<string> touched)
     {
         Index before = _index;
-        Index now = Build(_files, _roots, _engine);
+        Index now = Build(_files, _roots, _engine, _project);
         _index = now;
 
         bool filesChanged = false;
@@ -877,6 +898,11 @@ public sealed class Assets
         public Dictionary<string, List<string>> ByFolder { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Dictionary<string, Indexed> Engine { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// The paths of the project's own assets, those under its <c>Assets/</c>.
+        /// </summary>
+        public List<string> Project { get; } = [];
     }
 
     /// <summary>

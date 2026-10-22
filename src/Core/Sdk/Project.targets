@@ -1,0 +1,45 @@
+<Project>
+  <!-- A project in a Release build: its output folder holds it whole, its .magic file and Assets/ beside its code, and
+       the caches its domains make, baked by running Magic on it there, so a player's first run makes nothing (README.md
+       beside this file). Project.props imports it for a project built for a Magic folder, and the repository's
+       samples/Directory.Build.props for its own; both name the Magic to run as RunCommand. Any other build reads the
+       project where it is written and makes its caches as it runs. -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Content Include="$(MSBuildProjectName).magic;Assets/**" Exclude="Assets/**/*.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The bake reruns when the project's files, its code, or the Magic, gems and engine assets it runs with changed. It
+       starts from nothing each time, so the cache holds what this build's domains make and nothing an earlier one left:
+       Magic opens each domain in the output folder, its caches written to a scratch folder (MagicCache), which then
+       becomes the project's Cache/. A bake that cannot run, or logs an error, fails the build; MagicBake=false leaves
+       it out where Magic cannot run at all. -->
+  <Target Name="BakeCaches" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' and '$(MagicBake)' != 'false' and '$(DesignTimeBuild)' != 'true'"
+          Inputs="@(Content);@(IntermediateAssembly);@(_MagicBakeRunsWith)" Outputs="$(IntermediateOutputPath)Bake.stamp">
+    <PropertyGroup>
+      <_MagicBakeCache>$(IntermediateOutputPath)Bake/</_MagicBakeCache>
+    </PropertyGroup>
+
+    <RemoveDir Directories="$(OutDir)Cache;$(_MagicBakeCache)" />
+    <Message Importance="high" Text="Baking $(MSBuildProjectName)'s caches: Magic opens each of its domains in turn." />
+    <!-- Yielding: the node builds other projects while Magic runs. Magic's errors are the build's, its other lines
+         detail; the ceiling is for a bake that never ends. -->
+    <Exec Command="&quot;$(RunCommand)&quot; --project &quot;$(OutDir)$(MSBuildProjectName).magic&quot; --headless --bake --fail-on-error --seconds 1800"
+          EnvironmentVariables="MagicCache=$(_MagicBakeCache)" YieldDuringToolExecution="true"
+          LogStandardErrorAsError="true" StandardOutputImportance="low" />
+    <Error Condition="!Exists('$(_MagicBakeCache)$(MSBuildProjectName)')"
+           Text="Baking $(MSBuildProjectName) made no cache: the .magic file's name must be the project's, $(MSBuildProjectName)." />
+
+    <ItemGroup>
+      <_MagicBaked Include="$(_MagicBakeCache)$(MSBuildProjectName)/**" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_MagicBaked)" DestinationFolder="$(OutDir)Cache/%(RecursiveDir)" />
+    <Touch Files="$(IntermediateOutputPath)Bake.stamp" AlwaysCreate="true" />
+  </Target>
+
+  <!-- What Magic runs with, beside the folder RunCommand is in: itself, its gems and the engine's assets. -->
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <_MagicBakeRunsWith Include="$([System.IO.Path]::GetDirectoryName('$(RunCommand)'))/Magic.dll" />
+    <_MagicBakeRunsWith Include="$([System.IO.Path]::GetDirectoryName('$(RunCommand)'))/Gems/**" />
+    <_MagicBakeRunsWith Include="$([System.IO.Path]::GetDirectoryName('$(RunCommand)'))/Resources/**" />
+  </ItemGroup>
+</Project>

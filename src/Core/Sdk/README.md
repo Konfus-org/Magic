@@ -20,10 +20,19 @@ What must hold, since Magic loads code only from its own folder:
   once. Its `Description` and `Authors` are shown as Magic starts it, and its settings' doc comments are their
   descriptions, so its documentation file is built.
 - **The project's Run is Magic.** A project's Run, an IDE's or `dotnet run`'s, starts the Magic in `MagicDir` on the
-  project, in the project's folder. Magic writes its caches and logs in its own folder, so the project's folder holds
-  only what its author puts there.
+  project, in the project's folder. Magic writes its logs in its own folder and its caches in the machine's, so the
+  project's folder holds only what its author puts there.
+- **A release build is the game.** `Project.targets`, which `Project.props` imports, makes a `Release` build copy the
+  project's `.magic` file and `Assets/` into `Projects/<Name>/` beside its code, then bake its caches there: it runs
+  Magic headless on that copy with `--bake`, which opens each domain in turn, its caches written to a scratch folder,
+  then kept as the project's `Cache/`, which Magic reads before the machine's
+  ([The cache](../README.md#the-cache)). The bake starts from nothing whenever the project, its code or the Magic it
+  runs with changed, so the cache holds what this build's domains make and nothing an earlier one left. It needs a
+  GPU, and a bake that cannot run, or logs an error, fails the build; `-p:MagicBake=false` leaves it out. What a
+  script makes later that no domain shows is made on first use, as without a bake.
 
 Nothing else is imposed: the repository's analyzers, banned symbols and folder rules are its own house rules, and its
-own gems and samples are set up by its build properties rather than by these files. What a gem is and can ask for,
+own gems and samples are set up by its build properties rather than by these files, but for `Project.targets`, which
+its samples import too, so a project is baked one way. What a gem is and can ask for,
 and what a project file says, is in Core's README ([Gems](../README.md#gems),
 [the project file](../README.md#the-project-file)).

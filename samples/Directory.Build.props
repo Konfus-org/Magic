@@ -27,6 +27,10 @@
     <RunWorkingDirectory>$(MSBuildThisFileDirectory)../</RunWorkingDirectory>
   </PropertyGroup>
 
+  <!-- A Release build copies the project into its output folder and bakes its caches there, as a project built for a
+       Magic folder does. -->
+  <Import Project="$(MSBuildThisFileDirectory)../src/Core/Sdk/Project.targets" />
+
   <ItemGroup>
     <ProjectReference Include="$(MSBuildThisFileDirectory)../src/Bundled/Gems/*/*.csproj;$(MSBuildThisFileDirectory)../src/Bundled/Resources/Resources.csproj"
                       ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />

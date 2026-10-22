@@ -26,6 +26,12 @@ namespace Magic.Services;
 /// version it was made from, a run that changed what it is made from makes its own over it, and a reader in another
 /// process never finds half of one. Nothing is kept in memory: whoever reads an entry keeps what it needs of it.
 /// </para>
+/// <para>
+/// A project can bring its entries with it, as a Release build bakes them: <c>Cache/&lt;Type&gt;/&lt;key&gt;</c> in
+/// the project's own folder, read before the machine's and never written, as an installed game's folder may not be
+/// writable. One made from another version, as a preset with other settings makes, is dirty there too, and the
+/// machine's is read, or made, in its place.
+/// </para>
 /// </summary>
 public sealed class Caches
 {
@@ -38,9 +44,14 @@ public sealed class Caches
     private readonly IServiceProvider _services;
 
     /// <summary>
-    /// Where the project's entries are, a folder per type under it.
+    /// Where the project's entries are on this machine, a folder per type under it.
     /// </summary>
     private readonly string _folder;
+
+    /// <summary>
+    /// Where the entries the project brings with it are, a folder per type under it, read first and never written.
+    /// </summary>
+    private readonly string _bundled;
 
     internal Caches(IFileSystem files, IServiceProvider services, Project project)
     {
@@ -51,12 +62,13 @@ public sealed class Caches
             ? named
             : files.Combine(local, "Magic", "Cache");
         _folder = files.Combine(machine, project.Name);
+        _bundled = files.Combine(project.Root, "Cache");
     }
 
     /// <summary>
-    /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>;
-    /// why not when nothing is, or when what is was made from another version, or by another
-    /// <see cref="ICache{T}.Version"/>.
+    /// What is cached of <paramref name="key"/> as a <typeparamref name="T"/>, made from <paramref name="version"/>:
+    /// what the project brings, else what the machine keeps; why not when neither holds it, or when what they hold was
+    /// made from another version, or by another <see cref="ICache{T}.Version"/>.
     /// </summary>
     public async Task<Result<T>> ReadAsync<T>(ulong key, ulong version, CancellationToken cancel)
     {
@@ -65,16 +77,10 @@ public sealed class Caches
             return Result.Failure<T>($"no gem the project lists caches {typeof(T).Name}s.");
         }
 
-        string file = GetFile<T>(key);
-        if (!_files.FileExists(file)) return Result.Failure<T>($"nothing is cached at {file}.");
-
-        Result<byte[]> bytes = await _files.ReadAsync(file, cancel).ConfigureAwait(false);
-        if (!bytes.Ok) return Result.Failure<T>($"{file} could not be read: {bytes.Error}");
-
-        // A dirty entry is left for the write that follows to replace: deleting it here would collide with another
-        // reader of the same entry, and it is never read as valid anyway.
-        Result<T> read = Read(cache, bytes.Value, version);
-        return read.Ok ? read : Result.Failure<T>($"{file} is dirty: {read.Error}");
+        Result<T> bundled = await ReadAsync(cache, GetFile<T>(_bundled, key), version, cancel).ConfigureAwait(false);
+        return bundled.Ok
+            ? bundled
+            : await ReadAsync(cache, GetFile<T>(_folder, key), version, cancel).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -91,7 +97,7 @@ public sealed class Caches
             return;
         }
 
-        string file = GetFile<T>(key);
+        string file = GetFile<T>(_folder, key);
         Result written = await _files.WriteAsync(file, ToBytes(cache, version, value), cancel).ConfigureAwait(false);
         if (!written.Ok) Debugging.Warn($"{file} could not be written, so it is made again next time: {written.Error}");
     }
@@ -140,10 +146,27 @@ public sealed class Caches
     }
 
     /// <summary>
-    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is: in the project's folder.
+    /// Where what is cached of <paramref name="key"/> as a <typeparamref name="T"/> is under <paramref name="folder"/>.
     /// </summary>
-    private string GetFile<T>(ulong key)
+    private string GetFile<T>(string folder, ulong key)
     {
-        return _files.Combine(_folder, typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
+        return _files.Combine(folder, typeof(T).Name, key.ToString(CultureInfo.InvariantCulture));
+    }
+
+    /// <summary>
+    /// What the entry at <paramref name="file"/> holds, read by <paramref name="cache"/>, made from
+    /// <paramref name="version"/>; why not when there is none, or it was made from something else.
+    /// </summary>
+    private async Task<Result<T>> ReadAsync<T>(ICache<T> cache, string file, ulong version, CancellationToken cancel)
+    {
+        if (!_files.FileExists(file)) return Result.Failure<T>($"nothing is cached at {file}.");
+
+        Result<byte[]> bytes = await _files.ReadAsync(file, cancel).ConfigureAwait(false);
+        if (!bytes.Ok) return Result.Failure<T>($"{file} could not be read: {bytes.Error}");
+
+        // A dirty entry is left for the write that follows to replace: deleting it here would collide with another
+        // reader of the same entry, and it is never read as valid anyway.
+        Result<T> read = Read(cache, bytes.Value, version);
+        return read.Ok ? read : Result.Failure<T>($"{file} is dirty: {read.Error}");
     }
 }

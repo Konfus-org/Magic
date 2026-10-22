@@ -49,8 +49,8 @@ error was logged, until their world has loaded; and runs them with a window thro
 display and a GPU. Both runs wait for the world rather than for a number of frames, through the console's `wait loaded`,
 so they prove the shaders compile and the domain opens, and a world that never loads fails rather than passing on the
 loading screen. What bounds them is a time limit, Magic's `--seconds`, only a ceiling: a frame count would be none, as
-a headless loading screen costs next to nothing to draw, so thousands of frames go by while a cold shader cache
-compiles, and how many depends on the machine. Each run then opens every other domain the project's assets hold, all
+a headless loading screen costs next to nothing to draw, so thousands of frames go by while a cold cache is made, and
+how many depends on the machine. Each run then opens every other domain the project's assets hold, all
 but its loading domain, in place of the world, one after another through the console's `open`, so a change that
 breaks any sample fails, and the windowed run takes a screenshot of each; the time limit is per domain, as a cold
 cache makes a large domain's models and textures again for minutes. It ends with one line per step and its exit
@@ -68,7 +68,7 @@ project ends, so which native library is building, and for how long, shows as it
 
 `Screenshot.ps1` is the visual check: it runs the project with a window, pipes console lines in, and prints the PNGs'
 paths as its only output, one a line, so `$png = tools/Screenshot.ps1` keeps them. It waits until the world has loaded,
-however long a cold shader cache takes, then a while longer for what fades in to settle, takes the screenshot, then
+however long a cold cache takes, then a while longer for what fades in to settle, takes the screenshot, then
 opens each domain it is given in turn and takes one of each once it has settled, and quits; a world that never loads
 within the time limit fails the run. The wait to settle is counted in frames, so every run's images are taken at the
 same point. Console lines can be sent before the first screenshot, such as choosing a debug view, so what the image

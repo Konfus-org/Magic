@@ -38,4 +38,10 @@ public sealed class Args
     /// engine's. Empty for the default alone.
     /// </summary>
     public string Preset { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The run opens each of the project's domains in turn, each once the last is shown, then stops (--bake): what they
+    /// use is made and cached, as a Release build bakes it beside the project.
+    /// </summary>
+    public bool Bake { get; init; }
 }

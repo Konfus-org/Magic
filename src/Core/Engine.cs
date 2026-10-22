@@ -122,8 +122,10 @@ public static class Engine
             () =>
             {
                 // On the main thread before the first frame, once every gem is made, so every gem's loaders are there
-                // to read the domain: the world as the run before left it, else the project's entry point.
+                // to read the domain: the world as the run before left it, else the project's entry point, or, baking,
+                // each of the project's domains in turn.
                 if (state is { } saved) world.Restore(saved);
+                else if (args.Bake) world.BakeAsync().FireAndForget();
                 else world.OpenEntryPointAsync().FireAndForget();
 
                 frames.Run();

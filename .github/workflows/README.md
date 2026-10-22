@@ -7,7 +7,9 @@ any analyzer rule, so the format check adds what no build can check, such as a f
 formatting is the same on every OS. The Screenshot step needs a display, which no runner has, so it stays on developer
 machines. The Headless step still needs a GPU device,
 since the samples render offscreen: macOS runners have a virtual one, and Linux gets Mesa's software Vulkan driver
-and runs the platform library's offscreen video driver, both from the setup action. Two checks have no local
+and runs the platform library's offscreen video driver, both from the setup action. The Release build needs it too, as
+it bakes the samples' caches by running Magic on them where it built them; the Headless step then opens that built
+project, so it runs on what ships and reads the cache the package carries. Two checks have no local
 equivalent: Docs follows every link in the Markdown, to files, their headings and the web, so a moved file or a renamed
 heading fails here instead of going quietly stale; CodeQL is GitHub's security analysis of the C#, which reads the
 sources and the restored packages without compiling, so it needs no native libraries and runs in minutes.

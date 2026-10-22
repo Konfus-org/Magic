@@ -50,8 +50,11 @@ build once that restore, in its status bar, has finished.
 Running the samples, with `dotnet run --project samples` or the Samples project's Run in an IDE, first builds what
 they run with: Magic, the bundled gems and resources, and the samples' own code, each only where something changed.
 Then it starts Magic on them, passing it any options after `--`. Building `src/Core` alone builds Magic alone. Only a
-`Release` build copies the engine's and the gems' assets beside Magic; the others read them where they are in the
-repository, so building stays fast and an edit to one reaches a running engine at once.
+`Release` build copies the engine's and the gems' assets beside Magic, and a project's `.magic` file and `Assets/`
+beside its code, then bakes the project's caches there by running Magic on it, so its folder is a game that makes
+nothing on a player's first run ([Building for Magic](src/Core/Sdk/README.md)); the bake needs a GPU, and
+`-p:MagicBake=false` leaves it out. The other builds read assets where they are in the repository, so building stays
+fast and an edit to one reaches a running engine at once.
 
 ### Your own gem or project
 
@@ -71,14 +74,16 @@ counts frames.
 otherwise it ends the process at once. `--set Gem.setting=value`, as many times as needed, overrides a gem's setting
 from the presets, and `--preset Name` applies a preset, an asset of such settings for a kind of machine, over the
 project's own and under `--set` ([Gem settings](src/Core/README.md#gem-settings)). `--verbose` also logs the
-verbose lines, detail that is usually noise.
+verbose lines, detail that is usually noise. `--bake` opens each of the project's domains in turn, each once the last
+is shown, then stops, so everything they use is made and cached: what a `Release` build runs to bake a project.
 
 Exit codes: 0 clean, 1 bad arguments or a project that cannot be opened, 2 an error was logged under
 `--fail-on-error`. A crash ends the process with the OS's crash code and leaves a `.crash` file in `Logs/` beside
 Magic ([Crashes](src/Core/README.md#crashes)). What is slow to make, such as a compiled shader or a model's clusters,
 is kept in one folder per machine, shared by every checkout and worktree, `Magic/Cache/` under the user's local
 application data unless `MagicCache` names another, and made again when what it was made from changes; deleting the
-folder is always safe ([The cache](src/Core/README.md#the-cache)).
+folder is always safe. A project baked by a `Release` build brings its own in its folder, read first
+([The cache](src/Core/README.md#the-cache)).
 
 ## How it works
 

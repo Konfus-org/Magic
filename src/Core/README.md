@@ -377,6 +377,14 @@ folder of its own in it, by its name, as two projects' assets can share an id.
 
 So a gem that compiles a shader reads the cache first, and only on a miss compiles and writes what it made.
 
+A project can bring its entries with it: a `Cache/` folder in the project's own folder, laid out as the machine's, is
+read before it and never written, as a game's installed folder may not be writable. A `Release` build bakes one there
+(the command line's `--bake`, [Building for Magic](Sdk/README.md)): it opens each of the project's domains in turn,
+each once the last is shown, every gem having readied it, so every entry a domain needs for its first frame is made,
+in the build machine's GPU's shader format. An entry made from another version, as a player's preset with other
+settings makes, is dirty there as anywhere, and the machine's is read, or made, in its place; so is a shader in
+another format, and what a script makes later that no domain shows.
+
 ## Components
 
 A component is an unmanaged struct that implements `IComponent`, a marker with nothing in it: the world takes only

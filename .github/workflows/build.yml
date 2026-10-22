@@ -53,18 +53,20 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "Version=$version" >> $env:GITHUB_ENV
 
+      # The build bakes the samples' caches beside them in Build/bin/Release/Projects/Samples, and the headless run
+      # opens them there, so it runs on what ships and reads the bundle the package carries.
       - name: Build and run headless
         shell: pwsh
-        run: ./tools/Validate.ps1 -Configuration Release -Only Build,Headless
+        run: ./tools/Validate.ps1 -Configuration Release -Only Build,Headless -Project Build/bin/Release/Projects/Samples
 
-      # Magic's folder without what the build and the run left in it. tar keeps the executable bit that a zip would
-      # lose, so Linux and macOS get a tarball.
+      # Magic's folder without what the build and the run left in it; a project's baked Cache/ inside it ships. tar
+      # keeps the executable bit that a zip would lose, so Linux and macOS get a tarball.
       - name: Package
         shell: pwsh
         run: |
           $platform = "${{ runner.os }}-${{ runner.arch }}".ToLowerInvariant()
           $name = "Magic-$env:Version-$platform"
-          $excluded = 'Tests', 'Tools', 'Logs', 'Cache', 'Screenshots'
+          $excluded = 'Tests', 'Tools', 'Logs', 'Screenshots'
           if ($IsWindows) {
             Get-ChildItem Build/bin/Release -Exclude $excluded | Compress-Archive -DestinationPath "$name.zip"
           } else {
