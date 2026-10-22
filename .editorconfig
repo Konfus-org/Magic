@@ -1,7 +1,8 @@
 # Code style and analyzer rules. The build enforces them (EnforceCodeStyleInBuild) and treats every warning as an
-# error, so "warning" below means "the build fails", or, for what a build cannot check (IDE0001, and a file's line
-# endings, charset and final newline), Validate's format check fails. tools/Format.ps1 applies the fixes these settings
-# describe. Every code-quality rule is on (AnalysisMode All); the few that are off say why.
+# error, so "warning" below means "the build fails". What a build cannot check (IDE0001, and a file's charset and final
+# newline) only tools/Format.ps1 holds, on the files a change touches, and git makes every line ending LF
+# (.gitattributes). tools/Format.ps1 applies the fixes these settings describe. Every code-quality rule is on
+# (AnalysisMode All); the few that are off say why.
 root = true
 
 [*]

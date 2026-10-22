@@ -11,7 +11,7 @@ a person's judgment, which the build still reports; the repository's own layout 
 which put a blank line before a way out of a block and lay out an if/else whose bodies are one statement; the
 line-length and list analyzers' fixes, which wrap a line of code that is too long and put a wrapped list's items on
 lines of their own; and whitespace, line endings and the final newline. The rules are .editorconfig's, the ones the
-build and Validate's Format step check, so what it leaves passes them unless a fix needed judgment. It reads the code
+build checks, so what it leaves passes it unless a fix needed judgment. It reads the code
 as the last build left it, generated bindings included, and builds only the repository's own analyzers, which dotnet
 format loads from their build. tools/AgentTaskComplete.ps1 runs it first, so an agent's change is formatted before it
 is validated. Runs from any current directory.

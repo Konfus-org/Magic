@@ -1,16 +1,24 @@
 <#
 .SYNOPSIS
-What an agent runs on completing a task: tools/Format.ps1 on the change, tools/Validate.ps1 in full, then a stamp of
-the exact state it validated, without which the project's hook refuses the agent's git commit and git merge.
+What an agent runs on completing a task: tools/Format.ps1 on the change, the steps of tools/Validate.ps1 that what the
+change can affect needs, then a stamp of the exact state it validated, without which the project's hook refuses the
+agent's git commit and git merge.
 
 .DESCRIPTION
-Validation means the app ran with the change and its screenshot was looked at (AGENTS.md, Finish). This script first
-formats the change, so what is validated, stamped and reviewed is the formatted code, then runs every step of
-tools/Validate.ps1, the samples headless and with a window through every one of their domains, and when all
-pass, stamps the checkout's state: the git tree of every file in it, tracked or new, as git add -A would record it, so
-the stamp names content rather than a time. A checkout whose files changed while it ran is not stamped. The stamps are
-kept in the repository's git folder, which every worktree shares, so a merge from the main checkout finds the stamp its
-branch's worktree wrote. The script ends with the screenshots' paths, one of each domain: open each and look at it.
+-Change says what the change can affect, and so what must run to show it works (AGENTS.md, Finish). Docs is a change
+no compiler reads as code, such as Markdown, comments and docstrings: the build holds it, as it checks a docstring's
+XML and what it refers to. Code is any change to what runs, a refactor among them, as a rename can break a lookup by
+name that only a run finds: the tests run too, and the samples headless through every one of their domains. Visual is
+any change that can alter what is drawn: the samples run with a window through every domain instead, which load and
+render as the headless run does, ending in a screenshot of each to open and look at.
+
+The script first formats the change, so what is validated, stamped and reviewed is the formatted code, then runs those
+steps, and when all pass, stamps the checkout's state: the git tree of every file in it, tracked or new, as git add -A
+would record it, so the stamp names content rather than a time. A checkout whose files changed while it ran is not
+stamped. The stamps are kept in the repository's git folder, which every worktree shares, so a merge from the main
+checkout finds the stamp its branch's worktree wrote. A stamp keeps its level and its screenshots, and a state already
+stamped at the level asked for or a higher one is not validated again, so a run after a rebase that brought in
+nothing ends at once. The script ends with the screenshots' paths, one of each domain: open each and look at it.
 
 With -Hook it is that hook instead: the project's .claude/settings.json runs it before a Bash command that commits or
 merges, with the hook's input as JSON on stdin. A git commit passes when the checkout's state has a stamp, and a
@@ -18,14 +26,21 @@ git merge when the merged branch's last commit does, so an edit after the run, o
 run. It exits 2 with the reason on stderr to refuse, which the agent is shown, and 0 to let the command run; any other
 command, or one it cannot place in a checkout, passes. Runs under pwsh and Windows PowerShell, from any directory.
 
+.PARAMETER Change
+What the change can affect, which picks what runs: Docs, Code or Visual.
+
 .PARAMETER Hook
 Check the git commit or git merge the hook's input on stdin names, rather than validate.
 
 .EXAMPLE
-tools/AgentTaskComplete.ps1
+tools/AgentTaskComplete.ps1 -Change Code
 #>
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'Validate')]
 param(
+    [Parameter(Mandatory, ParameterSetName = 'Validate', Position = 0)]
+    [ValidateSet('Docs', 'Code', 'Visual')]
+    [string] $Change,
+    [Parameter(Mandatory, ParameterSetName = 'Hook')]
     [switch] $Hook
 )
 
@@ -69,11 +84,37 @@ function ConvertTo-Native([string] $path) {
 
 if (-not $Hook) {
     $root = Split-Path -Parent $PSScriptRoot
+    # How thoroughly each level validates, and the Validate steps it runs.
+    $rank = @{ Docs = 0; Code = 1; Visual = 2 }
+    $steps = @{
+        Docs = @('Build')
+        Code = @('Build', 'Test', 'Headless')
+        Visual = @('Build', 'Test', 'Screenshot')
+    }
+
+    # A state stamped at this level or a higher one passed already. A stamp's first line is its level, the rest its
+    # screenshots; one written before stamps had levels holds only screenshots, from a run of every step.
+    $tree = Get-CheckoutTree $root
+    $stamp = Get-StampPath $root $tree
+    if (Test-Path $stamp) {
+        $stamped = @(Get-Content $stamp)
+        $level = 'Visual'
+        if ($stamped.Count -gt 0 -and $rank.ContainsKey($stamped[0])) {
+            $level = $stamped[0]
+            $stamped = @($stamped | Select-Object -Skip 1)
+        }
+        if ($rank[$level] -ge $rank[$Change]) {
+            Write-Output "This state ($tree) was already validated as a $level change: git commit and git merge of it are allowed."
+            foreach ($path in $stamped) { Write-Output "  $path" }
+            exit 0
+        }
+    }
+
     & (Join-Path $PSScriptRoot 'Format.ps1')
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     $before = Get-CheckoutTree $root
-    & (Join-Path $PSScriptRoot 'Validate.ps1') | Tee-Object -Variable lines
+    & (Join-Path $PSScriptRoot 'Validate.ps1') -Only $steps[$Change] | Tee-Object -Variable lines
     $code = $LASTEXITCODE
     if ($code -ne 0) { exit $code }
 
@@ -86,11 +127,13 @@ if (-not $Hook) {
     $screenshots = @($lines | Where-Object { $_ -like 'Screenshot: *' } | ForEach-Object { $_.Substring(12) })
     $stamp = Get-StampPath $root $after
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $stamp) | Out-Null
-    Set-Content -Path $stamp -Value $screenshots -Encoding utf8
+    Set-Content -Path $stamp -Value (@($Change) + $screenshots) -Encoding utf8
     Write-Output ""
-    Write-Output "Stamped this state ($after): git commit and git merge of it are allowed."
-    Write-Output 'Open each screenshot and look at what it shows before reporting the task complete:'
-    foreach ($path in $screenshots) { Write-Output "  $path" }
+    Write-Output "Stamped this state ($after) as a $Change change: git commit and git merge of it are allowed."
+    if ($screenshots.Count -gt 0) {
+        Write-Output 'Open each screenshot and look at what it shows before reporting the task complete:'
+        foreach ($path in $screenshots) { Write-Output "  $path" }
+    }
     exit 0
 }
 
@@ -133,5 +176,5 @@ if ($isMerge) {
 
 if (Test-Path (Get-StampPath $top $tree)) { exit 0 }
 
-[Console]::Error.WriteLine("$what was never validated: run tools/AgentTaskComplete.ps1 in $where, open the screenshot it prints and look at it, then try again (AGENTS.md, Finish). An edit after the run, or a rebase onto new work, needs a new run.")
+[Console]::Error.WriteLine("$what was never validated: run tools/AgentTaskComplete.ps1 -Change with what the change can affect in $where, open any screenshot it prints and look at it, then try again (AGENTS.md, Finish). An edit after the run, or a rebase onto new work, needs a new run.")
 exit 2

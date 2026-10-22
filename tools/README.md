@@ -15,6 +15,8 @@ formats every file. It orders members, applies the code style, lays out blank li
 ([Analyzers](#analyzers)), wraps long lines and lists, and fixes whitespace. It builds only the analyzers.
 
 - Fixes that would delete, invent or rename code are left to you. The build still reports them.
+- It is the only check of what the build can't see: a name that can be shorter (IDE0001), and a file's charset and
+  final newline.
 - Check moved statics in review: a static initializer that reads a static declared below it reads it unset. Make a
   static that other statics read a field, with a property over it if other types read it.
 - The wrap never joins lines back. Reshape a wrap that reads badly by hand, and run it again when a fix makes another
@@ -24,11 +26,11 @@ formats every file. It orders members, applies the code style, lays out blank li
 
 Runs the checks every change must pass, in order, and stops at the first failure:
 
-1. **Build:** builds `Magic.slnx`. Every warning is an error.
-2. **Format:** checks the whole tree's formatting, line endings included, and writes nothing.
-3. **Test:** runs the tests against that build.
-4. **Headless:** runs the samples without a window under `--fail-on-error` and opens every domain.
-5. **Screenshot:** runs `Screenshot.ps1` through every domain. Needs a display and a GPU.
+1. **Build:** builds `Magic.slnx`. Every warning is an error, including every rule `Format.ps1` applies that a build
+   can see.
+2. **Test:** runs the tests against that build.
+3. **Headless:** runs the samples without a window under `--fail-on-error` and opens every domain.
+4. **Screenshot:** runs `Screenshot.ps1` through every domain. Needs a display and a GPU.
 
 It prints each step's exit code and the screenshots' paths. Open and look at each one. `-Only Build,Headless` runs
 some steps, `-Project` runs another project, and `-Seconds` sets how long each domain may take to load.
@@ -42,8 +44,15 @@ project.
 
 ## AgentTaskComplete.ps1
 
-An agent runs it when a task is done. It runs `Format.ps1`, then all of `Validate.ps1`. If every step passes, it
-stamps the checkout's exact files and prints the screenshots' paths.
+An agent runs it when a task is done, with `-Change` saying what the change can affect. It runs `Format.ps1`, then
+the steps of `Validate.ps1` that level needs:
+
+- `Docs`: Build.
+- `Code`: Build, Test and Headless.
+- `Visual`: Build, Test and Screenshot.
+
+If every step passes, it stamps the checkout's exact files with the level and prints any screenshots' paths. A state
+already stamped at that level or a higher one returns at once.
 
 `.claude/settings.json` runs it with `-Hook` before an agent's `git commit` or `git merge`. The hook refuses the
 command unless that exact state was stamped. Run it again after any edit or rebase.

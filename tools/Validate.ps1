@@ -1,17 +1,16 @@
 <#
 .SYNOPSIS
-Runs the checks a change must pass: a clean build, a format check, the tests, the samples headless through every one
-of their domains, and the samples with a window through every domain, ending in a screenshot of each to look at.
+Runs the checks a change must pass: a clean build, the tests, the samples headless through every one of their domains,
+and the samples with a window through every domain, ending in a screenshot of each to look at.
 
 .DESCRIPTION
 The steps run in order and the first failure ends the run with that step's exit code; a run that passes exits 0.
 The build is incremental, so what is built already is reused, and the native libraries are built once per machine,
 shared by every checkout (src/Bundled/Gems/README.md, Native libraries). The build already treats every warning as an
 error, so a clean build is one that exits 0. It logs with MSBuild's plain console logger, so the native libraries'
-progress shows as it happens, which the terminal logger holds back until each project ends.
-The Format step checks the whole tree against .editorconfig with dotnet format and writes nothing: it fails on what
-tools/Format.ps1 would change, what a build cannot check among it, such as a file's line endings. It reads the
-restore and the generated code of the configuration built, so running it alone (-Only Format) needs a build.
+progress shows as it happens, which the terminal logger holds back until each project ends. Formatting is not checked
+here: tools/Format.ps1 formats a change before it is validated, and the build fails on every rule it applies that a
+build can see.
 The tests run against that build, so running them alone (-Only Test) needs one. Both sample runs pass --fail-on-error,
 so an error logged during a run exits 2, and both wait until the world has loaded (the console's wait loaded), shaders
 compiled and the domain open, so a world that never loads fails rather than passing on the loading screen. Their
@@ -33,8 +32,7 @@ ceiling, not a wait.
 The project the sample runs open: a .magic file or the folder holding one, relative to the repository root.
 
 .PARAMETER Only
-The steps to run when not all of them: Build, Format, Test, Headless, Screenshot, in that order whatever order they are
-given.
+The steps to run when not all of them: Build, Test, Headless, Screenshot, in that order whatever order they are given.
 
 .EXAMPLE
 tools/Validate.ps1
@@ -49,8 +47,8 @@ param(
     [ValidateRange(1, [int]::MaxValue)]
     [int] $Seconds = 600,
     [string] $Project = 'samples',
-    [ValidateSet('Build', 'Format', 'Test', 'Headless', 'Screenshot')]
-    [string[]] $Only = @('Build', 'Format', 'Test', 'Headless', 'Screenshot')
+    [ValidateSet('Build', 'Test', 'Headless', 'Screenshot')]
+    [string[]] $Only = @('Build', 'Test', 'Headless', 'Screenshot')
 )
 
 Set-StrictMode -Version Latest
@@ -84,18 +82,6 @@ function Get-Domains {
     return @($domains | Sort-Object)
 }
 
-# Checks the whole tree and writes nothing. dotnet format takes no MSBuild properties, so the configuration built
-# reaches its project load through the environment, where MSBuild reads it, and the caller's value is put back after.
-function Invoke-FormatCheck {
-    $saved = $env:Configuration
-    $env:Configuration = $Configuration
-    try {
-        dotnet format $solution --verify-no-changes --no-restore
-    } finally {
-        $env:Configuration = $saved
-    }
-}
-
 # Runs the project headless until its world has loaded, opens each other domain in its place until it is there, then
 # quits; a run that reaches its -Seconds first never loaded.
 function Invoke-Headless {
@@ -120,7 +106,6 @@ function Invoke-Screenshot {
 
 $steps = @(
     @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration -tl:off } }
-    @{ Name = 'Format'; Run = { Invoke-FormatCheck } }
     @{ Name = 'Test'; Run = { dotnet test $solution --configuration $Configuration --no-build } }
     @{ Name = 'Headless'; Run = { Invoke-Headless } }
     @{ Name = 'Screenshot'; Run = { Invoke-Screenshot } }

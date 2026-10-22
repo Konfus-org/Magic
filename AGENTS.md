@@ -9,23 +9,31 @@ The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
 
 - **Format:** `tools/Format.ps1` formats the C# a change touches. You don't need to run it yourself; the next
   command does.
-- **Task complete:** `tools/AgentTaskComplete.ps1` formats, runs `tools/Validate.ps1` and stamps the validated state.
-  Run it when a task is done, and again after any later edit or rebase.
-- **Validate:** `tools/Validate.ps1` builds, checks formatting, runs the tests, loads every sample domain headless,
-  then screenshots each one and prints the paths.
+- **Task complete:** `tools/AgentTaskComplete.ps1 -Change <level>` formats, runs the steps of `tools/Validate.ps1`
+  the level needs and stamps the validated state. Run it when a task is done, and again after any later edit or
+  rebase. A state already stamped at that level returns at once.
+- **Validate:** `tools/Validate.ps1` builds, runs the tests, loads every sample domain headless, then screenshots
+  each one and prints the paths.
 - **Screenshot:** `tools/Screenshot.ps1` runs a project until its world loads and prints the screenshot's path. Use
   `-Domains`, `-Project` and `-Commands` to reach what the samples don't show.
 - **Review:** `plannotator review` opens the change as a diff in the user's browser and returns when they comment or
   approve ([Finish](#finish)).
 
-Validation means the app ran with the change and you looked at the screenshots. A hook refuses an agent's
-`git commit` and `git merge` unless `tools/AgentTaskComplete.ps1` stamped that exact state.
+Validation means running what the change can affect. Pick the lowest level that covers it, or the higher one when
+unsure:
+
+| `-Change` | For | Runs |
+| --- | --- | --- |
+| `Docs` | Markdown, comments, docstrings | The build |
+| `Code` | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, every sample domain headless |
+| `Visual` | Anything that can change what is drawn | The build, the tests, a screenshot of every sample domain to look at |
+
+A hook refuses an agent's `git commit` and `git merge` unless `tools/AgentTaskComplete.ps1` stamped that exact state.
 
 To run one step of Validate on its own:
 
 ```powershell
 dotnet build Magic.slnx
-dotnet format Magic.slnx --verify-no-changes --no-restore
 dotnet test Magic.slnx
 'wait loaded', 'open Domains/Audio/Audio.domain', 'quit' | Magic --project samples --seconds 1200 --fail-on-error --headless
 tools/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
@@ -93,11 +101,13 @@ assumptions and decisions a reviewer would question as you make them.
 
 ### Finish
 
-1. Run `tools/AgentTaskComplete.ps1`. Fix a failing test at its cause; never loosen, skip or delete it.
-2. Open and look at every screenshot it printed, for every change. If the change only shows somewhere the samples
-   don't reach, screenshot that too with `tools/Screenshot.ps1 -Project` or `-Commands`.
-3. Summarize what changed, what you assumed, what you couldn't verify and what the screenshots show. Keep the fix
-   and the cleanup apart.
+1. Run `git rebase --autostash <merge target>`, then `tools/AgentTaskComplete.ps1 -Change <level>`. If putting your
+   work back conflicts, resolve it in your own changes and drop the stash. Fix a failing test at its cause; never
+   loosen, skip or delete it.
+2. For a `Visual` change, open and look at every screenshot it printed. If the change only shows somewhere the
+   samples don't reach, screenshot that too with `tools/Screenshot.ps1 -Project` or `-Commands`.
+3. Summarize what changed, the level you validated at, what you assumed, what you couldn't verify and, for a
+   `Visual` change, what the screenshots show. Keep the fix and the cleanup apart.
 4. From the worktree, run `plannotator review --base <merge target>` in the background and wait for it. If it stops
    before the user decides, run it again; their comments are kept.
 5. Address each comment, or say with evidence why not, validate again, and go back to step 3. If the review closes
@@ -141,8 +151,9 @@ Every task runs in its own worktree. Never edit or commit in the main checkout.
 - **Start:** branch from the branch checked out in the main checkout. That branch is the merge target.
 - **Finish,** once the user approves:
   1. Commit on the worktree branch.
-  2. Rebase onto the merge target, run `tools/AgentTaskComplete.ps1` again and look at the new screenshots. Resolve
-     conflicts in your own changes only; if one needs another agent's work changed, stop and ask.
+  2. Rebase onto the merge target and run `tools/AgentTaskComplete.ps1` again at the same level. If nothing landed
+     it returns at once; if it validates again, look at a `Visual` change's new screenshots. Resolve conflicts in
+     your own changes only; if one needs another agent's work changed, stop and ask.
   3. Fast-forward the merge target to your branch. Push nothing.
   4. `git worktree remove`, then `git branch -d` (never `-D`).
   5. Remove every other worktree and branch made for the task the same way, including the one the app made for the

@@ -11,8 +11,8 @@
 
 - Open a pull request from your fork into `dev`. Keep branches short-lived; they merge by fast-forward.
 - A maintainer reviews it and approves once every comment is addressed.
-- Every check must pass before a merge: the build, the format check, the tests, the docs' links and the security
-  analysis ([CI](.github/workflows/README.md)). Merging to `main` publishes a release.
+- Every check must pass before a merge: the build, the tests, the docs' links and the security analysis
+  ([CI](.github/workflows/README.md)). Merging to `main` publishes a release.
 - A reviewer checks that the change follows the Code Standards, is the smallest change that does the job, fixes
   every copy of the code it fixes, adds nothing without a caller, edits nothing the build generates, commits no
   secret, and leaves what it touched cleaner, with the cleanup kept apart from the fix.

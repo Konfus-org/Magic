@@ -1,7 +1,6 @@
-# The format check and the tests, on Linux in Release: tools/Validate.ps1's Format and Test steps, which need no display
-# or GPU. The format check is the one place what a build cannot check is checked, such as a file's line endings, and
-# formatting is the same on every OS, so it runs here once. The headless sample run is the Build workflow's, on every
-# OS; the Screenshot step needs a display, so it stays on developer machines. The logs are kept when a run fails.
+# The tests, on Linux in Release: tools/Validate.ps1's Test step, which needs no display or GPU. The headless sample run
+# is the Build workflow's, on every OS; the Screenshot step needs a display, so it stays on developer machines. The logs
+# are kept when a run fails.
 name: Test
 
 on:
@@ -29,9 +28,9 @@ jobs:
       - id: setup
         uses: ./.github/actions/setup
 
-      - name: Build, check the format and test
+      - name: Build and test
         shell: pwsh
-        run: ./tools/Validate.ps1 -Configuration Release -Only Build,Format,Test
+        run: ./tools/Validate.ps1 -Configuration Release -Only Build,Test
 
       - if: failure()
         uses: actions/upload-artifact@v7

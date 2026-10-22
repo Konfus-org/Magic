@@ -2,7 +2,7 @@
 
 GitHub runs the checks on every pull request into `dev` or `main`, on every push to either, and by hand from the
 Actions tab. They run `tools/Validate.ps1` in `Release` ([Tools](../../tools/README.md)): the Build and Headless steps
-on Windows and Linux, and the Format and Test steps on Linux. They also check every link in the Markdown and run
+on Windows and Linux, and the Test step on Linux. They also check every link in the Markdown and run
 GitHub's CodeQL analysis on the C#. The Screenshot step doesn't run here, and macOS isn't built yet.
 
 - The repository's rulesets require every check to pass before a merge into `dev` or `main`. Give every job a name
