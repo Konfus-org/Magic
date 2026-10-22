@@ -109,7 +109,7 @@ public sealed class World : IDisposable
     /// shown (<see cref="IPreloader"/>), set by whoever made the gems once every one is, since the world is made while
     /// they are; none until then.
     /// </summary>
-    internal IReadOnlyList<IPreloader> Preloaders { get; internal set; } = [];
+    internal IReadOnlyList<IPreloader> Preloaders { get; set; } = [];
 
     public void Dispose()
     {
