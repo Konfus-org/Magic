@@ -4,7 +4,7 @@ namespace Magic.Contexts.Assets;
 
 /// <summary>
 /// The project being run: what its .magic file holds, and the folder that file is in. Plain data;
-/// <see cref="Internal.ProjectFile"/> finds and reads it.
+/// <see cref="Engine"/> finds and reads it.
 /// </summary>
 public sealed class Project
 {

@@ -176,9 +176,11 @@ like its file, and every prefab after them, as a prefab names its components by 
 world spawns again what a domain placed and the scripts run as they are now
 ([hot reload](../Bundled/Resources/README.md#hot-reload)).
 
-The folders of the engine's own assets and each gem's are known once the gems have loaded, and the assets are made
-over them. A gem's own assets are its `Resources/` folder; the engine's built-in default assets, which come with
-Magic whatever gems a project loads, are `src/Bundled/Resources/`. A release copies each beside its assembly. Any
+The assets are made before any gem loads, over the project's `Assets/` and the engine's own folder, and each gem's
+folder is added to them as the gem loads, to be read on a worker while the next one does. Every folder is indexed
+before the settings or any gem is made, as both find assets as they are made. A gem's own assets are its
+`Resources/` folder; the engine's built-in default assets, which come with Magic whatever gems a project loads, are
+`src/Bundled/Resources/`. A release copies each beside its assembly. Any
 other build copies nothing: it records the folder in the assembly, so assets are read where they are written, and
 building stays fast.
 

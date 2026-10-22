@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
 using Magic.Contexts.CmdLine;
 using Magic.Contexts.ECS;
-using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -30,7 +29,8 @@ public static class Engine
     /// <para>
     /// Core's services, the world among them, and every gem and the interfaces each provides, are registered with a
     /// service provider, which makes each gem after whatever its constructor asks for (<see cref="GemLoader"/>). The
-    /// settings are made first, as every gem's are made from the presets they read.
+    /// assets are made before any gem loads, take each one's folder as it does, and are indexed once they all have. The
+    /// settings are made next, as every gem's are made from the presets they read.
     /// </para>
     /// <para>
     /// A headless run has no window to close, so Ctrl+C in the terminal stops it cleanly, ending its gems. Otherwise
@@ -40,7 +40,7 @@ public static class Engine
     public static bool Run(Args args)
     {
         FileSystem files = new();
-        Result<Project> opened = ProjectFile.Open(files, args.ProjectPath);
+        Result<Project> opened = OpenProject(files, args.ProjectPath);
         if (!opened.Ok)
         {
             Debugging.Error(opened.Error);
@@ -66,9 +66,9 @@ public static class Engine
     [SuppressMessage(
         "Usage",
         "VSTHRD002:Avoid problematic synchronous waits",
-        Justification = "The saved world is waited for once the run's threads have both ended: "
-            + "its main-thread part ran before they did, and the rest is written on a worker, which needs neither, "
-            + "so the wait cannot deadlock.")]
+        Justification = "The assets' index is waited for before the run's threads start, and the saved world once "
+            + "they have both ended; the index is read on workers, and the world's main-thread part ran before the "
+            + "threads ended and the rest is written on a worker, so neither wait needs a thread it holds up.")]
     private static (Args Args, WorldState? State, double Seconds)? Run(
         FileSystem files,
         Project project,
@@ -78,7 +78,7 @@ public static class Engine
     {
         using Lifetime lifetime = new();
         using Threads threads = new(lifetime);
-        using PosixSignalRegistration? interrupt = args.Headless
+        using PosixSignalRegistration? interrupt = args.Headless // only allow Ctrl+C to kill when headless
             ? PosixSignalRegistration.Create(PosixSignal.SIGINT, context =>
             {
                 context.Cancel = true;
@@ -89,14 +89,27 @@ public static class Engine
         Debugging.Info($"Running {project.Name} from {project.Root}");
         Events events = new();
         Assemblies assemblies = new();
-        ServiceCollection services = CreateCoreServices(files, lifetime, threads, events, project, args, assemblies);
-        GemLoader loader = new(services, files, project, assemblies);
-        services.AddSingleton(provider => new Assets(files, project, loader.Resources, lifetime, events, provider));
+        using Assets assets = new(files, project, lifetime, events);
+        ServiceCollection services = CreateCoreServices(
+            files,
+            lifetime,
+            threads,
+            events,
+            project,
+            args,
+            assemblies,
+            assets);
+        using GemLoader loader = new(services, files, project, assemblies, assets);
 
         // Not disposed: the gems are ended below one at a time, so one that throws cannot stop the rest ending.
         ServiceProvider container = services.BuildServiceProvider();
+        assets.Services = container;
+
+        // The settings and the gems find assets as they are made, so every folder is indexed first: each has been read
+        // on a worker since it was added, as the gems loaded.
+        assets.IndexAsync().GetAwaiter().GetResult();
         Settings settings = container.GetRequiredService<Settings>();
-        List<IGem> gems = loader.Make(container);
+        List<IGem> gems = loader.Load(container);
         World world = container.GetRequiredService<World>();
         List<IPreloader> preloaders = [];
         foreach (IGem gem in gems)
@@ -105,7 +118,6 @@ public static class Engine
         }
 
         world.Preloaders = preloaders;
-        using Subscription codeBuilds = loader.WatchCode(container.GetRequiredService<Assets>());
 
         using FrameLoop frames = new(
             gems,
@@ -155,12 +167,49 @@ public static class Engine
     }
 
     /// <summary>
-    /// What a gem's constructor can ask for of Core, before what the gems provide, but the assets, added once the gems
-    /// have loaded over where each one's are: the settings and the cache are made once every gem's assembly has been
-    /// loaded. The world is made once a gem asks for it, or once every gem is, over the ECS and the scripts the gems
-    /// provide, when they do. The code
-    /// loaded, <paramref name="assemblies"/>, is a service too: the gem that reads <c>.cs</c> files finds a script's
-    /// class in it.
+    /// Reads the project at <paramref name="path"/>: a .magic file, or the folder holding exactly one.
+    /// </summary>
+    private static Result<Project> OpenProject(FileSystem files, string path)
+    {
+        Result<string> found = FindProject(files, path);
+        if (!found.Ok) return Result.Failure<Project>(found.Error);
+
+        Result<byte[]> bytes = files.Read(found.Value);
+        if (!bytes.Ok) return Result.Failure<Project>(bytes.Error);
+
+        Result<Project> read = Json.Read<Project>(bytes.Value);
+        if (!read.Ok) return Result.Failure<Project>($"{found.Value} is not a valid project: {read.Error}");
+
+        Project project = read.Value;
+        project.Root = files.GetParent(found.Value);
+        return Result.Success(project);
+    }
+
+    private static Result<string> FindProject(FileSystem files, string path)
+    {
+        if (files.FileExists(path)) return Result.Success(path);
+
+        if (!files.FolderExists(path))
+        {
+            return Result.Failure<string>($"There is no project at {path}: it is neither a .magic file nor a folder.");
+        }
+
+        IReadOnlyList<string> found = files.Find(path, ".magic");
+        if (found.Count != 1)
+        {
+            return Result.Failure<string>(
+                $"The project folder {path} must hold exactly one .magic file; it holds {found.Count}.");
+        }
+
+        return Result.Success(found[0]);
+    }
+
+    /// <summary>
+    /// What a gem's constructor can ask for of Core, before what the gems provide: the settings and the cache are made
+    /// once every gem's assembly has been loaded. The world is made once a gem asks for it, or once every gem is, over
+    /// the ECS and the scripts the gems provide, when they do. The code loaded, <paramref name="assemblies"/>, is a
+    /// service too: the gem that reads <c>.cs</c> files finds a script's class in it. So are the
+    /// <paramref name="assets"/>, made before the gems load, as each one's folder is added to them as it does.
     /// </summary>
     private static ServiceCollection CreateCoreServices(
         IFileSystem files,
@@ -169,24 +218,25 @@ public static class Engine
         Events events,
         Project project,
         Args args,
-        Assemblies assemblies)
+        Assemblies assemblies,
+        Assets assets)
     {
         ServiceCollection services = new();
         services.AddSingleton(assemblies);
+        services.AddSingleton(assets);
         services.AddSingleton(files);
         services.AddSingleton(lifetime);
         services.AddSingleton(threads);
         services.AddSingleton(events);
         services.AddSingleton(project);
         services.AddSingleton(args);
-        services.AddSingleton(
-            provider => new Settings(provider.GetRequiredService<Assets>(), files, events, project, args, lifetime));
+        services.AddSingleton(_ => new Settings(assets, files, events, project, args, lifetime));
         services.AddSingleton(provider => new Caches(files, provider, project));
         services.AddSingleton(provider => new World(
             provider.GetService<IEcs>(),
             provider.GetService<IScripts>(),
             assemblies,
-            provider.GetRequiredService<Assets>(),
+            assets,
             threads,
             events,
             project,

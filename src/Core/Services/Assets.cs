@@ -19,11 +19,15 @@ namespace Magic.Services;
 
 /// <summary>
 /// The assets: what the files under the asset roots describe, the project's <c>Assets/</c> folder, then the engine's
-/// and each gem's <c>Resources/</c>, as the gems loaded say, the first winning a path two of them have. A file
-/// is an asset when a <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a <see cref="Handle{T}"/>
-/// holds, so a file can move and whatever names it still finds it, and the import settings its loader reads. An asset
-/// path is relative to its root, with <c>/</c> between folders on every OS; a type's files are those with its
-/// extensions (<see cref="IAsset{TSelf}.Extensions"/>). Any thread.
+/// own <c>Resources/</c>, then each gem's, added as the gem loads (<see cref="AddRoot"/>), the first winning a path two
+/// of them have. A file is an asset when a <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a
+/// <see cref="Handle{T}"/> holds, so a file can move and whatever names it still finds it, and the import settings its
+/// loader reads. An asset path is relative to its root, with <c>/</c> between folders on every OS; a type's files are
+/// those with its extensions (<see cref="IAsset{TSelf}.Extensions"/>). Any thread.
+/// <para>
+/// Made before the gems load, so each gem's folder is read on a worker as the next gem loads. Nothing is found until
+/// every root is indexed (<see cref="IndexAsync"/>), which the engine waits for before any gem is made.
+/// </para>
 /// <para>
 /// A file is read by the <see cref="IAssetLoader{T}"/> a gem provides for its type, else as JSON for an
 /// <see cref="IJsonAsset{TSelf}"/> or as text for an <see cref="ITextAsset{TSelf}"/>, then worked on by the
@@ -31,12 +35,13 @@ namespace Magic.Services;
 /// is what it is made from. What loaded is held weakly, so it is let go once nothing that uses it holds it.
 /// </para>
 /// <para>
-/// The roots are watched. Once their changes settle, they are indexed again, and every asset asked for whose file
+/// The roots are watched until the assets are disposed, at the end of the run. Once their changes settle, they are
+/// indexed again, and every asset asked for whose file
 /// changed, or that was made from one that did, is made again, each after what it is made from, and told on
 /// <see cref="Events"/>.
 /// </para>
 /// </summary>
-public sealed class Assets
+public sealed class Assets : IDisposable
 {
     private const string Sidecar = ".meta";
     private const string DefaultName = "Default";
@@ -56,17 +61,10 @@ public sealed class Assets
 
     private readonly IFileSystem _files;
     private readonly Events _events;
-    private readonly IServiceProvider _services;
     private readonly CancellationToken _stopping;
 
     /// <summary>
-    /// The folders assets are found under, the first winning a path two of them have.
-    /// </summary>
-    private readonly string[] _roots;
-
-    /// <summary>
-    /// The engine's own <c>Resources/</c>, the first of the gems': where the default and failure assets
-    /// are, and only there.
+    /// The engine's own <c>Resources/</c>, Core's: where the default and failure assets are, and only there.
     /// </summary>
     private readonly string _engine;
 
@@ -74,6 +72,22 @@ public sealed class Assets
     /// The project's own <c>Assets/</c>: what is under it is the project's, not the engine's or a gem's.
     /// </summary>
     private readonly string _project;
+
+    /// <summary>
+    /// What the watches on the roots see, taken in once every root has first been indexed.
+    /// </summary>
+    private readonly Channel<string> _changes = Channel.CreateUnbounded<string>(
+        new UnboundedChannelOptions { SingleReader = true });
+
+    /// <summary>
+    /// The watches on the roots, until the assets are disposed. Under <see cref="_lock"/>.
+    /// </summary>
+    private readonly SubscriptionList _watches = new();
+
+    /// <summary>
+    /// Done once every root added has first been indexed (<see cref="IndexAsync"/>).
+    /// </summary>
+    private readonly TaskCompletionSource _indexed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     /// The default and failure assets found missing, by path, each said once.
@@ -86,7 +100,7 @@ public sealed class Assets
     private readonly AsyncLocal<ulong> _maker = new();
 
     /// <summary>
-    /// Held while the slots, or what assets are made from, change.
+    /// Held while the roots, the slots, or what assets are made from, change.
     /// </summary>
     private readonly Lock _lock = new();
 
@@ -101,48 +115,50 @@ public sealed class Assets
     private readonly Dictionary<ulong, List<AssetRef>> _madeFrom = [];
 
     /// <summary>
-    /// What is under the roots, made again whenever they change. Never changed once made, so it is read without a lock.
+    /// The folders assets are found under, in the order they were added, the first winning a path two of them have.
+    /// Replaced, never changed, under <see cref="_lock"/>, so it is read without it.
     /// </summary>
-    private Index _index;
+    private Root[] _roots = [];
 
-    internal Assets(
-        IFileSystem files,
-        Project project,
-        IReadOnlyList<string> resources,
-        Lifetime lifetime,
-        Events events,
-        IServiceProvider services)
+    /// <summary>
+    /// What is under the roots, made again whenever they change; empty until they are first indexed. Never changed once
+    /// made, so it is read without a lock.
+    /// </summary>
+    private Index _index = new();
+
+    /// <summary>
+    /// Starts reading the project's <c>Assets/</c> and the engine's own <c>Resources/</c>, the first roots; the gems'
+    /// are added as they load (<see cref="AddRoot"/>).
+    /// </summary>
+    internal Assets(IFileSystem files, Project project, Lifetime lifetime, Events events)
     {
         _files = files;
         _events = events;
-        _services = services;
         _stopping = lifetime.Stopping;
-
         _project = files.Combine(project.Root, "Assets");
-        string[] folders = [_project, .. resources];
-        List<string> roots = [];
-        foreach (string folder in folders)
+        _engine = GemAssembly.GetResources(files, typeof(Assets).Assembly);
+
+        WatchAsync().FireAndForget();
+        AddRoot(_project);
+        AddRoot(_engine);
+    }
+
+    /// <summary>
+    /// What the gems provide, where each type's loader and post-processor are found: set by whoever builds the service
+    /// provider, once it is built, as the assets are made before the gems load so that each one's folder is added as it
+    /// does. Nothing loads before it is set.
+    /// </summary>
+    internal IServiceProvider? Services { get; set; }
+
+    /// <summary>
+    /// Stops watching the roots: the engine's to call, at the end of the run.
+    /// </summary>
+    public void Dispose()
+    {
+        lock (_lock)
         {
-            if (files.FolderExists(folder)
-                && !roots.Exists(root => string.Equals(root, folder, StringComparison.OrdinalIgnoreCase)))
-            {
-                roots.Add(folder);
-            }
+            _watches.Dispose();
         }
-
-        _roots = [.. roots];
-        _engine = resources.Count > 0 ? resources[0] : string.Empty;
-        _index = Build(files, _roots, _engine, _project);
-
-        Channel<string> changes = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
-        SubscriptionList watches = new();
-        foreach (string root in _roots)
-        {
-            watches.Add(FileSystem.Watch(root, path => changes.Writer.TryWrite(path)));
-        }
-
-        WatchAsync(changes.Reader, watches).FireAndForget();
-        Debugging.Info($"Indexed {_index.ById.Count} assets under {_roots.Length} folders.");
     }
 
     /// <summary>
@@ -357,6 +373,43 @@ public sealed class Assets
     }
 
     /// <summary>
+    /// Adds <paramref name="folder"/> to the roots, after those added before it, which win a path it shares with them,
+    /// and starts reading it on a worker and watching it: a gem's own <c>Resources/</c>, as the gem loads. What is in
+    /// it is found once every root is indexed (<see cref="IndexAsync"/>). A folder that does not exist, or is a root
+    /// already, is left out.
+    /// </summary>
+    internal void AddRoot(string folder)
+    {
+        if (!_files.FolderExists(folder)) return;
+
+        lock (_lock)
+        {
+            if (Array.Exists(_roots, root => string.Equals(root.Folder, folder, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            _roots = [.. _roots, new Root(folder, Task.Run(() => ReadRoot(_files, folder)))];
+            _watches.Add(FileSystem.Watch(folder, path => _changes.Writer.TryWrite(path)));
+        }
+    }
+
+    /// <summary>
+    /// Indexes every root added, once each has been read: what the engine waits for once the gems have loaded and
+    /// before any is made, as the settings and the gems find assets as they are made. What the watches saw meanwhile
+    /// is taken in after.
+    /// </summary>
+    internal async Task IndexAsync()
+    {
+        Root[] roots = _roots;
+        List<Indexed>[] reads = await Task.WhenAll(Array.ConvertAll(roots, root => root.FirstRead))
+            .ConfigureAwait(false);
+        _index = Merge(roots, reads, _engine, _project);
+        _indexed.TrySetResult();
+        Debugging.Info($"Indexed {_index.ById.Count} assets under {roots.Length} folders.");
+    }
+
+    /// <summary>
     /// Whether <paramref name="asset"/> is <paramref name="source"/>, or is made from it, directly or through others,
     /// as <paramref name="madeFrom"/> says.
     /// </summary>
@@ -422,40 +475,58 @@ public sealed class Assets
     }
 
     /// <summary>
-    /// Every file with a sidecar under <paramref name="roots"/>, by its id, its path and its folder, those under
-    /// <paramref name="engine"/> by their path besides, and the paths of those under <paramref name="project"/>. A
-    /// sidecar without its file is warned about; a broken one, or one with an id another file has already, is an error
-    /// and gives no asset, unless it is at that file's path under a later root, which the first then overrides.
+    /// Every file with a sidecar under <paramref name="root"/>, by its path from it: the files and folders walked and
+    /// the sidecars read, which is what indexing waits on, so it runs on a worker for each root. A sidecar without its
+    /// file is warned about, and a broken one is an error and gives no asset.
     /// </summary>
-    private static Index Build(IFileSystem files, string[] roots, string engine, string project)
+    private static List<Indexed> ReadRoot(IFileSystem files, string root)
+    {
+        List<Indexed> found = [];
+        foreach (string sidecar in FileSystem.FindUnder(root, Sidecar))
+        {
+            string path = sidecar[..^Sidecar.Length];
+            string file = files.Combine([root, .. path.Split('/')]);
+            if (!files.FileExists(file))
+            {
+                Debugging.Warn($"{path}{Sidecar} has no {path} beside it.");
+                continue;
+            }
+
+            Result<(ulong Id, JsonElement Settings)> read = ReadSidecar(files, file + Sidecar);
+            if (!read.Ok)
+            {
+                Debugging.Error($"{path}{Sidecar} is not a sidecar, so {path} is not an asset: {read.Error}");
+                continue;
+            }
+
+            found.Add(new Indexed(read.Value.Id, path, file, read.Value.Settings));
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// What <paramref name="roots"/> hold, each one's files as <paramref name="reads"/> has them at its index
+    /// (<see cref="ReadRoot"/>), taken in root order: every file by its id, its path and its folder, those under
+    /// <paramref name="engine"/> by their path besides, and the paths of those under <paramref name="project"/>. A file
+    /// with an id another has already is an error and gives no asset, unless it is at that file's path under a later
+    /// root, which the first then overrides.
+    /// </summary>
+    private static Index Merge(Root[] roots, List<Indexed>[] reads, string engine, string project)
     {
         Index index = new();
-        foreach (string root in roots)
+        for (int i = 0; i < roots.Length; i++)
         {
-            bool isEngine = string.Equals(root, engine, StringComparison.OrdinalIgnoreCase);
-            bool isProject = string.Equals(root, project, StringComparison.OrdinalIgnoreCase);
-            foreach (string sidecar in FileSystem.FindUnder(root, Sidecar))
+            bool isEngine = string.Equals(roots[i].Folder, engine, StringComparison.OrdinalIgnoreCase);
+            bool isProject = string.Equals(roots[i].Folder, project, StringComparison.OrdinalIgnoreCase);
+            foreach (Indexed indexed in reads[i])
             {
-                string path = sidecar[..^Sidecar.Length];
-                string file = files.Combine([root, .. path.Split('/')]);
-                if (!files.FileExists(file))
-                {
-                    Debugging.Warn($"{path}{Sidecar} has no {path} beside it.");
-                    continue;
-                }
-
-                Result<(ulong Id, JsonElement Settings)> read = ReadSidecar(files, file + Sidecar);
-                if (!read.Ok)
-                {
-                    Debugging.Error($"{path}{Sidecar} is not a sidecar, so {path} is not an asset: {read.Error}");
-                    continue;
-                }
-
-                if (index.ById.TryGetValue(read.Value.Id, out Indexed? other))
+                string path = indexed.Path;
+                if (index.ById.TryGetValue(indexed.Id, out Indexed? other))
                 {
                     if (!string.Equals(other.Path, path, StringComparison.OrdinalIgnoreCase))
                     {
-                        Debugging.Error($"{path} has the id {read.Value.Id}, which {other.Path} has already; "
+                        Debugging.Error($"{path} has the id {indexed.Id}, which {other.Path} has already; "
                             + "it is not an asset until one of them has another.");
                     }
                     else if (isEngine)
@@ -466,7 +537,6 @@ public sealed class Assets
                     continue;
                 }
 
-                Indexed indexed = new(read.Value.Id, path, file, read.Value.Settings);
                 index.ById.Add(indexed.Id, indexed);
                 if (isEngine) index.Engine.TryAdd(path, indexed);
 
@@ -567,46 +637,41 @@ public sealed class Assets
     }
 
     /// <summary>
-    /// Takes in what the watches see, a batch at a time, once they have seen nothing for <see cref="_settle"/>, until
-    /// the run ends, when it stops <paramref name="watches"/>.
+    /// Takes in what the watches see, once every root has first been indexed, a batch at a time, once they have seen
+    /// nothing for <see cref="_settle"/>, until the run ends.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever goes wrong taking in one batch is logged, and the next is still taken in.")]
-    private async Task WatchAsync(ChannelReader<string> changes, SubscriptionList watches)
+    private async Task WatchAsync()
     {
-        try
+        await _indexed.Task.WaitAsync(_stopping).ConfigureAwait(false);
+        ChannelReader<string> changes = _changes.Reader;
+        while (await changes.WaitToReadAsync(_stopping).ConfigureAwait(false))
         {
-            while (await changes.WaitToReadAsync(_stopping).ConfigureAwait(false))
+            HashSet<string> touched = new(StringComparer.OrdinalIgnoreCase);
+            do
             {
-                HashSet<string> touched = new(StringComparer.OrdinalIgnoreCase);
-                do
+                while (changes.TryRead(out string? path))
                 {
-                    while (changes.TryRead(out string? path))
-                    {
-                        touched.Add(path.EndsWith(Sidecar, StringComparison.OrdinalIgnoreCase)
-                            ? path[..^Sidecar.Length]
-                            : path);
-                    }
+                    touched.Add(path.EndsWith(Sidecar, StringComparison.OrdinalIgnoreCase)
+                        ? path[..^Sidecar.Length]
+                        : path);
+                }
 
-                    await Task.Delay(_settle, _stopping).ConfigureAwait(false);
-                }
-                while (changes.TryPeek(out _));
-
-                try
-                {
-                    await ApplyAsync(touched).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    Debugging.Error($"The asset files' changes could not be taken in: {ex}");
-                }
+                await Task.Delay(_settle, _stopping).ConfigureAwait(false);
             }
-        }
-        finally
-        {
-            watches.Dispose();
+            while (changes.TryPeek(out _));
+
+            try
+            {
+                await ApplyAsync(touched).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Debugging.Error($"The asset files' changes could not be taken in: {ex}");
+            }
         }
     }
 
@@ -619,7 +684,8 @@ public sealed class Assets
     private async Task ApplyAsync(HashSet<string> touched)
     {
         Index before = _index;
-        Index now = Build(_files, _roots, _engine, _project);
+        Root[] roots = _roots;
+        Index now = Merge(roots, Array.ConvertAll(roots, root => ReadRoot(_files, root.Folder)), _engine, _project);
         _index = now;
 
         bool filesChanged = false;
@@ -774,7 +840,8 @@ public sealed class Assets
     /// The asset <paramref name="id"/> as a <typeparamref name="T"/>, read and made from its file
     /// (<see cref="ReadFileAsync{T}"/>), then given its handle. Then the type's post-processor, when a gem provides
     /// one, works on it, and what it returns is given the handle too. The post-processor is asked for on every load, as
-    /// the loader is; a type whose gem was not made, which Core has said why, loads without it.
+    /// the loader is; a type whose gem was not made, which Core has said why, loads without it. Nothing loads before
+    /// <see cref="Services"/> is set, as what reads a file is not known until then.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -785,6 +852,11 @@ public sealed class Assets
         where T : IAsset<T>
     {
         if (!_index.ById.TryGetValue(id, out Indexed? indexed)) return Result.Failure<T>($"No asset has the id {id}.");
+
+        if (Services is not { } services)
+        {
+            return Result.Failure<T>($"{indexed.Path} was asked for before the gems were, so nothing can read it yet.");
+        }
 
         if (!IsOf<T>(indexed.Path))
         {
@@ -798,7 +870,7 @@ public sealed class Assets
         Result<T> loaded;
         try
         {
-            loaded = await ReadFileAsync<T>(indexed, bytes.Value).ConfigureAwait(false);
+            loaded = await ReadFileAsync<T>(services, indexed, bytes.Value).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -809,7 +881,7 @@ public sealed class Assets
         if (!loaded.Ok) return Result.Failure<T>($"{indexed.Path} is not a {typeof(T).Name}: {loaded.Error}");
 
         indexed.Version = ComputeVersion(bytes.Value, indexed.Settings);
-        if (_services.GetProvided<ILoadPostProcessor<T>>(out _) is not { } processor) return loaded;
+        if (services.GetProvided<ILoadPostProcessor<T>>(out _) is not { } processor) return loaded;
 
         try
         {
@@ -827,14 +899,15 @@ public sealed class Assets
 
     /// <summary>
     /// <paramref name="bytes"/>, <paramref name="file"/>'s, as a <typeparamref name="T"/>: read by the loader a gem
-    /// provides for the type, handed the import settings its sidecar holds; else, with a sidecar that holds only the
-    /// id, as JSON for an <see cref="IJsonAsset{TSelf}"/>, or as text for an <see cref="ITextAsset{TSelf}"/>, made with
-    /// its parameterless constructor. The loader is asked for on every load, as loads are kept.
+    /// provides for the type among <paramref name="services"/>, handed the import settings its sidecar holds; else,
+    /// with a sidecar that holds only the id, as JSON for an <see cref="IJsonAsset{TSelf}"/>, or as text for an
+    /// <see cref="ITextAsset{TSelf}"/>, made with its parameterless constructor. The loader is asked for on every load,
+    /// as loads are kept.
     /// </summary>
-    private ValueTask<Result<T>> ReadFileAsync<T>(Indexed file, byte[] bytes)
+    private ValueTask<Result<T>> ReadFileAsync<T>(IServiceProvider services, Indexed file, byte[] bytes)
         where T : IAsset<T>
     {
-        IAssetLoader<T>? loader = _services.GetProvided<IAssetLoader<T>>(out bool isMade);
+        IAssetLoader<T>? loader = services.GetProvided<IAssetLoader<T>>(out bool isMade);
         if (!isMade) return new(Result.Failure<T>($"the gem that reads {typeof(T).Name}s was not made."));
 
         if (loader is not null) return loader.LoadAsync(file.Path, bytes, file.Settings, _stopping);
@@ -915,6 +988,12 @@ public sealed class Assets
         /// </summary>
         public ulong Version { get; set; }
     }
+
+    /// <summary>
+    /// A folder assets are found under, and its first read (<see cref="ReadRoot"/>), started as it was added, which the
+    /// first index waits for (<see cref="IndexAsync"/>).
+    /// </summary>
+    private sealed record Root(string Folder, Task<List<Indexed>> FirstRead);
 
     /// <summary>
     /// An asset asked for or added, as the type it was first asked for as.

@@ -9,7 +9,8 @@ is in [Core's README](../../Core/README.md#assets).
 
 ## Finding an asset
 
-**Roots.** Core indexes these folders as the gems are made, in this order, and watches them while it runs:
+**Roots.** Core reads these folders as the gems load, each on a worker, in this order, indexes them all before any gem
+is made, and watches them while it runs:
 
 | Root | Where |
 | --- | --- |

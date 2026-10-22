@@ -16,16 +16,16 @@ namespace Magic.Internal;
 /// that provides what Core or a gem listed before it provides is refused, as is a name listed twice, and one that is
 /// not the version the project asks for (<see cref="Project.Gems"/>). The types a gem's
 /// assembly is taken in as it loads (<see cref="Assemblies"/>), so files can name its components and scripts before
-/// any gem is made, and where each assembly's assets are (<see cref="Resources"/>). Magic's own scripts and the
-/// project's own code, its scripts and components, are loaded first the same way, though neither is a gem, and loaded
-/// again when they are built while the engine runs (<see cref="WatchCode"/>). The provider makes each gem after
-/// whatever its constructor asks for, so <see cref="Make"/> returns the gems in dependency order. A constructor
-/// parameter that is an <see cref="ISettings"/> is the gem's settings object, made by <see cref="Settings"/> as the
-/// gem is. A gem that is an <see cref="ILogSink"/> is added to the log once it is made, instead of provided, and one
-/// that is an <see cref="IPreloader"/> is given to the world by whoever made the gems. Whatever goes wrong with one gem
-/// is logged, and the others are made without it.
+/// any gem is made, and the folder of its own assets is added to the assets (<see cref="Assets.AddRoot"/>), which read
+/// it while the next gem loads. Magic's own scripts and the project's own code, its scripts and components, are loaded
+/// first the same way, though neither is a gem, and loaded again when they are built while the engine runs, until the
+/// loader is disposed. The provider makes each gem after whatever its constructor asks for, so <see cref="Load"/>
+/// returns the gems in dependency order. A constructor parameter that is an <see cref="ISettings"/> is the gem's
+/// settings object, made by <see cref="Settings"/> as the gem is. A gem that is an <see cref="ILogSink"/> is added to
+/// the log once it is made, instead of provided, and one that is an <see cref="IPreloader"/> is given to the world by
+/// whoever made the gems. Whatever goes wrong with one gem is logged, and the others are made without it.
 /// </summary>
-internal sealed class GemLoader
+internal sealed class GemLoader : IDisposable
 {
     /// <summary>
     /// How long a code folder must have been left alone before what was built there is loaded: a build writes the
@@ -35,6 +35,7 @@ internal sealed class GemLoader
 
     private readonly IFileSystem _files;
     private readonly Assemblies _assemblies;
+    private readonly Assets _assets;
     private readonly List<IGem> _made = [];
     private readonly HashSet<Type> _tried = [];
 
@@ -50,19 +51,30 @@ internal sealed class GemLoader
     private readonly List<CodeFile> _code = [];
 
     /// <summary>
-    /// Loads the project's code and the gems it lists, and registers the gems with <paramref name="services"/>, which
-    /// already holds what Core provides but the assets, made over where the gems' are once they have loaded.
+    /// The watches on the folders <see cref="_code"/> is built in, until the loader is disposed.
     /// </summary>
-    internal GemLoader(ServiceCollection services, IFileSystem files, Project project, Assemblies assemblies)
+    private readonly SubscriptionList _codeWatch = new();
+
+    /// <summary>
+    /// Loads the project's code and the gems it lists, registers the gems with <paramref name="services"/>, which
+    /// already holds what Core provides, and adds each one's own assets to <paramref name="assets"/> as it loads it.
+    /// </summary>
+    internal GemLoader(
+        ServiceCollection services,
+        IFileSystem files,
+        Project project,
+        Assemblies assemblies,
+        Assets assets)
     {
         _files = files;
         _assemblies = assemblies;
+        _assets = assets;
+
         LoadCode(files.Combine(AppContext.BaseDirectory, "Resources", "Resources.dll"), "Magic's scripts");
         LoadCode(
             files.Combine(AppContext.BaseDirectory, "Projects", project.Name, project.Name + ".dll"),
             $"{project.Name}'s code");
 
-        List<string> resources = [GemAssembly.GetResources(files, typeof(GemLoader).Assembly)];
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
         foreach (string listing in project.Gems)
         {
@@ -103,47 +115,26 @@ internal sealed class GemLoader
             }
 
             _gems.Add(gem);
-            resources.Add(gem.Resources);
+            assets.AddRoot(gem.Resources);
             _assemblies.Add(gem.Path, gem.Assembly);
         }
 
-        Resources = resources;
-    }
-
-    /// <summary>
-    /// The folders the engine's own assets and each loaded gem's are in, the engine's first and the gems' in the order
-    /// listed: in a release, the copies the build made beside each assembly; in any other build, the source folders the
-    /// build recorded, so assets are read where they are written.
-    /// </summary>
-    internal IReadOnlyList<string> Resources { get; }
-
-    /// <summary>
-    /// Watches where the code that is no gem was loaded from, until the subscription is disposed, and loads what is
-    /// built there again once the build has settled: its assembly replaces its last build's (<see cref="Assemblies"/>),
-    /// and <paramref name="assets"/> makes every script and every prefab again, as those are read as the classes code
-    /// holds, so the world runs the scripts as they are now. The gems are never loaded again: a gem takes a restart.
-    /// </summary>
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "The subscription returned owns the list, and disposing it disposes the list.")]
-    internal Subscription WatchCode(Assets assets)
-    {
-        SubscriptionList watching = new();
         foreach (CodeFile code in _code)
         {
-            watching.Add(
-                FileSystem.Watch(_files.GetParent(code.Path), _ => ReloadCodeAsync(code, assets).FireAndForget()));
+            _codeWatch.Add(FileSystem.Watch(_files.GetParent(code.Path), _ => ReloadCodeAsync(code).FireAndForget()));
         }
+    }
 
-        return new Subscription(watching.Dispose);
+    public void Dispose()
+    {
+        _codeWatch.Dispose();
     }
 
     /// <summary>
     /// Makes every gem that was registered, in the order they are listed, each after whatever its constructor asks for;
     /// the gems, in the order they were made. A gem that could not be made has said why, and is left out.
     /// </summary>
-    internal List<IGem> Make(ServiceProvider container)
+    internal List<IGem> Load(ServiceProvider container)
     {
         foreach (GemAssembly gem in _gems)
         {
@@ -235,7 +226,7 @@ internal sealed class GemLoader
     /// Something in <paramref name="code"/>'s folder changed: once it has settled, the last change to come loads the
     /// code again and has the scripts made again, then the prefabs, so each names the scripts' classes as they are now.
     /// </summary>
-    private async Task ReloadCodeAsync(CodeFile code, Assets assets)
+    private async Task ReloadCodeAsync(CodeFile code)
     {
         int change = code.Note();
         await Task.Delay(_settle).ConfigureAwait(false);
@@ -246,8 +237,8 @@ internal sealed class GemLoader
         }
 
         _assemblies.Add(code.Path, assembly);
-        await assets.RemakeAsync<Script>().ConfigureAwait(false);
-        await assets.RemakeAsync<Prefab>().ConfigureAwait(false);
+        await _assets.RemakeAsync<Script>().ConfigureAwait(false);
+        await _assets.RemakeAsync<Prefab>().ConfigureAwait(false);
     }
 
     /// <summary>
