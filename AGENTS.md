@@ -215,10 +215,33 @@ long as its task, or, when the task is dropped, until the user decides at the ne
   3. Fast-forward the merge target to your branch, and push nothing ([Commits](#commits)).
   4. Remove the worktree (`git worktree remove`) and delete the branch with `git branch -d`, never `-D`. `-d`
      refuses to delete unmerged work, which is the point.
+  5. Remove every other worktree and branch made for the task the same way, such as the one the app running the
+     session made for it at the start, which stays behind even when the work was done in a worktree of your own. A
+     branch whose commits are all on a remote branch, as one cut from the remote's default branch is, goes with
+     `-d` too once its upstream is set to that remote branch, since `-d` then sees it merged.
+  6. Delete the side sessions you started that are done ([Sessions](#sessions)).
 - **Abandoned work:** if the user drops the task, leave the worktree and branch in place and say so. The next
   session's start-of-session check reports them, and the user decides then.
-- **Start of every session:** run `git worktree list` and `git branch --no-merged <merge target>`, and report
-  anything left over before starting new work.
+- **Start of every session:** run `git worktree list` and `git branch --no-merged <merge target>`, and look at the
+  repository's sessions your tools can see. Clear away what is dead before starting new work: a worktree or branch
+  whose session is gone and whose commits are all merged, into the merge target or a remote branch, is removed as in
+  step 5 of Finish, and a session that is done is deleted. Report the rest. A worktree or branch holding commits or
+  changes found nowhere else is never removed: the user decides.
+
+### Sessions
+
+A session is one agent's thread of work, and the user reads the list of them to see what is still going, so a session
+left there once it is done hides the ones that are not. A session is done when it is not running, its work has merged
+or its question was answered, and nothing in it waits on the user. One that was interrupted, never began its work, or
+waits on the user for an approval, an answer or a push stays, however old it is.
+
+- **Delete what is done.** A session deletes the side sessions it started once they are done, and the
+  start-of-session check deletes any other that is. The user approves each delete.
+- **Keep what is still going.** Deleting a session can archive the side sessions it started along with it, so the
+  ones still going are detached to the top level first, by you or the user, or the session is left until they are
+  done.
+- **Check what a delete left.** Deleting a session can leave its worktree behind, detached, and its branch with it:
+  look at `git worktree list` afterwards and remove them as in step 5 of Finish.
 
 ### Commits
 
