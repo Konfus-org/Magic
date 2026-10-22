@@ -9,10 +9,9 @@ namespace Magic.DebugTools;
 
 /// <summary>
 /// One line of the telemetry: an instrument's numbers over the last second, its name above a line per set of tags, or
-/// one of those, under its tab and its header, as the cells of a row:
-/// its name, its value (a histogram's mean, a counter's total, a gauge's latest), how many or how much a second, and a
-/// histogram's most, each empty where the instrument has none. <see cref="Description"/> is the instrument's own: what
-/// it measures.
+/// one of those, under its tab and its header, as the cells of a row: its name, its value (a histogram's mean, a
+/// counter's total, a gauge's latest), how many or how much a second, and a histogram's most, each empty where the
+/// instrument has none. <see cref="Description"/> is the instrument's own: what it measures.
 /// </summary>
 internal readonly record struct TelemetryLine(
     string Tab,
@@ -141,6 +140,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// </summary>
     internal void Refresh()
     {
+        // A change to the settings' tabs hands a new list, and listening starts again under it.
         if (_listener is not null && !ReferenceEquals(_tabsListened, settings.Tabs))
         {
             Listen(false);
@@ -151,6 +151,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
         if (_listener is not { } listener || seconds < 1) return;
 
+        // The second starts over, and the observable instruments are read now, so the lines have their latest values.
         _secondStart = Stopwatch.GetTimestamp();
         listener.RecordObservableInstruments();
         _lines.Clear();
@@ -525,6 +526,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
         internal void Clear()
         {
+            // The most starts over from the next value, which comes with a count of 0.
             Previous = Last;
             Count = 0;
             Sum = 0;

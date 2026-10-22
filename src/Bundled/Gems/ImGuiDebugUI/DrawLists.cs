@@ -73,6 +73,7 @@ internal sealed unsafe class DrawLists
 
                 if (command.UserCallback != null || command.ElemCount == 0) continue;
 
+                // Clipped to the window, in whole pixels rounded out.
                 Rectangle clip = Rectangle.Intersect(
                     window,
                     Rectangle.FromLTRB(
@@ -83,6 +84,8 @@ internal sealed unsafe class DrawLists
 
                 if (clip.Width <= 0 || clip.Height <= 0) continue;
 
+                // The texture by the number ImGui's own texture was given, or the id the draw names alone; the indices
+                // and vertices moved past the lists copied before this one.
                 ulong texture = command.TexRef._TexData != null
                     ? command.TexRef._TexData->TexID
                     : command.TexRef._TexID;
@@ -135,6 +138,7 @@ internal sealed unsafe class DrawLists
     /// </summary>
     private void CopyTextures(ImDrawData_t* data)
     {
+        // A texture ImGui lets go of is forgotten only once the frame just ended draws nothing with it.
         ImVector_ImTextureDataPtr_t* textures = data->Textures;
         for (int i = 0; textures != null && i < textures->Size; i++)
         {

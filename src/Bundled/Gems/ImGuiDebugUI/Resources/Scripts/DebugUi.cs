@@ -96,6 +96,8 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
         Upload(ref _vertexBuffer, ref _vertexBytes, GpuBufferUsage.Vertex, MemoryMarshal.AsBytes(_lists.Vertices));
         Upload(ref _indexBuffer, ref _indexBytes, GpuBufferUsage.Index, MemoryMarshal.AsBytes(_lists.Indices));
 
+        // ImGui's vertices are in window pixels: the vertex stage is given one over the area's size to place them, and
+        // the fragment stage the target's encoding.
         using GpuRenderPass pass = context.Begin()
             .Pipeline(pipeline)
             .VertexBuffers([_vertexBuffer])
@@ -103,6 +105,8 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
             .Constants(GpuStage.Vertex, new Vector4(1f / context.Area.Width, 1f / context.Area.Height, 0, 0))
             .Constants(GpuStage.Fragment, new ImGuiConstants((uint)context.Encoding));
 
+        // Each draw clipped to its rectangle, its texture bound only when it changes; one whose texture is not taken in
+        // is left out.
         uint bound = 0;
         foreach (DrawCall call in _lists.Calls)
         {
@@ -165,6 +169,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     /// </summary>
     private void Upload(ref GpuBuffer buffer, ref uint size, GpuBufferUsage usage, ReadOnlySpan<byte> bytes)
     {
+        // Made again at the power of two that holds the bytes, and at least 16 KiB, so it seldom has to grow.
         if (buffer == GpuBuffer.None || size < bytes.Length)
         {
             _gpu.Release(buffer);

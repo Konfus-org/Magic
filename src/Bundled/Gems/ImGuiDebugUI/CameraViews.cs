@@ -37,10 +37,12 @@ internal readonly record struct CameraView(
 
         if (local.Z <= Near) return false;
 
+        // Across and up the view at its depth, -1 to 1 from edge to edge.
         Vector2 ndc = new(local.X / (local.Z * Tangents.X), local.Y / (local.Z * Tangents.Y));
 
         if (MathF.Abs(ndc.X) > 1 || MathF.Abs(ndc.Y) > 1) return false;
 
+        // Into the area's pixels, which count down from its top.
         pixel = new Vector2(
             Area.X + (((ndc.X * 0.5f) + 0.5f) * Area.Width),
             Area.Y + ((0.5f - (ndc.Y * 0.5f)) * Area.Height));

@@ -208,15 +208,19 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
     public void FixedUpdate(in Frame frame)
     {
+        // The step before is waited for and taken in, so the world is the main thread's again.
         WaitForStep();
         if (!_isApplied) Apply();
 
+        // A new step: the shapes fitted since the last are taken in, the domains waiting on them told how far they
+        // are, and gravity follows its setting.
         _step++;
         _shapes.TakeArrived();
         CheckPreloads();
         if (_settings.Gravity != -b3World_GetGravity(_box3d).y)
             b3World_SetGravity(_box3d, new b3Vec3 { y = -_settings.Gravity });
 
+        // Where the player's cameras are, which the range is measured from.
         _cameras.Clear();
         foreach ((_, _, Span<Transform> transforms, Span<Tags> tags) in _world.Query<Camera, Transform, Tags>())
         {
@@ -226,6 +230,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             }
         }
 
+        // Each entity that could be in range makes its body, or carries its changes over to it, and stamps it seen.
         float farthest = _settings.Range * Leave;
         foreach (EcsChunk<Transform, Physics> chunk in _world.Query<Transform, Physics>())
         {
@@ -237,6 +242,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             }
         }
 
+        // A body not stamped this step is of an entity gone, or out of range, and is dropped.
         foreach ((Entity entity, int slot) in _slots)
         {
             if (_bodies[slot].Seen != _step) _gone.Add(entity);
@@ -297,6 +303,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         if (found.IsEmpty) return 0;
 
+        // The sphere is a point at the origin with the radius, which the overlap places at the centre. Each shape it
+        // overlaps has its entity written straight into found, from the bodies pinned for the call; the callback is
+        // C's byte one, cast to the bool the binding takes.
         WaitForStep();
         b3Vec3 point = default;
         b3ShapeProxy proxy = new() { points = &point, count = 1, radius = radius };
@@ -407,6 +416,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
                 b3CreateSphereShape(body, def, &sphere);
                 break;
             case Shape.Capsule:
+                // Upright, as wide as the wider of the bounds' X and Z, its two centres as far apart as the height
+                // leaves once the round ends are taken off.
                 float radius = Math.Max(half.X, half.Z);
                 float reach = Math.Max(half.Y - radius, 0);
                 b3Capsule capsule = new()
@@ -621,6 +632,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             return;
         }
 
+        // A kinematic body is driven to where its transform is, pushing what is in the way; any other body whose
+        // transform moved is put there and woken.
         bool isMoved = transform.Position != body.Transform.Position || transform.Rotation != body.Transform.Rotation;
         if (physics.Motion == Motion.Kinematic)
         {
@@ -679,6 +692,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         if (_cameras.Count == 0) return true;
 
+        // How far the shape reaches from the entity's position: half its bounds' diagonal, plus how far their centre is
+        // from it; a shape still loading is taken to reach the scale's length.
         Vector3 scale = Vector3.Abs(transform.Scale);
         float reach = shape is null
             ? scale.Length()
@@ -743,6 +758,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         }
 
         AddShape(id, &shapeDef, shape, kind, transform.Scale);
+
+        // A mass asked for scales the one Box3D worked out from the shape, and the inertia with it, so the body still
+        // turns as its shape says.
         if (physics.Mass > 0 && physics.Motion == Motion.Dynamic)
         {
             b3MassData mass = b3Body_GetMassData(id);
@@ -960,6 +978,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         Vector3 normal = Vector3.Zero;
         float impulse = 0;
         int points = 0;
+
+        // Every point of every manifold summed, for the mean point and normal and the whole impulse; a point's anchor
+        // is measured from the first body's centre of mass.
         for (int i = 0; i < data.manifoldCount; i++)
         {
             ref b3Manifold manifold = ref data.manifolds[i];

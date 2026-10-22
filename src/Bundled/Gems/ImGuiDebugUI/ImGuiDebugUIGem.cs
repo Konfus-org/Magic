@@ -176,6 +176,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _stopping = lifetime.Stopping;
         _fontAsked = settings.Font;
 
+        // ImGui writes no ini file, and is told the renderer takes the textures it makes and changes, and draws by
+        // vertex offset; it takes the engine's look, at the settings' size.
         _context = ImGui_CreateContext(null);
         ImGui_SetCurrentContext(_context);
         ImGuiIO_t* io = ImGui_GetIO();
@@ -186,6 +188,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         Look.Apply(style);
         style->FontSizeBase = settings.FontSize;
 
+        // ImGui's clipboard is the window's, through callbacks that find this gem by the handle in the user data.
         _self = GCHandle.Alloc(this);
         ImGuiPlatformIO_t* platform = ImGui_GetPlatformIO();
         platform->Platform_ClipboardUserData = (void*)GCHandle.ToIntPtr(_self);
@@ -238,7 +241,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ImGuiIO_t* io = ImGui_GetIO();
         if (_input is { } input) ImGuiInput.Feed(io, input, _text);
 
-        // Laid out in window pixels: the font size says how big the UI is.
+        // Laid out in window pixels: the font size says how big the UI is. ImGui needs a time step of more than 0,
+        // which a frame's may not be.
         io->DisplaySize = new Vector2(_window.Width, _window.Height).Im;
         io->DeltaTime = Math.Max(frame.DeltaSeconds, 1e-4f);
         ImGui_GetStyle()->FontSizeBase = _settings.FontSize;
@@ -263,6 +267,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             End();
         }
 
+        // What is reported shows while a debug window is drawn, or always in a Debug build, and never with no window to
+        // see it in; it is taken either way, so what has had its time goes.
         _isShowing = _window.Width > 0 && (IsAlwaysShowing || _windowsDrawn > 0);
         _world.Clear();
         _lines.Clear();
@@ -448,6 +454,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         ThrowIfOutsideFrame();
         byte* id = LabelField(label);
+
+        // Encoded again only for another string than the one handed back last, or a change to read-only.
         if (!_documents.TryGetValue(label, out DocumentBuffer? document) || !ReferenceEquals(document.Text, text)
             || document.IsReadOnly != readOnly)
         {
@@ -490,6 +498,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public unsafe bool Slider(string label, ref float value, float min = 0f, float max = 0f)
     {
         ThrowIfOutsideFrame();
+
+        // A drag moves the value a hundredth of itself a pixel, and at least a tenth.
         float speed = Math.Max(Math.Abs(value) * 0.01f, 0.1f);
         fixed (float* held = &value)
         {

@@ -143,6 +143,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
             _isWaitingForWorld = false;
         }
 
+        // Lines run until one of them holds the rest back: a wait, a wait loaded or an open.
         while (_waiting == 0
             && !_isWaitingForWorld
             && _opening is not { IsCompleted: false }
@@ -174,6 +175,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         int depth = 0;
         foreach (char character in line)
         {
+            // A quote starting a word wraps it, and is dropped with the quote closing it; one inside a word is kept.
             if (character == '"')
             {
                 if (!hasAny) isWrapped = true;
@@ -196,6 +198,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
                 continue;
             }
 
+            // Braces and brackets outside quotes nest, and a space inside them stays in the word.
             if (!isQuoted) depth = Math.Max(0, depth + character switch { '{' or '[' => 1, '}' or ']' => -1, _ => 0 });
 
             word.Append(character);
@@ -312,6 +315,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
 
     private async Task SaveAsync(IGpu gpu, IWindow window, string path)
     {
+        // The capture is asked for on the render thread, which the GPU is used from, and its image awaited here.
         Task<Result<GpuImage>> capture = await _threads.InvokeAsync(
             EngineThread.Render,
             () => gpu.CaptureAsync(gpu.GetWindowTarget(window)),

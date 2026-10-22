@@ -238,6 +238,8 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
                 cards[i] = MakeCardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
             });
 
+        // From this far the model, its radius above and below its centre, is the card height's share of the view,
+        // which at a distance d is 2 d tan(half the field of view) tall.
         return new ModelCards { Distance = radius / (cardHeight * MathF.Tan(HalfFieldOfView)), Meshes = cards };
     }
 
@@ -296,6 +298,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         hash.Append(BitConverter.GetBytes(atlas));
         ulong value = hash.GetCurrentHashAsUInt64();
 
+        // An id of 0 is no texture.
         return value == 0 ? 1 : value;
     }
 

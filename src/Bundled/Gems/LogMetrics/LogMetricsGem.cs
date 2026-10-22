@@ -186,6 +186,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// </summary>
     private void Report()
     {
+        // The window starts over, and the observable instruments are read now, so the report has their latest values.
         double seconds = Stopwatch.GetElapsedTime(_windowStart).TotalSeconds;
         _windowStart = Stopwatch.GetTimestamp();
         _listener?.RecordObservableInstruments();
@@ -432,6 +433,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
 
         internal void Clear()
         {
+            // The least and the most start over from the next value, which comes with a count of 0.
             Count = 0;
             Sum = 0;
         }

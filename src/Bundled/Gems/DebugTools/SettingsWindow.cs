@@ -114,6 +114,8 @@ internal sealed class SettingsWindow : IDisposable
         _events = events;
         _input = input;
         _stopping = stopping;
+
+        // The presets and the debug views as their choices show them: sorted by name, each handle moved with its name.
         _presets = [.. settings.Presets];
         _presetNames = Array.ConvertAll(
             _presets,
@@ -206,6 +208,8 @@ internal sealed class SettingsWindow : IDisposable
         StringBuilder words = new(name.Length + 8);
         for (int i = 0; i < name.Length; i++)
         {
+            // A capital after a lower-case letter or a digit starts a word, as does an acronym's last capital with
+            // lower case after it; it is lowered unless a capital follows it, as in an acronym.
             char character = name[i];
             bool isAfterLower = i > 0 && (char.IsLower(name[i - 1]) || char.IsDigit(name[i - 1]));
             bool isEndOfAcronym = i > 0 && char.IsUpper(name[i - 1]) && i + 1 < name.Length
@@ -457,6 +461,8 @@ internal sealed class SettingsWindow : IDisposable
 
         int index = GetViewIndex();
         string description = index == 0 ? string.Empty : _viewDescriptions[index - 1];
+
+        // Made again when the view changes, or its description has loaded since.
         if (!string.Equals(_linedView, _debugView, StringComparison.Ordinal)
             || !_viewLine.EndsWith(description, StringComparison.Ordinal))
         {
@@ -641,8 +647,8 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
-    /// <c>view Stage</c> shows what that stage of the frame made in place of the finished image; <c>view</c> alone
-    /// shows the frame as it is again.
+    /// <c>view Name</c> shows that debug view, a pass in <c>Passes/Debug</c> by its file name, in place of the finished
+    /// image; <c>view</c> alone shows the frame as it is again.
     /// </summary>
     private void RunView(ReadOnlySpan<string> words)
     {

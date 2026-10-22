@@ -71,6 +71,7 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
             {
                 if (isUnfolded) ui.EndTable();
 
+                // A new header counts its rows, and is folded the first time it has too many to show.
                 header = line.Header;
                 int rows = 1;
                 while (i + rows < lines.Count

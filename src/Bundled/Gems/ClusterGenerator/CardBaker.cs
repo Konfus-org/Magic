@@ -101,6 +101,7 @@ internal static class CardBaker
             }
         }
 
+        // Each pass fills the uncovered texels beside one filled before it began, so the colours spread a texel a pass.
         for (int pass = 0; pass < Spread; pass++)
         {
             bool[] next = (bool[])filled.Clone();
@@ -202,6 +203,8 @@ internal static class CardBaker
 
             if (MathF.Abs(area) < 1e-12f) return;
 
+            // Each sample in the triangle's box and inside all three of its edges takes the corners' depth, uv and
+            // normal, weighted by how near it is to each, where it is the nearest yet.
             int fromX = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.X, MathF.Min(pb.X, pc.X))));
             int toX = Math.Min(Size - 1, (int)MathF.Ceiling(MathF.Max(pa.X, MathF.Max(pb.X, pc.X))));
             int fromY = Math.Max(0, (int)MathF.Floor(MathF.Min(pa.Y, MathF.Min(pb.Y, pc.Y))));
@@ -251,6 +254,7 @@ internal static class CardBaker
             float x = Vector3.Dot(local, right) / Half;
             float y = local.Y / Half;
 
+            // Across and up from -1 to 1 into samples from the top left, and how far along the view it is as depth.
             return new Vector3(((x * 0.5f) + 0.5f) * Size, (0.5f - (y * 0.5f)) * Size, Vector3.Dot(local, forward));
         }
 
@@ -277,6 +281,8 @@ internal static class CardBaker
 
             if (covered == 0) return;
 
+            // The means over the covered samples: the uv kept to 0 to 1, as a material repeats, and the depth and the
+            // normal from -1 to 1 into 0 to 1.
             uv /= covered;
             normal = normal.LengthSquared() > 1e-12f ? Vector3.Normalize(normal) : Vector3.UnitY;
             byte cover = (byte)(255 * covered / (Samples * Samples));

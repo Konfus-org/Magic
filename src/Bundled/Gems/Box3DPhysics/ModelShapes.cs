@@ -151,6 +151,8 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
 
         if (vertexCount == 0 || indexCount < 3) return null;
 
+        // Every mesh into one list of vertices and one of triangles, each mesh's indices moved past the vertices of
+        // those before it, and the bounds grown over every vertex.
         b3Vec3[] vertices = new b3Vec3[vertexCount];
         int[] indices = new int[indexCount];
         Vector3 min = new(float.PositiveInfinity);

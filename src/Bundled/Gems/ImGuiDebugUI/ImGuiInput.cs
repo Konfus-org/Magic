@@ -20,6 +20,7 @@ internal static unsafe class ImGuiInput
             FeedKey(io, key, input[control]);
         }
 
+        // The modifiers too, which ImGui reads shortcuts by, each held by the key on either side.
         ImGuiIO_AddKeyEvent(
             io,
             ImGuiMod_Ctrl,

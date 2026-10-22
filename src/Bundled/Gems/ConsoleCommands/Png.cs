@@ -14,6 +14,7 @@ internal static class Png
 {
     internal static byte[] Encode(GpuImage image)
     {
+        // The eight bytes every PNG file starts with.
         using MemoryStream png = new();
         png.Write([137, 80, 78, 71, 13, 10, 26, 10]);
 
@@ -25,6 +26,7 @@ internal static class Png
         header[9] = 6;
         Chunk(png, "IHDR"u8, header);
 
+        // Each row led by its filter type, 0 for none, and all of them deflated as one stream.
         using MemoryStream rows = new();
         using (ZLibStream deflate = new(rows, CompressionLevel.Fastest, leaveOpen: true))
         {

@@ -278,6 +278,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
     public void Update(in Frame frame)
     {
+        // The script assets fetched on workers since the last frame, each that did not load said once.
         while (_fetched.Reader.TryRead(out (Handle<Script> Handle, Result<Script> Loaded) fetched))
         {
             _loaded[fetched.Handle] = fetched.Loaded;
@@ -317,6 +318,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// </summary>
     private static List<MethodInfo> GetAdds(Type type)
     {
+        // Each interface the class has, matched with the Add that takes it, or for a generic system interface, with
+        // the generic Add made for the same component types.
         List<MethodInfo> adds = [];
         foreach (Type contract in type.GetInterfaces())
         {
@@ -552,6 +555,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// </summary>
     private void Reconcile()
     {
+        // Copies whose entity is gone, or no longer names their script, end; ending one takes it out of the list, so
+        // the index steps back over it.
         for (int i = 0; i < _attached.Count; i++)
         {
             Attached attached = _attached.GetAt(i).Value;
@@ -563,6 +568,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             }
         }
 
+        // The scripts named with no copy, gathered now and started once the query is over, as a start may spawn.
         _starting.Clear();
         foreach ((ReadOnlySpan<Entity> entities, Span<Scripts> scripts) in _ecs.Query<Scripts>())
         {
@@ -575,6 +581,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             }
         }
 
+        // Each starts once its asset is there, fetched first when no prefab loaded it; while a domain loads in place of
+        // the world, only an impatient one starts, unless the new domain is being readied.
         int started = 0;
         foreach ((Entity entity, Handle<Script> handle) in _starting)
         {
@@ -603,6 +611,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             if (!_ecs.IsAlive(waiting.Entity)) _pending.Remove(waiting);
         }
 
+        // A readying is over once a frame starts nothing and waits for no asset.
         if (_readied is not { } readied || started > 0 || IsFetching()) return;
 
         readied.TrySetResult();
@@ -610,7 +619,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     }
 
     /// <summary>
-    /// Whether a script found with no copy this frame waits for its asset (<see cref="Fetch"/>), so it has yet to start.
+    /// Whether a script found with no copy this frame waits for its asset (<see cref="Fetch"/>), so has yet to start.
     /// </summary>
     private bool IsFetching()
     {
@@ -772,8 +781,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// <summary>
     /// Hands back <paramref name="made"/> whole, to run until its entity goes, added to the ECS as each kind of system
     /// it is; held instead while the world loads, its class not <see cref="ImpatientAttribute"/>, or whatever its class
-    /// while the domain replacing the world is readied, as it is that world's, its systems added once the loading is over
-    /// (<see cref="FollowLoading"/>). Why not, when adding one throws.
+    /// while the domain replacing the world is readied, as it is that world's, its systems added once the loading is
+    /// over (<see cref="FollowLoading"/>). Why not, when adding one throws.
     /// </summary>
     [SuppressMessage(
         "Reliability",
@@ -831,6 +840,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         Type type = script.GetType();
         Dictionary<string, JsonElement> values = new(StringComparer.Ordinal);
         HashSet<string> backing = new(StringComparer.Ordinal);
+
+        // Its values first, each one's backing field noted so the fields below do not save it twice.
         foreach (PropertyInfo property in GetValues(type))
         {
             backing.Add($"<{property.Name}>k__BackingField");
@@ -915,6 +926,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     {
         if (_loaded.ContainsKey(script.Handle)) _loaded[script.Handle] = Result.Success(script);
 
+        // Gathered first, as ending a copy takes it out of the scripts being walked.
         List<Attached> restarting = [];
         foreach (Attached attached in _attached.Values)
         {
@@ -974,10 +986,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
     /// <summary>
     /// Calls each behaviour's hook for <paramref name="phase"/>, in the order they were made, but those held while the
-    /// world loads (<see cref="Attached.IsHeld"/>): FixedUpdate every step,
-    /// and Update and LateUpdate when the behaviour is due, decided once a frame in Update (<see cref="IsDue"/>), with
-    /// the time since the behaviour's last call as the frame's delta. A script whose entity is gone ends first; a
-    /// behaviour that throws is logged and ends, and the others go on.
+    /// world loads (<see cref="Attached.IsHeld"/>): FixedUpdate every step, and Update and LateUpdate when the
+    /// behaviour is due, decided once a frame in Update (<see cref="IsDue"/>), with the time since the behaviour's last
+    /// call as the frame's delta. A script whose entity is gone ends first; a behaviour that throws is logged and ends,
+    /// and the others go on.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -1016,6 +1028,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         _calls.Add(calls, new KeyValuePair<string, object?>("magic.gems.scripting.phase", _phases[(int)phase]));
         _behaviors.Record(_attached.Count);
     }
+
     /// <summary>
     /// The behaviour's hook for <paramref name="phase"/>: FixedUpdate every step; Update and LateUpdate only on a frame
     /// the behaviour is due, with the time waited since its last call as the delta. Whether it ran.

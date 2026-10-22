@@ -222,6 +222,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         ThrowIfNotMain();
         ArchEntity alive = GetAlive(entity);
+
+        // Every component is set, but only the types the entity lacks are added, all in one move.
         ComponentType[] types = new ComponentType[components.Length];
         object[] values = new object[components.Length];
         int added = 0;

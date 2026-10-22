@@ -31,6 +31,8 @@ internal sealed unsafe class TextArena : IDisposable
     /// </summary>
     internal byte* Of(string text)
     {
+        // Room for the most bytes the text could take, and its NUL. When what is left of the block is too little, it
+        // goes into the next, which is made, or made again larger, when it is too small for the text.
         int most = Encoding.UTF8.GetMaxByteCount(text.Length) + 1;
         if (_block < 0 || _used + most > _blocks[_block].Bytes)
         {

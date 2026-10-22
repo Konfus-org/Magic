@@ -110,6 +110,7 @@ internal sealed class Reports
                     continue;
                 }
 
+                // Plain text, reported every frame, comes before the rest, each in the order it was first reported.
                 report.IsFresh = false;
                 ShownReport shown = new(
                     report.Label,

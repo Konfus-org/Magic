@@ -36,8 +36,8 @@ internal sealed unsafe class FontSource : IDisposable
         // own, but only once it first reads the font, so the original must outlive this call.
         _handle = (nint*)ImGui_MemAlloc((nuint)sizeof(nint));
         *_handle = GCHandle.ToIntPtr(_font);
-        // The C API has no constructor for a config, so the defaults ImGui's sets are set here, and the atlas copies
-        // it.
+
+        // The C API has no constructor for a config, so the defaults ImGui's sets are set here; the atlas copies it.
         ImFontConfig_t config = default;
         config.ExtraSizeScale = 1f;
         config.GlyphMaxAdvanceX = float.MaxValue;
@@ -126,6 +126,8 @@ internal sealed unsafe class FontSource : IDisposable
 
         if (rectangle < 0) return false;
 
+        // Its box from the pen, scaled to the size drawn: its top is its bearing above the baseline, which is the
+        // ascent below the line's top.
         glyph->X0 = loaded.BearingX * scale;
         glyph->Y0 = MathF.Round(baked->Ascent) - (loaded.BearingY * scale);
         glyph->X1 = glyph->X0 + (loaded.Width * scale);
@@ -133,6 +135,7 @@ internal sealed unsafe class FontSource : IDisposable
         glyph->Visible = 1;
         glyph->PackId = rectangle;
 
+        // Its pixels from its top left corner in the asset's image, a row the image's width apart.
         ReadOnlySpan<byte> pixels = font.Pixels.Span[(((loaded.Y * font.Width) + loaded.X) * 4)..];
         fixed (byte* first = pixels)
         {

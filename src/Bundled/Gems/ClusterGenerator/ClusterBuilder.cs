@@ -11,11 +11,12 @@ namespace Magic.ClusterGenerator;
 /// once. The model's triangles are split into compact clusters, each of one material slot, a large mesh in chunks along
 /// a spatial sort, every chunk at once. Then, level after level, neighbouring clusters are grouped, each group is
 /// simplified to half its triangles with every place it shares with another group locked, and the mesh's own open
-/// border, and split into clusters again, every group at once. The simplifier keeps a subset of the vertices as they were, so every position stays on
-/// the grid and every vertex keeps its normal and uv. A group that can no longer simplify is drawn as it is from then
-/// on, so its border stays locked at every level after, and what is made beside it still meets it. A group's error is
-/// the most of what the simplification moved and what its clusters had, and its bounds enclose theirs, so neither ever
-/// shrinks from a level to the next, which is what lets a renderer pick each cluster alone.
+/// border, and split into clusters again, every group at once. The simplifier keeps a subset of the vertices as they
+/// were, so every position stays on the grid and every vertex keeps its normal and uv. A group that can no longer
+/// simplify is drawn as it is from then on, so its border stays locked at every level after, and what is made beside
+/// it still meets it. A group's error is the most of what the simplification moved and what its clusters had, and its
+/// bounds enclose theirs, so neither ever shrinks from a level to the next, which is what lets a renderer pick each
+/// cluster alone.
 /// </summary>
 internal static class ClusterBuilder
 {
@@ -83,6 +84,8 @@ internal static class ClusterBuilder
 
             if (current.Count <= 1 || level + 1 >= MaxLevels) break;
 
+            // The level's clusters grouped, every group simplified at once, and what they were split into is the next
+            // level; a group that would not simplify has its border frozen instead.
             List<List<Part>> groups = Group(current, vertices, places);
             byte[] locks = LockBorders(groups, places, frozen);
             List<Part>?[] made = new List<Part>?[groups.Count];
@@ -129,8 +132,8 @@ internal static class ClusterBuilder
 
     /// <summary>
     /// The model's vertices as the one array every level indexes, on the grid <paramref name="step"/> metres apart,
-    /// with each one's material slot, and each mesh's triangles into it. A triangle whose corners the grid puts in one
-    /// place has no area left: it is dropped.
+    /// with each one's material slot, and each mesh's triangles into it. A triangle two of whose corners the grid puts
+    /// in one place has no area left: it is dropped.
     /// </summary>
     private static (Vertex[] Vertices, int[] Slots, List<uint[]> Meshes) Gather(Model model, float step)
     {
@@ -212,6 +215,7 @@ internal static class ClusterBuilder
 
         if (!any) return 0;
 
+        // A model all at its origin still has a step, as a step of 0 says it has no vertices.
         return farthest > 0 ? farthest / PositionSteps : 1e-6f;
     }
 
@@ -271,6 +275,7 @@ internal static class ClusterBuilder
             }
         }
 
+        // Each chunk split on a worker. A chunk is of one mesh, so its first corner's material slot is the chunk's.
         List<Part>[] made = new List<Part>[chunks.Count];
         Parallel.For(
             0,
@@ -326,8 +331,8 @@ internal static class ClusterBuilder
     /// <summary>
     /// <paramref name="triangles"/> of one material slot, into <paramref name="own"/>, split by meshoptimizer into
     /// compact clusters of at most <see cref="ClusterHierarchy.MaxTriangles"/> triangles and
-    /// <see cref="ClusterHierarchy.MaxVertices"/> vertices, each holding the model's vertices <paramref name="sources"/>
-    /// says its own are.
+    /// <see cref="ClusterHierarchy.MaxVertices"/> vertices, each holding the model's vertices
+    /// <paramref name="sources"/> says its own are.
     /// </summary>
     private static unsafe List<Part> Split(
         Vertex[] own,
@@ -338,6 +343,8 @@ internal static class ClusterBuilder
         float error,
         Vector4? errorBounds)
     {
+        // Into buffers as large as they can need: meshoptimizer bounds how many clusters there can be, and together
+        // they hold no more vertices, nor corners, than the triangles have corners.
         nuint bound = meshopt_buildMeshletsBound((nuint)triangles.Length, ClusterHierarchy.MaxVertices, MinTriangles);
         meshopt_Meshlet[] meshlets = new meshopt_Meshlet[bound];
         uint[] meshletVertices = new uint[triangles.Length];
@@ -368,6 +375,7 @@ internal static class ClusterBuilder
         List<Part> parts = new(count);
         for (int i = 0; i < count; i++)
         {
+            // Its triangles and vertices reordered so each is near the one before it, which the GPU draws faster.
             meshopt_Meshlet meshlet = meshlets[i];
             fixed (uint* vertices = &meshletVertices[meshlet.vertex_offset])
             fixed (byte* corners = &meshletTriangles[meshlet.triangle_offset])
@@ -409,6 +417,7 @@ internal static class ClusterBuilder
     /// </summary>
     private static unsafe List<List<Part>> Group(List<Part> parts, Vertex[] vertices, uint[] places)
     {
+        // Every cluster's corners as places, so clusters that meet only by place are neighbours too.
         uint[] counts = new uint[parts.Count];
         int total = 0;
         for (int p = 0; p < parts.Count; p++)
@@ -466,6 +475,7 @@ internal static class ClusterBuilder
     /// </summary>
     private static byte[] LockBorders(List<List<Part>> groups, uint[] places, bool[] frozen)
     {
+        // Each place's group: the first to hold it, until another holds it too and it is shared.
         const int None = -2;
         const int Shared = -1;
         int[] groupAt = new int[places.Length];
@@ -527,6 +537,7 @@ internal static class ClusterBuilder
         byte[] locks,
         int level)
     {
+        // The group's corners, the most error any of its clusters has, and a sphere around all their error bounds.
         List<uint> corners = [];
         float error = 0;
         Vector4 bounds = group[0].ErrorBounds;
@@ -541,6 +552,7 @@ internal static class ClusterBuilder
             bounds = Enclose(bounds, part.ErrorBounds);
         }
 
+        // The group as a small mesh of its own, each vertex locked as the model's vertex it is a copy of.
         (Vertex[] own, uint[] triangles, uint[] sources) = Localize(CollectionsMarshal.AsSpan(corners), vertices);
         byte[] ownLocks = new byte[own.Length];
         for (int i = 0; i < own.Length; i++)
@@ -548,6 +560,8 @@ internal static class ClusterBuilder
             ownLocks[i] = locks[sources[i]];
         }
 
+        // Simplified to half its triangles with no limit on the error, which comes back as how far the surface moved,
+        // in the model's units.
         int triangleCount = triangles.Length / 3;
         uint[] kept = new uint[triangles.Length];
         int keptCount;
@@ -577,6 +591,7 @@ internal static class ClusterBuilder
 
         if (keptCount == 0 || keptCount / 3 > triangleCount * MinReduction) return null;
 
+        // What the group became is its clusters' parent, with the most error of theirs and of the simplification.
         error = MathF.Max(error, moved);
         foreach (Part part in group)
         {
@@ -678,6 +693,7 @@ internal static class ClusterBuilder
 
         if (distance + first.W <= second.W) return second;
 
+        // Neither holds the other: the sphere spans both, its centre moved from the first's toward the second's.
         float radius = (distance + first.W + second.W) / 2;
         Vector3 centre = a + ((b - a) * ((radius - first.W) / distance));
 
