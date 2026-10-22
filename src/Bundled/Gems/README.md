@@ -65,14 +65,17 @@ must hold:
   working folder), `built/` (what it installed) and `built/native/<file>`, the one shared library the build copies
   beside each gem that binds it, read through the links Linux and macOS install it as. A library declared by its
   sources has `project/`, the CMake project written for it, there too, since CMake ties a build folder to one source
-  path and that path must not be a checkout's. A gem's project may name these folders in an option, as a library
-  built against another names that one's `built/`.
-- **Pinned, then fetched or downloaded.** A library is fetched shallow from its repository at a tag, or downloaded
-  as the archive its author publishes, verified against the SHA-256 the item pins. Of a repository's submodules only
-  those the item names are fetched, each shallow at the commit the tag pins, and none under them: a repository often
-  vendors as submodules the libraries its build can do without, and their histories would be most of what a cold
-  build fetches. A submodule the build needs and the item does not name fails the library's configure. A changed tag
-  fetches afresh; nothing else touches the network.
+  path and that path must not be a checkout's, and one fetched from a repository has `fetch.cmake`, the script that
+  fetches it. A gem's project may name these folders in an option, as a library built against another names that
+  one's `built/`.
+- **Pinned, then fetched or downloaded.** A library is fetched from its repository at a tag, the tag's commit and
+  nothing else, or downloaded as the archive its author publishes, verified against the SHA-256 the item pins. Of a
+  repository's submodules only those the item names are fetched, each at the commit the tag pins, one commit deep,
+  and none under them: a repository often vendors as submodules the libraries its build can do without, and their
+  histories would be most of what a cold build fetches. A submodule the build needs and the item does not name fails
+  the library's configure. CMake's own git download takes every branch's tip and every tag with the one asked for,
+  so a script the build writes beside the library fetches instead. A changed tag fetches that tag, unless the source
+  already holds it, and a changed repository fetches from nothing; nothing else touches the network.
 - **Built once per machine.** A hash of what CMake is told of a library, and of the libraries it depends on, names a
   ready marker in its folder: a library is built again when its item changes, or one it depends on does, and the
   marker is written when it built. When every library a project declares is ready, nothing runs, not even CMake, and

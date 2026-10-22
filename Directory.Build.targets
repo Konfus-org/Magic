@@ -81,10 +81,11 @@
   <!-- Builds the project's libraries that are not built yet. Each library is had through CMake's ExternalProject: the
        build writes the project's items as one superbuild in its intermediate folder, an ExternalProject call each, and
        for a library declared by its Sources the CMake project that compiles them, beside the library. A repository is
-       fetched shallow, and of its submodules only those its item names, each shallow too. A hash of what
-       CMake is told of a library, and of the libraries it depends on, names a ready marker in its folder, so a library
-       is built when its declaration changed or it is missing, and a build cut short leaves no marker; CMake's own stamps
-       then resume it at the step that did not finish. When every library is ready nothing runs. The superbuild builds
+       fetched at its tag alone, by a script written beside the library, and of its submodules only those its item
+       names, each one commit deep; only what it lacks touches the network. A hash of what CMake is told of a library,
+       and of the libraries it depends on, names a ready marker in its folder, so a library is built when its
+       declaration changed or it is missing, and a build cut short leaves no marker; CMake's own stamps then resume it
+       at the step that did not finish. When every library is ready nothing runs. The superbuild builds
        one library at a time, in the order declared, each library's own build on the cores the caller allows, below
        normal priority, so a long native build never makes the machine unusable. Each library has a named mutex, as
        several checkouts share the folder: a project holds those of all the libraries it declares, whose folders its
@@ -235,6 +236,37 @@ void WriteWhenChanged(string path, string text)
     }
 }
 
+// What fetches a library from its repository, written beside it in place of ExternalProject's own git download, which
+// takes every branch's tip and every tag with the one asked for: the tag's commit alone, then each submodule named at
+// the commit the tag pins, one commit deep. A source that holds the tag already is checked out from what it holds, with
+// nothing fetched, as a superbuild new to a checkout runs every step again; one fetched from another repository is
+// fetched again from nothing. A checkout cut short is finished, and a file the tag leaves as it was keeps its time.
+string fetch = "# Written by the build from Directory.Build.targets: edit that, never this file. Fetches REPOSITORY at TAG into\n"
+    + "# SOURCE, and of its submodules the SUBMODULES named, a comma between.\n"
+    + "cmake_minimum_required(VERSION 3.28)\n"
+    + "function(git)\n"
+    + "  execute_process(COMMAND \"${GIT}\" -C \"${SOURCE}\" ${ARGN} COMMAND_ERROR_IS_FATAL ANY)\n"
+    + "endfunction()\n"
+    + "set(origin \"\")\n"
+    + "if(EXISTS \"${SOURCE}/.git\")\n"
+    + "  execute_process(COMMAND \"${GIT}\" -C \"${SOURCE}\" config --get remote.origin.url OUTPUT_VARIABLE origin OUTPUT_STRIP_TRAILING_WHITESPACE)\n"
+    + "endif()\n"
+    + "if(NOT \"${origin}\" STREQUAL \"${REPOSITORY}\")\n"
+    + "  file(REMOVE_RECURSE \"${SOURCE}\")\n"
+    + "  file(MAKE_DIRECTORY \"${SOURCE}\")\n"
+    + "  git(init --quiet)\n"
+    + "  git(remote add origin \"${REPOSITORY}\")\n"
+    + "endif()\n"
+    + "execute_process(COMMAND \"${GIT}\" -C \"${SOURCE}\" rev-parse --verify --quiet \"refs/tags/${TAG}^{commit}\" RESULT_VARIABLE missing OUTPUT_QUIET)\n"
+    + "if(missing)\n"
+    + "  git(fetch --depth 1 --no-tags origin tag \"${TAG}\")\n"
+    + "endif()\n"
+    + "git(-c advice.detachedHead=false checkout --force --quiet \"refs/tags/${TAG}\")\n"
+    + "if(SUBMODULES)\n"
+    + "  string(REPLACE \",\" \";\" SUBMODULES \"${SUBMODULES}\")\n"
+    + "  git(submodule update --init --depth 1 -- ${SUBMODULES})\n"
+    + "endif()\n";
+
 // Each library as CMake is told it. A library is had from its repository at a tag, or from its author's archive; its
 // own steps run with the terminal, so Ninja passes each one's output on as it comes rather than when the step ends.
 int count = Libraries.Length;
@@ -263,15 +295,12 @@ for (int i = 0; i < count; i++)
     StringBuilder call = new StringBuilder("ExternalProject_Add(" + name + "\n");
     if (repository.Length > 0)
     {
-        call.Append("  GIT_REPOSITORY " + Quote(repository) + " GIT_TAG " + Quote(library.GetMetadata("Tag")) + " GIT_SHALLOW ON GIT_PROGRESS OFF UPDATE_DISCONNECTED ON GIT_SUBMODULES \"\"");
-        if (submodules.Length > 0)
-        {
-            // The submodules the library builds from, each at the commit its tag pins with nothing under it, fetched by
-            // git at depth 1, which asks for that commit itself when it is no branch's tip; ExternalProject's own fetch
-            // of them, told of none above, takes each with its whole history. As the patch step, which runs once the
-            // source is checked out at its tag, before it is configured, and again whenever the checkout changes.
-            call.Append("\n  PATCH_COMMAND \"${GIT_EXECUTABLE}\" submodule update --init --depth 1 -- " + string.Join(" ", submodules.Select(Quote)));
-        }
+        // Through the script beside the library, told what to fetch on its command line, which CMake records, so the
+        // step runs again when the repository, tag or submodules change. The submodules have a comma between, as
+        // ExternalProject splits a command's arguments at semicolons.
+        call.Append("  DOWNLOAD_COMMAND \"${CMAKE_COMMAND}\" \"-DGIT=${GIT_EXECUTABLE}\" "
+            + string.Join(" ", new[] { "-DREPOSITORY=" + repository, "-DTAG=" + library.GetMetadata("Tag"), "-DSUBMODULES=" + string.Join(",", submodules), "-DSOURCE=" + folder + "/source" }.Select(Quote))
+            + " -P " + Quote(folder + "/fetch.cmake"));
     }
     else if (url.Length > 0)
     {
@@ -453,6 +482,11 @@ if (!Enumerable.Range(0, count).All(ready))
                 if (projects[i] != null)
                 {
                     WriteWhenChanged(folders[i] + "/project/CMakeLists.txt", projects[i]);
+                }
+
+                if (Libraries[i].GetMetadata("Repository").Length > 0)
+                {
+                    WriteWhenChanged(folders[i] + "/fetch.cmake", fetch);
                 }
             }
 
