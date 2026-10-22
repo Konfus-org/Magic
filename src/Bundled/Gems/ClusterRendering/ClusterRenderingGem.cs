@@ -123,6 +123,18 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     private Handle<Curve> _fogFalloffAsked;
     private Curve? _fogFalloff;
 
+    /// <summary>
+    /// Whether the last frame's copy of the world was loading, so the frame the loading domain takes the world's place
+    /// is told from the ones after it. Render thread.
+    /// </summary>
+    private bool _wasLoading;
+
+    /// <summary>
+    /// A new world took the old one's place since global illumination was last planned, so its next plan forgets the
+    /// old world's light (<see cref="GiVolume.Plan"/>). Render thread.
+    /// </summary>
+    private bool _isForgetting;
+
     public ClusterRenderingGem(
         IGpu gpu,
         IShaderCompiler compiler,
@@ -235,6 +247,9 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             _output.Forget();
         }
 
+        // A new world: the loading domain taking the world's place, or the domain replacing it readied from this frame.
+        _isForgetting |= (copy.IsLoading && !_wasLoading) || _preloader.Settling == 0;
+        _wasLoading = copy.IsLoading;
         CameraCopy? main = GetMainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
         UpdateRows(copy, main, player, frame);
@@ -404,8 +419,9 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// The global illumination's plan around the main camera when the pipeline traces it; cleared otherwise, so a
-    /// pipeline without it carries no stale field.
+    /// The global illumination's plan around the main camera when the pipeline traces it, forgetting the old world's
+    /// light the first time after a new world took its place; cleared otherwise, so a pipeline without it carries no
+    /// stale field.
     /// </summary>
     private void PlanGi(CameraCopy? main, in Frame frame)
     {
@@ -417,7 +433,9 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
                 _world.Instances.Recoloured,
                 frame.DeltaSeconds,
                 _preloader.Settling,
+                _isForgetting,
                 _settings);
+            _isForgetting = false;
             _giRays.Add(_gi.Rays);
             return;
         }

@@ -79,8 +79,9 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
 
         if (!_shapes.TryGetValue(model, out ModelShape? shape))
         {
+            // On a worker from the start: a model already loaded comes back at once, which would fit it right here.
             _shapes.Add(model, null);
-            LoadAsync(model).FireAndForget();
+            Task.Run(() => LoadAsync(model)).FireAndForget();
         }
 
         return shape;

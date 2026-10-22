@@ -467,6 +467,12 @@ internal struct GpuGi
     /// far from it it is, so where one level gives way to the next moves with the camera, never in a level's steps.
     /// </summary>
     internal Vector3 Camera;
+
+    /// <summary>
+    /// 1 in the frame a new world takes the old one's place, when every probe lets go of what it held, so none of the
+    /// old world's light is carried into it; 0 otherwise.
+    /// </summary>
+    internal uint Forgets;
 }
 
 /// <summary>

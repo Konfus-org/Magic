@@ -27,8 +27,8 @@ The player, `Assets/Prefabs/Player.prefab`, which `Samples.magic` names as its p
 the domain replaces the world: a camera tagged `player` with the scripts that fly and arm it, and the one that jumps
 between the samples from the number keys, 0 for the hub and 1 to 6 for the samples in the order the hub's arches stand
 in. While a domain replaces the world, the samples' own loading domain shows, named as the project's loading domain: its
-script is impatient, as a loading domain's scripts must be to run before the world is there
-([Scripts](../src/Core/README.md#scripts)).
+scripts are impatient, as a loading domain's must be to run before the world is there, and the same scripts in the
+sample being readied behind it wait until it is shown ([Scripts](../src/Core/README.md#scripts)).
 
 What the samples share sits beside the domains, in a folder for each kind: prefabs, scripts, components, materials,
 shaders, passes, pipelines, curves, models, textures and audio. A script is a `.cs` asset a prefab attaches by id and

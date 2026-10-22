@@ -425,19 +425,21 @@ the ECS while its entity lives; the entity it is made for holds it and is no ent
 records part of a frame: a pass of kind `script` names it, and the renderer makes it for each listing of the frame it
 builds and calls it on the render thread to draw into the pass's target, with pipelines of its own, never on an entity;
 it is the hook at a point of the frame for code that is no gem, a HUD or an overlay. A class marked `[Impatient]` starts
-and runs even while a domain loads in place of the world. Any other starts only as the new domain is readied, all of it
-there, so it never sees a world half loaded and what its start spawns is readied with the domain; its hooks and its
-systems run from the frame after the world is first shown, so that frame draws the world as it loaded
-([The world](#the-world)). The loading domain's own scripts, such as a progress bar, are impatient, or never run. The
-samples' scripts are the examples of each kind.
+and runs even while a domain loads in place of the world, as the loading domain shows. Any other starts only as the new
+domain is readied, all of it there, so it never sees a world half loaded and what its start spawns is readied with the
+domain; its hooks and its systems run from the frame after the world is first shown, so that frame draws the world as
+it loaded ([The world](#the-world)), and so do an impatient one's that starts then, as it belongs to that world. The
+loading domain's own scripts, such as a progress bar, are impatient, or never run. The samples' scripts are the
+examples of each kind.
 
 The `Scripts` component says which scripts an entity has, by their `.cs` assets: the gem that runs scripts makes a
 copy of each named and has no copy of, and ends a copy whose handle is gone or whose entity is destroyed, disposing
 it when it is `IDisposable`. Adding a handle attaches a script with its defaults; removing one detaches it. The world
 gives an entity its own copy of a script with a prefab's values through `IScripts`: its handle joins the entity's
 `Scripts`, and in the next frame, once whatever spawned with it is all there, the copy is made for the entity, given
-the values and started, on the main thread, or while a domain loads in place of the world, as it is readied. `IScripts` also makes a script of a class that runs on no entity, as a
-pipeline script does, with the services its constructor asks for, from any thread.
+the values and started, on the main thread, or while a domain loads in place of the world, as it is readied.
+`IScripts` also makes a script of a class that runs on no entity, as a pipeline script does, with the services its
+constructor asks for, from any thread.
 
 ## The world
 
@@ -471,7 +473,11 @@ from the player's camera, so the whole world is there at once.
 - Opening a domain in place of the open ones closes them and shows the project's loading domain until the new one
   is there, which is once every gem has taken it in. It spawns in the frame the loading domain closes, with the
   project's player put at its spawn: the first entity tagged as the spawn in its prefabs that are not cells, else in
-  its cells. The loading domain itself is not taken in first, so it shows as soon as it can.
+  its cells. The loading domain is read and taken in by every gem the first time a domain replaces the world, as any
+  domain is, then kept so for the run, so from then on it spawns in the frame the open domains close and is drawn
+  whole from the next: there is no frame with nothing in it, and nothing of it fades in. Only the first, as the entry
+  point opens, waits for it to be taken in, and shows once it is unless the entry point is there first. A change to
+  its files has it read again the next time it shows.
 - What spawned is then readied out of sight: the window keeps the loading domain's last image while each preloader
   readies the domain, all at once. The gem that runs scripts starts them, so what they spawn as they start is readied
   with it; a renderer draws it until what builds up over frames, its light, its shadows, the eye's exposure, has

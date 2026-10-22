@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Threading.Channels;
 using Magic.Contexts.Assets;
@@ -17,11 +18,12 @@ namespace Magic.Internal;
 /// <summary>
 /// The domains open in the world, and all that takes: opening one (<see cref="OpenAsync"/>), its prefabs read on
 /// workers, taken in by the gems that need time to (<see cref="IPreloader"/>) and spawned on the main thread, the
-/// loading domain shown while one replaces the world, and the one replacing it readied by those gems out of sight
-/// before it is shown, closing one, each kept as its files change, and the domains' part of a saved world
-/// (<see cref="Save"/>, <see cref="Restore"/>), readied out of sight too as it is put back. The world makes one when a
-/// gem provides the ECS, and is the one place to act on it: nothing else holds this; a gem below the world hears that
-/// one is loading on <see cref="Events"/> (<see cref="WorldLoading"/>). Main thread, but where a member says otherwise.
+/// loading domain, taken in once and kept, shown from the frame one begins to replace the world, and the one replacing
+/// it readied by those gems out of sight before it is shown, closing one, each kept as its files change, and the
+/// domains' part of a saved world (<see cref="Save"/>, <see cref="Restore"/>), readied out of sight too as it is put
+/// back. The world makes one when a gem provides the ECS, and is the one place to act on it: nothing else holds this; a
+/// gem below the world hears that one is loading on <see cref="Events"/> (<see cref="WorldLoading"/>). Main thread, but
+/// where a member says otherwise.
 /// </summary>
 internal sealed class Domains : IDisposable
 {
@@ -56,6 +58,13 @@ internal sealed class Domains : IDisposable
     /// The loading domain while it is shown.
     /// </summary>
     private Open? _loading;
+
+    /// <summary>
+    /// The loading domain, read and taken in by every gem that needs time to the first time a domain replaced the world,
+    /// then kept so, so it is shown whole from the frame the open domains close (<see cref="ShowLoading"/>); none
+    /// before, or once its files changed (<see cref="ForgetLoading"/>).
+    /// </summary>
+    private Keeping? _keeping;
 
     /// <summary>
     /// Domains opening in place of the world and saved worlds put back in its place (<see cref="Restore"/>), not shown
@@ -127,6 +136,7 @@ internal sealed class Domains : IDisposable
     public void Dispose()
     {
         _watching.Dispose();
+        ForgetLoading();
     }
 
     /// <summary>
@@ -462,13 +472,13 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// Every prefab in <paramref name="open"/>'s folder, each read on a worker, with the player when it replaces the
     /// world, and the models they draw loaded, then all of it taken in by the gems that need time to
-    /// (<see cref="IPreloader"/>), so whatever draws or simulates them has them the frame they spawn. The loading
-    /// domain is not taken in first, so it shows as soon as it can. The reads are the first half of the progress, the
+    /// (<see cref="IPreloader"/>), so whatever draws or simulates them has them the frame they spawn, the loading
+    /// domain's too, which is kept so (<see cref="ShowLoading"/>). The reads are the first half of the progress, the
     /// gems' taking in the second. On a worker.
     /// </summary>
     private async Task<Read> ReadAsync(Open open, IProgress<float>? progress, CancellationToken cancel)
     {
-        List<Placement> placements = GetPlacements(open);
+        List<Placement> placements = GetPlacements(open.Handle, open.Domain);
         int read = 0;
         Task<Result<Prefab>>[] reading = new Task<Result<Prefab>>[placements.Count];
         for (int i = 0; i < reading.Length; i++)
@@ -517,9 +527,7 @@ internal sealed class Domains : IDisposable
             if (model.Ok) models.Add(model.Value);
         }
 
-        SubscriptionList holds = open.IsLoadingDomain
-            ? new SubscriptionList()
-            : await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
+        SubscriptionList holds = await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
         progress?.Report(1);
         return new Read(placements, prefabs, player, models) { Holds = holds };
 
@@ -572,12 +580,12 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Every prefab in <paramref name="open"/>'s folder, where it is spawned: a cell at its corner, any other at the
-    /// origin. Any thread.
+    /// Every prefab in the folder of <paramref name="handle"/>, read as <paramref name="domain"/>, where it is spawned:
+    /// a cell at its corner, any other at the origin. Any thread.
     /// </summary>
-    private List<Placement> GetPlacements(Open open)
+    private List<Placement> GetPlacements(Handle<Domain> handle, Domain domain)
     {
-        string path = _assets.GetPath(open.Handle) ?? string.Empty;
+        string path = _assets.GetPath(handle) ?? string.Empty;
         int slash = path.LastIndexOf('/');
         string folder = slash < 0 ? string.Empty : path[..slash];
         List<Placement> placements = [];
@@ -588,7 +596,7 @@ internal sealed class Domains : IDisposable
 
             Vector3? cell = ParseCell(file);
             placements.Add(
-                new Placement(prefab, cell is { } at ? at * open.Domain.CellSize : Vector3.Zero, cell.HasValue));
+                new Placement(prefab, cell is { } at ? at * domain.CellSize : Vector3.Zero, cell.HasValue));
         }
 
         return placements;
@@ -789,7 +797,7 @@ internal sealed class Domains : IDisposable
     {
         _domains.Add(open);
         open.Player = player;
-        foreach (Placement placement in GetPlacements(open))
+        foreach (Placement placement in GetPlacements(open.Handle, open.Domain))
         {
             Placed placed = new(placement);
             if (kept.Remove(placement.File, out Entity[]? entities)) placed.Entities = entities;
@@ -837,11 +845,21 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Shows the loading domain while a domain replaces the world, once its file has loaded: the project's, or the
-    /// engine's.
+    /// Shows the loading domain as a domain begins to replace the world: the project's, or the engine's. Kept, it
+    /// spawns now, whole, so it is drawn with all it draws from the frame the open domains close. The first time it is
+    /// read and taken in by every gem that needs time to, then kept for the run, and shown once it is unless the domain
+    /// replacing the world is there by then (<see cref="KeepLoadingAsync"/>).
     /// </summary>
     private void ShowLoading()
     {
+        if (_keeping is { Kept: { } kept })
+        {
+            ShowKept(kept);
+            return;
+        }
+
+        if (_keeping is not null) return;
+
         string path = LoadingDomain + Domain.Extensions[0];
         Handle<Domain> handle = _project.Loading == Handle<Domain>.None ? _assets.Find<Domain>(path) : _project.Loading;
         if (handle == Handle<Domain>.None)
@@ -850,38 +868,78 @@ internal sealed class Domains : IDisposable
             return;
         }
 
-        ShowLoadingAsync(handle).FireAndForget();
+        _keeping = new Keeping(handle);
+        KeepLoadingAsync(_keeping).FireAndForget();
     }
 
-    private async Task ShowLoadingAsync(Handle<Domain> handle)
+    /// <summary>
+    /// Reads the loading domain <paramref name="keeping"/> names and has every gem that needs time to take it in, then
+    /// keeps it, on the main thread, and shows it if the world is still loading and the domain replacing it is not there
+    /// yet; lets it go when it was forgotten meanwhile (<see cref="ForgetLoading"/>). One that does not open is an error,
+    /// and none is shown until its files change.
+    /// </summary>
+    private async Task KeepLoadingAsync(Keeping keeping)
     {
-        Result<Domain> file = await _assets.LoadAsync(handle, _lifetime.Stopping).ConfigureAwait(false);
+        Result<Domain> file = await _assets.LoadAsync(keeping.Handle, _lifetime.Stopping).ConfigureAwait(false);
         if (!file.Ok)
         {
             Debugging.Error($"The loading domain does not open: {file.Error}");
             return;
         }
 
-        Open loading = new(
-            handle,
-            _assets.GetPath(handle) ?? "The loading domain",
+        string name = _assets.GetPath(keeping.Handle) ?? "The loading domain";
+        Open reading = new(
+            keeping.Handle,
+            name,
             file.Value,
             DomainOpenMode.Additive,
             isLoadingDomain: true,
             isReplacing: false);
-        bool isShown = await _threads.InvokeAsync(EngineThread.Main, () =>
+        Read read = await ReadAsync(reading, null, _lifetime.Stopping).ConfigureAwait(false);
+        await _threads.InvokeAsync(EngineThread.Main, () =>
         {
-            // Nor once the domain replacing the world is there, being readied behind the loading domain's last image.
-            if (!IsLoading || _loading is not null || _domains.Exists(static open => open.Readying is not null))
+            if (keeping.IsForgotten)
             {
-                return false;
+                read.Holds.Dispose();
+                return;
             }
 
-            _loading = loading;
-            return true;
-        }).ConfigureAwait(false);
+            keeping.Kept = new Resident(keeping.Handle, name, file.Value, read);
 
-        if (isShown) await ArriveAsync(loading, null, _lifetime.Stopping).ConfigureAwait(false);
+            // Nor once the domain replacing the world is there, being readied behind the loading domain's last image.
+            if (!IsLoading || _loading is not null || _domains.Exists(static open => open.Readying is not null)) return;
+
+            ShowKept(keeping.Kept);
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Spawns the kept loading domain <paramref name="kept"/> now, as it was read; what keeps it taken in stays when it
+    /// closes.
+    /// </summary>
+    private void ShowKept(Resident kept)
+    {
+        _loading = new Open(
+            kept.Handle,
+            kept.Name,
+            kept.Domain,
+            DomainOpenMode.Additive,
+            isLoadingDomain: true,
+            isReplacing: false);
+        Arrive(_loading, kept.Read with { Holds = new SubscriptionList() }, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Lets the kept loading domain go, as its files changed, so the next domain to replace the world reads and takes
+    /// it in again; one being read is let go once it is. One shown stays as it is until it closes.
+    /// </summary>
+    private void ForgetLoading()
+    {
+        if (_keeping is not { } keeping) return;
+
+        _keeping = null;
+        keeping.IsForgotten = true;
+        keeping.Kept?.Read.Holds.Dispose();
     }
 
     /// <summary>
@@ -918,10 +976,12 @@ internal sealed class Domains : IDisposable
 
     /// <summary>
     /// A domain's file was read again: what it is now, which <see cref="FilesChanged"/>, told next, places its cells
-    /// by.
+    /// by. The kept loading domain's is read again with it the next time it shows.
     /// </summary>
     private void DomainReloaded(AssetReloaded<Domain> reloaded)
     {
+        if (_keeping?.Handle == reloaded.Asset.Handle) ForgetLoading();
+
         foreach (Open open in GetShown())
         {
             if (open.Handle == reloaded.Asset.Handle) open.Domain = reloaded.Asset;
@@ -930,10 +990,16 @@ internal sealed class Domains : IDisposable
 
     /// <summary>
     /// A prefab was read again, as its file or a prefab it places changed: wherever a domain spawned it, it is spawned
-    /// again as it is now. The player is not: what the player has done is the game's.
+    /// again as it is now, and the kept loading domain is read again the next time it shows when it is one of its. The
+    /// player is not: what the player has done is the game's.
     /// </summary>
     private void PrefabReloaded(AssetReloaded<Prefab> reloaded)
     {
+        if (_keeping?.Kept?.Read.Placements.Exists(placement => placement.File == reloaded.Asset.Handle) == true)
+        {
+            ForgetLoading();
+        }
+
         foreach (Open open in GetShown())
         {
             if (open.IsThere && open.Prefabs.TryGetValue(reloaded.Asset.Handle, out Placed? placed))
@@ -946,16 +1012,22 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// Files came, went, moved or changed: in each domain that is there, a prefab that came is read and spawned, one
     /// that went is destroyed, one that moved, or whose cell moved with the cell size, is spawned where it is now, and
-    /// one that did not load is tried again.
+    /// one that did not load is tried again. The kept loading domain is read again the next time it shows when its
+    /// folder no longer holds the prefabs it was read with.
     /// </summary>
     private void FilesChanged(AssetsChanged changed)
     {
+        if (_keeping?.Kept is { } kept && !GetPlacements(kept.Handle, kept.Domain).SequenceEqual(kept.Read.Placements))
+        {
+            ForgetLoading();
+        }
+
         foreach (Open open in GetShown())
         {
             if (!open.IsThere) continue;
 
             HashSet<Handle<Prefab>> present = [];
-            foreach (Placement placement in GetPlacements(open))
+            foreach (Placement placement in GetPlacements(open.Handle, open.Domain))
             {
                 present.Add(placement.File);
                 if (open.Prefabs.TryGetValue(placement.File, out Placed? placed) && placed.Placement == placement
@@ -1040,6 +1112,28 @@ internal sealed class Domains : IDisposable
         /// Set by an initializer rather than the constructor, so the analyzer sees the record take ownership of it.
         /// </summary>
         internal required SubscriptionList Holds { get; init; }
+    }
+
+    /// <summary>
+    /// The loading domain as it was read to be kept: its handle, its path for messages, its file, and what was read for
+    /// it, whose holds keep it taken in while it is kept (<see cref="Keeping"/>).
+    /// </summary>
+    private sealed record Resident(Handle<Domain> Handle, string Name, Domain Domain, Read Read);
+
+    /// <summary>
+    /// The loading domain being read to be kept, or kept (<see cref="Kept"/>), and whether it was let go meanwhile, as
+    /// its files changed, so what is read for it then is let go too. Main thread.
+    /// </summary>
+    private sealed class Keeping(Handle<Domain> handle)
+    {
+        internal Handle<Domain> Handle { get; } = handle;
+
+        /// <summary>
+        /// What was read for it; none while it is being read, or when it does not open.
+        /// </summary>
+        internal Resident? Kept { get; set; }
+
+        internal bool IsForgotten { get; set; }
     }
 
     /// <summary>

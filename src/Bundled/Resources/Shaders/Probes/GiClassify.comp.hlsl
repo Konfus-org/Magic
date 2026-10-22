@@ -5,7 +5,10 @@
 // where it is, from the eight probes of it around as a place between them would be lit, and the sky's at the coarsest,
 // so it lights at once and near enough rather than counting for nothing until it is traced; what it sees is taken to be
 // open until then. Its irradiance tile is written again whenever that changes: from what it holds, counting, while it is
-// used and holds anything, else blank, counting for nothing.
+// used and holds anything, else blank, counting for nothing. In the frame a new world takes the old one's place
+// (header.forgets), every probe holds nothing and none is given another's light or the sky's, so none of the old world's
+// light is carried into the new one: not through a coarser probe, nor the sky as it was last captured, which a world
+// with no sky of its own never captures again, nor the light a ray's hit bounces.
 
 #include "Lighting/Gi.hlsli"
 #include "Lighting/Ibl.hlsli"
@@ -89,10 +92,11 @@ void main(uint3 thread : SV_DispatchThreadID)
     int3 probe = GiProbeOf(thread.x, index, level);
     int4 state = LOAD(GiProbeState, int4, thread.x);
     bool isSame = all(state.xyz == probe);
-    int holds = isSame ? state.w & (GiProbeHeld | GiProbeSeeded) : 0;
-    bool wasShown = isSame && (state.w & GiProbeUsed) != 0 && holds != 0;
+    int held = isSame ? state.w & (GiProbeHeld | GiProbeSeeded) : 0;
+    bool wasShown = isSame && (state.w & GiProbeUsed) != 0 && held != 0;
+    int holds = header.forgets != 0u ? 0 : held;
     bool isUsed = GiIsUsed(level, index, probe);
-    if (isUsed && holds == 0 && Seed(header, index, level, probe, thread.x))
+    if (isUsed && holds == 0 && header.forgets == 0u && Seed(header, index, level, probe, thread.x))
     {
         holds = GiProbeSeeded;
     }

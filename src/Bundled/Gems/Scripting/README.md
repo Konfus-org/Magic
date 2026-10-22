@@ -35,7 +35,10 @@ loads in place of the world, unless its class is `[Impatient]`, it waits until t
 this gem readies the domain (it is one of the gems that ready a domain before it is shown,
 [Core's README](../../../Core/README.md#the-world)), so what it spawns as it starts is readied with it. Held, its hooks
 are not called and its systems are not added until this gem hears the loading is over, the frame after the world is
-first shown, so that frame draws it as it loaded. The readying is done once an update finds nothing left to start,
+first shown, so that frame draws it as it loaded. An `[Impatient]` script, such as a loading domain's, starts and runs
+while the loading domain shows; one that starts as the domain replacing the world is readied is held all the same, as
+it belongs to the world not shown yet, so nothing of it, a label or a sound, shows over the loading domain's last
+image. The readying is done once an update finds nothing left to start,
 what the started scripts attached among it. A handle whose `.cs` asset does not load, or whose script cannot be made
 or started, is an error once, and the entity goes without that script until it is attached again. A pipeline script
 is made for no entity, with services alone, and asking for an `Entity` is the error.
@@ -59,8 +62,8 @@ Put back, in the frame the world is, a script is made as it is attached, its cla
 reading its file finds it, its constructor given the entity and its services, then each saved value is set on its
 property or field, and it runs on: `Start()` is not called, as it is as it was, so a script that spawns or subscribes
 in `Start` does not do so twice, and one that measured something as it started keeps its measure. The world is
-readied out of sight as it is put back, so the copy is held as one started while a domain is readied is, and runs on
-from the frame after the world is first shown, unless its class is `[Impatient]`. A saved value its class no longer
+readied out of sight as it is put back, so the copy is held as one started while a domain is readied is, whatever its
+class, and runs on from the frame after the world is first shown. A saved value its class no longer
 has, or that no longer fits, is warned about once and left. Its file is loaded too, so a build replaces the copy as it
 does any other.
 

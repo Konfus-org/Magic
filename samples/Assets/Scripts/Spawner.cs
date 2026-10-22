@@ -14,14 +14,21 @@ namespace Magic.Samples.Assets.Scripts;
 /// little to one side, which falls, bounces and goes <see cref="Lifetime"/> seconds later, as its
 /// <see cref="Expires"/> says and <see cref="ExpireSystem"/> sees to. A behaviour making entities at run time, with
 /// the components it builds them of:
-/// <c>{ "id": 3440, "every": 0.25, "model": { "id": 514 }, "material": { "id": 3322 } }</c>.
+/// <c>{ "id": 3440, "every": 0.25, "model": { "id": 514 }, "material": { "id": 3322 } }</c>. They are its own, so
+/// those still there go when its entity does, as when its domain closes, which ends the system that would have ended
+/// them.
 /// </summary>
-internal sealed class Spawner(Entity owner, World world) : IBehavior
+internal sealed class Spawner(Entity owner, World world) : IBehavior, IDisposable
 {
     /// <summary>
     /// Radians between one throw's direction and the next's: the golden angle, so they spread evenly all round.
     /// </summary>
     private const float Turn = 2.39996f;
+
+    /// <summary>
+    /// The bodies it made that may still be there, oldest first, the order they go in.
+    /// </summary>
+    private readonly Queue<Entity> _bodies = new();
 
     /// <summary>
     /// The frame clock's seconds when it makes the next.
@@ -51,6 +58,16 @@ internal sealed class Spawner(Entity owner, World world) : IBehavior
 
     public Handle<Material> Material { get; set; }
 
+    public void Dispose()
+    {
+        foreach (Entity body in _bodies)
+        {
+            if (world.IsAlive(body)) world.Destroy(body);
+        }
+
+        _bodies.Clear();
+    }
+
     public void Update(in Frame frame)
     {
         if (frame.Seconds < _next) return;
@@ -72,6 +89,11 @@ internal sealed class Spawner(Entity owner, World world) : IBehavior
             Bounce = 0.5f,
             Velocity = (Vector3.UnitY * Speed) + (aside * (Speed * 0.25f)),
         };
-        world.Create([at, renderer, body, new Expires { At = frame.Seconds + Lifetime }]);
+        while (_bodies.TryPeek(out Entity oldest) && !world.IsAlive(oldest))
+        {
+            _bodies.Dequeue();
+        }
+
+        _bodies.Enqueue(world.Create([at, renderer, body, new Expires { At = frame.Seconds + Lifetime }]));
     }
 }

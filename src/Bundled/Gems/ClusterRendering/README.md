@@ -242,6 +242,10 @@ from showing where they meet or lagging behind a change:
 - While a domain that replaces the world is readied out of sight ([Nothing pops](#nothing-pops)), every probe is
   traced every frame and holds the plain mean of its tracings, for as many frames as their mean takes to hold their
   noise and light to bounce, so the world is shown with its light settled rather than gathering it over seconds.
+- A new world forgets the old one's light: in the frame the loading domain takes the world's place, and again in the
+  first frame the domain replacing it is readied, every level is made again whole and every probe lets go of what it
+  held, given nothing in its place, so no light of the world before, through a probe, the sky it last captured or the
+  light a ray's hit bounces, lights the loading domain or glows on in the new world while it fades.
 - A probe that comes into use, as a level moves on, starts from the next coarser level's light where it is, the sky's
   at the coarsest, rather than from nothing, and keeps what it holds while it is out of use.
 - A ray that runs out of steps creeping along a surface takes it as hit rather than letting the sky in, and a model

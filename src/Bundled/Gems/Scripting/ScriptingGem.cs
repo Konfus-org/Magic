@@ -29,7 +29,8 @@ namespace Magic.Scripting;
 /// longer names it, or is gone, ends. While a domain loads in place of the world (<see cref="WorldLoading"/>), a script
 /// starts only as the new domain is readied (<see cref="ReadyAsync"/>), so what it spawns is readied with the domain,
 /// and its hooks and systems wait until the loading is over, so the frame that first shows the world draws it as it
-/// loaded; unless its class is <see cref="ImpatientAttribute"/>.
+/// loaded. One whose class is <see cref="ImpatientAttribute"/> starts and runs while the loading domain shows instead,
+/// but one made as the new domain is readied waits all the same, as it belongs to the world not shown yet.
 /// A system goes on the <see cref="IEcs"/>, through the Add that takes its kind; an <see cref="IBehavior"/> has its
 /// hooks called in this gem's. A pipeline script is made the same way for no entity, and never asks for one. A script
 /// read again, as the code it is in was built, has each live copy ended and a new one of its class started in its
@@ -136,7 +137,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
     /// <summary>
     /// Whether the domain replacing the world is being readied (<see cref="ReadyAsync"/>), until the loading is told
-    /// over: scripts start, held. Main thread.
+    /// over: scripts start, held, those that are <see cref="ImpatientAttribute"/> too. Main thread.
     /// </summary>
     private bool _isReadying;
 
@@ -777,8 +778,9 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
     /// <summary>
     /// Hands back <paramref name="made"/> whole, to run until its entity goes, added to the ECS as each kind of system
-    /// it is; held instead while the world loads, its class not <see cref="ImpatientAttribute"/>, its systems added once
-    /// the loading is over (<see cref="FollowLoading"/>). Why not, when adding one throws.
+    /// it is; held instead while the world loads, its class not <see cref="ImpatientAttribute"/>, or whatever its class
+    /// while the domain replacing the world is readied, as it is that world's, its systems added once the loading is over
+    /// (<see cref="FollowLoading"/>). Why not, when adding one throws.
     /// </summary>
     [SuppressMessage(
         "Reliability",
@@ -792,7 +794,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     {
         Attached attached = new(entity, script, values, made, new SubscriptionList())
         {
-            IsHeld = (_isLoading || _isReadying) && !IsImpatient(made.GetType()),
+            IsHeld = _isReadying || (_isLoading && !IsImpatient(made.GetType())),
         };
         return attached.IsHeld ? Result.Success(attached) : TryAddSystems(attached);
     }

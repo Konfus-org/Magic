@@ -27,9 +27,10 @@ public interface IScripts
     /// not there, and in the next frame, once whatever spawned with the entity is all there, a copy is made for the
     /// entity, its constructor given it first and then the services it asks for, given the script's values, started
     /// (<see cref="IScript.Start"/>) and run until the entity no longer names it. Not while a domain loads in place of
-    /// the world (<see cref="World.IsLoading"/>), unless the class is <see cref="Attributes.ImpatientAttribute"/>. A
-    /// script that game code adds to the component itself starts the same way, with the script's defaults. One that
-    /// cannot be made, or throws as it starts, is an error, and the entity goes without it. Main thread.
+    /// the world (<see cref="World.IsLoading"/>), unless the class is <see cref="Attributes.ImpatientAttribute"/>, and
+    /// one started as the domain replacing the world is readied runs from the frame after it is first shown, whatever its
+    /// class. A script that game code adds to the component itself starts the same way, with the script's defaults. One
+    /// that cannot be made, or throws as it starts, is an error, and the entity goes without it. Main thread.
     /// </summary>
     void Attach(Entity entity, PrefabScript script);
 
@@ -47,9 +48,9 @@ public interface IScripts
     /// (<see cref="Save"/>): its class found in the code loaded now, as reading its file finds it, a copy made for the
     /// entity as <see cref="Attach"/> makes one, its values and fields set back, and run until the entity is destroyed,
     /// but not started, as it is as it was. It runs from the frame after the world put back is first shown, as one
-    /// started while the world is readied does, unless the class is <see cref="Attributes.ImpatientAttribute"/>. A value
-    /// its class no longer has, or that no longer fits, is warned about and left. One whose class is not found, or that
-    /// cannot be made, is an error, and the entity goes without it. Main thread, in the frame the world is put back.
+    /// started while the world is readied does, whatever its class. A value its class no longer has, or that no longer
+    /// fits, is warned about and left. One whose class is not found, or that cannot be made, is an error, and the entity
+    /// goes without it. Main thread, in the frame the world is put back.
     /// </summary>
     void Restore(Entity entity, ScriptState state);
 }

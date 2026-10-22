@@ -37,7 +37,8 @@ namespace Magic.Services;
 /// A script attached to an entity (<see cref="Attach"/>) joins its <see cref="Scripts"/>, and the gem that runs
 /// scripts makes and starts it in the next frame, so it never sees half a prefab or half a domain. While a domain loads
 /// in place of the world, it starts as the domain is readied, so what it spawns is readied with it, and runs from the
-/// frame after the world is first shown, unless its class is <see cref="Attributes.ImpatientAttribute">[Impatient]</see>.
+/// frame after the world is first shown, unless its class is <see cref="Attributes.ImpatientAttribute">[Impatient]</see>
+/// and it starts while the loading domain shows, as the loading domain's own scripts do.
 /// </para>
 /// <para>
 /// The whole world can be saved as data (<see cref="SaveAsync"/>) and put back from it (<see cref="Restore"/>): the

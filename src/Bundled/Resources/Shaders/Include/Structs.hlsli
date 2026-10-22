@@ -59,7 +59,7 @@ struct GpuGi
     uint seed;
     uint steadies;
     float3 camera;
-    uint padding1;
+    uint forgets;
     uint4 padding[5];
 };
 
