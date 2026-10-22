@@ -54,7 +54,9 @@ and each refusal gets a rule in the generator, never a hand edit.
 
 Each library is had through CMake's ExternalProject: the build writes the project's items as one superbuild, a call
 each, and builds the libraries that are not ready, one at a time, in the order the project declares them, so a
-library is declared after those it depends on. What must hold:
+library is declared after those it depends on. A gem's libraries are built as its build starts, before the projects
+it references, so a cold native build goes on while Core compiles, and other gems' libraries build beside them. What
+must hold:
 
 - **One folder per machine.** Every library lands under `MagicNativeLibs`, the user's local application data folder
   (`Magic/NativeLibs/` under it) unless the variable says otherwise, shared by every checkout and worktree, since a
@@ -69,11 +71,17 @@ library is declared after those it depends on. What must hold:
   tag fetches afresh; nothing else touches the network.
 - **Built once per machine.** A hash of what CMake is told of a library, and of the libraries it depends on, names a
   ready marker in its folder: a library is built again when its item changes, or one it depends on does, and the
-  marker is written when it built. When every library a project declares is ready, nothing runs, not even CMake.
-  CMake's ExternalProject stamps record each step done, so a build cut short resumes at the step that did not finish.
-  One build at a time, machine-wide, under a named mutex, since the folder is shared.
-- **Bounded.** One library at a time, each library's own build on half the machine's cores unless `MagicNativeCores`
-  names how many, below normal priority, so a long build never makes the machine unusable and the memory it takes, a
+  marker is written when it built. When every library a project declares is ready, nothing runs, not even CMake, and
+  a build that finds nothing changed since the last, neither the project nor its items nor a library's binary in the
+  shared folder, which another checkout's build of it rewrites, starts no native work at all. CMake's ExternalProject
+  stamps record each step done, so a build cut short resumes at the step that did not finish.
+- **One build of a library at a time.** The folder is shared, so each library has a named mutex, machine-wide. A
+  project holds those of every library it declares, as its superbuild writes in all their folders, taken in name
+  order so two builds never wait on each other; whoever comes second finds the markers.
+- **Bounded.** Two libraries build at once on the machine, each in one of two lanes, and each library's own build runs
+  on half the machine's cores unless `MagicNativeCores` names how many, below normal priority: a second library fills
+  what the first leaves idle, as configuring, linking and fetching are one core's work, while the two together take
+  the machine's cores at the default, so a long build never makes the machine unusable and the memory it takes, a
   few hundred MB per compiler, is bounded with the cores. Ninja is the generator everywhere: on Windows CMake runs
   inside Visual Studio's developer environment, found through vswhere, which brings its compiler, CMake and Ninja;
   elsewhere CMake and Ninja come from the PATH ([requirements](../../../README.md#requirements)).
@@ -88,9 +96,15 @@ library is declared after those it depends on. What must hold:
   and its time while a task runs, and a task's messages at detailed verbosity alone, after its project ends.
 - **A real build's work alone.** An IDE builds each project in the background to feed its editor, a design-time build
   that hides what it logs and skips the compiler. Such a build compiles the API the last real build generated, and
-  neither builds a library nor generates one: a native build in it would run unseen, and the generator, built inside
-  it, would not be compiled, failing it and what the IDE asked of it, the package restore among them. So the editor
-  knows a library's API from the first real build on.
+  neither builds a library nor generates one, as a native build in it would run unseen. So the editor knows a
+  library's API from the first real build on.
+- **The generator is a reference.** A gem that declares a library references the bindings generator for the order it
+  builds in alone, so the generator is restored with everything else and built once per build, only where a library
+  is declared. Generation reruns when the generator, the item or the library's binary changed, but rewrites only a
+  file whose text changed, so a gem compiles again only when its API did.
+- **Long steps yield.** A native build and a generation give their MSBuild node back while they run, since a project
+  waiting on a reference resumes only on the node it started on: one gem's long step never holds up gems that have
+  nothing to do with it.
 
 ### Sharing a library
 

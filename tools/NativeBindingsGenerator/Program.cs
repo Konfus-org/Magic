@@ -50,9 +50,16 @@ internal static class Program
         HashSet<(DeclarationKind Kind, string CName)> dropped = [];
         List<string> errors = [];
         SortedDictionary<string, string> readerNames = new(StringComparer.Ordinal);
-        foreach (Target target in Target.All)
+
+        // The platforms are read at once, each by a parser of its own, and merged in Target.All's order, so what is
+        // written is what reading them one after another would write.
+        Reader.MakeShims(options);
+        Reader[] readers = new Reader[Target.All.Length];
+        Parallel.For(0, readers.Length, i => readers[i] = Reader.Read(options, Target.All[i]));
+        for (int i = 0; i < readers.Length; i++)
         {
-            Reader reader = Reader.Read(options, target);
+            Target target = Target.All[i];
+            Reader reader = readers[i];
             errors.AddRange(reader.Errors);
             structs.UnionWith(reader.Structs);
             foreach ((string cName, string name) in reader.NameMap)
@@ -124,10 +131,7 @@ internal static class Program
             return false;
         }
 
-        string text = Writer.Write(options, ordered, structs);
-        // Written whenever generation ran, so the output is newer than the inputs that made the build run it.
-        Directory.CreateDirectory(Path.GetDirectoryName(options.Output) ?? ".");
-        File.WriteAllText(options.Output, text, new UTF8Encoding(false));
+        WriteWhenChanged(options.Output, Writer.Write(options, ordered, structs));
 
         int constants = 0;
         int types = 0;
@@ -164,21 +168,30 @@ internal static class Program
         }
 
         string skippedPath = Path.ChangeExtension(options.Output, ".skipped.txt");
-        File.WriteAllText(skippedPath, skips.ToString(), new UTF8Encoding(false));
+        WriteWhenChanged(skippedPath, skips.ToString());
         StringBuilder nameMap = new();
         foreach ((string cName, string name) in readerNames)
         {
             nameMap.Append(cName).Append('\t').Append(name).Append('\n');
         }
 
-        File.WriteAllText(
-            Path.ChangeExtension(options.Output, ".names.txt"),
-            nameMap.ToString(),
-            new UTF8Encoding(false));
+        WriteWhenChanged(Path.ChangeExtension(options.Output, ".names.txt"), nameMap.ToString());
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Bindings: {options.Library}: {types} types, "
             + $"{functions} functions, {constants} constants -> {options.Output}; {skippedMacros} macros skipped, "
             + $"listed in {skippedPath}"));
         return true;
+    }
+
+    /// <summary>
+    /// Writes the file only when its text changed, so a project that compiles it builds again only when the API did;
+    /// the build's stamp, not the file, records that generation ran.
+    /// </summary>
+    private static void WriteWhenChanged(string path, string text)
+    {
+        if (File.Exists(path) && string.Equals(File.ReadAllText(path), text, StringComparison.Ordinal)) return;
+
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+        File.WriteAllText(path, text, new UTF8Encoding(false));
     }
 
     /// <summary>

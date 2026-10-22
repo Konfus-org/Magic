@@ -78,10 +78,7 @@ internal sealed class Reader
 
     internal IReadOnlyList<string> Errors => _errors;
 
-    /// <summary>
-    /// Where the shims are made: beside the output, so a clean build remakes them.
-    /// </summary>
-    private string ShimFolder => Path.ChangeExtension(_options.Output, ".shims");
+    private string ShimFolder => GetShimFolder(_options);
 
     internal static Reader Read(Options options, Target target)
     {
@@ -89,6 +86,46 @@ internal sealed class Reader
         reader.Read();
         return reader;
     }
+
+    /// <summary>
+    /// Makes the headers the library's build would generate, from their templates, as CMake would with every option
+    /// off: a <c>#cmakedefine NAME</c> line becomes an undefined NAME, a <c>#cmakedefine01 NAME</c> a NAME of 0, and
+    /// the rest is copied. Made once, before the platforms are read, as every platform reads the same ones.
+    /// </summary>
+    internal static void MakeShims(Options options)
+    {
+        string folder = GetShimFolder(options);
+        foreach ((string header, string template) in options.Shims)
+        {
+            string path = Path.Combine(folder, header);
+            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? folder);
+            StringBuilder made = new();
+            foreach (string line in File.ReadAllLines(Path.Combine(options.Root, template)))
+            {
+                string trimmed = line.TrimStart();
+                if (trimmed.StartsWith("#cmakedefine01 ", StringComparison.Ordinal))
+                {
+                    made.Append("#define ").Append(trimmed["#cmakedefine01 ".Length..].Trim()).Append(" 0\n");
+                }
+                else if (trimmed.StartsWith("#cmakedefine ", StringComparison.Ordinal))
+                {
+                    made.Append("/* #undef ").Append(trimmed["#cmakedefine ".Length..].Trim().Split(' ')[0])
+                        .Append(" */\n");
+                }
+                else
+                {
+                    made.Append(line).Append('\n');
+                }
+            }
+
+            File.WriteAllText(path, made.ToString(), new UTF8Encoding(false));
+        }
+    }
+
+    /// <summary>
+    /// Where the shims are made: beside the output, so a clean build remakes them.
+    /// </summary>
+    private static string GetShimFolder(Options options) => Path.ChangeExtension(options.Output, ".shims");
 
     private static string DescribeWhere(CppElement element)
         => element.Span.Start.File is { Length: > 0 } file
@@ -395,42 +432,8 @@ internal sealed class Reader
     }
 
     /// <summary>
-    /// Makes the headers the library's build would generate, from their templates, as CMake would with every option
-    /// off: a <c>#cmakedefine NAME</c> line becomes an undefined NAME, a <c>#cmakedefine01 NAME</c> a NAME of 0, and
-    /// the rest is copied, into <see cref="ShimFolder"/>.
-    /// </summary>
-    private void Shims()
-    {
-        string folder = ShimFolder;
-        foreach ((string header, string template) in _options.Shims)
-        {
-            string path = Path.Combine(folder, header);
-            Directory.CreateDirectory(Path.GetDirectoryName(path) ?? folder);
-            StringBuilder made = new();
-            foreach (string line in File.ReadAllLines(Path.Combine(_options.Root, template)))
-            {
-                string trimmed = line.TrimStart();
-                if (trimmed.StartsWith("#cmakedefine01 ", StringComparison.Ordinal))
-                {
-                    made.Append("#define ").Append(trimmed["#cmakedefine01 ".Length..].Trim()).Append(" 0\n");
-                }
-                else if (trimmed.StartsWith("#cmakedefine ", StringComparison.Ordinal))
-                {
-                    made.Append("/* #undef ").Append(trimmed["#cmakedefine ".Length..].Trim().Split(' ')[0])
-                        .Append(" */\n");
-                }
-                else
-                {
-                    made.Append(line).Append('\n');
-                }
-            }
-
-            File.WriteAllText(path, made.ToString(), new UTF8Encoding(false));
-        }
-    }
-
-    /// <summary>
-    /// The headers read for the target, with the generator's sysroot in place of the machine's.
+    /// The headers read for the target, with the generator's sysroot in place of the machine's, and the shims
+    /// <see cref="MakeShims"/> made.
     /// </summary>
     private CppCompilation Parse()
     {
@@ -455,11 +458,7 @@ internal sealed class Reader
 
         parserOptions.IncludeFolders.AddRange(_options.AbsoluteIncludePaths);
 
-        if (_options.Shims.Count > 0)
-        {
-            Shims();
-            parserOptions.IncludeFolders.Add(ShimFolder);
-        }
+        if (_options.Shims.Count > 0) parserOptions.IncludeFolders.Add(ShimFolder);
 
         parserOptions.Defines.AddRange(_options.Defines);
 

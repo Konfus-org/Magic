@@ -10,8 +10,7 @@
        item with no Headers is bound by hand and declared for its binary alone, and one declared HeadersOnly is fetched
        for its headers and sources alone. Building and generating are a real build's work, never a design-time one's:
        the build an IDE runs in the background to feed its editor compiles what the last real build generated. It
-       hides what it logs and skips the compiler, so a native build in it would run unseen and the generator, built
-       inside it, would not be compiled, failing it and every target the IDE asked for after, NuGet's among them. -->
+       hides what it logs, so a native build in it would run unseen. -->
   <PropertyGroup>
     <MagicNativeLibs Condition="'$(MagicNativeLibs)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))/Magic/NativeLibs/</MagicNativeLibs>
     <!-- With forward slashes, as CMake writes paths, so an option a project makes of it reads as CMake recorded it. -->
@@ -19,7 +18,8 @@
     <MagicNativeRid>$(NETCoreSdkRuntimeIdentifier)</MagicNativeRid>
     <MagicNativeSuperbuild>$(IntermediateOutputPath)natives/</MagicNativeSuperbuild>
     <MagicNativeBindingsGenerator>$(MSBuildThisFileDirectory)tools/NativeBindingsGenerator/NativeBindingsGenerator.csproj</MagicNativeBindingsGenerator>
-    <MagicNativeBindingsGeneratorDll>$(MSBuildThisFileDirectory)Build/bin/$(Configuration)/Tools/NativeBindingsGenerator/NativeBindingsGenerator.dll</MagicNativeBindingsGeneratorDll>
+    <!-- Where the generator's own build puts it (Directory.Build.props), in this build's Magic folder. -->
+    <MagicNativeBindingsGeneratorDll>$(MagicBin)Tools/NativeBindingsGenerator/NativeBindingsGenerator.dll</MagicNativeBindingsGeneratorDll>
     <MagicNativeSysroot>$(MSBuildThisFileDirectory)tools/NativeBindingsGenerator/Sysroot/</MagicNativeSysroot>
     <!-- A shared library's file name, as the OS names one (SDL3.dll, libSDL3.so, libSDL3.dylib). -->
     <MagicNativePrefix Condition="!$([MSBuild]::IsOSPlatform('Windows'))">lib</MagicNativePrefix>
@@ -65,6 +65,7 @@
         <Native>$(MagicNativeLibs)%(Identity)/built/native/$(MagicNativePrefix)%(Identity)$(MagicNativeSuffix)</Native>
         <Response>$(IntermediateOutputPath)%(Identity).bindings.rsp</Response>
         <Generated>$(IntermediateOutputPath)%(Identity).g.cs</Generated>
+        <Stamp>$(IntermediateOutputPath)%(Identity).bindings.stamp</Stamp>
       </NativeLibrary>
     </ItemGroup>
     <ItemGroup>
@@ -84,11 +85,14 @@
        is built when its declaration changed or it is missing, and a build cut short leaves no marker; CMake's own stamps
        then resume it at the step that did not finish. When every library is ready nothing runs. The superbuild builds
        one library at a time, in the order declared, each library's own build on the cores the caller allows, below
-       normal priority, so a long native build never makes the machine unusable. One build at a time, machine-wide:
-       several checkouts share the folder, so all native work holds one named mutex, and whoever comes second finds the
-       markers. On Windows CMake runs inside Visual Studio's developer environment, which brings its compiler, CMake and
-       Ninja; elsewhere they come from the PATH. What the build is doing is logged as it happens: a line as each library
-       starts and ends, and what CMake, git and the compilers print one verbosity down. -->
+       normal priority, so a long native build never makes the machine unusable. Each library has a named mutex, as
+       several checkouts share the folder: a project holds those of all the libraries it declares, whose folders its
+       superbuild writes in, and whoever comes second finds the markers, while other projects' libraries build beside
+       it. Two libraries build at once on the machine, each in one of two lanes, so a second fills what the first
+       leaves idle (configuring, linking and fetching are one core's work) and, on the default cores, the two take the
+       machine's between them. On Windows CMake runs inside Visual Studio's developer environment, which brings its
+       compiler, CMake and Ninja; elsewhere they come from the PATH. What the build is doing is logged as it happens: a
+       line as each library starts and ends, and what CMake, git and the compilers print one verbosity down. -->
   <UsingTask TaskName="BuildNativeLibraries" TaskFactory="RoslynCodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>
       <Libraries ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
@@ -365,86 +369,162 @@ bool Take(int i)
     return true;
 }
 
+// A library's mutex, held while its folder is written; one a build that died held is taken as it is, as CMake's stamps
+// resume what it was doing.
+Mutex Hold(string name)
+{
+    Mutex mutex = new Mutex(false, "Magic.Natives." + name);
+    try
+    {
+        if (!mutex.WaitOne(0))
+        {
+            Log.LogMessage(MessageImportance.High, "{0} is waiting for another build of {1} on this machine to finish.", Project, name);
+            mutex.WaitOne();
+        }
+    }
+    catch (AbandonedMutexException)
+    {
+    }
+
+    return mutex;
+}
+
+// One of the machine's two lanes. Polled, as a wait on several named mutexes at once is Windows' alone.
+Mutex Lane()
+{
+    bool told = false;
+    while (true)
+    {
+        for (int lane = 0; lane < 2; lane++)
+        {
+            Mutex mutex = new Mutex(false, "Magic.Natives.Lane" + lane);
+            try
+            {
+                if (mutex.WaitOne(0))
+                {
+                    return mutex;
+                }
+            }
+            catch (AbandonedMutexException)
+            {
+                return mutex;
+            }
+
+            mutex.Dispose();
+        }
+
+        if (!told)
+        {
+            Log.LogMessage(MessageImportance.High, "{0} is waiting for one of the two native libraries building on this machine to finish.", Project);
+            told = true;
+        }
+
+        Thread.Sleep(1000);
+    }
+}
+
 Func<int, bool> ready = i => File.Exists(markers[i]) && (Libraries[i].GetMetadata("HeadersOnly") == "true" || File.Exists(Libraries[i].GetMetadata("Native")));
 if (!Enumerable.Range(0, count).All(ready))
 {
-    using (Mutex mutex = new Mutex(false, "Magic.Natives"))
+    // Yielding while it waits and builds: the node builds other projects meanwhile, as a project waiting on a
+    // reference resumes only on the node it started on.
+    BuildEngine3.Yield();
+    Mutex[] held = Array.Empty<Mutex>();
+    try
     {
-        try
-        {
-            if (!mutex.WaitOne(0))
-            {
-                Log.LogMessage(MessageImportance.High, "{0} is waiting for another build of the native libraries on this machine to finish.", Project);
-                mutex.WaitOne();
-            }
-        }
-        catch (AbandonedMutexException)
-        {
-        }
+        // In name order, so two builds never each hold a mutex the other waits for.
+        held = names.OrderBy(name => name, StringComparer.Ordinal).Select(Hold).ToArray();
 
-        try
+        int[] pending = Enumerable.Range(0, count).Where(i => !ready(i)).ToArray();
+        // Every command runs in the shared folder.
+        Directory.CreateDirectory(natives);
+        string environment = pending.Length > 0 && windows ? DeveloperEnvironment() : null;
+        if (pending.Length > 0 && (!windows || environment != null))
         {
-            int[] pending = Enumerable.Range(0, count).Where(i => !ready(i)).ToArray();
-            // Every command runs in the shared folder.
-            Directory.CreateDirectory(natives);
-            string environment = pending.Length > 0 && windows ? DeveloperEnvironment() : null;
-            if (pending.Length > 0 && (!windows || environment != null))
+            Log.LogMessage(MessageImportance.High, "Building {0}'s native libraries under {1}/, each once per machine and again when its item changes: {2}.", Project, natives, string.Join(", ", pending.Select(i => names[i])));
+            for (int i = 0; i < count; i++)
             {
-                Log.LogMessage(MessageImportance.High, "Building {0}'s native libraries under {1}/, each once per machine and again when its item changes: {2}.", Project, natives, string.Join(", ", pending.Select(i => names[i])));
-                for (int i = 0; i < count; i++)
+                if (projects[i] != null)
                 {
-                    if (projects[i] != null)
-                    {
-                        WriteWhenChanged(folders[i] + "/project/CMakeLists.txt", projects[i]);
-                    }
+                    WriteWhenChanged(folders[i] + "/project/CMakeLists.txt", projects[i]);
                 }
+            }
 
-                WriteWhenChanged(superbuild + "/CMakeLists.txt",
-                    "# Written by the build from " + Project + "'s NativeLibrary items: edit those, never this file. Each library is an\n"
-                    + "# ExternalProject, built into its folder under the one every checkout on the machine shares.\n"
-                    + "cmake_minimum_required(VERSION 3.28)\n"
-                    + "project(MagicNatives NONE)\n"
-                    + "include(ExternalProject)\n\n"
-                    + string.Join("\n", calls));
-                System.Collections.Generic.List<string> lines = new System.Collections.Generic.List<string>();
-                bool built = Run(environment, "cmake", "-S \"" + superbuild + "\" -B \"" + superbuild + "/build\" -G Ninja", lines, "BND015");
-                for (int step = 0; built && step < pending.Length; step++)
+            WriteWhenChanged(superbuild + "/CMakeLists.txt",
+                "# Written by the build from " + Project + "'s NativeLibrary items: edit those, never this file. Each library is an\n"
+                + "# ExternalProject, built into its folder under the one every checkout on the machine shares.\n"
+                + "cmake_minimum_required(VERSION 3.28)\n"
+                + "project(MagicNatives NONE)\n"
+                + "include(ExternalProject)\n\n"
+                + string.Join("\n", calls));
+            System.Collections.Generic.List<string> lines = new System.Collections.Generic.List<string>();
+            bool built = Run(environment, "cmake", "-S \"" + superbuild + "\" -B \"" + superbuild + "/build\" -G Ninja", lines, "BND015");
+            for (int step = 0; built && step < pending.Length; step++)
+            {
+                int i = pending[step];
+                ITaskItem library = Libraries[i];
+                using (Mutex lane = Lane())
                 {
-                    int i = pending[step];
-                    ITaskItem library = Libraries[i];
-                    string from = library.GetMetadata("Repository").Length > 0 ? library.GetMetadata("Tag") + " from " + library.GetMetadata("Repository") : library.GetMetadata("Url");
-                    Log.LogMessage(MessageImportance.High, "{0} ({1} of {2}): {3}", names[i], step + 1, pending.Length, from);
-                    System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
-                    lines.Clear();
-                    built = Run(environment, "cmake", "--build \"" + superbuild + "/build\" --target " + names[i] + " --parallel 1", lines, "BND015")
-                        && (library.GetMetadata("HeadersOnly") == "true" || Take(i));
-                    if (built)
+                    try
                     {
-                        foreach (string old in Directory.GetFiles(folders[i], "ready.*"))
+                        string from = library.GetMetadata("Repository").Length > 0 ? library.GetMetadata("Tag") + " from " + library.GetMetadata("Repository") : library.GetMetadata("Url");
+                        Log.LogMessage(MessageImportance.High, "{0} ({1} of {2}): {3}", names[i], step + 1, pending.Length, from);
+                        System.Diagnostics.Stopwatch watch = System.Diagnostics.Stopwatch.StartNew();
+                        lines.Clear();
+                        built = Run(environment, "cmake", "--build \"" + superbuild + "/build\" --target " + names[i] + " --parallel 1", lines, "BND015")
+                            && (library.GetMetadata("HeadersOnly") == "true" || Take(i));
+                        if (built)
                         {
-                            File.Delete(old);
-                        }
+                            foreach (string old in Directory.GetFiles(folders[i], "ready.*"))
+                            {
+                                File.Delete(old);
+                            }
 
-                        File.WriteAllText(markers[i], "");
-                        // Formatted here: a message's arguments reach the logger as text, their format lost on the way.
-                        Log.LogMessage(MessageImportance.High, "{0}: ready in {1} s", names[i], Math.Round(watch.Elapsed.TotalSeconds).ToString("0"));
+                            File.WriteAllText(markers[i], "");
+                            // Formatted here: a message's arguments reach the logger as text, their format lost on the way.
+                            Log.LogMessage(MessageImportance.High, "{0}: ready in {1} s", names[i], Math.Round(watch.Elapsed.TotalSeconds).ToString("0"));
+                        }
+                    }
+                    finally
+                    {
+                        lane.ReleaseMutex();
                     }
                 }
             }
         }
-        finally
+    }
+    finally
+    {
+        foreach (Mutex mutex in held)
         {
             mutex.ReleaseMutex();
+            mutex.Dispose();
         }
+
+        BuildEngine3.Reacquire();
     }
 }
 ]]></Code>
     </Task>
   </UsingTask>
 
-  <Target Name="PrepareNativeLibraries" DependsOnTargets="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'">
+  <!-- What the native build reads beyond the project's files: the items as they came out, which a property from the
+       command line or the environment can change with no file changing. -->
+  <Target Name="_DeclareNativeLibraries" DependsOnTargets="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'">
+    <WriteLinesToFile File="$(MagicNativeSuperbuild)declared.txt" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="@(NativeLibrary->'%(Identity)|%(Repository)|%(Tag)|%(RecurseSubmodules)|%(Url)|%(Sha256)|%(Library)|%(CMakeOptions)|%(CMakeTarget)|%(DependsOn)|%(Sources)|%(IncludePath)|%(Defines)|%(HeadersOnly)|%(Native)')" />
+  </Target>
+
+  <!-- Before the project's references, so a cold native build goes on while Core compiles. Skipped while nothing it
+       reads has changed since it last finished: the project's files, the items, and the libraries' binaries in the
+       shared folder, which another checkout's build of a library rewrites. So a build that finds every library ready
+       starts no task, whose compiling is most of what such a run costs; the task, when it runs, decides what to build. -->
+  <Target Name="PrepareNativeLibraries" DependsOnTargets="_DeclareNativeLibraries" BeforeTargets="ResolveProjectReferences"
+          Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'"
+          Inputs="$(MSBuildAllProjects);$(MagicNativeSuperbuild)declared.txt;@(_NativeBuilt)" Outputs="$(MagicNativeSuperbuild)prepared.stamp">
     <BuildNativeLibraries Libraries="@(NativeLibrary)" Natives="$(MagicNativeLibs)" Superbuild="$(MagicNativeSuperbuild)"
                           Project="$(MSBuildProjectName)" Rid="$(MagicNativeRid)" Cores="$(MagicNativeCores)" />
+    <Touch Files="$(MagicNativeSuperbuild)prepared.stamp" AlwaysCreate="true" />
   </Target>
 
   <!-- The generated API joins the compile, and the libraries join the output, before the build assigns output paths,
@@ -455,7 +535,11 @@ if (!Enumerable.Range(0, count).All(ready))
       <None Include="@(_NativeBuilt)" Link="runtimes/$(MagicNativeRid)/native/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
       <Compile Include="@(_NativeGenerated->'%(Generated)');$(IntermediateOutputPath)NativeLibraries.g.cs" Visible="false" />
       <FileWrites Include="@(_NativeGenerated->'%(Generated)');@(_NativeGenerated->'%(Response)');$(IntermediateOutputPath)NativeLibraries.g.cs" />
+      <FileWrites Include="@(_NativeGenerated->'%(Stamp)');@(_NativeGenerated->'$(IntermediateOutputPath)%(Identity).g.skipped.txt');@(_NativeGenerated->'$(IntermediateOutputPath)%(Identity).g.names.txt')" />
+      <FileWrites Include="$(MagicNativeSuperbuild)declared.txt;$(MagicNativeSuperbuild)prepared.stamp" />
     </ItemGroup>
+    <!-- A generated file gone with its stamp left (deleted by hand) is generated again rather than missed. -->
+    <Delete Files="%(_NativeGenerated.Stamp)" Condition="!Exists('%(_NativeGenerated.Generated)')" />
     <!-- Nothing crosses to C marshalled: every call is blittable (a C bool is one byte), so each is a direct call. -->
     <WriteLinesToFile File="$(IntermediateOutputPath)NativeLibraries.g.cs" Overwrite="true" WriteOnlyWhenDifferent="true"
                       Lines="// &lt;auto-generated/&gt;;[assembly: System.Runtime.CompilerServices.DisableRuntimeMarshalling]" />
@@ -463,19 +547,21 @@ if (!Enumerable.Range(0, count).All(ready))
                       Lines="--library=%(_NativeGenerated.Identity);--namespace=%(_NativeGenerated.Namespace);--root=%(_NativeGenerated.Checkout);--headers=$([System.String]::Copy('%(_NativeGenerated.Headers)').Replace(';', ','));--include=$([System.String]::Copy('%(_NativeGenerated.IncludePath)').Replace(';', ','));--include-absolute=$(_NativeIncludeFolders);--defines=$([System.String]::Copy('%(_NativeGenerated.Defines)').Replace(';', ','));--prefixes=$([System.String]::Copy('%(_NativeGenerated.Prefixes)').Replace(';', ','));--class=%(_NativeGenerated.Class);--shims=$([System.String]::Copy('%(_NativeGenerated.Shims)').Replace(';', ','));--sysroot=$(MagicNativeSysroot);--output=%(_NativeGenerated.Generated)" />
   </Target>
 
-  <!-- Generation reruns when a library's binary changed (a new pin brings new headers with it), the item changed or the
-       generator did. -->
-  <Target Name="GenerateNativeBindings" DependsOnTargets="_AddNativeLibraryItems" BeforeTargets="CoreCompile" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'"
-          Inputs="@(_NativeBuilt);@(_NativeGenerated->'%(Response)');$(MagicNativeBindingsGeneratorDll)" Outputs="@(_NativeGenerated->'%(Generated)')">
-    <Exec Command="dotnet &quot;$(MagicNativeBindingsGeneratorDll)&quot; @&quot;%(_NativeGenerated.Response)&quot;" />
-  </Target>
+  <!-- The generator, a reference only for the order it builds in: restored with everything else and built once per
+       build, in the same configuration, so it lands with what it builds for, and only where a library is declared.
+       Nothing of it is compiled against or copied. -->
+  <ItemGroup Condition="'@(NativeLibrary)' != ''">
+    <ProjectReference Include="$(MagicNativeBindingsGenerator)" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
 
-  <!-- The generator is built here rather than referenced, so a project built alone and the solution take the same path;
-       in the same configuration, so it lands with what it builds for, and a solution build, which builds it too, builds
-       it once. Built this way it is restored by nothing else, and a restore is per configuration, so it is restored
-       first, in a pass of its own (the session id), as dotnet build does before it builds. -->
-  <Target Name="_BuildNativeBindingsGenerator" BeforeTargets="GenerateNativeBindings" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true' and '$(MSBuildProjectFullPath)' != '$(MagicNativeBindingsGenerator)'">
-    <MSBuild Projects="$(MagicNativeBindingsGenerator)" Targets="Restore" Properties="Configuration=$(Configuration);MSBuildRestoreSessionId=$([System.Guid]::NewGuid())" />
-    <MSBuild Projects="$(MagicNativeBindingsGenerator)" Targets="Build" Properties="Configuration=$(Configuration)" />
+  <!-- Generation reruns when a library's binary changed (a new pin brings new headers with it), the item changed or the
+       generator did. The generator rewrites only a file whose text changed, and the stamp records the run, so the
+       project compiles again only when the API did. -->
+  <Target Name="GenerateNativeBindings" DependsOnTargets="_AddNativeLibraryItems" BeforeTargets="CoreCompile" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'"
+          Inputs="@(_NativeBuilt);@(_NativeGenerated->'%(Response)');$(MagicNativeBindingsGeneratorDll)" Outputs="@(_NativeGenerated->'%(Stamp)')">
+    <!-- Yielding: the node builds other projects while the generator runs, as a project waiting on a reference resumes
+         only on the node it started on. -->
+    <Exec Command="dotnet &quot;$(MagicNativeBindingsGeneratorDll)&quot; @&quot;%(_NativeGenerated.Response)&quot;" YieldDuringToolExecution="true" />
+    <Touch Files="@(_NativeGenerated->'%(Stamp)')" AlwaysCreate="true" />
   </Target>
 </Project>

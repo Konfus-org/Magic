@@ -12,6 +12,10 @@ clang's builtin macros, so a parse depends on nothing installed and reads the sa
 needs a standard header the sysroot lacks is a build error naming it, and the header is added there. A library's own
 include folders come from its item.
 
+The three reads run at once, each with a parser of its own, after the headers the library's build would generate
+(its shims) are made once for all three, and their results are merged in a fixed order, so what is written is what
+reading them one after another would write.
+
 Each platform's declarations become C# text, and the three are merged: a declaration must read the same on every
 platform that has it, and one only some platforms have is still declared, as C would declare it and fail to link
 elsewhere. The differences allowed are the types whose spelling is the OS's: on these 64-bit targets a 64-bit
@@ -73,12 +77,14 @@ gets `@`. Two C names that would become one C# name are an error, never silently
 
 The build writes each library's arguments to `<library>.bindings.rsp` in the project's intermediate folder (under
 `Build/obj/<Configuration>/`, where its output is under `Build/bin/<Configuration>/`) and runs
-`dotnet Build/bin/<Configuration>/Tools/NativeBindingsGenerator/NativeBindingsGenerator.dll @<that file>`; the same
-command reproduces a run. Errors come out in MSBuild's form, naming the header line, so the build that ran it fails on
-them; the summary line counts what was made, names the functions skipped, and points at the `.skipped.txt` beside the
-generated file that lists every skip. A `.names.txt` beside it lists every C name and the C# name it became, struct
-fields (`Foo_Event.type`) and typedefs to primitives (`FooWindowFlags` is `ulong`) included, for moving code from one
-to the other.
+`dotnet Build/bin/<Configuration>/Tools/NativeBindingsGenerator/NativeBindingsGenerator.dll @<that file>`, from the
+build's own Magic folder where `MagicBin` moves it; the same command reproduces a run. A file whose text is what is
+already there is left alone, so a project compiles again only when its API changed, and the build's stamp beside it
+records that generation ran. Errors come out in MSBuild's form, naming the header line, so the build that ran it
+fails on them; the summary line counts what was made, names the functions skipped, and points at the `.skipped.txt`
+beside the generated file that lists every skip. A `.names.txt` beside it lists every C name and the C# name it
+became, struct fields (`Foo_Event.type`) and typedefs to primitives (`FooWindowFlags` is `ulong`) included, for
+moving code from one to the other.
 
 The tool references nothing of Magic and is exempt from the engine's banned-symbol list, as it reads headers and
 writes files.
