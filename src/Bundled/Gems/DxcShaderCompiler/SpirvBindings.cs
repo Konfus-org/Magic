@@ -1,43 +1,53 @@
-using System.Runtime.InteropServices;
-using System.Text;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
+using static Magic.DxcShaderCompiler.Spvc;
+using static Magic.DxcShaderCompiler.spvc_backend;
+using static Magic.DxcShaderCompiler.spvc_basetype;
+using static Magic.DxcShaderCompiler.spvc_capture_mode;
+using static Magic.DxcShaderCompiler.spvc_resource_type;
+using static Magic.DxcShaderCompiler.spvc_result;
+using static Magic.DxcShaderCompiler.SpvDecoration_;
+using static Magic.DxcShaderCompiler.SpvExecutionMode_;
 
 namespace Magic.DxcShaderCompiler;
 
 /// <summary>
-/// What a SPIR-V module binds, read from its words: each resource variable's name (OpName), what it is (the type its
-/// pointer points to: an image sampled or not, or of integers, which no GPU samples, a sampler, a block in the uniform
-/// or the storage class) and where it is (its DescriptorSet and Binding decorations), in the binding model of
+/// What a SPIR-V module binds, read by SPIRV-Cross: each resource variable the module declares, by its name, what it
+/// is (an image sampled or not, or of integers, which no GPU samples, a sampler, a uniform block or a buffer) and where
+/// it is (its DescriptorSet and Binding decorations), in the binding model of
 /// Shaders/Include/Bindings.hlsli. A set is a stage's read, write or uniform space, and a binding is a register of it.
 /// A sampler is the sampled texture's at its binding, and is not listed. A compute module's group size comes with them.
 /// </summary>
-internal static class SpirvBindings
+internal static unsafe class SpirvBindings
 {
-    private const uint MagicNumber = 0x07230203;
-    private const int HeaderWords = 5;
+    /// <summary>
+    /// The lists SPIRV-Cross sorts a module's resources into that the binding model binds, and what each holds.
+    /// </summary>
+    private static readonly (spvc_resource_type List, Resource Resource)[] _bound =
+    [
+        (SPVC_RESOURCE_TYPE_UNIFORM_BUFFER, Resource.Block),
+        (SPVC_RESOURCE_TYPE_STORAGE_BUFFER, Resource.Buffer),
+        (SPVC_RESOURCE_TYPE_STORAGE_IMAGE, Resource.StorageImage),
+        (SPVC_RESOURCE_TYPE_SEPARATE_IMAGE, Resource.Texture),
+        (SPVC_RESOURCE_TYPE_SEPARATE_SAMPLERS, Resource.Sampler),
+    ];
 
-    private const uint OpExecutionMode = 16;
-    private const uint OpName = 5;
-    private const uint OpTypeInt = 21;
-    private const uint OpTypeImage = 25;
-    private const uint OpTypeSampler = 26;
-    private const uint OpTypeStruct = 30;
-    private const uint OpTypeArray = 28;
-    private const uint OpTypeRuntimeArray = 29;
-    private const uint OpTypePointer = 32;
-    private const uint OpVariable = 59;
-    private const uint OpDecorate = 71;
-
-    private const uint ModeLocalSize = 17;
-    private const uint DecorationBlock = 2;
-    private const uint DecorationBufferBlock = 3;
-    private const uint DecorationBinding = 33;
-    private const uint DecorationDescriptorSet = 34;
-
-    private const uint ClassUniformConstant = 0;
-    private const uint ClassUniform = 2;
-    private const uint ClassStorageBuffer = 12;
+    /// <summary>
+    /// The lists of resources the binding model has no place for: an image and sampler combined, which HLSL never
+    /// makes, and what only other languages or ray tracing declare. A module's stage inputs and outputs and its push
+    /// constants are not resources it binds, and are not read.
+    /// </summary>
+    private static readonly spvc_resource_type[] _unbound =
+    [
+        SPVC_RESOURCE_TYPE_SAMPLED_IMAGE,
+        SPVC_RESOURCE_TYPE_SUBPASS_INPUT,
+        SPVC_RESOURCE_TYPE_ATOMIC_COUNTER,
+        SPVC_RESOURCE_TYPE_ACCELERATION_STRUCTURE,
+        SPVC_RESOURCE_TYPE_RAY_QUERY,
+        SPVC_RESOURCE_TYPE_SHADER_RECORD_BUFFER,
+        SPVC_RESOURCE_TYPE_GL_PLAIN_UNIFORM,
+        SPVC_RESOURCE_TYPE_TENSOR,
+    ];
 
     /// <summary>
     /// The shader <paramref name="spirv"/> is, compiled for <paramref name="stage"/>, with what it binds; why not, when
@@ -45,169 +55,164 @@ internal static class SpirvBindings
     /// </summary>
     internal static Result<GpuShader> Read(ReadOnlyMemory<byte> spirv, GpuStage stage)
     {
-        ReadOnlySpan<uint> words = MemoryMarshal.Cast<byte, uint>(spirv.Span);
-        if (words.Length < HeaderWords || words[0] != MagicNumber)
+        spvc_context_s* context;
+        if (spvc_context_create(&context) != SPVC_SUCCESS)
         {
-            return Result.Failure<GpuShader>("it is not SPIR-V.");
+            return Result.Failure<GpuShader>("SPIRV-Cross could not start.");
         }
 
-        Dictionary<uint, string> names = [];
-        Dictionary<uint, uint> bindings = [];
-        Dictionary<uint, uint> sets = [];
-        HashSet<uint> blocks = [];
-        HashSet<uint> bufferBlocks = [];
-        Dictionary<uint, Resource> types = [];
-        HashSet<uint> integers = [];
-        Dictionary<uint, (uint Class, uint Type)> pointers = [];
-        HashSet<uint> arrays = [];
-        List<(uint Id, uint Pointer)> variables = [];
-        (uint X, uint Y, uint Z) threads = (1, 1, 1);
-        int at = HeaderWords;
-        while (at < words.Length)
+        try
         {
-            uint count = words[at] >> 16;
-            uint opcode = words[at] & 0xFFFF;
-            if (count == 0 || at + count > words.Length) return Result.Failure<GpuShader>("its words are cut short.");
-
-            ReadOnlySpan<uint> operands = words.Slice(at + 1, (int)count - 1);
-            switch (opcode)
+            spvc_compiler_s* compiler;
+            spvc_resources_s* resources;
+            fixed (byte* code = spirv.Span)
             {
-                case OpName when operands.Length >= 2:
-                    names[operands[0]] = ReadLiteral(operands[1..]);
-                    break;
-                case OpDecorate when operands.Length >= 2:
-                    Decorate(operands, bindings, sets, blocks, bufferBlocks);
-                    break;
-                case OpTypeInt when operands.Length >= 1:
-                    integers.Add(operands[0]);
-                    break;
-                case OpTypeImage when operands.Length >= 7:
-                    // An image of integers cannot be sampled, so the binding model reads it as a storage texture.
-                    types[operands[0]] = operands[6] == 2 || integers.Contains(operands[1])
-                        ? Resource.StorageImage
-                        : Resource.Texture;
-                    break;
-                case OpTypeSampler when operands.Length >= 1:
-                    types[operands[0]] = Resource.Sampler;
-                    break;
-                case OpTypeStruct when operands.Length >= 1:
-                    types[operands[0]] = Resource.Block;
-                    break;
-                case OpTypeArray or OpTypeRuntimeArray when operands.Length >= 2:
-                    arrays.Add(operands[0]);
-                    break;
-                case OpTypePointer when operands.Length >= 3:
-                    pointers[operands[0]] = (operands[1], operands[2]);
-                    break;
-                case OpVariable when operands.Length >= 3:
-                    variables.Add((operands[1], operands[0]));
-                    break;
-                case OpExecutionMode when operands.Length >= 5 && operands[1] == ModeLocalSize:
-                    threads = (operands[2], operands[3], operands[4]);
-                    break;
-                default:
-                    break;
+                spvc_parsed_ir_s* ir;
+                if (spvc_context_parse_spirv(context, (uint*)code, (nuint)(spirv.Length / 4), &ir) != SPVC_SUCCESS
+                    || spvc_context_create_compiler(
+                        context,
+                        SPVC_BACKEND_NONE,
+                        ir,
+                        SPVC_CAPTURE_MODE_TAKE_OWNERSHIP,
+                        &compiler) != SPVC_SUCCESS
+                    || spvc_compiler_create_shader_resources(compiler, &resources) != SPVC_SUCCESS)
+                {
+                    return Result.Failure<GpuShader>(CString.Read(spvc_context_get_last_error_string(context)));
+                }
             }
 
-            at += (int)count;
-        }
+            foreach (spvc_resource_type list in _unbound)
+            {
+                spvc_reflected_resource* unbound = GetList(resources, list, out nuint count);
+                if (count > 0)
+                {
+                    return Result.Failure<GpuShader>(
+                        $"{GetName(compiler, unbound[0].id)} is of a type the binding model does not bind.");
+                }
+            }
 
-        List<GpuShaderBinding> found = [];
+            List<(uint Id, GpuShaderBinding Binding)> found = [];
+            Result read = ReadBindings(compiler, resources, stage, found);
+            if (!read.Ok) return Result.Failure<GpuShader>(read.Error);
+
+            // In the order the module declares them, as each list is.
+            found.Sort((first, second) => first.Id.CompareTo(second.Id));
+            return Result.Success(new GpuShader
+            {
+                Code = spirv,
+                EntryPoint = "main",
+                Stage = stage,
+                Bindings = found.ConvertAll(entry => entry.Binding),
+                ThreadCountX = GetGroupSize(compiler, 0),
+                ThreadCountY = GetGroupSize(compiler, 1),
+                ThreadCountZ = GetGroupSize(compiler, 2),
+            });
+        }
+        finally
+        {
+            spvc_context_destroy(context);
+        }
+    }
+
+    /// <summary>
+    /// Adds every resource of the lists the binding model binds to <paramref name="found"/>, with the variable it is;
+    /// a sampler is checked against the texture whose it is instead.
+    /// </summary>
+    private static Result ReadBindings(
+        spvc_compiler_s* compiler,
+        spvc_resources_s* resources,
+        GpuStage stage,
+        List<(uint Id, GpuShaderBinding Binding)> found)
+    {
         HashSet<uint> samplers = [];
-        foreach ((uint id, uint pointer) in variables)
+        foreach ((spvc_resource_type list, Resource listed) in _bound)
         {
-            if (!pointers.TryGetValue(pointer, out (uint Class, uint Type) pointee)
-                || pointee.Class is not (ClassUniformConstant or ClassUniform or ClassStorageBuffer))
+            spvc_reflected_resource* resource = GetList(resources, list, out nuint count);
+            for (nuint i = 0; i < count; i++)
             {
-                continue;
+                uint id = resource[i].id;
+                string name = GetName(compiler, id);
+                if (name.Length == 0) return Result.Failure("a resource has no name.");
+
+                spvc_type_s* type = spvc_compiler_get_type_handle(compiler, resource[i].type_id);
+                if (spvc_type_get_num_array_dimensions(type) > 0)
+                {
+                    return Result.Failure($"{name} is an array of resources, which the binding model does not bind.");
+                }
+
+                uint binding = spvc_compiler_get_decoration(compiler, id, SpvDecorationBinding);
+                if (listed == Resource.Sampler)
+                {
+                    samplers.Add(binding);
+                    continue;
+                }
+
+                // An image of integers cannot be sampled, so the binding model reads it as a storage texture.
+                Resource what = listed == Resource.Texture && IsOfIntegers(compiler, resource[i].base_type_id)
+                    ? Resource.StorageImage
+                    : listed;
+                uint set = spvc_compiler_get_decoration(compiler, id, SpvDecorationDescriptorSet);
+                Result<GpuBindingKind> kind = TryGetKind(stage, set, what, name);
+                if (!kind.Ok) return Result.Failure(kind.Error);
+
+                found.Add((id, new GpuShaderBinding(name, kind.Value, binding)));
             }
-
-            string name = names.GetValueOrDefault(id, string.Empty);
-            if (name.Length == 0) return Result.Failure<GpuShader>("a resource has no name.");
-
-            if (arrays.Contains(pointee.Type))
-            {
-                return Result.Failure<GpuShader>(
-                    $"{name} is an array of resources, which the binding model does not bind.");
-            }
-
-            if (!types.TryGetValue(pointee.Type, out Resource resource))
-            {
-                return Result.Failure<GpuShader>($"{name} is of a type the binding model does not bind.");
-            }
-
-            uint binding = bindings.GetValueOrDefault(id, 0u);
-            uint set = sets.GetValueOrDefault(id, 0u);
-            if (resource == Resource.Sampler)
-            {
-                samplers.Add(binding);
-                continue;
-            }
-
-            // A struct is a buffer in the storage class, or a uniform block in the uniform class; nothing else is
-            // bound.
-            bool isBuffer = resource == Resource.Block
-                && (pointee.Class == ClassStorageBuffer || bufferBlocks.Contains(pointee.Type));
-            bool isUniform = resource == Resource.Block && pointee.Class == ClassUniform
-                && blocks.Contains(pointee.Type);
-            if (resource == Resource.Block && !isBuffer && !isUniform)
-            {
-                return Result.Failure<GpuShader>($"{name} is a struct that is neither a buffer nor a constant block.");
-            }
-
-            Result<GpuBindingKind> kind = TryGetKind(stage, set, isBuffer ? Resource.Buffer : resource, name);
-            if (!kind.Ok) return Result.Failure<GpuShader>(kind.Error);
-
-            found.Add(new GpuShaderBinding(name, kind.Value, binding));
         }
 
         foreach (uint binding in samplers)
         {
-            if (!found.Exists(texture => texture.Kind == GpuBindingKind.Sampled && texture.Register == binding))
+            if (!found.Exists(texture => texture.Binding.Kind == GpuBindingKind.Sampled
+                && texture.Binding.Register == binding))
             {
-                return Result.Failure<GpuShader>(
+                return Result.Failure(
                     $"a sampler at {binding} has no sampled texture at {binding}, whose it would be.");
             }
         }
 
-        return Result.Success(new GpuShader
-        {
-            Code = spirv,
-            EntryPoint = "main",
-            Stage = stage,
-            Bindings = found,
-            ThreadCountX = threads.X,
-            ThreadCountY = threads.Y,
-            ThreadCountZ = threads.Z,
-        });
+        return Result.Success();
     }
 
-    private static void Decorate(
-        ReadOnlySpan<uint> operands,
-        Dictionary<uint, uint> bindings,
-        Dictionary<uint, uint> sets,
-        HashSet<uint> blocks,
-        HashSet<uint> bufferBlocks)
+    private static spvc_reflected_resource* GetList(
+        spvc_resources_s* resources,
+        spvc_resource_type type,
+        out nuint count)
     {
-        uint target = operands[0];
-        switch (operands[1])
+        spvc_reflected_resource* list;
+        nuint found;
+        if (spvc_resources_get_resource_list_for_type(resources, type, &list, &found) != SPVC_SUCCESS)
         {
-            case DecorationBinding when operands.Length >= 3:
-                bindings[target] = operands[2];
-                break;
-            case DecorationDescriptorSet when operands.Length >= 3:
-                sets[target] = operands[2];
-                break;
-            case DecorationBlock:
-                blocks.Add(target);
-                break;
-            case DecorationBufferBlock:
-                bufferBlocks.Add(target);
-                break;
-            default:
-                break;
+            count = 0;
+            return null;
         }
+
+        count = found;
+        return list;
     }
+
+    /// <summary>
+    /// The name the module gives a variable (its OpName), or empty.
+    /// </summary>
+    private static string GetName(spvc_compiler_s* compiler, uint id)
+        => CString.Read(spvc_compiler_get_name(compiler, id));
+
+    /// <summary>
+    /// Whether an image's texels are integers, read from the type it samples.
+    /// </summary>
+    private static bool IsOfIntegers(spvc_compiler_s* compiler, uint image)
+    {
+        spvc_type_s* sampled = spvc_compiler_get_type_handle(
+            compiler,
+            spvc_type_get_image_sampled_type(spvc_compiler_get_type_handle(compiler, image)));
+        return spvc_type_get_basetype(sampled) is SPVC_BASETYPE_INT8 or SPVC_BASETYPE_UINT8 or SPVC_BASETYPE_INT16
+            or SPVC_BASETYPE_UINT16 or SPVC_BASETYPE_INT32 or SPVC_BASETYPE_UINT32 or SPVC_BASETYPE_INT64
+            or SPVC_BASETYPE_UINT64;
+    }
+
+    /// <summary>
+    /// A compute module's group size along one axis (its LocalSize), and 1 for a module that has none.
+    /// </summary>
+    private static uint GetGroupSize(spvc_compiler_s* compiler, uint axis)
+        => Math.Max(spvc_compiler_get_execution_mode_argument_by_index(compiler, SpvExecutionModeLocalSize, axis), 1u);
 
     /// <summary>
     /// What a resource in a set is to a stage, by the space the set is (Shaders/Include/Bindings.hlsli): a read space
@@ -251,16 +256,6 @@ internal static class SpirvBindings
         }
 
         return Result.Failure<GpuBindingKind>($"{name} is in space {set}, which the stage has no use for.");
-    }
-
-    /// <summary>
-    /// A literal string operand: UTF-8, ending at its first zero byte.
-    /// </summary>
-    private static string ReadLiteral(ReadOnlySpan<uint> words)
-    {
-        ReadOnlySpan<byte> bytes = MemoryMarshal.AsBytes(words);
-        int end = bytes.IndexOf((byte)0);
-        return Encoding.UTF8.GetString(end < 0 ? bytes : bytes[..end]);
     }
 
     private enum Resource : byte

@@ -2,9 +2,9 @@
 
 HLSL to SPIR-V, DXIL or Metal: provides `IShaderCompiler`, with Microsoft's DirectXShaderCompiler (DXC) and
 Khronos's SPIRV-Cross ([Gems](../README.md#native-libraries)), DXC's library alone: Microsoft's own build where it
-publishes one, since the library is an LLVM, and built here where it does not. SPIRV-Cross is called through its
-generated API. DXC is a COM API, which the generator cannot express, so it is the one library bound by hand, in the
-gem, and the gem drives it directly:
+publishes one, since the library is an LLVM, and built here where it does not. SPIRV-Cross is called through the API
+Microsoft's generator writes from its C header, under C's own names. DXC is a COM API, which the repository's own
+generator cannot express, so it is the one library bound by hand, in the gem, and the gem drives it directly:
 a front end that fixes DXC's SPIR-V target at Vulkan 1.0 could not compile these shaders, whose wave intrinsics need
 1.1. The gem needs the assets (`Assets`), which a shader's includes are, and keeps what it compiles in the cache
 (`Caches`).
@@ -25,9 +25,9 @@ changing it while running compiles every shader again.
   that keep DXC's errors naming its file and line, and its guards keep a second copy out. An include no asset is at
   is left for DXC to report; one that does not load fails the compile with the asset's error.
 - SPIR-V first, whatever the format asked for: for Vulkan 1.1, so wave intrinsics become subgroup operations. What a
-  shader binds is read from the SPIR-V by name: each resource it uses, what it is and the register it is at; a
-  resource the shader does not use is dropped by the compiler and so not listed. The counts of each kind are what a
-  GPU needs to make a pipeline; the names are what a renderer binds by.
+  shader binds is read from the SPIR-V by SPIRV-Cross, on every platform, by name: each resource it uses, what it is
+  and the register it is at; a resource the shader does not use is dropped by the compiler and so not listed. The
+  counts of each kind are what a GPU needs to make a pipeline; the names are what a renderer binds by.
 - DXIL is compiled from the HLSL again, validated and signed by DXC's own validator, whose hash in the container is
   all Direct3D 12 checks a shader for. Vulkan's attributes mean nothing to DXIL, so its compile alone does not warn of
   them.

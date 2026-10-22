@@ -112,6 +112,7 @@ folder holds no Magic yet.
 
 ## NativeBindingsGenerator
 
-The generator behind every native library Magic binds: a `dotnet` project the build runs for each library a project
-declares, turning the library's C headers into the C# the project compiles. How it reads the headers and what each C
-declaration becomes is in [its README](NativeBindingsGenerator/README.md).
+The generator behind the native libraries Magic binds that have not moved to Microsoft's ClangSharpPInvokeGenerator
+([Gems](../src/Bundled/Gems/README.md#native-libraries)): a `dotnet` project the build runs for each such library a
+project declares, turning the library's C headers into the C# the project compiles. How it reads the headers and what
+each C declaration becomes is in [its README](NativeBindingsGenerator/README.md).

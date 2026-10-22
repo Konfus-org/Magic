@@ -51,6 +51,16 @@ how the headers are read, and what the generator refuses and why, is in the
 [generator](../../../tools/NativeBindingsGenerator/README.md): it fails rather than guess, naming the header line,
 and each refusal gets a rule in the generator, never a hand edit.
 
+An item whose `Generator` names Microsoft's ClangSharpPInvokeGenerator is bound by that instead, a maintained tool
+the libraries are moving to one by one, so the repository keeps no generator of its own; the build downloads it with
+the restore. Its API is C as the header spells it: every type, enum member, function and constant under its C name,
+the functions and constants in a static class the item's `Class` names. A gem writes `using static` for that class
+and for the enums it uses, so its calls read as the library's own documentation does. C's `bool` is `bool` and its
+`char` is `byte`, as the repository's generator writes them, nothing is wrapped, and no doc comments come with it.
+The headers are read once, for one target every platform shares, so the API is the same everywhere. A declaration it
+has no faithful C# for, it warns of, and the warning fails the build until the item's `Unbound` lists the
+declaration, so what is left out is written down beside the library.
+
 ### Building a library
 
 Each library is had through CMake's ExternalProject: the build writes the project's items as one superbuild, a call

@@ -4,13 +4,14 @@
        to C# ones (src/Bundled/Gems/README.md#native-libraries). The build writes the project's items as one CMake
        superbuild, an ExternalProject each, and builds what is not built yet into one folder per machine
        (MagicNativeLibs), shared by every checkout. From there it generates the C# API from the headers
-       (tools/NativeBindingsGenerator) into the intermediate folder and compiles it in, and copies the library beside
-       the assembly under runtimes/<rid>/native/, where the gem load context finds it. Every item's include folder
-       serves every generation in the project, so a library whose headers include another's declares that one too; an
-       item with no Headers is bound by hand and declared for its binary alone, and one declared HeadersOnly is fetched
-       for its headers and sources alone. Building and generating are a real build's work, never a design-time one's:
-       the build an IDE runs in the background to feed its editor compiles what the last real build generated. It
-       hides what it logs, so a native build in it would run unseen. -->
+       (tools/NativeBindingsGenerator, or Microsoft's ClangSharpPInvokeGenerator for an item that names it) into the
+       intermediate folder and compiles it in, and copies the library beside the assembly under runtimes/<rid>/native/,
+       where the gem load context finds it. Every item's include folder serves every generation in the project, so a
+       library whose headers include another's declares that one too; an item with no Headers is bound by hand and
+       declared for its binary alone, and one declared HeadersOnly is fetched for its headers and sources alone.
+       Building and generating are a real build's work, never a design-time one's: the build an IDE runs in the
+       background to feed its editor compiles what the last real build generated. It hides what it logs, so a native
+       build in it would run unseen. -->
   <PropertyGroup>
     <MagicNativeLibs Condition="'$(MagicNativeLibs)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))/Magic/NativeLibs/</MagicNativeLibs>
     <!-- With forward slashes, as CMake writes paths, so an option a project makes of it reads as CMake recorded it. -->
@@ -21,6 +22,14 @@
     <!-- Where the generator's own build puts it (Directory.Build.props), in this build's Magic folder. -->
     <MagicNativeBindingsGeneratorDll>$(MagicBin)Tools/NativeBindingsGenerator/NativeBindingsGenerator.dll</MagicNativeBindingsGeneratorDll>
     <MagicNativeSysroot>$(MSBuildThisFileDirectory)tools/NativeBindingsGenerator/Sysroot/</MagicNativeSysroot>
+    <!-- Microsoft's generator: the native tool the restore downloads for this machine's runtime, and the one target
+         every machine reads the headers for, so what it writes is the same on every platform. Its package is named
+         for the SDK's portable runtime, as a distribution's own SDK names its runtime for the distribution
+         (ubuntu.26.04-x64), which no package is published for. -->
+    <MagicClangSharpRid>$(NETCoreSdkPortableRuntimeIdentifier)</MagicClangSharpRid>
+    <MagicClangSharpGenerator>$(NuGetPackageRoot)clangsharppinvokegenerator.$(MagicClangSharpRid)/$(ClangSharpPInvokeGeneratorVersion)/tools/any/$(MagicClangSharpRid)/ClangSharpPInvokeGenerator</MagicClangSharpGenerator>
+    <MagicClangSharpGenerator Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicClangSharpGenerator).exe</MagicClangSharpGenerator>
+    <MagicNativeBindingsTarget>x86_64-pc-windows-msvc</MagicNativeBindingsTarget>
     <!-- A shared library's file name, as the OS names one (SDL3.dll, libSDL3.so, libSDL3.dylib). -->
     <MagicNativePrefix Condition="!$([MSBuild]::IsOSPlatform('Windows'))">lib</MagicNativePrefix>
     <MagicNativeSuffix Condition="$([MSBuild]::IsOSPlatform('Windows'))">.dll</MagicNativeSuffix>
@@ -32,7 +41,9 @@
        and none unless named; or the archive at Url its author publishes, verified by Sha256, with the shared library at
        Library in it. How it is built: in Release with its CMakeOptions, one CMake argument each, installed unless
        CMakeTarget names the one target to build, after the libraries it DependsOn; or, for a library with no build of
-       its own, compiled from its Sources. What is bound of it: the rest, read by the bindings generator. -->
+       its own, compiled from its Sources. What is bound of it: the rest, read by the bindings generator, ours unless
+       Generator names Microsoft's ClangSharpPInvokeGenerator, which binds it with C's own names and leaves out the
+       declarations Unbound names, those it has no C# for. -->
   <ItemDefinitionGroup>
     <NativeLibrary>
       <Repository />
@@ -52,6 +63,8 @@
       <Prefixes />
       <Class />
       <Shims />
+      <Generator />
+      <Unbound />
       <HeadersOnly>false</HeadersOnly>
     </NativeLibrary>
   </ItemDefinitionGroup>
@@ -64,6 +77,7 @@
         <Checkout>$(MagicNativeLibs)%(Identity)/source/</Checkout>
         <Native>$(MagicNativeLibs)%(Identity)/built/native/$(MagicNativePrefix)%(Identity)$(MagicNativeSuffix)</Native>
         <Response>$(IntermediateOutputPath)%(Identity).bindings.rsp</Response>
+        <RootHeader>$(IntermediateOutputPath)%(Identity).root.h</RootHeader>
         <Generated>$(IntermediateOutputPath)%(Identity).g.cs</Generated>
         <Stamp>$(IntermediateOutputPath)%(Identity).bindings.stamp</Stamp>
       </NativeLibrary>
@@ -71,6 +85,7 @@
     <ItemGroup>
       <_NativeInclude Include="@(NativeLibrary)" Condition="'%(NativeLibrary.IncludePath)' != ''" />
       <_NativeGenerated Include="@(NativeLibrary)" Condition="'%(NativeLibrary.Headers)' != ''" />
+      <_ClangSharpGenerated Include="@(_NativeGenerated)" Condition="'%(_NativeGenerated.Generator)' == 'ClangSharpPInvokeGenerator'" />
       <_NativeBuilt Include="@(NativeLibrary->'%(Native)')" Condition="'%(NativeLibrary.HeadersOnly)' != 'true'" />
     </ItemGroup>
     <PropertyGroup>
@@ -572,15 +587,40 @@ Success = !Log.HasLoggedErrors;
     <Touch Files="$(MagicNativeSuperbuild)prepared.stamp" AlwaysCreate="true" />
   </Target>
 
+  <!-- Microsoft's generator, for each item that names it, gets the arguments this writes: the item's headers read as
+       one parse, through a root header including each of them, as ours reads them; what is declared under its include
+       folder bound, as what it includes from elsewhere is another library's; and the rest the same for every item:
+       C's bool as bool and char as byte, as our generator writes them, the target every platform shares, the
+       generator's own attributes beside the API, and a header that marks the file generated. One item at a time, so
+       each is written with its own headers. -->
+  <Target Name="_WriteClangSharpArguments" Outputs="%(_ClangSharpGenerated.Identity)" Condition="'@(_ClangSharpGenerated)' != ''">
+    <ItemGroup>
+      <_ClangSharpHeader Remove="@(_ClangSharpHeader)" />
+      <_ClangSharpHeader Include="%(_ClangSharpGenerated.Headers)" Checkout="%(_ClangSharpGenerated.Checkout)" />
+      <_ClangSharpTraversed Remove="@(_ClangSharpTraversed)" />
+      <_ClangSharpTraversed Include="%(_ClangSharpGenerated.Checkout)%(_ClangSharpGenerated.IncludePath)/**/*.h" />
+      <_ClangSharpDefine Remove="@(_ClangSharpDefine)" />
+      <_ClangSharpDefine Include="%(_ClangSharpGenerated.Defines)" />
+      <_ClangSharpUnbound Remove="@(_ClangSharpUnbound)" />
+      <_ClangSharpUnbound Include="%(_ClangSharpGenerated.Unbound)" />
+    </ItemGroup>
+    <WriteLinesToFile File="%(_ClangSharpGenerated.RootHeader)" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="@(_ClangSharpHeader->'#include &quot;%(Checkout)%(Identity)&quot;')" />
+    <WriteLinesToFile File="%(_ClangSharpGenerated.Response)" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="--language=c;--file=%(_ClangSharpGenerated.RootHeader);@(_ClangSharpTraversed->'--traverse=%(FullPath)');@(_NativeInclude->'--include-directory=%(Checkout)%(IncludePath)');@(_ClangSharpDefine->'--define-macro=%(Identity)');@(_ClangSharpUnbound->'--exclude=%(Identity)');--namespace=%(_ClangSharpGenerated.Namespace);--library-path=%(_ClangSharpGenerated.Identity);--method-class-name=%(_ClangSharpGenerated.Class);--output=%(_ClangSharpGenerated.Generated);--header-file=$(IntermediateOutputPath)bindings.header;--config=codegen=latest;--config=types=windows;--generate=macro-bindings;--generate=funcs-with-body=false;--generate=helper-types;--remap=_Bool=bool;--remap=char=byte;--no-resource-directory-detection;--additional=-nostdinc;--additional=-isystem$(MagicNativeSysroot);--additional=--target=$(MagicNativeBindingsTarget)" />
+  </Target>
+
   <!-- The generated API joins the compile, and the libraries join the output, before the build assigns output paths,
        so a project referencing this one copies them too. Located first, as a design-time build skips the preparing
-       and what it depends on. -->
-  <Target Name="_AddNativeLibraryItems" DependsOnTargets="_LocateNativeLibraries;PrepareNativeLibraries" BeforeTargets="AssignTargetPaths;CoreCompile" Condition="'@(NativeLibrary)' != ''">
+       and what it depends on; Microsoft's generator's arguments after the preparing, which fetches the headers they
+       list. -->
+  <Target Name="_AddNativeLibraryItems" DependsOnTargets="_LocateNativeLibraries;PrepareNativeLibraries;_WriteClangSharpArguments" BeforeTargets="AssignTargetPaths;CoreCompile" Condition="'@(NativeLibrary)' != ''">
     <ItemGroup>
       <None Include="@(_NativeBuilt)" Link="runtimes/$(MagicNativeRid)/native/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
       <Compile Include="@(_NativeGenerated->'%(Generated)');$(IntermediateOutputPath)NativeLibraries.g.cs" Visible="false" />
       <FileWrites Include="@(_NativeGenerated->'%(Generated)');@(_NativeGenerated->'%(Response)');$(IntermediateOutputPath)NativeLibraries.g.cs" />
       <FileWrites Include="@(_NativeGenerated->'%(Stamp)');@(_NativeGenerated->'$(IntermediateOutputPath)%(Identity).g.skipped.txt');@(_NativeGenerated->'$(IntermediateOutputPath)%(Identity).g.names.txt')" />
+      <FileWrites Include="@(_ClangSharpGenerated->'%(RootHeader)');$(IntermediateOutputPath)bindings.header" Condition="'@(_ClangSharpGenerated)' != ''" />
       <FileWrites Include="$(MagicNativeSuperbuild)declared.txt;$(MagicNativeSuperbuild)prepared.stamp" />
     </ItemGroup>
     <!-- A generated file gone with its stamp left (deleted by hand) is generated again rather than missed. -->
@@ -588,25 +628,37 @@ Success = !Log.HasLoggedErrors;
     <!-- Nothing crosses to C marshalled: every call is blittable (a C bool is one byte), so each is a direct call. -->
     <WriteLinesToFile File="$(IntermediateOutputPath)NativeLibraries.g.cs" Overwrite="true" WriteOnlyWhenDifferent="true"
                       Lines="// &lt;auto-generated/&gt;;[assembly: System.Runtime.CompilerServices.DisableRuntimeMarshalling]" />
-    <WriteLinesToFile File="%(_NativeGenerated.Response)" Overwrite="true" WriteOnlyWhenDifferent="true"
+    <!-- What Microsoft's generator puts at the top of its file, as ours does: the file is generated, and its code is
+         checked by nothing. -->
+    <WriteLinesToFile File="$(IntermediateOutputPath)bindings.header" Overwrite="true" WriteOnlyWhenDifferent="true"
+                      Lines="// &lt;auto-generated/&gt;;#pragma warning disable" Condition="'@(_ClangSharpGenerated)' != ''" />
+    <WriteLinesToFile File="%(_NativeGenerated.Response)" Overwrite="true" WriteOnlyWhenDifferent="true" Condition="'%(_NativeGenerated.Generator)' == ''"
                       Lines="--library=%(_NativeGenerated.Identity);--namespace=%(_NativeGenerated.Namespace);--root=%(_NativeGenerated.Checkout);--headers=$([System.String]::Copy('%(_NativeGenerated.Headers)').Replace(';', ','));--include=$([System.String]::Copy('%(_NativeGenerated.IncludePath)').Replace(';', ','));--include-absolute=$(_NativeIncludeFolders);--defines=$([System.String]::Copy('%(_NativeGenerated.Defines)').Replace(';', ','));--prefixes=$([System.String]::Copy('%(_NativeGenerated.Prefixes)').Replace(';', ','));--class=%(_NativeGenerated.Class);--shims=$([System.String]::Copy('%(_NativeGenerated.Shims)').Replace(';', ','));--sysroot=$(MagicNativeSysroot);--output=%(_NativeGenerated.Generated)" />
   </Target>
 
   <!-- The generator, a reference only for the order it builds in: restored with everything else and built once per
        build, in the same configuration, so it lands with what it builds for, and only where a library is declared.
-       Nothing of it is compiled against or copied. -->
+       Nothing of it is compiled against or copied. Microsoft's, a native tool, is downloaded by the same restore,
+       its package for this machine's runtime, and run where NuGet keeps it. -->
   <ItemGroup Condition="'@(NativeLibrary)' != ''">
     <ProjectReference Include="$(MagicNativeBindingsGenerator)" ReferenceOutputAssembly="false" Private="false" />
+    <PackageDownload Include="ClangSharpPInvokeGenerator.$(MagicClangSharpRid)" Version="[$(ClangSharpPInvokeGeneratorVersion)]" />
   </ItemGroup>
 
-  <!-- Generation reruns when a library's binary changed (a new pin brings new headers with it), the item changed or the
-       generator did. The generator rewrites only a file whose text changed, and the stamp records the run, so the
-       project compiles again only when the API did. -->
+  <!-- Generation reruns when a library's binary changed (a new pin brings new headers with it), the item changed or a
+       generator did, and the stamp records the run. Ours rewrites only a file whose text changed, so the project
+       compiles again only when the API did; Microsoft's rewrites its file whenever it runs, which is only then. -->
   <Target Name="GenerateNativeBindings" DependsOnTargets="_AddNativeLibraryItems" BeforeTargets="CoreCompile" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'"
-          Inputs="@(_NativeBuilt);@(_NativeGenerated->'%(Response)');$(MagicNativeBindingsGeneratorDll)" Outputs="@(_NativeGenerated->'%(Stamp)')">
+          Inputs="@(_NativeBuilt);@(_NativeGenerated->'%(Response)');@(_ClangSharpGenerated->'%(RootHeader)');$(MagicNativeBindingsGeneratorDll);@(_ClangSharpGenerated->'$(MagicClangSharpGenerator)')"
+          Outputs="@(_NativeGenerated->'%(Stamp)')">
     <!-- Yielding: the node builds other projects while the generator runs, as a project waiting on a reference resumes
          only on the node it started on. -->
-    <Exec Command="dotnet &quot;$(MagicNativeBindingsGeneratorDll)&quot; @&quot;%(_NativeGenerated.Response)&quot;" YieldDuringToolExecution="true" />
+    <Exec Command="dotnet &quot;$(MagicNativeBindingsGeneratorDll)&quot; @&quot;%(_NativeGenerated.Response)&quot;"
+          Condition="'%(_NativeGenerated.Generator)' == ''" YieldDuringToolExecution="true" />
+    <!-- It exits non-zero on any warning, each a declaration it could not bind faithfully, so one fails the build
+         until the item lists it as Unbound. -->
+    <Exec Command="&quot;$(MagicClangSharpGenerator)&quot; @&quot;%(_NativeGenerated.Response)&quot;"
+          Condition="'%(_NativeGenerated.Generator)' == 'ClangSharpPInvokeGenerator'" YieldDuringToolExecution="true" />
     <Touch Files="@(_NativeGenerated->'%(Stamp)')" AlwaysCreate="true" />
   </Target>
 </Project>
