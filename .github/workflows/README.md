@@ -2,11 +2,11 @@
 
 What GitHub runs on a change and what must hold for it to pass. The Build and Test workflows run the same script a
 developer runs, `tools/Validate.ps1` ([Tools](../../tools/README.md)), a step at a time: Build runs its Build and
-Headless steps on every OS Magic targets, Test its Build, Format and Test steps on Linux. Every build already fails on
+Headless steps on Windows and Linux, Test its Build, Format and Test steps on Linux. Every build already fails on
 any analyzer rule, so the format check adds what no build can check, such as a file's line endings, and it runs once, as
 formatting is the same on every OS. The Screenshot step needs a display, which no runner has, so it stays on developer
 machines. The Headless step still needs a GPU device,
-since the samples render offscreen: macOS runners have a virtual one, and Linux gets Mesa's software Vulkan driver
+since the samples render offscreen: Linux gets Mesa's software Vulkan driver
 and runs the platform library's offscreen video driver, both from the setup action. The Release build needs it too, as
 it bakes the samples' caches by running Magic on them where it built them; the Headless step then opens that built
 project, so it runs on what ships and reads the cache the package carries. Two checks have no local
@@ -26,8 +26,8 @@ Every workflow runs on a pull request into `dev` or `main` and on a push to eith
 asks to merge, and the merged result once more. Each can also be started by hand from the Actions tab, and Build runs
 on a weekly schedule as well, which keeps the caches alive (below). A newer push to the same pull request or branch
 cancels the run it supersedes; Build alone finishes on `main` regardless, where a release in progress is never cut
-short. On a push to `dev` or `main`, Build fails fast: the first OS to fail cancels the other two, since the push has
-one verdict and a runner's hour is not spent confirming it. A pull request's three builds run to the end, so its author
+short. On a push to `dev` or `main`, Build fails fast: the first OS to fail cancels the other, since the push has
+one verdict and a runner's hour is not spent confirming it. A pull request's builds run to the end, so its author
 sees every OS's result at once. Every job has a time limit, so a stuck step ends the job instead of holding a runner; the limits are generous
 for the jobs that may build the native libraries from source (below) and tight for the rest.
 
@@ -36,12 +36,17 @@ for each OS, Test, Docs and CodeQL to pass before a merge, so that Dependabot's 
 held to the same bar. That is what makes a merge into `main` a release of checked code. GitHub knows a check by its
 job's name alone, whatever workflow it is in, so every job here carries a name no other job has.
 
+## macOS
+
+macOS is planned but not yet supported: the renderer is moving to Vulkan, which reaches a Mac only through a
+translation layer, so nothing is built for it. When macOS is supported, the matrix takes it back, and the rulesets
+require its Build check again.
+
 ## The native libraries
 
 The native libraries are fetched and built by the first build
 ([Native libraries](../../src/Bundled/Gems/README.md#native-libraries)); the shader compiler, a whole compiler
-toolchain, comes prebuilt on Windows and Linux and is built on macOS, so a cold build is short on the first two and
-long on the third, while a warm one does nothing. The build puts the libraries in a folder per machine, which the
+toolchain, comes prebuilt on Windows and Linux, so a cold build is short, while a warm one does nothing. The build puts the libraries in a folder per machine, which the
 setup action pins to `Build/NativeLibs/` in the workspace, cached per OS and architecture and keyed on the gems'
 projects, which declare the libraries, and the build that reads them. The libraries' ready markers make a restored
 cache a no-op, and a cache restored under an older key still serves: the build sees which library's item changed and
@@ -60,15 +65,15 @@ in the matrix, not a longer limit.
 
 ## What a runner needs
 
-What a developer's machine does ([requirements](../../README.md#requirements)). Windows and macOS runners come with
-the toolchain; Linux installs the platform library's build dependencies, and the setup action installs the rest.
+What a developer's machine does ([requirements](../../README.md#requirements)). Windows runners come with the
+toolchain; Linux installs the platform library's build dependencies, and the setup action installs the rest.
 
 ## Builds and releases
 
 Each Build job builds on its OS, runs the headless samples against the result, and packages Magic's output folder
-without what the build and the run left in it: a zip on Windows, a tarball on Linux and macOS, so the executable bit
+without what the build and the run left in it: a zip on Windows, a tarball on Linux, so the executable bit
 survives. The package is kept with the run for a week, so a build from any pull request can be downloaded and tried.
-On a push to `main`, once all three builds passed, one GitHub release is created at that commit from those same
+On a push to `main`, once every build passed, one GitHub release is created at that commit from those same
 packages, tagged `v<version>` with generated notes. Nothing is built twice.
 
 The version is Core's `VersionPrefix` with the run number as the patch, so every build is newer than the one before

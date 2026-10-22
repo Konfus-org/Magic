@@ -1,8 +1,8 @@
 # The build on every OS Magic targets, in Release: tools/Validate.ps1's Build step, which already treats every warning
 # as an error, then the headless samples against what it built. Every job packages Magic's folder, so a build is there
-# to download from any run, and a push to main publishes the three packages as one GitHub release once every build
-# passed: what ships is what was checked, built once. The weekly run keeps main's native-library caches alive, which
-# every branch falls back to.
+# to download from any run, and a push to main publishes the packages as one GitHub release once every build passed:
+# what ships is what was checked, built once. The weekly run keeps main's native-library caches alive, which every
+# branch falls back to. macOS is planned but not yet supported, so nothing is built for it.
 name: Build
 
 on:
@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: ${{ github.event_name == 'push' }}
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -60,7 +60,7 @@ jobs:
         run: ./tools/Validate.ps1 -Configuration Release -Only Build,Headless -Project Build/bin/Release/Projects/Samples
 
       # Magic's folder without what the build and the run left in it; a project's baked Cache/ inside it ships. tar
-      # keeps the executable bit that a zip would lose, so Linux and macOS get a tarball.
+      # keeps the executable bit that a zip would lose, so Linux gets a tarball.
       - name: Package
         shell: pwsh
         run: |

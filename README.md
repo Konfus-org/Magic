@@ -5,8 +5,9 @@ and Bevy. `Magic` is the engine: a host that loads a project and its gems (plugi
 standalone program that works with or without an editor. The ECS, windows and input, rendering and physics all live
 in gems, the engine's plugins.
 
-Everything runs on Windows, Linux and macOS from one code base, on current .NET, and is written for performance; the
-rules are in the [code standards](CODESTANDARDS.md).
+Everything runs on Windows and Linux from one code base, on current .NET, and is written for performance; the rules
+are in the [code standards](CODESTANDARDS.md). macOS is planned but not yet supported: the code keeps to what runs
+there, so it can follow.
 
 ## Building and running
 
