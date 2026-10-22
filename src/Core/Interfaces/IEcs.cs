@@ -13,7 +13,7 @@ namespace Magic.Interfaces;
 /// objects.
 /// <para>
 /// The world is the main thread's (<see cref="EngineThread.Main"/>): every call is made there, or throws. Work on
-/// another thread hands what it built to the main thread (<see cref="Threads.InvokeAsync{T}"/>), in a batch where it
+/// another thread hands what it built to the main thread (<see cref="Threads.PostAsync{T}"/>), in a batch where it
 /// can (<see cref="Create{T1}(ReadOnlySpan{T1})"/>), and queries it there too. The one exception is reading: while an
 /// <see cref="IParallelSystem"/> runs, it may read other entities (<see cref="IsAlive"/>, <see cref="Has{T}"/>,
 /// <see cref="Get{T}"/>) on whichever thread it is on.

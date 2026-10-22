@@ -10,7 +10,8 @@ namespace Magic.Internal;
 /// or a script refers to. One is read only as the world is restored, which maps each id to the entity it made for it
 /// (<see cref="Remap"/>) on the thread it restores on; an id the save holds no entity for, one destroyed before it,
 /// reads as none. Anywhere else, reading one is an error: a file names no entity, as its slot is nothing outside the
-/// run that gave it.
+/// run that gave it. The serializer's own form would write all three ints and read them back as they were, naming
+/// whatever holds that slot in the next run.
 /// </summary>
 [SuppressMessage(
     "Performance",

@@ -194,7 +194,7 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 ### Naming
 
 - A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `Lifetime.Stop(reason)`. If it
-  doesn't (`Pump()`, `_scratch`), name the object: what is pumped, what is held.
+  doesn't (`Process()`, `_scratch`), name the object: what is processed, what is held.
 - `Get` never fails. `Is`, `Has` and `Can` answer a question with a bool. `Try` returns whether it worked, with the
   result in an `out` parameter or a `Result`. `TryGet` is a lookup that can fail.
 - Other verbs: `Make`, `Parse`, `Format`, `Find` (may return null), `To` for a conversion.

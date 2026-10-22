@@ -546,7 +546,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         if (_threads.IsCurrent(EngineThread.Main)) return;
 
         throw new InvalidOperationException(
-            "The world is the main thread's: hand the work to it (Threads.InvokeAsync).");
+            "The world is the main thread's: hand the work to it (Threads.PostAsync).");
     }
 
     /// <summary>

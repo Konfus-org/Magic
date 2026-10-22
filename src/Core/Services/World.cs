@@ -164,7 +164,7 @@ public sealed class World : IDisposable
         Domains domains = _domains;
         (List<DomainState> Domains, List<Saving> Entities) taken = _threads.IsCurrent(EngineThread.Main)
             ? Take(ecs, domains)
-            : await _threads.InvokeAsync(EngineThread.Main, () => Take(ecs, domains), cancel).ConfigureAwait(false);
+            : await _threads.PostAsync(EngineThread.Main, () => Take(ecs, domains), cancel).ConfigureAwait(false);
         List<EntityState> entities = await Task.Run(() => Write(taken.Entities, progress, cancel), cancel)
             .ConfigureAwait(false);
 
@@ -260,7 +260,7 @@ public sealed class World : IDisposable
         Result<T> loaded = await _assets.LoadAsync(asset, cancel).ConfigureAwait(false);
 
         return loaded.Ok
-            ? Result.Success(await _threads.InvokeAsync(EngineThread.Main, () => Spawn(loaded.Value, at), cancel)
+            ? Result.Success(await _threads.PostAsync(EngineThread.Main, () => Spawn(loaded.Value, at), cancel)
                 .ConfigureAwait(false))
             : Result.Failure<Entity[]>(loaded.Error);
     }
@@ -396,7 +396,7 @@ public sealed class World : IDisposable
     /// Takes in what workers finished for the domains since the last frame. Core calls it on the main thread at the
     /// start of each frame.
     /// </summary>
-    internal void TakeArrived() => _domains?.TakeArrived();
+    internal void Pump() => _domains?.Pump();
 
     /// <summary>
     /// Opens the project's entry point in place of the world; the default domain when it does not open. Core calls it

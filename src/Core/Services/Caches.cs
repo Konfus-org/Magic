@@ -4,8 +4,8 @@ using System.Globalization;
 using System.IO;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 using Magic.Interfaces;
-using Magic.Internal;
 
 namespace Magic.Services;
 

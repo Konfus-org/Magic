@@ -47,7 +47,7 @@ internal sealed class Domains : IDisposable
     private readonly List<Open> _domains = [];
 
     /// <summary>
-    /// What workers finished for the main thread to take in at the start of a frame (<see cref="TakeArrived"/>): a
+    /// What workers finished for the main thread to take in at the start of a frame (<see cref="Pump"/>): a
     /// prefab read for a placement, a domain whose reading failed, which closes, or one every gem readied, which is
     /// shown, as is a world put back every gem readied.
     /// </summary>
@@ -74,7 +74,7 @@ internal sealed class Domains : IDisposable
 
     /// <summary>
     /// The world was shown, or the domain replacing it is not coming, since the last frame began: told as the next one
-    /// begins (<see cref="TakeArrived"/>), so the frame that first shows the world draws it as it loaded, before anything
+    /// begins (<see cref="Pump"/>), so the frame that first shows the world draws it as it loaded, before anything
     /// that hears it runs.
     /// </summary>
     private bool _isTelling;
@@ -163,7 +163,7 @@ internal sealed class Domains : IDisposable
             mode,
             isLoadingDomain: false,
             isReplacing: mode == DomainOpenMode.Replace);
-        Open? already = await _threads.InvokeAsync(EngineThread.Main, () => Begin(open), cancel).ConfigureAwait(false);
+        Open? already = await _threads.PostAsync(EngineThread.Main, () => Begin(open), cancel).ConfigureAwait(false);
 
         return already is not null
             ? Result.Success(already.Domain)
@@ -176,7 +176,7 @@ internal sealed class Domains : IDisposable
     /// placement is spawned, a domain whose reading failed is closed, and one every gem readied is shown, as is a world
     /// put back every gem readied, which the next frame tells. On the main thread, at the start of each frame.
     /// </summary>
-    internal void TakeArrived()
+    internal void Pump()
     {
         if (_isTelling)
         {
@@ -461,7 +461,7 @@ internal sealed class Domains : IDisposable
 
         // Whatever the token: what was read holds what the gems took in, which arriving keeps, or lets go when the
         // domain was closed meanwhile.
-        Result<Domain> arrived = await _threads.InvokeAsync(
+        Result<Domain> arrived = await _threads.PostAsync(
             EngineThread.Main,
             () => Arrive(open, read, cancel),
             CancellationToken.None)
@@ -773,7 +773,7 @@ internal sealed class Domains : IDisposable
             saved.Mode,
             isLoadingDomain: false,
             isReplacing: kept is null && saved.Mode == DomainOpenMode.Replace);
-        bool isOpening = await _threads.InvokeAsync(
+        bool isOpening = await _threads.PostAsync(
             EngineThread.Main,
             () =>
             {
@@ -792,12 +792,12 @@ internal sealed class Domains : IDisposable
     /// Waits until every domain of a world put back has arrived, <paramref name="restoring"/>, or is not coming, then
     /// has every gem ready the world again, as what they took in and spawned is there now, which takes the place of the
     /// readying it was held by as it was put back (<see cref="Restore"/>); once they all have, it is shown as the next
-    /// frame starts (<see cref="TakeArrived"/>).
+    /// frame starts (<see cref="Pump"/>).
     /// </summary>
     private async Task RevealRestoredAsync(List<Task> restoring)
     {
         await Task.WhenAll(restoring).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-        Task readied = await _threads.InvokeAsync(
+        Task readied = await _threads.PostAsync(
             EngineThread.Main,
             () => ReadyAllAsync("the world put back", _lifetime.Stopping),
             _lifetime.Stopping)
@@ -915,7 +915,7 @@ internal sealed class Domains : IDisposable
             isLoadingDomain: true,
             isReplacing: false);
         Read read = await ReadAsync(reading, null, _lifetime.Stopping).ConfigureAwait(false);
-        await _threads.InvokeAsync(
+        await _threads.PostAsync(
             EngineThread.Main,
             () =>
             {

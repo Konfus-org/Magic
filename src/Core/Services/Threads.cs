@@ -14,13 +14,13 @@ namespace Magic.Services;
 /// not this. Safe from any thread.
 /// <para>
 /// The main thread runs what it was handed at the start of every frame, before Update; the render thread between
-/// frames. Nothing here waits for another thread: <see cref="InvokeAsync(EngineThread, Action, CancellationToken)"/>
+/// frames. Nothing here waits for another thread: <see cref="PostAsync(EngineThread, Action, CancellationToken)"/>
 /// hands back a task, so the two engine threads never wait on each other but where the frame loop says. Work handed to
 /// the main thread before it starts runs on its first frame.
 /// </para>
 /// <para>
 /// What a worker makes for a gem is not handed over as work: it is data the gem keeps and takes in at the start of its
-/// own hook. <see cref="InvokeAsync{T}(EngineThread, Func{T}, CancellationToken)"/> is for a flow that must await a
+/// own hook. <see cref="PostAsync{T}(EngineThread, Func{T}, CancellationToken)"/> is for a flow that must await a
 /// step on an engine thread and what it returns. When the frames end, the main thread runs what it was left and takes
 /// no more, the gems having stopped on it; then the render thread runs what it was left, takes no more, and the gems
 /// are disposed on it. Anything handed to either after that is dropped.
@@ -64,9 +64,9 @@ public sealed class Threads : IDisposable
     /// and whoever awaits it goes on on a worker. Work that has not started when <paramref name="cancel"/> is
     /// cancelled, or that the thread will never run because the run has ended, never runs, and the task ends cancelled.
     /// </summary>
-    public Task InvokeAsync(EngineThread thread, Action work, CancellationToken cancel = default)
+    public Task PostAsync(EngineThread thread, Action work, CancellationToken cancel = default)
     {
-        return InvokeAsync<object?>(
+        return PostAsync<object?>(
             thread,
             () =>
             {
@@ -77,12 +77,12 @@ public sealed class Threads : IDisposable
             cancel);
     }
 
-    /// <inheritdoc cref="InvokeAsync(EngineThread, Action, CancellationToken)"/>
+    /// <inheritdoc cref="PostAsync(EngineThread, Action, CancellationToken)"/>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "What the work throws ends the task, for whoever awaits it.")]
-    public Task<T> InvokeAsync<T>(EngineThread thread, Func<T> work, CancellationToken cancel = default)
+    public Task<T> PostAsync<T>(EngineThread thread, Func<T> work, CancellationToken cancel = default)
     {
         if (cancel.IsCancellationRequested) return Task.FromCanceled<T>(cancel);
 
@@ -156,20 +156,17 @@ public sealed class Threads : IDisposable
     }
 
     /// <summary>
-    /// Hands the render thread a frame's Render, in its turn after the work handed before it; not timed as work, since
-    /// the frame loop times each of its hooks.
+    /// Hands <paramref name="work"/> to <paramref name="thread"/>, in its turn after the work handed before it, with no
+    /// task and not timed as work: for the engine's own hand-offs, such as a frame's Render, whose parts are timed
+    /// themselves. False once the thread has ended, and the work is dropped.
     /// </summary>
-    internal void HandFrame(Action render)
-    {
-        if (_render.TryEnqueue(render, isTimed: false)) return;
-
-        Debugging.Warn("A frame was handed to the render thread after the run ended; it is dropped.");
-    }
+    internal bool TryPost(EngineThread thread, Action work) => Queue(thread).TryEnqueue(work, isTimed: false);
 
     /// <summary>
-    /// Runs what the main thread was handed so far. On the main thread, at the start of each frame.
+    /// Runs what <paramref name="thread"/> was handed so far. On that thread: the main thread drains its work at the
+    /// start of each frame.
     /// </summary>
-    internal void RunMainWork() => _main.RunPending();
+    internal void Drain(EngineThread thread) => Queue(thread).RunPending();
 
     /// <summary>
     /// Runs <paramref name="frames"/> on a new thread, the main thread, and the render thread's work on the calling

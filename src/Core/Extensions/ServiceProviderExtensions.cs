@@ -1,4 +1,4 @@
-namespace Magic.Internal;
+namespace Magic.Extensions;
 
 /// <summary>
 /// Asking the container for what a gem may provide, such as a loader, a cache or a post-processor: no gem need provide

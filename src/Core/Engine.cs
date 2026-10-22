@@ -269,7 +269,7 @@ public static class Engine
     {
         for (int i = gems.Count - 1; i >= 0; i--)
         {
-            if (gems[i] is ILogSink sink) Debugging.Remove(sink);
+            if (gems[i] is ILogSink sink) Debugging.Unregister(sink);
 
             if (gems[i] is not IDisposable disposable) continue;
 

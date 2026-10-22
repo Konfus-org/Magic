@@ -472,7 +472,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         if (_threads.IsCurrent(EngineThread.Render)) return;
 
         throw new InvalidOperationException("The GPU is the render thread's: use it in Render, "
-            + "or hand the work to the render thread (Threads.InvokeAsync).");
+            + "or hand the work to the render thread (Threads.PostAsync).");
     }
 
     /// <summary>

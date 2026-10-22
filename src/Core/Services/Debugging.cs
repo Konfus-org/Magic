@@ -150,7 +150,7 @@ public static class Debugging
     /// Sends every line logged from now on to <paramref name="sink"/> too, until it is removed. The first sink added
     /// gets the lines logged before it first.
     /// </summary>
-    internal static void Add(ILogSink sink)
+    internal static void Register(ILogSink sink)
     {
         _entries.Writer.TryWrite(new Entry(default, AddSink));
 
@@ -177,7 +177,7 @@ public static class Debugging
         "VSTHRD002:Avoid problematic synchronous waits",
         Justification = "Removing a sink is synchronous, and the printing task never needs the waiting thread, "
             + "so the wait cannot deadlock; it is bounded besides.")]
-    internal static void Remove(ILogSink sink)
+    internal static void Unregister(ILogSink sink)
     {
         TaskCompletionSource removed = new();
 

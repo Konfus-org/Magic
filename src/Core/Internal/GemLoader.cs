@@ -16,7 +16,7 @@ namespace Magic.Internal;
 /// that provides what Core or a gem listed before it provides is refused, as is a name listed twice, and one that is
 /// not the version the project asks for (<see cref="Project.Gems"/>). A gem's assembly is taken in as it loads
 /// (<see cref="Assemblies"/>), so files can name its components and scripts before any gem is made, and the folder of
-/// its own assets is added to the assets (<see cref="Assets.AddRoot"/>), which read it while the next gem loads.
+/// its own assets is added to the assets (<see cref="Assets.Register"/>), which read it while the next gem loads.
 /// Magic's own scripts and the project's own code, its scripts and components, are loaded first the same way, though
 /// neither is a gem, and loaded again when they are built while the engine runs, until the loader is disposed. The
 /// provider makes each gem after whatever its constructor asks for, so <see cref="Load"/> returns the gems in
@@ -121,8 +121,8 @@ internal sealed class GemLoader : IDisposable
             }
 
             _gems.Add(gem);
-            assets.AddRoot(gem.Resources);
-            _assemblies.Add(gem.Path, gem.Assembly);
+            assets.Register(gem.Resources);
+            _assemblies.Register(gem.Path, gem.Assembly);
         }
 
         foreach (CodeFile code in _code)
@@ -224,7 +224,7 @@ internal sealed class GemLoader : IDisposable
     {
         if (GemAssembly.LoadCode(_files, path, what, again: false) is not { } assembly) return;
 
-        _assemblies.Add(path, assembly);
+        _assemblies.Register(path, assembly);
         _code.Add(new CodeFile(path, what));
     }
 
@@ -243,7 +243,7 @@ internal sealed class GemLoader : IDisposable
             return;
         }
 
-        _assemblies.Add(code.Path, assembly);
+        _assemblies.Register(code.Path, assembly);
         await _assets.RemakeAsync<Script>().ConfigureAwait(false);
         await _assets.RemakeAsync<Prefab>().ConfigureAwait(false);
     }
@@ -301,7 +301,7 @@ internal sealed class GemLoader : IDisposable
         }
 
         _made.Add(made);
-        if (made is ILogSink sink) Debugging.Add(sink);
+        if (made is ILogSink sink) Debugging.Register(sink);
 
         string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
         Debugging.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");

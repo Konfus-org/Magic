@@ -340,7 +340,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         HashSet<Handle<Model>> models = GetModels(prefabs);
         Preload preload = new(models, progress, cancel);
-        await _threads.InvokeAsync(
+        await _threads.PostAsync(
             EngineThread.Main,
             () =>
             {

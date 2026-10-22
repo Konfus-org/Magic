@@ -4,6 +4,7 @@ using System.Diagnostics.Metrics;
 using System.Reflection;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Telemetry;
+using Magic.Contexts.Threading;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -185,8 +186,8 @@ internal sealed class FrameLoop : IDisposable
             Seconds = seconds;
             Debugging.Frame = index;
 
-            _threads.RunMainWork();
-            _world.TakeArrived();
+            _threads.Drain(EngineThread.Main);
+            _world.Pump();
             _events.Deliver();
 
             RunPhase(Phase.Update, frame);
@@ -201,7 +202,8 @@ internal sealed class FrameLoop : IDisposable
 
             _rendering = frame;
             _rendered.Reset();
-            _threads.HandFrame(_renderFrame);
+            if (!_threads.TryPost(EngineThread.Render, _renderFrame))
+                Debugging.Warn("A frame was handed to the render thread after the run ended; it is dropped.");
         }
 
         WaitForRender();

@@ -50,7 +50,7 @@ public sealed class Assemblies
     /// <summary>
     /// Every type <paramref name="assembly"/> holds; those that load, when some of its do not.
     /// </summary>
-    internal static IReadOnlyList<Type> From(Assembly assembly)
+    internal static IReadOnlyList<Type> GetAllFrom(Assembly assembly)
     {
         try
         {
@@ -72,7 +72,7 @@ public sealed class Assemblies
     /// Takes in <paramref name="assembly"/>, loaded from <paramref name="path"/>, in place of the one last loaded from
     /// there.
     /// </summary>
-    internal void Add(string path, Assembly assembly)
+    internal void Register(string path, Assembly assembly)
     {
         lock (_adding)
         {
@@ -86,7 +86,7 @@ public sealed class Assemblies
         List<Type> found = [];
         foreach (Assembly assembly in all)
         {
-            foreach (Type type in From(assembly))
+            foreach (Type type in GetAllFrom(assembly))
             {
                 if (!type.IsNested && !type.ContainsGenericParameters
                     && string.Equals(type.Name, name, StringComparison.Ordinal))

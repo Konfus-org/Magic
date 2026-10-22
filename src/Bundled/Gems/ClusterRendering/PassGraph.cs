@@ -734,7 +734,7 @@ internal sealed class PassGraph(
         List<string> failures = [];
         List<Loaded> loaded = await LoadPassesAsync(listing, pipeline, effects, overlay, appended, failures)
             .ConfigureAwait(false);
-        await threads.InvokeAsync(EngineThread.Render, () => listing.Fit(loaded, failures, variants), stopping)
+        await threads.PostAsync(EngineThread.Render, () => listing.Fit(loaded, failures, variants), stopping)
             .ConfigureAwait(false);
 
         // What binds nothing compiles at once; the place-only pieces use a part of what the pieces do, and are bound as
@@ -759,7 +759,7 @@ internal sealed class PassGraph(
         }
 
         await Task.WhenAll(probes).ConfigureAwait(false);
-        await threads.InvokeAsync(EngineThread.Render, listing.Use, stopping).ConfigureAwait(false);
+        await threads.PostAsync(EngineThread.Render, listing.Use, stopping).ConfigureAwait(false);
         listing.Done();
 
         async Task<Result<GpuShader>> CompilePiecesAsync(bool placeOnly, string name)
@@ -980,7 +980,7 @@ internal sealed class PassGraph(
             };
         }
 
-        SurfaceKey[] variants = await threads.InvokeAsync(
+        SurfaceKey[] variants = await threads.PostAsync(
             EngineThread.Render,
             () =>
             {
@@ -1090,7 +1090,7 @@ internal sealed class PassGraph(
     private async Task CompileSurfaceAsync(ListedPass pass, SurfaceKey variant, bool isCounted)
     {
         Result<GpuPipelineDescription> desc = await SurfaceAsync(pass, variant).ConfigureAwait(false);
-        await threads.InvokeAsync(
+        await threads.PostAsync(
             EngineThread.Render,
             () =>
             {

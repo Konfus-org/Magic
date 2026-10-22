@@ -476,7 +476,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
     /// </summary>
     private Task<string> OnMainThreadAsync(Func<string> work)
     {
-        return _threads.InvokeAsync(EngineThread.Main, () =>
+        return _threads.PostAsync(EngineThread.Main, () =>
         {
             try
             {

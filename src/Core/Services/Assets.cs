@@ -19,7 +19,7 @@ namespace Magic.Services;
 
 /// <summary>
 /// The assets: what the files under the asset roots describe, the project's <c>Assets/</c> folder, then the engine's
-/// own <c>Resources/</c>, then each gem's, added as the gem loads (<see cref="AddRoot"/>), the first winning a path two
+/// own <c>Resources/</c>, then each gem's, added as the gem loads (<see cref="Register"/>), the first winning a path two
 /// of them have. A file is an asset when a <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a
 /// <see cref="Handle{T}"/> holds, so a file can move and whatever names it still finds it, and the import settings its
 /// loader reads. An asset path is relative to its root, with <c>/</c> between folders on every OS; a type's files are
@@ -99,19 +99,14 @@ public sealed class Assets : IDisposable
     private readonly AsyncLocal<ulong> _maker = new();
 
     /// <summary>
-    /// Held while the roots, the slots, or what assets are made from, change.
+    /// What each asset loaded as it was made last, or has loaded so far as it is made now: what it is made from.
     /// </summary>
-    private readonly Lock _lock = new();
+    private readonly Dictionary<ulong, List<AssetRef>> _madeFrom = [];
 
     /// <summary>
     /// Every asset asked for or added, until its file is gone.
     /// </summary>
     private readonly Dictionary<ulong, Slot> _slots = [];
-
-    /// <summary>
-    /// What each asset loaded as it was made last, or has loaded so far as it is made now: what it is made from.
-    /// </summary>
-    private readonly Dictionary<ulong, List<AssetRef>> _madeFrom = [];
 
     /// <summary>
     /// The folders assets are found under, in the order they were added, the first winning a path two of them have.
@@ -126,8 +121,13 @@ public sealed class Assets : IDisposable
     private Index _index = new();
 
     /// <summary>
+    /// Held while the roots, the slots, or what assets are made from, change.
+    /// </summary>
+    private readonly Lock _lock = new();
+
+    /// <summary>
     /// Starts reading the project's <c>Assets/</c> and the engine's own <c>Resources/</c>, the first roots; the gems'
-    /// are added as they load (<see cref="AddRoot"/>).
+    /// are added as they load (<see cref="Register"/>).
     /// </summary>
     internal Assets(IFileSystem files, Project project, Lifetime lifetime, Events events)
     {
@@ -138,8 +138,8 @@ public sealed class Assets : IDisposable
         _engine = GemAssembly.GetResources(files, typeof(Assets).Assembly);
 
         WatchAsync().FireAndForget();
-        AddRoot(_project);
-        AddRoot(_engine);
+        Register(_project);
+        Register(_engine);
     }
 
     /// <summary>
@@ -366,7 +366,7 @@ public sealed class Assets : IDisposable
     /// it is found once every root is indexed (<see cref="IndexAsync"/>). A folder that does not exist, or is a root
     /// already, is left out.
     /// </summary>
-    internal void AddRoot(string folder)
+    internal void Register(string folder)
     {
         if (!_files.FolderExists(folder)) return;
 

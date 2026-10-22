@@ -9,7 +9,8 @@ namespace Magic.Internal;
 /// <summary>
 /// An entity's tags as JSON: an array of their ids, as a saved world holds them, since a tag is the hash of its name
 /// and keeps no name to write. Past <see cref="Tags.Capacity"/>, the rest are left out. A prefab gives an entity its
-/// tags by name instead, beside its components, which the gem that reads prefabs turns into these.
+/// tags by name instead, beside its components, which the gem that reads prefabs turns into these. The serializer
+/// has no form for an inline array: it writes one as <c>{}</c> and cannot read it back.
 /// </summary>
 [SuppressMessage(
     "Performance",

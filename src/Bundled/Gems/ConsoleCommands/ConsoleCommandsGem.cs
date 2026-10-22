@@ -316,7 +316,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     private async Task SaveAsync(IGpu gpu, IWindow window, string path)
     {
         // The capture is asked for on the render thread, which the GPU is used from, and its image awaited here.
-        Task<Result<GpuImage>> capture = await _threads.InvokeAsync(
+        Task<Result<GpuImage>> capture = await _threads.PostAsync(
             EngineThread.Render,
             () => gpu.CaptureAsync(gpu.GetWindowTarget(window)),
             _stopping).ConfigureAwait(false);

@@ -519,7 +519,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         // The audio files are asked for on the main thread, which keeps what has loaded, and the main thread's hook
         // counts them in each frame (CheckPreloads) until all are.
         Preload preload = new(audios, models, progress, cancel);
-        await _threads.InvokeAsync(
+        await _threads.PostAsync(
             EngineThread.Main,
             () =>
             {

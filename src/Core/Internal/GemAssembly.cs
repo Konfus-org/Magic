@@ -66,7 +66,7 @@ internal readonly record struct GemAssembly(
 
         Assembly assembly = loaded.Value;
         List<Type> gems = [];
-        foreach (Type type in Assemblies.From(assembly))
+        foreach (Type type in Assemblies.GetAllFrom(assembly))
         {
             if (type.IsClass && !type.IsAbstract && type.IsAssignableTo(typeof(IGem))) gems.Add(type);
         }

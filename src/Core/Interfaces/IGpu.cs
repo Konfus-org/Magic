@@ -14,7 +14,7 @@ namespace Magic.Interfaces;
 /// handle.
 /// <para>
 /// It is the render thread's (<see cref="EngineThread.Render"/>), which made the windows: gem constructors and
-/// Dispose, the Render hooks, and work handed to the render thread (<see cref="Threads.InvokeAsync{T}"/>, as a renderer
+/// Dispose, the Render hooks, and work handed to the render thread (<see cref="Threads.PostAsync{T}"/>, as a renderer
 /// fits the passes a worker loaded). Anywhere else it throws.
 /// </para>
 /// <para>

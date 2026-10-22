@@ -10,7 +10,8 @@ namespace Magic.Internal;
 /// A renderer's material slots as JSON: an array of handles by slot, <c>[ { "id": 710 } ]</c>, so a prefab lists a
 /// model's materials in the order its meshes name them. A slot left empty before a filled one is written as none,
 /// <c>{ "id": 0 }</c>, and read back as one, so a saved world keeps every slot where it was; the empty slots after the
-/// last filled one are left out. More than <see cref="MaterialSlots.Capacity"/> is refused.
+/// last filled one are left out. More than <see cref="MaterialSlots.Capacity"/> is refused. The serializer's own
+/// form, as the slots are enumerable, writes all of them and cannot read them back.
 /// </summary>
 [SuppressMessage(
     "Performance",
