@@ -43,7 +43,9 @@ after that a build touches them only when one's item changes, and every checkout
 them. The build says which library it is on as it goes, in an IDE's build output too; in a terminal, `dotnet build
 -tl:off` shows it, since the terminal logger shows a task's messages only after its project ends. An IDE's background
 builds, which only feed its editor, never build a library or generate its API, so the editor knows the API from the
-first real build on.
+first real build on. Visual Studio restores the packages as it loads or reloads the projects rather than when a build
+starts, since a build's restore fails on a project still loading (`nuget.config`): in a fresh clone, start the first
+build once that restore, in its status bar, has finished.
 
 Running the samples, with `dotnet run --project samples` or the Samples project's Run in an IDE, first builds what
 they run with: Magic, the bundled gems and resources, and the samples' own code, each only where something changed.

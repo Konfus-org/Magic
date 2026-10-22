@@ -18,7 +18,8 @@
 
   <!-- Its Run, an IDE's or dotnet run's: Magic opening the project, started in the repository. A run needs what Magic
        loads with the project built too, the bundled gems and resources, which the project's code never compiles
-       against: they are built before it, each only where it changed, and nothing of them is referenced or copied. -->
+       against: they are built before it, each only where it changed, and nothing of them is referenced or copied, so
+       no target framework is negotiated with them either, which would load each of them once more for nothing. -->
   <PropertyGroup>
     <RunCommand>$(MagicBin)Magic</RunCommand>
     <RunCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicBin)Magic.exe</RunCommand>
@@ -28,6 +29,6 @@
 
   <ItemGroup>
     <ProjectReference Include="$(MSBuildThisFileDirectory)../src/Bundled/Gems/*/*.csproj;$(MSBuildThisFileDirectory)../src/Bundled/Resources/Resources.csproj"
-                      ReferenceOutputAssembly="false" Private="false" />
+                      ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 </Project>
