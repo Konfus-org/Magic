@@ -2,21 +2,10 @@ using System.ComponentModel;
 using Magic.Attributes;
 using Magic.Interfaces;
 
-namespace Magic.SdlGpu;
+namespace Magic.VulkanGpu;
 
 /// <summary>
-/// The graphics APIs SDL drives, each asked for by SDL's name for it; <see cref="Auto"/> leaves the choice to SDL.
-/// </summary>
-internal enum GpuDriver : byte
-{
-    Auto,
-    Vulkan,
-    Direct3d12,
-    Metal,
-}
-
-/// <summary>
-/// The swapchain compositions SDL offers, each with the image format it implies.
+/// How a window's image is composed onto the display, each with the image format it implies.
 /// </summary>
 internal enum Composition : byte
 {
@@ -27,11 +16,11 @@ internal enum Composition : byte
 }
 
 /// <summary>
-/// The GPU device SdlGpu opens. Set in the project's <c>Presets/Default.preset</c>, by another preset, or with
-/// <c>--set SdlGpu.driver=vulkan</c>.
+/// The GPU VulkanGpu opens and how it presents. Set in the project's <c>Presets/Default.preset</c>, by another preset,
+/// or with <c>--set VulkanGpu.device=Intel</c>.
 /// </summary>
 [Category("Render/Device")]
-internal sealed class SdlGpuSettings : ISettings
+internal sealed class VulkanGpuSettings : ISettings
 {
 #if RELEASE
     private const bool IsRelease = true;
@@ -40,16 +29,16 @@ internal sealed class SdlGpuSettings : ISettings
 #endif
 
     /// <summary>
-    /// The graphics API SDL drives, or <see cref="GpuDriver.Auto"/> for SDL's choice. The <c>SDL_GPU_DRIVER</c>
-    /// environment variable still wins. Changed while running, the engine starts again.
+    /// Part of the name of the GPU to open, as the log names it, any case: <c>Intel</c>, <c>3070</c>. Empty, or naming
+    /// none, opens the fastest that runs Vulkan 1.3, or the one saving power when <see cref="LowPower"/> says so.
+    /// Changed while running, the engine starts again.
     /// </summary>
     [RequireRestart]
-    public GpuDriver Driver { get; set; } = GpuDriver.Auto;
+    public string Device { get; set; } = string.Empty;
 
     /// <summary>
-    /// Open the GPU that saves power, the integrated one on a machine with two, rather than the fastest. SDL picks
-    /// between GPUs only this way, never by name; the log names the one it opened. Changed while running, the engine
-    /// starts again.
+    /// Open the GPU that saves power, the integrated one on a machine with two, rather than the fastest, when
+    /// <see cref="Device"/> names none. Changed while running, the engine starts again.
     /// </summary>
     [RequireRestart]
     public bool LowPower { get; set; }
@@ -72,8 +61,9 @@ internal sealed class SdlGpuSettings : ISettings
     public Composition Composition { get; set; } = Composition.Sdr;
 
     /// <summary>
-    /// The API's own validation: slow, and loud about misuse. It needs the API's validation layers installed. Changed
-    /// while running, the engine starts again.
+    /// Vulkan's validation layer: slow, and loud about misuse, each kind of message logged once. It needs the layer
+    /// installed, as the Vulkan SDK installs it; without it the GPU opens unvalidated and says so. Changed while
+    /// running, the engine starts again.
     /// </summary>
     [RequireRestart]
     [Category("Debug")]

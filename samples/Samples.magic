@@ -5,7 +5,7 @@
     "player": { "id": 3316 },
     "gems": [
         "SdlPlatform",
-        "SdlGpu",
+        "VulkanGpu",
         "DxcShaderCompiler",
         "ConsoleCommands",
         "ArchEcs",

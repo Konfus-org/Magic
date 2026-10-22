@@ -8,14 +8,14 @@
 //   SAMPLER(n)  the sampler of the sampled texture at READ(n): a pair shares its index.
 //   WRITE(n)    compute only: read-write storage textures first, then read-write storage buffers. A storage
 //               texture a shader writes states its format for Vulkan, [[vk::image_format("rgba16f")]], which
-//               otherwise needs a device feature to write it; DXIL ignores the attribute.
+//               otherwise needs a device feature to write it.
 //   UNIFORM(n)  constant blocks. A stage has exactly one, at UNIFORM(0).
 //   Names:      a shader a renderer composes (a pass's, a surface's) reads the frame's textures and buffers by name:
 //               the renderer declares every name the pass can see ahead of it, numbered as above, and binds whichever
 //               the shader uses, read back from its compile; the shader binds nothing itself.
 //   Buffers:    a storage buffer is byte-addressed, ByteAddressBuffer or RWByteAddressBuffer, never structured: a GPU
-//               gem may view it as raw bytes (Direct3D 12 does), and a structured buffer would then read its element
-//               size from a view that has none, which some GPUs take as 0. Its elements go through LOAD and STORE, its
+//               gem may view it as raw bytes, and a structured buffer would then read its element size from a view
+//               that has none, which some GPUs take as 0. Its elements go through LOAD and STORE, its
 //               length through CountOf, and an atomic through the buffer's own methods, by byte.
 // Conventions:
 //   Frame:      left-handed, +X right, +Y up, +Z forward; 1 unit = 1 m.
@@ -32,12 +32,13 @@
 //               light's), luminance in nits. The scene colour is pre-exposed, radiance times exposure, so 16-bit
 //               targets keep their precision however bright the scene; emissive surfaces and what a
 //               transparent surface sees behind it are in those units.
-//   Colour:     linear Rec. 709 in shading, sRGB in colour textures. The window's image is UNORM: the last pass of
-//               a frame encodes its colour (Include/Color.hlsli's LinearToSrgb) and dithers it.
+//   Colour:     linear Rec. 709 in shading, sRGB in colour textures. The window's image's format says who encodes
+//               its colour: an UNORM image's the last pass of a frame encodes (Include/Color.hlsli's LinearToSrgb) and
+//               dithers, an sRGB one's the GPU encodes as it writes it.
 //   Includes:   by path under Shaders/ (#include "Include/Bindings.hlsli"): the shader asset Shaders/<path>, from
 //               whichever root has it, which the compiler loads; nothing is read from a folder.
 //   Language:   HLSL 2021 (and(), or() and select() for vector logic), Shader Model 6.0, warnings are errors.
-//   Waves:      wave intrinsics (Vulkan 1.1 subgroups, Metal SIMD-groups) where every lane that calls one is
+//   Waves:      wave intrinsics (Vulkan's subgroup operations) where every lane that calls one is
 //               active and the result is the same whatever the wave's size, 32 or 64 by GPU: scalarising a loop,
 //               reducing a group, or handing out the places of a count (WaveAllocate), which the atomics' order
 //               already made arbitrary. Never otherwise a result that depends on which lanes share a wave.

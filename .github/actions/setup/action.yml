@@ -1,5 +1,6 @@
 # What a job needs before it builds Magic: the SDK global.json names, Python where the shader compiler is built from
-# source, SDL's build dependencies on Linux, Ninja where the OS does not bring it, and the two caches. The native
+# source, SDL's build dependencies on Linux, Ninja where the OS does not bring it, a software Vulkan driver, as no
+# runner has a GPU, and the two caches. The native
 # libraries' cache is only restored here: the job saves it with save-natives as its last step, so a cold native build
 # survives a failure later in the job. README.md beside the workflows explains the whole.
 name: Set up Magic's build
@@ -39,6 +40,16 @@ runs:
           libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
           libxkbcommon-dev libwayland-dev libdecor-0-dev \
           libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev
+
+    # The Windows runner has no GPU and no Vulkan loader either: the Vulkan runtime, and Mesa's lavapipe registered as
+    # its driver, are the device the headless samples open.
+    - name: Install the Vulkan runtime and a software Vulkan driver
+      if: runner.os == 'Windows'
+      uses: jakoch/install-vulkan-sdk-action@v1.7.0
+      with:
+        install_runtime_only: true
+        install_lavapipe: true
+        cache: true
 
     - name: Install Ninja
       if: runner.os == 'macOS'

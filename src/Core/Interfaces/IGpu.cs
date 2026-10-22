@@ -64,9 +64,10 @@ public interface IGpu
     /// A window as a render target: a texture that is, each frame, the image the window shows next, acquired the first
     /// time a command draws into it and shown once the frame is submitted. The same texture every call for one window;
     /// <see cref="Release(GpuTexture)"/> gives the window back, before it closes, and it can be a target again from the
-    /// next frame. It is drawn into, never sampled or read: draw into a texture of your own for that. Its format is
-    /// not sRGB, so the last pass of a frame encodes its colour itself. While the window has no image (minimised, or
-    /// none at all in a headless run) it is 0 x 0, and the passes into it are skipped.
+    /// next frame. It is drawn into, never sampled or read: draw into a texture of your own for that. Its format
+    /// (<see cref="GetFormat"/>) says who encodes its colour: an UNORM image's the last pass of a frame encodes, an sRGB
+    /// one's the GPU does. While the window has no image (minimised, or none at all in a headless run) it is 0 x 0, and
+    /// the passes into it are skipped.
     /// </summary>
     GpuTexture GetWindowTarget(IWindow window);
 

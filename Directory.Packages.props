@@ -10,6 +10,7 @@
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageVersion Include="System.CommandLine" Version="2.0.12" />
     <PackageVersion Include="System.IO.Hashing" Version="10.0.12" />
+    <PackageVersion Include="Vortice.Vulkan" Version="3.3.0" />
   </ItemGroup>
 
   <!-- Microsoft's bindings generator: a native tool per runtime, which a project declaring a native library downloads

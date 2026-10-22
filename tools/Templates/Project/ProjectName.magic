@@ -3,7 +3,7 @@
     "entryPoint": { "id": 1111111111 },
     "gems": [
         "SdlPlatform",
-        "SdlGpu",
+        "VulkanGpu",
         "DxcShaderCompiler",
         "ConsoleCommands",
         "ArchEcs",

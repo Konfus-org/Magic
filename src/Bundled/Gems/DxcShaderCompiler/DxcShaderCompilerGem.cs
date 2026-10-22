@@ -18,10 +18,8 @@ namespace Magic.DxcShaderCompiler;
 /// <summary>
 /// <see cref="IShaderCompiler"/> on Microsoft's DirectXShaderCompiler (DXC), called directly so every option is the
 /// engine's: HLSL 2021, Shader Model 6.0, warnings as errors, and SPIR-V for Vulkan 1.1, whose subgroup operations are
-/// HLSL's wave intrinsics. Every shader is compiled to SPIR-V first, whatever the format asked for, since what it binds
-/// is read from that, by name (<see cref="SpirvBindings"/>); DXIL is compiled from the HLSL again, and Metal is
-/// translated from the SPIR-V by SPIRV-Cross (<see cref="Metal"/>). A shader's includes are shader assets, spliced in
-/// before DXC sees it.
+/// HLSL's wave intrinsics. What a shader binds is read from its SPIR-V, by name (<see cref="SpirvBindings"/>). A
+/// shader's includes are shader assets, spliced in before DXC sees it.
 /// What it compiles is kept in the cache (<see cref="Caches"/>, which it writes for as <see cref="ICache{T}"/> of
 /// <see cref="GpuShader"/>): named by its source with its includes spliced in, its name, its stage and its format, so
 /// no two sources share an entry, and made with the debug-info setting, so a shader compiles once, and again only when
@@ -324,8 +322,8 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
     /// <summary>
     /// <paramref name="source"/>, its includes spliced in and its stage defined, compiled by DXC for
-    /// <paramref name="profile"/> into <paramref name="format"/>, with what it binds, by name, read from its SPIR-V
-    /// (<see cref="SpirvBindings"/>).
+    /// <paramref name="profile"/> into SPIR-V, the one <paramref name="format"/> there is, with what it binds, by name,
+    /// read from it (<see cref="SpirvBindings"/>).
     /// </summary>
     private Result<GpuShader> Compile(
         string source,
@@ -334,7 +332,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         GpuStage stage,
         GpuShaderFormat format)
     {
-        Result<byte[]> spirv = CompileWithDxc(source, name, profile, isSpirv: true);
+        Result<byte[]> spirv = CompileWithDxc(source, name, profile);
         if (!spirv.Ok) return Result.Failure<GpuShader>(spirv.Error);
 
         Result<GpuShader> reflected = SpirvBindings.Read(spirv.Value, stage);
@@ -343,43 +341,23 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {reflected.Error}");
         }
 
-        Result<byte[]> code = format switch
-        {
-            GpuShaderFormat.Spirv => spirv,
-            GpuShaderFormat.Dxil => CompileWithDxc(source, name, profile, isSpirv: false),
-            GpuShaderFormat.Msl => Metal.Translate(spirv.Value, name, stage),
-            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "There is no such shader format."),
-        };
-        return code.Ok
-            ? Result.Success(reflected.Value with
-            {
-                Code = code.Value,
-                EntryPoint = format == GpuShaderFormat.Msl
-                ? "main0"
-                : "main"
-            })
-            : Result.Failure<GpuShader>(code.Error);
+        return format == GpuShaderFormat.Spirv
+            ? Result.Success(reflected.Value with { Code = spirv.Value, EntryPoint = "main" })
+            : throw new ArgumentOutOfRangeException(nameof(format), format, "There is no such shader format.");
     }
 
     /// <summary>
-    /// One DXC compile of <paramref name="source"/>, to SPIR-V or DXIL; a failure carries DXC's own text.
+    /// One DXC compile of <paramref name="source"/> to SPIR-V; a failure carries DXC's own text.
     /// </summary>
-    private unsafe Result<byte[]> CompileWithDxc(string source, string name, string profile, bool isSpirv)
+    private unsafe Result<byte[]> CompileWithDxc(string source, string name, string profile)
     {
         List<string> arguments = ["-E", "main", "-T", profile, "-HV", "2021", "-WX", "-O3", "-Zpc"];
 
-        // Vulkan's attributes ([[vk::image_format]]) mean nothing to DXIL, which warns that it ignores them; the SPIR-V
-        // compile, which always runs first, still checks every one with every warning on. A resource the shader does
-        // not use is dropped, so what is read from the SPIR-V is what the shader uses; its interface is kept whole, so
-        // the stages' varyings line up.
-        arguments.AddRange(isSpirv
-            ? ["-spirv", "-fspv-target-env=vulkan1.1", "-fspv-flatten-resource-arrays", "-fspv-preserve-interface"]
-            : ["-Wno-ignored-attributes"]);
-
-        if (_settings.DebugInfo)
-        {
-            arguments.AddRange(isSpirv ? ["-fspv-debug=vulkan-with-source"] : ["-Zi", "-Qembed_debug"]);
-        }
+        // A resource the shader does not use is dropped, so what is read from the SPIR-V is what the shader uses; its
+        // interface is kept whole, so the stages' varyings line up.
+        arguments.AddRange(
+            ["-spirv", "-fspv-target-env=vulkan1.1", "-fspv-flatten-resource-arrays", "-fspv-preserve-interface"]);
+        if (_settings.DebugInfo) arguments.Add("-fspv-debug=vulkan-with-source");
 
         byte[] text = Encoding.UTF8.GetBytes(source);
         nint[] wide = new nint[arguments.Count];
@@ -430,8 +408,6 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
             output = GetOutput(result, 4);
             if (output == 0) return Result.Failure<byte[]>($"{name}: DXC compiled nothing.");
 
-            // DXIL comes validated and signed: Direct3D 12 checks the container's hash, which DXC's own validator
-            // wrote.
             return Result.Success(GetBytes(output).ToArray());
         }
         finally

@@ -45,7 +45,7 @@ public sealed record GpuShader
     public required ReadOnlyMemory<byte> Code { get; init; }
 
     /// <summary>
-    /// The function the GPU starts the shader at: <c>main</c>, which translation to Metal renames <c>main0</c>.
+    /// The function the GPU starts the shader at: <c>main</c>.
     /// </summary>
     public required string EntryPoint { get; init; }
 

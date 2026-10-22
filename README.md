@@ -20,7 +20,8 @@ there, so it can follow.
   with it; on Linux, gcc or clang with the platform library's build dependencies (the X11 and Wayland development
   packages); on macOS, the Xcode command line tools, and Python 3, which the shader compiler's own build needs there,
   as it is built from source.
-- A GPU with a driver for Vulkan 1.1, Direct3D 12 or Metal, which the engine renders through.
+- A GPU with a driver for Vulkan 1.3, which the engine renders through, and the Vulkan SDK for its validation layer,
+  which a setting turns on.
 - PowerShell for the scripts under `tools/`: `pwsh` on Linux and macOS, and Windows PowerShell 5.1 serves on Windows.
 - For reviewing an agent's change ([AGENTS.md](AGENTS.md#finish)), the `plannotator` command
   ([Plannotator](https://plannotator.ai)); building and running do not need it.

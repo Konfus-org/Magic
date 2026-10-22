@@ -35,7 +35,10 @@ matches its folder. New code follows every rule here; existing code is brought t
   repository at a pinned commit, builds it for the machine and generates its C# API from the headers
   ([Gems](src/Bundled/Gems/README.md#native-libraries)). No third-party wrapper, package, prebuilt binary or copied
   code stands in for that, and no binding is written by hand except where the generator cannot express the API (a
-  COM interface), which the gem that needs it says in its README.
+  COM interface), which the gem that needs it says in its README. Vulkan's is the one exception: its API comes from
+  Vortice.Vulkan, a maintained package generated from Khronos's registry and kept current with it, over the system's
+  Vulkan loader, which the GPU's driver installs; should the package fall behind the registry, the build generates the
+  API instead.
 - **Secrets.** Nothing secret is in the repository: no key, token or password in code, configuration or a workflow.
   CI reads its own from the repository's secrets.
 
@@ -440,4 +443,5 @@ on my machine": the other machines are the point.
   provider turns into its API's calls. Backend-specific code lives only in that gem.
 - What is drawn into is a render target, a `GpuTexture`: a render texture, or a window's, which `IGpu` hands out.
   Drawing code takes a target and asks its format and size; it never assumes a window.
-- A GPU feature is used only if Vulkan, D3D12 and Metal all have it.
+- A GPU feature is used only if Vulkan 1.3 has it on every GPU the engine runs on, MoltenVK's and KosmicKrisp's on a
+  Mac among them, so a Mac can follow; anything more is optional, with a way that works where it is missing.
