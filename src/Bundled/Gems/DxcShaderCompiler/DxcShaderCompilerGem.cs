@@ -167,6 +167,9 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
         if (!spliced.Ok) return Result.Failure<GpuShader>(spliced.Error);
 
+        // The stage's macro goes in front, and a #line so DXC counts the shader's own lines from 1 again. The cache key
+        // is the source as compiled, with its name, stage and format; a compile of that key already on its way is
+        // waited for rather than started again.
         string source = $"#define {define} 1\n#line 1 \"{name}\"\n{spliced.Value}";
         ulong key = XxHash3.HashToUInt64(Encoding.UTF8.GetBytes($"{name}\n{stage}\n{format}\n{source}"));
         TaskCompletionSource<Result<GpuShader>> own = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -207,6 +210,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
     private static unsafe void Release(nint instance)
     {
+        // The third method of every COM object is IUnknown's Release.
         if (instance != 0) ((delegate* unmanaged<nint, uint>)GetMethod(instance, 2))(instance);
     }
 
@@ -226,6 +230,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// </summary>
     private static unsafe ReadOnlySpan<byte> GetBytes(nint blob)
     {
+        // IDxcBlob's GetBufferPointer and GetBufferSize, its first two methods after IUnknown's three.
         void* start = ((delegate* unmanaged<nint, void*>)GetMethod(blob, 3))(blob);
         nuint size = ((delegate* unmanaged<nint, nuint>)GetMethod(blob, 4))(blob);
 
@@ -260,6 +265,8 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         GpuStage stage,
         GpuShaderFormat format)
     {
+        // An entry made with debug info is another version than one made without, so changing the setting finds the
+        // entries dirty.
         ulong version = _settings.DebugInfo ? 1UL : 0UL;
 
         if (await _caches.ReadAsync<GpuShader>(key, version, CancellationToken.None)
@@ -360,6 +367,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// </summary>
     private unsafe Result<byte[]> CompileWithDxc(string source, string name, string profile)
     {
+        // Entry point main, the stage's profile, HLSL 2021, warnings as errors, optimised, and matrices column-major.
         List<string> arguments = ["-E", "main", "-T", profile, "-HV", "2021", "-WX", "-O3", "-Zpc"];
 
         // A resource the shader does not use is dropped, so what is read from the SPIR-V is what the shader uses; its
@@ -376,6 +384,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         nint errors = 0;
         try
         {
+            // DXC takes its arguments as the OS's wide strings, freed once it has compiled.
             for (int i = 0; i < wide.Length; i++)
             {
                 wide[i] = ToWideString(arguments[i]);
@@ -388,6 +397,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
             if (created < 0) return Result.Failure<byte[]>($"{name}: DXC could not start (0x{created:X8}).");
 
+            // IDxcCompiler3's Compile, its first method after IUnknown's three.
             fixed (byte* bytes = text)
             fixed (nint* argumentList = wide)
             {
@@ -405,6 +415,8 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
                 if (compiled < 0) return Result.Failure<byte[]>($"{name}: DXC failed to run (0x{compiled:X8}).");
             }
 
+            // The result's GetStatus, then its GetErrorBuffer when it failed: the first and third of its methods after
+            // IUnknown's, GetResult, the SPIR-V, being the second.
             int status;
             ((delegate* unmanaged<nint, int*, int>)GetMethod(result, 3))(result, &status);
             if (status < 0)

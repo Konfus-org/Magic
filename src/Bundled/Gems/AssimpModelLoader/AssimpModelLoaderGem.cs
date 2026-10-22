@@ -166,6 +166,8 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         // indexer.
         aiVector3D* uvs = *(aiVector3D**)&source->mTextureCoords;
         bool hasTangents = source->mTangents is not null && source->mBitangents is not null;
+        // Each vertex in the engine's frame, less the origin. A tangent's w is the side of it the bitangent is on, -1
+        // where the texture is mirrored on the model; a mesh without tangents has +X.
         Vertex[] vertices = new Vertex[source->mNumVertices];
         for (int i = 0; i < vertices.Length; i++)
         {

@@ -47,6 +47,8 @@ internal sealed class AcousticMesh
 
         if (vertexCount == 0 || triangleCount == 0) return null;
 
+        // Every mesh's vertices mirrored into the one array, the farthest from the origin kept as the reach, and its
+        // triangles offset to where its vertices start, their last two corners swapped as the mirror turns the winding.
         IPLVector3[] vertices = new IPLVector3[vertexCount];
         IPLTriangle[] triangles = new IPLTriangle[triangleCount];
         float reach = 0;
@@ -82,6 +84,7 @@ internal sealed class AcousticMesh
     /// </summary>
     internal static unsafe AcousticMesh MakeCube()
     {
+        // Corner i's bits 1, 2 and 4 put it at the high side of x, y and z.
         IPLVector3[] vertices = new IPLVector3[8];
         for (int i = 0; i < 8; i++)
         {

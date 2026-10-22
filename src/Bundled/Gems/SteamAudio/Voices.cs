@@ -140,6 +140,8 @@ internal sealed unsafe class Voices : IDisposable
 
     internal Voices(_IPLContext_t* context, _IPLHRTF_t* hrtf, _IPLSimulator_t* simulator, SteamAudioSettings settings)
     {
+        // An echo of an order has (order + 1)² channels, one a direction it is heard from, and rings for the reverb's
+        // seconds of samples; a frame is stereo, interleaved; and the commands have room for a few to each slot.
         _context = context;
         _hrtf = hrtf;
         _sampleRate = settings.SampleRate;
@@ -327,6 +329,7 @@ internal sealed unsafe class Voices : IDisposable
             frames++;
         }
 
+        // A fill that took longer than the sound it made lasts is late, and the device hears a gap.
         double seconds = Stopwatch.GetElapsedTime(start).TotalSeconds;
         _renderDuration.Record(seconds);
         if (seconds > (double)frames * _frameSize / _sampleRate) _late.Add(1);
@@ -354,6 +357,7 @@ internal sealed unsafe class Voices : IDisposable
 
         if (isReflecting) MixEchoes();
 
+        // Scaled by the volume and clipped to what the device can play.
         float volume = Volume;
         Span<float> mixed = _mixed;
         for (int i = 0; i < mixed.Length; i++)
@@ -366,6 +370,7 @@ internal sealed unsafe class Voices : IDisposable
     {
         while (_commands.Reader.TryRead(out VoiceCommand command))
         {
+            // A seek or free meant for a start the slot no longer plays is ignored.
             Slot slot = _slots[command.Slot];
             switch (command.Action)
             {
@@ -441,6 +446,7 @@ internal sealed unsafe class Voices : IDisposable
 
             if (!isReflecting || at < 0 || at >= _reflectors.Length) return;
 
+            // An effect given to another sound since it last echoed starts clean, with none of the last one's echo.
             Reflector reflector = _reflectors[at];
             if (reflector.Slot != index)
             {
@@ -451,6 +457,7 @@ internal sealed unsafe class Voices : IDisposable
             iplSourceGetOutputs(reflector.Source, IPL_SIMULATIONFLAGS_REFLECTIONS, &outputs);
             IPLReflectionEffectParams echo = outputs.reflections;
 
+            // Nothing echoes until a trace has worked the echo out.
             if (echo.ir is null) return;
 
             echo.type = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
@@ -699,12 +706,15 @@ internal sealed unsafe class Voices : IDisposable
                 _appliedPitch = pitch;
             }
 
+            // Fed until the stream holds a frame, or has had the last of a sound that does not loop.
             int want = frameSize * channels * sizeof(float);
             while (!_isFlushed && SDL_GetAudioStreamAvailable(_stream) < want)
             {
                 FeedMore();
             }
 
+            // What the stream gave, the rest of the frame silence. Its time runs on by what was played, at its pitch,
+            // wrapping when it loops, and it is done once the last of it has been played.
             int got = Math.Max(0, SDL_GetAudioStreamData(_stream, into, want));
             new Span<float>(into + (got / sizeof(float)), (want - got) / sizeof(float)).Clear();
             double seconds = Seconds + ((double)got / (channels * sizeof(float)) * pitch / sampleRate);

@@ -64,6 +64,8 @@ internal sealed class PipelineLoaderGem(Assets assets, PipelineSettings settings
                 continue;
             }
 
+            // The nested pipeline's passes are copied in, each with this entry's params merged into a dictionary of its
+            // own, so setting one here leaves the nested pipeline as it is.
             foreach (PipelinePass pass in nested.Value.Passes)
             {
                 passes.Add(pass with { Params = Merge(pass.Name, entry, pass.Params) });

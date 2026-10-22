@@ -66,6 +66,8 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         Tags tags = default;
         foreach (string tag in entity.Tags)
         {
+            // Adding fails for a tag held already, which is no fault, as well as for an empty one or one past the
+            // capacity.
             Tag named = string.IsNullOrEmpty(tag) ? default : Tag.Of(tag);
             if (!tags.Add(named) && !tags.Has(named))
             {
@@ -85,6 +87,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     {
         if (scripts.Count == 0) return null;
 
+        // A script that cannot be held is taken out of the part's list too, the index stepping back over the gap.
         Scripts held = default;
         for (int i = 0; i < scripts.Count; i++)
         {

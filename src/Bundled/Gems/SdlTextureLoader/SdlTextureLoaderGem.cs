@@ -69,6 +69,8 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
 
             if (!path.EndsWith(".svg", StringComparison.OrdinalIgnoreCase)) return IMG_Load_IO(io, closeio: true);
 
+            // An .svg is drawn at the width asked for, a height of 0 keeping it in proportion; unlike the other
+            // loader, this one leaves the stream open.
             SDL_Surface* drawn = IMG_LoadSizedSVG_IO(io, width, 0);
             SDL_CloseIO(io);
 
@@ -82,6 +84,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
     /// </summary>
     private static Result<Texture> MakeMips(SDL_Surface* level0, TextureMeta meta)
     {
+        // Each level's size and where it starts in the one array, half the one above on each side down to one texel.
         int count = meta.Mipmaps ? 1 + BitOperations.Log2((uint)Math.Max(level0->w, level0->h)) : 1;
         TextureLevel[] levels = new TextureLevel[count];
         int size = 0;
@@ -93,6 +96,8 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
             size += levels[i].Size;
         }
 
+        // Each level scaled from the one above it, every level SDL made here freed once it has been copied and scaled
+        // from; the first is the caller's to free.
         byte[] pixels = GC.AllocateUninitializedArray<byte>(size);
         Copy(level0, pixels.AsSpan(levels[0].Offset, levels[0].Size));
         SDL_Surface* above = level0;

@@ -307,6 +307,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         Check(iplSceneCreate(context, &sceneSettings, &scene), "the scene");
         _scene = scene;
 
+        // The simulator works out the direct sound of every slot, and the echoes when any sound may echo; the voices
+        // add each slot's and reflector's source to it before it commits them, with the scene, empty until solids come.
         IPLSimulationSettings simulation = new()
         {
             flags = settings.ReflectionSources > 0
@@ -350,6 +352,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             return;
         }
 
+        // Every slot starts free, pushed last first so the first is taken first.
         _sounds = sounds;
         _soundWorld = new SoundWorld(context, scene, sceneSettings);
         _holds = new Hold[settings.Voices];
@@ -359,6 +362,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             _free.Push(i);
         }
 
+        // No reflector echoes anything yet; the device plays and the simulation thread runs only once all they read is
+        // made.
         _reflected = new int[settings.ReflectionSources];
         Array.Fill(_reflected, -1);
         _frames = [new SimulationFrame(settings), new SimulationFrame(settings), new SimulationFrame(settings)];
@@ -442,6 +447,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         if (!_isHeld) Assign();
 
+        // This frame's listener, slots, echoes and, a few times a second, the solids near the player, written into the
+        // frame being filled, which is then swapped in as the newest and the simulation thread woken to take it.
         SimulationFrame filling = _frames[_filling];
         filling.Listener = _listener;
         filling.ListenerPosition = _listenerPosition;
@@ -466,6 +473,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         _wake.Set();
         _heard.Record(_holds.Length - _free.Count);
 
+        // Readying ends once the scene holds every solid of a gathering made since it began.
         if (_readied is null || Volatile.Read(ref _placed) < _readyAt) return;
 
         _readied.TrySetResult();
@@ -508,6 +516,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             Surroundings.AddModels(prefab.Parts, models);
         }
 
+        // The audio files are asked for on the main thread, which keeps what has loaded, and the main thread's hook
+        // counts them in each frame (CheckPreloads) until all are.
         Preload preload = new(audios, models, progress, cancel);
         await _threads.InvokeAsync(
             EngineThread.Main,
@@ -538,6 +548,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         if (_sounds is null) return Task.CompletedTask;
 
+        // The next frame gathers the solids at once, and readying ends once that gathering is all placed; one already
+        // waiting is cancelled, as this one takes its place.
         _sinceGathered = GatherSeconds;
         _readyAt = _gathered + 1;
         TaskCompletionSource readied = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -699,6 +711,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 continue;
             }
 
+            // A file that did not load counts as in, as does a model when there is no scene to fit it for.
             int done = 0;
             foreach (Handle<Audio> audio in preload.Audios)
             {
@@ -745,6 +758,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             }
         }
 
+        // With no player, the camera drawing into the window, else the first camera.
         if (listener is null)
         {
             foreach ((_, Span<Transform> transforms, Span<Camera> cameras) in _world.Query<Transform, Camera>())
@@ -777,6 +791,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
             if (hold.Stream == 0) continue;
 
+            // Not let go yet: a free the audio thread had no room for is told again.
             Voices.Slot slot = sounds.Slots[i];
             if (slot.Released != hold.Generation)
             {
@@ -796,6 +811,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 Debugging.Verbose($"Entity {voice.Entity.Id}'s sound ended.");
             }
 
+            // No reflector echoes a slot let go.
             for (int k = 0; k < _reflected.Length; k++)
             {
                 if (_reflected[k] == i) _reflected[k] = -1;
@@ -823,6 +839,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             }
         }
 
+        // A voice this frame did not see is of an entity gone or without its sound, and its slot goes; listed first, as
+        // the voices cannot change while they are walked.
         foreach ((Entity entity, Voice voice) in _voices)
         {
             if (voice.Seen != _frame) _gone.Add(entity);
@@ -851,6 +869,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             _voices.Add(entity, voice);
         }
 
+        // What a script wrote since the last frame, told from what the gem wrote back then: another audio or space
+        // needs another slot, another audio from its start; another time is sought; and a pause or stop lets the slot
+        // go, a stop back to the start.
         voice.Seen = _frame;
         if (sound.Audio != voice.Sound.Audio || sound.Space != voice.Sound.Space)
         {
@@ -870,6 +891,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             if (sound.Playback == Playback.Stopped) voice.Time = 0;
         }
 
+        // How far in it is now: one that ended is stopped, one heard is where the audio thread has played to unless a
+        // seek is on its way, and one playing but not heard runs on in silence.
         voice.Sound = sound;
         voice.Position = transform.Position;
         voice.Rotation = transform.Rotation;
@@ -896,6 +919,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             && (sound.Space == SoundSpace.Everywhere || voice.Distance < sound.Range);
         if (isAudible && _sounds is not null) _wanted.Add(voice);
 
+        // Written back for scripts to read, and kept to tell what a script writes next from it.
         sound.Time = (float)voice.Time;
         voice.WrittenTime = sound.Time;
         voice.WrittenPlayback = sound.Playback;
@@ -936,6 +960,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         if (_sounds is null || voice.Audio is not { } audio) return;
 
         int index = _free.Peek();
+        // From the file's rate and channels to the device's rate, mono for a sound in the world, which Steam Audio
+        // places around the head, and stereo for one everywhere, mixed in as it is.
         Hold hold = _holds[index];
         SDL_AudioSpec from = new() { format = SDL_AUDIO_F32, channels = audio.Channels, freq = audio.SampleRate };
         SDL_AudioSpec to = new()
@@ -1020,6 +1046,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
             if (_holds[i].Voice is not { } voice) continue;
 
+            // A sound in the world fades to silence over the far end of its range, as Steam Audio's fall-off never
+            // does; a seek the audio thread had no room for is told again next frame.
             Voices.Slot slot = sounds.Slots[i];
             Sound sound = voice.Sound;
             bool isWorld = sound.Space == SoundSpace.World;
@@ -1040,6 +1068,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
             if (!isWorld) continue;
 
+            // Which way it is from the listener, straight ahead when at the head; and what reaches the listener
+            // straight from it, the same worked out as applied: fallen off with distance, dulled by the air, quieter
+            // off its front, and muffled by what is in the way unless it is unoccluded.
             IPLVector3 position = SoundWorld.ToVector(voice.Position);
             slot.Direction = voice.Distance < Closest
                 ? new IPLVector3 { z = -1 }
@@ -1085,6 +1116,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     {
         if (_reflected.Length == 0) return;
 
+        // The slots of the nearest heard sounds in the world that are not dry, one for each reflector, from the voices
+        // wanting a slot, which are sorted nearest first.
         Span<int> nearest = stackalloc int[_reflected.Length];
         int count = 0;
         if (sounds.IsReflecting)
@@ -1100,6 +1133,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             }
         }
 
+        // A reflector whose sound is no longer among them lets it go.
         nearest = nearest[..count];
         for (int k = 0; k < _reflected.Length; k++)
         {
@@ -1109,6 +1143,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             _reflected[k] = -1;
         }
 
+        // A sound newly among them takes a free reflector; one already echoed keeps its own.
         foreach (int slot in nearest)
         {
             if (Array.IndexOf(_reflected, slot) >= 0) continue;
@@ -1144,16 +1179,19 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             int taken = 0;
             while (!stopping.IsCancellationRequested)
             {
+                // Woken by a frame handed over or by the run ending; a wake with no new frame waits again.
                 _wake.Wait(CancellationToken.None);
                 _wake.Reset();
 
                 if (Volatile.Read(ref _isEnding)) return;
                 if (Interlocked.Exchange(ref _isNewest, 0) == 0) continue;
 
+                // The newest frame is taken in exchange for the one last read, which the main thread may fill next.
                 _reading = Interlocked.Exchange(ref _newest, _reading);
                 SimulationFrame frame = _frames[_reading];
                 if (frame.HasSolids) taken = frame.Gathered;
 
+                // Once the scene holds every solid of the gathering last taken, the main thread is told, for readying.
                 Simulate(_sounds, _soundWorld, frame);
                 if (_soundWorld.IsWhole) Volatile.Write(ref _placed, taken);
 

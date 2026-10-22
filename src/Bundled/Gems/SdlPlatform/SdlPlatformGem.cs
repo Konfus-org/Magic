@@ -172,6 +172,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
         _clipboard = ReadClipboard();
 
+        // The keyboards and mice plugged in as the window opens; those plugged in later arrive as events.
         int keyboardsCount;
         uint* keyboards = SDL_GetKeyboards(&keyboardsCount);
         for (int i = 0; i < keyboardsCount; i++)
@@ -254,6 +255,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         get
         {
+            // The control on every device of its kind as one: the value furthest from 0, and down, pressed or released
+            // if any device's is.
             float value = 0;
             bool isDown = false;
             bool wasPressed = false;
@@ -380,6 +383,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     break;
                 case SDL_EVENT_MOUSE_MOTION:
                 {
+                    // SDL's points as window pixels; the motion is scaled by the sensitivity too, and flipped when the
+                    // settings invert it.
                     uint mouse = sdlEvent.motion.which;
                     Set(DeviceKind.Mouse, mouse, Control.MouseX, sdlEvent.motion.x * _pixelDensity);
                     Set(DeviceKind.Mouse, mouse, Control.MouseY, sdlEvent.motion.y * _pixelDensity);
@@ -392,6 +397,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
                 case SDL_EVENT_MOUSE_WHEEL:
                 {
+                    // A wheel the OS flips (natural scrolling) is flipped back, so away from the player is positive on
+                    // every system.
                     uint mouse = sdlEvent.wheel.which;
                     float direction = sdlEvent.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -1 : 1;
                     Add(mouse, Control.MouseWheelX, sdlEvent.wheel.x * direction);
@@ -472,7 +479,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// Asks the window thread to resize the window when the settings ask for a size they did not before.
+    /// Asks the render thread to resize the window when the settings ask for a size they did not before.
     /// </summary>
     private unsafe void Resize()
     {
@@ -534,7 +541,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                 index = FindIndex(change.Device, change.Id);
                 if (index < 0)
                 {
-                    // A device that gives no name is shown as what it is.
+                    // A device that gives no name is shown as what it is. Its controls are its kind's block of 256, at
+                    // each control's index.
                     _devices.Add(new InputDevice(
                         change.Device,
                         change.Id,

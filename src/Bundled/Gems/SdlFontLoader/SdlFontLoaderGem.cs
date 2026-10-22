@@ -133,6 +133,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
                 $"SDL could not convert U+{codepoint:X4} to RGBA8: {CString.Read(SDL_GetError())}");
         }
 
+        // The rows without what the surface pads each one with (its pitch), so they pack tightly.
         int row = rgba->w * 4;
         byte[] pixels = GC.AllocateUninitializedArray<byte>(row * rgba->h);
         for (int y = 0; y < rgba->h; y++)
@@ -151,6 +152,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     /// </summary>
     private static Font Pack(float size, int lineHeight, int ascent, List<Drawn> drawn)
     {
+        // The atlas doubles a side at a time, the narrower one, until every character fits.
         int width = 256;
         int height = 256;
         List<(int X, int Y)> places = [];
@@ -160,6 +162,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
             else height *= 2;
         }
 
+        // Each character's rows copied to its place in the atlas, and the place kept as its glyph.
         byte[] atlas = new byte[width * height * 4];
         Dictionary<uint, Glyph> glyphs = new(drawn.Count);
         for (int i = 0; i < drawn.Count; i++)

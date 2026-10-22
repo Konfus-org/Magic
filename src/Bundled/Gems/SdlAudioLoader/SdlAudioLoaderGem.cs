@@ -112,6 +112,8 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
                         $"it says it has {spec.channels} channel(s) at {spec.freq} Hz.");
                 }
 
+                // Decoded as floats, a chunk at a time onto the end of a buffer that doubles whenever the next chunk
+                // might not fit, until the decoder has nothing left.
                 spec.format = SDL_AUDIO_F32;
                 float[] samples = new float[Chunk / sizeof(float)];
                 int count = 0;

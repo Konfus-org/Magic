@@ -131,6 +131,9 @@ internal sealed class SoundWorld : IDisposable
     /// </summary>
     internal unsafe bool Update(Vector3 listener, double seconds)
     {
+        // Nearest first: a solid held as it was is stamped seen, and moved if it moved; any other, new or with another
+        // model or material, is taken out and placed again while there is time, and left for a later update once there
+        // is none.
         long start = Stopwatch.GetTimestamp();
         _update++;
         _listener = listener;
@@ -165,6 +168,8 @@ internal sealed class SoundWorld : IDisposable
             isChanged |= Add(solid);
         }
 
+        // A solid this update did not see is no longer gathered, and goes; listed first, as the instances cannot change
+        // while they are walked.
         foreach ((Entity entity, Instance instance) in _instances)
         {
             if (instance.Seen != _update) _gone.Add(entity);

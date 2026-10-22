@@ -67,6 +67,7 @@ internal sealed class Surroundings(Assets assets)
     {
         foreach (PrefabPart part in parts)
         {
+            // Whether the part's body stays put or is moved by code, and the model it is drawn as.
             Handle<Model> model = Handle<Model>.None;
             bool isSolid = false;
             foreach (IComponent component in part.Components)
@@ -104,6 +105,8 @@ internal sealed class Surroundings(Assets assets)
     /// </summary>
     internal void Gather(World world, ReadOnlySpan<Vector3> listeners, float range, List<Solid> into)
     {
+        // Last frame's near entities are what may stay out to the far end; this frame's start empty. Each body is
+        // passed over from its transform alone first, and only one that could be near has its model looked up.
         into.Clear();
         (_wasNear, _near) = (_near, _wasNear);
         _near.Clear();

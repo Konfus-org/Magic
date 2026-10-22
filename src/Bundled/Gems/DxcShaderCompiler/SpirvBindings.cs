@@ -56,10 +56,9 @@ internal static unsafe class SpirvBindings
     internal static Result<GpuShader> Read(ReadOnlyMemory<byte> spirv, GpuStage stage)
     {
         spvc_context_s* context;
+
         if (spvc_context_create(&context) != SPVC_SUCCESS)
-        {
             return Result.Failure<GpuShader>("SPIRV-Cross could not start.");
-        }
 
         try
         {
@@ -68,6 +67,7 @@ internal static unsafe class SpirvBindings
             fixed (byte* code = spirv.Span)
             {
                 spvc_parsed_ir_s* ir;
+
                 if (spvc_context_parse_spirv(context, (uint*)code, (nuint)(spirv.Length / 4), &ir) != SPVC_SUCCESS
                     || spvc_context_create_compiler(
                         context,
@@ -84,6 +84,7 @@ internal static unsafe class SpirvBindings
             foreach (spvc_resource_type list in _unbound)
             {
                 spvc_reflected_resource* unbound = GetList(resources, list, out nuint count);
+
                 if (count > 0)
                 {
                     return Result.Failure<GpuShader>(
@@ -93,10 +94,12 @@ internal static unsafe class SpirvBindings
 
             List<(uint Id, GpuShaderBinding Binding)> found = [];
             Result read = ReadBindings(compiler, resources, stage, found);
+
             if (!read.Ok) return Result.Failure<GpuShader>(read.Error);
 
             // In the order the module declares them, as each list is.
             found.Sort((first, second) => first.Id.CompareTo(second.Id));
+
             return Result.Success(new GpuShader
             {
                 Code = spirv,
@@ -132,18 +135,19 @@ internal static unsafe class SpirvBindings
             {
                 uint id = resource[i].id;
                 string name = GetName(compiler, id);
+
                 if (name.Length == 0) return Result.Failure("a resource has no name.");
 
                 spvc_type_s* type = spvc_compiler_get_type_handle(compiler, resource[i].type_id);
+
                 if (spvc_type_get_num_array_dimensions(type) > 0)
-                {
                     return Result.Failure($"{name} is an array of resources, which the binding model does not bind.");
-                }
 
                 uint binding = spvc_compiler_get_decoration(compiler, id, SpvDecorationBinding);
                 if (listed == Resource.Sampler)
                 {
                     samplers.Add(binding);
+
                     continue;
                 }
 
@@ -153,6 +157,7 @@ internal static unsafe class SpirvBindings
                     : listed;
                 uint set = spvc_compiler_get_decoration(compiler, id, SpvDecorationDescriptorSet);
                 Result<GpuBindingKind> kind = TryGetKind(stage, set, what, name);
+
                 if (!kind.Ok) return Result.Failure(kind.Error);
 
                 found.Add((id, new GpuShaderBinding(name, kind.Value, binding)));
@@ -182,10 +187,12 @@ internal static unsafe class SpirvBindings
         if (spvc_resources_get_resource_list_for_type(resources, type, &list, &found) != SPVC_SUCCESS)
         {
             count = 0;
+
             return null;
         }
 
         count = found;
+
         return list;
     }
 
@@ -203,6 +210,7 @@ internal static unsafe class SpirvBindings
         spvc_type_s* sampled = spvc_compiler_get_type_handle(
             compiler,
             spvc_type_get_image_sampled_type(spvc_compiler_get_type_handle(compiler, image)));
+
         return spvc_type_get_basetype(sampled) is SPVC_BASETYPE_INT8 or SPVC_BASETYPE_UINT8 or SPVC_BASETYPE_INT16
             or SPVC_BASETYPE_UINT16 or SPVC_BASETYPE_INT32 or SPVC_BASETYPE_UINT32 or SPVC_BASETYPE_INT64
             or SPVC_BASETYPE_UINT64;
@@ -221,6 +229,8 @@ internal static unsafe class SpirvBindings
     /// </summary>
     private static Result<GpuBindingKind> TryGetKind(GpuStage stage, uint set, Resource resource, string name)
     {
+        // The sets the binding header gives the stage's read, write and uniform spaces; a vertex or fragment stage has
+        // no write space.
         (uint read, uint write, uint uniform) = stage switch
         {
             GpuStage.Vertex => (0u, uint.MaxValue, 1u),
@@ -228,6 +238,7 @@ internal static unsafe class SpirvBindings
             GpuStage.Compute => (0u, 1u, 2u),
             _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "There is no such shader stage."),
         };
+
         if (set == uniform && resource == Resource.Block) return Result.Success(GpuBindingKind.Uniform);
 
         if (set == read)
