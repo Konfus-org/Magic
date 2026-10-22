@@ -9,8 +9,8 @@ namespace Magic.ClusterGenerator;
 /// meshoptimizer (<see cref="Meshopt"/>). Every level indexes one array of the model's own vertices, put on the grid
 /// once. The model's triangles are split into compact clusters, each of one material slot, a large mesh in chunks along
 /// a spatial sort, every chunk at once. Then, level after level, neighbouring clusters are grouped, each group is
-/// simplified to half its triangles with every place it shares with another group locked, and split into clusters
-/// again, every group at once. The simplifier keeps a subset of the vertices as they were, so every position stays on
+/// simplified to half its triangles with every place it shares with another group locked, and the mesh's own open
+/// border, and split into clusters again, every group at once. The simplifier keeps a subset of the vertices as they were, so every position stays on
 /// the grid and every vertex keeps its normal and uv. A group that can no longer simplify is drawn as it is from then
 /// on, so its border stays locked at every level after, and what is made beside it still meets it. A group's error is
 /// the most of what the simplification moved and what its clusters had, and its bounds enclose theirs, so neither ever
@@ -511,8 +511,10 @@ internal static class ClusterBuilder
     /// <summary>
     /// A group simplified by meshoptimizer to half its triangles with its locked vertices kept, and split into the
     /// clusters of the next level, each material slot's triangles on their own; its clusters take what they were
-    /// simplified into as their parent. Null when it would keep too much (<see cref="MinReduction"/>), or nothing: its
-    /// clusters stay the coarsest there are of their part of the model.
+    /// simplified into as their parent. The mesh's own open border is locked too: a leaf, a quad open all round, would
+    /// otherwise collapse away for the little it moves the surface, though all it covered goes with it, and a tree
+    /// would stand bare from a few metres off. Null when it would keep too much (<see cref="MinReduction"/>), or
+    /// nothing: its clusters stay the coarsest there are of their part of the model.
     /// </summary>
     private static unsafe List<Part>? Simplify(
         List<Part> group,
@@ -565,7 +567,7 @@ internal static class ClusterBuilder
                 locked,
                 (ulong)(triangleCount / 2 * 3),
                 float.MaxValue,
-                SimplifyOptions.ErrorAbsolute,
+                SimplifyOptions.ErrorAbsolute | SimplifyOptions.LockBorder,
                 &moved);
         }
 

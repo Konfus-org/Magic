@@ -24,6 +24,9 @@ are, their errors and spheres and what is kept between them, is the gem's own, a
   clusters again, every group at once. Places, not vertices, decide what meets, so clusters that meet only at a seam,
   a material's edge or a chunk's, are grouped and locked as neighbours. A kept triangle keeps its corners' material,
   and a group's triangles are split into clusters slot by slot.
+- The mesh's own open border is locked as a group's is. A leaf is a quad open all round: collapsing it moves the
+  surface by no more than the leaf is wide, so its error says nothing of all it covered, and a tree whose leaves went
+  that way would stand bare from a few metres off. Its leaves stay as they are until its cards take over.
 - A group's error is the most of what its simplification moved the surface and what its clusters had, and its sphere
   encloses theirs: the clusters made from it take both as theirs, and the clusters it was made from as their parent's.
   Neither shrinks from a level to the next, so a renderer picks each cluster alone, and the clusters it picks still
