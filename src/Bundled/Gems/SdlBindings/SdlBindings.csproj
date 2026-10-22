@@ -11,20 +11,20 @@
   </PropertyGroup>
 
   <!-- SDL is installed, so the three built on it find it there. SDL_image reads its formats itself, so none of its
-       vendored codecs is built, nor the submodules under theirs fetched; SDL_ttf brings FreeType and HarfBuzz with it;
-       SDL_mixer decodes WAV itself and Ogg Vorbis, MP3 and FLAC with the single-file decoders in its own source, so it
-       needs no other library. Each of the three is its shared library alone. -->
+       vendored codecs is built or fetched; SDL_ttf builds FreeType and HarfBuzz from its submodules, without the SVG
+       ones; SDL_mixer decodes WAV itself and Ogg Vorbis, MP3 and FLAC with the single-file decoders in its own source,
+       so it needs no other library. Each of the three is its shared library alone. -->
   <ItemGroup>
     <NativeLibrary Include="SDL3" Repository="https://github.com/libsdl-org/SDL" Tag="release-3.4.18"
                    CMakeOptions="-DSDL_TEST_LIBRARY=OFF;-DSDL_EXAMPLES=OFF;-DSDL_INSTALL_TESTS=OFF"
                    Headers="include/SDL3/SDL.h" IncludePath="include" />
-    <NativeLibrary Include="SDL3_image" Repository="https://github.com/libsdl-org/SDL_image" Tag="release-3.4.8" RecurseSubmodules="false"
+    <NativeLibrary Include="SDL3_image" Repository="https://github.com/libsdl-org/SDL_image" Tag="release-3.4.8"
                    DependsOn="SDL3" CMakeTarget="SDL3_image-shared"
                    CMakeOptions="-DSDLIMAGE_VENDORED=OFF;-DSDLIMAGE_SAMPLES=OFF;-DSDLIMAGE_AVIF=OFF;-DSDLIMAGE_WEBP=OFF;-DSDLIMAGE_TIF=OFF;-DSDLIMAGE_JXL=OFF;
                                  -DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
                    Headers="include/SDL3_image/SDL_image.h" IncludePath="include" Prefixes="SDL_IMAGE=IMG" />
     <NativeLibrary Include="SDL3_ttf" Repository="https://github.com/libsdl-org/SDL_ttf" Tag="release-3.2.2"
-                   DependsOn="SDL3" CMakeTarget="SDL3_ttf-shared"
+                   Submodules="external/freetype;external/harfbuzz" DependsOn="SDL3" CMakeTarget="SDL3_ttf-shared"
                    CMakeOptions="-DSDLTTF_VENDORED=ON;-DSDLTTF_SAMPLES=OFF;-DSDLTTF_PLUTOSVG=OFF;-DCMAKE_PREFIX_PATH=$(MagicNativeLibs)SDL3/built"
                    Headers="include/SDL3_ttf/SDL_ttf.h;include/SDL3_ttf/SDL_textengine.h" IncludePath="include" Prefixes="SDL_TTF=TTF" />
     <NativeLibrary Include="SDL3_mixer" Repository="https://github.com/libsdl-org/SDL_mixer" Tag="release-3.2.4"

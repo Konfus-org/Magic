@@ -19,13 +19,14 @@ generator cannot express the API, a COM interface; the gem whose library needs t
 A library is one `NativeLibrary` item in the gem's project, and the item says all of it, so a gem carries its
 libraries with it when it is added or removed. Its `Include` is the library's logical name: what the generated
 `DllImport`s name, what the load context resolves, and the name of the library's folder. The item says where the
-library comes from, a repository at a tag or the archive its author publishes with the archive's SHA-256; how CMake
-builds it, the options it is given and the one target to build where it is not installed; the libraries it is built
-after and against; and what is bound of it. The metadata are declared, with what each means, beside the build that
-reads them, in `Directory.Build.targets`. Where a platform needs something else, the gem's project says so with a
-condition, as the shader compiler's does, which comes prebuilt where its author publishes a build and from source
-elsewhere. An item with no `Headers` is bound by hand and declared for its binary alone; one declared `HeadersOnly`
-is fetched for its headers and sources alone, as another library's input is.
+library comes from, a repository at a tag with the submodules it builds from, or the archive its author publishes
+with the archive's SHA-256; how CMake builds it, the options it is given and the one target to build where it is not
+installed; the libraries it is built after and against; and what is bound of it. The metadata are declared, with
+what each means, beside the build that reads them, in `Directory.Build.targets`. Where a platform needs something
+else, the gem's project says so with a condition, as the shader compiler's does, which comes prebuilt where its
+author publishes a build and from source elsewhere. An item with no `Headers` is bound by hand and declared for its
+binary alone; one declared `HeadersOnly` is fetched for its headers and sources alone, as another library's input
+is.
 
 A library with no build of its own, written to be compiled into its user, is declared by its sources: the build
 writes the CMake project that compiles them into one shared library, with the defines its headers are read with, so
@@ -66,9 +67,12 @@ must hold:
   sources has `project/`, the CMake project written for it, there too, since CMake ties a build folder to one source
   path and that path must not be a checkout's. A gem's project may name these folders in an option, as a library
   built against another names that one's `built/`.
-- **Pinned, then fetched or downloaded.** A library is fetched shallow from its repository at a tag, with its
-  submodules, or downloaded as the archive its author publishes, verified against the SHA-256 the item pins. A changed
-  tag fetches afresh; nothing else touches the network.
+- **Pinned, then fetched or downloaded.** A library is fetched shallow from its repository at a tag, or downloaded
+  as the archive its author publishes, verified against the SHA-256 the item pins. Of a repository's submodules only
+  those the item names are fetched, each shallow at the commit the tag pins, and none under them: a repository often
+  vendors as submodules the libraries its build can do without, and their histories would be most of what a cold
+  build fetches. A submodule the build needs and the item does not name fails the library's configure. A changed tag
+  fetches afresh; nothing else touches the network.
 - **Built once per machine.** A hash of what CMake is told of a library, and of the libraries it depends on, names a
   ready marker in its folder: a library is built again when its item changes, or one it depends on does, and the
   marker is written when it built. When every library a project declares is ready, nothing runs, not even CMake, and

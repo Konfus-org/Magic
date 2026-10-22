@@ -13,8 +13,9 @@
 
   <!-- DirectXShaderCompiler: Microsoft's own build of the tag where it publishes one, since the library is an LLVM and
        the one build that takes long; built from source where it does not (macOS, and Linux on ARM), with Microsoft's
-       predefined parameters, SPIR-V code generation and no tests. DXC is a COM API, bound by hand in the gem, so only
-       the compiler's library is declared, and it validates and signs DXIL itself. -->
+       predefined parameters, SPIR-V code generation and no tests, so without the test framework among its submodules.
+       DXC is a COM API, bound by hand in the gem, so only the compiler's library is declared, and it validates and
+       signs DXIL itself. -->
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <NativeLibrary Include="dxcompiler" Url="https://github.com/microsoft/DirectXShaderCompiler/releases/download/$(DxcTag)/dxc_2026_09_29.zip"
                    Sha256="ad31b1fc8443175d204f77a611fdb3ef2ec42759bdc2f1167368de24a4a7e7f1" Library="bin/$(MagicNativeRid.Replace('win-', ''))/dxcompiler.dll" />
@@ -25,6 +26,7 @@
   </ItemGroup>
   <ItemGroup Condition="!$([MSBuild]::IsOSPlatform('Windows')) and '$(MagicNativeRid)' != 'linux-x64'">
     <NativeLibrary Include="dxcompiler" Repository="https://github.com/microsoft/DirectXShaderCompiler" Tag="$(DxcTag)" CMakeTarget="dxcompiler"
+                   Submodules="external/DirectX-Headers;external/SPIRV-Headers;external/SPIRV-Tools"
                    CMakeOptions="-C;&lt;SOURCE_DIR&gt;/cmake/caches/PredefinedParams.cmake;-DHLSL_INCLUDE_TESTS=OFF;-DSPIRV_BUILD_TESTS=OFF;
                                  -DLLVM_INCLUDE_TESTS=OFF;-DCLANG_INCLUDE_TESTS=OFF;-DLLVM_ENABLE_ASSERTIONS=OFF;-DHLSL_BUILD_DXILCONV=OFF;-DLLVM_APPEND_VC_REV=OFF" />
   </ItemGroup>
