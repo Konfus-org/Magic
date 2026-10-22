@@ -153,6 +153,7 @@ internal sealed class Domains : IDisposable
         CancellationToken cancel = default)
     {
         Result<Domain> file = await _assets.LoadAsync(domain, cancel).ConfigureAwait(false);
+
         if (!file.Ok) return Result.Failure<Domain>($"The domain does not open: {file.Error}");
 
         Open open = new(
@@ -163,6 +164,7 @@ internal sealed class Domains : IDisposable
             isLoadingDomain: false,
             isReplacing: mode == DomainOpenMode.Replace);
         Open? already = await _threads.InvokeAsync(EngineThread.Main, () => Begin(open), cancel).ConfigureAwait(false);
+
         return already is not null
             ? Result.Success(already.Domain)
             : await ArriveAsync(open, progress, cancel).ConfigureAwait(false);
@@ -309,6 +311,7 @@ internal sealed class Domains : IDisposable
     private static Vector3? ParseCell(string file)
     {
         string[] parts = Path.GetFileNameWithoutExtension(file).Split('_');
+
         return parts.Length == 3
             && int.TryParse(parts[0], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int x)
             && int.TryParse(parts[1], NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int y)
@@ -346,12 +349,14 @@ internal sealed class Domains : IDisposable
                 if (placed.Placement.IsCell == cells && placed.Prefab?.PlaceOf(Tag.Spawn) is { } spawn)
                 {
                     Transform at = spawn.Under(new Transform { Position = placed.Placement.Corner });
+
                     return new Transform { Position = at.Position, Rotation = at.Rotation };
                 }
             }
         }
 
         Debugging.Warn($"{open.Name} has no entity tagged spawn, so the player is put at its origin.");
+
         return new Transform();
     }
 
@@ -407,6 +412,7 @@ internal sealed class Domains : IDisposable
         if (open.IsReplacing && BeginLoading()) ShowLoading();
 
         _domains.Add(open);
+
         return null;
     }
 
@@ -422,6 +428,7 @@ internal sealed class Domains : IDisposable
         // The world loads again before the end of the last loading was told: to whoever hears it, it goes on.
         _isTelling = false;
         _events.Publish(new WorldLoading(true));
+
         return true;
     }
 
@@ -440,14 +447,16 @@ internal sealed class Domains : IDisposable
         catch
         {
             _arrived.Writer.TryWrite(new Arrived(open, null, default));
+
             throw;
         }
 
         Result<Domain> arrived = await _threads.InvokeAsync(
-                EngineThread.Main,
-                () => Arrive(open, read, cancel),
-                CancellationToken.None)
+            EngineThread.Main,
+            () => Arrive(open, read, cancel),
+            CancellationToken.None)
             .ConfigureAwait(false);
+
         return arrived.Ok && open.IsReplacing ? await RevealAsync(open, cancel).ConfigureAwait(false) : arrived;
     }
 
@@ -466,6 +475,7 @@ internal sealed class Domains : IDisposable
         }
 
         _arrived.Writer.TryWrite(new Arrived(open, null, default, IsReady: true));
+
         return await open.Shown.Task.ConfigureAwait(false);
     }
 
@@ -491,14 +501,8 @@ internal sealed class Domains : IDisposable
         if (open.IsReplacing && _project.Player != Handle<Prefab>.None)
         {
             Result<Prefab> loaded = await _assets.LoadAsync(_project.Player, cancel).ConfigureAwait(false);
-            if (loaded.Ok)
-            {
-                player = loaded.Value;
-            }
-            else
-            {
-                Debugging.Error($"The project's player is not spawned: {loaded.Error}");
-            }
+            if (loaded.Ok) player = loaded.Value;
+            else Debugging.Error($"The project's player is not spawned: {loaded.Error}");
         }
 
         List<Prefab> spawning = [];
@@ -529,12 +533,14 @@ internal sealed class Domains : IDisposable
 
         SubscriptionList holds = await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
         progress?.Report(1);
+
         return new Read(placements, prefabs, player, models) { Holds = holds };
 
         async Task<Result<Prefab>> ReadOneAsync(Handle<Prefab> file)
         {
             Result<Prefab> prefab = await _assets.LoadAsync(file, cancel).ConfigureAwait(false);
             progress?.Report(0.5f * Interlocked.Increment(ref read) / reading.Length);
+
             return prefab;
         }
     }
@@ -592,6 +598,7 @@ internal sealed class Domains : IDisposable
         foreach (string file in _assets.GetPaths(folder))
         {
             Handle<Prefab> prefab = _assets.Find<Prefab>(file);
+
             if (prefab == Handle<Prefab>.None) continue;
 
             Vector3? cell = ParseCell(file);
@@ -613,6 +620,7 @@ internal sealed class Domains : IDisposable
         if (open.IsClosed)
         {
             read.Holds.Dispose();
+
             return Result.Failure<Domain>("It was closed before it was there.");
         }
 
@@ -629,14 +637,8 @@ internal sealed class Domains : IDisposable
 
             if (read.Prefabs[i] is { Ok: true, Value: { } prefab })
             {
-                if (placed.Entities is null)
-                {
-                    Show(placed, prefab);
-                }
-                else
-                {
-                    placed.Prefab = prefab;
-                }
+                if (placed.Entities is null) Show(placed, prefab);
+                else placed.Prefab = prefab;
 
                 entities += placed.Entities?.Length ?? 0;
             }
@@ -652,9 +654,7 @@ internal sealed class Domains : IDisposable
 
         open.IsThere = true;
         if (!open.IsLoadingDomain)
-        {
             Debugging.Info($"Opened {open.Name}: {entities} entities in {open.Prefabs.Count} prefabs.");
-        }
 
         if (open.IsReplacing) Ready(open, cancel);
 
@@ -702,6 +702,7 @@ internal sealed class Domains : IDisposable
         if (open.IsClosed)
         {
             open.Shown.TrySetResult(Result.Failure<Domain>("It was closed before it was shown."));
+
             return;
         }
 
@@ -747,6 +748,7 @@ internal sealed class Domains : IDisposable
         if (!file.Ok)
         {
             Debugging.Error($"{_assets.GetPath(saved.Domain) ?? "A domain"} is not restored: {file.Error}");
+
             return;
         }
 
@@ -757,13 +759,17 @@ internal sealed class Domains : IDisposable
             saved.Mode,
             isLoadingDomain: false,
             isReplacing: kept is null && saved.Mode == DomainOpenMode.Replace);
-        bool isOpening = await _threads.InvokeAsync(EngineThread.Main, () =>
-        {
-            if (kept is null) return Begin(open) is null;
+        bool isOpening = await _threads.InvokeAsync(
+            EngineThread.Main,
+            () =>
+            {
+                if (kept is null) return Begin(open) is null;
 
-            Reopen(open, kept, player);
-            return true;
-        }, _lifetime.Stopping).ConfigureAwait(false);
+                Reopen(open, kept, player);
+
+                return true;
+            },
+            _lifetime.Stopping).ConfigureAwait(false);
 
         if (isOpening) await ArriveAsync(open, null, _lifetime.Stopping).ConfigureAwait(false);
     }
@@ -778,9 +784,9 @@ internal sealed class Domains : IDisposable
     {
         await Task.WhenAll(restoring).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         Task readied = await _threads.InvokeAsync(
-                EngineThread.Main,
-                () => ReadyAllAsync("the world put back", _lifetime.Stopping),
-                _lifetime.Stopping)
+            EngineThread.Main,
+            () => ReadyAllAsync("the world put back", _lifetime.Stopping),
+            _lifetime.Stopping)
             .ConfigureAwait(false);
         await readied.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         _arrived.Writer.TryWrite(new Arrived(null, null, default));
@@ -820,14 +826,8 @@ internal sealed class Domains : IDisposable
         if (open.IsClosed) return;
 
         open.IsClosed = true;
-        if (open.IsLoadingDomain)
-        {
-            _loading = null;
-        }
-        else
-        {
-            _domains.Remove(open);
-        }
+        if (open.IsLoadingDomain) _loading = null;
+        else _domains.Remove(open);
 
         foreach (Placed placed in open.Prefabs.Values)
         {
@@ -855,6 +855,7 @@ internal sealed class Domains : IDisposable
         if (_keeping is { Kept: { } kept })
         {
             ShowKept(kept);
+
             return;
         }
 
@@ -865,6 +866,7 @@ internal sealed class Domains : IDisposable
         if (handle == Handle<Domain>.None)
         {
             Debugging.Warn($"There is no loading domain: the project names none, and there is no {path}.");
+
             return;
         }
 
@@ -884,6 +886,7 @@ internal sealed class Domains : IDisposable
         if (!file.Ok)
         {
             Debugging.Error($"The loading domain does not open: {file.Error}");
+
             return;
         }
 
@@ -896,21 +899,26 @@ internal sealed class Domains : IDisposable
             isLoadingDomain: true,
             isReplacing: false);
         Read read = await ReadAsync(reading, null, _lifetime.Stopping).ConfigureAwait(false);
-        await _threads.InvokeAsync(EngineThread.Main, () =>
-        {
-            if (keeping.IsForgotten)
+        await _threads.InvokeAsync(
+            EngineThread.Main,
+            () =>
             {
-                read.Holds.Dispose();
-                return;
-            }
+                if (keeping.IsForgotten)
+                {
+                    read.Holds.Dispose();
 
-            keeping.Kept = new Resident(keeping.Handle, name, file.Value, read);
+                    return;
+                }
 
-            // Nor once the domain replacing the world is there, being readied behind the loading domain's last image.
-            if (!IsLoading || _loading is not null || _domains.Exists(static open => open.Readying is not null)) return;
+                keeping.Kept = new Resident(keeping.Handle, name, file.Value, read);
 
-            ShowKept(keeping.Kept);
-        }).ConfigureAwait(false);
+                // Nor once the domain replacing the world is there, being readied behind the loading domain's last
+                // image.
+                if (!IsLoading || _loading is not null || _domains.Exists(static open => open.Readying is not null))
+                    return;
+
+                ShowKept(keeping.Kept);
+            }).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -996,16 +1004,12 @@ internal sealed class Domains : IDisposable
     private void PrefabReloaded(AssetReloaded<Prefab> reloaded)
     {
         if (_keeping?.Kept?.Read.Placements.Exists(placement => placement.File == reloaded.Asset.Handle) == true)
-        {
             ForgetLoading();
-        }
 
         foreach (Open open in GetShown())
         {
             if (open.IsThere && open.Prefabs.TryGetValue(reloaded.Asset.Handle, out Placed? placed))
-            {
                 Show(placed, reloaded.Asset);
-            }
         }
     }
 
@@ -1018,9 +1022,7 @@ internal sealed class Domains : IDisposable
     private void FilesChanged(AssetsChanged changed)
     {
         if (_keeping?.Kept is { } kept && !GetPlacements(kept.Handle, kept.Domain).SequenceEqual(kept.Read.Placements))
-        {
             ForgetLoading();
-        }
 
         foreach (Open open in GetShown())
         {
@@ -1030,6 +1032,7 @@ internal sealed class Domains : IDisposable
             foreach (Placement placement in GetPlacements(open.Handle, open.Domain))
             {
                 present.Add(placement.File);
+
                 if (open.Prefabs.TryGetValue(placement.File, out Placed? placed) && placed.Placement == placement
                     && placed.Entities is not null)
                 {

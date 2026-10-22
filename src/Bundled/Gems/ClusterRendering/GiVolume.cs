@@ -140,14 +140,8 @@ internal sealed class GiVolume
             float voxel = finest * (1 << index);
             level.Clear();
             (int X, int Y, int Z) origin = (Snap(camera.X, voxel), Snap(camera.Y, voxel), Snap(camera.Z, voxel));
-            if (forgets || !level.IsHeld || level.Voxel != voxel)
-            {
-                level.MarkAll(origin);
-            }
-            else
-            {
-                level.MarkMoved(origin);
-            }
+            if (forgets || !level.IsHeld || level.Voxel != voxel) level.MarkAll(origin);
+            else level.MarkMoved(origin);
 
             level.Voxel = voxel;
             uint period = every << index;
@@ -305,6 +299,7 @@ internal sealed class GiVolume
         internal GpuGiLevel GetRow()
         {
             bool isDirty = _low.X <= _high.X;
+
             return new GpuGiLevel
             {
                 OriginX = _origin.X,

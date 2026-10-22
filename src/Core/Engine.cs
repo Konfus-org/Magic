@@ -44,6 +44,7 @@ public static class Engine
         if (!opened.Ok)
         {
             Debugging.Error(opened.Error);
+
             return false;
         }
 
@@ -79,11 +80,13 @@ public static class Engine
         using Lifetime lifetime = new();
         using Threads threads = new(lifetime);
         using PosixSignalRegistration? interrupt = args.Headless // only allow Ctrl+C to kill when headless
-            ? PosixSignalRegistration.Create(PosixSignal.SIGINT, context =>
-            {
-                context.Cancel = true;
-                lifetime.Stop("Ctrl+C");
-            })
+            ? PosixSignalRegistration.Create(
+                PosixSignal.SIGINT,
+                context =>
+                {
+                    context.Cancel = true;
+                    lifetime.Stop("Ctrl+C");
+                })
             : null;
 
         Debugging.Info($"Running {project.Name} from {project.Root}");
@@ -172,16 +175,20 @@ public static class Engine
     private static Result<Project> OpenProject(FileSystem files, string path)
     {
         Result<string> found = FindProject(files, path);
+
         if (!found.Ok) return Result.Failure<Project>(found.Error);
 
         Result<byte[]> bytes = files.Read(found.Value);
+
         if (!bytes.Ok) return Result.Failure<Project>(bytes.Error);
 
         Result<Project> read = Json.Read<Project>(bytes.Value);
+
         if (!read.Ok) return Result.Failure<Project>($"{found.Value} is not a valid project: {read.Error}");
 
         Project project = read.Value;
         project.Root = files.GetParent(found.Value);
+
         return Result.Success(project);
     }
 
@@ -190,11 +197,10 @@ public static class Engine
         if (files.FileExists(path)) return Result.Success(path);
 
         if (!files.FolderExists(path))
-        {
             return Result.Failure<string>($"There is no project at {path}: it is neither a .magic file nor a folder.");
-        }
 
         IReadOnlyList<string> found = files.Find(path, ".magic");
+
         if (found.Count != 1)
         {
             return Result.Failure<string>(
@@ -241,6 +247,7 @@ public static class Engine
             events,
             project,
             lifetime));
+
         return services;
     }
 

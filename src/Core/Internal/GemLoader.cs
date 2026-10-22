@@ -129,10 +129,7 @@ internal sealed class GemLoader : IDisposable
         }
     }
 
-    public void Dispose()
-    {
-        _codeWatch.Dispose();
-    }
+    public void Dispose() => _codeWatch.Dispose();
 
     /// <summary>
     /// Makes every gem that was registered, in the order they are listed, each after whatever its constructor asks for;

@@ -180,10 +180,7 @@ public sealed class Assets : IDisposable
     /// it is missing.
     /// </summary>
     public Handle<T> Default<T>()
-        where T : IAsset<T>
-    {
-        return Get<T>(typeof(T).Name + "s", DefaultName, "default");
-    }
+        where T : IAsset<T> => Get<T>(typeof(T).Name + "s", DefaultName, "default");
 
     /// <summary>
     /// What is drawn in a broken <typeparamref name="T"/>'s place when <paramref name="type"/> broke: the asset named
@@ -192,28 +189,20 @@ public sealed class Assets : IDisposable
     /// draws a failure as have one. None, and an error logged once, when it is missing.
     /// </summary>
     public Handle<T> Failure<T>(FailureType type)
-        where T : IAsset<T>
-    {
-        return Get<T>($"{typeof(T).Name}s/{FailuresFolder}", type.ToString(), $"{type} failure");
-    }
+        where T : IAsset<T> => Get<T>($"{typeof(T).Name}s/{FailuresFolder}", type.ToString(), $"{type} failure");
 
     /// <summary>
     /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them: a domain's
     /// prefabs.
     /// </summary>
     public IReadOnlyList<string> GetPaths(string folder)
-    {
-        return _index.ByFolder.TryGetValue(folder, out List<string>? paths) ? paths : [];
-    }
+        => _index.ByFolder.TryGetValue(folder, out List<string>? paths) ? paths : [];
 
     /// <summary>
     /// Where <paramref name="asset"/> is, as <see cref="Find{T}"/> takes it; null when no file has its id.
     /// </summary>
     public string? GetPath<T>(Handle<T> asset)
-        where T : IAsset<T>
-    {
-        return _index.ById.TryGetValue(asset.Id, out Indexed? found) ? found.Path : null;
-    }
+        where T : IAsset<T> => _index.ById.TryGetValue(asset.Id, out Indexed? found) ? found.Path : null;
 
     /// <summary>
     /// A hash of the asset's file and its <c>.meta</c>, which changes when either does: what its post-processor is
@@ -228,9 +217,11 @@ public sealed class Assets : IDisposable
         if (indexed.Version != 0) return indexed.Version;
 
         Result<byte[]> bytes = _files.Read(indexed.File);
+
         if (!bytes.Ok) return 0;
 
         indexed.Version = ComputeVersion(bytes.Value, indexed.Settings);
+
         return indexed.Version;
     }
 
@@ -258,9 +249,7 @@ public sealed class Assets : IDisposable
         where T : IAsset<T>
     {
         if (asset == Handle<T>.None)
-        {
             return new(Result.Failure<T>($"No {typeof(T).Name} was asked for: the handle is none."));
-        }
 
         ulong maker = _maker.Value;
         lock (_lock)
@@ -310,6 +299,7 @@ public sealed class Assets : IDisposable
         {
             Debugging.Error(
                 $"A {typeof(T).Name} a gem made has the id {id}, which {file.Path} has, so it is not added.");
+
             return;
         }
 
@@ -329,14 +319,8 @@ public sealed class Assets : IDisposable
             slot.Loading = null;
         }
 
-        if (hadLoaded)
-        {
-            _events.Publish(new AssetReloaded<T>(asset));
-        }
-        else
-        {
-            _events.Publish(new AssetLoaded<T>(asset));
-        }
+        if (hadLoaded) _events.Publish(new AssetReloaded<T>(asset));
+        else _events.Publish(new AssetLoaded<T>(asset));
     }
 
     /// <summary>
@@ -369,6 +353,7 @@ public sealed class Assets : IDisposable
     {
         List<string> paths = _index.Project.FindAll(IsOf<T>);
         paths.Sort(StringComparer.OrdinalIgnoreCase);
+
         return paths.ConvertAll(Find<T>);
     }
 
@@ -385,9 +370,7 @@ public sealed class Assets : IDisposable
         lock (_lock)
         {
             if (Array.Exists(_roots, root => string.Equals(root.Folder, folder, StringComparison.OrdinalIgnoreCase)))
-            {
                 return;
-            }
 
             _roots = [.. _roots, new Root(folder, Task.Run(() => ReadRoot(_files, folder)))];
             _watches.Add(FileSystem.Watch(folder, path => _changes.Writer.TryWrite(path)));
@@ -471,6 +454,7 @@ public sealed class Assets : IDisposable
         }
 
         init.Invoke(asset, [value]);
+
         return Result.Success(asset);
     }
 
@@ -489,6 +473,7 @@ public sealed class Assets : IDisposable
             if (!files.FileExists(file))
             {
                 Debugging.Warn($"{path}{Sidecar} has no {path} beside it.");
+
                 continue;
             }
 
@@ -496,6 +481,7 @@ public sealed class Assets : IDisposable
             if (!read.Ok)
             {
                 Debugging.Error($"{path}{Sidecar} is not a sidecar, so {path} is not an asset: {read.Error}");
+
                 continue;
             }
 
@@ -570,6 +556,7 @@ public sealed class Assets : IDisposable
         Result<Dictionary<string, JsonElement>> read = bytes.Ok
             ? Json.Read<Dictionary<string, JsonElement>>(bytes.Value)
             : Result.Failure<Dictionary<string, JsonElement>>(bytes.Error);
+
         if (!read.Ok) return Result.Failure<(ulong, JsonElement)>(read.Error);
 
         if (!read.Value.Remove("id", out JsonElement id) || id.ValueKind != JsonValueKind.Number
@@ -591,6 +578,7 @@ public sealed class Assets : IDisposable
         XxHash3 hash = new();
         hash.Append(file);
         hash.Append(Encoding.UTF8.GetBytes(settings.GetRawText()));
+
         return hash.GetCurrentHashAsUInt64();
     }
 
@@ -755,6 +743,7 @@ public sealed class Assets : IDisposable
         int make = ++slot.Started;
         Task<Result<T>> making = Task.Run(() => MakeAfterAsync(slot, id, make, before, isRemake), _stopping);
         slot.Loading = making;
+
         return making;
     }
 
@@ -789,14 +778,8 @@ public sealed class Assets : IDisposable
         lock (_lock)
         {
             isReload = isRemake && slot.Loaded is not null;
-            if (made.Ok)
-            {
-                slot.Loaded = new WeakReference(made.Value);
-            }
-            else if (slot.Loaded?.Target is T held)
-            {
-                kept = held;
-            }
+            if (made.Ok) slot.Loaded = new WeakReference(made.Value);
+            else if (slot.Loaded?.Target is T held) kept = held;
 
             // A failure with nothing held stays, as this make, until the file changes.
             if (slot.Started == make && (made.Ok || kept is not null)) slot.Loading = null;
@@ -805,19 +788,14 @@ public sealed class Assets : IDisposable
         if (kept is not null)
         {
             Debugging.Error($"{made.Error} What loaded before stays in use.");
+
             return Result.Success(kept);
         }
 
         if (!made.Ok) return made;
 
-        if (isReload)
-        {
-            _events.Publish(new AssetReloaded<T>(made.Value));
-        }
-        else
-        {
-            _events.Publish(new AssetLoaded<T>(made.Value));
-        }
+        if (isReload) _events.Publish(new AssetReloaded<T>(made.Value));
+        else _events.Publish(new AssetLoaded<T>(made.Value));
 
         return made;
     }
@@ -833,6 +811,7 @@ public sealed class Assets : IDisposable
         _loadDuration.Record(
             Stopwatch.GetElapsedTime(start).TotalSeconds,
             new KeyValuePair<string, object?>(Metrics.AssetTypeTag, typeof(T).Name));
+
         return read;
     }
 
@@ -854,9 +833,7 @@ public sealed class Assets : IDisposable
         if (!_index.ById.TryGetValue(id, out Indexed? indexed)) return Result.Failure<T>($"No asset has the id {id}.");
 
         if (Services is not { } services)
-        {
             return Result.Failure<T>($"{indexed.Path} was asked for before the gems were, so nothing can read it yet.");
-        }
 
         if (!IsOf<T>(indexed.Path))
         {
@@ -865,6 +842,7 @@ public sealed class Assets : IDisposable
         }
 
         Result<byte[]> bytes = await _files.ReadAsync(indexed.File, _stopping).ConfigureAwait(false);
+
         if (!bytes.Ok) return Result.Failure<T>($"{indexed.Path} could not be read: {bytes.Error}");
 
         Result<T> loaded;
@@ -878,9 +856,11 @@ public sealed class Assets : IDisposable
         }
 
         loaded = loaded.Ok ? TryGive(loaded.Value, nameof(IAsset<T>.Handle), new Handle<T>(id)) : loaded;
+
         if (!loaded.Ok) return Result.Failure<T>($"{indexed.Path} is not a {typeof(T).Name}: {loaded.Error}");
 
         indexed.Version = ComputeVersion(bytes.Value, indexed.Settings);
+
         if (services.GetProvided<ILoadPostProcessor<T>>(out _) is not { } processor) return loaded;
 
         try
@@ -908,15 +888,15 @@ public sealed class Assets : IDisposable
         where T : IAsset<T>
     {
         IAssetLoader<T>? loader = services.GetProvided<IAssetLoader<T>>(out bool isMade);
+
         if (!isMade) return new(Result.Failure<T>($"the gem that reads {typeof(T).Name}s was not made."));
 
         if (loader is not null) return loader.LoadAsync(file.Path, bytes, file.Settings, _stopping);
 
         bool isJson = typeof(T).IsAssignableTo(typeof(IJsonAsset<T>));
+
         if (!isJson && !typeof(T).IsAssignableTo(typeof(ITextAsset<T>)))
-        {
             return new(Result.Failure<T>($"no gem the project lists reads {typeof(T).Name}s."));
-        }
 
         if (file.Settings.GetPropertyCount() != 0)
         {
@@ -929,6 +909,7 @@ public sealed class Assets : IDisposable
         ReadOnlySpan<byte> text = bytes.AsSpan().StartsWith(Encoding.UTF8.Preamble)
             ? bytes.AsSpan(Encoding.UTF8.Preamble.Length)
             : bytes;
+
         return new(TryGive(Activator.CreateInstance<T>(), nameof(ITextAsset<T>.Text), Encoding.UTF8.GetString(text)));
     }
 
@@ -954,9 +935,7 @@ public sealed class Assets : IDisposable
     /// Where asset <paramref name="id"/> is, for a message, or its id when no file has it.
     /// </summary>
     private string GetName(ulong id)
-    {
-        return _index.ById.TryGetValue(id, out Indexed? found) ? found.Path : id.ToString(CultureInfo.InvariantCulture);
-    }
+        => _index.ById.TryGetValue(id, out Indexed? found) ? found.Path : id.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
     /// What is under the roots: every asset by its id, by its path, the paths in each folder, and the engine's own
@@ -1033,9 +1012,6 @@ public sealed class Assets : IDisposable
         /// </summary>
         public int Started { get; set; }
 
-        public override Task RemakeAsync(Assets assets, ulong id)
-        {
-            return assets.RemakeAsync(this, id);
-        }
+        public override Task RemakeAsync(Assets assets, ulong id) => assets.RemakeAsync(this, id);
     }
 }
