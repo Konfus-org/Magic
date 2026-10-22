@@ -1,13 +1,12 @@
 # Standing up Wizard
 
-A step-by-step build of the Magic editor, **Wizard**, and of the gem that lets it, and an LLM, drive the engine.
-Work through it top to bottom: every part ends with a checkpoint to run before going on.
+A step-by-step build of **Wizard**, the Magic editor, and of the gem that lets Wizard or an LLM drive the engine.
+Work through it top to bottom, and run each part's checkpoint before going on.
 
-Paths are relative to the repository root unless a step says otherwise. Commands are PowerShell, and run the same
-under Windows PowerShell 5.1 and `pwsh`.
+Paths are relative to the repository root unless a step says otherwise. Commands are PowerShell and run under both
+Windows PowerShell 5.1 and `pwsh`.
 
-This is a build guide, so unlike the repository's READMEs it is full of code. It is temporary: once Part 8 has written
-`tools/Wizard/README.md`, delete it.
+This guide is temporary: delete it once Part 8 has written `tools/Wizard/README.md`.
 
 ## What you are building
 
@@ -26,72 +25,13 @@ This is a build guide, so unlike the repository's READMEs it is full of code. It
                                                      └─────────────────────────────────┘
 ```
 
-Three processes, two boundaries:
+- **The engine speaks MCP.** A new bundled gem, `Mcp`, serves tools (`entity_list`, `component_set`, `log_read`, …)
+  over localhost HTTP. Wizard and an LLM call the same tools. Wizard references no Magic assembly.
+- **The shell shows Wizard's page.** The Wizard server is a Blazor Server app. Electron starts it and shows its address
+  in a native window. The same address works in a browser tab.
 
-- **The engine and everything else speak MCP.** A new bundled gem, `Mcp`, serves tools (`entity_list`,
-  `component_set`, `log_read`, …) over localhost HTTP. Wizard references no Magic assembly: a tool's name and its JSON
-  are the whole contract, and an LLM gets exactly the same one.
-- **The shell and Wizard share a URL.** The Wizard server is an ordinary Blazor Server app. Electron starts it, reads
-  the address it prints, and shows it in a native window. The same address opens in a browser tab, which is how you
-  iterate with hot reload.
-
-By the end you can press Play to start the engine on a project, read its log, run console commands, list its entities
-and filter them by component, edit components live in an inspector, add and remove components and entities, and do
-all of it from Claude Code as well.
-
-### Decisions baked in, and why
-
-| Decision | Why |
-|---|---|
-| The MCP server is a gem: `ModelContextProtocol.Core` over `HttpListener` | Magic runs on the base .NET runtime, so ASP.NET Core cannot load into a gem. The SDK's protocol package and the BCL's listener need nothing more. |
-| Stateless: nothing pushed, clients poll (`log_read(after)`) | One request, one answer fits an engine whose world is the main thread's, and it is the SDK's simplest HTTP mode. |
-| Off until the `Mcp.port` setting names a port | A gem setting, as LogMetrics' `enabled` is: a project lists the gem, and only a run given a port opens one. It shows in F4 and is followed live. Wizard passes it on the engine's command line. |
-| Projects list the gem | A project names the gems it runs. Part 1 adds `Mcp` to the samples and to the project template. |
-| Components through `World`, by their type's name | `World` already reads and writes components whose type is known only at run time, and `Assemblies` finds a type by name. Reflection is left for removing a component and for the list's filter. |
-| Entities by id, labelled by their components | Entities have no names or parents. The list says what each holds and filters by a component, a page at a time: the samples' largest world, the Valley, holds about 33,000. |
-| Blazor Server inside the official Electron | C# logic, a web UI, cross-platform, and both halves have large backing; no community wrapper in between. |
-| The engine keeps its own window | No viewport work in this pass: an in-editor viewport means streaming frames, and is its own project. |
-
-### What changed since the first version of this tutorial
-
-The first version (`Tools/Wizard/TUTORIAL.md`, removed with the engine redo) was written for an engine with Flecs,
-named and parented entities, chunk files and one flat folder for every gem. Against today's engine:
-
-- The gem is a bundled gem, built like the others, and its port is a setting rather than an environment variable.
-- The hierarchy became a flat entity list, as entities have no names or parents; rename and enable went with them.
-- The logging-package pin is gone: every gem now loads from its own folder into its own load context.
-- `command_list` is `help`, `screenshot` is the console's own command, and an entity's id is three numbers.
-- Wizard lives in `tools/Wizard/`, finds Magic through `Magic.slnx` or `MagicDir`, and is cut off from the engine's
-  central package versions and native-library targets as well as its build settings and code rules.
-
-### What was verified, and what was not
-
-Verified on 2026-10-21, on Windows 11 with the .NET SDK 10.0.401, Node 24.19, Electron 44.9.3, Electron Forge 8.0.1
-and the MCP SDK 2.2.0, in a worktree of `dev` at 8523d660, with every listing exactly as printed here:
-
-- `Magic.slnx` builds with no warning or error under the repository's analyzers.
-- Every tool, called by hand against the samples, headless and with a window: wrong ids, unknown names, a value with
-  a misspelt key, an unknown command, a request from a browser origin refused, and the port moved live with
-  `settings_set`.
-- Wizard in a browser tab: Play, the status line, the console with `help` and `screenshot`, the entity list and its
-  filter, the sun's colour edited and seen in the engine's own screenshot, a component added and removed, an entity
-  created and destroyed, Stop.
-- The shell from source and packaged: the page in the window, the preload bridge, Play from inside it, a project that
-  cannot start reporting why, and closing the window ending the server and the engine.
-- What it costs the engine: with every panel polling, the tool work on the main thread averaged 0.65 ms and peaked at
-  3.3 ms, the list walking a world of 60,685 entities, about four calls a second, measured by LogMetrics in a Debug build.
-
-Not verified, so treat as "should work":
-
-- **Browse's native dialog.** The shell's window was driven through Chromium's debugging port, which cannot click a
-  native dialog; the bridge it calls was checked.
-- **Claude Code connecting** (Part 2.2). The server answers the SDK's own client, but a server cannot be added to a
-  Claude Code session from inside one.
-- **`dotnet watch` hot reload**, the stock Blazor workflow.
-- **A restart of the run** (`Lifetime.Restart`) while Wizard is connected: by the code, the gem is made again and
-  listens on the same port, so the next poll is answered.
-- **macOS and Linux.** Nothing in Wizard is Windows-specific, but `HttpListener` and the shell were tried on Windows
-  only.
+When you're done, you can start the engine on a project with Play, read its log, run console commands, list and
+filter entities, edit, add and remove components and entities, and do all of it from Claude Code too.
 
 ## Part 0: Prerequisites
 
@@ -100,7 +40,7 @@ dotnet --version   # 10.0.100 or a later feature band of 10.0, as global.json sa
 node --version     # v24 or later; npm comes with it
 ```
 
-Before you start, make sure the engine builds and passes its own checks:
+Make sure the engine builds and passes its checks:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File tools/Validate.ps1
@@ -110,13 +50,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools/Validate.ps1
 
 ### 1.1 What Core gives the gem
 
-Almost everything the gem needs is already public: `World` holds the entities and reads and writes components whose
-type is known only at run time, `Assemblies` finds a component's type by its name, `Json` reads and writes in the
-engine's dialect, `Settings` lists and changes every setting, `Threads` hands a step to the main thread and gives back
-what it returned, and `ICommands` runs a console line. The gem takes each in its constructor.
-
-One thing is missing: a list of every component type, for an "add component" menu. `Assemblies` finds a type by
-name, but cannot list them. Add the listing to it, general-purpose, beside `Get<T>`, in
+The gem takes Core's public `World`, `Assemblies`, `Json`, `Settings`, `Threads` and `ICommands` in its constructor.
+Core lacks one thing: a list of every component type, for an "add component" menu. Add it next to `Get<T>` in
 `src/Core/Services/Assemblies.cs`:
 
 ```csharp
@@ -143,21 +78,15 @@ name, but cannot list them. Add the listing to it, general-purpose, beside `Get<
     }
 ```
 
-It searches the same assemblies as `Get`, with the same `From`, so a type that fails to load is skipped the same way
-and a project's code built again replaces its last build. Nothing is kept: it searches each time.
-
-Say so in `src/Core/README.md`, under What a gem can ask for, by replacing the `Assemblies` bullet:
+In `src/Core/README.md`, add this to "What a gem can ask for":
 
 ```markdown
-- **The code loaded**, `Assemblies`: where the type a file names, a component's struct or a script's class, is found
-  by its name, and the types of a kind are listed, for a tool to offer them.
+`Assemblies` finds a type by its name, and lists every type of a kind for a tool to offer.
 ```
 
 ### 1.2 The project
 
-Create `src/Bundled/Gems/Mcp/Mcp.csproj`. Like every bundled gem's, it says only what the gem is: the rest comes from
-`src/Bundled/Gems/Directory.Build.props`, which references Core without copying it and puts the gem in
-`Build/bin/<Configuration>/Gems/Mcp/`.
+Create `src/Bundled/Gems/Mcp/Mcp.csproj`. The rest of its build comes from `src/Bundled/Gems/Directory.Build.props`.
 
 ```xml
 <!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
@@ -174,14 +103,12 @@ Create `src/Bundled/Gems/Mcp/Mcp.csproj`. Like every bundled gem's, it says only
 </Project>
 ```
 
-Every package version lives in `Directory.Packages.props`. Add the SDK's beside the others, in order:
+Add the SDK's version to `Directory.Packages.props`, in order:
 
 ```xml
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
 ```
-
-2.2.0 is the version proven here; 2.3.0 came out the day this was written.
 
 In `Magic.slnx`, add the project to the `/Gems/` folder, in order:
 
@@ -190,7 +117,7 @@ In `Magic.slnx`, add the project to the `/Gems/` folder, in order:
     <Project Path="src/Bundled/Gems/Mcp/Mcp.csproj" />
 ```
 
-Nothing else registers it: the samples' project builds every bundled gem before it runs (`samples/Directory.Build.props`).
+Nothing else registers it.
 
 ### 1.3 The settings
 
@@ -219,13 +146,11 @@ internal sealed class McpSettings : ISettings
 }
 ```
 
-The doc comments are what F4 shows, the range bounds what it offers, and the category puts the port beside the other
-debugging settings.
+F4 shows the doc comments, keeps the value in the range and lists the port under Debug.
 
 ### 1.4 The gem
 
-Create `src/Bundled/Gems/Mcp/McpGem.cs`. Read the notes after the listing before you type it in; they explain what is
-not obvious.
+Create `src/Bundled/Gems/Mcp/McpGem.cs`:
 
 ```csharp
 using System.ComponentModel;
@@ -821,132 +746,39 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 }
 ```
 
-#### Notes on the gem
-
-**The `using` aliases.** `System.ComponentModel` (for `[Description]`) has an `IComponent` too, and the SDK's
-`ModelContextProtocol.Protocol` has a `Result`. Without the two aliases both names are ambiguous and the build fails
-with CS0104.
-
-**The engine's build rules apply.** Every analyzer warning is an error here, which is why the listing reads as it
-does: every `await` says `.ConfigureAwait(false)` (an `await using` too, through `ConfiguredAsyncDisposable`), a task
-nobody awaits is let go with `FireAndForget()`, the null-forgiving `!` is banned, numbers are parsed and formatted
-culture-invariantly, a caught exception is named and logged, and the frame loop's own code has no LINQ.
-
-**How a request flows.**
-
-1. `Update` sees the port setting differ from the port listened on, and `Listen` starts an `HttpListener` there.
-2. `AcceptAsync` takes each connection on a pool thread and lets `ServeAsync` answer it.
-3. `ServeAsync` refuses what is not a POST to `/mcp`, and anything whose `Origin` header names a page that is not on
-   this machine. Browsers send `Origin`; command-line and SDK clients do not. That stops a web page you happen to have
-   open from driving your engine.
-4. `AnswerAsync` makes a transport and a server for that one request (`Stateless = true`) and lets the SDK handle the
-   message: it parses the JSON-RPC, finds the tool, and calls your delegate.
-5. A delegate that touches the world calls `OnMainThreadAsync`, which hands the work to the main thread with
-   `Threads.InvokeAsync(EngineThread.Main, …)` and returns its task. The main thread runs it at the start of the next
-   frame, before `Update`.
-6. The SDK writes the answer into the buffer, and `AnswerAsync` sends it.
-
-This is what `Threads` is for: a flow that must await a step on an engine thread and what it returns. Nothing blocks a
-frame, and nothing is run on the main thread that was not asked for by a request.
-
-**Why the answer is buffered.** A JSON-RPC notification, such as `notifications/initialized`, has no answer, and
-Streamable HTTP wants a 202 for it. `HandlePostRequestAsync` says whether it wrote anything only afterwards, and an
-HTTP status cannot change once the body has started, so the answer goes to memory first.
-
-**How tools are declared.** `McpServerTool.Create` turns a delegate into a tool: parameter names become the JSON
-argument names, `[Description]` becomes their documentation, which is what an LLM reads, and a default value makes an
-argument optional. A tool returns its text, or a task of it.
-
-**Errors.** Throw `McpException` for anything the caller should read: the SDK turns it into a tool error carrying the
-message, after "An error occurred invoking '<tool>': ". Any other exception is reported with no detail, so
-`OnMainThreadAsync` turns what the world throws when it refuses (a dead entity, a call it does not support) into an
-`McpException` with the world's own message.
-
-**Tools that skip the main thread.** `log_read` reads what the gem keeps under its own lock; `component_types`,
-`settings_get`, `settings_set` and `quit` use services that are safe from any thread; `component_set` reads its value
-off the main thread, as reading JSON touches nothing of the world, and sets it on the main thread. `domain_open` starts
-the open and answers at once, as `World.OpenAsync` may take minutes on a cold cache, longer than a client waits; it
-logs an error if the domain does not open, and `engine_info` says when the world has loaded.
-
-**Following the port.** The setting can change while the engine runs (`set Mcp.port=47801` in the console, or
-`settings_set`), so `Update` compares it with the port listened on each frame and moves, as gems follow their settings.
-A port that cannot be had is an error once, and tried again only when the setting changes. A run that restarts
-(`Lifetime.Restart`, a `[RequireRestart]` setting) disposes the gem and makes it again on the same port, so a
-client's next request is answered by the new one.
-
-**The log.** Being an `ILogSink` is all it takes: the loader adds any gem that is one to the log. A sink hears the
-lines logged from when it is made; the lines before go only to the first sink of the run, which is the debug console
-when the project lists it. Part 3's Wizard shows the engine's own terminal output for that reason.
-
-**Components by name.** `World.GetComponents` hands back an entity's components boxed, and `World.Set` takes boxed
-ones, so reading and writing need no reflection: `Assemblies.Get<IComponent>` finds the type a name means and `Json`
-reads and writes it. `Has<T>` and `Remove<T>` exist only as generics, so for the list's filter and for removing, the
-gem closes the generic method over the type and makes a delegate of it, per call. It keeps none: a cache keyed by
-type would keep a reloaded project's old code alive.
-
-**What is left out.** The engine's dialect writes every public property, a transform's matrix and a rotation's
-`isIdentity` among them. Nothing can set those back (they are read harmlessly, as a file may hold them), so
-`RemoveComputed` drops every property without a setter, at every level, and an inspector offers only what an edit can
-change.
-
-**Entity ids.** An entity is three numbers, its slot, its ECS world and its version, so it travels as one string of
-them, `58175.0.1`, which a client hands back as it got it. The version makes an id of a destroyed entity fail rather
-than reach the next one in its slot.
-
 ### 1.5 Its README
 
-Every gem has a README saying what it is and what must hold for it, in concepts rather than code. Create
-`src/Bundled/Gems/Mcp/README.md`:
+Create `src/Bundled/Gems/Mcp/README.md`:
 
 ```markdown
 # Mcp
 
-Serves the running engine to MCP clients over localhost HTTP, so an editor or an LLM drives it through the same
-tools, and the engine knows nothing of who is calling. A tool's name and its JSON are the whole contract: a client
-references no engine code, and asks the server itself what tools there are and what each takes.
+Serves the running engine to MCP clients, such as an editor or an LLM, over localhost HTTP. A client references no
+engine code: it asks the server which tools it has, and calls them with JSON.
 
-## Reaching it
+## Using it
 
-The gem opens no port until its port setting names one, so a project can list it and only the runs that want a
-client open one: an editor sets it on the command line of the engine it starts, and a developer sets it by hand. It
-follows the setting while running, moving to the new port or closing. It listens on the loopback names alone, and
-refuses a request a browser sent from a page that is not on this machine, so a web page open elsewhere cannot drive
-the engine.
+Set the gem's port setting to open a port, for example `--set Mcp.port=47800`. With no port set, it opens none. It
+follows the setting while running. It listens on localhost only, and refuses requests a browser sends from a page on
+another machine.
 
-The server is stateless, Streamable HTTP's simplest form: one POST carries one JSON-RPC message and gets one answer,
-and a server is made for that request alone. Nothing is pushed, so a client polls, the log as much as the world.
+Each POST to `/mcp` carries one JSON-RPC message and gets one answer. Nothing is pushed: clients poll.
 
-## Threads
-
-Requests arrive on the thread pool. What touches the world is handed to the main thread and answers once it has run
-there, at the start of the next frame, so a call waits for a frame and sees the world between two of them. What
-reads only what is safe from any thread, the settings, the code loaded and the log the gem keeps, answers at once.
-Opening a domain is started and not waited for, since a domain can take far longer to open than a client waits for an
-answer; the world says when it has loaded.
-
-## Entities and components
-
-An entity travels as one string, its three numbers, which a client hands back as it got it. Entities have no names,
-so a list of them says the types of their components, and filters by one, a page at a time, as a world can hold far
-more entities than a client lists. A component travels by its type's name, as JSON in the engine's dialect, with what
-the type only computes left out, a transform's matrix, since nothing could set it back. A component is set whole: what
-is left out takes its default, as in a file.
-
-## The log
-
-The gem is a log sink that keeps the latest lines, numbered, so a client asks for those after the last it saw. It
-hears the lines logged from when it is made; those before went to the first sink alone, so an editor that starts the
-engine reads its terminal for them.
-
-## Limits
-
-It saves nothing: what a client changes lasts until the domain is opened again. It has no screenshot tool: the
-console's screenshot command saves one, and the log says where.
+- Tools that touch the world run on the main thread at the start of the next frame. The others answer at once.
+- `domain_open` starts opening a domain and answers at once. `engine_info` says when the world has loaded.
+- An entity id is one string of three numbers, such as `58175.0.1`. Hand it back as you got it.
+- `entity_list` returns a page of entities with their component types, and can filter by a component.
+- A component travels as JSON under its type's name, without properties nothing can set, such as a transform's
+  matrix. Setting a component replaces it whole: what you leave out takes its default.
+- `log_read` returns the latest log lines, numbered, so you can ask for the lines after the last one you saw. It has
+  only the lines logged after the gem started.
+- Nothing is saved: changes last until the domain opens again. For a screenshot, run the console's `screenshot`
+  command; the log says where it went.
 ```
 
 ### 1.6 List it
 
-A project runs the gems its `.magic` file lists. Add `Mcp` after `LogMetrics` in `samples/Samples.magic`:
+Add `Mcp` after `LogMetrics` in `samples/Samples.magic`:
 
 ```json
         "LogMetrics",
@@ -954,9 +786,8 @@ A project runs the gems its `.magic` file lists. Add `Mcp` after `LogMetrics` in
     ]
 ```
 
-and the same in `tools/Templates/Project/ProjectName.magic`, so every new project made from the template can be opened
-in Wizard. Listing it costs nothing: without a port it opens none. (Run `tools/InstallTemplates.ps1` again to update
-the installed template.)
+Do the same in `tools/Templates/Project/ProjectName.magic`, then run `tools/InstallTemplates.ps1` again to update the
+installed template.
 
 ### Checkpoint
 
@@ -965,20 +796,20 @@ dotnet build Magic.slnx
 dotnet run --project samples
 ```
 
-The build has no warnings or errors. Among the log's start-up lines is
+The build has no warnings or errors. The log's start-up lines include
 
 ```
 Gem Mcp 1.0.0 by Konfus started: Serves the engine to MCP clients, an editor or an LLM, over localhost HTTP.
 ```
 
-and no "MCP clients reach the engine" line follows, because no port is set. The samples run exactly as before. Run
-`tools/Validate.ps1` again before you commit the engine half.
+with no "MCP clients reach the engine" line after it: no port is set yet. Run `tools/Validate.ps1` again before you
+commit the engine half.
 
 ## Part 2: Talk to the engine
 
 ### 2.1 By hand
 
-Terminal one, run the samples with the port set (what follows `--` goes to Magic):
+In one terminal, run the samples with the port set:
 
 ```powershell
 dotnet run --project samples -- --set Mcp.port=47800
@@ -990,7 +821,7 @@ Add `--headless` after the `--` to run without a window. The log now includes
 MCP clients reach the engine at http://localhost:47800/mcp
 ```
 
-Terminal two, define a helper and call some tools:
+In a second terminal, define a helper and call some tools:
 
 ```powershell
 function Mcp($tool, $arguments = '{}') {
@@ -1011,10 +842,8 @@ event: message
 data: {"result":{"content":[{"type":"text","text":"{"project":"Samples","root":"samples","frame":14297,"entities":49,"domains":["Domains/Hub/Hub.domain"],"isLoading":false,"isLoaded":true}"}]},"id":1,"jsonrpc":"2.0"}
 ```
 
-The tool's own answer is the `text` value: JSON inside a JSON string, so its quotes arrive escaped as `"`. That
-one reads `{"project":"Samples","root":"samples","frame":14297,"entities":49,"domains":["Domains/Hub/Hub.domain"],"isLoading":false,"isLoaded":true}`.
-`component_types` answers `Camera`, `Contacts`, `DirectionalLight`, `Physics`, `PointLight`, `PostProcessing`,
-`Renderer`, `Scripts`, `Sky`, `Spin`, `SpotLight`, `Tags`, `Transform` and `Weather`.
+The tool's answer is the `text` value: JSON inside a JSON string. `component_types` answers with the names of the
+component types, such as `Camera`, `DirectionalLight` and `Transform`.
 
 Now change the world. Find the sun, read it, and turn it red:
 
@@ -1038,35 +867,29 @@ The engine exits.
 
 ### 2.2 From Claude Code
 
-Register the server with Claude Code for this repository, kept out of git:
+Register the server with Claude Code:
 
 ```powershell
 claude mcp add --transport http magic http://localhost:47800/mcp
 ```
 
-Start the engine with `--set Mcp.port=47800` as above, then start Claude Code in the repository. Ask it things like
-"which entities have a light?" or "turn the sun red and take a screenshot" (it runs the `screenshot` command and reads
-the path from the log). The server is only there while an engine runs on that port.
+Start the engine with `--set Mcp.port=47800`, then start Claude Code in the repository and ask it things like "which
+entities have a light?" or "turn the sun red and take a screenshot". The server exists only while an engine runs on
+that port.
 
-47800 is only the convention for an engine you start by hand. Wizard picks a free port each run, so the two never
-collide.
+Use 47800 for an engine you start by hand. Wizard picks a free port for each run.
 
 ## Part 3: The Wizard server
 
-Wizard is its own solution, in `tools/Wizard/`. Nothing in it is built by `Magic.slnx`, and nothing in it references
-Magic.
+Wizard is its own solution in `tools/Wizard/`. `Magic.slnx` doesn't build it, and it references no Magic code.
 
 ### 3.1 Cut Wizard off from the engine's build
 
-Four files at the repository root reach every project beneath them, each found by MSBuild or the compiler walking up
-from the project to the first one of its name: `Directory.Build.props` (output folders, configurations, analyzers,
-banned APIs, the namespace check), `Directory.Build.targets` (the native libraries), `Directory.Packages.props`
-(central package versions, and the analyzers it adds to every project) and `.editorconfig` (the engine's code rules,
-whose `ConfigureAwait(false)` rule is wrong for Blazor components, which must continue on their own context). Giving
-Wizard its own of each stops every walk at `tools/Wizard/`.
+The repository's build settings, native-library targets, package versions and code rules must not reach Wizard. Give
+it its own `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props` and `.editorconfig`.
 
-Create these before you scaffold the project in 3.2; otherwise the template's first restore goes under the engine's
-`Build/obj/Debug/Tools/Wizard/` (delete that folder if it did).
+Create them before you scaffold the project in 3.2. Otherwise the first restore goes under
+`Build/obj/Debug/Tools/Wizard/`; delete that folder if it did.
 
 `tools/Wizard/Directory.Build.props`:
 
@@ -1087,8 +910,7 @@ Create these before you scaffold the project in 3.2; otherwise the template's fi
 </Project>
 ```
 
-With `ArtifactsPath`, the build lands in `Build/Wizard/bin/Wizard/debug/` and its intermediates in
-`Build/Wizard/obj/`. No `bin` or `obj` folder appears in the source tree.
+The build goes to `Build/Wizard/bin/Wizard/debug/`, and its intermediate files to `Build/Wizard/obj/`.
 
 `tools/Wizard/Directory.Build.targets`:
 
@@ -1133,17 +955,9 @@ dotnet new sln --format slnx -n Wizard
 dotnet sln Wizard.slnx add Wizard/Wizard.csproj
 ```
 
-What the flags mean:
-
-- `--interactivity Server`: components run in the server process and update the page over a websocket. That is what
-  lets C# in a component start processes and hold an MCP client.
-- `--all-interactive`: the whole app is interactive, not page by page.
-- `--empty`: no sample pages or Bootstrap.
-- `--no-https`: it only ever listens on localhost.
-
-You now have `tools/Wizard/Wizard.slnx` and the project in `tools/Wizard/Wizard/`. In
-`tools/Wizard/Wizard/Properties/launchSettings.json`, set `applicationUrl` to `http://localhost:5211`: the template
-picks a random port, and a fixed one makes the later steps copy-pasteable.
+This makes `tools/Wizard/Wizard.slnx` and a Blazor Server project in `tools/Wizard/Wizard/`, interactive throughout,
+with no sample pages and no HTTPS. In `tools/Wizard/Wizard/Properties/launchSettings.json`, set `applicationUrl` to
+`http://localhost:5211`.
 
 ### 3.3 The project file
 
@@ -1210,13 +1024,12 @@ if (Environment.GetEnvironmentVariable("WIZARD_SHELL") == "1")
 app.Run();
 ```
 
-Next to the template this adds two things: the `Engine` singleton, and the stdin lifeline Part 4 uses. Because
-`Engine` is a singleton that implements `IAsyncDisposable`, the host disposes it on shutdown, and that is what stops
-the engine.
+This adds the `Engine` singleton and the stdin lifeline Part 4 uses. The host disposes `Engine` on shutdown, which
+stops the engine.
 
 ### 3.5 The Engine service
 
-Create `tools/Wizard/Wizard/Services/Engine.cs`. It is the only place in Wizard that knows how the engine is reached.
+Create `tools/Wizard/Wizard/Services/Engine.cs`, the only part of Wizard that talks to the engine:
 
 ```csharp
 using System.Diagnostics;
@@ -1442,23 +1255,8 @@ public sealed class Engine : IAsyncDisposable
 public sealed class EngineException(string message) : Exception(message);
 ```
 
-Things worth knowing:
-
-- **The port goes on the command line.** `--set Mcp.port=<free port>` sets the gem's setting for this run alone, over
-  every preset. A project that does not list the gem gets an error for the key and runs without a server, which is
-  why the timeout's message asks about the gem.
-- **Magic's output comes through.** Its terminal output is read and written to Wizard's own, so `dotnet run` shows the
-  engine's whole log, the lines before the gem was made among them, and a run that fails says why there. Its input is
-  a pipe nothing writes to, so the engine's console never reads Wizard's input, which the shell holds as a lifeline.
-- **`Changed` fires on a thread that is not the UI's** (the process's exit callback). Components hop back with
-  `InvokeAsync` before touching their state; the ones below do.
-- **`EngineException` is the only exception a component catches.** `CallAsync` turns transport failures (the engine
-  died mid-call) and tool errors (the engine said no) into it.
-- **Finding the engine.** Built inside this repository, Wizard walks up from its own output folder to `Magic.slnx` and
-  uses the Debug build. Outside a repository, it uses the Magic folder `MagicDir` names, which
-  `tools/InstallTemplates.ps1` sets for the templates.
-- **Wizard uses `File` and `Process` directly.** The engine's rules (disk access through `IFileSystem`, no `Console`)
-  are the engine's; Wizard is a separate application.
+Play starts Magic with `--set Mcp.port=<free port>`, and the engine's log shows in Wizard's terminal. Inside this
+repository Wizard runs the Debug build next to `Magic.slnx`; elsewhere it runs the Magic in the folder `MagicDir` names.
 
 ### 3.6 App.razor and imports
 
@@ -1639,13 +1437,8 @@ Create the folder `tools/Wizard/Wizard/Components/Editor` and in it `Toolbar.raz
 }
 ```
 
-This is the pattern every panel follows:
-
-- `OnInitialized` starts a `PollAsync` loop on a `PeriodicTimer`. The loop's continuations run on the component's own
-  context, so it changes state and calls `StateHasChanged` directly.
-- `Dispose` cancels the loop.
-- Engine failures are caught as `EngineException` and shown or ignored, never thrown out of the component: an unhandled
-  exception would end the page's connection.
+Every panel follows this pattern: `OnInitialized` starts a polling loop, `Dispose` cancels it, and engine failures are
+caught as `EngineException`, never thrown out of the component.
 
 ### 3.8 The console
 
@@ -1768,14 +1561,11 @@ Create `tools/Wizard/Wizard/Components/Editor/ConsolePanel.razor` (not `Console.
 }
 ```
 
-The console keeps its lines when the engine stops, so you can still read why it stopped. A line's level, `verbose`,
-`info`, `warn` or `error` as the engine's dialect writes the enum, is its CSS class, which the stylesheet colours. A
-new page starts again from the first line the engine kept.
+The console keeps its lines when the engine stops. Each line's level is its CSS class.
 
 ### 3.9 The page
 
-Replace `tools/Wizard/Wizard/Components/Pages/Home.razor`. The entity list and the inspector come in Part 5; for now
-the page has the toolbar, the empty panels and the console.
+Replace `tools/Wizard/Wizard/Components/Pages/Home.razor`. Part 5 fills in the entity list and the inspector.
 
 ```razor
 @page "/"
@@ -1795,7 +1585,7 @@ the page has the toolbar, the empty panels and the console.
 
 ### 3.10 The stylesheet
 
-Replace `tools/Wizard/Wizard/wwwroot/app.css`. It already holds the styles for the panels Part 5 adds.
+Replace `tools/Wizard/Wizard/wwwroot/app.css`. It includes the styles for Part 5's panels.
 
 ```css
 :root {
@@ -2145,12 +1935,11 @@ dotnet run --project Wizard
 
 It prints `Now listening on: http://localhost:5211`. Open that in a browser.
 
-1. Paste the full path of the samples into the box, the folder or its `Samples.magic`, and press **Play**.
-2. The engine window opens on the Hub. The status on the right reads `Samples · frame N · 49 entities`, the frame
-   counting up (` · loading` follows while a domain is still opening).
-3. The console fills with the engine's log from the gem's first line on: `Gem Mcp 1.0.0 by Konfus started`, `MCP
-   clients reach the engine at http://localhost:<port>/mcp`, `Opened Domains/Hub/Hub.domain: 48 entities in 1
-   prefabs.` The terminal running Wizard shows the engine's whole log.
+1. Paste the full path of the samples folder, or of its `Samples.magic`, into the box and press **Play**.
+2. The engine window opens on the Hub. The status on the right reads `Samples · frame N · 49 entities`, with the frame
+   counting up.
+3. The console fills with the engine's log, starting at `Gem Mcp 1.0.0 by Konfus started`. The terminal running
+   Wizard shows the whole log.
 4. Type `help` in the command box and press Enter: the engine's commands are listed.
 5. Type `nope`: a yellow line says there is no such command.
 6. Type `screenshot`: a `Screenshot: …png` line names the file under `Build/bin/Debug/Screenshots/`.
@@ -2166,13 +1955,12 @@ For day-to-day UI work, use `dotnet watch` instead of `dotnet run`:
 dotnet watch --project Wizard
 ```
 
-Edits to `.razor`, `.cs` and `.css` files reach the open page without a restart. This is the fast loop; use the
-Electron shell when you need the real window.
+Edits to `.razor`, `.cs` and `.css` files reach the open page without a restart.
 
 ## Part 4: The Electron shell
 
-The shell is a small Node project in `tools/Wizard/Shell`. It is the only JavaScript in the repository, and it stays
-small: it owns the window, the menu and native dialogs, and nothing of the editor itself.
+The shell is a small Node project in `tools/Wizard/Shell`. It owns the window, the menu and native dialogs, and
+nothing else.
 
 ### 4.1 package.json
 
@@ -2202,13 +1990,8 @@ Then, from `tools/Wizard/Shell`:
 npm install --save-dev electron@44 @electron-forge/cli@8 @electron-forge/maker-zip@8
 ```
 
-This adds a `devDependencies` section to `package.json` (`electron` `^44.9.3` and the two Forge packages `^8.0.1` when
-this was written), writes `package-lock.json`, which you commit, and makes `node_modules`, which you never commit
-(Part 8 ignores it). The majors are pinned because Electron 45 came out the day this was written. Electron Forge is the
-Electron project's own packaging tool; only Part 7 needs it, but installing it now keeps this to one step.
-
-Electron downloads its binary the first time it runs, not during `npm install`, so the first `npm start` takes a
-little longer and prints `Downloading Electron binary...`.
+This adds Electron and Electron Forge, its packaging tool, to `package.json` and writes `package-lock.json`. Commit
+the lock file, never `node_modules`. The first `npm start` downloads the Electron binary.
 
 ### 4.2 main.js
 
@@ -2329,20 +2112,8 @@ app.on('before-quit', () => {
 });
 ```
 
-How the pieces fit:
-
-- **Finding the port.** The server is started with `--urls http://127.0.0.1:0`. Kestrel picks a free port and logs
-  `Now listening on: http://127.0.0.1:NNNNN`, which the shell reads from the server's output.
-- **The output.** Everything the server prints, the engine's log included (3.5), goes on to the shell's own output, so
-  `npm start` in a terminal shows it all.
-- **`ASPNETCORE_ENVIRONMENT`.** A build that has not been published serves its static files (the stylesheet, the
-  Blazor script) only in the Development environment. From source the shell runs the Debug build, so it says
-  Development; packaged, it runs published output and says Production.
-- **`cwd`.** ASP.NET Core uses the working folder as its content root, where it looks for `appsettings.json`. Setting
-  it to the server's own folder makes that independent of where the shell was started.
-- **The shutdown chain.** The window closes → `before-quit` closes the server's stdin → `Program.cs` sees the end of
-  its input and stops the host → the host disposes `Engine` → `Engine.StopAsync` tells Magic to quit. Because it hangs
-  on a pipe, the same chain runs if Electron crashes.
+The shell starts the server on a free port, reads the address from its output and shows it. Closing the window, or
+the shell crashing, closes the server's input, which stops the server and the engine.
 
 ### 4.3 preload.js
 
@@ -2361,11 +2132,11 @@ contextBridge.exposeInMainWorld('wizard', {
 });
 ```
 
-This is the whole pattern for any native feature you add later:
+To add a native feature later:
 
 1. `main.js`: `ipcMain.handle('some-name', …)` does the native thing and returns plain data.
 2. `preload.js`: add a function to `window.wizard` that invokes it.
-3. `App.razor`: add a do-nothing stand-in to the fallback object, so a browser tab still works.
+3. `App.razor`: add a do-nothing stand-in to the fallback object, for browser tabs.
 4. A component: `await JS.InvokeAsync<T>("wizard.someName")`. `Toolbar.BrowseAsync` is the example.
 
 ### Checkpoint
@@ -2390,7 +2161,7 @@ npm start
 
    It prints nothing (unless another Magic of yours runs elsewhere).
 
-**Hot reload inside the real window.** Run the server under `dotnet watch` in one terminal, and point the shell at it
+**Hot reload in the real window.** Run the server under `dotnet watch` in one terminal, and point the shell at it
 from another:
 
 ```powershell
@@ -2402,14 +2173,13 @@ $env:WIZARD_URL = "http://localhost:5211"
 npm start
 ```
 
-In this mode the shell neither starts nor stops the server: closing the window leaves `dotnet watch` running. Remove
-the variable (`Remove-Item Env:WIZARD_URL`) to go back.
+The shell then neither starts nor stops the server. Remove the variable (`Remove-Item Env:WIZARD_URL`) to go back.
 
-View → Toggle Developer Tools gives you the browser's devtools for layout and CSS work.
+View → Toggle Developer Tools opens the browser's devtools.
 
 ## Part 5: Entities and Inspector
 
-The engine's tools are all there already; this part is Wizard's UI alone.
+This part is Wizard's UI only. The engine's tools are already there.
 
 ### 5.1 The page type
 
@@ -2591,21 +2361,13 @@ Create `tools/Wizard/Wizard/Components/Editor/EntityList.razor`:
 }
 ```
 
-Why it is shaped this way:
-
-- **A page at a time.** The samples' largest world, the Valley, holds about 33,000 entities, more than a list should
-  draw, so the panel asks for the first hundred that match and **Show 100 more** asks for more. The count in the header is how many match.
-- **The filter is the hierarchy's stand-in.** Entities have no names or parents, so what tells them apart is what they
-  hold: "With DirectionalLight" finds the sun and the moon, "With Camera" the player's camera. The types come from
-  `component_types`, asked again whenever the engine starts.
-- **One poll a second.** Each walks the world on the engine's main thread, which is the 3.3 ms measured at the top. If
-  a larger world makes that show, poll less often or only on a change of filter.
+The list shows the first hundred entities that match its filter, and **Show 100 more** asks for more. The header
+counts every match. It polls once a second.
 
 ### 5.3 A field editor for any JSON value
 
-Create `tools/Wizard/Wizard/Components/Editor/JsonField.razor`. The inspector knows nothing about `Transform` or
-`Camera`: it shows whatever JSON the engine sends, so a new component type in a gem or a game shows up in it with no
-change to Wizard.
+Create `tools/Wizard/Wizard/Components/Editor/JsonField.razor`. It edits any JSON value the engine sends, whatever the
+component type.
 
 ```razor
 @using System.Globalization
@@ -2699,12 +2461,8 @@ else
 }
 ```
 
-Two Razor details that will bite you otherwise:
-
-- `@(Owner[Key]?.GetValue<bool>())` needs the outer parentheses. Without them Razor reads `<bool>` as an HTML tag and
-  the build fails with "method group cannot be made nullable" (CS8978).
-- Number inputs are plain text inputs on purpose. An asset id such as `12045873320119837722` survives neither a
-  browser's number input nor a `double`.
+Keep the outer parentheses in `@(Owner[Key]?.GetValue<bool>())`; without them the build fails with CS8978. Numbers
+use plain text inputs.
 
 ### 5.4 The inspector
 
@@ -2883,14 +2641,8 @@ Create `tools/Wizard/Wizard/Components/Editor/Inspector.razor`:
 }
 ```
 
-How an edit travels: you change a field → `JsonField.SetAsync` replaces the value inside the component's JSON and
-raises `Changed` → the inspector sends the whole component with `component_set` → it reloads the entity, so the screen
-shows what the engine holds, not what you typed. If the engine refuses a value, its message shows in red and the
-reload puts the old value back.
-
-The `_editing` flag matters: the player's camera flies itself, so its `Transform` changes every frame, and without the
-flag the half-second refresh would overwrite a field while you type in it. A component the engine writes as one value
-rather than an object, the list of hashes `Tags` is, gets one raw JSON field.
+An edit sends the whole component with `component_set`, then reloads the entity. If the engine refuses a value, its
+message shows in red and the old value comes back. A field you are typing in isn't refreshed until you leave it.
 
 ### 5.5 Put them on the page
 
@@ -2916,35 +2668,29 @@ Replace `tools/Wizard/Wizard/Components/Pages/Home.razor`:
 }
 ```
 
-The page owns the selection and hands it to both panels. That is the whole of Wizard's shared UI state for now.
+The page owns the selection and hands it to both panels.
 
 ### Checkpoint
 
 Run Wizard (in a browser or the shell), Play the samples, then:
 
-1. Open the Valley (key 6). The entity list shows about 32,700 and, first, the player and the domain's globals: the
-   player's camera (`Camera, Scripts, Tags, Transform`), the sun and the moon (`DirectionalLight, Spin, Transform`),
-   `PostProcessing`, `Weather`, then the point lights.
+1. Open the Valley (key 6). The entity list counts about 32,700, starting with the player's camera
+   (`Camera, Scripts, Tags, Transform`) and the sun and the moon (`DirectionalLight, Spin, Transform`).
 2. Choose **With Camera**: one entity. Choose **Every entity** again.
 3. Select the sun. The inspector shows `Transform` (position, rotation and scale, no matrix), `DirectionalLight` and
    `Spin`.
-4. Set the colour's `g` to `0.3` and `b` to `0.2`, pressing Tab after each. The world turns red in the engine window
-   (type `screenshot` in the console to keep a picture of it), and the fields still read `0.3` and `0.2` after the
-   next refresh.
+4. Set the colour's `g` to `0.3` and `b` to `0.2`, pressing Tab after each. The world turns red in the engine window,
+   and the fields still read `0.3` and `0.2` after the next refresh.
 5. Press **+**. The new entity is selected, with no components. Choose `Transform` under "Add component…" and press
    **Add**: a Transform with its defaults appears (rotation `w` 1, scale 1), and the status counts one more entity.
 6. Press **×** beside `Transform`: the entity has no components again. Press **−**: it is gone, and the count is back.
 
-Edits are live only. Stop and Play again, and the world is what its prefabs say: saving is later work.
+Edits aren't saved. Stop and Play again, and the world is back to what its prefabs say.
 
 ## Part 6: Tests
 
-None in this pass, and that is the rule rather than a gap. The engine's tests are unit tests of a project's public API
-(`tests/README.md`), and the gem makes nothing public: it answers HTTP on a socket and calls into the world, which is
-I/O and more than one unit. What a test could check is what Part 2 checks by hand. `Assemblies.GetAll` is public, so
-Core.Tests could cover it; add one only if you want it, as tests are written when asked for.
-
-Wizard has no tests either: its logic is thin wiring over `Engine.CallAsync`.
+None. Part 2 checks the gem by hand. Add a Core.Tests test for `Assemblies.GetAll` only if one is asked for
+([Tests](../../tests/README.md)).
 
 ## Part 7: Packaging
 
@@ -2984,8 +2730,7 @@ cd Shell
 npm run package
 ```
 
-The app lands in `Build/Wizard/shell/out/Wizard-win32-x64/`. Run `Wizard.exe` there: it behaves as `npm start` does,
-but runs the published server in the Production environment.
+The app lands in `Build/Wizard/shell/out/Wizard-win32-x64/`. Run `Wizard.exe` there.
 
 To make a zip you can hand to someone:
 
@@ -2993,18 +2738,14 @@ To make a zip you can hand to someone:
 npm run make
 ```
 
-It writes `Build/Wizard/shell/out/make/zip/win32/x64/Wizard-win32-x64-0.1.0.zip`, about 150 MB, most of it Chromium.
+It writes `Build/Wizard/shell/out/make/zip/win32/x64/Wizard-win32-x64-0.1.0.zip`.
 
-Things to know before you hand it out:
+Before you hand it out:
 
-- **The published server needs the .NET 10 ASP.NET Core runtime on the machine.** To drop that, publish
-  self-contained: add `-r win-x64 --self-contained` to the `dotnet publish` line, and the matching runtime identifier
-  on other platforms.
-- **It still has to find an engine.** Inside this repository the walk up to `Magic.slnx` works from the packaged
-  location too. Anywhere else, set `MagicDir` to a Magic folder. How Wizard and Magic are shipped together is an open
-  question for later.
-- **One platform per build.** Electron Forge packages for the platform it runs on: a macOS or Linux build is made on
-  that platform, with the server published for it.
+- The machine needs the .NET 10 ASP.NET Core runtime, unless you publish self-contained: add
+  `-r win-x64 --self-contained` to the `dotnet publish` line, or another platform's runtime identifier.
+- Outside this repository, set `MagicDir` to a Magic folder.
+- Electron Forge packages only for the platform it runs on.
 
 ## Part 8: Housekeeping
 
@@ -3017,43 +2758,27 @@ Add to the repository's `.gitignore`:
 node_modules/
 ```
 
-Everything else Wizard makes is under `Build/` already. Commit `tools/Wizard/Shell/package-lock.json`.
+Commit `tools/Wizard/Shell/package-lock.json`.
 
 ### 8.2 READMEs
 
-Create `tools/Wizard/README.md`, which says how Wizard works and what must hold for it, as the repository's READMEs
-do:
+Create `tools/Wizard/README.md`:
 
 ````markdown
 # Wizard
 
-The Magic editor: an application of its own, which starts Magic on a project and drives it only through the gem that
-serves the engine over MCP, so everything Wizard does, an LLM client can do too. Wizard references no engine assembly:
-a tool's name and its JSON are the whole contract.
+The Magic editor. It starts Magic on a project and drives it through the MCP gem's tools, the same tools an LLM
+client uses. Wizard references no engine code.
 
-## How it is built
+- **The server** is a Blazor Server app. Every panel is a C# component.
+- **The shell** is an Electron app that owns the window, the menu and native dialogs. It starts the server on a free
+  port and shows it. Closing the shell stops the server and the engine.
 
-Two halves. The server is a Blazor Server app: every panel is a C# component, rendered in the server and updated in
-the page over a websocket, so what the editor does, starting the engine and holding its MCP client among it, is C#.
-The shell is a thin Electron app that owns only what a page cannot: the window, the menu and native dialogs. It starts
-the server on a free port, reads the address it prints and shows it, and holds the server's input open, so when the
-shell goes, the server stops, and the engine with it.
-
-Wizard is its own solution, cut off from the engine's build by files of its own beside it: build settings, targets,
-package versions and code rules, as its components follow ASP.NET's conventions rather than the engine's. What it
-builds goes under the repository's `Build/Wizard/`.
-
-## The engine
-
-One engine at a time: Play starts Magic, this repository's Debug build or else the one in the folder `MagicDir`
-names, on the project, with the MCP gem's port set to a free one for that run, and waits for its server to answer. So
-the project must list that gem. The engine's own output goes on to Wizard's, where what happened before the gem was
-made, or why a run failed, can be read. The server pushes nothing, so every panel polls, and a field being typed in
-is left alone until it loses focus.
+Wizard is its own solution, outside the engine's build and code rules. It builds into `Build/Wizard/`.
 
 ## Building and running
 
-You need the .NET 10 SDK and Node. Build the engine first (`dotnet build Magic.slnx` at the repository's root).
+You need the .NET 10 SDK and Node. Build the engine first with `dotnet build Magic.slnx` at the repository root.
 
 ```powershell
 dotnet build Wizard.slnx
@@ -3062,23 +2787,26 @@ npm install
 npm start
 ```
 
+Press Play to start Magic on a project, which must list the MCP gem. Wizard runs this repository's Debug build, or
+else the Magic in the folder `MagicDir` names. The engine's log shows in Wizard's terminal.
+
 ## Working on the UI
 
-`dotnet watch --project Wizard`, then the address it prints in a browser. To see the same hot-reloading page in the
-real window, set `WIZARD_URL` to that address before `npm start`.
+Run `dotnet watch --project Wizard` and open the address it prints in a browser. To use the real window, set
+`WIZARD_URL` to that address before `npm start`.
 
 ## Adding a feature
 
-A feature is an engine tool first, so an LLM gets it too, and then a panel that calls it. What only a desktop app can
-do, a native dialog or a menu, is a handler in the shell, exposed to the page by its preload script, with a stand-in
-in the page so a browser tab still works.
+Add a tool to the MCP gem first, then a panel that calls it. For something only a desktop app can do, such as a
+native dialog, add a handler in the shell, expose it in the shell's preload script, and give the page a stand-in for
+browser tabs.
 ````
 
-In `tools/README.md`, change the first sentence to take the editor in:
+In `tools/README.md`, change the first sentence to:
 
 ```markdown
-What the build runs, what checks a change, what a gem or project of one's own starts from, and the editor; none of it
-ships with Magic.
+Scripts that build and check Magic, the repository's own analyzers, the templates for a new gem or project, and the
+editor. Nothing here ships.
 ```
 
 and add a section at its end:
@@ -3086,57 +2814,44 @@ and add a section at its end:
 ```markdown
 ## Wizard
 
-`Wizard/` is the editor: an application of its own, with its own solution, which starts Magic on a project and drives
-it only through the gem that serves MCP. It is cut off from the engine's build and code rules, and is no part of a
-change's checks. How it is built and run is in [its README](Wizard/README.md).
+The Magic editor, with its own solution. It isn't part of a change's checks. See [its README](Wizard/README.md).
 ```
 
-In the root `README.md`'s folder structure, make the `tools/` line:
+In the root `README.md`'s Folders block, make the `tools/` line:
 
 ```
-tools/                     what the build runs, such as the analyzers, the scripts that check a change, and the editor (tools/Wizard); nothing here ships with Magic
+tools/                     the repository's analyzers, the build and check scripts, and the editor (tools/Wizard); nothing here ships
 ```
 
-Once these exist, this tutorial has done its job: delete it.
+Then delete this tutorial.
 
 ## Troubleshooting
 
-| Symptom | Cause and fix |
+| Symptom | Fix |
 |---|---|
-| `CS0104: 'IComponent' is an ambiguous reference` or `'Result' is an ambiguous reference` in `McpGem.cs` | One of the two `using … = …;` aliases at the top of the file is missing. |
-| The engine logs an error for `--set Mcp.port`, and Wizard says the MCP server never answered | The project does not list the gem: add `"Mcp"` to its `.magic` file's gems (1.6). |
-| `MCP clients cannot reach the engine on port N: …` | Something else holds the port, usually an engine left running by hand on 47800. Close it, or pick another port. |
-| Wizard: "Magic is not at …" | The engine is not built (`dotnet build Magic.slnx`), or Wizard runs outside the repository and `MagicDir` is not set. |
-| Wizard: "Magic exited with code 1 before its MCP server answered" | The project's path is wrong, or it could not be opened. The terminal running Wizard has the engine's log, which says why. |
-| Wizard's build fails with `CA2007` or other engine rules, or restores the engine's analyzers | A file from 3.1 is missing: `.editorconfig` for the rules, `Directory.Packages.props` for the analyzers. |
-| `Build/obj/Debug/Tools/Wizard/` appeared | The project was scaffolded before 3.1's files existed. Delete that folder; the next restore goes under `Build/Wizard/`. |
-| The page loads unstyled from the Debug build | The server runs in Production without being published. Use `dotnet run`, or let the shell start it (it says Development). |
-| `CS8978: 'method group' cannot be made nullable` in a `.razor` file | A generic call in an attribute is missing its outer parentheses: write `@(x.GetValue<bool>())`. |
-| The shell: "Wizard could not start … ENOENT" | The server is not built: `dotnet build Wizard.slnx` in `tools/Wizard/`. |
-| A console command runs glued to the one before | The box is cleared when the server's answer reaches the page, a moment after Enter; typing within that moment lands on the old text. |
-| The engine runs on after Wizard was killed from Task Manager | Killing the Wizard server skips its shutdown. Closing the window, or the shell crashing, does stop the engine; a hard kill of the server does not. Close the engine window. |
+| `CS0104: 'IComponent' is an ambiguous reference` or `'Result' is an ambiguous reference` in `McpGem.cs` | Add back the missing `using … = …;` alias at the top of the file. |
+| The engine logs an error for `--set Mcp.port`, and Wizard says the MCP server never answered | Add `"Mcp"` to the project's `.magic` file (1.6). |
+| `MCP clients cannot reach the engine on port N: …` | Another program holds the port, often an engine you started on 47800. Close it or pick another port. |
+| Wizard: "Magic is not at …" | Build the engine (`dotnet build Magic.slnx`), or set `MagicDir` outside the repository. |
+| Wizard: "Magic exited with code 1 before its MCP server answered" | Check the project's path. The engine's log in Wizard's terminal says what failed. |
+| Wizard's build fails with `CA2007` or other engine rules, or restores the engine's analyzers | Add the missing file from 3.1: `.editorconfig` for the rules, `Directory.Packages.props` for the analyzers. |
+| `Build/obj/Debug/Tools/Wizard/` appeared | Delete it. It came from scaffolding before 3.1's files existed. |
+| The page loads unstyled from the Debug build | Use `dotnet run`, or let the shell start the server. |
+| `CS8978: 'method group' cannot be made nullable` in a `.razor` file | Add the outer parentheses: `@(x.GetValue<bool>())`. |
+| The shell: "Wizard could not start … ENOENT" | Build the server: `dotnet build Wizard.slnx` in `tools/Wizard/`. |
+| A console command runs glued to the one before | Wait a moment after Enter before typing the next command. |
+| The engine runs on after the Wizard server was killed | Close the engine window. Only a hard kill of the server skips stopping the engine. |
 
 ## Where to go next
 
-Roughly in the order they unlock each other:
+In rough order:
 
-1. **Saving.** Nothing writes a prefab back, so edits vanish on Stop. `World.SaveAsync` already takes the world as
-   data in one frame, but nothing knows which prefab part an entity came from, or writes `.prefab` files. That is the
-   engine design question that makes Wizard an editor rather than an inspector, and a `domain_save` tool after it.
-2. **Names.** A prefab part has a name in its file, but the entity spawned from it does not keep it, so the list labels
-   entities by their components. Keeping it (a component, a table in the world) is an engine decision, and gives the
-   list a name column and, with parents, a tree again.
-3. **Docking.** Replace the CSS grid in `app.css` with a docking layout. There is no well-backed docking component for
-   Blazor, so this means vendoring a JavaScript library (dockview is the usual choice) behind one Razor wrapper
-   component, with the layout saved per user.
-4. **Native menu → editor actions.** File → Open Project and the like: `main.js` sends the page a message,
-   `preload.js` exposes a subscription, and a component calls into C# through a `DotNetObjectReference`.
-5. **Assets.** `Assets.GetPaths` lists a folder's assets; an `asset_list` tool, a panel over it, and pickers in the
-   inspector for `Handle<T>` fields, which are raw ids today.
-6. **An in-editor viewport.** Core's GPU already has render textures a camera can draw into and that can be read
-   back, as its README says an editor's viewport is. Streaming them into the page and the input back is the work.
-7. **A screenshot tool that answers the image.** The PNG encoder is the console gem's own; a tool returning an image
-   needs one Core shares.
+1. **Saving.** Write `.prefab` files from the world, then add a `domain_save` tool.
+2. **Names.** Keep a prefab part's name on the entity spawned from it, for a name column and, with parents, a tree.
+3. **Docking.** Replace the CSS grid in `app.css` with a docking layout, saved per user.
+4. **Native menu actions.** File → Open Project and the like, sent from `main.js` through `preload.js` to a component.
+5. **Assets.** An `asset_list` tool over `Assets.GetPaths`, a panel for it, and pickers for `Handle<T>` fields.
+6. **An in-editor viewport.** Stream a camera's render texture into the page, and send input back.
+7. **A screenshot tool that returns the image.**
 8. **Undo**, once saving exists: record each `component_set` with the value it replaced.
-9. **Push instead of polling.** If the polls ever show in a profile, move the gem to a stateful MCP transport and send
-   notifications. Polling is simpler, and fine until then.
+9. **Push instead of polling**, through a stateful MCP transport, if polling ever shows in a profile.

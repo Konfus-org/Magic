@@ -1,8 +1,7 @@
 # Icons
 
-An `Icon` is the application's icon: a `.icon` file naming the [texture](../Textures/README.md) it shows, by its
-handle. The keys are the `Icon` type's properties, documented on it, and the icon beside this README is the example.
+An `.icon` file names the [texture](../Textures/README.md) the window shows as the application's icon. The `Icon` type
+documents the format. `Default.icon` is the example, and the icon a window shows until another is set.
 
-The window shows the icon its window service names, the default icon until a gem sets another; the platform gem loads
-it and hands its texture's image to the OS. The default icon is the engine's; to brand a project, put its image
-anywhere under `Assets/`, write an `.icon` naming it, and set it as the window's icon.
+To give a project its own icon, add its image under `Assets/`, write an `.icon` that names it, and set it as the
+window's `Icon` from code (`IWindow`).

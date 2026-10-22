@@ -1,41 +1,23 @@
 # Contributing
 
-## Code of conduct
+- Follow the [Code of Conduct](CODE_OF_CONDUCT.md) in every space of the project.
+- Code follows the [Code Standards](CODESTANDARDS.md), tests follow [Tests](tests/README.md), and docs follow the
+  [documentation rules](AGENTS.md#documentation-rules).
+- Before changing an area, read its README. If you change how the area works, update its README in the same change.
+- The [README](README.md) covers the requirements and the build. Format your change with `tools/Format.ps1` and pass
+  `tools/Validate.ps1` ([Tools](tools/README.md)).
 
-Read the [Code of Conduct](CODE_OF_CONDUCT.md). It applies in every space of the project.
+## Pull requests
 
-## Standards
-
-Code follows the [Code Standards](CODESTANDARDS.md), tests follow [Tests](tests/README.md), and documentation
-follows the documentation rules in [AGENTS.md](AGENTS.md#documentation-rules), which apply to every contributor, not
-only agents. Before changing an area, read its README: it says how the area works and what must hold for it to work,
-and a change to how it works updates it in the same change.
-
-## Building
-
-The [README](README.md) has the requirements, the build and the command line. `tools/Format.ps1` formats the C# a
-change touches by `.editorconfig`, and `tools/Validate.ps1` runs what every change must pass, a format check of the
-whole tree among it ([Tools](tools/README.md)).
-
-## Reviewing and merging
-
-Make a fork with your changes, then open a pull request into `dev`. A maintainer reviews, comments, and approves once
-every comment is addressed. Every check must pass before a merge: the build on every OS, the tests, the
-documentation's links and the security analysis ([CI](.github/workflows/README.md)). Merging to `main` publishes a
-release.
-
-A reviewer looks for the same things in every change, so a contributor can check them first: it follows the
-[Code Standards](CODESTANDARDS.md); it is the smallest change that does the job; a fix reaches every copy of the
-code it fixes, not only the one that was reported; nothing is added without a caller; nothing the build generates is
-edited by hand; no secret is committed; and what the change touched is left cleaner than it was found, with the
-cleanup told apart from the fix so each can be judged on its own.
-
-Branches are short-lived and merge by fast-forward once validated. CI runs the same `tools/Validate.ps1` a
-developer runs, so a change that passes locally passes there, and `main` is always releasable, since merging to it
-publishes.
+- Open a pull request from your fork into `dev`. Keep branches short-lived; they merge by fast-forward.
+- A maintainer reviews it and approves once every comment is addressed.
+- Every check must pass before a merge: the build, the format check, the tests, the docs' links and the security
+  analysis ([CI](.github/workflows/README.md)). Merging to `main` publishes a release.
+- A reviewer checks that the change follows the Code Standards, is the smallest change that does the job, fixes
+  every copy of the code it fixes, adds nothing without a caller, edits nothing the build generates, commits no
+  secret, and leaves what it touched cleaner, with the cleanup kept apart from the fix.
 
 ## AI-assisted work
 
-[AGENTS.md](AGENTS.md) is the process AI agents follow in this repository. AI-assisted contributions are welcome
-under the same standards as any other code: you must understand, be able to explain, and be ready to change what you
-submit, and a human reviews and approves everything before it merges.
+AI-assisted contributions follow the same standards. You must understand, be able to explain and be ready to change
+what you submit. A human reviews and approves everything before it merges. Agents follow [AGENTS.md](AGENTS.md).

@@ -1,80 +1,33 @@
 # Shaders
 
-HLSL every renderer shares: the binding model and conventions, the surface contract and the engine's surfaces, and a
-lighting library of physically based shading. A shader is an asset like any other, an `.hlsl` or `.hlsli` with a `.meta`
-beside it, a surface a `.surf.hlsl` and a sky a `.sky.hlsl`. It goes here, in a folder for what it is (`Include/` for
-the headers, `Lighting/` for the library, `Surfaces/`, `Skies/`, and a renderer's passes in folders for the stage they run in, its debug views in
-`Debug/`), when what uses it ships with Magic, and in the `Resources/Shaders/` of the gem that uses it otherwise. The
-rules every shader follows, and how they are compiled, are in the
-[code standards](../../../../CODESTANDARDS.md#shaders).
-
-## Lighting a pixel
-
-A renderer reads what a surface is made of, from its G-buffer or straight from the surface's own function in a forward
-pass, and hands it to the lighting entry point (`Lighting/Shade.hlsli`), which answers the light the surface sends
-toward the viewer, in nits. It looks the pixel up in the DFG table at (n·v, roughness), prepares the surface's shading
-model, adds the key light through its shadow (the sun by day, the moon by night, else the brightest other directional
-light), the other directional lights whole, and each local light that reaches the pixel, walked from the frame's light
-bins and tiles, then light from everywhere: the sky's harmonics, or the probes of global illumination where they hold the
-place, for diffuse, and the sky prefiltered by roughness for reflections, coloured by the probes along the reflection
-where they hold it, less what occlusion hides, or the world's traced reflections where the renderer has them. The
-renderer multiplies by exposure and adds the surface's emissive,
-which is pre-exposed already. The pieces, each in its own header under `Lighting/` or `Include/`, which documents what
-it offers:
-
-- **The DFG table** is the GGX lobe's albedo integrated at (n·v, roughness), split into F0 and F90 terms, and cloth's
-  sheen albedo, made once by a compute pass into a small texture. It makes rough metals keep their energy (multiple
-  scattering) under lights and the environment alike.
-- **Units.** Directional lights in lux, the sun's and the moon's as they are above the air (about 120 000 and, full,
-  0.3), point and spot lights in candela (lumens / 4π, and lumens / π for a spot), the sky in nits.
-  The lighting answers in nits; exposure, from EV100 (`1 / (1.2 · 2^EV100)`), turns that into the pre-exposed scene
-  colour, where emissive surfaces already are.
-- **Shading models**: metallic-roughness, clear coat (coat, coat roughness), cloth (sheen, sheen roughness) and
-  subsurface (transmission, wrap), a surface's shading model with what the model takes in its model data, picked per
-  pixel by a `[branch]` that is uniform across most of a tile.
-- **Reflections** come from a cube prefiltered by GGX, a mip per roughness, read along the specular lobe's dominant
-  direction, box-projected for a local probe; diffuse light from nine spherical-harmonic coefficients. Where a renderer
-  traces reflections of the world itself, it uses them in place of the cube's for a surface smooth enough to have them.
-  Where it has none, and global illumination's probes hold the place, a surface reflects the probes' light along the
-  reflection, the world's colour and shade that way, with the cube's detail kept by as much of the sky as the probes
-  see there: out in the open the sky as before, in a courtyard its walls.
-- **Specular anti-aliasing.** A highlight narrower than a pixel only aliases, flickering as the view moves, so a
-  renderer widens a surface's roughness by how far its normal turns across the pixel, the pixel's spread of normals
-  added to the surface's own (Tokuyoshi & Kaplanyan 2019); where the normal does not turn, the roughness is as the
-  surface said. It measures the normal it can take a pixel's neighbours of, the mesh's: a normal map's detail finer
-  than a pixel is not measured.
-- **Light from everywhere** is the sky's, from its harmonics, or where a renderer gathers it, global illumination's
-  probes (`Lighting/Gi.hlsli`): the probes' irradiance over pi, as the harmonics' is, with how much of it the probes
-  hold, the rest the sky's.
-- **Occlusion.** Multi-bounce ambient occlusion lets a bright surface fill in its creases; specular occlusion hides the
-  reflections of the cube and the probes a crease's bent normal says are hidden, beyond what the open hemisphere would,
-  or from visibility alone where there is no bent normal. A traced reflection takes none: its ray met what is in the
-  way, where a guess from the view around the pixel would hide a mirror's grazing view of the open sky.
-- **Shadows.** The shadow filter reads a reverse-Z shadow map, a single texture such as an atlas whose tiles keep their
-  taps inside them, by a tent of comparisons gathered from a few bilinear taps with a sampler that compares
-  GreaterOrEqual; a normal offset keeps a receiver off itself.
+HLSL shared by every renderer: the conventions, the surface and sky contracts, the engine's surfaces and skies, and a
+lighting library. A shader is an `.hlsl` or `.hlsli` asset with a `.meta`. A surface is a `.surf.hlsl` and a sky a
+`.sky.hlsl` ([Materials](../Materials/README.md#writing-a-surface)). A gem can also keep shaders in its own
+`Resources/Shaders/`. The rules every shader follows are in the [code standards](../../../../CODESTANDARDS.md#shaders).
 
 ## Writing a shader
 
-Read `Include/Bindings.hlsli` first: its header is the conventions, and the
-[code standards](../../../../CODESTANDARDS.md#shaders) the rules. What is specific to a shader asset:
+Start with `Include/Bindings.hlsli`. Its header lists the conventions and the binding model.
 
-- **How a pass finds it.** A `.pass` names its shader by id, and the kind of shader is its extension: a compute pass's
-  `.comp.hlsl`, a fullscreen pass's `.frag.hlsl`, or a depth draw's `.vert.hlsl`. A draw of surfaces names none: the
-  renderer composes its shaders around the surface each material names.
-- **Reading the frame by name.** A pass's shader, and a surface and its template, read the frame's textures and buffers
-  by name: the renderer declares every name the pass can see ahead of the shader, with `HAS_Name` defined for each, so
-  a shader guards what a frame may not have and does without it, and binds whichever the shader uses, read back from
-  its compile. The macro says a name is there, not that the pass is meant to read it: what a stage that runs once a
-  frame makes is there for every pass after it, so a shader two passes run tells them apart by a name only one of them
-  has made before it. Only a shader the renderer does not compose binds through the binding header's macros itself.
-- **Includes** name a path under `Shaders/`, `#include "Lighting/Lights.hlsli"`: the asset at that path, from whichever
-  root has it, so a project's or a gem's header is included the same way. Every header has a guard and includes what
-  it uses.
-- **An integer texture** cannot be sampled: it is read as a storage texture, texel by texel, with no sampler.
-- **A compute group** is a square for 2D work, or a row otherwise, sized to whole waves on every GPU, as the engine's
-  compute passes are.
-- **Failures.** What only the GPU can find wrong is drawn as the failure, magenta breathing (`Include/Failure.hlsli`),
-  where it is, and raised as a code in the frame's failures buffer from a compute pass that lists it among its writes;
-  the renderer says each raised code in words across the view (`Include/FailureBanner.hlsli`, in the text
-  `Include/DebugText.hlsli` draws). A new code is a number here and its words in the renderer, in the same order.
+- A `.pass` names its shader by id: a `.comp.hlsl` for a compute pass, a `.frag.hlsl` for a fullscreen pass, a
+  `.vert.hlsl` for a depth draw. A draw of surfaces names none; the renderer builds one around each surface.
+- A pass's shader reads the frame's textures and buffers by name. The renderer defines `HAS_Name` for each name the
+  pass can see; guard a name the frame may not have with `#ifdef`.
+- `#include` takes a path under `Shaders/`, such as `"Lighting/Lights.hlsli"`, from any root.
+- Integer textures can't be sampled. Read them as storage textures.
+- Draw what only the GPU can find wrong with `Include/Failure.hlsli`, and raise its code into the frame's failures
+  buffer. The renderer shows each raised code as text. To add a code, number it in `Include/Failure.hlsli` and add
+  its words in the renderer, in the same order.
+
+## Lighting a pixel
+
+`Lighting/Shade.hlsli` returns the light a surface sends toward the camera, in nits. It adds the key light through
+its shadow, the other directional lights, the point and spot lights that reach the pixel, and light from everywhere
+(the sky, global illumination and reflections), less occlusion. The renderer then multiplies by exposure. Each piece
+has its own header under `Lighting/` or `Include/`.
+
+- **Units:** directional lights in lux, point and spot lights in candela, the sky in nits. Emissive light is already
+  pre-exposed.
+- **Shading models:** metallic-roughness, clear coat, cloth and subsurface, picked per pixel by the surface
+  (`Include/ShadingModel.hlsli`).
+- **Specular anti-aliasing:** the renderer widens a surface's roughness by how far its normal turns across the pixel.

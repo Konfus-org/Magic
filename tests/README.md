@@ -1,49 +1,37 @@
 # Tests
 
-Tests live here, in `tests/`, apart from the code they test, so no project carries its tests. Each project that has
-any gets one xunit project of its own here, named `<Project>.Tests`: `tests/Core.Tests/` for `src/Core`,
-`tests/<Gem>.Tests/` for a gem. A test project references what it tests, and only plain project references besides.
-Its root namespace is `Magic.Tests` for Core's and `Magic.<Gem>.Tests` for a gem's, so a test file's namespace follows
-its folder as any other's does. A gem's types are internal, so a gem gets a test project only once it has public types
-with behaviour. `dotnet test` runs them through Microsoft.Testing.Platform, which `global.json` names as the runner.
+Run them with `dotnet test Magic.slnx`.
 
-Tests pass on every supported OS. They touch no disk; a path in an input or an expectation is built with
-`IFileSystem.Combine` (`Path.Combine` is banned by the build), never written Windows-shaped (`C:\`, `\\`).
+- Each tested project has one xunit project here named `<Project>.Tests`: `tests/Core.Tests/` for `src/Core`,
+  `tests/<Gem>.Tests/` for a gem. Its root namespace is `Magic.Tests` for Core and `Magic.<Gem>.Tests` for a gem.
+- A test project references what it tests, and nothing but plain project references besides.
+- A gem gets a test project only once it has public types with behaviour.
+- Tests pass on every supported OS. Build paths with `IFileSystem.Combine`, never Windows-shaped (`C:\`, `\\`).
 
 ## What a test covers
 
-- **One unit.** A unit test drives one class through its public API. No end to end: two subsystems working together
-  are not a unit test.
-- **No I/O.** Never the file system, the network, a native library, the clock or an unseeded `Random`: anything that
-  can fail for a reason other than the code being wrong.
-- **No fixture.** A unit test class has no fields but constants; each test news up what it tests.
-- **The public API only.** A test drives a type through its public members and sees what happened where a gem would:
-  a return value, an event, what a fake it was handed received. Nothing internal is visible to a test (no
-  `InternalsVisibleTo`), and there is no reflection or private state: what is not public is not tested.
-- **Nothing is exposed for a test.** No member is added or made public so that a test can reach it. What other
-  projects use is public; what they do not is not, and is tested only through the public member that uses it.
-- **Our code only.** Third-party and framework code is trusted to work: no test of what System.Text.Json reads, what
-  System.CommandLine parses or what System.Numerics computes. Test what we wrote on top.
-- **No shared state.** Whatever a test needs it builds in its own arrange. Nothing static and mutable, nothing that one
-  test leaves for the next, no dependence on the order tests run in.
+- **One unit:** one class, driven through its public API. No end-to-end tests.
+- **No I/O:** no file system, network, native library, clock or unseeded `Random`.
+- **No fixture:** a test class has no fields but constants. Each test creates what it tests.
+- **Public API only:** check what a gem would see: a return value, an event, what a fake received. No
+  `InternalsVisibleTo`, reflection or private state.
+- **Nothing exposed for a test:** never add a member or make one public so a test can reach it.
+- **Our code only:** don't test framework or third-party code. Test what we wrote on top.
+- **No shared state:** nothing static and mutable, nothing left for the next test, no dependence on test order.
 
 ## How a test is written
 
-- **One class, one file.** `FooTests.cs` tests `Foo` and nothing else, in the test project of the project `Foo` is in,
-  under the folder `Foo` is in: `tests/Core.Tests/Contexts/Utils/ResultTests.cs` for
-  `src/Core/Contexts/Utils/Result.cs`. Nothing is shared between test files: a fake a test needs is a small private
-  class in its file.
-- **One thing.** A test checks one behavior of one method or property. If the name needs an "and", or the asserts need
-  a comment to tell them apart, split it.
-- **Arrange, act, assert**, in that order, once each, with a blank line between. Nothing is asserted before the act,
-  and there is no second act after the assert: that is a second test.
-- **Fails first.** A test written for a fix is written before the fix and seen to fail without it. A test that has
-  never failed has not shown that it checks anything.
-- **Named for the behavior** it checks, as a sentence: `A_failure_says_why`.
-- **A `[Theory]` with `[InlineData]`** for the same behavior over several inputs, not a loop inside one test.
-- **No defaults.** A test that only checks what a value starts as breaks every time the default is tuned and catches
-  nothing. Test behavior that changes state, and the gates that turn bad input away.
-- **Cheap to maintain.** Assert the behavior, not the wording: no exact log lines, window layouts or other text that
-  changes whenever the feature is polished. No restating the implementation as the expected value.
-- **Don't over-mock.** Fake the interfaces at the edge of what is tested (an `IFileSystem`, an `ICommands`). Use the
-  real types for plain data and math.
+- **One class, one file:** `FooTests.cs` tests `Foo`, in the matching test project and folder:
+  `tests/Core.Tests/Contexts/Utils/ResultTests.cs` for `src/Core/Contexts/Utils/Result.cs`. Nothing is shared between
+  test files; a fake is a small private class in its file.
+- **One behaviour** of one method or property. If the name needs an "and", split it.
+- **Arrange, act, assert,** once each, in that order, with a blank line between.
+- **Fails first:** write a test for a fix before the fix, and see it fail without it.
+- **Named as a sentence** for the behaviour it checks: `A_failure_says_why`.
+- **`[Theory]` with `[InlineData]`** for one behaviour over several inputs, not a loop in one test.
+- **No defaults:** don't test what a value starts as. Test behaviour that changes state, and the checks that reject
+  bad input.
+- **Assert behaviour, not wording:** no exact log lines, window layouts or other text. Don't restate the
+  implementation as the expected value.
+- **Don't over-mock:** fake the interfaces at the edge (an `IFileSystem`, an `ICommands`). Use real types for plain
+  data and math.

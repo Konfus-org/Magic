@@ -1,503 +1,278 @@
 # Code Standards
 
-The rules every line of C#, HLSL and build configuration in this repository follows, and why. How the engine works is
-in [Core's README](src/Core/README.md); this document says only what code must do. The build enforces what it can:
-every compiler, analyzer, MSBuild and NuGet warning is an error, `.editorconfig` holds the rules, `BannedSymbols.txt`
-the APIs the build refuses, each with what to use instead, and `Directory.Build.props` checks that every namespace
-matches its folder. New code follows every rule here; existing code is brought to them as it is touched
-([Policies](#policies)).
+Rules for all C#, HLSL and build configuration. Every warning is a build error. `.editorconfig` holds the style rules
+and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring existing code up to them as you touch it.
 
 ## Policies
 
-- **The smallest change that does the job.** Keep a change isolated, and prefer the simplest, most direct solution:
-  no over-engineering, no abstraction until a second real use needs it, no predicting edge cases. Complexity is added
-  only when a specific problem requires it. A known pattern is used where the problem is the one it solves, never
-  reached for first, and the comment names it (a double-buffered snapshot, a pool), so a reader who knows the pattern
-  reads faster.
-- **Duplication.** Reuse what exists before writing more, and where two places do the same thing, one method does it.
-  But no single-use helper: a method called from one place is written at that place.
-- **Housekeeping.** Permanently delete stale definitions instead of leaving commented placeholders, and add no unused
-  member, parameter or overload for a caller that does not exist yet.
-- **Leave it cleaner.** The code a change touches is in better shape after it than before. Quality goes one small
-  tolerated flaw at a time, and the next reader pays for each one left behind. The cleanup never changes behaviour and
-  is told apart from the fix in the review, so each can be judged on its own.
-- **Conventions.** These rules first, then .NET's own conventions (the Framework Design Guidelines) where these are
-  silent, so the code reads as any C# developer expects. One word for one thing across the code base: what is
-  `Cached` here is not `FromCache` there.
-- **Modern C#.** Use current C# and .NET, and follow the `.editorconfig`: the build and Validate's format check
-  enforce it, and `tools/Format.ps1` applies what has one right answer ([Tools](tools/README.md#formatps1)). The target
-  moves with `global.json`, so what is current is what
-  [.NET's](https://learn.microsoft.com/en-us/dotnet/core/whats-new) and
-  [C#'s](https://learn.microsoft.com/en-us/dotnet/csharp/whats-new) what's-new pages say it is.
-- **Portable.** All code runs on every major platform; see [Cross platform](#cross-platform).
-- **Dependencies.** Third-party managed libraries come from NuGet, and a package with a known vulnerability, direct
-  or transitive, fails the restore (`NuGetAudit`). A native library is declared to the build, which clones its
-  repository at a pinned commit, builds it for the machine and generates its C# API from the headers
-  ([Gems](src/Bundled/Gems/README.md#native-libraries)). No third-party wrapper, package, prebuilt binary or copied
-  code stands in for that, and no binding is written by hand except where the generator cannot express the API (a
-  COM interface), which the gem that needs it says in its README. Vulkan's is the one exception: its API comes from
-  Vortice.Vulkan, a maintained package generated from Khronos's registry and kept current with it, over the system's
-  Vulkan loader, which the GPU's driver installs; should the package fall behind the registry, the build generates the
-  API instead.
-- **Secrets.** Nothing secret is in the repository: no key, token or password in code, configuration or a workflow.
-  CI reads its own from the repository's secrets.
+- Make the smallest, simplest change that works. No abstraction before a second real use, no guessing at edge cases.
+- Use a known pattern only for the problem it solves, and name it in a comment (a double-buffered snapshot, a pool).
+- Reuse what exists. When two places do the same thing, one method does it. No helper with a single caller.
+- Delete stale code instead of commenting it out. No unused member, parameter or overload.
+- Leave the code you touch cleaner, without changing behaviour, and keep the cleanup apart from the fix.
+- Follow these rules, then .NET's Framework Design Guidelines. Use one word for one thing across the code base.
+- Use current C# and .NET. Follow `.editorconfig` ([Format.ps1](tools/README.md#formatps1)).
+- All code runs on every platform Magic targets ([Cross platform](#cross-platform)).
+- Managed dependencies come from NuGet. A package with a known vulnerability, direct or transitive, fails the restore.
+- Native libraries are built from source, or downloaded as their author publishes them
+  ([Native libraries](src/Bundled/Gems/README.md#native-libraries)). No third-party wrapper, package, binary or copied
+  code. Hand-write a binding only where the generator can't, and say so in the gem's README. The one exception is
+  Vulkan, whose API comes from the Vortice.Vulkan package over the system's Vulkan loader.
+- No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
 
 ## Architecture
 
 ### Visibility
 
-Public is for what other parts use; everything else is `internal` (or private), wherever it lives. A Core type is
-internal unless a gem or a game script needs it: the container and other host plumbing never are. A type only one gem
-uses lives in that gem, internal; Core holds the types gems share. Tests see only what is public (no
-`InternalsVisibleTo`): nothing is public for their sake, a member only its own type uses is private, and what is not
-public is not tested ([Tests](tests/README.md)).
-
-The same holds member by member, from the bottom up: a member is private until another type in its project needs
-it, then internal, and public only on a public type's contract or to implement an interface. A member of an
-internal type is never public except where an interface it implements requires it, so `public` always means "part
-of a contract", and a reader can tell a type's surface from its workings at a glance.
-
-An interface exists so that a gem can be swapped (Core's contract between gems) or for what reaches outside the
-process (the disk, the GPU, a window); nothing gets one so that a test can fake it. No type wraps another that already
-does the job to forward to it: a layer whose members each call one member of the next is a layer with no reason.
+- Make public only what other parts use, such as a gem or a game script. Everything else is `internal` or private.
+- The container and host plumbing are never public.
+- A type only one gem uses lives in that gem, internal. Core holds the types gems share.
+- A member is private, then internal once its project needs it, and public only on a public contract or interface.
+- Nothing is public for a test's sake ([Tests](tests/README.md)).
+- Add an interface only to swap a gem or to reach outside the process (disk, GPU, window), never just for a test.
+- No type that only forwards calls to another.
 
 ### Folders
 
-A namespace is its project's root namespace (`Magic` for Core, `Magic.<Name>` for a gem or a project's code) and then
-the folders below the project, and the build checks that every file's matches.
-
-Core files its types by what they are, one folder and namespace each, so where a new file goes is never a judgement
-call. A type goes in the first of these that fits:
-
-1. **The root**: what starts the run.
-2. **`Internal`**: what is not public.
-3. **`Interfaces`**: interfaces.
-4. **`Attributes`**: attributes.
-5. **`Extensions`**: `XExtensions` classes.
-6. **`Contexts`**: the state of the run and the frame, as Core hands it to gems, the subscriptions that say how long
-   what is added to them lasts, and every other enum, record and struct: the plain data gems pass each other.
-7. **`Services`**: services and nothing else: what is registered for gems to ask for, and static services such as
-   the log.
-
-A folder exists only once something is in it, and holds only what its rule says: a type that fits none of them is a
-reason to agree a new folder, not to stretch one. A folder grown too big to take in at a glance is split by area, a
-subfolder and namespace each, never named like a type in it (`Frames` holds `Frame`); what is no one area's stays at
-its top.
-
-A gem is flat: every file at its root, in the gem's one namespace (`Magic.<Gem>`), since a gem stays small enough to
-take in at a glance. Its `Resources/` folder holds the gem's own assets, scripts among them, never its code. The
-engine's built-in default assets, the ones that come with Magic whatever gems a project loads, are
-`src/Bundled/Resources/`.
-
-A file is named for its main type. Small types that belong with it and go in the same folder can share its file (an
-enum one of its properties takes, the record that goes with it); a type that stands on its own has a file of its own.
-Extension members use `extension(T x) { }` blocks in an `XExtensions` class, filed as above; related types (a family
-of enums converted the same way) share one class, one block each.
+- A namespace is the project's root namespace (`Magic` for Core, `Magic.<Name>` otherwise) plus its folders.
+- Core puts each type in the first folder that fits: the root (what starts the run), `Internal` (not public),
+  `Interfaces`, `Attributes`, `Extensions` (`XExtensions` classes), `Contexts` (run and frame state for gems,
+  subscriptions, and every other enum, record and struct), then `Services` (services only).
+- A folder holds only what its rule says, and exists only once it holds something. Agree a new one for a misfit.
+- Split a big folder into a subfolder per area, never named like a type in it. What fits no one area stays on top.
+- A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds its assets and scripts, not code.
+- The engine's built-in default assets go in `src/Bundled/Resources/`.
+- Name a file for its main type. Small types that belong with it may share its file; others get their own.
+- Extension members go in `extension(T x) { }` blocks in an `XExtensions` class. Related types share one class.
 
 ### Gems, systems and scripts
 
-- A gem is `internal sealed class X : IGem` plus the Core interfaces it provides. What it depends on, its own
-  settings object included, are constructor parameters, including what it uses of another gem's work (a renderer
-  takes the window it draws into): that order is the order gems are made in and, reversed, disposed in. What it
-  needs arrives there and is kept, so what a type needs is read from its signature and the order to make gems in
-  stays decidable. Nothing asks the container or a provider for a service later, with one exception: what makes
-  objects at run time from their constructors' parameters, as the gem that runs scripts makes each script from the
-  services its class asks for, takes `IServiceProvider` for that. Its csproj says what it is, in the SDK's
-  `Description`, `Version` and `Authors`, and nothing else declares those.
-- A gem reads nothing of the run itself: what it needs of the command line or the project file arrives as the `Args`
-  and `Project` services, and what it can be told arrives as its settings object, plain data like a file type
-  ([Assets](#assets)). Its settings can change while running, between frames, and a gem follows each: it reads it
-  where it is used, or compares it each frame with what it last applied. One it can only read as it starts is
-  `[RequireRestart]`, and changing it starts the engine again.
-- A gem frees what it started (a native library, a subsystem) in `Dispose`, once nothing of its own is still running
-  on a worker.
-- A gem's constructor, `Dispose` and `Render` run on the render thread; `Update`, `FixedUpdate`, `LateUpdate`, `Sync`
-  and `Stop` on the main thread. What a gem owns is used on one of them: what the other has for it is data the owner
-  takes in at the start of its hook, and what of the main thread's a gem owns ends in `Stop`, before `Dispose`.
-  `LateUpdate` prepares what `Render` will read, into a copy `Render` is not reading; `Sync` swaps the two and
-  nothing more, as every gem waits on it; `Render` reads only that copy, since the main thread is changing everything
-  else.
-- A component is an unmanaged struct with public fields that implements `IComponent`, and nothing else: declaring it
-  is all it takes for the world to hold it and a file to name it ([Components](src/Core/README.md#components)).
-- Work over entities is a system that names the components it looks at, up to four (`ISystem<T1>` and on; `ISystem`
-  for every entity), and an `IParallelSystem` when it is work over many entities. Its `Phase` is stated when not
-  `Update`: `Update`, `FixedUpdate` or `LateUpdate`. It is added to the world (`World.Add`) and kept as a
-  `Subscription`. What is not about entities (pumping events, presenting, loading) is an `IGem` hook.
-- What a gem tells others has happened is a message, a struct, on `Events`; whoever listens watches it and keeps the
-  `Subscription`.
-- A script is a `.cs` asset under a project's `Assets/`, a gem's `Resources/` or `src/Bundled/Resources/`, its class
-  named like the file and an `IScript`: an `IBehavior` for what one entity does each frame, and a system script, of any
-  kind of system the world takes, when it works over many. A game is its assets and that code, never a gem of its own. A
-  script's constructor takes the `Entity` it is attached to first, when it uses it, then what it asks for as a gem's
-  does, and only keeps them: no work in a constructor, as its values are not set yet. Its values are its public
-  `{ get; set; }` properties, and `Start()` is where it begins, with them set. A pipeline script runs on no entity, so
-  its constructor takes services alone ([Scripts](src/Core/README.md#scripts)).
+- A gem is `internal sealed class X : IGem` plus the Core interfaces it provides.
+- A gem takes all it depends on, settings included, as constructor parameters and keeps them.
+- Never get a service from a container later. Only code that builds objects from constructors takes `IServiceProvider`.
+- A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
+- A gem gets the command line and project file from the `Args` and `Project` services, never by reading them itself.
+- A gem's options come from its settings object, which is plain data like a file type ([Assets](#assets)).
+- A gem follows setting changes between frames. Mark a setting it reads only at start `[RequireRestart]`.
+- A gem frees what it started in `Dispose`, once none of its work still runs on a worker.
+- The constructor, `Dispose` and `Render` run on the render thread; the other hooks on the main thread.
+- Each thing a gem owns is used on one thread. The other thread hands it data, taken in at the start of a hook.
+- What a gem owns on the main thread ends in `Stop`, before `Dispose`.
+- `LateUpdate` fills a copy for `Render`, `Sync` only swaps the copies, and `Render` reads only its copy.
+- A component is an unmanaged struct with public fields that implements `IComponent`, and nothing else.
+- Work over entities is an `ISystem<T1>` (up to four components; `ISystem` for all), or an `IParallelSystem` for many.
+  State its `Phase` when it isn't `Update`. Add it with `World.Add` and keep the `Subscription`.
+- Work that isn't about entities (pumping events, presenting, loading) is an `IGem` hook.
+- Tell other gems what happened with a message struct on `Events`. A listener keeps its `Subscription`.
+- A script is a `.cs` asset whose class, named like the file, is an `IScript`: an `IBehavior` for one entity each
+  frame, or a system script for many.
+- A game is its assets and scripts, never a gem.
+- A script's constructor takes its `Entity` first if it uses it, then services, and only keeps them. A pipeline
+  script takes services only. A script's values are public `{ get; set; }` properties. `Start()` runs once they're set.
 
 ### Assets
 
-- An asset type is a sealed class implementing `IAsset<T>` of itself: what its users read, never how its file was
-  read. It states its file extensions as a static, so no code names them, and has a handle that is set once as it is
-  made, the one thing on it Core's `Assets` sets rather than its file. A type gems share is Core's; one only its gem
-  reads is that gem's.
-- A type whose file is itself as JSON implements `IJsonAsset<T>`, and one whose file is its text `ITextAsset<T>`:
-  Core reads both. Any other format is an `IAssetLoader<T>` a gem provides by implementing it, returning `Result`, and
-  what the `.meta` sidecar holds beside the id is its import settings.
-- Components, assets and the project name an asset by its typed handle, never by a path: a path is for code that
-  starts from a name.
-- A type read from a file is plain data: properties, and no JSON attributes, I/O or `Open`. Turning bytes into it and
-  finding its file are separate code beside it, and nothing else repeats its shape. Its properties follow the file
-  rather than [State](#state)'s constructor rule: a key the file must have is a `required` property with
-  `{ get; init; }`, and one with a default is `{ get; set; }` with the default as its initialiser. What code sets
-  rather than the file has no public setter, so it is never read from a file.
-- One JSON dialect: everything is read and written in [Core's](src/Core/README.md#assets), which reaches any type by
-  reflection, so nothing is declared for a type to be read or written and no other options object is made.
-- A default is stated once: a setting's is its property initialiser; a file's, its type's initialisers; a script's,
-  its properties' initialisers; a component's, its getters. No static `Default` instances or constants
-  beside them. Every asset type has a default asset, `<Type>s/Default.<ext>` (`<Type>s/Default/Default.<ext>` for a
-  folder asset, a domain), and an asset setting is a path, empty for that default. A value an implementation falls
-  back to on its own (the renderer's background with no sky) is defined once in it, where it is easy to find and
-  change, never on a Core type. The few "nothing" values are a static `None` on the type, as a handle's is.
+- An asset type is a sealed class implementing `IAsset<T>` of itself. It holds what its users read, not file details.
+- It states its file extensions as a static. Only Core's `Assets` sets its handle, once.
+- An asset type gems share is Core's. One only a gem reads is that gem's.
+- A type stored as JSON implements `IJsonAsset<T>`, and one stored as text `ITextAsset<T>`.
+- Other formats need a gem's `IAssetLoader<T>` returning `Result`. The `.meta` file holds the import settings.
+- Name an asset by its typed handle, never a path, except in code that starts from a name.
+- A type read from a file is plain data: properties only, no JSON attributes, I/O or `Open`. Separate code reads it.
+- A key the file must have is a `required` `{ get; init; }` property. One with a default is `{ get; set; }`. What code
+  sets, not the file, has no public setter.
+- Read and write all JSON with [Core's](src/Core/README.md#assets) one dialect. No per-type setup or options objects.
+- State each default once, as a property initializer (a component's in its getters). No static `Default` instances
+  or constants next to them.
+- Every asset type has a default asset, `<Type>s/Default.<ext>` (`<Type>s/Default/Default.<ext>` for a folder asset).
+  An asset setting is a path, empty for that default.
+- Define an implementation's own fallback (the renderer's background with no sky) once in it, never on a Core type.
+- A "nothing" value is a static `None` on its type.
 
 ### Disposables
 
-What hands out something that ends when disposed (an event or file watch, an ECS observer, a scheduled system, a
-registration, an attachment) returns `Subscription`, not `IDisposable`, and whoever keeps it holds a `Subscription`,
-so reading the code says what the thing is and why it is kept. Several kept for as long as their owner go in a
-`SubscriptionList`, which one `Dispose` ends, rather than a loop over them.
+- Return `Subscription`, not `IDisposable`, for anything that ends when disposed, and hold it as a `Subscription`.
+- Keep several that live as long as their owner in a `SubscriptionList`.
 
 ## Correctness
 
 ### Null
 
-- The null-forgiving `!` (`value!`, `null!`, `default!`) is not allowed; the build fails on it (`NX0001`-`NX0003`,
-  from Nullable.Extended.Analyzer), and on every nullable warning. No `// !` comment to excuse one either.
-- What is always there is not declared nullable: pass it in, make it `required`, or group what comes and goes
-  together into one optional object.
-- What may be missing is handled where it is read: a guard clause, `is not { } value`, `??` with a fallback or a
-  `throw` that says what was expected. `[MemberNotNullWhen]` and `[MaybeNullWhen]` tell the compiler what a
-  check proves, as a result's success flag proves its value is there.
-- A guard that throws uses the helper that names the check, rather than an `if` and a `throw` written out:
-  `ArgumentNullException.ThrowIfNull(x)` and its `ThrowIf*` siblings (`ThrowIfNullOrEmpty`, `ThrowIfNegative`) for
-  a parameter, `ObjectDisposedException.ThrowIf` for a disposed owner, `string.IsNullOrWhiteSpace` for a string that
-  must say something.
+- No null-forgiving `!` and no `// !` comment. The build fails on it and on every nullable warning.
+- Don't make what is always there nullable: pass it in, make it `required`, or group optional parts into one object.
+- Handle a missing value where it's read: a guard clause, `is not { } value`, `??`, or a `throw` saying what's missing.
+- Use `[MemberNotNullWhen]` and `[MaybeNullWhen]` to tell the compiler what a check proves.
+- Throw through the named helpers (`ArgumentNullException.ThrowIfNull` and its siblings,
+  `ObjectDisposedException.ThrowIf`), and check a string that must say something with `string.IsNullOrWhiteSpace`.
 
 ### Async
 
-- Every `await` says `.ConfigureAwait(false)`; the build fails without it (`CA2007`). Tests are the exception:
-  xUnit runs them on its own context.
-- A task is awaited, kept to be awaited later, or let go with `.FireAndForget()`, which logs what it throws. Never
-  dropped (`VSTHRD110`, `CS4014` fail the build), never discarded with `_ =`: that hides what it threw and says
-  nothing about what was meant.
-- Ordinary async and background work is tasks: async methods, `Task.Run`, `.FireAndForget()`. `Threads` is for the
-  engine's own threads, and for work that lasts as long as the run.
-- What a worker makes for an engine thread is data, never work: the gem keeps what arrived (a `Channel<T>`, or a
-  reference written whole) and takes it in at the start of the hook that owns the structure it goes into, so no thread
-  runs code on another's behalf and nothing locks a collection two threads read and write. `Threads` is for a flow
-  that must await a step on an engine thread and what it returns. Nothing blocks waiting on the main or render
-  thread.
-- Async all the way up: nothing on the main or render thread, or in the frame loop, blocks on a task (`.Result`,
-  `.Wait()`, `.GetAwaiter().GetResult()`), since a thread that waits on work queued behind it deadlocks. A
-  synchronous API (a file system's synchronous read) is a synchronous implementation, not a wait on its async twin.
-  The one wait allowed is at a boundary where every thread that could be held up has already ended, with a comment
-  saying so (the engine collecting the saved world after both engine threads are gone).
-- Task-returning methods end in `Async` (`VSTHRD200`); no `async void` (`VSTHRD100`).
+- Every `await` has `.ConfigureAwait(false)`, except in tests.
+- Await every task, keep it to await later, or call `.FireAndForget()`. Never drop it or discard it with `_ =`.
+- Use tasks for async and background work. `Threads` is for the engine's threads, work that lasts the whole run, and
+  flows that must await a step on an engine thread.
+- A worker hands an engine thread data (a `Channel<T>`, or a reference written whole), never work. The hook that owns
+  the structure takes it in at its start. No locks on collections two threads share.
+- Nothing blocks waiting on the main or render thread. Nothing there or in the frame loop blocks on a task
+  (`.Result`, `.Wait()`, `.GetAwaiter().GetResult()`).
+- Implement a synchronous API synchronously, not as a wait on its async twin.
+- The one allowed wait is at a boundary where every thread it could hold up has ended, with a comment saying so.
+- No `async void`.
 
 ### Failures
 
-- A `Result` for what can fail on content or the machine: I/O, import, compile, readback.
-- Broken content is `Debugging.Error` and a visible stand-in (the glowing failure surface, the failure cube), never
-  a stopped frame.
-- What works, only worse, is `Debugging.Warn`.
-- An exception is for a programmer's mistake, and for a gem that cannot exist at all (no GPU device). Its type
-  says which mistake: `ArgumentException` and its kin for a bad argument, `InvalidOperationException` for a call at
-  the wrong time, `NotSupportedException` for what this implementation does not do; never `Exception` itself, which
-  says nothing a catch could act on.
-- Nothing is caught and dropped. What is caught is logged (`Debugging.Error`, saying what failed and on what) or
-  rethrown with `throw;`, so the cause survives. `catch (Exception)` is for the boundaries that keep one failure
-  from stopping the run (a gem's hook, a loader, a task let go), and it logs there; everywhere else a catch names
-  the exception it expects or filters with `when`.
-- A log line says what happened and to what (the asset, the gem), once. What repeats every frame is a
-  `Debugging.Verbose` line or a metric, never an `Info`, `Warn` or `Error` each frame, which buries the line that
-  mattered.
-- `Debugging.Assert` is for state that cannot be, where going on would be worse than stopping: it ends the process at
-  once, leaving a crash file. A caller's mistake at an API stays an exception, which takes only that gem out of the
-  loop.
+- Return a `Result` for what can fail on content or the machine: I/O, import, compile, readback.
+- Broken content logs `Debugging.Error` and shows a visible stand-in. It never stops the frame.
+- What works, only worse, logs `Debugging.Warn`.
+- Throw only for a programmer's mistake, or a gem that can't exist (no GPU): `ArgumentException` for a bad argument,
+  `InvalidOperationException` for a call at the wrong time, `NotSupportedException` for what this implementation
+  doesn't do. Never `Exception` itself.
+- Never catch and drop. Log what you catch with `Debugging.Error`, saying what failed and on what, or `throw;`.
+- Catch `Exception` only where one failure must not stop the run (a gem's hook, a loader, a task let go), and log it.
+  Elsewhere, catch the exception you expect or filter with `when`.
+- A log line says what happened and to what, once. What repeats every frame is `Debugging.Verbose` or a metric.
+- `Debugging.Assert` is for impossible state; it ends the process with a crash file. API misuse stays an exception.
 
 ### Performance
 
-Asynchronous where work can wait, and fast in the frame loop. Outside the frame loop the simple form comes first,
-and a change for speed follows a measurement, taken in a Debug build, since Debug is the baseline that must never
-hitch and so is where a hitch is measured. Inside the loop:
-
-- **No LINQ in the frame loop.** Nothing that runs every frame (`Update`, `Render`, physics, a system's `Run`, a
-  render pass) uses LINQ, allocates closures or formats strings: plain loops, delegates made once and kept.
-- **Spans for chunks of data.** Pass `Span<T>`/`ReadOnlySpan<T>` instead of slicing arrays onto the heap. A type that
-  must stay on the stack is a `ref struct`.
-- **`ValueTask` when it is usually done.** A method that completes synchronously most of the time (a cache check)
-  returns `ValueTask`/`ValueTask<T>`, not `Task`.
-- **Off the main thread where it can be.** Work over many entities is a parallel system; loading and building are
-  tasks that hand what they made to the main thread in one batch; drawing is the render thread's.
-- **Function pointers for hot native calls.** A native function called often is called through a `delegate*`, not a
-  delegate.
+- Outside the frame loop, write the simple form first. Optimise only after measuring in a Debug build.
+- Work asynchronously where the work can wait.
+- Nothing that runs every frame uses LINQ, closures or string formatting. Use plain loops and delegates made once.
+- Pass `Span<T>` and `ReadOnlySpan<T>`, not array slices. A type that must stay on the stack is a `ref struct`.
+- Return `ValueTask` from a method that usually completes synchronously.
+- Work over many entities is a parallel system. Loading and building are tasks that hand their results to the main
+  thread in one batch. Drawing is the render thread's.
+- Call frequent native functions through function pointers (`delegate*`).
 
 ## Style
 
 ### Type layout
 
-Members go in this order, with one blank line between members and between groups. It is StyleCop's order, which the
-build checks and `tools/Format.ps1` puts a changed file's members in, so where a member goes is never a judgement call:
-
-1. Fields, constants first
-2. Constructors and finalizer
-3. Events, then properties and indexers, then extension blocks
-4. Operators
-5. Methods
-6. Nested types: delegates, enums, interfaces, structs, then classes
-
-Within each kind, public comes before internal, and internal before private, and at each of those static comes before
-instance. Types that share a file are in the nested types' order, so a small enum or record struct that goes with the
-main type sits above it.
-
-`Dispose` is the first public method, so the teardown is found where the type's methods start.
-
-An interface's members are public members, placed with the other public ones of their kind: properties with
-properties, methods with methods. `IX.Member` is only for a member that can't be public because it would share a name
-with another one (the untyped `IEnumerator.Current` beside a typed `Current`), and it goes directly under the public
-member it stands in for.
-
-A primary constructor when the constructor only keeps its parameters; an explicit one when it does work (builds a
-query, makes a delegate, subscribes).
-
-Within what the order leaves free, keep related members next to each other, and fields that belong together under the
-comment that says what they are for.
+- Members go in StyleCop's order, which `tools/Format.ps1` applies: fields (constants first), constructors, events,
+  properties and indexers, extension blocks, operators, methods, then nested types (delegates, enums, interfaces,
+  structs, classes). One blank line between members.
+- Within each kind: public, internal, then private, and static before instance.
+- Types that share a file follow the nested types' order. `Dispose` is the first public method.
+- Interface members are public, placed with their kind. Use `IX.Member` only for a name clash, under the public one.
+- Use a primary constructor when it only keeps its parameters, and an explicit one when it does work.
+- Keep related members together, and related fields under a comment saying what they're for.
 
 ### Lines
 
-A line of code fits within `.editorconfig`'s `max_line_length`, and `tools/Format.ps1` wraps one that does not. A
-list of arguments or parameters that does not fit on its line has every item on a line of its own, one indent in, the
-first on the line after the opening parenthesis; so does every list that spans lines, a call whose last argument is a
-lambda or an initializer among them, so a list reads the same however it came to be wrapped:
-
-```csharp
-Parallel.For(
-    0,
-    cards.Length,
-    i =>
-    {
-        cards[i] = Bake(model.Meshes[i]);
-    });
-```
-
-An operator, `?:` or `=>` that a line is broken at starts the next line; an `=` ends its line. The build holds all of
-it (`RCS0056`, `RCS0053`) but for a comment or a string, which no tool measures or wraps: a long string is split by
-hand, the next part starting with `+`.
+- A line of code fits within `max_line_length`. `tools/Format.ps1` wraps one that doesn't.
+- A list of arguments or parameters that doesn't fit, and every list that spans lines, has each item on its own
+  line, one indent in, starting on the line after the opening parenthesis.
+- When a line breaks at an operator, `?:` or `=>`, that starts the next line. An `=` ends its line.
+- Split a long string by hand, the next part starting with `+`.
 
 ### State
 
-- Public and internal state is exposed as `PascalCase` properties, never as fields.
-- If a value is set once, use `{ get; }` and assign it in the constructor.
-- If a value can change, use `{ get; set; }`, or `{ get; private set; }` when writes need a tighter scope.
-- If a value is derived from other state, use an expression-bodied property (`=>`): a getter that only returns
-  something is never written out as `get { return ...; }`.
-- Private state is a private field (`_camelCase`), declared with the other fields at the top of the type, whatever it
-  holds: an injected dependency, a lock, a collection, a delegate made once and kept (`_renderFrame = RenderFrame`,
-  so a frame allocates no closure), a flag, this frame's values for a callback. `{ get; set; }` is for what other code
-  reads; where reading or writing private state has to do something, that is a method.
-- The exception is interop and data structs, where layout or the JSON shape depends on fields
-  (`[StructLayout]`, GPU structs, ECS components). They keep their public fields.
+- Public and internal state are `PascalCase` properties, never fields.
+- Use `{ get; }` set in the constructor for a value set once, `{ get; set; }` or `{ get; private set; }` for one that
+  changes, and `=>` for one derived from other state. Never write `get { return ...; }`.
+- Private state is a `_camelCase` field at the top of the type, whatever it holds. If reading or writing it has to do
+  something, use a method.
+- Interop and data structs (`[StructLayout]`, GPU structs, ECS components) keep their public fields.
 
 ### Methods
 
-A method should read from top to bottom:
-
-1. Guard clauses and validation first, returning or throwing early.
-2. Setup next, using `using` declarations rather than nested `using` blocks.
-3. The main path, kept at one level of indentation where possible. Prefer early `continue` and `return` to
-   nested `if`/`else`.
-4. The result.
-5. Local functions last, after the final `return`.
-
-Separate these steps with a blank line.
-
-A way out of a block, a `return`, `continue`, `break` or `throw`, has a blank line before it, so where a block ends
-early stands out from the work before it. An early-out `if`, whose body is a way out and nothing else, has the blank
-line in its place, and a run of them shares one, as guard clauses read as one step:
-
-```csharp
-Prepare(frame);
-
-if (frame.IsEmpty) return;
-if (!_isReady) return;
-
-Draw(frame);
-
-return frame.Count;
-```
-
-What opens its block needs none, and nor does the `break` that ends a switch section, which is the section's syntax
-rather than a way out. The build holds this (`MG0001`).
-
-A method is one step of its caller's story, small enough to take in at a glance. A long method that is a sequence
-of steps becomes those steps as methods, called in order from the original, so the original reads as its outline;
-each step gets a summary saying why, where that is not obvious. A table-shaped method (one `switch` over many cases)
-stays whole. A loop body nested three deep or more is an early `continue`, or a method named for the step.
-
-A method, local function or operator whose body is one statement on one line says it with `=>`, as a property does:
-`private float ReadAxis(Control positive, Control negative) => _input[positive].Value - _input[negative].Value;`. The
-build holds this (`IDE0022`, `IDE0061`, `IDE0023`, `IDE0024`).
-
-An `if` or `else` whose body is one statement has no braces. The body is on the header's line when that fits within
-`.editorconfig`'s `max_line_length`, as in `if (count == 0) return;`, and on the next line, one indent in, when it does
-not, so it is never lost off the end of a long line. An `else` starts its own line, so a choice between two actions
-reads as a pair:
-
-```csharp
-if (state is { } saved) world.Restore(saved);
-else world.OpenEntryPointAsync().FireAndForget();
-
-if (_settings.ShadowResolution != _shadowMap.Width || _settings.ShadowCascades != _shadowMap.Layers)
-    _shadowMap = MakeShadowMap(_settings.ShadowResolution, _settings.ShadowCascades);
-```
-
-A body of more than one statement, a body or a condition too long for a line of its own, and every loop (`for`,
-`foreach`, `while`) has braces on their own lines, however short the body, so that what repeats always reads as a
-block; where one branch of an `if` needs braces, every branch has them. The build holds all of it (`MG0002` lays out
-the chain without braces, `IDE0011` asks for them where they are needed), and `tools/Format.ps1` puts it right.
-
-A choice between two values is a `?:`; among more, it is a switch expression, on a tuple of the conditions where they
-are not one value, or early returns, never a `?:` inside a `?:`, which the build refuses. An `if` that ends a method or
-a loop iteration and holds the rest of it is turned around into a guard clause (`if (done) return;`), which the build
-asks for too.
+- A method reads top to bottom, with a blank line between: guard clauses, setup with `using` declarations, the main
+  path kept flat with early `continue` and `return`, the result, then local functions.
+- Keep a method small. Split a long sequence of steps into methods called in order, with a summary where a step's
+  reason isn't obvious. Keep a method that is one big `switch` whole.
+- Turn a loop body nested three deep into an early `continue` or a method named for the step.
+- Put a blank line before a `return`, `continue`, `break` or `throw`, unless it opens its block or ends a switch
+  section. A run of early-out `if`s shares one blank line before them.
+- A method, local function or operator whose body is one statement on one line uses `=>`.
+- An `if` or `else` with a one-statement body has no braces. The body goes on the header's line when it fits, or on
+  the next line, one indent in. An `else` starts its own line.
+- A body of more than one statement, a condition too long for its line, and every loop have braces on their own
+  lines. If one branch needs braces, all do.
+- Two values: `?:`. More: a switch expression or early returns. Never a `?:` inside a `?:`.
+- Turn an `if` that ends a method or loop iteration and holds the rest of it into a guard clause.
 
 ### Naming
 
-- Read a name as `Class.Member(arguments)`. If that says what happens or what is held, the name is good, however
-  short: `Assets.Find<Texture>(path)`, `Caches.ReadAsync<Shader>(key, version)`, `Lifetime.Stop(reason)`. If it
-  does not (a `Pump()` on a system, a `_scratch` buffer), name the object: what is pumped, what the buffer holds.
-- A method's prefix says what kind of thing it does. `Get` returns what the object holds or looks up and never
-  fails (`GetRow(model)`, `GetPath(handle)`); `Is`, `Has` or `Can` returns a bool that answers a question
-  (`IsDrawable`, `HasPass`, `CanSee`); `Try` returns a bool that says whether it worked, with the result in an
-  `out` parameter, or a `Result` (`TryGetResource(scope, name, out resource)`, `TryRecord(pass)`); and
-  the two combine as `TryGet` for a lookup that can fail. Other verbs say what else happens: `Make`, `Parse`,
-  `Format`, `Find` (which may find nothing, and says so with a `?`), `To` for a conversion. A method returning a
-  value is never a bare noun (`Amount`, `Shown`, `RowOf`): the verb is what tells the reader whether it computes,
-  looks up, converts or can fail. A static factory (`Result.Success`, `Tag.Of`), a fluent builder step
-  (`render.Viewport(area).Pipeline(pipeline)`), an immediate-mode widget whose bool means "used this frame"
-  (`IDebugUI.Button`) and a collection's `Add`/`Remove` keep .NET's own idioms.
-- A reusable buffer is named for its one purpose, and has only one.
-- No single-letter locals or lambda parameters, except loop counters, `x`/`y`/`z`, and the coefficients of a
-  published formula. Established short words (`ctx`, `cls`, `sb`, `dt`, `ex`) stay.
-- A local does not change meaning within a method, and does not shadow a type.
-- Every method that returns a `Task` or `ValueTask` ends in `Async`, private helpers included
-  (`LoadAsync`, `GenerateAsync`, `LoadFileAsync`). A method that waits for the same work on the calling thread has
-  the name without it (`Read` beside `ReadAsync`). Test methods are the exception: their name is the
-  sentence they check.
-- An async method takes a `CancellationToken cancel` as its last parameter and passes it to everything it awaits,
-  unless nothing in it could stop. Long work whose share done can be measured (opening a domain, generating a model's
-  clusters) also takes an `IProgress<float>? progress`, 0 to 1, just before the token; a single step (one file read,
-  a hand-off to a thread, a compile) does not. Both are optional (`= null`, `= default`) on a service's public methods
-  and required on interfaces and private helpers.
+- A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `Lifetime.Stop(reason)`. If it
+  doesn't (`Pump()`, `_scratch`), name the object: what is pumped, what is held.
+- `Get` never fails. `Is`, `Has` and `Can` answer a question with a bool. `Try` returns whether it worked, with the
+  result in an `out` parameter or a `Result`. `TryGet` is a lookup that can fail.
+- Other verbs: `Make`, `Parse`, `Format`, `Find` (may return null), `To` for a conversion.
+- A method that returns a value is never a bare noun (`Amount`, `RowOf`).
+- Keep .NET's idioms: static factories (`Result.Success`), fluent builders, immediate-mode widgets (`IDebugUI.Button`),
+  and a collection's `Add` and `Remove`.
+- A reusable buffer has one purpose, and is named for it.
+- No single-letter names except loop counters, `x`/`y`/`z` and formula coefficients. `ctx`, `sb`, `dt`, `ex` are fine.
+- A local keeps one meaning and never shadows a type.
+- Methods that return `Task` or `ValueTask` end in `Async`, private ones too, and a synchronous twin drops it (`Read`
+  and `ReadAsync`). Test methods are named as the sentence they check.
+- An async method takes a `CancellationToken cancel` last and passes it on, unless nothing in it could stop. Long work
+  with measurable progress also takes an `IProgress<float>? progress` (0 to 1) just before the token. Both are
+  optional on a service's public methods, and required on interfaces and private helpers.
 
 ### Comments
 
 - XML doc comments on types and non-obvious members. Say why, not what.
-- Code whose purpose is not obvious at a glance has a `//` comment above it saying what it does and, where that is not
-  plain either, why: a loop that does more than one thing, a calculation, an order that matters, a workaround. The
-  comment speaks for the block below it, up to the next blank line. One that restates the line under it says nothing
-  the code does not, and is not written.
-
-  ```csharp
-  // Each entity's components as JSON; a type JSON cannot hold is logged once and left out of every entity.
-  foreach (Saving entity in entities)
-  ```
-- `<summary>` tags sit on their own lines, even for a one-line summary:
-
-  ```csharp
-  /// <summary>
-  /// Where Assets live.
-  /// </summary>
-  ```
-
-  Not `/// <summary>Where Assets live.</summary>`.
-- A comment wraps at `.editorconfig`'s `max_line_length` like the code around it, at a word. No tool wraps or checks
-  a comment, so this one is the writer's to keep.
-- No divider comments (`// ---- Section ----`, `// ====`) and no `#region`.
+- Put a `//` comment above code whose purpose isn't obvious at a glance (a loop doing more than one thing, a
+  calculation, an order that matters, a workaround), saying what it does and, if needed, why. It covers the block
+  below it, up to the next blank line. Never write a comment that restates its line.
+- `<summary>` and `</summary>` go on their own lines, even for a one-line summary.
+- Wrap a comment at `max_line_length`, at a word. No divider comments (`// ----`) and no `#region`.
 
 ## Shaders
 
-- Shaders are HLSL only, compiled by whichever gem provides `IShaderCompiler`, which loads their `#include`s from
-  the assets: HLSL 2021, Shader Model 6.0 with wave intrinsics, warnings are errors.
-- Resources bind through the binding header's macros, `Include/Bindings.hlsli`, never a register by hand. Its header
-  holds the conventions every shader is written against: frame, winding, reverse-Z, matrices, physical light units
-  and pre-exposure, colour.
-- Wave intrinsics only where the result cannot depend on the wave's size, 32 or 64 by GPU, or where it hands out the
-  places of a count the atomics' order already made arbitrary (the library's wave allocation). No 16-bit types and
-  no runtime-indexed resource arrays.
-- A value that can go wrong is kept from it where it arises: roughness clamped by the library's helper, n·v kept
-  above 0, a vector that can be zero normalised by the helper that allows it, explicit gradients or levels
-  (`SampleGrad`, `SampleLevel`) inside a branch.
-- Few variants: a define for what changes the pipeline (which surface, forward or not), a `[branch]` on a value the
-  whole draw shares for what does not.
-- One copy of each piece: the BRDF, the lights and their units, and the shading models live once, in the shared
-  shader library ([Shaders](src/Bundled/Resources/Shaders/README.md)), and every renderer shades with them.
-- A technique from a paper is written here from the paper, and its comment names the paper; no third-party shader
-  code is copied in.
+- HLSL 2021 only, Shader Model 6.0 with wave intrinsics, warnings as errors. The gem that provides `IShaderCompiler`
+  compiles shaders and loads their `#include`s from the assets.
+- Bind resources with the macros in `Include/Bindings.hlsli`, never by register. Its header lists the conventions.
+- Use wave intrinsics only where the result can't depend on the wave size (32 or 64), or the order is already
+  arbitrary. No 16-bit types and no runtime-indexed resource arrays.
+- Guard a value where it can go wrong: clamp roughness with the library's helper, keep n·v above 0, normalise with
+  the helper that allows zero, and use `SampleGrad` or `SampleLevel` inside a branch.
+- Few variants: a define for what changes the pipeline, a `[branch]` on a value the whole draw shares for the rest.
+- The BRDF, the lights and their units, and the shading models live once, in the shared
+  [shader library](src/Bundled/Resources/Shaders/README.md). Every renderer shades with them.
+- Write a technique from its paper and name the paper in a comment. Copy in no third-party shader code.
 
 ## Cross platform
 
-Magic targets Windows, Linux and macOS from one code base. Nothing below is optional on the grounds that "it works
-on my machine": the other machines are the point.
+Write all code to run on Windows, Linux and macOS.
 
 ### Paths
 
-- Never write a separator, split on one, or compare path prefixes as strings. Build a path with
-  `IFileSystem.Combine`, and take one apart with `IFileSystem.GetParent`. `FileSystem` is the one place that knows what a
-  separator is.
-- `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine: they know every OS's rules.
+- Build a path with `IFileSystem.Combine` and split it with `IFileSystem.GetParent`. Never touch separators directly.
+- `Path.GetExtension`, `Path.GetFileName*` and `Path.ChangeExtension` are fine.
 - No drive letters, no absolute paths, no checking a string for `..`.
-- **An asset path is not an OS path.** It is relative to its asset root and always uses `/`, on every OS.
-  Core's `Assets` converts at its boundary; nothing else converts one into the other.
-- Linux file systems are case-sensitive. A file name in code, an asset, a shader `#include`, a csproj or a `.meta`
-  matches the file on disk exactly. The engine compares paths ignoring case so that every OS behaves the same, which
-  means two files may never differ by case alone.
+- An asset path is relative to its asset root and always uses `/`. Only Core's `Assets` turns it into an OS path.
+- File names in code, assets, `#include`s, csproj and `.meta` files match the disk exactly, case included. Two files
+  never differ only by case.
 
 ### Disk
 
-- All disk access goes through `IFileSystem`, never `File` or `Directory`.
-- The one exception is `Debugging`, the log: it writes crash files itself, so that it works before any service
-  exists and after one has broken.
-- Engine output goes beside Magic, a folder per kind (`Logs`, `Screenshots`), never a hardcoded temp, home or AppData
-  path. The cache is the one exception, as what it holds serves every copy of Magic on the machine: one folder per
-  machine, under the folder .NET names as the user's local application data, unless `MagicCache` names another
-  ([The cache](src/Core/README.md#the-cache)).
-- File watch events differ per OS: duplicated, coalesced, out of order. Treat one as "something changed here",
-  collect them in one place, and check what exists.
+- All disk access goes through `IFileSystem`, never `File` or `Directory`. Only `Debugging`, the log, is exempt.
+- Engine output goes next to Magic in a folder per kind (`Logs`, `Screenshots`), never a temp, home or AppData path.
+  The cache is the one exception ([The cache](src/Core/README.md#the-cache)).
+- Treat a file watch event as "something changed here": collect them in one place and check what exists.
 
 ### Text
 
-- Files and generated shader source are written with `\n`, never `Environment.NewLine`, as UTF-8 without a BOM.
-  Readers accept `\r\n` and a BOM.
-- Numbers and dates are parsed and formatted culture-invariantly.
+- Write files and generated shader source with `\n`, never `Environment.NewLine`, as UTF-8 without a BOM. Accept
+  `\r\n` and a BOM when reading.
+- Parse and format numbers and dates culture-invariantly.
 
 ### Platform code
 
-- No OS APIs in Core: no P/Invoke, no registry, no `.exe`/`.so`/`.dylib` names, no `OperatingSystem.Is*`.
-  Anything platform-specific lives in a gem, behind one of Core's interfaces (`IWindow`, `IInput`, `IGpu`),
-  guarded by `OperatingSystem.IsWindows()` and its siblings.
-- A native library is referenced by its logical name (`"name"`, never `"name.dll"`). Its binary comes with the gem
-  that declares it, built from the library's own source, under `runtimes/<rid>/native/`, where the gem's load
-  context finds it, and one gem declares each library so every gem that binds the name gets the same copy
-  ([Gems](src/Core/README.md#gems)).
-- No csproj names a runtime identifier: a gem carries the native binaries built on the machine that built it, which
-  is the one it runs on.
-- Repository scripts are one cross-platform script each, PowerShell that runs under `pwsh` and Windows PowerShell
-  5.1, or a `dotnet` command. No `.bat`/`.sh` pairs ([Tools](tools/README.md)).
+- No OS APIs in Core: no P/Invoke, registry, `.exe`/`.so`/`.dylib` names or `OperatingSystem.Is*`.
+- Platform code lives in a gem behind a Core interface, guarded by `OperatingSystem.IsWindows()` and its siblings.
+- Reference a native library by its logical name (`"name"`, never `"name.dll"`). One gem declares it, and its binary
+  ships with that gem under `runtimes/<rid>/native/`.
+- No csproj names a runtime identifier.
+- Repository scripts are one PowerShell file each, for `pwsh` and Windows PowerShell 5.1, or a `dotnet` command. No
+  `.bat`/`.sh` pairs.
 
 ### Graphics
 
-- Drawing goes through `IGpu`: a gem makes GPU objects and records a frame's commands as plain data, which the GPU
-  provider turns into its API's calls. Backend-specific code lives only in that gem.
-- What is drawn into is a render target, a `GpuTexture`: a render texture, or a window's, which `IGpu` hands out.
-  Drawing code takes a target and asks its format and size; it never assumes a window.
-- A GPU feature is used only if Vulkan 1.3 has it on every GPU the engine runs on, MoltenVK's and KosmicKrisp's on a
-  Mac among them, so a Mac can follow; anything more is optional, with a way that works where it is missing.
+- Draw through `IGpu`: a gem records commands as plain data, and the GPU provider turns them into API calls.
+  Backend-specific code lives only in the GPU provider.
+- Draw into a render target, a `GpuTexture`, asking its format and size. Never assume a window.
+- Use a GPU feature only if Vulkan 1.3 has it on every GPU the engine runs on, a Mac's MoltenVK and KosmicKrisp
+  included. Anything more is optional, with a path that works without it.
