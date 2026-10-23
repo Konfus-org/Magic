@@ -10,7 +10,7 @@ namespace Magic.VoxelRendering;
 /// <summary>
 /// A surface shader and the variant it is compiled as.
 /// </summary>
-internal readonly record struct SurfaceKey(Handle<Shader> Shader, bool Masked, bool DoubleSided);
+internal readonly record struct SurfaceKey(Handle<Shader> Shader, bool IsMasked, bool IsDoubleSided);
 
 /// <summary>
 /// What a material is drawn with: its row, the surface and variant its pipelines are composed of, and how it blends; or,
@@ -454,7 +454,7 @@ internal sealed class GpuMaterials
     {
         if (entry.Asset is not { } material)
         {
-            PackAsFailure(handle, entry, FailureType.Shader, "Material does not load", doubleSided: false);
+            PackAsFailure(handle, entry, FailureType.Shader, "Material does not load", isDoubleSided: false);
 
             return;
         }
@@ -463,7 +463,7 @@ internal sealed class GpuMaterials
 
         if (surface.Source is not { } source || _failures.IsBroken(material.Shader))
         {
-            PackAsFailure(handle, entry, FailureType.Shader, "Surface does not compile", material.DoubleSided);
+            PackAsFailure(handle, entry, FailureType.Shader, "Surface does not compile", material.IsDoubleSided);
 
             return;
         }
@@ -471,7 +471,7 @@ internal sealed class GpuMaterials
         (bool hasFailedTexture, bool isLoading) = CheckTextures(material);
         if (hasFailedTexture)
         {
-            PackAsFailure(handle, entry, FailureType.Texture, "Texture does not load", material.DoubleSided);
+            PackAsFailure(handle, entry, FailureType.Texture, "Texture does not load", material.IsDoubleSided);
 
             return;
         }
@@ -490,7 +490,7 @@ internal sealed class GpuMaterials
         source.Layout.Write(material.Params, _getTextureRef, MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
         DrawnMaterial drawn = new(
             entry.Row,
-            new SurfaceKey(material.Shader, material.Type == MaterialType.Masked, material.DoubleSided),
+            new SurfaceKey(material.Shader, material.Type == MaterialType.Masked, material.IsDoubleSided),
             material.Type,
             source.IsSky);
         ShowWhenDrawable(handle, entry, new PackedMaterial(row, drawn, null));
@@ -524,7 +524,7 @@ internal sealed class GpuMaterials
         MaterialEntry entry,
         FailureType type,
         string why,
-        bool doubleSided)
+        bool isDoubleSided)
     {
         entry.Broken = type;
         Handle<Material> failure = _failures.GetMaterial(type);
@@ -537,7 +537,7 @@ internal sealed class GpuMaterials
 
         DrawnMaterial drawn = new(
             entry.Row,
-            packed.Drawn.Surface with { DoubleSided = doubleSided },
+            packed.Drawn.Surface with { IsDoubleSided = isDoubleSided },
             MaterialType.Opaque,
             IsSky: false);
         ShowWhenDrawable(handle, entry, packed with { Drawn = drawn, Failure = why });
@@ -598,7 +598,7 @@ internal sealed class GpuMaterials
         }
 
         SurfaceKey surface = drawn.Surface;
-        uint flags = BinReady | (surface.Masked ? BinMasked : 0) | (surface.DoubleSided ? BinDoubleSided : 0);
+        uint flags = BinReady | (surface.IsMasked ? BinMasked : 0) | (surface.IsDoubleSided ? BinDoubleSided : 0);
         if (drawn.Type == MaterialType.Transparent)
         {
             _tables.MaterialBins.Set(drawn.Row, flags | BinTransparent);
@@ -607,7 +607,7 @@ internal sealed class GpuMaterials
         }
 
         uint raster = (uint)(FixedRasterBins + BinOf(_rasterBins, RasterBins, surface, SurfaceRasterBins));
-        uint resolve = (uint)BinOf(_resolveBins, ResolveBins, surface with { Masked = false }, MaxResolveBins);
+        uint resolve = (uint)BinOf(_resolveBins, ResolveBins, surface with { IsMasked = false }, MaxResolveBins);
         _tables.MaterialBins.Set(drawn.Row, flags | raster | (resolve << 16));
 
         // A surface past the bins there are is drawn with the last one's, and said: never left out.
@@ -645,13 +645,13 @@ internal sealed class GpuMaterials
     /// What a material entry last read of its material: its params' count, read first, as what is read after it is at
     /// least as new, then how it is blended and its sides. Another of any is a change to take in.
     /// </summary>
-    private readonly record struct MaterialRead(long Version, MaterialType Type, bool DoubleSided)
+    private readonly record struct MaterialRead(long Version, MaterialType Type, bool IsDoubleSided)
     {
         internal static MaterialRead Of(Material material)
         {
             long version = material.Params.Version;
 
-            return new MaterialRead(version, material.Type, material.DoubleSided);
+            return new MaterialRead(version, material.Type, material.IsDoubleSided);
         }
     }
 

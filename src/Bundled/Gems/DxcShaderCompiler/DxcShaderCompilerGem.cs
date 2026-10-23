@@ -48,7 +48,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// <summary>
     /// Whether the shaders were last compiled with debug info, so a change while running compiles them again.
     /// </summary>
-    private bool _debugInfo = settings.DebugInfo;
+    private bool _debugInfo = settings.HasDebugInfo;
 
     /// <summary>
     /// The compiles on their way, by cache key, for a shader asked for again while it compiles to wait for.
@@ -66,9 +66,9 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// </summary>
     public void Update(in Frame frame)
     {
-        if (_settings.DebugInfo == _debugInfo) return;
+        if (_settings.HasDebugInfo == _debugInfo) return;
 
-        _debugInfo = _settings.DebugInfo;
+        _debugInfo = _settings.HasDebugInfo;
         _assets.RecreateAsync<Shader>().FireAndForget();
     }
 
@@ -251,7 +251,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     {
         // An entry made with debug info is another version than one made without, so changing the setting finds the
         // entries dirty.
-        ulong version = _settings.DebugInfo ? 1UL : 0UL;
+        ulong version = _settings.HasDebugInfo ? 1UL : 0UL;
 
         if (await _caches.ReadAsync<GpuShader>(key, version, CancellationToken.None)
             .ConfigureAwait(false) is { Ok: true } cached)
@@ -356,7 +356,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         // A resource the shader does not use is dropped, so what is read from the SPIR-V is what the shader uses; its
         // interface is kept whole, so the stages' varyings line up. Arrays of resources stay arrays: they are the heap.
         arguments.AddRange(["-spirv", "-fspv-target-env=vulkan1.1", "-fspv-preserve-interface"]);
-        if (_settings.DebugInfo) arguments.Add("-fspv-debug=vulkan-with-source");
+        if (_settings.HasDebugInfo) arguments.Add("-fspv-debug=vulkan-with-source");
 
         byte[] text = Encoding.UTF8.GetBytes(source);
         nint[] wide = new nint[arguments.Count];

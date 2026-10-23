@@ -1,7 +1,7 @@
 {
     "name": "Samples",
     "entryPoint": { "id": 3400 },
-    "loading": { "id": 3402 },
+    "loadingDomain": { "id": 3402 },
     "player": { "id": 3316 },
     "gems": [
         "SdlPlatform",

@@ -8,7 +8,7 @@
         {"name": "Moon", "components": {"Transform": {"rotation": {"x": 0.53336, "y": 0.15154, "z": -0.351, "w": -0.75456}}, "DirectionalLight": {"mode": "moon", "color": {"r": 0.85, "g": 0.9, "b": 1}, "intensity": 0.3}, "Spin": {"degreesPerSecond": 0.45, "axis": {"x": 0.513, "y": 0.3, "z": -0.351}}}},
         {"name": "Landscape", "prefab": {"id": 3724}, "components": {"Transform": {}}},
         {"name": "Cabin", "prefab": {"id": 3725}, "components": {"Transform": {"position": {"x": -2897.898, "y": 61.359, "z": -1816.817}, "rotation": {"x": 0, "y": -0.5373, "z": 0, "w": 0.84339}}}},
-        {"name": "Wind", "components": {"Sound": {"audio": {"id": 3704}, "loop": true, "volume": 0.35, "space": "everywhere"}}},
+        {"name": "Wind", "components": {"Sound": {"audio": {"id": 3704}, "isLooping": true, "volume": 0.35, "space": "everywhere"}}},
         {"name": "Controls", "scripts": [{"id": 3452, "faster": 40}, {"id": 3448}, {"id": 3446, "materials": [{"id": 3600}, {"id": 3601}, {"id": 3602}, {"id": 3603}, {"id": 3604}], "snowLine": 2700}]},
         {"name": "Help", "scripts": [{"id": 3450, "isOnScreen": true, "text": "The sun and the moon cross the sky; hold T to run the day forty times as fast.\nUp and down bring the snow down the mountains; [ and ] change the cloud cover, - and = the wind, , and . the fog."}]},
         {"name": "Spawn", "tags": ["spawn"], "components": {"Transform": {"position": {"x": -2895.276, "y": 63.459, "z": -1816.164}, "rotation": {"x": 0, "y": -0.66262, "z": 0, "w": 0.74896}}}},

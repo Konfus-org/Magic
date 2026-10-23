@@ -71,7 +71,7 @@ internal sealed class DebugToolsGem(
     /// </summary>
     private void ShowFrameRate(in Frame frame)
     {
-        if (!settings.FrameRate) return;
+        if (!settings.IsFrameRateShown) return;
 
         _frames++;
         _countedSec += frame.RealDeltaSec;

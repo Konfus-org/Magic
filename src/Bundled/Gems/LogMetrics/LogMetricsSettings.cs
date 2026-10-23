@@ -13,7 +13,7 @@ internal sealed class LogMetricsSettings : ISettings
     /// <summary>
     /// Off unless asked for, so a project can list the gem and only the runs that want metrics log them.
     /// </summary>
-    public bool Enabled { get; set; }
+    public bool IsEnabled { get; set; }
 
     /// <summary>
     /// How often a summary is logged, in seconds.

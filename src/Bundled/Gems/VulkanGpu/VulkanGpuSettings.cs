@@ -30,7 +30,7 @@ internal sealed class VulkanGpuSettings : ISettings
 
     /// <summary>
     /// Part of the name of the GPU to open, as the log names it, any case: <c>Intel</c>, <c>3070</c>. Empty, or naming
-    /// none, opens the fastest that runs Vulkan 1.3, or the one saving power when <see cref="LowPower"/> says so.
+    /// none, opens the fastest that runs Vulkan 1.3, or the one saving power when <see cref="IsLowPower"/> says so.
     /// Changed while running, the engine starts again.
     /// </summary>
     [RequireRestart]
@@ -41,7 +41,7 @@ internal sealed class VulkanGpuSettings : ISettings
     /// <see cref="Device"/> names none. Changed while running, the engine starts again.
     /// </summary>
     [RequireRestart]
-    public bool LowPower { get; set; }
+    public bool IsLowPower { get; set; }
 
     /// <summary>
     /// Present on the display's refresh. Off, a frame is shown as soon as it is done, tearing where the OS allows it.
@@ -49,7 +49,7 @@ internal sealed class VulkanGpuSettings : ISettings
     /// Changed while running, every window presents the new way from the next frame.
     /// </summary>
     [Category("Window")]
-    public bool Vsync { get; set; } = IsRelease;
+    public bool HasVsync { get; set; } = IsRelease;
 
     /// <summary>
     /// How a window's image is composed onto the display, which decides its format: <c>sdr</c> (8-bit UNORM, the
@@ -67,5 +67,5 @@ internal sealed class VulkanGpuSettings : ISettings
     /// </summary>
     [RequireRestart]
     [Category("Debug")]
-    public bool Validation { get; set; }
+    public bool IsValidating { get; set; }
 }

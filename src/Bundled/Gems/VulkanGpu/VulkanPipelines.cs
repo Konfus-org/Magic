@@ -155,7 +155,7 @@ internal sealed unsafe class VulkanPipelines(VulkanDevice device, VulkanHeap hea
             // triangle in it is clockwise on the target, as the shaders are written for.
             VkPipelineRasterizationStateCreateInfo rasterization = new()
             {
-                depthClampEnable = !description.DepthClip,
+                depthClampEnable = !description.IsDepthClipped,
                 polygonMode = VkPolygonMode.Fill,
                 cullMode = description.Cull.ToVulkan(),
                 frontFace = VkFrontFace.Clockwise,
@@ -172,7 +172,7 @@ internal sealed unsafe class VulkanPipelines(VulkanDevice device, VulkanHeap hea
             VkPipelineDepthStencilStateCreateInfo depth = new()
             {
                 depthTestEnable = hasDepth,
-                depthWriteEnable = hasDepth && description.DepthWrite,
+                depthWriteEnable = hasDepth && description.IsDepthWritten,
                 depthCompareOp = description.DepthCompare.ToVulkan(),
             };
             VkPipelineColorBlendStateCreateInfo blend = new()

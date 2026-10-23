@@ -115,10 +115,10 @@ internal static class Program
             ProjectPath = parsed.GetRequiredValue(project),
             FrameLimit = parsed.GetValue(frames) ?? ulong.MaxValue,
             TimeLimit = parsed.GetValue(seconds) ?? TimeSpan.MaxValue,
-            Headless = parsed.GetValue(headless),
+            IsHeadless = parsed.GetValue(headless),
             Settings = parsed.GetValue(settings) ?? [],
             Preset = parsed.GetValue(preset) ?? string.Empty,
-            Bake = parsed.GetValue(bake),
+            IsBaking = parsed.GetValue(bake),
         };
 
         // Nothing is awaited before the engine runs, so it runs on the process's first thread, which the OS ties

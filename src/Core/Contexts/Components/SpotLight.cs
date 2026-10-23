@@ -66,5 +66,5 @@ public record struct SpotLight : IComponent
     /// It casts no shadow: its light reaches through everything, which costs next to nothing to draw. A light far off,
     /// whose shadows would not show, is best drawn so.
     /// </summary>
-    public bool Shadowless { get; set; }
+    public bool IsShadowless { get; set; }
 }

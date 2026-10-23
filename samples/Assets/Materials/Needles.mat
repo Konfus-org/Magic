@@ -1,7 +1,7 @@
 {
     // The conifers' needles: rows across each frond, letting light through, flecked by the wind.
     "shader": { "id": 3651 },
-    "doubleSided": true,
+    "isDoubleSided": true,
     "params": {
         "color": { "r": 0.1, "g": 0.2, "b": 0.08, "a": 1 },
         "roughness": { "x": 0.7 },

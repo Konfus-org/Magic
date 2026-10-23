@@ -70,8 +70,8 @@ internal sealed unsafe class VulkanDevice
         if (HasDebugUtils) extensions.Add(Vulkan.VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         if (HasColorSpaces) extensions.Add(Vulkan.VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
 
-        bool isValidated = settings.Validation && HasLayer(Vulkan.VK_LAYER_KHRONOS_VALIDATION_EXTENSION_NAME);
-        if (settings.Validation && !isValidated)
+        bool isValidated = settings.IsValidating && HasLayer(Vulkan.VK_LAYER_KHRONOS_VALIDATION_EXTENSION_NAME);
+        if (settings.IsValidating && !isValidated)
         {
             Debugging.Warn("Vulkan's validation layer is not installed, so the GPU is not validated: the Vulkan SDK "
                 + "installs it.");
@@ -466,7 +466,7 @@ internal sealed unsafe class VulkanDevice
             InstanceApi.vkEnumeratePhysicalDevices(&count, first);
         }
 
-        VkPhysicalDeviceType preferred = settings.LowPower
+        VkPhysicalDeviceType preferred = settings.IsLowPower
             ? VkPhysicalDeviceType.IntegratedGpu
             : VkPhysicalDeviceType.DiscreteGpu;
         VkPhysicalDevice best = default;

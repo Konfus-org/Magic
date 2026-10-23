@@ -592,7 +592,7 @@ internal sealed unsafe class Voices : IDisposable
         /// <summary>
         /// It plays again from the start when it ends; written by the main thread.
         /// </summary>
-        internal bool Loop
+        internal bool IsLooping
         {
             get => Volatile.Read(ref field);
             set => Volatile.Write(ref field, value);
@@ -717,7 +717,7 @@ internal sealed unsafe class Voices : IDisposable
             int got = Math.Max(0, SDL_GetAudioStreamData(_stream, into, want));
             new Span<float>(into + (got / sizeof(float)), (want - got) / sizeof(float)).Clear();
             double seconds = Seconds + ((double)got / (channels * sizeof(float)) * pitch / sampleRate);
-            Seconds = Loop && _duration > 0 ? seconds % _duration : Math.Min(seconds, _duration);
+            Seconds = IsLooping && _duration > 0 ? seconds % _duration : Math.Min(seconds, _duration);
             IsDone = _isFlushed && got < want;
         }
 
@@ -766,7 +766,7 @@ internal sealed unsafe class Voices : IDisposable
 
             if (_fed < _count) return;
 
-            if (Loop && _count > 0)
+            if (IsLooping && _count > 0)
             {
                 _fed = 0;
 

@@ -43,7 +43,7 @@ internal sealed class SteamAudioSettings : ISettings
     /// <summary>
     /// Sounds echo off what is solid around them, traced through the world on a thread of the gem's own.
     /// </summary>
-    public bool Reflections { get; set; } = true;
+    public bool HasReflections { get; set; } = true;
 
     /// <summary>
     /// How many of the nearest sounds in the world echo; each holds its echo, a few MB, for as long as the run.

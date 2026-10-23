@@ -20,7 +20,7 @@ internal sealed class DebugToolsSettings : ISettings
     /// The frame rate and a frame's time, averaged over half a second, in the top left corner: by default in a Debug
     /// build, where the engine's speed is what is being watched.
     /// </summary>
-    public bool FrameRate { get; set; } = IsDebug;
+    public bool IsFrameRateShown { get; set; } = IsDebug;
 
     /// <summary>
     /// The telemetry window's tabs, in this order: each a title, and the meters under it, by their name or a prefix of

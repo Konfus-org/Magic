@@ -14,5 +14,5 @@ internal sealed class DxcShaderCompilerSettings : ISettings
     /// Embeds each shader's source and symbols, so a GPU capture (RenderDoc, PIX, Xcode) can step through it. Changed
     /// while running, every shader is compiled again.
     /// </summary>
-    public bool DebugInfo { get; set; }
+    public bool HasDebugInfo { get; set; }
 }

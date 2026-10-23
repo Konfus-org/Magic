@@ -940,9 +940,9 @@ internal sealed class Domains : IDisposable
         if (_keptLoadingDomain is not null) return;
 
         string path = DefaultLoadingDomainPath + Domain.Extensions[0];
-        Handle<Domain> handle = _app.Project.Loading == Handle<Domain>.None
+        Handle<Domain> handle = _app.Project.LoadingDomain == Handle<Domain>.None
             ? _assets.Find<Domain>(path)
-            : _app.Project.Loading;
+            : _app.Project.LoadingDomain;
         if (handle == Handle<Domain>.None)
         {
             Debugging.Warn($"There is no loading domain: the project names none, and there is no {path}.");

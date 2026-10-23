@@ -19,7 +19,7 @@ public sealed class Project
     /// The domain shown while another replaces the world (<see cref="World.OpenAsync"/>); none shows the engine's,
     /// <c>Domains/Loading/Loading.domain</c>.
     /// </summary>
-    public Handle<Domain> Loading { get; set; }
+    public Handle<Domain> LoadingDomain { get; set; }
 
     /// <summary>
     /// What is spawned at a domain's spawn when it opens in place of the world (<see cref="World.OpenAsync"/>): the

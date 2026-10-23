@@ -120,7 +120,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             SDL_SetHint(CString.Constant(SDL_HINT_NO_SIGNAL_HANDLERS), on);
         }
 
-        uint systems = run.Headless
+        uint systems = run.IsHeadless
             ? SDL_INIT_GAMEPAD
             : SDL_INIT_VIDEO | SDL_INIT_GAMEPAD;
 
@@ -138,7 +138,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                 + "Magic was built against.");
         }
 
-        if (run.Headless) return;
+        if (run.IsHeadless) return;
 
         fixed (byte* title = CString.ToBytes(app.Project.Name))
         {
@@ -450,7 +450,8 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     Set(DeviceKind.Mouse, mouse, Control.MouseY, sdlEvent.motion.y * _pixelDensity);
                     float motion = _pixelDensity * Math.Clamp(_settings.MouseSensitivity, 0.1f, 10);
                     Add(mouse, Control.MouseMotionX, sdlEvent.motion.xrel * motion);
-                    Add(mouse, Control.MouseMotionY, sdlEvent.motion.yrel * motion * (_settings.InvertMouseY ? -1 : 1));
+                    float sign = _settings.IsMouseYInverted ? -1 : 1;
+                    Add(mouse, Control.MouseMotionY, sdlEvent.motion.yrel * motion * sign);
 
                     break;
                 }
@@ -685,7 +686,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     private unsafe void ReadAxes(uint id, SDL_Gamepad* gamepad)
     {
         // SDL's stick y grows downward; Magic's is up positive, unless the settings invert it.
-        float up = _settings.InvertStickY ? 1 : -1;
+        float up = _settings.IsStickYInverted ? 1 : -1;
         Set(DeviceKind.Gamepad, id, Control.GamepadLeftX, ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX)));
         Set(
             DeviceKind.Gamepad,

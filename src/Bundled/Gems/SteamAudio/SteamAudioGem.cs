@@ -255,7 +255,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         _assets = assets;
         _settings = settings;
         _surroundings = new Surroundings(assets);
-        if (run.Headless)
+        if (run.IsHeadless)
         {
             Debugging.Info("Sound is not played headless: every sound goes on in silence.");
 
@@ -439,7 +439,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         if (_sounds is not null)
         {
             _sounds.Volume = _settings.Volume;
-            _sounds.IsReflecting = _settings.Reflections && _reflected.Length > 0;
+            _sounds.IsReflecting = _settings.HasReflections && _reflected.Length > 0;
             TakeReleased(_sounds);
         }
 
@@ -603,7 +603,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         if (voice.Time < audio.Seconds) return;
 
-        if (sound.Loop && audio.Seconds > 0)
+        if (sound.IsLooping && audio.Seconds > 0)
         {
             voice.Time %= audio.Seconds;
 
@@ -1068,7 +1068,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             float fade = isWorld ? Math.Clamp((sound.Range - voice.Distance) / (sound.Range * Fade), 0, 1) : 1;
             slot.Gain = sound.Volume * fade;
             slot.Pitch = sound.Pitch;
-            slot.Loop = sound.Loop;
+            slot.IsLooping = sound.IsLooping;
             if (voice.IsSeeking)
             {
                 voice.IsSeeking = !sounds.TryTell(new VoiceCommand
@@ -1095,7 +1095,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             IPLDirectEffectFlags applied = IPL_DIRECTEFFECTFLAGS_APPLYDISTANCEATTENUATION
                 | IPL_DIRECTEFFECTFLAGS_APPLYAIRABSORPTION
                 | IPL_DIRECTEFFECTFLAGS_APPLYDIRECTIVITY;
-            if (!sound.Unoccluded)
+            if (!sound.IsUnoccluded)
             {
                 simulated |= IPL_DIRECTSIMULATIONFLAGS_OCCLUSION | IPL_DIRECTSIMULATIONFLAGS_TRANSMISSION;
                 applied |= IPL_DIRECTEFFECTFLAGS_APPLYOCCLUSION | IPL_DIRECTEFFECTFLAGS_APPLYTRANSMISSION;
@@ -1140,7 +1140,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             {
                 if (count == nearest.Length) break;
                 if (voice.Slot >= 0 && voice.Sound.Space == SoundSpace.World
-                    && !voice.Sound.Dry)
+                    && !voice.Sound.IsDry)
                 {
                     nearest[count++] = voice.Slot;
                 }

@@ -58,7 +58,7 @@ internal sealed class VoxelRenderingSettings : ISettings
     /// block of the target's.
     /// </summary>
     [Category("Render/Display")]
-    public bool Upscale { get; set; } = true;
+    public bool IsUpscaled { get; set; } = true;
 
     /// <summary>
     /// The most taps a material's textures are filtered with at a grazing angle: 1 to 16.

@@ -144,9 +144,9 @@ public sealed class Settings : IDisposable
     public void Dispose() => _reloads.Dispose();
 
     /// <summary>
-    /// The setting at <paramref name="key"/>, <c>Get&lt;bool&gt;("SdlPlatform.vsync")</c>. One just set reads back at
-    /// once, though its gem sees it only at the next sync point. Why not, when no gem with settings has it, or it is no
-    /// <typeparamref name="T"/>.
+    /// The setting at <paramref name="key"/>, <c>TryGet&lt;bool&gt;("VulkanGpu.hasVsync")</c>. One just set reads back
+    /// at once, though its gem sees it only at the next sync point. Why not, when no gem with settings has it, or it is
+    /// no <typeparamref name="T"/>.
     /// </summary>
     public Result<T> TryGet<T>(string key)
     {
@@ -183,7 +183,7 @@ public sealed class Settings : IDisposable
 
     /// <summary>
     /// Changes the setting at <paramref name="key"/> to <paramref name="value"/> until another preset is applied,
-    /// <c>TrySet("SdlPlatform.vsync", false)</c>; its gem sees it at the next sync point. The value is anything the
+    /// <c>TrySet("VulkanGpu.hasVsync", false)</c>; its gem sees it at the next sync point. The value is anything the
     /// setting reads as JSON, a <see cref="JsonNode"/> included. Why not, when no gem with settings has it or the value
     /// does not fit it; then nothing changes.
     /// </summary>
@@ -358,7 +358,7 @@ public sealed class Settings : IDisposable
                 ProjectPath = _args.ProjectPath,
                 FrameLimit = _args.FrameLimit,
                 TimeLimit = _args.TimeLimit,
-                Headless = _args.Headless,
+                IsHeadless = _args.IsHeadless,
                 Settings = lines,
                 Preset = preset
             };

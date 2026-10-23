@@ -7,6 +7,6 @@
         {"name": "Lantern", "components": {"Transform": {"position": {"x": -1.55, "y": 1.0, "z": -0.6}, "scale": {"x": 1.6, "y": 1.6, "z": 1.6}}, "Renderer": {"model": {"id": 3478}, "materials": [{"id": 3613}, {"id": 3614}]}}},
         {"name": "Lantern light", "components": {"Transform": {"position": {"x": -1.55, "y": 1.17, "z": -0.6}}, "PointLight": {"color": {"r": 1, "g": 0.72, "b": 0.42}, "intensity": 30, "range": 9}}},
         {"name": "Embers", "components": {"Transform": {"position": {"x": -3.45, "y": 0.52, "z": 0}, "scale": {"x": 0.18, "y": 0.04, "z": 0.3}}, "Renderer": {"model": {"id": 517}, "materials": [{"id": 3616}]}}},
-        {"name": "Fire", "components": {"Transform": {"position": {"x": -3.2, "y": 0.9, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.55, "b": 0.25}, "intensity": 90, "range": 12}, "Sound": {"audio": {"id": 3705}, "loop": true, "volume": 0.7, "near": 1.5, "range": 18}}, "scripts": [{"id": 3449, "intensity": 90}]}
+        {"name": "Fire", "components": {"Transform": {"position": {"x": -3.2, "y": 0.9, "z": 0}}, "PointLight": {"color": {"r": 1, "g": 0.55, "b": 0.25}, "intensity": 90, "range": 12}, "Sound": {"audio": {"id": 3705}, "isLooping": true, "volume": 0.7, "near": 1.5, "range": 18}}, "scripts": [{"id": 3449, "intensity": 90}]}
     ]
 }

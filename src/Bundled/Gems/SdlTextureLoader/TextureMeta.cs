@@ -36,7 +36,7 @@ internal sealed class TextureMeta
     /// Make the mip chain, each level half the one above, down to one texel. Off for an image only ever shown at its
     /// size.
     /// </summary>
-    public bool Mipmaps { get; set; } = true;
+    public bool HasMipmaps { get; set; } = true;
 
     /// <summary>
     /// For an <c>.svg</c>: the width, in pixels, it is drawn at, its height kept in proportion; 0 is the size the file

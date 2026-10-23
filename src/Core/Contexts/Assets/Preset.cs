@@ -4,7 +4,7 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// Gem settings in a file, <c>Presets/&lt;Name&gt;.preset</c>: <c>{ "settings": { "SdlPlatform.vsync": false } }</c>.
+/// Gem settings in a file, <c>Presets/&lt;Name&gt;.preset</c>: <c>{ "settings": { "VulkanGpu.hasVsync": false } }</c>.
 /// The default one, <c>Presets/Default.preset</c>, is the project's own settings, and any other applied is a kind of
 /// machine's over it (<see cref="Services.Settings"/>).
 /// </summary>

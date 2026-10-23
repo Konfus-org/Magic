@@ -113,7 +113,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpuDriver, IDisposable
     {
         _settings = settings;
         _threads = threads;
-        _vsyncPresenting = settings.Vsync;
+        _vsyncPresenting = settings.HasVsync;
         _composing = settings.Composition;
 
         // The SDL whose windows this gem draws into is the platform gem's, which opens the windows and quits SDL as it
@@ -742,9 +742,9 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpuDriver, IDisposable
     /// </summary>
     private void FollowSwapchain()
     {
-        if (_vsyncPresenting == _settings.Vsync && _composing == _settings.Composition) return;
+        if (_vsyncPresenting == _settings.HasVsync && _composing == _settings.Composition) return;
 
-        _vsyncPresenting = _settings.Vsync;
+        _vsyncPresenting = _settings.HasVsync;
         _composing = _settings.Composition;
         _windows.Follow();
     }

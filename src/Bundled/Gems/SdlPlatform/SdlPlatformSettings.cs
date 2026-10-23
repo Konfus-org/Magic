@@ -34,7 +34,7 @@ internal sealed class SdlPlatformSettings : ISettings
     /// Mouse motion up reads as down, and down as up.
     /// </summary>
     [Category("Input")]
-    public bool InvertMouseY { get; set; }
+    public bool IsMouseYInverted { get; set; }
 
     /// <summary>
     /// How far a stick or trigger is pushed before it reads as anything but 0, 0 to 0.5 of its reach; past it, what is
@@ -48,5 +48,5 @@ internal sealed class SdlPlatformSettings : ISettings
     /// Pushing a stick up reads as down, and down as up.
     /// </summary>
     [Category("Input")]
-    public bool InvertStickY { get; set; }
+    public bool IsStickYInverted { get; set; }
 }

@@ -228,7 +228,7 @@ public sealed class Engine
 
         // Headless, Ctrl+C quits the app, and its gems end; with a window it ends the process at once, as in any
         // program.
-        using PosixSignalRegistration? interrupt = args.Headless
+        using PosixSignalRegistration? interrupt = args.IsHeadless
             ? PosixSignalRegistration.Create(
                 PosixSignal.SIGINT,
                 context =>
@@ -457,7 +457,7 @@ public sealed class Engine
             // world as the run before left it, else the project's entry point, or, baking, each of the project's
             // domains in turn.
             if (state is { } saved) _world.Restore(saved);
-            else if (_args.Bake) _world.BakeAsync().FireAndForget();
+            else if (_args.IsBaking) _world.BakeAsync().FireAndForget();
             else _world.OpenEntryPointAsync().FireAndForget();
 
             RunFrames();

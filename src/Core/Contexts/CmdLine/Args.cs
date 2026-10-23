@@ -2,7 +2,7 @@ namespace Magic.Contexts.CmdLine;
 
 /// <summary>
 /// What to run and how: the command line's options, as plain data. A gem can ask for it in its constructor, as
-/// a platform gem does to open no window when <see cref="Headless"/>.
+/// a platform gem does to open no window when <see cref="IsHeadless"/>.
 /// </summary>
 public sealed class Args
 {
@@ -26,7 +26,7 @@ public sealed class Args
     /// <summary>
     /// The run has no window: Ctrl+C stops it cleanly, ending its gems, instead of ending the process at once.
     /// </summary>
-    public bool Headless { get; init; }
+    public bool IsHeadless { get; init; }
 
     /// <summary>
     /// Gem settings that win over the presets' (--set), each a <c>Gem.path=value</c> line as given.
@@ -43,5 +43,5 @@ public sealed class Args
     /// The run opens each of the project's domains in turn, each once the last is shown, then stops (--bake): what they
     /// use is made and cached, as a Release build bakes it beside the project.
     /// </summary>
-    public bool Bake { get; init; }
+    public bool IsBaking { get; init; }
 }

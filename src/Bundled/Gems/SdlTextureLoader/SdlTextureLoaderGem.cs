@@ -85,7 +85,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
     private static Result<Texture> CreateMips(SDL_Surface* level0, TextureMeta meta)
     {
         // Each level's size and where it starts in the one array, half the one above on each side down to one texel.
-        int count = meta.Mipmaps ? 1 + BitOperations.Log2((uint)Math.Max(level0->w, level0->h)) : 1;
+        int count = meta.HasMipmaps ? 1 + BitOperations.Log2((uint)Math.Max(level0->w, level0->h)) : 1;
         TextureLevel[] levels = new TextureLevel[count];
         int size = 0;
         for (int i = 0; i < count; i++)

@@ -1,7 +1,7 @@
 {
     // The aspens' leaves: a midrib, light through them, flecked by the wind.
     "shader": { "id": 3651 },
-    "doubleSided": true,
+    "isDoubleSided": true,
     "params": {
         "color": { "r": 0.2, "g": 0.33, "b": 0.07, "a": 1 },
         "roughness": { "x": 0.6 },

@@ -277,7 +277,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
                 CreateTool("settings_get", "Every gem setting by its key (Gem.setting), with its value and what it is.",
                     FormatSettings),
                 CreateTool("settings_set", "Changes a gem setting as the console's set does: live until a preset is applied, never saved.",
-                    ([Description("The setting's key, from settings_get, such as SdlPlatform.vsync.")] string key,
+                    ([Description("The setting's key, from settings_get, such as VulkanGpu.hasVsync.")] string key,
                      [Description("The new value as JSON.")] JsonElement value) => SetSetting(key, value)),
                 CreateTool("quit", "Ends the run once the current frame is done.",
                     Quit),

@@ -25,7 +25,7 @@ namespace Magic.Services;
 /// its corner, <see cref="Domain.CellSize"/> metres a side, and any other at the domain's origin. Nothing is loaded by
 /// distance: whatever draws the world picks each thing's detail by its distance. Opening a domain in place of the
 /// others (<see cref="DomainOpenMode.Replace"/>) closes them and shows the project's loading domain
-/// (<see cref="Project.Loading"/>) until the new one is there, spawned with the project's player
+/// (<see cref="Project.LoadingDomain"/>) until the new one is there, spawned with the project's player
 /// (<see cref="Project.Player"/>) at its spawn (<see cref="Tag.Spawn"/>) in the frame the loading domain closes; the
 /// window keeps the loading domain's last image while every gem that needs to readies the new one out of sight
 /// (<see cref="IPreloader.IsReady"/>), and it is shown once they all have, drawn as it loaded, before anything moves
@@ -527,7 +527,7 @@ public sealed class World : IDisposable
         IReadOnlyList<Handle<Domain>> domains = _domains is null ? [] : _assets.GetProjectAssets<Domain>();
         foreach (Handle<Domain> domain in domains)
         {
-            if (domain == _app.Project.EntryPoint || domain == _app.Project.Loading) continue;
+            if (domain == _app.Project.EntryPoint || domain == _app.Project.LoadingDomain) continue;
 
             Result<Domain> opened = await OpenAsync(domain, DomainOpenMode.Replace, null, _app.Quitting)
                 .ConfigureAwait(false);

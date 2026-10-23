@@ -13,7 +13,7 @@ namespace Magic.LogMetrics;
 /// <summary>
 /// Logs what the engine measures: every <see cref="LogMetricsSettings.IntervalSeconds"/>, a line per instrument and set
 /// of tags measured since the last time, then the slowest frame and where its time went, and once more when the run
-/// ends. Off unless <see cref="LogMetricsSettings.Enabled"/>, and then it does not listen at all, so nothing is
+/// ends. Off unless <see cref="LogMetricsSettings.IsEnabled"/>, and then it does not listen at all, so nothing is
 /// measured for it.
 /// <para>
 /// Measurements are added up on the thread that records them, the main or render thread for Core's, without allocating
@@ -42,7 +42,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     public LogMetricsGem(LogMetricsSettings settings)
     {
         _settings = settings;
-        if (!settings.Enabled)
+        if (!settings.IsEnabled)
         {
             Debugging.Verbose("Metrics are not logged; --set LogMetrics.enabled=true turns them on.");
         }
@@ -96,7 +96,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// </summary>
     private void Follow()
     {
-        bool isWanted = _settings.Enabled && _settings.IntervalSeconds > 0;
+        bool isWanted = _settings.IsEnabled && _settings.IntervalSeconds > 0;
         if (_listener is not null && (!isWanted || !HasSameMeters())) Stop();
 
         if (isWanted && _listener is null) Start();

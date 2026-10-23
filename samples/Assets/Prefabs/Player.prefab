@@ -24,7 +24,7 @@
             "tags": [ "unpausable" ],
             "components": {
                 "Transform": {},
-                "Sound": { "audio": { "id": 3702 }, "playback": "paused", "loop": true, "volume": 0.5, "space": "everywhere" }
+                "Sound": { "audio": { "id": 3702 }, "playback": "paused", "isLooping": true, "volume": 0.5, "space": "everywhere" }
             },
             "scripts": [ { "id": 3453 } ]
         }

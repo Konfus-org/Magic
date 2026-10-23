@@ -487,7 +487,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     }
 
     private void Draw(ViewTarget target, GpuTexture image, in Frame frame)
-        => _output.Draw(target, image, !_settings.Upscale, _cleared.Add(target.Texture), frame);
+        => _output.Draw(target, image, !_settings.IsUpscaled, _cleared.Add(target.Texture), frame);
 
     /// <summary>
     /// Clears the window to black when no view drew into it this frame, so it never shows what its image held before.

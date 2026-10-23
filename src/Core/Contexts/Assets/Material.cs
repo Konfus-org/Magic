@@ -45,7 +45,7 @@ public sealed class Material : IJsonAsset<Material>
     /// <summary>
     /// Its back faces are drawn too.
     /// </summary>
-    public bool DoubleSided { get; set; }
+    public bool IsDoubleSided { get; set; }
 
     /// <summary>
     /// Values by the names of the shader's <c>MaterialParams</c> members, matched as HLSL does, case and all; one left

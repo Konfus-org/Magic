@@ -49,7 +49,7 @@ public enum GpuBlend : byte
 /// an optional depth target. The vertex shader reads its vertices from the heap by <c>SV_VertexID</c>. Triangles are
 /// clockwise from outside, and the defaults are the engine's other conventions (back faces culled, reverse-Z), so a
 /// GPU reads them rather than knowing them. Depth is tested whenever <see cref="DepthFormat"/> is set, and written
-/// unless <see cref="DepthWrite"/> is off.
+/// unless <see cref="IsDepthWritten"/> is off.
 /// </summary>
 public sealed record GpuPipelineDescription
 {
@@ -72,7 +72,7 @@ public sealed record GpuPipelineDescription
 
     public GpuCompare DepthCompare { get; init; } = GpuCompare.GreaterOrEqual;
 
-    public bool DepthWrite { get; init; } = true;
+    public bool IsDepthWritten { get; init; } = true;
 
     public GpuCull Cull { get; init; } = GpuCull.Back;
 
@@ -90,5 +90,5 @@ public sealed record GpuPipelineDescription
     /// Off clamps depth to the planes instead of clipping at them, so a shadow caster behind the near plane still
     /// writes.
     /// </summary>
-    public bool DepthClip { get; init; } = true;
+    public bool IsDepthClipped { get; init; } = true;
 }

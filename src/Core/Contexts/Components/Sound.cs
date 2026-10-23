@@ -65,7 +65,7 @@ public record struct Sound : IComponent
     /// <summary>
     /// It starts again from the start each time it ends, never stopping of itself.
     /// </summary>
-    public bool Loop { get; set; }
+    public bool IsLooping { get; set; }
 
     /// <summary>
     /// How loud, from just above 0 to 1 and beyond; silence is <see cref="Playback.Paused"/>.
@@ -119,12 +119,12 @@ public record struct Sound : IComponent
     /// What is solid between it and the listener does not muffle it, which costs nothing to trace: for a sound meant
     /// to be heard whatever is in the way.
     /// </summary>
-    public bool Unoccluded { get; set; }
+    public bool IsUnoccluded { get; set; }
 
     /// <summary>
     /// It does not echo off what is around it, which costs nothing to trace.
     /// </summary>
-    public bool Dry { get; set; }
+    public bool IsDry { get; set; }
 
     /// <summary>
     /// Seconds into it, at its own pitch, as it was last heard. Set it to play from there.

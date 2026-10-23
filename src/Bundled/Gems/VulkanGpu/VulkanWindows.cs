@@ -392,7 +392,7 @@ internal sealed unsafe class VulkanWindows(
     /// </summary>
     private VkPresentModeKHR ChoosePresentMode(VulkanWindow window)
     {
-        if (_settings.Vsync) return VkPresentModeKHR.Fifo;
+        if (_settings.HasVsync) return VkPresentModeKHR.Fifo;
 
         uint count;
         _device.InstanceApi

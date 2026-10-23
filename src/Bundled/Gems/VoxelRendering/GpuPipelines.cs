@@ -197,7 +197,7 @@ internal sealed class GpuPipelines : IDisposable
         bool isClipped = !_drawnInto.TryGetValue(MaterialPass.Visibility, out TargetFormats visibility)
             || GetMaterialPipeline(new MaterialKey(MaterialPass.Visibility, surface, visibility)) != GpuPipeline.None;
         bool isResolved = !_drawnInto.TryGetValue(MaterialPass.Resolve, out TargetFormats resolve)
-            || GetMaterialPipeline(new MaterialKey(MaterialPass.Resolve, surface with { Masked = false }, resolve))
+            || GetMaterialPipeline(new MaterialKey(MaterialPass.Resolve, surface with { IsMasked = false }, resolve))
                 != GpuPipeline.None;
 
         return isClipped && isResolved;
@@ -369,8 +369,8 @@ internal sealed class GpuPipelines : IDisposable
                 Fragment = fragment.Value,
                 ColorFormats = key.Formats.Colors,
                 DepthFormat = key.Formats.Depth,
-                DepthWrite = key.Pass == MaterialPass.Visibility,
-                Cull = key.Surface.DoubleSided || key.Pass == MaterialPass.Resolve ? GpuCull.None : GpuCull.Back,
+                IsDepthWritten = key.Pass == MaterialPass.Visibility,
+                Cull = key.Surface.IsDoubleSided || key.Pass == MaterialPass.Resolve ? GpuCull.None : GpuCull.Back,
             }
             : null;
         string? error = description is not null ? null : compiledVertex.Ok ? fragment.Error : compiledVertex.Error;
@@ -395,8 +395,8 @@ internal sealed class GpuPipelines : IDisposable
         }
 
         StringBuilder text = new();
-        text.Append("#define SURFACE_MASKED ").Append(key.Surface.Masked ? 1 : 0).Append('\n')
-            .Append("#define SURFACE_DOUBLE_SIDED ").Append(key.Surface.DoubleSided ? 1 : 0).Append('\n')
+        text.Append("#define SURFACE_MASKED ").Append(key.Surface.IsMasked ? 1 : 0).Append('\n')
+            .Append("#define SURFACE_DOUBLE_SIDED ").Append(key.Surface.IsDoubleSided ? 1 : 0).Append('\n')
             .Append("#define SURFACE_FORWARD 0\n")
             .Append("#include \"Rendering/Include/Surfaces.hlsli\"\n")
             .Append("#line 1 \"").Append(name).Append("\"\n").Append(surface).Append('\n')
