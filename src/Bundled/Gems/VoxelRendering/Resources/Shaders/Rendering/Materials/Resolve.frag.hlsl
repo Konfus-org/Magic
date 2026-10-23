@@ -12,18 +12,9 @@
 
 #include "Include/Brdf.hlsli"
 #include "Include/GBuffer.hlsli"
-#include "Include/TileVaryings.hlsli"
 #include "Rendering/Include/PieceFragment.hlsli"
 #include "Rendering/Include/Pieces.hlsli"
-
-struct ResolveOutput
-{
-    float4 albedo : SV_Target0;
-    float4 normal : SV_Target1;
-    float4 material : SV_Target2;
-    float4 emissive : SV_Target3;
-    float2 velocity : SV_Target4;
-};
+#include "Rendering/Include/TileVaryings.hlsli"
 
 // Where a point of the view (ndc) falls on the triangle whose corners are a, b and c as clip (x, y, w): the weights of
 // its corners, each the corner's share of the 2D homogeneous coordinates' inverse, normalised.
@@ -34,7 +25,7 @@ float3 BarycentricsAt(float3 a, float3 b, float3 c, float2 ndc)
     return weights / (weights.x + weights.y + weights.z);
 }
 
-ResolveOutput main(TileVaryings input)
+GBufferOutput main(TileVaryings input)
 {
     LoadView(Draw.view);
     uint2 pixel = (uint2)input.clip.xy;
@@ -141,7 +132,6 @@ ResolveOutput main(TileVaryings input)
     stored.metallic = surface.metallic;
     stored.specular = surface.specular;
     stored.modelData = surface.modelData;
-    GBufferOutput written = EncodeGBuffer(stored, surface.emissive);
 
     // A card moves as its centre does; a cluster's point as its instance moved it.
     float3 place = here.x * places[0] + here.y * places[1] + here.z * places[2];
@@ -151,11 +141,5 @@ ResolveOutput main(TileVaryings input)
     float4 lastClip = ToPrevClip(last);
     float2 lastNdc = lastClip.xy / max(lastClip.w, 1e-6);
 
-    ResolveOutput output;
-    output.albedo = written.albedo;
-    output.normal = written.normal;
-    output.material = written.material;
-    output.emissive = written.emissive;
-    output.velocity = (ndc - View.jitter - lastNdc) * float2(0.5, -0.5);
-    return output;
+    return EncodeGBuffer(stored, surface.emissive, (ndc - View.jitter - lastNdc) * float2(0.5, -0.5));
 }

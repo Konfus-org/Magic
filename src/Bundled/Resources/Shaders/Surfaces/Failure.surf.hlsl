@@ -44,7 +44,7 @@ Surface EvaluateSurface(SurfaceInputs input, MaterialParams material)
     Surface surface = DefaultSurface(input);
     surface.baseColor = float3(0.0, 0.0, 0.0);
     surface.specular = 0.0;
-    surface.emissive = FailurePattern(material.kind, input.uv) * FailureGlow * FailurePulse(input.time);
+    surface.emissive = FailurePattern(material.kind, input.uv) * FailureGlow * FailurePulse(input.frame.realSec);
     surface.alphaCutoff = 0.0;
     return surface;
 }

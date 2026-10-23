@@ -54,7 +54,7 @@ uint BannerGlyph(TBuffer text, TBuffer raised, uint written, uint row, uint colu
 
 // color at pixel of the view (from its top left, size across) with the banner over it.
 template<typename TBuffer>
-float3 FailureBanner(float3 color, uint2 pixel, uint2 size, TBuffer text, TBuffer raised, float time)
+float3 FailureBanner(float3 color, uint2 pixel, uint2 size, TBuffer text, TBuffer raised, float timeSec)
 {
     uint written = text.Load(0u);
     uint lines = written;
@@ -77,7 +77,7 @@ float3 FailureBanner(float3 color, uint2 pixel, uint2 size, TBuffer text, TBuffe
         return color;
     }
 
-    float3 background = FailureColor * FailurePulse(time);
+    float3 background = FailureColor * FailurePulse(timeSec);
     uint2 inBox = pixel - origin;
     if (any(inBox < BannerMargin) || any(inBox >= BannerMargin + texels * scale))
     {

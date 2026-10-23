@@ -51,19 +51,7 @@ internal sealed class DefaultPipeline : IRenderPipeline
                 ViewTexture(view, GpuFormat.Rgba16Float, Target | GpuTextureUsage.ComputeWrite));
             rendering.Dispatch(
                 Lighting,
-                new LightingConstants(
-                    view.Constants,
-                    g.Depth,
-                    g.Albedo,
-                    g.Normal,
-                    g.Surface,
-                    g.Emissive,
-                    sky.Dfg,
-                    sky.Sampler,
-                    sky.Sh,
-                    sky.Specular,
-                    view.Exposure,
-                    hdr),
+                new LightingConstants(view.Constants, g, sky, view.Exposure, hdr),
                 GpuGroups.For(view.Size, 8),
                 [g.Depth, g.Albedo, g.Normal, g.Surface, g.Emissive, sky.Dfg, sky.Sh, sky.Specular, view.Exposure],
                 [hdr, rendering.Failures]);
@@ -88,15 +76,8 @@ internal sealed class DefaultPipeline : IRenderPipeline
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct LightingConstants(
         GpuBuffer View,
-        GpuTexture Depth,
-        GpuTexture Albedo,
-        GpuTexture Normal,
-        GpuTexture Surface,
-        GpuTexture Emissive,
-        GpuTexture Dfg,
-        GpuSampler Sampler,
-        GpuBuffer Sh,
-        GpuTexture Specular,
+        GBuffer GBuffer,
+        SkyLight Sky,
         GpuBuffer Exposure,
         GpuTexture Hdr);
 }

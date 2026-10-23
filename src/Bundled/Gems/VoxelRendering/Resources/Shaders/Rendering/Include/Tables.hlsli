@@ -13,8 +13,8 @@ static const uint InstanceMirrored = 1u;
 static const uint InstanceFadeIn = 2u;
 
 // An instance, by its entity's slot: the rows of transpose(world) (xyz its turn and scale, w its position), and the last
-// frame's the same way; its largest scale, its model's row, when its fade started (in time) and its eight material
-// slots' rows, two to a word.
+// frame's the same way; its largest scale, its model's row, when its fade started (real seconds) and its eight
+// material slots' rows, two to a word.
 struct GpuInstance
 {
     float4 row0;
@@ -26,7 +26,7 @@ struct GpuInstance
     float maxScale;
     uint flags;
     uint model;
-    float fadeStart;
+    float fadeStartSec;
     uint4 materials;
 };
 

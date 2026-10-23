@@ -18,8 +18,8 @@
 static const uint PieceTriangles = 32u;
 static const uint CardBit = 0x80000000u;
 
-// Seconds a fade in takes.
-static const float FadeSeconds = 0.4;
+// How long a fade in takes.
+static const float FadeSec = 0.4;
 
 // The share either side of the distance a model's cards take over from its clusters over which both are drawn, each
 // dissolving into the other.
@@ -94,7 +94,7 @@ PieceVertex LoadCorner(GpuCluster cluster, uint corner)
 // How far through its fade an instance is, 0 to 1.
 float FadeProgress(GpuInstance instance)
 {
-    return saturate((View.time - instance.fadeStart) / FadeSeconds);
+    return saturate((View.frame.realSec - instance.fadeStartSec) / FadeSec);
 }
 
 // How far a model's cards have taken over from its clusters at a distance, 0 to 1 across the band about the distance
@@ -130,7 +130,7 @@ float2 DissolveOf(GpuInstance instance, float takeover, bool isCard)
 // Whether a pixel of a dissolving piece is kept: 0 or more to keep it, less to clip it. The dither moves each frame.
 float DissolveKeep(float2 dissolve, float2 pixel)
 {
-    float dither = InterleavedGradientNoise(pixel, View.frameIndex);
+    float dither = InterleavedGradientNoise(pixel, View.frame.index);
     return min(dissolve.x - dither - 1e-4, dither - dissolve.y);
 }
 

@@ -24,7 +24,7 @@ float4 main(PassVaryings input) : SV_Target0
     }
 
     float3 direction = normalize(ViewToWorld(ViewPosition(input.position.xy, 1.0)));
-    SkyLight light = SkyAlong(direction, false, InterleavedGradientNoise(input.position.xy, View.frameIndex));
+    SkyLight light = SkyAlong(direction, false, InterleavedGradientNoise(input.position.xy, View.frame.index));
     float exposure = BUFFER(c.exposure).Load<float4>(0u).x;
     return float4((light.nits + light.discs) * exposure + light.emissive, 1.0);
 }

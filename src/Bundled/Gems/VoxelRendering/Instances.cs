@@ -28,7 +28,7 @@ namespace Magic.VoxelRendering;
 /// Nothing pops in. A look is drawn once it can be drawn as it should be, its model and its cards' atlases in and each
 /// of its materials drawn (<see cref="GpuModels.IsDrawable"/>, <see cref="GpuMaterials.IsShown"/>), and from then on;
 /// until it is, its instances' rows are empty, so nothing of them is drawn. One that waited for it dissolves into view
-/// over the shaders' <c>FadeSeconds</c> from when it could be drawn; one whose look is drawn already appears as it is,
+/// over the shaders' <c>FadeSec</c> from when it could be drawn; one whose look is drawn already appears as it is,
 /// as it was made to.
 /// </para>
 /// </summary>
@@ -108,11 +108,11 @@ internal sealed class Instances(
     }
 
     /// <summary>
-    /// Takes in what changed since the last frame into the instances' table. <paramref name="time"/> is the frame's,
+    /// Takes in what changed since the last frame into the instances' table. <paramref name="nowSec"/> is the frame's,
     /// which a fade starts at; <paramref name="player"/> where detail is wanted first; <paramref name="isHidden"/>
     /// while the world is drawn out of sight.
     /// </summary>
-    internal void Update(Renderables copy, float time, Vector3 player, bool isHidden)
+    internal void Update(Renderables copy, float nowSec, Vector3 player, bool isHidden)
     {
         _isHidden = isHidden;
         Delta<InstanceCopy> instances = copy.Instances;
@@ -140,12 +140,12 @@ internal sealed class Instances(
 
         foreach (ref readonly Delta<InstanceCopy>.Change change in instances.Changed)
         {
-            Change(change.Slot, change.Value, time, player);
+            Change(change.Slot, change.Value, nowSec, player);
         }
 
         WriteChanged();
         _moving.AddRange(_stillMoving);
-        Recheck(time);
+        Recheck(nowSec);
         LetGo();
     }
 
@@ -164,7 +164,7 @@ internal sealed class Instances(
         return false;
     }
 
-    private void Change(int slot, in InstanceCopy instance, float time, Vector3 player)
+    private void Change(int slot, in InstanceCopy instance, float nowSec, Vector3 player)
     {
         ref InstanceEntry entry = ref _entries[slot];
         Transform transform = instance.Transform;
@@ -178,8 +178,8 @@ internal sealed class Instances(
         entry.Transform = transform;
         entry.Renderer = renderer;
         entry.IsLive = true;
-        entry.FadeStart = wasLive ? entry.FadeStart : time;
-        entry.Look = isNewLook ? Take(slot, new Look(renderer.Model, renderer.Materials), time) : entry.Look;
+        entry.FadeStartSec = wasLive ? entry.FadeStartSec : nowSec;
+        entry.Look = isNewLook ? Take(slot, new Look(renderer.Model, renderer.Materials), nowSec) : entry.Look;
 
         if (entry.Look is not { } look) return;
 
@@ -255,7 +255,7 @@ internal sealed class Instances(
         Vector3 position = transform.Position;
         Vector3 scale = Vector3.Abs(transform.Scale);
         bool isMirrored = transform.Scale.X * transform.Scale.Y * transform.Scale.Z < 0;
-        bool hasWaited = look.ReadyAt > entry.FadeStart;
+        bool hasWaited = look.ReadyAtSec > entry.FadeStartSec;
         GpuInstance row = new()
         {
             Row0 = new Vector4(linear.M11, linear.M21, linear.M31, position.X),
@@ -264,7 +264,7 @@ internal sealed class Instances(
             MaxScale = MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z)),
             Flags = (uint)((isMirrored ? GpuInstanceFlags.Mirrored : GpuInstanceFlags.None)
                 | (hasWaited ? GpuInstanceFlags.FadeIn : GpuInstanceFlags.None)),
-            FadeStart = hasWaited ? look.ReadyAt : entry.FadeStart,
+            FadeStartSec = hasWaited ? look.ReadyAtSec : entry.FadeStartSec,
         };
 
         GpuInstance last = keepsLast ? tables.Instances.Rows[slot] : row;
@@ -281,13 +281,13 @@ internal sealed class Instances(
     /// The entry of what the instances drawing <paramref name="look"/> share, worked out the first time one does, its
     /// model and materials held from then, with <paramref name="slot"/> now among them and marked failed as they are.
     /// </summary>
-    private LookEntry Take(int slot, Look look, float time)
+    private LookEntry Take(int slot, Look look, float nowSec)
     {
         if (!_looks.TryGetValue(look, out LookEntry? entry))
         {
             entry = new LookEntry(look);
             Hold(look);
-            Resolve(entry, time);
+            Resolve(entry, nowSec);
             _looks[look] = entry;
         }
 
@@ -300,10 +300,10 @@ internal sealed class Instances(
     /// <summary>
     /// Works out what a look's instances share from its model and materials as they are now: its model's row and its
     /// material slots', or the failure's when the model failed or a slot names a sky, which no mesh draws, why they are
-    /// drawn as the failure, and whether they can be drawn, from <paramref name="time"/> when they could not before.
+    /// drawn as the failure, and whether they can be drawn, from <paramref name="nowSec"/> when they could not before.
     /// Once they can, they are drawn for as long as the look is, as what it names loads again.
     /// </summary>
-    private void Resolve(LookEntry entry, float time)
+    private void Resolve(LookEntry entry, float nowSec)
     {
         Look look = entry.Look;
         bool hasFailed = models.HasFailed(look.Model);
@@ -339,7 +339,7 @@ internal sealed class Instances(
         entry.IsReady = true;
 
         // Before every instance's fade start, so none dissolves in, when nobody sees the look come in.
-        entry.ReadyAt = _isHidden ? float.NegativeInfinity : time;
+        entry.ReadyAtSec = _isHidden ? float.NegativeInfinity : nowSec;
     }
 
     private void Remove(int slot)
@@ -358,7 +358,7 @@ internal sealed class Instances(
     /// along. Everything <see cref="Resolve"/> reads of a model or material counts it changed when it changes, so no
     /// other look can differ.
     /// </summary>
-    private void Recheck(float time)
+    private void Recheck(float nowSec)
     {
         if (models.Changed.Count == 0 && materials.Changed.Count == 0) return;
 
@@ -377,7 +377,7 @@ internal sealed class Instances(
             bool hadFailed = entry.HasFailed;
             bool wasReady = entry.IsReady;
             (string Why, string What)? failure = entry.Failure;
-            Resolve(entry, time);
+            Resolve(entry, nowSec);
             bool isRowChanged = entry.HasFailed != hadFailed || entry.IsReady != wasReady;
 
             if (!isRowChanged && entry.Failure == failure) continue;
@@ -456,7 +456,7 @@ internal sealed class Instances(
         internal Transform Transform;
         internal Renderer Renderer;
         internal LookEntry? Look;
-        internal float FadeStart;
+        internal float FadeStartSec;
         internal bool IsLive;
     }
 
@@ -485,6 +485,6 @@ internal sealed class Instances(
         /// </summary>
         internal bool IsReady { get; set; }
 
-        internal float ReadyAt { get; set; }
+        internal float ReadyAtSec { get; set; }
     }
 }

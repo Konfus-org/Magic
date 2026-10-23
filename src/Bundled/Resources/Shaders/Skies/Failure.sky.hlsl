@@ -16,13 +16,13 @@ struct MaterialParams
 SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
 {
     SkyLight light;
-    light.nits = float3(1.0, 1.0, 1.0) * (Luminance(input.sunIlluminance) * material.captured);
+    light.nits = float3(1.0, 1.0, 1.0) * (Luminance(input.lights.sunIlluminance) * material.captured);
     light.discs = float3(0.0, 0.0, 0.0);
     light.emissive = float3(0.0, 0.0, 0.0);
     if (!input.isCapture)
     {
         light.nits = float3(0.0, 0.0, 0.0);
-        light.emissive = FailurePixel(input.time);
+        light.emissive = FailurePixel(input.frame.realSec);
     }
 
     return light;

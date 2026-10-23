@@ -17,6 +17,9 @@ clusters and cards a cluster generator makes for each model.
   failure material. A pass whose shader fails is left out, and a banner across the view says why.
 - **Loading.** Nothing is drawn until it can be drawn properly, and what had to wait fades in. A domain appears whole in
   its first frame. A frame shows only once every pass's shader is compiled.
+- **Pausing.** While the world is paused, its animated materials and its sky stand still, and they follow its time
+  scale. Fades and failures go on. A surface or sky animates by its inputs' `frame.worldSec`, and by `frame.realSec`
+  for what goes on while the world is paused.
 
 Its settings, such as the render scale, are on `VoxelRenderingSettings` and show in the settings window (F4).
 Textures are compressed to BC7 the first time they load, and kept in the cache.

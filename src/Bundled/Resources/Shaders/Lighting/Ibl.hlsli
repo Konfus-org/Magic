@@ -5,7 +5,28 @@
 #ifndef MAGIC_IBL_HLSLI
 #define MAGIC_IBL_HLSLI
 
+#include "Include/Heap.hlsli"
 #include "Lighting/Lights.hlsli"
+
+// The sky's light as the renderer captured it this frame, by heap id, Core's SkyLight member for member, which a pass's
+// constants hold whole: the DFG table, the light from everywhere as nine harmonics (LoadSkySh), the reflections for
+// each roughness, and the sampler they are read through.
+struct SkyLightIds
+{
+    uint dfg;
+    uint sh;
+    uint specular;
+    uint sampler;            // linear, clamped
+};
+
+// The nine harmonics a buffer holds, a float4 each, rgb the coefficient.
+void LoadSkySh(uint buffer, out float3 sh[9])
+{
+    [unroll] for (uint i = 0u; i < 9u; i++)
+    {
+        sh[i] = BUFFER(buffer).Load<float4>(i * 16u).rgb;
+    }
+}
 
 // The light a white Lambertian surface facing n reflects from an environment given as nine spherical-harmonic
 // coefficients (L2, linear colour): the environment's radiance projected on the real SH basis, convolved here with

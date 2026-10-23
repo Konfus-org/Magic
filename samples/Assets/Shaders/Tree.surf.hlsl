@@ -73,17 +73,17 @@ Surface EvaluateSurface(SurfaceInputs input, MaterialParams material)
     }
 
     // Gusts: flecks that run downwind, as many as it blows hard.
-    float windSpeed = length(input.wind);
+    float windSpeed = length(input.weather.wind);
     [branch] if (material.shimmer > 0.0 && windSpeed > 0.1)
     {
-        float3 moving = input.worldPosition * 0.9 - input.wind * (input.time * 0.35);
+        float3 moving = input.worldPosition * 0.9 - input.weather.wind * (input.frame.worldSec * 0.35);
         float fleck = saturate(GradientNoise(moving) * 2.0 - 0.4) * saturate(windSpeed / 12.0) * material.shimmer;
         color *= 1.0 + fleck * 0.6;
-        normal = NormalizeOrZero(normal + NormalizeOrZero(input.wind) * fleck * 0.5);
+        normal = NormalizeOrZero(normal + NormalizeOrZero(input.weather.wind) * fleck * 0.5);
     }
 
     // Wet under cloud: darker, as water fills the surface, and glossier.
-    float wet = saturate((input.coverage - 0.45) * 2.0) * material.wetness;
+    float wet = saturate((input.weather.coverage - 0.45) * 2.0) * material.wetness;
     color *= lerp(1.0, 0.6, wet);
     roughness = lerp(roughness, 0.3, wet);
 

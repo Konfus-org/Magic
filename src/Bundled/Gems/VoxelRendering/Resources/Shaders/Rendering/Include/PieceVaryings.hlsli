@@ -1,10 +1,10 @@
-// What the pieces' vertex stage (Templates/Pieces.vert.hlsl) hands a fragment stage, declared once so the two cannot
-// disagree: the fragment's inputs must line up with the vertex's outputs location for location. Every
+// What the pieces' vertex stage (Rendering/Materials/Pieces.vert.hlsl) hands a fragment stage, declared once so the
+// two cannot disagree: the fragment's inputs must line up with the vertex's outputs location for location. Every
 // varying is the triangle's corner's, so a value all three corners share, as the triangle's id, needs no provoking
 // vertex.
 
-#ifndef MAGIC_PIECE_VARYINGS_HLSLI
-#define MAGIC_PIECE_VARYINGS_HLSLI
+#ifndef MAGIC_RENDERING_PIECE_VARYINGS_HLSLI
+#define MAGIC_RENDERING_PIECE_VARYINGS_HLSLI
 
 struct PieceVaryings
 {

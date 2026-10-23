@@ -11,8 +11,8 @@
 #define PIECES_PLACE_ONLY 0
 #endif
 
-#include "Include/PieceVaryings.hlsli"
 #include "Rendering/Include/Materials.hlsli"
+#include "Rendering/Include/PieceVaryings.hlsli"
 #include "Rendering/Include/Pieces.hlsli"
 
 #if PIECES_PLACE_ONLY

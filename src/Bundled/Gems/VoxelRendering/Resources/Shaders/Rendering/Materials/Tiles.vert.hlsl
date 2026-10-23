@@ -2,8 +2,8 @@
 // of the classifying pass's list (its place, 12 bits each way, and its resolve bin in the top 8), cut at the view's
 // edge. The bin goes on to the fragment stage, which shades only the tile's pixels of its surface.
 
-#include "Include/TileVaryings.hlsli"
 #include "Rendering/Include/Materials.hlsli"
+#include "Rendering/Include/TileVaryings.hlsli"
 
 static const float2 QuadCorners[6] = { float2(0.0, 0.0), float2(1.0, 0.0), float2(1.0, 1.0), float2(0.0, 0.0), float2(1.0, 1.0), float2(0.0, 1.0) };
 

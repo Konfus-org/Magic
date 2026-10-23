@@ -19,7 +19,7 @@ static const float FailureGlow = 2.0;
 // breathing to be plain, but never at zero: a failed thing stays visible.
 static const float PulseMin = 0.05;
 static const float PulseMax = 1.0;
-static const float PulsePeriod = 2.0; // seconds
+static const float PulsePeriodSec = 2.0;
 
 // What only the GPU finds wrong, a word each of the frame's Failures buffer, 1 once raised, emptied every frame. The
 // renderer's FailureHandler.cs holds the words for each, in this order: change both together.
@@ -27,16 +27,16 @@ static const uint FailureNaN = 0u;            // a NaN or infinity in the lit sc
 static const uint FailureMaterialRange = 1u;  // a material row past the materials there are
 static const uint FailureCodeCount = 8u;
 
-float FailurePulse(float time)
+float FailurePulse(float timeSec)
 {
-    float wave = sin(time * 2.0 * Pi / PulsePeriod) * 0.5 + 0.5;
+    float wave = sin(timeSec * 2.0 * Pi / PulsePeriodSec) * 0.5 + 0.5;
     return lerp(PulseMin, PulseMax, wave);
 }
 
 // A pixel shown as the failure: the colour, glowing and breathing.
-float3 FailurePixel(float time)
+float3 FailurePixel(float timeSec)
 {
-    return FailureColor * FailureGlow * FailurePulse(time);
+    return FailureColor * FailureGlow * FailurePulse(timeSec);
 }
 
 // Raises code in the frame's Failures buffer, which a compute pass has that lists Failures among its writes.

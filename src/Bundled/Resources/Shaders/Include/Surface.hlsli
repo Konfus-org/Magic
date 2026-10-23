@@ -25,8 +25,10 @@
 #define MAGIC_SURFACE_HLSLI
 
 #include "Include/Bindings.hlsli"
+#include "Include/Frame.hlsli"
 #include "Include/Math.hlsli"
 #include "Include/ShadingModel.hlsli"
+#include "Include/Weather.hlsli"
 
 // 1 when the surface is drawn over the scene already there (a transparent material), which it can then read through
 // ScenePixelOf and SceneBehind. The renderer defines it in front of this file.
@@ -51,12 +53,11 @@ struct SurfaceInputs
     float3 positionDdx;    // screen-space derivatives of worldPosition, as uv's are: for textures mapped in world space
     float3 positionDdy;
     float2 screenUv;
-    float time;            // seconds, for animated surfaces
+    FrameConstants frame;  // the clocks: an animated surface moves by frame.worldSec, which stands still while paused
     float3 cameraPosition; // absolute, like worldPosition
     float3 viewDirection;  // unit length, from the surface toward the camera
     bool isFrontFace;
-    float3 wind;           // the world's weather: metres per second, its direction and strength
-    float coverage;        // the world's weather: how much of the sky clouds cover, 0 clear to 1 overcast
+    WeatherConstants weather;
 };
 
 // What a surface hands back: what it is made of, in linear colour.

@@ -128,8 +128,8 @@ public interface IRendering
 
     /// <summary>
     /// <paramref name="image"/> run through <paramref name="shader"/> into a texture like it, a thread a pixel in
-    /// groups of 8 by 8: its constants the view's constants, the image and the texture it writes, a word each and one
-    /// more of padding, then <paramref name="values"/>.
+    /// groups of 8 by 8: its constants Shaders/Include/Effect.hlsli's <c>EffectImages</c>, then
+    /// <paramref name="values"/>.
     /// </summary>
     GpuTexture Effect<T>(RenderView view, Handle<Shader> shader, GpuTexture image, in T values)
         where T : unmanaged;

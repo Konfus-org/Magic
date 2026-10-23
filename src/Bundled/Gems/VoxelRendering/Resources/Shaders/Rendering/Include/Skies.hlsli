@@ -1,7 +1,7 @@
 // How this renderer binds a sky written against Core's Include/Sky.hlsli: composed ahead of the sky, it declares the
 // tables the sky's generated LoadMaterialParams reads and how a texture is read (Textures.hlsli), hands the sky the
-// view's sun, moon and weather (SkyInputsOf), and, for a world with no sky (SKY_FALLBACK), is the renderer's own: a
-// clear sky as bright as the sun makes it, with the sun's disc. The pass composed after the sky reads it along a
+// view's clocks, sun, moon and weather (SkyInputsOf), and, for a world with no sky (SKY_FALLBACK), is the renderer's
+// own: a clear sky as bright as the sun makes it, with the sun's disc. The pass composed after the sky reads it along a
 // direction by SkyAlong (SkyAlong.hlsli).
 
 #ifndef MAGIC_RENDERING_SKIES_HLSLI
@@ -18,18 +18,9 @@ SkyInputs SkyInputsOf(float3 direction, bool isCapture, float dither)
     SkyInputs inputs;
     inputs.direction = direction;
     inputs.cameraPosition = View.cameraPosition;
-    inputs.time = View.time;
-    inputs.sunDirection = View.skyLights.sunDirection;
-    inputs.sunIlluminance = View.skyLights.sunIlluminance;
-    inputs.sunAngularRadius = View.skyLights.sunAngularRadius;
-    inputs.moonDirection = View.skyLights.moonDirection;
-    inputs.moonIlluminance = View.skyLights.moonIlluminance;
-    inputs.moonAngularRadius = View.skyLights.moonAngularRadius;
-    inputs.wind = View.weather.wind;
-    inputs.coverage = View.weather.coverage;
-    inputs.density = View.weather.density;
-    inputs.cloudColor = View.weather.cloudColor;
-    inputs.cloudShadow = View.weather.cloudShadow;
+    inputs.frame = View.frame;
+    inputs.lights = View.skyLights;
+    inputs.weather = View.weather;
     inputs.isCapture = isCapture;
     inputs.dither = dither;
     return inputs;

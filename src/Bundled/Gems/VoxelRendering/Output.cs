@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
+using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
@@ -84,7 +85,7 @@ internal sealed class Output : IDisposable
     /// <paramref name="isCrisp"/> as it is scaled, with the failure banner over it (<see cref="SendBanner"/>). The rest
     /// of the target is cleared first when <paramref name="clears"/>; only the clear until the pipeline is made.
     /// </summary>
-    internal void Draw(ViewTarget target, GpuTexture image, bool isCrisp, bool clears, float time, uint frameIndex)
+    internal void Draw(ViewTarget target, GpuTexture image, bool isCrisp, bool clears, in Frame frame)
     {
         GpuPipeline pipeline = GetPipeline(target.Format);
         if (pipeline == GpuPipeline.None || image == GpuTexture.None)
@@ -101,9 +102,8 @@ internal sealed class Output : IDisposable
             Raised.Id,
             target.Area.Width,
             target.Area.Height,
-            time,
             (uint)target.Encoding,
-            frameIndex);
+            new FrameConstants(frame));
         using GpuDebugGroup group = _gpu.Commands.DebugGroup("Output");
         using GpuRenderPass render = _gpu.Commands
             .RenderPass([new GpuTextureLevel(target.Texture)], clears ? GpuContents.Clear : GpuContents.Keep);
@@ -204,8 +204,8 @@ internal sealed class Output : IDisposable
 
     /// <summary>
     /// The output's constants, as Output.frag.hlsl's <c>OutputConstants</c>: the image and the sampler it is read
-    /// through, the banner's glyphs and the raised codes, the view's size as it is shown, the time, how it is encoded,
-    /// and the frame's number, which dithers it.
+    /// through, the banner's glyphs and the raised codes, the view's size as it is shown, how it is encoded, and the
+    /// frame's clocks, the banner pulsing by its real time and its number dithering it.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct OutputConstants(
@@ -215,9 +215,8 @@ internal sealed class Output : IDisposable
         uint Failures,
         float Width,
         float Height,
-        float Time,
         uint Encoding,
-        uint FrameIndex);
+        FrameConstants Frame);
 
     /// <summary>
     /// The two stages as compiled, or why each did not.

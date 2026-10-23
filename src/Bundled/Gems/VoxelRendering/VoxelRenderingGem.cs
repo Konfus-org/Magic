@@ -487,13 +487,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     }
 
     private void Draw(ViewTarget target, GpuTexture image, in Frame frame)
-        => _output.Draw(
-            target,
-            image,
-            !_settings.Upscale,
-            _cleared.Add(target.Texture),
-            (float)frame.RealSec,
-            (uint)(frame.Index % uint.MaxValue));
+        => _output.Draw(target, image, !_settings.Upscale, _cleared.Add(target.Texture), frame);
 
     /// <summary>
     /// Clears the window to black when no view drew into it this frame, so it never shows what its image held before.
@@ -653,8 +647,9 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     }
 
     /// <summary>
-    /// A post effect's constants, as <see cref="IRendering.Effect"/> says: the view's constants, the image and the
-    /// texture written, a word of padding, then the effect's values.
+    /// A post effect's constants, as <see cref="IRendering.Effect"/> says: Shaders/Include/Effect.hlsli's
+    /// <c>EffectImages</c>, member for member, the view's constants, the image and the texture written and a word of
+    /// padding, then the effect's values.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct EffectConstants<T>(

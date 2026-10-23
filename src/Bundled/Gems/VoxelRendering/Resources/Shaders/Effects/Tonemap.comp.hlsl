@@ -5,14 +5,12 @@
 // output is display-encoded, so it is decoded to the linear colour the output encodes again, back in Rec. 709. The
 // Tonemap post effect's.
 
+#include "Include/Effect.hlsli"
 #include "Include/Heap.hlsli"
 
 struct TonemapConstants
 {
-    uint view;
-    uint image;              // the lit view, pre-exposed
-    uint output;             // written
-    uint padding;
+    EffectImages effect;     // its image the lit view, pre-exposed
     float bias;              // EV added before the curve
 };
 
@@ -59,11 +57,11 @@ float3 AgX(float3 color)
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID)
 {
-    if (any(id.xy >= SizeOf(LEVEL(c.output, 0u))))
+    if (any(id.xy >= SizeOf(LEVEL(c.effect.output, 0u))))
     {
         return;
     }
 
-    float3 color = TEXTURE(c.image).Load(int3(id.xy, 0)).rgb;
-    LEVEL(c.output, 0u)[id.xy] = float4(AgX(color * exp2(c.bias)), 1.0);
+    float3 color = TEXTURE(c.effect.image).Load(int3(id.xy, 0)).rgb;
+    LEVEL(c.effect.output, 0u)[id.xy] = float4(AgX(color * exp2(c.bias)), 1.0);
 }

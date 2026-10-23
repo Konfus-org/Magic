@@ -277,8 +277,9 @@ float2 CloudCover(float3 place, float coverage, float softness, uint octaves)
 float CloudDensity(SkyInputs input, MaterialParams material, float3 at, uint octaves, bool isEroded)
 {
     float scale = max(material.cloudScale, 1.0);
-    float3 drifted = float3(at.x - input.wind.x * input.time, at.y, at.z - input.wind.z * input.time);
-    float2 cover = CloudCover(float3(drifted.xz / scale, input.time * CloudChange), input.coverage, material.cloudSoftness, octaves);
+    float worldSec = input.frame.worldSec;
+    float3 drifted = float3(at.x - input.weather.wind.x * worldSec, at.y, at.z - input.weather.wind.z * worldSec);
+    float2 cover = CloudCover(float3(drifted.xz / scale, worldSec * CloudChange), input.weather.coverage, material.cloudSoftness, octaves);
     float height = at.y / max(material.cloudThickness, 1.0);
     float top = lerp(0.3, 1.0, cover.y);
     float shape = cover.x * lerp(ThinnestShare, 1.0, cover.y) * saturate(height / 0.08) * saturate((top - height) / (0.3 * top));
@@ -298,7 +299,7 @@ float CloudDensity(SkyInputs input, MaterialParams material, float3 at, uint oct
 // the layer's thickness.
 float CloudExtinction(SkyInputs input, MaterialParams material)
 {
-    return lerp(ThinCloud, ThickCloud, saturate(input.density)) / max(material.cloudThickness, 1.0);
+    return lerp(ThinCloud, ThickCloud, saturate(input.weather.density)) / max(material.cloudThickness, 1.0);
 }
 
 // The clouds' optical depth from a place of the layer toward a light, a few taps farther apart the farther along its
@@ -378,7 +379,7 @@ float3 CloudLit(SkyInputs input, MaterialParams material, float3 at, CloudLight 
 
     float diffused = max(1.0 / (1.0 + 0.75 * toLight * (1.0 - CloudAsymmetry)) - exp(-toLight), 0.0);
     float powder = lerp(1.0, 1.0 - exp(-2.0 * stepDepth), light.awayFromView);
-    return input.cloudColor * light.reaching * ((reached / total * powder * light.phase + diffused) * CloudAlbedo * InvPi);
+    return input.weather.cloudColor * light.reaching * ((reached / total * powder * light.phase + diffused) * CloudAlbedo * InvPi);
 }
 
 // The clouds along a view ray from a place relative to the planet's centre, through the span of their layer it
@@ -395,7 +396,7 @@ CloudMarch MarchClouds(SkyInputs input, MaterialParams material, float3 origin, 
     float stride = (span.y - span.x) / (float)steps;
     float extinction = CloudExtinction(input, material);
     float baseRadius = PlanetRadius + material.cloudHeight;
-    float3 ambient = input.cloudShadow * ((sun.reaching + moon.reaching) * AmbientPerLux + material.nightSky.rgb);
+    float3 ambient = input.weather.cloudShadow * ((sun.reaching + moon.reaching) * AmbientPerLux + material.nightSky.rgb);
     float weighted = 0.0;
     [loop] for (uint i = 0u; i < steps && march.through > 0.01; i++)
     {
@@ -429,7 +430,7 @@ CloudMarch MarchClouds(SkyInputs input, MaterialParams material, float3 origin, 
 // A star's light along a direction: the share of the sky's cells the material asks for holds one, somewhere in the
 // cell, most of them faint and a few bright, tinted between the material's two colours, and twinkling, the more the
 // nearer the horizon.
-float3 StarLight(float3 direction, MaterialParams material, float time)
+float3 StarLight(float3 direction, MaterialParams material, float timeSec)
 {
     float density = saturate(material.starDensity);
     float3 cell = floor(direction * StarCells);
@@ -444,7 +445,7 @@ float3 StarLight(float3 direction, MaterialParams material, float time)
     float3 star = normalize((cell + jitter) / StarCells);
     float rank = (chance - (1.0 - density)) / density;
     float brightness = exp(-(1.0 - dot(direction, star)) * StarSharpness) * Pow2(Pow2(rank));
-    float flicker = 0.5 + 0.5 * sin(time * (6.0 + 6.0 * HashToUnit(PcgHash(hash + 4u))) + TwoPi * HashToUnit(PcgHash(hash + 5u)));
+    float flicker = 0.5 + 0.5 * sin(timeSec * (6.0 + 6.0 * HashToUnit(PcgHash(hash + 4u))) + TwoPi * HashToUnit(PcgHash(hash + 5u)));
     float lowness = 1.0 - saturate(direction.y * 4.0);
     float twinkle = 1.0 - saturate(material.starTwinkle) * flicker * lerp(0.3, 1.0, lowness);
     float3 tint = lerp(material.starWarm.rgb, material.starCool.rgb, HashToUnit(PcgHash(hash + 3u)));
@@ -509,7 +510,7 @@ float3 MoonAlbedo(MaterialParams material, float2 at, float3 onSphere, float2 fa
 float3 MoonDisc(SkyInputs input, MaterialParams material, MoonFace face, float2 faceDdx, float2 faceDdy, float3 towardMoon, float3 towardSun, bool hasSun)
 {
     float off = length(face.at);
-    if (off >= 1.0 || all(input.moonIlluminance <= 0.0))
+    if (off >= 1.0 || all(input.lights.moonIlluminance <= 0.0))
     {
         return float3(0.0, 0.0, 0.0);
     }
@@ -520,7 +521,7 @@ float3 MoonDisc(SkyInputs input, MaterialParams material, MoonFace face, float2 
     float softness = max(material.moonSoftness, 1e-3);
     float scatter = 2.0 * max(toSun, 0.0) / max(max(toSun, 0.0) + toEarth, 1e-4) * smoothstep(-softness, softness, toSun);
     float3 albedo = MoonAlbedo(material, face.at, float3(face.at, toEarth), faceDdx, faceDdy);
-    float3 full = input.moonIlluminance * max(material.moonBrightness, 0.0);
+    float3 full = input.lights.moonIlluminance * max(material.moonBrightness, 0.0);
     float edge = saturate((1.0 - off) / DiscEdge);
     return full * albedo * ((scatter + max(material.earthshine, 0.0)) * edge);
 }
@@ -529,8 +530,8 @@ float3 MoonDisc(SkyInputs input, MaterialParams material, MoonFace face, float2 
 // day, when working it out would change nothing; none otherwise.
 float3 NoticedMoonLux(SkyInputs input, float3 towardSun, float3 towardMoon)
 {
-    float3 moonLux = input.moonIlluminance * MoonPhaseShare(towardSun, towardMoon, any(input.sunIlluminance > 0.0));
-    float sunShowing = Luminance(input.sunIlluminance) * saturate(towardSun.y * 10.0 + 1.0);
+    float3 moonLux = input.lights.moonIlluminance * MoonPhaseShare(towardSun, towardMoon, any(input.lights.sunIlluminance > 0.0));
+    float sunShowing = Luminance(input.lights.sunIlluminance) * saturate(towardSun.y * 10.0 + 1.0);
     bool isNoticed = Luminance(moonLux) > MoonNoticed * sunShowing && Luminance(moonLux) > 0.0 && towardMoon.y > -0.2;
     return isNoticed ? moonLux : float3(0.0, 0.0, 0.0);
 }
@@ -598,9 +599,9 @@ AirSpan AirAlong(
 SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
 {
     float3 direction = input.direction;
-    float3 towardSun = -input.sunDirection;
-    float3 towardMoon = -input.moonDirection;
-    float3 sunLux = input.sunIlluminance;
+    float3 towardSun = -input.lights.sunDirection;
+    float3 towardMoon = -input.lights.moonDirection;
+    float3 sunLux = input.lights.sunIlluminance;
     bool hasSun = any(sunLux > 0.0);
     float haze = max(material.haze, 0.0);
     float cosSun = dot(direction, towardSun);
@@ -608,7 +609,7 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
     float3 origin = float3(0.0, PlanetRadius + max(input.cameraPosition.y, 0.0) + 1.0, 0.0);
 
     // Where the view falls on the moon's face, and how it moves across a pixel, taken before anything branches.
-    MoonFace face = MoonFaceAt(direction, towardMoon, max(input.moonAngularRadius, 1e-6));
+    MoonFace face = MoonFaceAt(direction, towardMoon, max(input.lights.moonAngularRadius, 1e-6));
     float2 faceDdx = ddx(face.at);
     float2 faceDdy = ddy(face.at);
 
@@ -629,7 +630,7 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
     float baseRadius = PlanetRadius + material.cloudHeight;
     float2 layer = ShellSpan(origin, direction, baseRadius, baseRadius + max(material.cloudThickness, 1.0));
     layer.y = min(min(layer.y, rayEnd), layer.x + CloudLongest);
-    bool hasClouds = input.coverage > 0.0 && layer.y > layer.x && layer.x < CloudFade;
+    bool hasClouds = input.weather.coverage > 0.0 && layer.y > layer.x && layer.x < CloudFade;
     CloudMarch clouds;
     clouds.light = float3(0.0, 0.0, 0.0);
     clouds.through = 1.0;
@@ -664,7 +665,7 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
     else
     {
         float day = hasSun ? saturate(towardSun.y * 10.0 + 0.5) : 0.0;
-        beyond += through * (material.nightSky.rgb + StarLight(direction, material, input.time) * (max(material.stars, 0.0) * (1.0 - day)));
+        beyond += through * (material.nightSky.rgb + StarLight(direction, material, input.frame.worldSec) * (max(material.stars, 0.0) * (1.0 - day)));
     }
 
     SkyLight light;
@@ -678,7 +679,7 @@ SkyLight EvaluateSky(SkyInputs input, MaterialParams material)
 
     // The sun's disc, darker and redder toward its rim, each colour kept to the disc's whole light (the mean of mu to a
     // power p over a disc is 2 / (p + 2)), its edge softened, through the air and the clouds in front of it.
-    float radius = max(input.sunAngularRadius, 1e-6);
+    float radius = max(input.lights.sunAngularRadius, 1e-6);
     float off = sqrt(max(2.0 * (1.0 - cosSun), 0.0)) / radius;
     if (hasSun && off < 1.0)
     {
@@ -705,7 +706,7 @@ float3 LightThrough(SkyInputs input, float3 position, float3 towardLight, Materi
     float2 layer = ShellSpan(origin, towardLight, baseRadius, baseRadius + max(material.cloudThickness, 1.0));
     layer.y = min(layer.y, layer.x + CloudLongest);
     float fade = saturate(1.0 - layer.x / CloudFade);
-    if (input.coverage <= 0.0 || layer.y <= layer.x || fade <= 0.0 || all(air <= 0.0))
+    if (input.weather.coverage <= 0.0 || layer.y <= layer.x || fade <= 0.0 || all(air <= 0.0))
     {
         return air;
     }
@@ -726,11 +727,11 @@ float3 LightThrough(SkyInputs input, float3 position, float3 towardLight, Materi
 // mountain fades into the light the sky shows past it. Clouds in front of the place are left out.
 AirLight EvaluateAir(SkyInputs input, float reach, MaterialParams material)
 {
-    float3 towardSun = -input.sunDirection;
-    float3 towardMoon = -input.moonDirection;
+    float3 towardSun = -input.lights.sunDirection;
+    float3 towardMoon = -input.lights.moonDirection;
     float3 origin = float3(0.0, PlanetRadius + max(input.cameraPosition.y, 0.0) + 1.0, 0.0);
     float3 moonLux = NoticedMoonLux(input, towardSun, towardMoon);
-    AirSpan span = AirAlong(origin, input.direction, 0.0, reach, AirSteps, towardSun, input.sunIlluminance, towardMoon, moonLux, material);
+    AirSpan span = AirAlong(origin, input.direction, 0.0, reach, AirSteps, towardSun, input.lights.sunIlluminance, towardMoon, moonLux, material);
     AirLight air;
     air.nits = span.light;
     air.through = dot(span.through, float3(1.0, 1.0, 1.0) / 3.0);

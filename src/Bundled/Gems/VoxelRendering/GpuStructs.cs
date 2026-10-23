@@ -1,6 +1,7 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Magic.Contexts.Frames;
 
 namespace Magic.VoxelRendering;
 
@@ -18,7 +19,7 @@ internal enum GpuInstanceFlags : uint
     Mirrored = 1,
 
     /// <summary>
-    /// It dissolves into view from <see cref="GpuInstance.FadeStart"/>.
+    /// It dissolves into view from <see cref="GpuInstance.FadeStartSec"/>.
     /// </summary>
     FadeIn = 2,
 }
@@ -48,11 +49,17 @@ internal struct ViewConstants
     /// </summary>
     internal Matrix4x4 PrevViewProj;
 
+    internal FrameConstants Frame;
+
     /// <summary>
     /// Where the camera is, which every position a shader works with is relative to.
     /// </summary>
     internal Vector3 CameraPosition;
-    internal float Time;
+
+    /// <summary>
+    /// Pixels a cluster's error may cover before a finer one is drawn.
+    /// </summary>
+    internal float ClusterError;
 
     /// <summary>
     /// The view's size in pixels as it is drawn, and one over it.
@@ -77,7 +84,11 @@ internal struct ViewConstants
     /// The key light's illuminance in lux, times its colour; zero with none.
     /// </summary>
     internal Vector3 KeyLightIlluminance;
-    internal uint FrameIndex;
+
+    /// <summary>
+    /// 1 when the key light is the sky's sun or moon, whose light reaches the world through the sky's air and clouds.
+    /// </summary>
+    internal uint KeyLightThroughSky;
 
     /// <summary>
     /// The view's size in pixels as it is shown, and this frame's sub-pixel offset of <see cref="ViewProj"/>.
@@ -98,23 +109,6 @@ internal struct ViewConstants
     /// </summary>
     internal Vector3 PriorityPosition;
     internal float TextureMipScale;
-
-    internal float DeltaSeconds;
-
-    /// <summary>
-    /// Pixels a cluster's error may cover before a finer one is drawn.
-    /// </summary>
-    internal float ClusterError;
-
-    /// <summary>
-    /// 1 when the key light is the sky's sun or moon, whose light reaches the world through the sky's air and clouds.
-    /// </summary>
-    internal uint KeyLightThroughSky;
-
-    /// <summary>
-    /// How many of <see cref="Directional"/> light the world.
-    /// </summary>
-    internal uint DirectionalCount;
 
     /// <summary>
     /// How the view's image is encoded as it is shown, a <see cref="Contexts.Gpu.TargetEncoding"/>.
@@ -154,8 +148,12 @@ internal struct ViewConstants
     /// </summary>
     internal uint Exposure;
     internal uint SkySh;
-    internal uint Padding0;
-    internal uint Padding1;
+
+    /// <summary>
+    /// How many of <see cref="Directional"/> light the world.
+    /// </summary>
+    internal uint DirectionalCount;
+    internal uint Padding;
 
     /// <summary>
     /// The world's weather, as its <c>Weather</c> says, or still and clear without one.
@@ -174,8 +172,23 @@ internal struct ViewConstants
 }
 
 /// <summary>
-/// The sky's sun and moon in a <see cref="ViewConstants"/>: the way each one's light travels, its illuminance in lux
-/// times its colour, zero without one, and its disc's half-angle in radians.
+/// The frame's clocks, as Shaders/Include/Frame.hlsli's <c>FrameConstants</c>, member for member, which a
+/// <see cref="ViewConstants"/> and the output's constants hold: the world's time and the real time since the first
+/// frame, the real time since the last, and the frame's number.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct FrameConstants(float WorldSec, float RealSec, float RealDeltaSec, uint Index)
+{
+    internal FrameConstants(in Frame frame)
+        : this((float)frame.WorldSec, (float)frame.RealSec, frame.RealDeltaSec, (uint)(frame.Index % uint.MaxValue))
+    {
+    }
+}
+
+/// <summary>
+/// The sky's sun and moon in a <see cref="ViewConstants"/>, as Shaders/Include/SkyLights.hlsli's
+/// <c>SkyLightConstants</c>, member for member: the way each one's light travels, its illuminance in lux times its
+/// colour, zero without one, and its disc's half-angle in radians.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct SkyLightConstants
@@ -215,9 +228,10 @@ internal struct DirectionalLights
 }
 
 /// <summary>
-/// The world's weather in a <see cref="ViewConstants"/>: the wind in metres per second, how much of the sky the clouds
-/// cover and how thick they are, 0 to 1 each, and their linear colours where the sun lights them and in their own
-/// shade; how much fog there is a metre, its tint, the metres before it begins, and its share by height as a curve.
+/// The world's weather in a <see cref="ViewConstants"/>, as Shaders/Include/Weather.hlsli's <c>WeatherConstants</c>,
+/// member for member: the wind in metres per second, how much of the sky the clouds cover and how thick they are, 0 to
+/// 1 each, and their linear colours where the sun lights them and in their own shade; how much fog there is a metre,
+/// its tint, the metres before it begins, and its share by height as a curve.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal struct WeatherConstants
@@ -266,9 +280,10 @@ internal struct GpuInstance
     internal uint Model;
 
     /// <summary>
-    /// When its fade started, in the frame's <c>Time</c>, while <see cref="Flags"/> says it fades.
+    /// When its fade started, in the frame's real time (<see cref="FrameConstants.RealSec"/>), while
+    /// <see cref="Flags"/> says it fades.
     /// </summary>
-    internal float FadeStart;
+    internal float FadeStartSec;
 
     internal MaterialRows Materials;
 }

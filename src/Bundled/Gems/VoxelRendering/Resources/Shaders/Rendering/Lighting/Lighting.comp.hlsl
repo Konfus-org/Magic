@@ -15,15 +15,8 @@
 struct LightingConstants
 {
     uint view;
-    uint depth;
-    uint albedo;
-    uint normal;
-    uint surface;            // the G-buffer's material target
-    uint emissive;           // what the surfaces give off, pre-exposed
-    uint dfg;
-    uint sampler;            // linear, clamped
-    uint sh;                 // the sky's harmonics, nine float4s
-    uint specular;           // the sky prefiltered for each roughness
+    GBufferIds gbuffer;
+    SkyLightIds sky;
     uint exposure;           // the view's exposure (Effects/Exposure.comp.hlsl)
     uint hdr;                // written where something was drawn
 };
@@ -41,13 +34,13 @@ struct ShadePoint
 float3 Shade(ShadePoint at)
 {
     GBufferSurface surface = at.surface;
-    SamplerState linearClamp = SAMPLER_STATE(c.sampler);
+    SamplerState linearClamp = SAMPLER_STATE(c.sky.sampler);
     float nov = max(dot(surface.normal, at.view), 1e-4);
-    float2 dfg = TEXTURE(c.dfg).SampleLevel(linearClamp, float2(nov, surface.roughness), 0.0).xy;
+    float2 dfg = TEXTURE(c.sky.dfg).SampleLevel(linearClamp, float2(nov, surface.roughness), 0.0).xy;
     float sheen = 0.0;
     [branch] if (surface.model == ShadingCloth)
     {
-        sheen = TEXTURE(c.dfg).SampleLevel(linearClamp, float2(nov, surface.modelData.y), 0.0).z;
+        sheen = TEXTURE(c.sky.dfg).SampleLevel(linearClamp, float2(nov, surface.modelData.y), 0.0).z;
     }
 
     Shading shading = PrepareShading(surface.baseColor, surface.metallic, surface.specular, surface.roughness, surface.normal, at.view, surface.model, surface.modelData, dfg, sheen);
@@ -65,22 +58,19 @@ float3 Shade(ShadePoint at)
     }
 
     float3 sh[9];
-    [unroll] for (uint i = 0u; i < 9u; i++)
-    {
-        sh[i] = BUFFER(c.sh).Load<float4>(i * 16u).rgb;
-    }
+    LoadSkySh(c.sky.sh, sh);
 
     float width;
     float height;
     float levels;
-    CUBE(c.specular).GetDimensions(0u, width, height, levels);
+    CUBE(c.sky.specular).GetDimensions(0u, width, height, levels);
     float3 reflected = reflect(-at.view, surface.normal);
     float3 dominant = SpecularDominantDirection(surface.normal, reflected, surface.roughness);
-    float3 prefiltered = CUBE(c.specular).SampleLevel(linearClamp, dominant, PrefilteredLevel(surface.roughness, levels)).rgb;
+    float3 prefiltered = CUBE(c.sky.specular).SampleLevel(linearClamp, dominant, PrefilteredLevel(surface.roughness, levels)).rgb;
     float3 coatPrefiltered = float3(0.0, 0.0, 0.0);
     [branch] if (surface.model == ShadingClearCoat)
     {
-        coatPrefiltered = CUBE(c.specular).SampleLevel(linearClamp, reflected, PrefilteredLevel(surface.modelData.y, levels)).rgb;
+        coatPrefiltered = CUBE(c.sky.specular).SampleLevel(linearClamp, reflected, PrefilteredLevel(surface.modelData.y, levels)).rgb;
     }
 
     // The material's own occlusion hides the sky's light from everywhere, and its reflections a crease would.
@@ -100,7 +90,7 @@ void main(uint3 id : SV_DispatchThreadID)
         return;
     }
 
-    float depth = TEXTURE(c.depth).Load(pixel).r;
+    float depth = TEXTURE(c.gbuffer.depth).Load(pixel).r;
     if (depth <= 0.0)
     {
         return;
@@ -110,12 +100,12 @@ void main(uint3 id : SV_DispatchThreadID)
     ShadePoint at;
     at.position = ViewToWorld(ViewPosition(float2(id.xy) + 0.5, viewDepth));
     at.view = -normalize(at.position);
-    at.surface = DecodeGBuffer(TEXTURE(c.albedo).Load(pixel), TEXTURE(c.normal).Load(pixel), TEXTURE(c.surface).Load(pixel));
-    float3 lit = Shade(at) * BUFFER(c.exposure).Load<float4>(0u).x + TEXTURE(c.emissive).Load(pixel).rgb;
+    at.surface = LoadGBuffer(c.gbuffer, pixel);
+    float3 lit = Shade(at) * BUFFER(c.exposure).Load<float4>(0u).x + TEXTURE(c.gbuffer.emissive).Load(pixel).rgb;
     [branch] if (any(isnan(lit)) || any(isinf(lit)))
     {
         RaiseFailure(BUFFER(View.failures), FailureNaN);
-        lit = FailurePixel(View.time);
+        lit = FailurePixel(View.frame.realSec);
     }
 
     LEVEL(c.hdr, 0u)[id.xy] = float4(lit, 1.0);

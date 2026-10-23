@@ -34,27 +34,20 @@
 #ifndef MAGIC_SKY_HLSLI
 #define MAGIC_SKY_HLSLI
 
+#include "Include/Frame.hlsli"
 #include "Include/Math.hlsli"
+#include "Include/SkyLights.hlsli"
 #include "Include/Surface.hlsli"
+#include "Include/Weather.hlsli"
 
-// What the renderer hands a sky, in world space, +Y up. A sun or moon the world has none of has no light and points
-// straight down.
+// What the renderer hands a sky, in world space, +Y up.
 struct SkyInputs
 {
     float3 direction;        // unit length, the way this point of the sky is seen
     float3 cameraPosition;   // metres, for a sky that changes as the camera climbs
-    float time;              // seconds, for what drifts
-    float3 sunDirection;     // unit length, the way the sun's light travels: the sun is at -sunDirection
-    float3 sunIlluminance;   // lux, times the sun's colour, above the air; zero with no sun
-    float sunAngularRadius;  // radians, the sun's disc
-    float3 moonDirection;    // unit length, the way the moon's light travels: the moon is at -moonDirection
-    float3 moonIlluminance;  // lux, times the moon's colour, of a full moon above the air; zero with no moon
-    float moonAngularRadius; // radians, the moon's disc
-    float3 wind;             // metres per second, the world's weather
-    float coverage;          // how much of the sky clouds cover, 0 clear to 1 overcast
-    float density;           // how thick they are, 0 wisps to 1 thick
-    float3 cloudColor;       // linear, the clouds where the sun lights them, times the sun's light
-    float3 cloudShadow;      // linear, the clouds in their own shade and underneath, times the sky's light
+    FrameConstants frame;    // the clocks: what drifts moves by frame.worldSec, which stands still while paused
+    SkyLightConstants lights;
+    WeatherConstants weather;
     bool isCapture;          // drawn into the light from everywhere, coarse and blurred, so detail can be spared
     float dither;            // 0 to 1, another for each pixel and frame in the view, which the temporal upscale blends,
                              // so a sky that integrates by steps offsets them by it; the same everywhere otherwise

@@ -224,7 +224,7 @@ float4 HeightBlend(float4 share, float4 heights)
 // without shimmering. Its height is left as it is, so the wind never moves where the layers meet.
 void Sway(inout Layer grass, SurfaceInputs input)
 {
-    float2 wind = input.wind.xz;
+    float2 wind = input.weather.wind.xz;
     float speed = length(wind);
     if (speed < 0.1)
     {
@@ -233,10 +233,10 @@ void Sway(inout Layer grass, SurfaceInputs input)
 
     float2 along = wind / speed;
     float2 place = input.worldPosition.xz;
-    float downwind = dot(place, along) - speed * 0.5 * input.time;
+    float downwind = dot(place, along) - speed * 0.5 * input.frame.worldSec;
     float across = dot(place, float2(-along.y, along.x));
-    float gust = GradientNoise(float3(downwind * (1.0 / 60.0), across * (1.0 / 150.0), input.time * 0.05));
-    float crest = GradientNoise(float3(downwind * (1.0 / 8.0), across * (1.0 / 24.0), input.time * 0.3));
+    float gust = GradientNoise(float3(downwind * (1.0 / 60.0), across * (1.0 / 150.0), input.frame.worldSec * 0.05));
+    float crest = GradientNoise(float3(downwind * (1.0 / 8.0), across * (1.0 / 24.0), input.frame.worldSec * 0.3));
     float gusts = lerp(0.25, 1.0, saturate(gust * 1.5 + 0.5));
     float crests = saturate(crest * 2.0 + 0.4);
     float footprint = max(length(input.positionDdx), length(input.positionDdy));

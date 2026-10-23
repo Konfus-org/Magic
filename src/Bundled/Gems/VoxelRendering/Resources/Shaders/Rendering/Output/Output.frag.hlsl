@@ -7,6 +7,7 @@
 
 #include "Include/Color.hlsli"
 #include "Include/FailureBanner.hlsli"
+#include "Include/Frame.hlsli"
 #include "Include/Fullscreen.hlsli"
 #include "Include/Heap.hlsli"
 #include "Include/Noise.hlsli"
@@ -19,9 +20,8 @@ struct OutputConstants
     uint failures;           // the frame's raised codes
     float width;             // the view's size as it is shown
     float height;
-    float time;
     uint encoding;           // 0 linear as it is, 1 sRGB, 2 PQ (HDR10), 3 scRGB
-    uint frameIndex;         // which dithers it
+    FrameConstants frame;    // the banner pulses by its real time, and its index dithers
 };
 
 CONSTANTS(OutputConstants, c);
@@ -33,12 +33,12 @@ float3 EncodeForTarget(float3 color, float2 pixel)
 {
     [branch] if (c.encoding == 1u)
     {
-        return LinearToSrgb(saturate(color)) + TriangularDither(pixel, c.frameIndex) / 255.0;
+        return LinearToSrgb(saturate(color)) + TriangularDither(pixel, c.frame.index) / 255.0;
     }
     else if (c.encoding == 2u)
     {
         float3 pq = LinearToPq(Rec709ToRec2020(saturate(color)) * PaperWhiteNits);
-        return pq + TriangularDither(pixel, c.frameIndex) / 1023.0;
+        return pq + TriangularDither(pixel, c.frame.index) / 1023.0;
     }
     else if (c.encoding == 3u)
     {
@@ -52,6 +52,6 @@ float4 main(PassVaryings input) : SV_Target0
 {
     float2 size = float2(c.width, c.height);
     float3 color = TEXTURE(c.image).SampleLevel(SAMPLER_STATE(c.sampler), input.uv, 0.0).rgb;
-    color = FailureBanner(color, uint2(input.uv * size), uint2(size), BUFFER(c.text), BUFFER(c.failures), c.time);
+    color = FailureBanner(color, uint2(input.uv * size), uint2(size), BUFFER(c.text), BUFFER(c.failures), c.frame.realSec);
     return float4(EncodeForTarget(color, input.position.xy), 1.0);
 }

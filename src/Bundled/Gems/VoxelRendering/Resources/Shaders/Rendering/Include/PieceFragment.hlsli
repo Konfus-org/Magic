@@ -1,7 +1,8 @@
 // What the material templates (Rendering/Materials/VisibilityClip.frag.hlsl, Resolve.frag.hlsl) hand a surface: where
 // the pixel is, its normal (turned to the face seen on a double-sided surface's back), its uv and position and their
 // derivatives, which the caller works out, as the resolve has no neighbouring pixels of its triangle to take them from,
-// scaled by textureMipScale, which side of it the camera sees, and the world's weather. Composed after the surface.
+// scaled by textureMipScale, which side of it the camera sees, the frame's clocks and the world's weather. Composed
+// after the surface.
 //
 // A card's pixel (Core's Card) is the mesh as its atlases hold it, seen from one of the two views either side of the
 // camera, dithered between them by how far round from one to the next the camera is, so a card turns smoothly as the
@@ -17,8 +18,8 @@
 
 #include "Include/Math.hlsli"
 #include "Include/Noise.hlsli"
-#include "Include/PieceVaryings.hlsli"
 #include "Include/Surface.hlsli"
+#include "Rendering/Include/PieceVaryings.hlsli"
 #include "Rendering/Include/View.hlsli"
 
 // Core's Card: the views each atlas holds, those of a row, and a view's cell as a share of the atlas.
@@ -81,7 +82,7 @@ SurfaceInputs PieceInputsOf(
     [branch] if (isCard)
     {
         float3 placed = input.position;
-        float pick = InterleavedGradientNoise(input.clip.xy + float2(41.0, 23.0), View.frameIndex);
+        float pick = InterleavedGradientNoise(input.clip.xy + float2(41.0, 23.0), View.frame.index);
         float shown = floor(input.card.x) + (frac(input.card.x) > pick ? 1.0 : 0.0);
         float view = fmod(shown, CardAtlasViews);
         float2 local = float2(input.uv.x * 0.5 + 0.5, 0.5 - input.uv.y * 0.5);
@@ -129,11 +130,10 @@ SurfaceInputs PieceInputsOf(
     inputs.positionDdx *= View.textureMipScale;
     inputs.positionDdy *= View.textureMipScale;
     inputs.screenUv = input.clip.xy * View.viewTexel;
-    inputs.time = View.time;
+    inputs.frame = View.frame;
     inputs.cameraPosition = View.cameraPosition;
     inputs.viewDirection = NormalizeOrZero(-(inputs.worldPosition - View.cameraPosition));
-    inputs.wind = View.weather.wind;
-    inputs.coverage = View.weather.coverage;
+    inputs.weather = View.weather;
 
     // A mirrored instance's corners were swapped, so what the rasteriser calls its front is its front.
     inputs.isFrontFace = isFrontFace;

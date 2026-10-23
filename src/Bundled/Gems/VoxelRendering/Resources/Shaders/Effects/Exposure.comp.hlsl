@@ -30,10 +30,7 @@ static const float Brightening = 1.0;
 float MeteredEv()
 {
     float3 sh[9];
-    [unroll] for (uint i = 0u; i < 9u; i++)
-    {
-        sh[i] = BUFFER(View.skySh).Load<float4>(i * 16u).rgb;
-    }
+    LoadSkySh(View.skySh, sh);
 
     float3 white = ShIrradiance(float3(0.0, 1.0, 0.0), sh);
     white += View.keyLightIlluminance * (saturate(-View.keyLightDirection.y) / Pi);
@@ -53,6 +50,6 @@ void main()
     float4 held = BUFFER(c.exposure).Load<float4>(0u);
     float currentEv = held.z > 0.0 ? log2(1.0 / (1.2 * held.x)) : targetEv;
     float rate = targetEv > currentEv ? Darkening : Brightening;
-    float ev = currentEv + (targetEv - currentEv) * (1.0 - exp(-View.deltaSeconds * rate));
+    float ev = currentEv + (targetEv - currentEv) * (1.0 - exp(-View.frame.realDeltaSec * rate));
     BUFFER(c.exposure).Store<float4>(0u, float4(1.0 / (1.2 * exp2(ev)), ev, 1.0, 0.0));
 }

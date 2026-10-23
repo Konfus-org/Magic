@@ -1,43 +1,17 @@
 // A view's constants for a frame: the renderer's ViewConstants (GpuStructs.cs), member for member: change both
-// together. Its camera, its sizes, the world's lights and weather, and the heap ids of the world's tables. A pass names
-// the view's buffer among its constants and loads it first (LoadView), into View, which everything after reads.
-// Camera-relative: a position is relative to the camera before viewProj takes it. Reverse-Z with no far plane: a depth
-// is near over the view depth, 0 where nothing was drawn. A matrix is its four rows, as System.Numerics keeps them,
-// which take a row vector (Transform).
+// together. The frame's clocks, its camera, its sizes, the world's lights and weather, and the heap ids of the world's
+// tables. A pass names the view's buffer among its constants and loads it first (LoadView), into View, which everything
+// after reads. Camera-relative: a position is relative to the camera before viewProj takes it. Reverse-Z with no far
+// plane: a depth is near over the view depth, 0 where nothing was drawn. A matrix is its four rows, as System.Numerics
+// keeps them, which take a row vector (Transform).
 
 #ifndef MAGIC_RENDERING_VIEW_HLSLI
 #define MAGIC_RENDERING_VIEW_HLSLI
 
-#include "Include/Curve.hlsli"
+#include "Include/Frame.hlsli"
 #include "Include/Heap.hlsli"
-
-// The world's weather, still, clear and with no fog without one.
-struct WeatherConstants
-{
-    float3 wind;             // metres per second: its direction and strength
-    float coverage;          // how much of the sky clouds cover, 0 clear to 1 overcast
-    float3 cloudColor;       // the clouds where the sun lights them, linear
-    float density;           // how thick they are, 0 wisps to 1 thick
-    float3 cloudShadow;      // the clouds in their own shade and underneath, linear
-    float fog;               // the share of the light the fog puts out a metre where its falloff is 1; 0, none
-    float3 fogColor;         // the fog's tint, times the light that reaches it, linear
-    float fogStart;          // metres from the camera before the fog begins
-    Curve fogFalloff;        // the fog's share by metres above the world's origin
-};
-
-// The sky's sun and moon, which the sky draws whether or not either lights the world now. Each points straight down
-// with no light without one.
-struct SkyLightConstants
-{
-    float3 sunDirection;     // the way its light travels
-    float sunAngularRadius;  // its disc's half-angle, radians
-    float3 sunIlluminance;   // lux times its colour, above the air
-    float moonAngularRadius;
-    float3 moonDirection;
-    float padding0;
-    float3 moonIlluminance;  // a full moon's lux times its colour, above the air
-    float padding1;
-};
+#include "Include/SkyLights.hlsli"
+#include "Include/Weather.hlsli"
 
 // A directional light that lights the world alone, without shadows.
 struct DirectionalLightConstants
@@ -57,8 +31,10 @@ struct ViewConstants
     float4 rotation[4];      // world to view, a rotation alone
     float4 prevViewProj[4];  // the last frame's viewProj
 
+    FrameConstants frame;
+
     float3 cameraPosition;
-    float time;
+    float clusterError;      // pixels a cluster's error may cover before a finer one is drawn
 
     float2 viewSize;         // pixels as the view is drawn, and one over them
     float2 viewTexel;
@@ -73,7 +49,7 @@ struct ViewConstants
     float keyLightAngularRadius;  // its disc's half-angle, radians
 
     float3 keyLightIlluminance;   // lux times its colour; zero with none
-    uint frameIndex;
+    uint keyLightThroughSky;      // 1 when it is the sky's sun or moon
 
     float2 outputSize;       // pixels as the view is shown
     float2 jitter;           // this frame's sub-pixel offset of viewProj, in clip space
@@ -83,11 +59,6 @@ struct ViewConstants
 
     float3 priorityPosition; // the player's camera relative to this one, which detail is kept nearest to
     float textureMipScale;   // what uv gradients are scaled by
-
-    float deltaSeconds;
-    float clusterError;      // pixels a cluster's error may cover before a finer one is drawn
-    uint keyLightThroughSky; // 1 when the key light is the sky's sun or moon
-    uint directionalCount;   // how many of directional light the world
 
     uint targetEncoding;     // 0 linear as it is, 1 sRGB, 2 PQ (HDR10), 3 scRGB: Encode.hlsli
     uint skyMaterial;        // the sky's material's row
@@ -107,8 +78,8 @@ struct ViewConstants
 
     uint exposure;           // the heap ids of the view's exposure, a float4: the exposure, its EV100, metered or not,
     uint skySh;              // and of the sky's harmonics, nine float4s
-    uint padding0;
-    uint padding1;
+    uint directionalCount;   // how many of directional light the world
+    uint padding;
 
     WeatherConstants weather;
     SkyLightConstants skyLights;
