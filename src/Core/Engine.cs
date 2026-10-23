@@ -7,6 +7,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.CmdLine;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
+using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Telemetry;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
@@ -117,7 +118,7 @@ public sealed class Engine
     private (Args Args, Task<WorldState> Saving, double Seconds)? _restart;
 
     private Engine(
-        List<IGem> gems,
+        List<(IGem Gem, SubscriptionList Registrations)> gems,
         World world,
         App app,
         Threads threads,
@@ -130,8 +131,8 @@ public sealed class Engine
         _gems = new Hooked[gems.Count];
         for (int i = 0; i < gems.Count; i++)
         {
-            Type type = gems[i].GetType();
-            _gems[i] = new Hooked(gems[i], type.Assembly.GetName().Name ?? type.Name);
+            Type type = gems[i].Gem.GetType();
+            _gems[i] = new Hooked(gems[i].Gem, type.Assembly.GetName().Name ?? type.Name, gems[i].Registrations);
         }
 
         _hooked = new Hooked[_phases.Length][];
@@ -252,10 +253,10 @@ public sealed class Engine
         // on a worker since it was added, as the gems loaded.
         assets.IndexAsync().GetAwaiter().GetResult();
         Settings settings = container.GetRequiredService<Settings>();
-        List<IGem> gems = loader.Load(container);
+        List<(IGem Gem, SubscriptionList Registrations)> gems = loader.Load(container);
         World world = container.GetRequiredService<World>();
         List<IPreloader> preloaders = [];
-        foreach (IGem gem in gems)
+        foreach ((IGem gem, _) in gems)
         {
             if (gem is IPreloader preloader) preloaders.Add(preloader);
         }
@@ -558,9 +559,9 @@ public sealed class Engine
     }
 
     /// <summary>
-    /// Disposes the gems that are <see cref="IDisposable"/>, the last made first, so each ends before what it uses. A
-    /// gem that is an <see cref="ILogSink"/> is taken off the log first, once it has had every line logged before, so
-    /// it can close what it writes to.
+    /// Disposes the gems that are <see cref="IDisposable"/>, the last made first, so each ends before what it uses. What
+    /// is registered for a gem ends first: a gem that is an <see cref="ILogSink"/> is taken off the log once it has had
+    /// every line logged before, so it can close what it writes to.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -571,7 +572,7 @@ public sealed class Engine
         for (int i = _gems.Length - 1; i >= 0; i--)
         {
             IGem gem = _gems[i].Gem;
-            if (gem is ILogSink sink) Debugging.Unregister(sink);
+            _gems[i].Registrations.Dispose();
 
             if (gem is not IDisposable disposable) continue;
 
@@ -665,14 +666,16 @@ public sealed class Engine
     }
 
     /// <summary>
-    /// A gem in the frame loop, by the name the project lists it as, which its assembly is named for, and whether it
-    /// threw and left the loop for good: written and read on both threads.
+    /// A gem in the frame loop, by the name the project lists it as, which its assembly is named for, what is
+    /// registered for it, and whether it threw and left the loop for good: written and read on both threads.
     /// </summary>
-    private sealed class Hooked(IGem gem, string name)
+    private sealed class Hooked(IGem gem, string name, SubscriptionList registrations)
     {
         public IGem Gem { get; } = gem;
 
         public string Name { get; } = name;
+
+        public SubscriptionList Registrations { get; } = registrations;
 
         public bool HasLeft
         {

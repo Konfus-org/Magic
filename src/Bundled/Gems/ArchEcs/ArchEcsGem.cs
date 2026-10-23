@@ -308,38 +308,38 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T4 : unmanaged, IComponent
         => new(WalkOf(All<T1, T2, T3, T4>.Description, All<T1, T2, T3, T4>.Cut));
 
-    public Subscription Add(ISystem system) => Schedule(system, system.Phase, frame => system.Run(frame, Query()));
+    public Subscription Register(ISystem system) => Schedule(system, system.Phase, frame => system.Run(frame, Query()));
 
-    public Subscription Add<T1>(ISystem<T1> system)
+    public Subscription Register<T1>(ISystem<T1> system)
         where T1 : unmanaged, IComponent
         => Schedule(system, system.Phase, frame => system.Run(frame, Query<T1>()));
 
-    public Subscription Add<T1, T2>(ISystem<T1, T2> system)
+    public Subscription Register<T1, T2>(ISystem<T1, T2> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         => Schedule(system, system.Phase, frame => system.Run(frame, Query<T1, T2>()));
 
-    public Subscription Add<T1, T2, T3>(ISystem<T1, T2, T3> system)
+    public Subscription Register<T1, T2, T3>(ISystem<T1, T2, T3> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
         => Schedule(system, system.Phase, frame => system.Run(frame, Query<T1, T2, T3>()));
 
-    public Subscription Add<T1, T2, T3, T4>(ISystem<T1, T2, T3, T4> system)
+    public Subscription Register<T1, T2, T3, T4>(ISystem<T1, T2, T3, T4> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent
         => Schedule(system, system.Phase, frame => system.Run(frame, Query<T1, T2, T3, T4>()));
 
-    public Subscription Add(IParallelSystem system)
+    public Subscription Register(IParallelSystem system)
         => AddParallel(
             system,
             system.Phase,
             All.Description,
             (in Frame frame, in Chunk chunk) => system.Run(frame, All.Cut(chunk)));
 
-    public Subscription Add<T1>(IParallelSystem<T1> system)
+    public Subscription Register<T1>(IParallelSystem<T1> system)
         where T1 : unmanaged, IComponent
         => AddParallel(
             system,
@@ -347,7 +347,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
             All<T1>.Description,
             (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1>.Cut(chunk)));
 
-    public Subscription Add<T1, T2>(IParallelSystem<T1, T2> system)
+    public Subscription Register<T1, T2>(IParallelSystem<T1, T2> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         => AddParallel(
@@ -356,7 +356,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
             All<T1, T2>.Description,
             (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2>.Cut(chunk)));
 
-    public Subscription Add<T1, T2, T3>(IParallelSystem<T1, T2, T3> system)
+    public Subscription Register<T1, T2, T3>(IParallelSystem<T1, T2, T3> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
@@ -366,7 +366,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
             All<T1, T2, T3>.Description,
             (in Frame frame, in Chunk chunk) => system.Run(frame, All<T1, T2, T3>.Cut(chunk)));
 
-    public Subscription Add<T1, T2, T3, T4>(IParallelSystem<T1, T2, T3, T4> system)
+    public Subscription Register<T1, T2, T3, T4>(IParallelSystem<T1, T2, T3, T4> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent

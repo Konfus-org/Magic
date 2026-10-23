@@ -136,71 +136,71 @@ public interface IEcs
         where T4 : unmanaged, IComponent;
 
     /// <summary>
-    /// Runs <paramref name="system"/> every frame, in its <see cref="ISystem.Phase"/>, after the systems added before
-    /// it, until the subscription is disposed. A system that throws is logged and taken off; the others go on.
+    /// Runs <paramref name="system"/> every frame, in its <see cref="ISystem.Phase"/>, after the systems registered
+    /// before it, until the subscription is disposed. A system that throws is logged and taken off; the others go on.
     /// </summary>
-    Subscription Add(ISystem system);
+    Subscription Register(ISystem system);
 
     /// <summary>
-    /// <see cref="Add(ISystem)"/> for a system over the entities that have a <typeparamref name="T1"/>.
+    /// <see cref="Register(ISystem)"/> for a system over the entities that have a <typeparamref name="T1"/>.
     /// </summary>
-    Subscription Add<T1>(ISystem<T1> system)
+    Subscription Register<T1>(ISystem<T1> system)
         where T1 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Add(ISystem)"/> for a system over the entities that have both components.
+    /// <see cref="Register(ISystem)"/> for a system over the entities that have both components.
     /// </summary>
-    Subscription Add<T1, T2>(ISystem<T1, T2> system)
+    Subscription Register<T1, T2>(ISystem<T1, T2> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Add(ISystem)"/> for a system over the entities that have all three components.
+    /// <see cref="Register(ISystem)"/> for a system over the entities that have all three components.
     /// </summary>
-    Subscription Add<T1, T2, T3>(ISystem<T1, T2, T3> system)
+    Subscription Register<T1, T2, T3>(ISystem<T1, T2, T3> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Add(ISystem)"/> for a system over the entities that have all four components.
+    /// <see cref="Register(ISystem)"/> for a system over the entities that have all four components.
     /// </summary>
-    Subscription Add<T1, T2, T3, T4>(ISystem<T1, T2, T3, T4> system)
+    Subscription Register<T1, T2, T3, T4>(ISystem<T1, T2, T3, T4> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Add(ISystem)"/> for a system that runs a chunk at a time on the ECS's worker threads.
+    /// <see cref="Register(ISystem)"/> for a system that runs a chunk at a time on the ECS's worker threads.
     /// </summary>
-    Subscription Add(IParallelSystem system);
+    Subscription Register(IParallelSystem system);
 
     /// <summary>
-    /// <see cref="Add(IParallelSystem)"/> for a system over the entities that have a <typeparamref name="T1"/>.
+    /// <see cref="Register(IParallelSystem)"/> for a system over the entities that have a <typeparamref name="T1"/>.
     /// </summary>
-    Subscription Add<T1>(IParallelSystem<T1> system)
+    Subscription Register<T1>(IParallelSystem<T1> system)
         where T1 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Add(IParallelSystem)"/> for a system over the entities that have both components.
+    /// <see cref="Register(IParallelSystem)"/> for a system over the entities that have both components.
     /// </summary>
-    Subscription Add<T1, T2>(IParallelSystem<T1, T2> system)
+    Subscription Register<T1, T2>(IParallelSystem<T1, T2> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Add(IParallelSystem)"/> for a system over the entities that have all three components.
+    /// <see cref="Register(IParallelSystem)"/> for a system over the entities that have all three components.
     /// </summary>
-    Subscription Add<T1, T2, T3>(IParallelSystem<T1, T2, T3> system)
+    Subscription Register<T1, T2, T3>(IParallelSystem<T1, T2, T3> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent;
 
     /// <summary>
-    /// <see cref="Add(IParallelSystem)"/> for a system over the entities that have all four components.
+    /// <see cref="Register(IParallelSystem)"/> for a system over the entities that have all four components.
     /// </summary>
-    Subscription Add<T1, T2, T3, T4>(IParallelSystem<T1, T2, T3, T4> system)
+    Subscription Register<T1, T2, T3, T4>(IParallelSystem<T1, T2, T3, T4> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent

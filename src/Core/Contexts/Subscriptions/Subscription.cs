@@ -1,7 +1,7 @@
 namespace Magic.Contexts.Subscriptions;
 
 /// <summary>
-/// Something handed out that lasts until it is disposed: a registered command, an added system. Whoever keeps one
+/// Something handed out that lasts until it is disposed: a registered command or system. Whoever keeps one
 /// holds it as a Subscription, so the field says what it is and why it is kept.
 /// </summary>
 public sealed class Subscription(Action end) : IDisposable

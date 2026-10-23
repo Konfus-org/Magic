@@ -47,13 +47,13 @@ namespace Magic.Scripting;
 internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPreloader, IDisposable
 {
     /// <summary>
-    /// Each of the <see cref="IEcs"/>'s Adds, one per kind of system, with the type it takes: a class that implements
-    /// that interface is a system of that kind.
+    /// Each of the <see cref="IEcs"/>'s Register methods, one per kind of system, with the type it takes: a class that
+    /// implements that interface is a system of that kind.
     /// </summary>
-    private static readonly (MethodInfo Add, Type Taken)[] _adds = Array.ConvertAll(
+    private static readonly (MethodInfo Register, Type Taken)[] _registers = Array.ConvertAll(
         Array.FindAll(
             typeof(IEcs).GetMethods(),
-            method => string.Equals(method.Name, nameof(IEcs.Add), StringComparison.Ordinal)
+            method => string.Equals(method.Name, nameof(IEcs.Register), StringComparison.Ordinal)
                 && method.GetParameters().Length == 1),
         method => (method, method.GetParameters()[0].ParameterType));
 
@@ -313,31 +313,31 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     }
 
     /// <summary>
-    /// The <see cref="IEcs"/>'s Add for each kind of system <paramref name="type"/> is, made for the components it
-    /// names; none for a class that is no system.
+    /// The <see cref="IEcs"/>'s Register for each kind of system <paramref name="type"/> is, made for the components
+    /// it names; none for a class that is no system.
     /// </summary>
-    private static List<MethodInfo> GetAdds(Type type)
+    private static List<MethodInfo> GetRegisters(Type type)
     {
-        // Each interface the class has, matched with the Add that takes it, or for a generic system interface, with
-        // the generic Add made for the same component types.
-        List<MethodInfo> adds = [];
+        // Each interface the class has, matched with the Register that takes it, or for a generic system interface,
+        // with the generic Register made for the same component types.
+        List<MethodInfo> registers = [];
         foreach (Type contract in type.GetInterfaces())
         {
-            foreach ((MethodInfo add, Type taken) in _adds)
+            foreach ((MethodInfo register, Type taken) in _registers)
             {
                 if (taken == contract)
                 {
-                    adds.Add(add);
+                    registers.Add(register);
                 }
-                else if (add.IsGenericMethodDefinition && contract.IsGenericType && taken.IsGenericType
+                else if (register.IsGenericMethodDefinition && contract.IsGenericType && taken.IsGenericType
                     && taken.GetGenericTypeDefinition() == contract.GetGenericTypeDefinition())
                 {
-                    adds.Add(add.MakeGenericMethod(contract.GetGenericArguments()));
+                    registers.Add(register.MakeGenericMethod(contract.GetGenericArguments()));
                 }
             }
         }
 
-        return adds;
+        return registers;
     }
 
     /// <summary>
@@ -650,7 +650,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             if (!attached.IsHeld) continue;
 
             attached.IsHeld = false;
-            if (TryAddSystems(attached) is { Ok: false } failed)
+            if (TryRegisterSystems(attached) is { Ok: false } failed)
             {
                 Debugging.Error($"Script {attached.Instance.GetType().Name} is left off entity {attached.Entity.Id}: "
                     + $"{failed.Error}");
@@ -799,25 +799,25 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             IsHeld = _isReadying || (_isLoading && !IsImpatient(made.GetType())),
         };
 
-        return attached.IsHeld ? Result.Success(attached) : TryAddSystems(attached);
+        return attached.IsHeld ? Result.Success(attached) : TryRegisterSystems(attached);
     }
 
     /// <summary>
-    /// Adds <paramref name="attached"/>'s script to the ECS as each kind of system it is, into its systems; why not,
-    /// when adding one throws, none of them left added.
+    /// Registers <paramref name="attached"/>'s script with the ECS as each kind of system it is, into its systems; why
+    /// not, when registering one throws, none of them left registered.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
-        Justification = "Whatever adding a script's system throws, the entity goes without the script, "
+        Justification = "Whatever registering a script's system throws, the entity goes without the script, "
             + "and the others are started.")]
-    private Result<Attached> TryAddSystems(Attached attached)
+    private Result<Attached> TryRegisterSystems(Attached attached)
     {
         try
         {
-            foreach (MethodInfo add in GetAdds(attached.Instance.GetType()))
+            foreach (MethodInfo register in GetRegisters(attached.Instance.GetType()))
             {
-                if (add.Invoke(_ecs, [attached.Instance]) is Subscription system) attached.Systems.Add(system);
+                if (register.Invoke(_ecs, [attached.Instance]) is Subscription system) attached.Systems.Add(system);
             }
 
             return Result.Success(attached);

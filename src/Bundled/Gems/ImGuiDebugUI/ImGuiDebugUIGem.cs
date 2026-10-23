@@ -196,7 +196,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         platform->Platform_GetClipboardTextFn = &GetClipboard;
 
         _views = new CameraViews(window);
-        _viewing = world.Add(_views);
+        _viewing = world.Register(_views);
         _isShowing = IsAlwaysShowing && window.Width > 0;
         LoadFontAsync().FireAndForget();
     }

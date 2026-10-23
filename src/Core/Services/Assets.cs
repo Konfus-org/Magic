@@ -76,11 +76,6 @@ public sealed class Assets : IDisposable
         new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
-    /// The watches on the roots, until the assets are disposed. Under <see cref="_lock"/>.
-    /// </summary>
-    private readonly SubscriptionList _watches = new();
-
-    /// <summary>
     /// Done once every root added has first been indexed (<see cref="IndexAsync"/>).
     /// </summary>
     private readonly TaskCompletionSource _indexed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -135,8 +130,10 @@ public sealed class Assets : IDisposable
         _engine = GemAssembly.GetResources(files, typeof(Assets).Assembly);
 
         WatchAsync().FireAndForget();
-        Register(_project);
-        Register(_engine);
+
+        // The first roots are the assets' own for the whole run, so they are added with nothing to end them.
+        AddRoot(_project);
+        AddRoot(_engine);
     }
 
     /// <summary>
@@ -153,7 +150,10 @@ public sealed class Assets : IDisposable
     {
         lock (_lock)
         {
-            _watches.Dispose();
+            foreach (Root root in _roots)
+            {
+                root.Watch.Dispose();
+            }
         }
     }
 
@@ -360,22 +360,12 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// Adds <paramref name="folder"/> to the roots, after those added before it, which win a path it shares with them,
     /// and starts reading it on a worker and watching it: a gem's own <c>Resources/</c>, as the gem loads. What is in
-    /// it is found once every root is indexed (<see cref="IndexAsync"/>). A folder that does not exist, or is a root
-    /// already, is left out.
+    /// it is found once every root is indexed (<see cref="IndexAsync"/>), until the subscription is disposed: then it is
+    /// taken out of the roots, and what is in it goes as a deleted folder's files do. A folder that does not exist, or
+    /// is a root already, is left out.
     /// </summary>
-    internal void Register(string folder)
-    {
-        if (!_files.FolderExists(folder)) return;
-
-        lock (_lock)
-        {
-            if (Array.Exists(_roots, root => string.Equals(root.Folder, folder, StringComparison.OrdinalIgnoreCase)))
-                return;
-
-            _roots = [.. _roots, new Root(folder, Task.Run(() => ReadRoot(_files, folder)))];
-            _watches.Add(FileSystem.Watch(folder, path => _changes.Writer.TryWrite(path)));
-        }
-    }
+    internal Subscription Register(string folder)
+        => AddRoot(folder) is { } root ? new Subscription(() => Unregister(root)) : Subscription.None;
 
     /// <summary>
     /// Indexes every root added, once each has been read: what the engine waits for once the gems have loaded and
@@ -667,6 +657,44 @@ public sealed class Assets : IDisposable
                 Debugging.Error($"The asset files' changes could not be taken in: {ex}");
             }
         }
+    }
+
+    /// <summary>
+    /// Adds <paramref name="folder"/> to the roots, reading it on a worker and watching it, as <see cref="Register"/>
+    /// says; none when it does not exist or is a root already.
+    /// </summary>
+    private Root? AddRoot(string folder)
+    {
+        if (!_files.FolderExists(folder)) return null;
+
+        lock (_lock)
+        {
+            if (Array.Exists(_roots, added => string.Equals(added.Folder, folder, StringComparison.OrdinalIgnoreCase)))
+                return null;
+
+            Root root = new(folder, Task.Run(() => ReadRoot(_files, folder)))
+            {
+                Watch = FileSystem.Watch(folder, path => _changes.Writer.TryWrite(path)),
+            };
+            _roots = [.. _roots, root];
+
+            return root;
+        }
+    }
+
+    /// <summary>
+    /// Takes <paramref name="root"/> out of the roots and stops watching it. It is told as a change under it, so the
+    /// roots are indexed again without it once the changes are next taken in.
+    /// </summary>
+    private void Unregister(Root root)
+    {
+        lock (_lock)
+        {
+            _roots = Array.FindAll(_roots, added => !ReferenceEquals(added, root));
+        }
+
+        root.Watch.Dispose();
+        _changes.Writer.TryWrite(root.Folder);
     }
 
     /// <summary>
@@ -977,10 +1005,13 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// A folder assets are found under, and its first read (<see cref="ReadRoot"/>), started as it was added, which the
-    /// first index waits for (<see cref="IndexAsync"/>).
+    /// A folder assets are found under, its first read (<see cref="ReadRoot"/>), started as it was added, which the
+    /// first index waits for (<see cref="IndexAsync"/>), and the watch on it.
     /// </summary>
-    private sealed record Root(string Folder, Task<List<Indexed>> FirstRead);
+    private sealed record Root(string Folder, Task<List<Indexed>> FirstRead)
+    {
+        public required Subscription Watch { get; init; }
+    }
 
     /// <summary>
     /// An asset asked for or added, as the type it was first asked for as.

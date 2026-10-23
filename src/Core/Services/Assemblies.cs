@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Reflection;
+using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
 
@@ -10,8 +11,9 @@ namespace Magic.Services;
 /// path it was loaded from, so one loaded again, as the project's is when it is built while the engine runs, replaces
 /// its last build. What a file names from code, a script's class or a component's struct, is found here by the name
 /// of its type, checked to be what the file is for (<see cref="Get{T}"/>): the assemblies are searched once per name,
-/// what each resolved to is kept for the run, and forgotten when an assembly is added or replaced. A gem asks for it as
-/// it asks for any service, as the one that reads <c>.cs</c> files does to find a script's class. Safe from any thread.
+/// what each resolved to is kept for the run, and forgotten when an assembly is added, replaced or let go. A gem asks
+/// for it as it asks for any service, as the one that reads <c>.cs</c> files does to find a script's class. Safe from
+/// any thread.
 /// </summary>
 public sealed class Assemblies
 {
@@ -70,15 +72,18 @@ public sealed class Assemblies
 
     /// <summary>
     /// Takes in <paramref name="assembly"/>, loaded from <paramref name="path"/>, in place of the one last loaded from
-    /// there.
+    /// there, until the subscription is disposed: then it is let go, unless one loaded from there since has taken its
+    /// place.
     /// </summary>
-    internal void Register(string path, Assembly assembly)
+    internal Subscription Register(string path, Assembly assembly)
     {
         lock (_adding)
         {
             _loaded[path] = assembly;
             _code = new Code([.. _loaded.Values]);
         }
+
+        return new Subscription(() => Unregister(path, assembly));
     }
 
     private static Result<Type> Search(string name, IReadOnlyList<Assembly> all)
@@ -115,6 +120,21 @@ public sealed class Assemblies
         Code code = _code;
 
         return code.Named.GetOrAdd(name, Search, code.All);
+    }
+
+    /// <summary>
+    /// Lets go of <paramref name="assembly"/>, loaded from <paramref name="path"/>, while it is still the one from
+    /// there.
+    /// </summary>
+    private void Unregister(string path, Assembly assembly)
+    {
+        lock (_adding)
+        {
+            if (!_loaded.TryGetValue(path, out Assembly? loaded) || loaded != assembly) return;
+
+            _loaded.Remove(path);
+            _code = new Code([.. _loaded.Values]);
+        }
     }
 
     /// <summary>

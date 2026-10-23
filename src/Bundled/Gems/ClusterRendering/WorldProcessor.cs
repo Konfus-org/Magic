@@ -99,10 +99,10 @@ internal sealed class WorldProcessor : IDisposable
         _lights = new Slots<LightCopy>(_back.Lights);
 
         // In this order: the ECS runs a phase's systems in the order they were added, and the first starts the copy.
-        _systems.Add(world.Add(new ReadWorld(this, world)));
-        _systems.Add(world.Add(new InstanceCopier(_instances)));
-        _systems.Add(world.Add(new PointLightCopier(_lights)));
-        _systems.Add(world.Add(new SpotLightCopier(_lights)));
+        _systems.Add(world.Register(new ReadWorld(this, world)));
+        _systems.Add(world.Register(new InstanceCopier(_instances)));
+        _systems.Add(world.Register(new PointLightCopier(_lights)));
+        _systems.Add(world.Register(new SpotLightCopier(_lights)));
     }
 
     /// <summary>

@@ -13,8 +13,8 @@ namespace Magic.Services;
 
 /// <summary>
 /// The game world: everything in it, and the one place to act on it. It opens and closes domains, puts assets in the
-/// world (<see cref="Spawn"/>), makes, finds and changes entities and adds systems, over the pieces underneath, which
-/// stay separate: the ECS a gem provides (<see cref="IEcs"/>), the scripts a gem runs (<see cref="IScripts"/>), and
+/// world (<see cref="Spawn"/>), makes, finds and changes entities and registers systems, over the pieces underneath,
+/// which stay separate: the ECS a gem provides (<see cref="IEcs"/>), the scripts a gem runs (<see cref="IScripts"/>), and
 /// the assets. Core always makes it, and opens the project's entry point through it on the first frame. Without a gem
 /// that provides the ECS it holds no entities: no domain opens, which is warned about, and a call that needs entities
 /// throws, saying so. Main thread, but where a member says otherwise.
@@ -387,55 +387,55 @@ public sealed class World : IDisposable
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent => GetEcs().Query<T1, T2, T3, T4>();
 
-    /// <inheritdoc cref="IEcs.Add(ISystem)"/>
-    public Subscription Add(ISystem system) => GetEcs().Add(system);
+    /// <inheritdoc cref="IEcs.Register(ISystem)"/>
+    public Subscription Register(ISystem system) => GetEcs().Register(system);
 
-    /// <inheritdoc cref="IEcs.Add{T1}(ISystem{T1})"/>
-    public Subscription Add<T1>(ISystem<T1> system)
-        where T1 : unmanaged, IComponent => GetEcs().Add(system);
+    /// <inheritdoc cref="IEcs.Register{T1}(ISystem{T1})"/>
+    public Subscription Register<T1>(ISystem<T1> system)
+        where T1 : unmanaged, IComponent => GetEcs().Register(system);
 
-    /// <inheritdoc cref="IEcs.Add{T1, T2}(ISystem{T1, T2})"/>
-    public Subscription Add<T1, T2>(ISystem<T1, T2> system)
+    /// <inheritdoc cref="IEcs.Register{T1, T2}(ISystem{T1, T2})"/>
+    public Subscription Register<T1, T2>(ISystem<T1, T2> system)
         where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent => GetEcs().Add(system);
+        where T2 : unmanaged, IComponent => GetEcs().Register(system);
 
-    /// <inheritdoc cref="IEcs.Add{T1, T2, T3}(ISystem{T1, T2, T3})"/>
-    public Subscription Add<T1, T2, T3>(ISystem<T1, T2, T3> system)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent => GetEcs().Add(system);
-
-    /// <inheritdoc cref="IEcs.Add{T1, T2, T3, T4}(ISystem{T1, T2, T3, T4})"/>
-    public Subscription Add<T1, T2, T3, T4>(ISystem<T1, T2, T3, T4> system)
+    /// <inheritdoc cref="IEcs.Register{T1, T2, T3}(ISystem{T1, T2, T3})"/>
+    public Subscription Register<T1, T2, T3>(ISystem<T1, T2, T3> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent => GetEcs().Add(system);
+        where T3 : unmanaged, IComponent => GetEcs().Register(system);
 
-    /// <inheritdoc cref="IEcs.Add(IParallelSystem)"/>
-    public Subscription Add(IParallelSystem system) => GetEcs().Add(system);
-
-    /// <inheritdoc cref="IEcs.Add{T1}(IParallelSystem{T1})"/>
-    public Subscription Add<T1>(IParallelSystem<T1> system)
-        where T1 : unmanaged, IComponent => GetEcs().Add(system);
-
-    /// <inheritdoc cref="IEcs.Add{T1, T2}(IParallelSystem{T1, T2})"/>
-    public Subscription Add<T1, T2>(IParallelSystem<T1, T2> system)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent => GetEcs().Add(system);
-
-    /// <inheritdoc cref="IEcs.Add{T1, T2, T3}(IParallelSystem{T1, T2, T3})"/>
-    public Subscription Add<T1, T2, T3>(IParallelSystem<T1, T2, T3> system)
-        where T1 : unmanaged, IComponent
-        where T2 : unmanaged, IComponent
-        where T3 : unmanaged, IComponent => GetEcs().Add(system);
-
-    /// <inheritdoc cref="IEcs.Add{T1, T2, T3, T4}(IParallelSystem{T1, T2, T3, T4})"/>
-    public Subscription Add<T1, T2, T3, T4>(IParallelSystem<T1, T2, T3, T4> system)
+    /// <inheritdoc cref="IEcs.Register{T1, T2, T3, T4}(ISystem{T1, T2, T3, T4})"/>
+    public Subscription Register<T1, T2, T3, T4>(ISystem<T1, T2, T3, T4> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        where T4 : unmanaged, IComponent => GetEcs().Add(system);
+        where T4 : unmanaged, IComponent => GetEcs().Register(system);
+
+    /// <inheritdoc cref="IEcs.Register(IParallelSystem)"/>
+    public Subscription Register(IParallelSystem system) => GetEcs().Register(system);
+
+    /// <inheritdoc cref="IEcs.Register{T1}(IParallelSystem{T1})"/>
+    public Subscription Register<T1>(IParallelSystem<T1> system)
+        where T1 : unmanaged, IComponent => GetEcs().Register(system);
+
+    /// <inheritdoc cref="IEcs.Register{T1, T2}(IParallelSystem{T1, T2})"/>
+    public Subscription Register<T1, T2>(IParallelSystem<T1, T2> system)
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent => GetEcs().Register(system);
+
+    /// <inheritdoc cref="IEcs.Register{T1, T2, T3}(IParallelSystem{T1, T2, T3})"/>
+    public Subscription Register<T1, T2, T3>(IParallelSystem<T1, T2, T3> system)
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent
+        where T3 : unmanaged, IComponent => GetEcs().Register(system);
+
+    /// <inheritdoc cref="IEcs.Register{T1, T2, T3, T4}(IParallelSystem{T1, T2, T3, T4})"/>
+    public Subscription Register<T1, T2, T3, T4>(IParallelSystem<T1, T2, T3, T4> system)
+        where T1 : unmanaged, IComponent
+        where T2 : unmanaged, IComponent
+        where T3 : unmanaged, IComponent
+        where T4 : unmanaged, IComponent => GetEcs().Register(system);
 
     /// <summary>
     /// Takes in what workers finished for the domains since the last frame. Core calls it on the main thread at the

@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Channels;
 using Magic.Contexts.Logging;
+using Magic.Contexts.Subscriptions;
 using Magic.Interfaces;
 
 namespace Magic.Services;
@@ -147,12 +148,16 @@ public static class Debugging
     }
 
     /// <summary>
-    /// Sends every line logged from now on to <paramref name="sink"/> too, until it is removed. The first sink added
-    /// gets the lines logged before it first.
+    /// Sends every line logged from now on to <paramref name="sink"/> too, until the subscription is disposed, which
+    /// waits until the sink has been given every line logged before, so it can be closed straight after; never
+    /// disposed from inside the sink's own <see cref="ILogSink.Write"/>. The first sink added gets the lines logged
+    /// before it first.
     /// </summary>
-    internal static void Register(ILogSink sink)
+    internal static Subscription Register(ILogSink sink)
     {
         _entries.Writer.TryWrite(new Entry(default, AddSink));
+
+        return new Subscription(() => Unregister(sink));
 
         void AddSink()
         {
@@ -169,15 +174,24 @@ public static class Debugging
     }
 
     /// <summary>
-    /// Stops sending lines to <paramref name="sink"/>. Waits until it has been given every line logged before, so it
-    /// can be closed straight after; never called from inside the sink's own <see cref="ILogSink.Write"/>.
+    /// Prints everything written so far and stops: lines written after it are dropped. Called once, at exit.
+    /// </summary>
+    internal static async Task FlushAsync()
+    {
+        _entries.Writer.TryComplete();
+        await _printing.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stops sending lines to <paramref name="sink"/>, once it has been given every line logged before
+    /// (<see cref="Register"/>).
     /// </summary>
     [SuppressMessage(
         "Usage",
         "VSTHRD002:Avoid problematic synchronous waits",
         Justification = "Removing a sink is synchronous, and the printing task never needs the waiting thread, "
             + "so the wait cannot deadlock; it is bounded besides.")]
-    internal static void Unregister(ILogSink sink)
+    private static void Unregister(ILogSink sink)
     {
         TaskCompletionSource removed = new();
 
@@ -194,15 +208,6 @@ public static class Debugging
             _sinks.Remove(sink);
             removed.SetResult();
         }
-    }
-
-    /// <summary>
-    /// Prints everything written so far and stops: lines written after it are dropped. Called once, at exit.
-    /// </summary>
-    internal static async Task FlushAsync()
-    {
-        _entries.Writer.TryComplete();
-        await _printing.ConfigureAwait(false);
     }
 
     private static LogLine Stamp(LogLevel level, string message, string member, string file, int line)

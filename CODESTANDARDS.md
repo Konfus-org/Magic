@@ -61,7 +61,7 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 - `LateUpdate` fills a copy for `Render`, `Sync` only swaps the copies, and `Render` reads only its copy.
 - A component is an unmanaged struct with public fields that implements `IComponent`, and nothing else.
 - Work over entities is an `ISystem<T1>` (up to four components; `ISystem` for all), or an `IParallelSystem` for many.
-  State its `Phase` when it isn't `Update`. Add it with `World.Add` and keep the `Subscription`.
+  State its `Phase` when it isn't `Update`. Register it with `World.Register` and keep the `Subscription`.
 - Work that isn't about entities (pumping events, presenting, loading) is an `IGem` hook.
 - Tell other gems what happened with a message struct on `Events`. A listener keeps its `Subscription`.
 - A script is a `.cs` asset whose class, named like the file, is an `IScript`: an `IBehavior` for one entity each
@@ -198,6 +198,8 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 - `Get` never fails. `Is`, `Has` and `Can` answer a question with a bool. `Try` returns whether it worked, with the
   result in an `out` parameter or a `Result`. `TryGet` is a lookup that can fail.
 - Other verbs: `Make`, `Parse`, `Format`, `Find` (may return null), `To` for a conversion.
+- `Register` hands something to a service and returns the `Subscription` that takes it back. `Add` and `Remove`
+  belong to a collection.
 - A method that returns a value is never a bare noun (`Amount`, `RowOf`).
 - Keep .NET's idioms: static factories (`Result.Success`), fluent builders, immediate-mode widgets (`IDebugUI.Button`),
   and a collection's `Add` and `Remove`.
