@@ -326,17 +326,17 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// Pumps SDL's events (<see cref="Pump"/>). Render thread.
+    /// Pumps SDL's events (<see cref="PumpEvents"/>). Render thread.
     /// </summary>
-    public void Render(in Frame frame) => Pump();
+    public void Render(in Frame frame) => PumpEvents();
 
     /// <summary>
-    /// Pumps SDL's events (<see cref="Pump"/>) while the app is paused, so the window still answers the OS: it moves,
+    /// Pumps SDL's events (<see cref="PumpEvents"/>) while the app is paused, so the window still answers the OS: it moves,
     /// closes and is never taken for hung. What they change is applied on the next frame. Render thread.
     /// </summary>
     public void Idle(EngineThread thread)
     {
-        if (thread == EngineThread.Render) Pump();
+        if (thread == EngineThread.Render) PumpEvents();
     }
 
     /// <summary>
@@ -392,7 +392,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         "Style",
         "IDE0010:Add missing cases",
         Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose.")]
-    private unsafe void Pump()
+    private unsafe void PumpEvents()
     {
         ApplyWanted();
         SDL_Event sdlEvent;

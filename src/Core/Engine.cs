@@ -105,7 +105,7 @@ public sealed class Engine
     /// <summary>
     /// The time the fixed steps have reached on the world's clock. Main thread.
     /// </summary>
-    private double _fixedSeconds;
+    private double _fixedSec;
 
     /// <summary>
     /// Both clocks (<see cref="Frame.RealSeconds"/>, <see cref="Frame.Seconds"/>) as of the last frame started, from
@@ -156,8 +156,8 @@ public sealed class Engine
         _args = args;
         _rendered = rendered;
         _renderFrame = RenderFrame;
-        _renderIdle = RenderIdle;
-        _fixedSeconds = clocks.World;
+        _renderIdle = IdleRenderThread;
+        _fixedSec = clocks.WorldSec;
         _clocks = clocks;
     }
 
@@ -261,7 +261,7 @@ public sealed class Engine
         // on a worker since it was added, as the gems loaded.
         assets.IndexAsync().GetAwaiter().GetResult();
         Settings settings = container.GetRequiredService<Settings>();
-        CoreSettings core = MakeCoreSettings(settings);
+        CoreSettings core = CreateCoreSettings(settings);
         List<(IGem Gem, SubscriptionList Registrations)> gems = loader.Load(container);
         World world = container.GetRequiredService<World>();
         List<IPreloader> preloaders = [];
@@ -284,7 +284,7 @@ public sealed class Engine
     /// The engine's own settings, made under <c>Core</c> before any gem's, so they come first wherever every setting is
     /// listed; their defaults when the presets give them values that do not fit, which is an error.
     /// </summary>
-    private static CoreSettings MakeCoreSettings(Settings settings)
+    private static CoreSettings CreateCoreSettings(Settings settings)
     {
         Result<ISettings?> made = settings.Make("Core", typeof(CoreSettings));
 
@@ -485,17 +485,18 @@ public sealed class Engine
 
     /// <summary>
     /// Runs frames until the app quits, the frame limit is reached or the time limit is, then waits for the last to be
-    /// rendered; while the app is paused, holds them (<see cref="Hold"/>). The time limit counts from the real clock the
-    /// run went on from, the time the app was paused included, so a run left paused still ends. On the main thread.
+    /// rendered; while the app is paused, holds them (<see cref="HoldFrames"/>). The time limit counts from the real
+    /// clock the run went on from, the time the app was paused included, so a run left paused still ends. On the main
+    /// thread.
     /// </summary>
     private void RunFrames()
     {
         long start = Stopwatch.GetTimestamp();
-        double limit = _args.TimeLimit.TotalSeconds - _clocks.Real;
+        double limitSec = _args.TimeLimit.TotalSeconds - _clocks.RealSec;
 
         // Seconds since the start as of the last frame started, or as a hold ended, which the next frame's real time is
         // measured from, so the time the app was paused is left out of it.
-        double previous = 0;
+        double previousSec = 0;
         for (ulong index = 0; !_app.IsQuitting; index++)
         {
             if (index == _args.FrameLimit)
@@ -506,12 +507,12 @@ public sealed class Engine
             }
 
             bool isHeld = _app.IsPaused;
-            bool isStep = isHeld && Hold(start, limit);
+            bool isStep = isHeld && HoldFrames(start, limitSec);
 
             if (_app.IsQuitting) break;
 
-            double now = Stopwatch.GetElapsedTime(start).TotalSeconds;
-            if (now >= limit)
+            double nowSec = Stopwatch.GetElapsedTime(start).TotalSeconds;
+            if (nowSec >= limitSec)
             {
                 _app.Quit($"ran {_args.TimeLimit.TotalSeconds} s");
 
@@ -521,14 +522,14 @@ public sealed class Engine
             // The time the app was paused is left out, so a frame after a hold starts afresh, and a stepped one moves
             // the clocks on by one fixed step, however long the app was paused. The fixed step is read once, so the
             // frame and its steps agree on it.
-            double fixedStep = 1.0 / _core.FixedRate;
-            double realDelta = isHeld ? 0 : now - previous;
-            if (isStep) realDelta = fixedStep;
+            double fixedStepSec = 1.0 / _core.FixedRate;
+            double realDeltaSec = isHeld ? 0 : nowSec - previousSec;
+            if (isStep) realDeltaSec = fixedStepSec;
 
-            if (index > 0 && !isHeld) _frameDuration.Record(realDelta);
+            if (index > 0 && !isHeld) _frameDuration.Record(realDeltaSec);
 
-            previous = now;
-            Frame frame = StartFrame(index, realDelta);
+            previousSec = nowSec;
+            Frame frame = StartFrame(index, realDeltaSec);
             Debugging.Frame = index;
 
             _threads.Drain(EngineThread.Main);
@@ -536,7 +537,7 @@ public sealed class Engine
             _events.Deliver();
 
             RunPhase(Phase.Update, frame);
-            RunFixedSteps(frame, fixedStep);
+            RunFixedSteps(frame, fixedStepSec);
             RunPhase(Phase.LateUpdate, frame);
             WaitForRender();
 
@@ -628,17 +629,17 @@ public sealed class Engine
 
     /// <summary>
     /// Holds the frames while the app is paused (<see cref="App.IsPaused"/>), until it goes on, quits or steps a frame,
-    /// or <paramref name="limit"/> seconds have passed since <paramref name="start"/>: about 60 times a second, the main
+    /// or <paramref name="limitSec"/> seconds have passed since <paramref name="start"/>: about 60 times a second, the main
     /// thread runs what it was handed, then every gem idles, on the main thread and then on the render thread
     /// (<see cref="IGem.Idle"/>). Whether a frame was stepped. On the main thread.
     /// </summary>
-    private bool Hold(long start, double limit)
+    private bool HoldFrames(long start, double limitSec)
     {
         while (_app.IsPaused && !_app.IsQuitting)
         {
             if (_app.TryTakeStep()) return true;
 
-            if (Stopwatch.GetElapsedTime(start).TotalSeconds >= limit) return false;
+            if (Stopwatch.GetElapsedTime(start).TotalSeconds >= limitSec) return false;
 
             _threads.Wait(EngineThread.Main, _idlePeriod);
             _threads.Drain(EngineThread.Main);
@@ -655,41 +656,41 @@ public sealed class Engine
     }
 
     /// <summary>
-    /// The frame <paramref name="index"/>: the real clock moved on by <paramref name="realDelta"/>, and the world's by as
+    /// The frame <paramref name="index"/>: the real clock moved on by <paramref name="realDeltaSec"/>, and the world's by as
     /// much, scaled (<see cref="World.TimeScale"/>), or not at all while the world is paused (<see cref="World.IsPaused"/>).
     /// While a domain loads in place of the world, the world's clock runs as the real one, unpaused, as the gems ready the
     /// new one on the frames' fixed steps.
     /// </summary>
-    private Frame StartFrame(ulong index, double realDelta)
+    private Frame StartFrame(ulong index, double realDeltaSec)
     {
         bool isLoading = _world.IsLoading;
         bool isPaused = _world.IsPaused && !isLoading;
         float scale = isLoading ? 1 : _world.TimeScale;
-        double worldDelta = isPaused ? 0 : realDelta * scale;
-        _clocks = new Clocks(_clocks.Real + realDelta, _clocks.World + worldDelta);
+        double worldDeltaSec = isPaused ? 0 : realDeltaSec * scale;
+        _clocks = new Clocks(_clocks.RealSec + realDeltaSec, _clocks.WorldSec + worldDeltaSec);
 
-        return new Frame(index, (float)worldDelta, _clocks.World, (float)realDelta, _clocks.Real, isPaused);
+        return new Frame(index, (float)worldDeltaSec, _clocks.WorldSec, (float)realDeltaSec, _clocks.RealSec, isPaused);
     }
 
     /// <summary>
-    /// Runs FixedUpdate for every <paramref name="fixedStep"/> up to <paramref name="frame"/>'s time on the world's
+    /// Runs FixedUpdate for every <paramref name="fixedStepSec"/> up to <paramref name="frame"/>'s time on the world's
     /// clock, each given the step and the time it reaches. Past <see cref="CoreSettings.MaxFixedSteps"/>, the steps
     /// left are dropped. No cap can save a step that takes longer than the time it simulates: the loop then runs the
     /// cap's worth every frame and the world falls behind real time, and the step is what must be fixed.
     /// </summary>
-    private void RunFixedSteps(in Frame frame, double fixedStep)
+    private void RunFixedSteps(in Frame frame, double fixedStepSec)
     {
-        for (int step = 0; _fixedSeconds + fixedStep <= frame.Seconds; step++)
+        for (int step = 0; _fixedSec + fixedStepSec <= frame.Seconds; step++)
         {
             if (step == _core.MaxFixedSteps)
             {
-                _fixedSeconds = frame.Seconds;
+                _fixedSec = frame.Seconds;
 
                 break;
             }
 
-            _fixedSeconds += fixedStep;
-            RunPhase(Phase.FixedUpdate, frame with { DeltaSeconds = (float)fixedStep, Seconds = _fixedSeconds });
+            _fixedSec += fixedStepSec;
+            RunPhase(Phase.FixedUpdate, frame with { DeltaSeconds = (float)fixedStepSec, Seconds = _fixedSec });
         }
     }
 
@@ -711,7 +712,7 @@ public sealed class Engine
     /// <summary>
     /// The idle handed over while the app is paused, on the render thread.
     /// </summary>
-    private void RenderIdle()
+    private void IdleRenderThread()
     {
         try
         {
@@ -807,7 +808,7 @@ public sealed class Engine
     /// <summary>
     /// Both clocks a frame tells (<see cref="Frame"/>), in seconds: the real one and the world's.
     /// </summary>
-    private readonly record struct Clocks(double Real, double World);
+    private readonly record struct Clocks(double RealSec, double WorldSec);
 
     /// <summary>
     /// A gem in the frame loop, by the name the project lists it as, which its assembly is named for, what is
