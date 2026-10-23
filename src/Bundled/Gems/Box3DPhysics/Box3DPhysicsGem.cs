@@ -763,9 +763,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         if (_stepped.IsSet) return;
 
-        long start = _stepWait.Start();
+        long startTimestamp = _stepWait.Start();
         _stepped.Wait();
-        _stepWait.RecordSince(start);
+        _stepWait.RecordSince(startTimestamp);
     }
 
     /// <summary>
@@ -783,9 +783,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
             if (_isEnding) return;
 
-            long start = _stepDuration.Start();
+            long startTimestamp = _stepDuration.Start();
             Step();
-            _stepDuration.RecordSince(start);
+            _stepDuration.RecordSince(startTimestamp);
 
             _stepped.Set();
         }

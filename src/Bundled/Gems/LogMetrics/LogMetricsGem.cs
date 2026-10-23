@@ -11,7 +11,7 @@ using Magic.Services;
 namespace Magic.LogMetrics;
 
 /// <summary>
-/// Logs what the engine measures: every <see cref="LogMetricsSettings.IntervalSeconds"/>, a line per instrument and set
+/// Logs what the engine measures: every <see cref="LogMetricsSettings.IntervalSec"/>, a line per instrument and set
 /// of tags measured since the last time, then the slowest frame and where its time went, and once more when the run
 /// ends. Off unless <see cref="LogMetricsSettings.IsEnabled"/>, and then it does not listen at all, so nothing is
 /// measured for it.
@@ -37,7 +37,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// <summary>
     /// When the measurements being added up began: the last report, or the start.
     /// </summary>
-    private long _windowStart;
+    private long _windowStartTimestamp;
 
     public LogMetricsGem(LogMetricsSettings settings)
     {
@@ -46,9 +46,9 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         {
             Debugging.Verbose("Metrics are not logged; --set LogMetrics.enabled=true turns them on.");
         }
-        else if (settings.IntervalSeconds <= 0)
+        else if (settings.IntervalSec <= 0)
         {
-            Debugging.Error($"LogMetrics's intervalSeconds must be more than 0, not {settings.IntervalSeconds}; "
+            Debugging.Error($"LogMetrics's intervalSec must be more than 0, not {settings.IntervalSec}; "
                 + "metrics are not logged.");
         }
 
@@ -62,7 +62,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         _slowest.Current = frame.Index;
         Follow();
 
-        if (_listener is null || Stopwatch.GetElapsedTime(_windowStart).TotalSeconds < _settings.IntervalSeconds)
+        if (_listener is null || Stopwatch.GetElapsedTime(_windowStartTimestamp).TotalSeconds < _settings.IntervalSec)
             return;
 
         Report();
@@ -96,7 +96,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// </summary>
     private void Follow()
     {
-        bool isWanted = _settings.IsEnabled && _settings.IntervalSeconds > 0;
+        bool isWanted = _settings.IsEnabled && _settings.IntervalSec > 0;
         if (_listener is not null && (!isWanted || !HasSameMeters())) Stop();
 
         if (isWanted && _listener is null) Start();
@@ -132,7 +132,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         listener.SetMeasurementEventCallback<decimal>(Add);
         _meters = _settings.Meters;
         _listener = listener;
-        _windowStart = Stopwatch.GetTimestamp();
+        _windowStartTimestamp = Stopwatch.GetTimestamp();
         listener.Start();
     }
 
@@ -187,14 +187,14 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     private void Report()
     {
         // The window starts over, and the observable instruments are read now, so the report has their latest values.
-        double seconds = Stopwatch.GetElapsedTime(_windowStart).TotalSeconds;
-        _windowStart = Stopwatch.GetTimestamp();
+        double windowSec = Stopwatch.GetElapsedTime(_windowStartTimestamp).TotalSeconds;
+        _windowStartTimestamp = Stopwatch.GetTimestamp();
         _listener?.RecordObservableInstruments();
         lock (_lock)
         {
             foreach (Measured measured in _measured)
             {
-                measured.Report(seconds);
+                measured.Report(windowSec);
             }
         }
 
@@ -317,9 +317,9 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         }
 
         /// <summary>
-        /// Logs a line for each series measured over the last <paramref name="seconds"/>, and starts it over.
+        /// Logs a line for each series measured over the last <paramref name="windowSec"/>, and starts it over.
         /// </summary>
-        internal void Report(double seconds)
+        internal void Report(double windowSec)
         {
             lock (_lock)
             {
@@ -327,7 +327,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
                 {
                     if (series.Count == 0) continue;
 
-                    Debugging.Info(Describe(series, seconds));
+                    Debugging.Info(Describe(series, windowSec));
                     series.Clear();
                 }
             }
@@ -360,7 +360,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             return added;
         }
 
-        private string Describe(Series series, double seconds)
+        private string Describe(Series series, double windowSec)
         {
             string? unit = instrument.Unit;
             StringBuilder text = new(instrument.Name);
@@ -376,15 +376,15 @@ internal sealed class LogMetricsGem : IGem, IDisposable
                 case Summary.Distribution:
                     text.Append(
                         CultureInfo.InvariantCulture,
-                        $"{series.Count} in {seconds:0.##} s, "
+                        $"{series.Count} in {windowSec:0.##} s, "
                             + $"mean {FormatAmount(series.Sum / series.Count, unit)}, "
                             + $"min {FormatAmount(series.Min, unit)}, max {FormatAmount(series.Max, unit)}");
                     break;
                 case Summary.Total:
                     text.Append(
                         CultureInfo.InvariantCulture,
-                        $"{FormatAmount(series.Sum, unit)} in {seconds:0.##} s, "
-                            + $"{FormatAmount(series.Sum / seconds, unit)}/s");
+                        $"{FormatAmount(series.Sum, unit)} in {windowSec:0.##} s, "
+                            + $"{FormatAmount(series.Sum / windowSec, unit)}/s");
                     break;
                 case Summary.Latest:
                 default:
@@ -476,18 +476,18 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         private readonly List<Hook> _hooks = [];
         private readonly List<Hook> _slowestHooks = [];
         private int _count;
-        private double _sum;
+        private double _sumSec;
         private ulong _index;
-        private double _seconds;
+        private double _slowestSec;
         private TimeSpan _paused;
 
         /// <summary>
         /// How long each engine thread spent on work handed to it, in the frame being timed and in the slowest.
         /// </summary>
-        private double _mainWork;
-        private double _renderWork;
-        private double _slowestMainWork;
-        private double _slowestRenderWork;
+        private double _mainWorkSec;
+        private double _renderWorkSec;
+        private double _slowestMainWorkSec;
+        private double _slowestRenderWorkSec;
 
         /// <summary>
         /// How long the garbage collector had paused the process for when the last frame ended.
@@ -502,9 +502,9 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// <summary>
         /// Keeps a hook's time in the frame being timed.
         /// </summary>
-        internal void Add(double seconds, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        internal void Add(double tookSec, ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
-            Hook hook = new(FindTag(tags, Metrics.GemNameTag), FindTag(tags, Metrics.FramePhaseTag), seconds);
+            Hook hook = new(FindTag(tags, Metrics.GemNameTag), FindTag(tags, Metrics.FramePhaseTag), tookSec);
             lock (_lock)
             {
                 _hooks.Add(hook);
@@ -514,42 +514,42 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// <summary>
         /// Keeps a piece of handed work's time in the frame being timed, under the thread that ran it.
         /// </summary>
-        internal void AddWork(double seconds, ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        internal void AddWork(double workSec, ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
             bool isRender = FindTag(tags, Metrics.ThreadNameTag) is "render";
             lock (_lock)
             {
-                if (isRender) _renderWork += seconds;
-                else _mainWork += seconds;
+                if (isRender) _renderWorkSec += workSec;
+                else _mainWorkSec += workSec;
             }
         }
 
         /// <summary>
-        /// Ends the frame being timed, which took <paramref name="seconds"/>, keeping its hooks and handed work when it
-        /// is the slowest yet.
+        /// Ends the frame being timed, which took <paramref name="frameSec"/>, keeping its hooks and handed work when
+        /// it is the slowest yet.
         /// </summary>
-        internal void Ended(double seconds)
+        internal void Ended(double frameSec)
         {
             TimeSpan paused = GC.GetTotalPauseDuration();
             lock (_lock)
             {
-                if (_count == 0 || seconds > _seconds)
+                if (_count == 0 || frameSec > _slowestSec)
                 {
                     _index = Current;
-                    _seconds = seconds;
+                    _slowestSec = frameSec;
                     _paused = paused - _pausedBefore;
                     _slowestHooks.Clear();
                     _slowestHooks.AddRange(_hooks);
-                    _slowestMainWork = _mainWork;
-                    _slowestRenderWork = _renderWork;
+                    _slowestMainWorkSec = _mainWorkSec;
+                    _slowestRenderWorkSec = _renderWorkSec;
                 }
 
                 _pausedBefore = paused;
-                _sum += seconds;
+                _sumSec += frameSec;
                 _count++;
                 _hooks.Clear();
-                _mainWork = 0;
-                _renderWork = 0;
+                _mainWorkSec = 0;
+                _renderWorkSec = 0;
             }
         }
 
@@ -562,38 +562,41 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             {
                 if (_count == 0) return;
 
-                _slowestHooks.Sort(static (first, second) => second.Seconds.CompareTo(first.Seconds));
+                _slowestHooks.Sort(static (first, second) => second.TookSec.CompareTo(first.TookSec));
                 StringBuilder text = new();
                 text.Append(
                     CultureInfo.InvariantCulture,
                     $"Slowest frame f{_index} took "
-                        + $"{FormatAmount(_seconds, "s")}, {_seconds * _count / _sum:0.#}x the mean:");
-                double hooked = 0;
+                        + $"{FormatAmount(_slowestSec, "s")}, {_slowestSec * _count / _sumSec:0.#}x the mean:");
+                double hookedSec = 0;
                 for (int i = 0; i < _slowestHooks.Count; i++)
                 {
                     Hook hook = _slowestHooks[i];
                     // A render-thread hook ran beside the main thread's frame rather than inside it.
-                    if (hook.Phase is not nameof(Phase.Render)) hooked += hook.Seconds;
+                    if (hook.Phase is not nameof(Phase.Render)) hookedSec += hook.TookSec;
 
                     if (i < HooksShown)
                     {
                         text.Append(
                             CultureInfo.InvariantCulture,
-                            $" {hook.Gem}.{hook.Phase} {FormatAmount(hook.Seconds, "s")},");
+                            $" {hook.Gem}.{hook.Phase} {FormatAmount(hook.TookSec, "s")},");
                     }
                 }
 
-                text.Append(" outside the main thread's hooks ").Append(FormatAmount(_seconds - hooked, "s"));
-                if (_slowestMainWork > 0)
-                    text.Append(", of it work handed to the main thread ").Append(FormatAmount(_slowestMainWork, "s"));
+                text.Append(" outside the main thread's hooks ").Append(FormatAmount(_slowestSec - hookedSec, "s"));
+                if (_slowestMainWorkSec > 0)
+                {
+                    text.Append(", of it work handed to the main thread ")
+                        .Append(FormatAmount(_slowestMainWorkSec, "s"));
+                }
 
-                if (_slowestRenderWork > 0)
-                    text.Append("; work handed to the render thread ").Append(FormatAmount(_slowestRenderWork, "s"));
+                if (_slowestRenderWorkSec > 0)
+                    text.Append("; work handed to the render thread ").Append(FormatAmount(_slowestRenderWorkSec, "s"));
 
                 text.Append("; GC paused ").Append(FormatAmount(_paused.TotalSeconds, "s"));
                 Debugging.Info(text.ToString());
                 _count = 0;
-                _sum = 0;
+                _sumSec = 0;
             }
         }
 
@@ -610,6 +613,6 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// <summary>
         /// One gem hook's time, named by the tags Core records it with.
         /// </summary>
-        private readonly record struct Hook(object? Gem, object? Phase, double Seconds);
+        private readonly record struct Hook(object? Gem, object? Phase, double TookSec);
     }
 }

@@ -45,26 +45,26 @@ public interface IDebugUI
     void Text(string text, Color? color = null);
 
     /// <summary>
-    /// A line on screen for <paramref name="seconds"/>, null for the UI's own time, logged as information. The same
+    /// A line on screen for <paramref name="staySec"/>, null for the UI's own time, logged as information. The same
     /// line again while it shows is one line, with how often.
     /// </summary>
     void Info(
         string text,
-        float? seconds = null,
+        float? staySec = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0);
 
     /// <summary>
     /// A warning: at <paramref name="position"/> in the world, or a line on screen without one. It stays
-    /// <paramref name="seconds"/> after it was last reported (null for the UI's own time, 0 for only while it is
+    /// <paramref name="staySec"/> after it was last reported (null for the UI's own time, 0 for only while it is
     /// reported every frame), and is logged as a warning when it appears, not again while it stays.
     /// <paramref name="tooltip"/> shows while the mouse rests on it.
     /// </summary>
     void Warn(
         string text,
         Vector3? position = null,
-        float? seconds = null,
+        float? staySec = null,
         string? tooltip = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
@@ -76,7 +76,7 @@ public interface IDebugUI
     void Error(
         string text,
         Vector3? position = null,
-        float? seconds = null,
+        float? staySec = null,
         string? tooltip = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",

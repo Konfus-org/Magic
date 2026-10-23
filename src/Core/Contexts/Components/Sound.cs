@@ -45,9 +45,9 @@ public enum SoundSpace : byte
 /// ambience. A zero reads as its default, so <c>{ "audio": { "id": 800 } }</c> in a file plays the sound once, at full
 /// volume, in the world, heard at full volume within a metre and not at all past 25; <c>"loop": true</c> plays it
 /// without end, and <c>"space": "everywhere"</c> plays it as music is. The gem that plays sounds writes back how far in
-/// it is (<see cref="Time"/>) and when a sound that does not loop has ended (<see cref="Playback"/>), and follows what
-/// a script writes: <see cref="Playback"/> to play, pause or stop it, <see cref="Time"/> to seek, and every other value
-/// as it changes.
+/// it is (<see cref="TimeSec"/>) and when a sound that does not loop has ended (<see cref="Playback"/>), and follows
+/// what a script writes: <see cref="Playback"/> to play, pause or stop it, <see cref="TimeSec"/> to seek, and every
+/// other value as it changes.
 /// </summary>
 public record struct Sound : IComponent
 {
@@ -58,7 +58,7 @@ public record struct Sound : IComponent
 
     /// <summary>
     /// Whether it plays: playing by default, so a sound placed in the world is heard as it spawns. Set to playing again
-    /// after it stopped, it plays from <see cref="Time"/>, which stopping put back to the start.
+    /// after it stopped, it plays from <see cref="TimeSec"/>, which stopping put back to the start.
     /// </summary>
     public Playback Playback { get; set; }
 
@@ -129,5 +129,5 @@ public record struct Sound : IComponent
     /// <summary>
     /// Seconds into it, at its own pitch, as it was last heard. Set it to play from there.
     /// </summary>
-    public float Time { get; set; }
+    public float TimeSec { get; set; }
 }

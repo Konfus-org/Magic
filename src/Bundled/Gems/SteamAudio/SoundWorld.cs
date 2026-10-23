@@ -162,14 +162,14 @@ internal sealed class SoundWorld : IDisposable
     /// <summary>
     /// Brings the scene up to date with the solids last taken, nearest <paramref name="listener"/> first: a moved solid
     /// moves, one whose model or material changed is made again, one no longer listed goes, and new ones come in for as
-    /// long as <paramref name="seconds"/> allows. True when anything changed, so the scene must be committed.
+    /// long as <paramref name="placingSec"/> allows. True when anything changed, so the scene must be committed.
     /// </summary>
-    internal unsafe bool Update(Vector3 listener, double seconds)
+    internal unsafe bool Update(Vector3 listener, double placingSec)
     {
         // Nearest first: a solid held as it was is stamped seen, and moved if it moved; any other, new or with another
         // model or material, is taken out and placed again while there is time, and left for a later update once there
         // is none.
-        long start = Stopwatch.GetTimestamp();
+        long startTimestamp = Stopwatch.GetTimestamp();
         _update++;
         _listener = listener;
         _solids.Sort(_byNearness);
@@ -192,7 +192,7 @@ internal sealed class SoundWorld : IDisposable
                 continue;
             }
 
-            if (Stopwatch.GetElapsedTime(start).TotalSeconds > seconds)
+            if (Stopwatch.GetElapsedTime(startTimestamp).TotalSeconds > placingSec)
             {
                 IsWhole = false;
 

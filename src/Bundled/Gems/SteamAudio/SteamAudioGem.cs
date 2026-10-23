@@ -94,7 +94,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// How long one update of the acoustic scene may spend placing new solids, before the direct sound is worked out:
     /// the rest come in on the updates after, nearest first.
     /// </summary>
-    private const double PlacingSeconds = 0.008;
+    private const double PlacingSec = 0.008;
 
     /// <summary>
     /// How often the solids near the player are gathered again: what stays put needs no look every frame, and walking a
@@ -314,7 +314,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             maxNumOcclusionSamples = OcclusionSamples,
             maxNumRays = settings.Rays,
             numDiffuseSamples = 32,
-            maxDuration = settings.ReverbSeconds,
+            maxDuration = settings.ReverbSec,
             maxOrder = settings.Order,
             maxNumSources = Math.Max(1, settings.ReflectionSources),
             numThreads = Math.Max(1, Environment.ProcessorCount / 4),
@@ -456,8 +456,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         filling.ListenerPosition = _listenerPosition;
         filling.Bounces = _settings.Bounces;
         filling.IsReflecting = _sounds.IsReflecting;
-        filling.ReflectionPeriod = 1 / Math.Clamp(_settings.ReflectionRate, 1, 60);
-        filling.PlacingSeconds = stream.IsHeld ? double.PositiveInfinity : PlacingSeconds;
+        filling.ReflectionPeriodSec = 1 / Math.Clamp(_settings.ReflectionRate, 1, 60);
+        filling.PlacingSec = stream.IsHeld ? double.PositiveInfinity : PlacingSec;
         Steer(_sounds, filling);
         Reflect(_sounds, filling);
         _sinceGatheredSec += frame.RealDeltaSec;
@@ -599,18 +599,18 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private static void RunSilently(Voice voice, ref Sound sound, Audio audio, float deltaSec)
     {
-        voice.Time += deltaSec * Math.Clamp(sound.Pitch, 0.5f, 2);
+        voice.TimeSec += deltaSec * Math.Clamp(sound.Pitch, 0.5f, 2);
 
-        if (voice.Time < audio.Seconds) return;
+        if (voice.TimeSec < audio.DurationSec) return;
 
-        if (sound.IsLooping && audio.Seconds > 0)
+        if (sound.IsLooping && audio.DurationSec > 0)
         {
-            voice.Time %= audio.Seconds;
+            voice.TimeSec %= audio.DurationSec;
 
             return;
         }
 
-        voice.Time = 0;
+        voice.TimeSec = 0;
         sound.Playback = Playback.Stopped;
     }
 
@@ -869,8 +869,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             {
                 Entity = entity,
                 Sound = sound,
-                Time = sound.Time,
-                WrittenTime = sound.Time,
+                TimeSec = sound.TimeSec,
+                WrittenTimeSec = sound.TimeSec,
                 WrittenPlayback = sound.Playback
             };
             _voices.Add(entity, voice);
@@ -883,19 +883,19 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         if (sound.Audio != voice.Sound.Audio || sound.Space != voice.Sound.Space)
         {
             Free(voice);
-            if (sound.Audio != voice.Sound.Audio) voice.Time = 0;
+            if (sound.Audio != voice.Sound.Audio) voice.TimeSec = 0;
         }
 
-        if (sound.Time != voice.WrittenTime)
+        if (sound.TimeSec != voice.WrittenTimeSec)
         {
-            voice.Time = Math.Max(0, sound.Time);
+            voice.TimeSec = Math.Max(0, sound.TimeSec);
             voice.IsSeeking = true;
         }
 
         if (sound.Playback != voice.WrittenPlayback && sound.Playback != Playback.Playing)
         {
             Free(voice);
-            if (sound.Playback == Playback.Stopped) voice.Time = 0;
+            if (sound.Playback == Playback.Stopped) voice.TimeSec = 0;
         }
 
         // How far in it is now: one that ended is stopped, one heard is where the audio thread has played to unless a
@@ -910,12 +910,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         {
             voice.HasEnded = false;
             sound.Playback = Playback.Stopped;
-            voice.Time = 0;
+            voice.TimeSec = 0;
         }
         else if (voice.Slot >= 0 && _sounds is not null && !voice.IsSeeking)
         {
             Voices.Slot slot = _sounds.Slots[voice.Slot];
-            if (slot.Started == voice.Generation) voice.Time = slot.Seconds;
+            if (slot.Started == voice.Generation) voice.TimeSec = slot.TimeSec;
         }
         else if (voice.Slot < 0 && sound.Playback == Playback.Playing && audio is not null)
         {
@@ -927,8 +927,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         if (isAudible && _sounds is not null) _wanted.Add(voice);
 
         // Written back for scripts to read, and kept to tell what a script writes next from it.
-        sound.Time = (float)voice.Time;
-        voice.WrittenTime = sound.Time;
+        sound.TimeSec = (float)voice.TimeSec;
+        voice.WrittenTimeSec = sound.TimeSec;
         voice.WrittenPlayback = sound.Playback;
         voice.Sound = sound;
     }
@@ -1002,13 +1002,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             Action = VoiceAction.Start,
             Slot = index,
             Generation = hold.Generation + 1,
-            Seconds = voice.Time,
+            TimeSec = voice.TimeSec,
             Stream = (nint)stream,
             Samples = (nint)pin.Pointer,
             Count = audio.Samples.Length,
             Channels = audio.Channels,
             Rate = audio.SampleRate,
-            Duration = audio.Seconds,
+            DurationSec = audio.DurationSec,
             IsEverywhere = voice.Sound.Space == SoundSpace.Everywhere,
         };
         if (!_sounds.TryTell(command))
@@ -1025,7 +1025,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         voice.Generation = command.Generation;
         voice.IsSeeking = false;
         Debugging.Verbose(
-            $"Entity {voice.Entity.Id}'s sound is heard, {voice.Distance:0.#} m away, from {voice.Time:0.##} s in.");
+            $"Entity {voice.Entity.Id}'s sound is heard, {voice.Distance:0.#} m away, from {voice.TimeSec:0.##} s in.");
     }
 
     /// <summary>
@@ -1076,7 +1076,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                     Action = VoiceAction.Seek,
                     Slot = i,
                     Generation = voice.Generation,
-                    Seconds = voice.Time
+                    TimeSec = voice.TimeSec
                 });
             }
 
@@ -1189,7 +1189,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         {
             if (_sounds is null || _soundWorld is null) return;
 
-            long traced = 0;
+            long tracedTimestamp = 0;
             int taken = 0;
             int forgotten = 0;
             while (!stopping.IsCancellationRequested)
@@ -1219,9 +1219,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 }
 
                 if (frame.IsReflecting && Array.IndexOf(frame.IsEchoing, true) >= 0
-                    && Stopwatch.GetElapsedTime(traced).TotalSeconds >= frame.ReflectionPeriod)
+                    && Stopwatch.GetElapsedTime(tracedTimestamp).TotalSeconds >= frame.ReflectionPeriodSec)
                 {
-                    traced = Stopwatch.GetTimestamp();
+                    tracedTimestamp = Stopwatch.GetTimestamp();
                     Trace(_sounds, frame);
                 }
             }
@@ -1239,10 +1239,10 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private unsafe void Simulate(Voices sounds, SoundWorld soundWorld, SimulationFrame frame)
     {
-        long start = _simulateDuration.Start();
+        long startTimestamp = _simulateDuration.Start();
         if (frame.HasSolids) soundWorld.Take(frame.Solids);
 
-        if (soundWorld.Update(frame.ListenerPosition, frame.PlacingSeconds))
+        if (soundWorld.Update(frame.ListenerPosition, frame.PlacingSec))
         {
             iplSceneCommit(_scene);
             iplSimulatorCommit(_simulator);
@@ -1259,7 +1259,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         iplSimulatorRunDirect(_simulator);
-        _simulateDuration.RecordSince(start);
+        _simulateDuration.RecordSince(startTimestamp);
         _solids.Record(soundWorld.Count);
     }
 
@@ -1269,13 +1269,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private unsafe void Trace(Voices sounds, SimulationFrame frame)
     {
-        long start = _traceDuration.Start();
+        long startTimestamp = _traceDuration.Start();
         IPLSimulationSharedInputs shared = new()
         {
             listener = frame.Listener,
             numRays = _settings.Rays,
             numBounces = frame.Bounces,
-            duration = _settings.ReverbSeconds,
+            duration = _settings.ReverbSec,
             order = _settings.Order,
             irradianceMinDistance = 1,
         };
@@ -1300,7 +1300,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         iplSimulatorRunReflections(_simulator);
-        _traceDuration.RecordSince(start);
+        _traceDuration.RecordSince(startTimestamp);
     }
 
     /// <summary>
@@ -1325,9 +1325,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         /// <summary>
         /// Seconds into its sound, as the gem knows it.
         /// </summary>
-        internal double Time { get; set; }
+        internal double TimeSec { get; set; }
 
-        internal float WrittenTime { get; set; }
+        internal float WrittenTimeSec { get; set; }
 
         internal Playback WrittenPlayback { get; set; }
 
@@ -1440,12 +1440,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         /// <summary>
         /// How long the scene's update may spend placing new solids (<see cref="SoundWorld.Update"/>).
         /// </summary>
-        internal double PlacingSeconds { get; set; }
+        internal double PlacingSec { get; set; }
 
         internal int Bounces { get; set; }
 
         internal bool IsReflecting { get; set; }
 
-        internal float ReflectionPeriod { get; set; }
+        internal float ReflectionPeriodSec { get; set; }
     }
 }

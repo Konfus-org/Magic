@@ -299,7 +299,7 @@ public sealed class Threads : IDisposable
             Justification = "Whatever posted work throws, it is logged and the thread goes on.")]
         private void Run(in Pending pending)
         {
-            long start = pending.IsTimed ? _workDuration.Start() : 0;
+            long startTimestamp = pending.IsTimed ? _workDuration.Start() : 0;
             try
             {
                 pending.Work();
@@ -310,7 +310,7 @@ public sealed class Threads : IDisposable
             }
 
             // Outside the try: a listener that throws is its own failure, not the work's.
-            _workDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.ThreadNameTag, name));
+            _workDuration.RecordSince(startTimestamp, new KeyValuePair<string, object?>(Metrics.ThreadNameTag, name));
         }
 
         /// <summary>

@@ -491,7 +491,7 @@ public sealed class Engine
     /// </summary>
     private void RunFrames()
     {
-        long start = Stopwatch.GetTimestamp();
+        long startTimestamp = Stopwatch.GetTimestamp();
         double limitSec = _args.TimeLimit.TotalSeconds - _clocks.RealSec;
 
         // Seconds since the start as of the last frame started, or as a hold ended, which the next frame's real time is
@@ -507,11 +507,11 @@ public sealed class Engine
             }
 
             bool isHeld = _app.IsPaused;
-            bool isStep = isHeld && HoldFrames(start, limitSec);
+            bool isStep = isHeld && HoldFrames(startTimestamp, limitSec);
 
             if (_app.IsQuitting) break;
 
-            double nowSec = Stopwatch.GetElapsedTime(start).TotalSeconds;
+            double nowSec = Stopwatch.GetElapsedTime(startTimestamp).TotalSeconds;
             if (nowSec >= limitSec)
             {
                 _app.Quit($"ran {_args.TimeLimit.TotalSeconds} s");
@@ -568,7 +568,7 @@ public sealed class Engine
     {
         foreach (LoopGem loopGem in _stops)
         {
-            long start = _hookDuration.Start();
+            long startTimestamp = _hookDuration.Start();
             try
             {
                 loopGem.Gem.Stop();
@@ -581,7 +581,7 @@ public sealed class Engine
             }
 
             _hookDuration.RecordSince(
-                start,
+                startTimestamp,
                 new(Metrics.GemNameTag, loopGem.Name),
                 new(Metrics.FramePhaseTag, nameof(IGem.Stop)));
         }
@@ -629,17 +629,17 @@ public sealed class Engine
 
     /// <summary>
     /// Holds the frames while the app is paused (<see cref="App.IsPaused"/>), until it goes on, quits or steps a frame,
-    /// or <paramref name="limitSec"/> seconds have passed since <paramref name="start"/>: about 60 times a second, the main
-    /// thread runs what it was handed, then every gem idles, on the main thread and then on the render thread
-    /// (<see cref="IGem.Idle"/>). Whether a frame was stepped. On the main thread.
+    /// or <paramref name="limitSec"/> seconds have passed since <paramref name="startTimestamp"/>: about 60 times a
+    /// second, the main thread runs what it was handed, then every gem idles, on the main thread and then on the render
+    /// thread (<see cref="IGem.Idle"/>). Whether a frame was stepped. On the main thread.
     /// </summary>
-    private bool HoldFrames(long start, double limitSec)
+    private bool HoldFrames(long startTimestamp, double limitSec)
     {
         while (_app.IsPaused && !_app.IsQuitting)
         {
             if (_app.TryTakeStep()) return true;
 
-            if (Stopwatch.GetElapsedTime(start).TotalSeconds >= limitSec) return false;
+            if (Stopwatch.GetElapsedTime(startTimestamp).TotalSeconds >= limitSec) return false;
 
             _threads.Wait(EngineThread.Main, _idlePeriod);
             _threads.Drain(EngineThread.Main);
@@ -726,9 +726,9 @@ public sealed class Engine
 
     private void WaitForRender()
     {
-        long start = _renderWait.Start();
+        long startTimestamp = _renderWait.Start();
         _rendered.Wait();
-        _renderWait.RecordSince(start);
+        _renderWait.RecordSince(startTimestamp);
     }
 
     /// <summary>
@@ -746,7 +746,7 @@ public sealed class Engine
         {
             if (loopGem.HasLeft) continue;
 
-            long start = _hookDuration.Start();
+            long startTimestamp = _hookDuration.Start();
             try
             {
                 CallHook(loopGem.Gem, phase, frame);
@@ -761,7 +761,7 @@ public sealed class Engine
 
             // Outside the try: a listener that throws is its own failure, not this gem's.
             _hookDuration.RecordSince(
-                start,
+                startTimestamp,
                 new(Metrics.GemNameTag, loopGem.Name),
                 new(Metrics.FramePhaseTag, _phases[(int)phase]));
         }
@@ -785,7 +785,7 @@ public sealed class Engine
 
             if (loopGem.HasLeft) continue;
 
-            long start = _hookDuration.Start();
+            long startTimestamp = _hookDuration.Start();
             try
             {
                 loopGem.Gem.Idle(thread);
@@ -799,7 +799,7 @@ public sealed class Engine
             }
 
             _hookDuration.RecordSince(
-                start,
+                startTimestamp,
                 new(Metrics.GemNameTag, loopGem.Name),
                 new(Metrics.FramePhaseTag, nameof(IGem.Idle)));
         }

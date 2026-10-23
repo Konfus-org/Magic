@@ -17,14 +17,14 @@ public static class HistogramExtensions
         public long Start() => timer.Enabled ? Stopwatch.GetTimestamp() : 0;
 
         /// <summary>
-        /// Records the seconds since <paramref name="start"/>, tagged with <paramref name="tags"/>, unless nothing
-        /// listened when it started.
+        /// Records the seconds since <paramref name="startTimestamp"/>, tagged with <paramref name="tags"/>, unless
+        /// nothing listened when it started.
         /// </summary>
-        public void RecordSince(long start, params ReadOnlySpan<KeyValuePair<string, object?>> tags)
+        public void RecordSince(long startTimestamp, params ReadOnlySpan<KeyValuePair<string, object?>> tags)
         {
-            if (start == 0) return;
+            if (startTimestamp == 0) return;
 
-            timer.Record(Stopwatch.GetElapsedTime(start).TotalSeconds, tags);
+            timer.Record(Stopwatch.GetElapsedTime(startTimestamp).TotalSeconds, tags);
         }
     }
 }

@@ -5,7 +5,7 @@ namespace Magic.Scripting;
 
 /// <summary>
 /// How often a far behaviour is updated: set in the project's <c>Presets/Default.preset</c>, by another preset, or with
-/// <c>--set Scripting.maxInterval=1</c>, which updates every behaviour every frame.
+/// <c>--set Scripting.maxIntervalFrames=1</c>, which updates every behaviour every frame.
 /// </summary>
 [Category("Scripting")]
 internal sealed class ScriptingSettings : ISettings
@@ -19,5 +19,5 @@ internal sealed class ScriptingSettings : ISettings
     /// <summary>
     /// The most frames between two updates of a behaviour, however far it is: 1 or more.
     /// </summary>
-    public int MaxInterval { get; set; } = 32;
+    public int MaxIntervalFrames { get; set; } = 32;
 }

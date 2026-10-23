@@ -22,7 +22,7 @@ internal sealed class ExpireSystem(World world) : ISystemScript<Expires>
         {
             for (int i = 0; i < entities.Length; i++)
             {
-                if (expiries[i].At <= frame.WorldSec) _gone.Add(entities[i]);
+                if (expiries[i].AtSec <= frame.WorldSec) _gone.Add(entities[i]);
             }
         }
 

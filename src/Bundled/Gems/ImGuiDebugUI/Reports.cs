@@ -43,10 +43,10 @@ internal sealed class Reports
     private long _reported;
 
     /// <summary>
-    /// Shows <paramref name="text"/> until <paramref name="seconds"/> from <paramref name="now"/>, or keeps it showing
-    /// that long when it already is; with 0 seconds it shows until the first frame it is not reported in. True when the
-    /// text was not showing anywhere, which is when a warning or error logs: looked up for those alone, the kind whose
-    /// answer is read.
+    /// Shows <paramref name="text"/> until <paramref name="staySec"/> from <paramref name="nowSec"/>, or keeps it
+    /// showing that long when it already is; with 0 seconds it shows until the first frame it is not reported in. True
+    /// when the text was not showing anywhere, which is when a warning or error logs: looked up for those alone, the
+    /// kind whose answer is read.
     /// </summary>
     internal bool Add(
         string text,
@@ -54,8 +54,8 @@ internal sealed class Reports
         Color color,
         Vector3? position,
         string? tooltip,
-        float seconds,
-        double now)
+        float staySec,
+        double nowSec)
     {
         lock (_lock)
         {
@@ -63,7 +63,7 @@ internal sealed class Reports
             {
                 report.Color = color;
                 report.Tooltip = tooltip;
-                report.Expires = now + seconds;
+                report.ExpiresSec = nowSec + staySec;
                 report.IsFresh = true;
                 if (kind == ReportKind.Counted)
                 {
@@ -80,7 +80,7 @@ internal sealed class Reports
                 Label = kind == ReportKind.Alarm ? $"!!! {text} !!!" : text,
                 Color = color,
                 Tooltip = tooltip,
-                Expires = now + seconds,
+                ExpiresSec = nowSec + staySec,
                 IsFresh = true,
                 Count = 1,
                 Kind = kind,
@@ -92,17 +92,17 @@ internal sealed class Reports
     }
 
     /// <summary>
-    /// Adds what shows at <paramref name="now"/> to <paramref name="world"/>, what has a position, and to
+    /// Adds what shows at <paramref name="nowSec"/> to <paramref name="world"/>, what has a position, and to
     /// <paramref name="lines"/>, what has none, each in the order it was first reported, the lines reported every frame
     /// first. What has had its time, and was not reported again since the last take, is gone after it.
     /// </summary>
-    internal void Take(double now, List<ShownReport> world, List<ShownReport> lines)
+    internal void Take(double nowSec, List<ShownReport> world, List<ShownReport> lines)
     {
         lock (_lock)
         {
             foreach (((string text, Vector3? position), Report report) in _reports)
             {
-                if (!report.IsFresh && now >= report.Expires)
+                if (!report.IsFresh && nowSec >= report.ExpiresSec)
                 {
                     // Removing while enumerating a Dictionary is allowed.
                     _reports.Remove((text, position));
@@ -147,7 +147,7 @@ internal sealed class Reports
 
         internal string? Tooltip { get; set; }
 
-        internal double Expires { get; set; }
+        internal double ExpiresSec { get; set; }
 
         /// <summary>
         /// Reported since it was last taken: it shows at least once, however short its time.

@@ -29,7 +29,7 @@ public static class Debugging
     /// How long removing a sink waits for it to be given the lines logged before, so a stuck sink cannot hang the
     /// run's end.
     /// </summary>
-    private const int CatchUpSeconds = 5;
+    private const int CatchUpSec = 5;
 
     /// <summary>
     /// How many lines are kept for the first sink while there is none; past it the oldest go.
@@ -198,9 +198,9 @@ public static class Debugging
         // The printing task has finished, at exit: the sink gets nothing more.
         if (!_entries.Writer.TryWrite(new Entry(default, RemoveSink))) return;
 
-        if (removed.Task.Wait(TimeSpan.FromSeconds(CatchUpSeconds))) return;
+        if (removed.Task.Wait(TimeSpan.FromSeconds(CatchUpSec))) return;
 
-        Warn($"Log sink {sink.GetType().Name} did not catch up within {CatchUpSeconds} s, "
+        Warn($"Log sink {sink.GetType().Name} did not catch up within {CatchUpSec} s, "
             + "so its last lines may be lost.");
 
         void RemoveSink()

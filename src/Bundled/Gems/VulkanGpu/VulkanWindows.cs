@@ -170,7 +170,7 @@ internal sealed unsafe class VulkanWindows(
 
         if (window.Swapchain.IsNull) return false;
 
-        long start = _acquireWait.Start();
+        long startTimestamp = _acquireWait.Start();
         VkResult result = _device.Api.vkAcquireNextImageKHR(
             window.Swapchain,
             ulong.MaxValue,
@@ -191,7 +191,7 @@ internal sealed unsafe class VulkanWindows(
                 out image);
         }
 
-        _acquireWait.RecordSince(start);
+        _acquireWait.RecordSince(startTimestamp);
         if (result is not (VkResult.Success or VkResult.SuboptimalKHR))
         {
             Debugging.Warn($"Window {window.Id}'s image was not acquired: {result}");

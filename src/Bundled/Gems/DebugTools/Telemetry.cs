@@ -86,7 +86,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// <summary>
     /// When the second being summed up began.
     /// </summary>
-    private long _secondStart;
+    private long _secondStartTimestamp;
 
     /// <summary>
     /// The last second's lines, in the order they show.
@@ -130,7 +130,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         _listener.SetMeasurementEventCallback<float>(Add);
         _listener.SetMeasurementEventCallback<double>(Add);
         _listener.SetMeasurementEventCallback<decimal>(Add);
-        _secondStart = Stopwatch.GetTimestamp();
+        _secondStartTimestamp = Stopwatch.GetTimestamp();
         _listener.Start();
     }
 
@@ -147,19 +147,19 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             Listen(true);
         }
 
-        double seconds = Stopwatch.GetElapsedTime(_secondStart).TotalSeconds;
+        double windowSec = Stopwatch.GetElapsedTime(_secondStartTimestamp).TotalSeconds;
 
-        if (_listener is not { } listener || seconds < 1) return;
+        if (_listener is not { } listener || windowSec < 1) return;
 
         // The second starts over, and the observable instruments are read now, so the lines have their latest values.
-        _secondStart = Stopwatch.GetTimestamp();
+        _secondStartTimestamp = Stopwatch.GetTimestamp();
         listener.RecordObservableInstruments();
         _lines.Clear();
         lock (_lock)
         {
             foreach (Measured measured in _measured)
             {
-                measured.Describe(_lines, seconds);
+                measured.Describe(_lines, windowSec);
             }
         }
 
@@ -373,10 +373,10 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         }
 
         /// <summary>
-        /// Adds a line for each series measured over the last <paramref name="seconds"/> to <paramref name="lines"/>,
+        /// Adds a line for each series measured over the last <paramref name="windowSec"/> to <paramref name="lines"/>,
         /// after one of the instrument's name when they have tags, and starts each over.
         /// </summary>
-        internal void Describe(List<TelemetryLine> lines, double seconds)
+        internal void Describe(List<TelemetryLine> lines, double windowSec)
         {
             lock (_lock)
             {
@@ -398,7 +398,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
                         isNamed = true;
                     }
 
-                    lines.Add(Describe(series, seconds));
+                    lines.Add(Describe(series, windowSec));
                     series.Clear();
                 }
             }
@@ -461,9 +461,9 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
         /// <summary>
         /// <paramref name="series"/>' row: the instrument's name when it has no tags, else its tags' values, indented
-        /// under the name, then what it measured over the last <paramref name="seconds"/>, in the cells it has.
+        /// under the name, then what it measured over the last <paramref name="windowSec"/>, in the cells it has.
         /// </summary>
-        private TelemetryLine Describe(Series series, double seconds)
+        private TelemetryLine Describe(Series series, double windowSec)
         {
             string? unit = instrument.Unit;
             ReadOnlySpan<KeyValuePair<string, object?>> tags = series.Tags;
@@ -477,16 +477,16 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             {
                 Summary.Distribution => (
                     FormatAmount(series.Sum / series.Count, unit),
-                    string.Create(CultureInfo.InvariantCulture, $"{series.Count / seconds:0.#}/s"),
+                    string.Create(CultureInfo.InvariantCulture, $"{series.Count / windowSec:0.#}/s"),
                     FormatAmount(series.Max, unit)),
                 Summary.Total => (
                     FormatAmount(series.Sum, unit),
-                    $"{FormatAmount(series.Sum / seconds, unit)}/s",
+                    $"{FormatAmount(series.Sum / windowSec, unit)}/s",
                     string.Empty),
                 Summary.Running => (
                     FormatAmount(series.Last, unit),
                     series.Previous is { } previous
-                        ? $"{FormatAmount((series.Last - previous) / seconds, unit)}/s"
+                        ? $"{FormatAmount((series.Last - previous) / windowSec, unit)}/s"
                         : string.Empty,
                     string.Empty),
                 Summary.Latest or _ => (FormatAmount(series.Last, unit), string.Empty, string.Empty),

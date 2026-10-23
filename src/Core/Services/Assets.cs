@@ -49,7 +49,7 @@ public sealed class Assets : IDisposable
     /// How long the files must have been left alone before their changes are taken in: an editor saving a file, or a
     /// build copying a folder, writes several times in a row.
     /// </summary>
-    private static readonly TimeSpan _settle = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan _settleTime = TimeSpan.FromMilliseconds(300);
     private static readonly Histogram<double> _loadDuration = Metrics.Meter.CreateTimer(
         Metrics.AssetLoadDuration,
         "How long an asset took to read, make and post-process, tagged with its type.",
@@ -620,7 +620,7 @@ public sealed class Assets : IDisposable
 
     /// <summary>
     /// Takes in what the watches see, once every root has first been indexed, a batch at a time, once they have seen
-    /// nothing for <see cref="_settle"/>, until the run ends.
+    /// nothing for <see cref="_settleTime"/>, until the run ends.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -644,7 +644,7 @@ public sealed class Assets : IDisposable
                         : path);
                 }
 
-                await Task.Delay(_settle, _quitting).ConfigureAwait(false);
+                await Task.Delay(_settleTime, _quitting).ConfigureAwait(false);
             }
             while (changes.TryPeek(out _));
 
@@ -846,9 +846,11 @@ public sealed class Assets : IDisposable
     private async Task<Result<T>> ReadAsync<T>(ulong id)
         where T : IAsset<T>
     {
-        long start = _loadDuration.Start();
+        long startTimestamp = _loadDuration.Start();
         Result<T> read = await ReadAndProcessAsync<T>(id).ConfigureAwait(false);
-        _loadDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.AssetTypeTag, typeof(T).Name));
+        _loadDuration.RecordSince(
+            startTimestamp,
+            new KeyValuePair<string, object?>(Metrics.AssetTypeTag, typeof(T).Name));
 
         return read;
     }

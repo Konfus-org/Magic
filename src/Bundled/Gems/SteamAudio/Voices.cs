@@ -56,7 +56,7 @@ internal readonly struct VoiceCommand
     /// <summary>
     /// Seconds into the sound to play from.
     /// </summary>
-    internal double Seconds { get; init; }
+    internal double TimeSec { get; init; }
 
     internal nint Stream { get; init; }
 
@@ -71,7 +71,7 @@ internal readonly struct VoiceCommand
 
     internal int Rate { get; init; }
 
-    internal double Duration { get; init; }
+    internal double DurationSec { get; init; }
 
     internal bool IsEverywhere { get; init; }
 }
@@ -147,7 +147,7 @@ internal sealed unsafe class Voices : IDisposable
         _frameSize = settings.FrameSize;
         _order = settings.Order;
         _ambisonicChannels = (_order + 1) * (_order + 1);
-        _irSize = (int)MathF.Ceiling(settings.ReverbSeconds * _sampleRate);
+        _irSize = (int)MathF.Ceiling(settings.ReverbSec * _sampleRate);
         _mixed = new float[_frameSize * 2];
         _stereo = new float[_frameSize * 2];
         _commands = Channel.CreateBounded<VoiceCommand>(new BoundedChannelOptions(settings.Voices * 4)
@@ -313,7 +313,7 @@ internal sealed unsafe class Voices : IDisposable
     {
         if (_hasFailed != 0 || additional <= 0) return;
 
-        long start = Stopwatch.GetTimestamp();
+        long startTimestamp = Stopwatch.GetTimestamp();
         int bytes = _mixed.Length * sizeof(float);
         int frames = 0;
         while (additional > 0)
@@ -329,9 +329,9 @@ internal sealed unsafe class Voices : IDisposable
         }
 
         // A fill that took longer than the sound it made lasts is late, and the device hears a gap.
-        double seconds = Stopwatch.GetElapsedTime(start).TotalSeconds;
-        _renderDuration.Record(seconds);
-        if (seconds > (double)frames * _frameSize / _sampleRate) _late.Add(1);
+        double renderSec = Stopwatch.GetElapsedTime(startTimestamp).TotalSeconds;
+        _renderDuration.Record(renderSec);
+        if (renderSec > (double)frames * _frameSize / _sampleRate) _late.Add(1);
     }
 
     /// <summary>
@@ -377,7 +377,7 @@ internal sealed unsafe class Voices : IDisposable
                     slot.Begin(command);
                     break;
                 case VoiceAction.Seek:
-                    if (slot.IsActive && slot.Generation == command.Generation) slot.SeekTo(command.Seconds);
+                    if (slot.IsActive && slot.Generation == command.Generation) slot.SeekTo(command.TimeSec);
                     break;
                 case VoiceAction.Free:
                     if (slot.IsActive && slot.Generation == command.Generation) slot.Let(hasEnded: false);
@@ -516,7 +516,7 @@ internal sealed unsafe class Voices : IDisposable
         private int _rate;
         private int _fed;
         private bool _isFlushed;
-        private double _duration;
+        private double _durationSec;
         private float _appliedPitch;
         private int _flags;
 
@@ -624,7 +624,7 @@ internal sealed unsafe class Voices : IDisposable
         /// <summary>
         /// Seconds into its sound as last played; written by the audio thread.
         /// </summary>
-        internal double Seconds
+        internal double TimeSec
         {
             get => Volatile.Read(ref field);
             private set => Volatile.Write(ref field, value);
@@ -667,7 +667,7 @@ internal sealed unsafe class Voices : IDisposable
             _count = command.Count;
             _channels = command.Channels;
             _rate = command.Rate;
-            _duration = command.Duration;
+            _durationSec = command.DurationSec;
             _appliedPitch = 0;
             Generation = command.Generation;
             IsEverywhere = command.IsEverywhere;
@@ -675,21 +675,21 @@ internal sealed unsafe class Voices : IDisposable
             IsDone = false;
             iplDirectEffectReset(Direct);
             iplBinauralEffectReset(Binaural);
-            SeekTo(command.Seconds);
+            SeekTo(command.TimeSec);
             Started = command.Generation;
         }
 
         /// <summary>
-        /// Plays on from <paramref name="seconds"/> in, dropping what the stream held. Audio thread.
+        /// Plays on from <paramref name="timeSec"/> in, dropping what the stream held. Audio thread.
         /// </summary>
-        internal void SeekTo(double seconds)
+        internal void SeekTo(double timeSec)
         {
             SDL_ClearAudioStream(_stream);
-            long frame = (long)(Math.Clamp(seconds, 0, _duration) * _rate);
+            long frame = (long)(Math.Clamp(timeSec, 0, _durationSec) * _rate);
             _fed = (int)Math.Min(frame * _channels, _count);
             _isFlushed = false;
             IsDone = false;
-            Seconds = seconds;
+            TimeSec = timeSec;
         }
 
         /// <summary>
@@ -716,8 +716,8 @@ internal sealed unsafe class Voices : IDisposable
             // wrapping when it loops, and it is done once the last of it has been played.
             int got = Math.Max(0, SDL_GetAudioStreamData(_stream, into, want));
             new Span<float>(into + (got / sizeof(float)), (want - got) / sizeof(float)).Clear();
-            double seconds = Seconds + ((double)got / (channels * sizeof(float)) * pitch / sampleRate);
-            Seconds = IsLooping && _duration > 0 ? seconds % _duration : Math.Min(seconds, _duration);
+            double timeSec = TimeSec + ((double)got / (channels * sizeof(float)) * pitch / sampleRate);
+            TimeSec = IsLooping && _durationSec > 0 ? timeSec % _durationSec : Math.Min(timeSec, _durationSec);
             IsDone = _isFlushed && got < want;
         }
 

@@ -40,9 +40,9 @@ namespace Magic.Scripting;
 /// <para>
 /// A behaviour far from the player's cameras, those tagged <see cref="Tag.Player"/>, is updated less often: Update and
 /// LateUpdate run every frame within <see cref="ScriptingSettings.FullRateDistance"/> of the nearest, and up to n times
-/// as far every nth frame, up to every <see cref="ScriptingSettings.MaxInterval"/>th, with the time since the last call
-/// as its frame's delta. FixedUpdate is never held back, nor is an entity without a <see cref="Transform"/>, which is
-/// nowhere.
+/// as far every nth frame, up to every <see cref="ScriptingSettings.MaxIntervalFrames"/>th, with the time since the
+/// last call as its frame's delta. FixedUpdate is never held back, nor is an entity without a
+/// <see cref="Transform"/>, which is nowhere.
 /// </para>
 /// <para>
 /// While the world is paused (<see cref="Frame.IsPaused"/>), a behaviour's hooks wait, unless its class is
@@ -957,8 +957,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// Whether <paramref name="entity"/>'s behaviours are called in frame <paramref name="index"/>'s Update and
     /// LateUpdate: every frame within <see cref="ScriptingSettings.FullRateDistance"/> of the nearest of the player's
     /// cameras, and up to n times as far every nth, as what is twice as far moves half as far on screen, up to every
-    /// <see cref="ScriptingSettings.MaxInterval"/>th. Entities take turns by their id, so the far ones do not all fall
-    /// on one frame. Every frame with no player camera, or for an entity without a <see cref="Transform"/>.
+    /// <see cref="ScriptingSettings.MaxIntervalFrames"/>th. Entities take turns by their id, so the far ones do not all
+    /// fall on one frame. Every frame with no player camera, or for an entity without a <see cref="Transform"/>.
     /// </summary>
     private bool IsDue(Entity entity, ulong index)
     {
@@ -972,11 +972,12 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         }
 
         // Not a number when there is no distance to divide (a camera's own script, with a full-rate distance of 0).
-        float interval = MathF.Min(
+        float intervalFrames = MathF.Min(
             MathF.Ceiling(MathF.Sqrt(nearest) / _settings.FullRateDistance),
-            _settings.MaxInterval);
+            _settings.MaxIntervalFrames);
 
-        return interval < 2 || float.IsNaN(interval) || (index + (ulong)entity.Id) % (ulong)interval == 0;
+        return intervalFrames < 2 || float.IsNaN(intervalFrames)
+            || (index + (ulong)entity.Id) % (ulong)intervalFrames == 0;
     }
 
     /// <summary>

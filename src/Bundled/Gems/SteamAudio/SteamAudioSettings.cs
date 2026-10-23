@@ -70,7 +70,7 @@ internal sealed class SteamAudioSettings : ISettings
     /// </summary>
     [RequireRestart]
     [Range(0.1, 10.0)]
-    public float ReverbSeconds { get; set; } = 2;
+    public float ReverbSec { get; set; } = 2;
 
     /// <summary>
     /// How finely an echo keeps where it comes from: 0 hears it from everywhere alike, each step above as many more

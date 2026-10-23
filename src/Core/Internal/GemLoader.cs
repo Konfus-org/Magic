@@ -32,7 +32,7 @@ internal sealed class GemLoader : IDisposable
     /// How long a code folder must have been left alone before what was built there is loaded: a build writes the
     /// assembly, its symbols and what it depends on one after another.
     /// </summary>
-    private static readonly TimeSpan _settle = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan _settleTime = TimeSpan.FromMilliseconds(300);
 
     private readonly IFileSystem _files;
     private readonly Assemblies _assemblies;
@@ -262,7 +262,7 @@ internal sealed class GemLoader : IDisposable
     private async Task ReloadCodeAsync(CodeFile code)
     {
         int change = code.Note();
-        await Task.Delay(_settle).ConfigureAwait(false);
+        await Task.Delay(_settleTime).ConfigureAwait(false);
 
         if (!code.IsLatest(change)
             || GemAssembly.LoadCode(_files, code.Path, code.What, again: true) is not { } assembly)

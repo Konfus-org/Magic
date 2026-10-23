@@ -32,5 +32,5 @@ public sealed class Audio : IAsset<Audio>
     /// <summary>
     /// How long it plays at its own pitch.
     /// </summary>
-    public double Seconds => Channels == 0 || SampleRate == 0 ? 0 : (double)Samples.Length / Channels / SampleRate;
+    public double DurationSec => Channels == 0 || SampleRate == 0 ? 0 : (double)Samples.Length / Channels / SampleRate;
 }

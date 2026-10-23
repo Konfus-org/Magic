@@ -36,7 +36,7 @@ internal sealed class Strike(Entity owner, World world) : IBehavior
 
         // Rung again from the start, louder the harder it was struck, from a fifth of full volume up.
         ref Sound sound = ref world.Get<Sound>(owner);
-        sound.Time = 0;
+        sound.TimeSec = 0;
         sound.Volume = Math.Clamp(hardest / Loudest, 0.2f, 1);
         sound.Playback = Playback.Playing;
     }

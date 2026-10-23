@@ -9,5 +9,5 @@ namespace Magic.Samples.Assets.Components;
 /// </summary>
 internal record struct Expires : IComponent
 {
-    public double At;
+    public double AtSec;
 }

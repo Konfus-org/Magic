@@ -96,6 +96,6 @@ internal sealed class Spawner(Entity owner, World world) : IBehavior, IDisposabl
             _bodies.Dequeue();
         }
 
-        _bodies.Enqueue(world.Create([at, renderer, body, new Expires { At = frame.WorldSec + LifetimeSec }]));
+        _bodies.Enqueue(world.Create([at, renderer, body, new Expires { AtSec = frame.WorldSec + LifetimeSec }]));
     }
 }

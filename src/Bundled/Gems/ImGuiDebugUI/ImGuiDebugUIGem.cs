@@ -272,7 +272,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _isShowing = _window.Width > 0 && (IsAlwaysShowing || _windowsDrawn > 0);
         _world.Clear();
         _lines.Clear();
-        _reports.Take(GetNow(), _world, _lines);
+        _reports.Take(GetNowSec(), _world, _lines);
 
         if (!_isShowing) return;
 
@@ -292,26 +292,26 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     }
 
     public void Text(Vector3 position, string text, Color? color = null, string? tooltip = null)
-        => _reports.Add(text, ReportKind.Plain, color ?? _white, position, tooltip, 0, GetNow());
+        => _reports.Add(text, ReportKind.Plain, color ?? _white, position, tooltip, 0, GetNowSec());
 
     public void Text(string text, Color? color = null)
-        => _reports.Add(text, ReportKind.Plain, color ?? _white, null, null, 0, GetNow());
+        => _reports.Add(text, ReportKind.Plain, color ?? _white, null, null, 0, GetNowSec());
 
     public void Info(
         string text,
-        float? seconds = null,
+        float? staySec = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0)
     {
-        _reports.Add(text, ReportKind.Counted, _white, null, null, seconds ?? _settings.ReportSeconds, GetNow());
+        _reports.Add(text, ReportKind.Counted, _white, null, null, staySec ?? _settings.ReportSec, GetNowSec());
         Debugging.Info(text, member, file, line);
     }
 
     public void Warn(
         string text,
         Vector3? position = null,
-        float? seconds = null,
+        float? staySec = null,
         string? tooltip = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
@@ -323,8 +323,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             _warning,
             position,
             tooltip,
-            seconds ?? _settings.ReportSeconds,
-            GetNow()))
+            staySec ?? _settings.ReportSec,
+            GetNowSec()))
         {
             return;
         }
@@ -335,7 +335,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public void Error(
         string text,
         Vector3? position = null,
-        float? seconds = null,
+        float? staySec = null,
         string? tooltip = null,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
@@ -347,8 +347,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             _error,
             position,
             tooltip,
-            seconds ?? _settings.ReportSeconds,
-            GetNow()))
+            staySec ?? _settings.ReportSec,
+            GetNowSec()))
         {
             return;
         }
@@ -668,7 +668,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// <summary>
     /// The time reports are kept by, in seconds.
     /// </summary>
-    private static double GetNow() => Environment.TickCount64 / 1000d;
+    private static double GetNowSec() => Environment.TickCount64 / 1000d;
 
     /// <summary>
     /// A linear colour as ImGui packs one, encoded to sRGB as the window's image wants: alpha, blue, green, red from

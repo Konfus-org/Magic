@@ -42,7 +42,7 @@ internal sealed unsafe class VulkanTimer : IDisposable
     /// <summary>
     /// Each group's time this frame, added up where a name recurs (a pass per view).
     /// </summary>
-    private readonly Dictionary<string, double> _groupSeconds = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, double> _groupSec = new(StringComparer.Ordinal);
 
     private readonly double _secondsPerTick;
     private readonly ulong _mask;
@@ -174,21 +174,22 @@ internal sealed unsafe class VulkanTimer : IDisposable
 
         for (int i = 0; i < _counts[slot]; i++)
         {
-            ref double seconds = ref CollectionsMarshal.GetValueRefOrAddDefault(
-                _groupSeconds,
+            ref double groupSec = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                _groupSec,
                 _groups[slot][i],
                 out _);
-            seconds += ToSeconds(_ticks[2 + (i * 2)], _ticks[3 + (i * 2)]);
+            groupSec += ToSeconds(_ticks[2 + (i * 2)], _ticks[3 + (i * 2)]);
         }
 
-        foreach ((string group, double seconds) in _groupSeconds)
+        foreach ((string group, double groupSec) in _groupSec)
         {
-            _groupDuration.Record(seconds, new KeyValuePair<string, object?>(GroupTag, group));
+            _groupDuration.Record(groupSec, new KeyValuePair<string, object?>(GroupTag, group));
         }
 
         _frameDuration.Record(ToSeconds(_ticks[0], _ticks[1]));
-        _groupSeconds.Clear();
+        _groupSec.Clear();
     }
 
-    private double ToSeconds(ulong start, ulong end) => ((end - start) & _mask) * _secondsPerTick;
+    private double ToSeconds(ulong startTimestamp, ulong endTimestamp)
+        => ((endTimestamp - startTimestamp) & _mask) * _secondsPerTick;
 }

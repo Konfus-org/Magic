@@ -18,7 +18,7 @@ internal sealed class LogMetricsSettings : ISettings
     /// <summary>
     /// How often a summary is logged, in seconds.
     /// </summary>
-    public double IntervalSeconds { get; set; } = 30;
+    public double IntervalSec { get; set; } = 30;
 
     /// <summary>
     /// The meters listened to, each with the meters under it: "Magic" is Core's "Magic.Core" and every gem's

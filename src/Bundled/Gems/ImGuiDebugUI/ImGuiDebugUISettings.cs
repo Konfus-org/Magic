@@ -26,7 +26,7 @@ internal sealed class ImGuiDebugUISettings : ISettings
     /// <summary>
     /// Seconds a line on screen, or a warning or error in the world, stays when its report does not say.
     /// </summary>
-    public float ReportSeconds { get; set; } = 5;
+    public float ReportSec { get; set; } = 5;
 
     /// <summary>
     /// Metres from a camera beyond which text in the world is not shown in its view.
