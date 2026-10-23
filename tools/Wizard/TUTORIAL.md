@@ -243,43 +243,43 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
             ServerInstructions = "Drives a running Magic engine. What touches the world answers once the engine's next frame has run it. Poll log_read for output.",
             ToolCollection =
             [
-                MakeTool("engine_info", "The project, the frame the engine is on, how many entities there are, the open domains and whether the world has loaded.",
+                CreateTool("engine_info", "The project, the frame the engine is on, how many entities there are, the open domains and whether the world has loaded.",
                     () => OnMainThreadAsync(FormatEngineInfo)),
-                MakeTool("log_read", "Log lines newer than 'after', oldest first. Pass the last id seen to get only what is new.",
+                CreateTool("log_read", "Log lines newer than 'after', oldest first. Pass the last id seen to get only what is new.",
                     ([Description("Id of the last line already seen; 0 for every line kept.")] long after = 0,
                      [Description("Most lines to return.")] int max = 200) => FormatLog(after, max)),
-                MakeTool("command_run", "Runs a console command as if typed at the terminal; 'help' lists them. What it says goes to the log: read it with log_read.",
+                CreateTool("command_run", "Runs a console command as if typed at the terminal; 'help' lists them. What it says goes to the log: read it with log_read.",
                     ([Description("The command and its words, such as: help")] string line) => OnMainThreadAsync(() => RunCommand(line))),
-                MakeTool("domain_open", "Starts opening a domain by its asset path; engine_info says once the world has loaded.",
+                CreateTool("domain_open", "Starts opening a domain by its asset path; engine_info says once the world has loaded.",
                     ([Description("Path under the project's Assets folder or a Resources folder, with forward slashes, such as Domains/Valley/Valley.domain.")] string path,
                      [Description("True to open it beside the open domains; false to replace them.")] bool additive = false) => OpenDomain(path, additive)),
-                MakeTool("domain_close", "Closes an open domain by its asset path, destroying what it spawned.",
+                CreateTool("domain_close", "Closes an open domain by its asset path, destroying what it spawned.",
                     ([Description("Path under the project's Assets folder or a Resources folder, with forward slashes.")] string path) => OnMainThreadAsync(() => CloseDomain(path))),
-                MakeTool("entity_list", "Entities by id with the names of their components' types, those with a component of a type when one is given, a page at a time.",
+                CreateTool("entity_list", "Entities by id with the names of their components' types, those with a component of a type when one is given, a page at a time.",
                     ([Description("A component type's name, from component_types; empty for every entity.")] string component = "",
                      [Description("How many matching entities to skip.")] int skip = 0,
                      [Description("Most entities to return.")] int max = 100) => OnMainThreadAsync(() => FormatEntities(component, skip, max))),
-                MakeTool("entity_get", "One entity's components, each by its type's name, as JSON in the engine's file format.",
+                CreateTool("entity_get", "One entity's components, each by its type's name, as JSON in the engine's file format.",
                     ([Description("The entity's id, from entity_list.")] string id) => OnMainThreadAsync(() => FormatEntity(id))),
-                MakeTool("entity_create", "Creates an entity with no components and answers its id.",
+                CreateTool("entity_create", "Creates an entity with no components and answers its id.",
                     () => OnMainThreadAsync(() => FormatId(_world.Create()))),
-                MakeTool("entity_destroy", "Destroys an entity and its components.",
+                CreateTool("entity_destroy", "Destroys an entity and its components.",
                     ([Description("The entity's id.")] string id) => OnMainThreadAsync(() => DestroyEntity(id))),
-                MakeTool("component_types", "The names of every component type an entity can have, in order.",
+                CreateTool("component_types", "The names of every component type an entity can have, in order.",
                     FormatComponentTypes),
-                MakeTool("component_set", "Gives an entity a component, or overwrites the one it has. The value is the whole component, as entity_get shows it; fields left out take their defaults.",
+                CreateTool("component_set", "Gives an entity a component, or overwrites the one it has. The value is the whole component, as entity_get shows it; fields left out take their defaults.",
                     ([Description("The entity's id.")] string id,
                      [Description("The component type's name, from component_types.")] string component,
                      [Description("The component as JSON, as entity_get shows it.")] JsonElement value) => SetComponentAsync(id, component, value)),
-                MakeTool("component_remove", "Takes a component off an entity.",
+                CreateTool("component_remove", "Takes a component off an entity.",
                     ([Description("The entity's id.")] string id,
                      [Description("The component type's name.")] string component) => OnMainThreadAsync(() => RemoveComponent(id, component))),
-                MakeTool("settings_get", "Every gem setting by its key (Gem.setting), with its value and what it is.",
+                CreateTool("settings_get", "Every gem setting by its key (Gem.setting), with its value and what it is.",
                     FormatSettings),
-                MakeTool("settings_set", "Changes a gem setting as the console's set does: live until a preset is applied, never saved.",
+                CreateTool("settings_set", "Changes a gem setting as the console's set does: live until a preset is applied, never saved.",
                     ([Description("The setting's key, from settings_get, such as SdlPlatform.vsync.")] string key,
                      [Description("The new value as JSON.")] JsonElement value) => SetSetting(key, value)),
-                MakeTool("quit", "Ends the run once the current frame is done.",
+                CreateTool("quit", "Ends the run once the current frame is done.",
                     Quit),
             ],
         };
@@ -307,7 +307,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
         }
     }
 
-    private static McpServerTool MakeTool(string name, string description, Delegate run)
+    private static McpServerTool CreateTool(string name, string description, Delegate run)
     {
         return McpServerTool.Create(run, new McpServerToolCreateOptions { Name = name, Description = description });
     }

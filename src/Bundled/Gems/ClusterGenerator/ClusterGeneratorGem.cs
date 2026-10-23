@@ -153,19 +153,19 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
             byte[] pixels = new byte[reader.ReadInt32()];
             bytes.ReadExactly(pixels);
 
-            return MakeAtlas(id, pixels);
+            return CreateAtlas(id, pixels);
         }
     }
 
     /// <summary>
-    /// Makes every model again when the card height was changed while running, so its cards start where it now says.
+    /// Creates every model again when the card height was changed while running, so its cards start where it now says.
     /// </summary>
     public void Update(in Frame frame)
     {
         if (_settings.CardHeight == _cardHeight) return;
 
         _cardHeight = _settings.CardHeight;
-        _assets.RemakeAsync<Model>().FireAndForget();
+        _assets.RecreateAsync<Model>().FireAndForget();
     }
 
     public async Task<Result<Model>> ProcessAsync(Model asset, ulong version, CancellationToken cancel)
@@ -183,7 +183,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         else
         {
             // The cards and the clusters only read the model, so they are made at once.
-            Task<ModelCards?> cards = Task.Run(() => MakeCards(asset, cardHeight), cancel);
+            Task<ModelCards?> cards = Task.Run(() => CreateCards(asset, cardHeight), cancel);
             ClusterHierarchy? clusters = ClusterBuilder.Build(asset, cancel);
             made = new(await cards.ConfigureAwait(false), clusters);
             Debugging.Verbose($"Made {made.Clusters?.Clusters.Length ?? 0} clusters and "
@@ -215,7 +215,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// <paramref name="cardHeight"/> of the view tall; none for a model that lies flat. How big it is, which its height
     /// on screen is measured by, is half the largest side of the box around its vertices.
     /// </summary>
-    private static ModelCards? MakeCards(Model model, float cardHeight)
+    private static ModelCards? CreateCards(Model model, float cardHeight)
     {
         (Vector3 min, Vector3 max) = GetBounds(model);
         Vector3 size = max - min;
@@ -232,10 +232,10 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
                 (Vector3 centre, float half, byte[] surface, byte[] normals) = CardBaker.Bake(model.Meshes[i]);
                 Card card = new()
                 {
-                    Surface = MakeAtlas(HandleOf(model.Handle, i, 1), surface),
-                    Normals = MakeAtlas(HandleOf(model.Handle, i, 2), normals),
+                    Surface = CreateAtlas(HandleOf(model.Handle, i, 1), surface),
+                    Normals = CreateAtlas(HandleOf(model.Handle, i, 2), normals),
                 };
-                cards[i] = MakeCardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
+                cards[i] = CreateCardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
             });
 
         // From this far the model, its radius above and below its centre, is the card height's share of the view,
@@ -247,7 +247,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// One card as a mesh: four vertices at <paramref name="centre"/>, each with its corner in its uv, the card's half
     /// width and half height in its normal, no turn, and a tangent whose w is 0, which marks a card.
     /// </summary>
-    private static Mesh MakeCardMesh(Vector3 centre, float half, int slot, Card card)
+    private static Mesh CreateCardMesh(Vector3 centre, float half, int slot, Card card)
     {
         Vector3 sides = new(half, half, 0);
         Vector4 marker = new(1, 0, 0, 0);
@@ -271,7 +271,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// <summary>
     /// A card's atlas as a texture: its texels, linear, read between texels and never past its edge.
     /// </summary>
-    private static Texture MakeAtlas(ulong id, byte[] pixels)
+    private static Texture CreateAtlas(ulong id, byte[] pixels)
     {
         return new Texture
         {

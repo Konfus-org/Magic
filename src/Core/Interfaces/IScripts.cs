@@ -21,7 +21,7 @@ public interface IScripts
     /// than one public constructor, asks for an entity or for what nothing provides, or throws. Any thread: a
     /// constructor only keeps what it is given.
     /// </summary>
-    Result<IScript> Make(Script script);
+    Result<IScript> Create(Script script);
 
     /// <summary>
     /// Gives <paramref name="entity"/> its own copy of <paramref name="script"/>, as a part's component is copied to

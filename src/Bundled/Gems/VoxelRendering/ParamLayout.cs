@@ -172,7 +172,7 @@ internal sealed partial class ParamLayout
             }
         }
 
-        string loader = MakeLoader(signature, prologue, rows);
+        string loader = CreateLoader(signature, prologue, rows);
         int structEnd = _hlsl.IndexOf(';', _bodyEnd) + 1;
 
         return new StringBuilder(_hlsl.Length + loader.Length + 1)
@@ -340,7 +340,7 @@ internal sealed partial class ParamLayout
     /// HLSL that unpacks the struct from <paramref name="rows"/>, an expression of <c>uint4</c> rows:
     /// <c>MaterialParams LoadMaterialParams(uint material) { ... }</c>. One line, so it shifts no line after it.
     /// </summary>
-    private string MakeLoader(string signature, string prologue, string rows)
+    private string CreateLoader(string signature, string prologue, string rows)
     {
         StringBuilder text = new();
         text.Append(StructName).Append(' ').Append(signature).Append(" { ").Append(prologue).Append(' ')

@@ -46,7 +46,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
 
         try
         {
-            return MakeMips(level0, meta.Value);
+            return CreateMips(level0, meta.Value);
         }
         finally
         {
@@ -82,7 +82,7 @@ internal sealed unsafe class SdlTextureLoaderGem : IGem, IAssetLoader<Texture>
     /// <paramref name="level0"/> as a texture, with the levels below it when <paramref name="meta"/> asks for mips,
     /// each half the one above, all in one array.
     /// </summary>
-    private static Result<Texture> MakeMips(SDL_Surface* level0, TextureMeta meta)
+    private static Result<Texture> CreateMips(SDL_Surface* level0, TextureMeta meta)
     {
         // Each level's size and where it starts in the one array, half the one above on each side down to one texel.
         int count = meta.Mipmaps ? 1 + BitOperations.Log2((uint)Math.Max(level0->w, level0->h)) : 1;

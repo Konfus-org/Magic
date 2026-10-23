@@ -30,7 +30,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
     public Entity[] Spawn(World world, Transform at)
     {
         List<(Entity Entity, PrefabPart Part)> made = [];
-        Make(world, Parts, at, made);
+        Create(world, Parts, at, made);
         Entity[] entities = new Entity[made.Count];
         for (int i = 0; i < entities.Length; i++)
         {
@@ -50,7 +50,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
     /// </summary>
     public Transform? FindWith(Tag tag) => PlaceIn(Parts, new Transform(), tag);
 
-    private static void Make(
+    private static void Create(
         World world,
         IReadOnlyList<PrefabPart> parts,
         Transform parent,
@@ -66,7 +66,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
             }
 
             made.Add((world.Create(components), part));
-            Make(world, part.Children, placed, made);
+            Create(world, part.Children, placed, made);
         }
     }
 

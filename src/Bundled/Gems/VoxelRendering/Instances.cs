@@ -238,7 +238,7 @@ internal sealed class Instances(
     private void WorkOut(int index)
     {
         (int slot, bool keepsLast) = _changed[index];
-        _rows[index] = MakeRow(slot, _entries[slot], keepsLast);
+        _rows[index] = CreateRow(slot, _entries[slot], keepsLast);
     }
 
     /// <summary>
@@ -246,7 +246,7 @@ internal sealed class Instances(
     /// and its material slots', its look's; and how it fades, in from when its look could be drawn when it waited for
     /// that. Empty while its look cannot be drawn yet.
     /// </summary>
-    private GpuInstance MakeRow(int slot, in InstanceEntry entry, bool keepsLast)
+    private GpuInstance CreateRow(int slot, in InstanceEntry entry, bool keepsLast)
     {
         if (entry.Look is not { IsReady: true } look) return default;
 
@@ -387,7 +387,7 @@ internal sealed class Instances(
                 failures.Unmark(slot);
                 if (entry.Failure is { } now) failures.Mark(slot, now);
 
-                if (isRowChanged) tables.Instances.Set(slot, MakeRow(slot, _entries[slot], keepsLast: false));
+                if (isRowChanged) tables.Instances.Set(slot, CreateRow(slot, _entries[slot], keepsLast: false));
             }
         }
 

@@ -69,7 +69,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         if (_settings.DebugInfo == _debugInfo) return;
 
         _debugInfo = _settings.DebugInfo;
-        _assets.RemakeAsync<Shader>().FireAndForget();
+        _assets.RecreateAsync<Shader>().FireAndForget();
     }
 
     /// <summary>

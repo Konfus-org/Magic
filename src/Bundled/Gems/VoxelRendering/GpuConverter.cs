@@ -32,7 +32,7 @@ internal static class GpuConverter
     /// of the textures materials sample are data rather than colour. Made, with the tables the encoder needs before its
     /// first block, the first time a texture is compressed, so a model's conversion never loads the encoder.
     /// </summary>
-    private static readonly bc7enc_compress_block_params _blockOptions = MakeBlockOptions();
+    private static readonly bc7enc_compress_block_params _blockOptions = CreateBlockOptions();
 
     /// <summary>
     /// A model packed for the pool: its clusters, or for one with none its meshes split into clusters; its levels; and
@@ -244,7 +244,7 @@ internal static class GpuConverter
             {
                 int count = (indices.Count - firstIndex) / 3;
                 if (count > 0)
-                    clusters.Add(MakeFlatCluster(vertices, firstVertex, firstIndex, count, mesh.MaterialSlot));
+                    clusters.Add(CreateFlatCluster(vertices, firstVertex, firstIndex, count, mesh.MaterialSlot));
 
                 firstVertex = vertices.Count;
                 firstIndex = indices.Count;
@@ -282,7 +282,12 @@ internal static class GpuConverter
     /// <summary>
     /// A cluster of a flat hierarchy: full detail, no error and no parent, its sphere every bound it has.
     /// </summary>
-    private static Cluster MakeFlatCluster(List<Vertex> vertices, int firstVertex, int firstIndex, int count, int slot)
+    private static Cluster CreateFlatCluster(
+        List<Vertex> vertices,
+        int firstVertex,
+        int firstIndex,
+        int count,
+        int slot)
     {
         Vector4 sphere = ComputeSphere(vertices, firstVertex, vertices.Count - firstVertex);
 
@@ -509,7 +514,7 @@ internal static class GpuConverter
         }
     }
 
-    private static unsafe bc7enc_compress_block_params MakeBlockOptions()
+    private static unsafe bc7enc_compress_block_params CreateBlockOptions()
     {
         bc7enc_compress_block_init();
         bc7enc_compress_block_params options = new()

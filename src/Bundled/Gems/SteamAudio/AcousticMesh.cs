@@ -82,7 +82,7 @@ internal sealed class AcousticMesh
     /// <summary>
     /// A cube a metre across, centred on its origin: what an entity with no model is, as its body is.
     /// </summary>
-    internal static unsafe AcousticMesh MakeCube()
+    internal static unsafe AcousticMesh CreateCube()
     {
         // Corner i's bits 1, 2 and 4 put it at the high side of x, y and z.
         IPLVector3[] vertices = new IPLVector3[8];

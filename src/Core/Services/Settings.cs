@@ -238,9 +238,9 @@ public sealed class Settings : IDisposable
 
         lock (_lock)
         {
-            Result remade = Remake(_layers with { Preset = read.Value, Live = [] });
+            Result recreated = Recreate(_layers with { Preset = read.Value, Live = [] });
 
-            if (!remade.Ok) return Result.Failure($"Preset {GetName(preset)} {remade.Error}");
+            if (!recreated.Ok) return Result.Failure($"Preset {GetName(preset)} {recreated.Error}");
 
             Preset = preset;
         }
@@ -269,7 +269,7 @@ public sealed class Settings : IDisposable
     /// its settings added to <see cref="All"/>; nothing for a gem that takes none, which is an error when it is given
     /// some. Why not, when they do not fit it. As the gem is made.
     /// </summary>
-    internal Result<ISettings?> Make(string gem, Type? type)
+    internal Result<ISettings?> Create(string gem, Type? type)
     {
         lock (_lock)
         {
@@ -546,11 +546,11 @@ public sealed class Settings : IDisposable
             Layers layers = _layers;
             layers = preset == _default ? layers with { Default = read.Value } : layers;
             layers = preset == Preset ? layers with { Preset = read.Value } : layers;
-            Result remade = Remake(layers);
-            if (!remade.Ok)
+            Result recreated = Recreate(layers);
+            if (!recreated.Ok)
             {
                 Debugging.Error(
-                    $"Preset {GetName(preset)} was changed, but {remade.Error}; the settings stay as they were.");
+                    $"Preset {GetName(preset)} was changed, but {recreated.Error}; the settings stay as they were.");
 
                 return;
             }
@@ -560,10 +560,11 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
-    /// Makes every gem's settings again under <paramref name="layers"/>, which become the layers, and keeps them to be
-    /// copied in at the next sync point. Why not, when a gem's do not fit them; then nothing changes. Under the lock.
+    /// Creates every gem's settings again under <paramref name="layers"/>, which become the layers, and keeps them to
+    /// be copied in at the next sync point. Why not, when a gem's do not fit them; then nothing changes. Under the
+    /// lock.
     /// </summary>
-    private Result Remake(Layers layers)
+    private Result Recreate(Layers layers)
     {
         // Every gem's read before any is kept, so one that does not fit them leaves every gem as it was.
         List<(ISettings Held, ISettings Changed)> changes = [];

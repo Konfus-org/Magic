@@ -531,7 +531,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
         if (pipeline != _pipelineAsked)
         {
             _pipelineAsked = pipeline;
-            MakeScriptAsync(pipeline, isPipeline: true).FireAndForget();
+            CreateScriptAsync(pipeline, isPipeline: true).FireAndForget();
         }
 
         Handle<Script> overlay = _settings.Overlay == Handle<Script>.None
@@ -540,15 +540,15 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
         if (overlay != _overlayAsked)
         {
             _overlayAsked = overlay;
-            MakeScriptAsync(overlay, isPipeline: false).FireAndForget();
+            CreateScriptAsync(overlay, isPipeline: false).FireAndForget();
         }
     }
 
     /// <summary>
-    /// Makes <paramref name="handle"/>'s script with the services it asks for, told back as a change; why not is an
+    /// Creates <paramref name="handle"/>'s script with the services it asks for, told back as a change; why not is an
     /// error, and the script it would replace goes on.
     /// </summary>
-    private async Task MakeScriptAsync(Handle<Script> handle, bool isPipeline)
+    private async Task CreateScriptAsync(Handle<Script> handle, bool isPipeline)
     {
         string role = isPipeline ? "pipeline script" : "overlay script";
 
@@ -574,7 +574,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
             return;
         }
 
-        Result<IScript> made = _scripts.Make(asset.Value);
+        Result<IScript> made = _scripts.Create(asset.Value);
         if (!made.Ok)
         {
             Debugging.Error($"The {role} {asset.Value.Type.Name} cannot be made: {made.Error}");

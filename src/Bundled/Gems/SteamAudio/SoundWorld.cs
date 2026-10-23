@@ -234,7 +234,7 @@ internal sealed class SoundWorld : IDisposable
     {
         if (!_subScenes.TryGetValue((solid.Model, solid.Material), out SubScene? subScene))
         {
-            subScene = SubScene.Make(_context, _settings, solid.Mesh, solid.Material);
+            subScene = SubScene.Create(_context, _settings, solid.Mesh, solid.Material);
 
             if (subScene is null) return false;
 
@@ -305,7 +305,7 @@ internal sealed class SoundWorld : IDisposable
         /// The sub-scene of <paramref name="mesh"/>'s triangles, all made of <paramref name="material"/>, committed;
         /// null, with the error logged, when Steam Audio cannot make it.
         /// </summary>
-        internal static SubScene? Make(
+        internal static SubScene? Create(
             _IPLContext_t* context,
             IPLSceneSettings settings,
             AcousticMesh mesh,

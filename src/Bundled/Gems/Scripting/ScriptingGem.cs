@@ -180,7 +180,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         return new(TryGetClass(path, Handle<Script>.None));
     }
 
-    public Result<IScript> Make(Script script) => MakeOf(script.Type, entity: null);
+    public Result<IScript> Create(Script script) => CreateScript(script.Type, entity: null);
 
     public void Attach(Entity entity, PrefabScript script)
     {
@@ -463,7 +463,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a script throws as it is made, it is not made, and the others are.")]
-    private Result<IScript> MakeOf(Type type, Entity? entity)
+    private Result<IScript> CreateScript(Type type, Entity? entity)
     {
         ConstructorInfo[] constructors = type.GetConstructors();
 
@@ -710,7 +710,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private Result<Attached> Start(Entity entity, Script script, IReadOnlyDictionary<string, object?> values)
     {
         Type type = script.Type;
-        Result<IScript> made = MakeOf(type, entity);
+        Result<IScript> made = CreateScript(type, entity);
 
         if (!made.Ok) return Result.Failure<Attached>(made.Error);
 
@@ -744,7 +744,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private Result<Attached> Put(Entity entity, Script script, ScriptState state)
     {
         Type type = script.Type;
-        Result<IScript> made = MakeOf(type, entity);
+        Result<IScript> made = CreateScript(type, entity);
 
         if (!made.Ok) return Result.Failure<Attached>(made.Error);
 

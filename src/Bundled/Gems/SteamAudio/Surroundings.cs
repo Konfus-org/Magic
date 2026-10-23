@@ -47,7 +47,7 @@ internal sealed class Surroundings(Assets assets)
     /// </summary>
     private readonly Channel<(Handle<Model> Model, AcousticMesh Mesh)> _fitted = Channel
         .CreateUnbounded<(Handle<Model> Model, AcousticMesh Mesh)>(new UnboundedChannelOptions { SingleReader = true });
-    private readonly AcousticMesh _unitCube = AcousticMesh.MakeCube();
+    private readonly AcousticMesh _unitCube = AcousticMesh.CreateCube();
 
     /// <summary>
     /// The entities gathered last frame, which stay until a little past the range, and those gathered this frame.

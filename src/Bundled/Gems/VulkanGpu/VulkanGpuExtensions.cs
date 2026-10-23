@@ -220,10 +220,10 @@ internal static class VulkanGpuExtensions
         internal VkPipelineColorBlendAttachmentState ToVulkan() => blend switch
         {
             GpuBlend.None => new VkPipelineColorBlendAttachmentState { colorWriteMask = VkColorComponentFlags.All },
-            GpuBlend.Alpha => MakeBlending(VkBlendFactor.SrcAlpha, VkBlendFactor.OneMinusSrcAlpha, VkBlendOp.Add),
-            GpuBlend.Premultiplied => MakeBlending(VkBlendFactor.One, VkBlendFactor.OneMinusSrcAlpha, VkBlendOp.Add),
-            GpuBlend.Add => MakeBlending(VkBlendFactor.One, VkBlendFactor.One, VkBlendOp.Add),
-            GpuBlend.Max => MakeBlending(VkBlendFactor.One, VkBlendFactor.One, VkBlendOp.Max),
+            GpuBlend.Alpha => CreateBlending(VkBlendFactor.SrcAlpha, VkBlendFactor.OneMinusSrcAlpha, VkBlendOp.Add),
+            GpuBlend.Premultiplied => CreateBlending(VkBlendFactor.One, VkBlendFactor.OneMinusSrcAlpha, VkBlendOp.Add),
+            GpuBlend.Add => CreateBlending(VkBlendFactor.One, VkBlendFactor.One, VkBlendOp.Add),
+            GpuBlend.Max => CreateBlending(VkBlendFactor.One, VkBlendFactor.One, VkBlendOp.Max),
             _ => throw new ArgumentOutOfRangeException(nameof(blend), blend, "There is no such blend."),
         };
     }
@@ -232,7 +232,7 @@ internal static class VulkanGpuExtensions
     /// Colour blends <paramref name="source"/> and <paramref name="destination"/> with <paramref name="operation"/>;
     /// alpha does the same, except that straight alpha keeps its own: one of src, one minus src of dst.
     /// </summary>
-    private static VkPipelineColorBlendAttachmentState MakeBlending(
+    private static VkPipelineColorBlendAttachmentState CreateBlending(
         VkBlendFactor source,
         VkBlendFactor destination,
         VkBlendOp operation) => new()

@@ -228,17 +228,17 @@ internal sealed class GpuPipelines : IDisposable
     {
         foreach (Entry entry in _compute.Values)
         {
-            entry.MakeStale();
+            entry.MarkStale();
         }
 
         foreach (Entry entry in _fullscreen.Values)
         {
-            entry.MakeStale();
+            entry.MarkStale();
         }
 
         foreach (Entry entry in _materials.Values)
         {
-            entry.MakeStale();
+            entry.MarkStale();
         }
 
         _failed.Clear();
@@ -487,7 +487,7 @@ internal sealed class GpuPipelines : IDisposable
         /// <summary>
         /// A shader changed: compiled again the next time it is asked for, even when it failed.
         /// </summary>
-        internal void MakeStale()
+        internal void MarkStale()
         {
             IsStale = true;
             HasFailed = false;

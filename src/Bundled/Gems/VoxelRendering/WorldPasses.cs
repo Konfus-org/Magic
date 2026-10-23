@@ -392,28 +392,28 @@ internal sealed class WorldPasses : IDisposable
         uint tiles = (uint)(((view.Size.Width + 7) / 8) * ((view.Size.Height + 7) / 8));
         ViewBuffers made = new(view.Size, _capacity, hiZLevels)
         {
-            Counts = MakeBuffer(Counts * 4),
-            Args = MakeBuffer(ArgsRows * DispatchBytes),
-            Budget = MakeBuffer(Buckets * 2 * 4),
-            Jobs = MakeBuffer(_capacity.Jobs * 16),
-            HiddenInstances = MakeBuffer(_capacity.Instances * 4),
-            Clusters = MakeBuffer(_capacity.Clusters * 16),
-            HiddenClusters = MakeBuffer(_capacity.Clusters * 8),
-            BinCounts = MakeBuffer(RasterBins * 4),
-            BinCursors = MakeBuffer(RasterBins * 4),
-            BinArgs = MakeBuffer(2 * RasterBins * DrawBytes),
-            Pieces = MakeBuffer(_capacity.Pieces * 12),
-            HiZ = MakeBuffer(hiZBytes),
-            TileCounts = MakeBuffer(ResolveRows * 4),
-            TileList = MakeBuffer(Math.Max(_capacity.ResolveBins, 1) * tiles * 4),
-            ResolveArgs = MakeBuffer(ResolveRows * DrawBytes),
+            Counts = CreateBuffer(Counts * 4),
+            Args = CreateBuffer(ArgsRows * DispatchBytes),
+            Budget = CreateBuffer(Buckets * 2 * 4),
+            Jobs = CreateBuffer(_capacity.Jobs * 16),
+            HiddenInstances = CreateBuffer(_capacity.Instances * 4),
+            Clusters = CreateBuffer(_capacity.Clusters * 16),
+            HiddenClusters = CreateBuffer(_capacity.Clusters * 8),
+            BinCounts = CreateBuffer(RasterBins * 4),
+            BinCursors = CreateBuffer(RasterBins * 4),
+            BinArgs = CreateBuffer(2 * RasterBins * DrawBytes),
+            Pieces = CreateBuffer(_capacity.Pieces * 12),
+            HiZ = CreateBuffer(hiZBytes),
+            TileCounts = CreateBuffer(ResolveRows * 4),
+            TileList = CreateBuffer(Math.Max(_capacity.ResolveBins, 1) * tiles * 4),
+            ResolveArgs = CreateBuffer(ResolveRows * DrawBytes),
         };
         _views[view.Id] = made;
 
         return made;
     }
 
-    private GpuBuffer MakeBuffer(uint bytes)
+    private GpuBuffer CreateBuffer(uint bytes)
     {
         uint size = Math.Max(bytes, 4);
         GpuBuffer buffer = _gpu.CreateBuffer(Usage, size);

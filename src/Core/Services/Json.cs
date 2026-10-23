@@ -23,7 +23,7 @@ public static class Json
     /// The dialect, for .NET's serializer itself: <c>JsonSerializer.Deserialize&lt;T&gt;(json, Json.Options)</c>. It
     /// cannot be changed.
     /// </summary>
-    public static JsonSerializerOptions Options { get; } = MakeDialect();
+    public static JsonSerializerOptions Options { get; } = CreateDialect();
 
     /// <summary>
     /// The code loaded, which a file that names a type by its name finds it in, as a render effect is
@@ -105,7 +105,7 @@ public static class Json
         }
     }
 
-    private static JsonSerializerOptions MakeDialect()
+    private static JsonSerializerOptions CreateDialect()
     {
         JsonSerializerOptions options = new()
         {

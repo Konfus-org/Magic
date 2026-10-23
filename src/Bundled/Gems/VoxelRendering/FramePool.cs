@@ -29,7 +29,7 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
     {
         foreach (Kept<GpuTexture> kept in _textures.Values)
         {
-            foreach (GpuTexture texture in kept.Made)
+            foreach (GpuTexture texture in kept.Created)
             {
                 gpu.Release(texture);
             }
@@ -37,7 +37,7 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
 
         foreach (Kept<GpuBuffer> kept in _buffers.Values)
         {
-            foreach (GpuBuffer buffer in kept.Made)
+            foreach (GpuBuffer buffer in kept.Created)
             {
                 gpu.Release(buffer);
             }
@@ -52,17 +52,17 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
     internal GpuTexture Texture(in GpuTextureDescription description)
     {
         Kept<GpuTexture> kept = GetKept(_textures, description);
-        if (kept.Taken == kept.Made.Count) kept.Made.Add(gpu.CreateTexture(description));
+        if (kept.Taken == kept.Created.Count) kept.Created.Add(gpu.CreateTexture(description));
 
-        return kept.Made[kept.Taken++];
+        return kept.Created[kept.Taken++];
     }
 
     internal GpuBuffer Buffer(uint bytes)
     {
         Kept<GpuBuffer> kept = GetKept(_buffers, bytes);
-        if (kept.Taken == kept.Made.Count) kept.Made.Add(MakeBuffer(bytes));
+        if (kept.Taken == kept.Created.Count) kept.Created.Add(CreateBuffer(bytes));
 
-        return kept.Made[kept.Taken++];
+        return kept.Created[kept.Taken++];
     }
 
     internal GpuSampler Sampler(in GpuSamplerDescription description)
@@ -84,9 +84,9 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
     {
         foreach (Kept<GpuTexture> kept in _textures.Values)
         {
-            for (int i = kept.Taken; i < kept.Made.Count; i++)
+            for (int i = kept.Taken; i < kept.Created.Count; i++)
             {
-                gpu.Release(kept.Made[i]);
+                gpu.Release(kept.Created[i]);
             }
 
             kept.EndFrame();
@@ -94,9 +94,9 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
 
         foreach (Kept<GpuBuffer> kept in _buffers.Values)
         {
-            for (int i = kept.Taken; i < kept.Made.Count; i++)
+            for (int i = kept.Taken; i < kept.Created.Count; i++)
             {
-                gpu.Release(kept.Made[i]);
+                gpu.Release(kept.Created[i]);
             }
 
             kept.EndFrame();
@@ -115,7 +115,7 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
         return found;
     }
 
-    private GpuBuffer MakeBuffer(uint bytes)
+    private GpuBuffer CreateBuffer(uint bytes)
     {
         uint size = Math.Max(bytes, 4);
         GpuBuffer buffer = gpu.CreateBuffer(BufferUsage, size);
@@ -131,13 +131,13 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
     /// </summary>
     private sealed class Kept<T>
     {
-        internal List<T> Made { get; } = [];
+        internal List<T> Created { get; } = [];
 
         internal int Taken { get; set; }
 
         internal void EndFrame()
         {
-            Made.RemoveRange(Taken, Made.Count - Taken);
+            Created.RemoveRange(Taken, Created.Count - Taken);
             Taken = 0;
         }
     }

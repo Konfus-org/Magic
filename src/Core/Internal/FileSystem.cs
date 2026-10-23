@@ -110,7 +110,7 @@ internal sealed class FileSystem : IFileSystem
         List<string> found = [];
         foreach (string file in Directory.EnumerateFiles(folder, "*", _under))
         {
-            if (HasExtension(file, extension)) found.Add(MakeRelative(folder, file));
+            if (HasExtension(file, extension)) found.Add(ToRelative(folder, file));
         }
 
         return found;
@@ -139,18 +139,18 @@ internal sealed class FileSystem : IFileSystem
             // Room for a burst, such as a build copying a folder of files at once, before the OS drops what follows.
             InternalBufferSize = 64 * 1024,
         };
-        watcher.Created += (_, e) => changed(MakeRelative(folder, e.FullPath));
+        watcher.Created += (_, e) => changed(ToRelative(folder, e.FullPath));
 
         // A folder is "written" whenever a file in it is, and that file is reported itself.
         watcher.Changed += (_, e) =>
         {
-            if (!Directory.Exists(e.FullPath)) changed(MakeRelative(folder, e.FullPath));
+            if (!Directory.Exists(e.FullPath)) changed(ToRelative(folder, e.FullPath));
         };
-        watcher.Deleted += (_, e) => changed(MakeRelative(folder, e.FullPath));
+        watcher.Deleted += (_, e) => changed(ToRelative(folder, e.FullPath));
         watcher.Renamed += (_, e) =>
         {
-            changed(MakeRelative(folder, e.OldFullPath));
-            changed(MakeRelative(folder, e.FullPath));
+            changed(ToRelative(folder, e.OldFullPath));
+            changed(ToRelative(folder, e.FullPath));
         };
         watcher.Error += (_, e) => Debugging.Warn($"Watching {folder} missed changes: {e.GetException().Message}");
         watcher.EnableRaisingEvents = true;
@@ -171,6 +171,6 @@ internal sealed class FileSystem : IFileSystem
     /// <summary>
     /// <paramref name="path"/> from <paramref name="folder"/>, with <c>/</c> between folders on every OS.
     /// </summary>
-    private static string MakeRelative(string folder, string path)
+    private static string ToRelative(string folder, string path)
         => Path.GetRelativePath(folder, path).Replace(Path.DirectorySeparatorChar, '/');
 }

@@ -286,7 +286,7 @@ public sealed class Engine
     /// </summary>
     private static CoreSettings CreateCoreSettings(Settings settings)
     {
-        Result<ISettings?> made = settings.Make("Core", typeof(CoreSettings));
+        Result<ISettings?> made = settings.Create("Core", typeof(CoreSettings));
 
         if (made is { Ok: true, Value: CoreSettings core }) return core;
 

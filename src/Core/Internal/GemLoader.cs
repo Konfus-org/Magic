@@ -37,7 +37,7 @@ internal sealed class GemLoader : IDisposable
     private readonly IFileSystem _files;
     private readonly Assemblies _assemblies;
     private readonly Assets _assets;
-    private readonly List<(IGem Gem, SubscriptionList Registrations)> _made = [];
+    private readonly List<(IGem Gem, SubscriptionList Registrations)> _created = [];
     private readonly HashSet<Type> _tried = [];
 
     /// <summary>
@@ -49,7 +49,7 @@ internal sealed class GemLoader : IDisposable
     /// <summary>
     /// The gems whose constructors are running, so one asked for by what it needs is told it is a cycle.
     /// </summary>
-    private readonly HashSet<Type> _making = [];
+    private readonly HashSet<Type> _creating = [];
     private readonly List<GemAssembly> _gems = [];
 
     /// <summary>
@@ -121,7 +121,7 @@ internal sealed class GemLoader : IDisposable
             }
 
             // Registered as its class, made once, and as each interface it provides, which hands out that one gem.
-            services.AddSingleton(gem.Type, provider => MakeGem(provider, gem));
+            services.AddSingleton(gem.Type, provider => CreateGem(provider, gem));
             foreach (Type contract in gem.Provides)
             {
                 services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
@@ -173,11 +173,11 @@ internal sealed class GemLoader : IDisposable
             }
             catch (InvalidOperationException)
             {
-                // MakeGem has logged why the gem was not made.
+                // CreateGem has logged why the gem was not created.
             }
         }
 
-        return _made;
+        return _created;
     }
 
     /// <summary>
@@ -271,12 +271,12 @@ internal sealed class GemLoader : IDisposable
         }
 
         code.SwapRegistration(_assemblies.Register(code.Path, assembly));
-        await _assets.RemakeAsync<Script>().ConfigureAwait(false);
-        await _assets.RemakeAsync<Prefab>().ConfigureAwait(false);
+        await _assets.RecreateAsync<Script>().ConfigureAwait(false);
+        await _assets.RecreateAsync<Prefab>().ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The service provider's factory for a gem: makes it from its settings object and the services its constructor
+    /// The service provider's factory for a gem: creates it from its settings object and the services its constructor
     /// asks for, which the provider makes first, adds it to what was made, and adds it to the log if it is an
     /// <see cref="ILogSink"/>. Why it could not be made, settings that do not fit it among the reasons, is logged here,
     /// against the gem, and the gems that need it are told only that it was not. A gem is tried once; one asked for
@@ -286,9 +286,9 @@ internal sealed class GemLoader : IDisposable
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem's constructor throws, it is logged and the gem is not made; the others go on.")]
-    private IGem MakeGem(IServiceProvider services, GemAssembly gem)
+    private IGem CreateGem(IServiceProvider services, GemAssembly gem)
     {
-        if (_making.Contains(gem.Type))
+        if (_creating.Contains(gem.Type))
         {
             throw new InvalidOperationException(
                 $"it needs {gem.Name}, which is being made: a cycle, as {gem.Name} needs something that needs it.");
@@ -296,7 +296,7 @@ internal sealed class GemLoader : IDisposable
 
         if (!_tried.Add(gem.Type)) throw new InvalidOperationException($"it needs {gem.Name}, which was not made.");
 
-        Result<ISettings?> settings = services.GetRequiredService<Settings>().Make(gem.Name, gem.Settings);
+        Result<ISettings?> settings = services.GetRequiredService<Settings>().Create(gem.Name, gem.Settings);
         if (!settings.Ok)
         {
             Debugging.Error($"Gem {gem.Name} was not made: {settings.Error}");
@@ -305,7 +305,7 @@ internal sealed class GemLoader : IDisposable
         }
 
         IGem made;
-        _making.Add(gem.Type);
+        _creating.Add(gem.Type);
         try
         {
             made = (IGem)ActivatorUtilities.CreateInstance(
@@ -324,13 +324,13 @@ internal sealed class GemLoader : IDisposable
         }
         finally
         {
-            _making.Remove(gem.Type);
+            _creating.Remove(gem.Type);
         }
 
         SubscriptionList registered = _registered[gem.Type];
         if (made is ILogSink sink) registered.Add(Debugging.Register(sink));
 
-        _made.Add((made, registered));
+        _created.Add((made, registered));
 
         string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
         Debugging.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");

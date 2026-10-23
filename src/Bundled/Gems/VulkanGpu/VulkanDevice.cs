@@ -359,7 +359,7 @@ internal sealed unsafe class VulkanDevice
     /// <summary>
     /// The validation layer's messages that are worth reading: warnings and errors, of every kind.
     /// </summary>
-    private static VkDebugUtilsMessengerCreateInfoEXT MakeMessengerInfo() => new()
+    private static VkDebugUtilsMessengerCreateInfoEXT CreateMessengerInfo() => new()
     {
         messageSeverity = VkDebugUtilsMessageSeverityFlagsEXT.Warning | VkDebugUtilsMessageSeverityFlagsEXT.Error,
         messageType = VkDebugUtilsMessageTypeFlagsEXT.General
@@ -423,7 +423,7 @@ internal sealed unsafe class VulkanDevice
                 pEngineName = engine,
                 apiVersion = VkVersion.Version_1_3,
             };
-            VkDebugUtilsMessengerCreateInfoEXT messenger = MakeMessengerInfo();
+            VkDebugUtilsMessengerCreateInfoEXT messenger = CreateMessengerInfo();
             VkInstanceCreateInfo info = new()
             {
                 pNext = isMessaged ? &messenger : null,
@@ -444,7 +444,7 @@ internal sealed unsafe class VulkanDevice
 
     private VkDebugUtilsMessengerEXT CreateMessenger()
     {
-        VkDebugUtilsMessengerCreateInfoEXT info = MakeMessengerInfo();
+        VkDebugUtilsMessengerCreateInfoEXT info = CreateMessengerInfo();
         VkDebugUtilsMessengerEXT messenger;
         InstanceApi.vkCreateDebugUtilsMessengerEXT(&info, &messenger);
 

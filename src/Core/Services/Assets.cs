@@ -18,11 +18,11 @@ namespace Magic.Services;
 
 /// <summary>
 /// The assets: what the files under the asset roots describe, the project's <c>Assets/</c> folder, then the engine's
-/// own <c>Resources/</c>, then each gem's, added as the gem loads (<see cref="Register"/>), the first winning a path two
-/// of them have. A file is an asset when a <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what a
-/// <see cref="Handle{T}"/> holds, so a file can move and whatever names it still finds it, and the import settings its
-/// loader reads. An asset path is relative to its root, with <c>/</c> between folders on every OS; a type's files are
-/// those with its extensions (<see cref="IAsset{TSelf}.Extensions"/>). Any thread.
+/// own <c>Resources/</c>, then each gem's, added as the gem loads (<see cref="Register"/>), the first winning a path
+/// two of them have. A file is an asset when a <c>.meta</c> sidecar is beside it, holding its 64-bit id, which is what
+/// a <see cref="Handle{T}"/> holds, so a file can move and whatever names it still finds it, and the import settings
+/// its loader reads. An asset path is relative to its root, with <c>/</c> between folders on every OS; a type's files
+/// are those with its extensions (<see cref="IAsset{TSelf}.Extensions"/>). Any thread.
 /// <para>
 /// Made before the gems load, so each gem's folder is read on a worker as the next gem loads. Nothing is found until
 /// every root is indexed (<see cref="IndexAsync"/>), which the engine waits for before any gem is made.
@@ -93,7 +93,7 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// What each asset loaded as it was made last, or has loaded so far as it is made now: what it is made from.
     /// </summary>
-    private readonly Dictionary<ulong, List<AssetRef>> _madeFrom = [];
+    private readonly Dictionary<ulong, List<AssetRef>> _createdFrom = [];
 
     /// <summary>
     /// Every asset asked for or added, until its file is gone.
@@ -231,7 +231,7 @@ public sealed class Assets : IDisposable
     {
         lock (_lock)
         {
-            return _madeFrom.TryGetValue(asset.Id, out List<AssetRef>? sources) ? [.. sources] : [];
+            return _createdFrom.TryGetValue(asset.Id, out List<AssetRef>? sources) ? [.. sources] : [];
         }
     }
 
@@ -247,12 +247,12 @@ public sealed class Assets : IDisposable
         if (asset == Handle<T>.None)
             return new(Result.Failure<T>($"No {typeof(T).Name} was asked for: the handle is none."));
 
-        ulong maker = _assetBeingCreated.Value;
+        ulong beingCreated = _assetBeingCreated.Value;
         lock (_lock)
         {
             // Loaded as another asset is made, it is recorded as what that one is made from, and refused when it is
             // that one or is made from it, as each would wait for the other for ever.
-            if (maker != 0 && !HasRecorded(maker, new AssetRef(typeof(T), asset.Id)))
+            if (beingCreated != 0 && !HasRecorded(beingCreated, new AssetRef(typeof(T), asset.Id)))
             {
                 return new(Result.Failure<T>(
                     $"{GetName(asset.Id)} is made from itself: something it loads as it is made loads it."));
@@ -274,7 +274,7 @@ public sealed class Assets : IDisposable
             // the failure kept from the last until its file changes, or a make started now.
             if (slot.Loading is null && slot.Loaded?.Target is T held) return new(Result.Success(held));
 
-            return new((slot.Loading ?? MakeAsync(slot, asset.Id, isRemake: false)).WaitAsync(cancel));
+            return new((slot.Loading ?? CreateAsync(slot, asset.Id, isRecreation: false)).WaitAsync(cancel));
         }
     }
 
@@ -324,24 +324,24 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Makes every <typeparamref name="T"/> asked for so far again, as when their files change: for a gem that makes
+    /// Creates every <typeparamref name="T"/> asked for so far again, as when their files change: for a gem that makes
     /// them, a post-processor, whose settings changed how, and for code loaded again, which a script is the class of
-    /// and a prefab names components from. Each that had loaded is told as <see cref="AssetReloaded{T}"/> once made;
+    /// and a prefab names components from. Each that had loaded is told as <see cref="AssetReloaded{T}"/> once created;
     /// done once every one is.
     /// </summary>
-    public Task RemakeAsync<T>()
+    public Task RecreateAsync<T>()
         where T : IAsset<T>
     {
-        List<Task> remaking = [];
+        List<Task> recreating = [];
         lock (_lock)
         {
             foreach ((ulong id, Slot slot) in _slots)
             {
-                if (slot is Slot<T>) remaking.Add(slot.RemakeAsync(this, id));
+                if (slot is Slot<T>) recreating.Add(slot.RecreateAsync(this, id));
             }
         }
 
-        return Task.WhenAll(remaking);
+        return Task.WhenAll(recreating);
     }
 
     /// <summary>
@@ -360,9 +360,9 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// Adds <paramref name="folder"/> to the roots, after those added before it, which win a path it shares with them,
     /// and starts reading it on a worker and watching it: a gem's own <c>Resources/</c>, as the gem loads. What is in
-    /// it is found once every root is indexed (<see cref="IndexAsync"/>), until the subscription is disposed: then it is
-    /// taken out of the roots, and what is in it goes as a deleted folder's files do. A folder that does not exist, or
-    /// is a root already, is left out.
+    /// it is found once every root is indexed (<see cref="IndexAsync"/>), until the subscription is disposed: then it
+    /// is taken out of the roots, and what is in it goes as a deleted folder's files do. A folder that does not exist,
+    /// or is a root already, is left out.
     /// </summary>
     internal Subscription Register(string folder)
         => AddRoot(folder) is { } root ? new Subscription(() => Unregister(root)) : Subscription.None;
@@ -384,9 +384,9 @@ public sealed class Assets : IDisposable
 
     /// <summary>
     /// Whether <paramref name="asset"/> is <paramref name="source"/>, or is made from it, directly or through others,
-    /// as <paramref name="madeFrom"/> says.
+    /// as <paramref name="createdFrom"/> says.
     /// </summary>
-    private static bool IsMadeFrom(ulong asset, ulong source, Dictionary<ulong, List<AssetRef>> madeFrom)
+    private static bool IsCreatedFrom(ulong asset, ulong source, Dictionary<ulong, List<AssetRef>> createdFrom)
     {
         HashSet<ulong> seen = [];
         Stack<ulong> waiting = new([asset]);
@@ -394,7 +394,7 @@ public sealed class Assets : IDisposable
         {
             if (next == source) return true;
 
-            if (seen.Add(next) && madeFrom.TryGetValue(next, out List<AssetRef>? sources))
+            if (seen.Add(next) && createdFrom.TryGetValue(next, out List<AssetRef>? sources))
             {
                 foreach (AssetRef made in sources)
                 {
@@ -408,9 +408,9 @@ public sealed class Assets : IDisposable
 
     /// <summary>
     /// <paramref name="changed"/>, and every asset made from one of them, or from one of those, and so on out, as
-    /// <paramref name="madeFrom"/> says.
+    /// <paramref name="createdFrom"/> says.
     /// </summary>
-    private static HashSet<ulong> AddMadeFrom(HashSet<ulong> changed, Dictionary<ulong, List<AssetRef>> madeFrom)
+    private static HashSet<ulong> AddCreatedFrom(HashSet<ulong> changed, Dictionary<ulong, List<AssetRef>> createdFrom)
     {
         // Pass after pass, each adding what is made from one found already, until a pass adds nothing.
         HashSet<ulong> found = [.. changed];
@@ -418,7 +418,7 @@ public sealed class Assets : IDisposable
         while (grew)
         {
             grew = false;
-            foreach ((ulong id, List<AssetRef> sources) in madeFrom)
+            foreach ((ulong id, List<AssetRef> sources) in createdFrom)
             {
                 if (!found.Contains(id) && sources.Exists(source => found.Contains(source.Id)))
                 {
@@ -734,70 +734,72 @@ public sealed class Assets : IDisposable
             if (written) changed.Add(file.Id);
         }
 
-        List<Task> remaking = [];
+        List<Task> recreating = [];
         lock (_lock)
         {
-            HashSet<ulong> remake = AddMadeFrom(changed, _madeFrom);
+            HashSet<ulong> toRecreate = AddCreatedFrom(changed, _createdFrom);
             foreach (ulong id in gone)
             {
                 _slots.Remove(id);
-                _madeFrom.Remove(id);
+                _createdFrom.Remove(id);
             }
 
             // Every one is started before any can load another, which waits for this lock, so whatever loads one that
             // is being made again waits for what it is made into: each is made after what it is made from.
-            foreach (ulong id in remake)
+            foreach (ulong id in toRecreate)
             {
-                if (_slots.TryGetValue(id, out Slot? slot)) remaking.Add(slot.RemakeAsync(this, id));
+                if (_slots.TryGetValue(id, out Slot? slot)) recreating.Add(slot.RecreateAsync(this, id));
             }
         }
 
-        await Task.WhenAll(remaking).ConfigureAwait(false);
+        await Task.WhenAll(recreating).ConfigureAwait(false);
         if (filesChanged) _events.Publish(new AssetsChanged());
     }
 
     /// <summary>
-    /// Makes <paramref name="slot"/>'s asset again after its file, or one it is made from, changed, and logs a failure,
-    /// as nobody asked for it. Called under <see cref="_lock"/>, which it starts the make under.
+    /// Creates <paramref name="slot"/>'s asset again after its file, or one it is made from, changed, and logs a
+    /// failure, as nobody asked for it. Called under <see cref="_lock"/>, which it starts the creation under.
     /// </summary>
-    private async Task RemakeAsync<T>(Slot<T> slot, ulong id)
+    private async Task RecreateAsync<T>(Slot<T> slot, ulong id)
         where T : IAsset<T>
     {
-        Result<T> made = await MakeAsync(slot, id, isRemake: true).ConfigureAwait(false);
+        Result<T> made = await CreateAsync(slot, id, isRecreation: true).ConfigureAwait(false);
         if (!made.Ok) Debugging.Error(made.Error);
     }
 
     /// <summary>
-    /// Starts making asset <paramref name="id"/> into <paramref name="slot"/>, once the load already on its way there,
-    /// if any, is done, and has whoever asks for it meanwhile wait for what it makes: made again after a change when
-    /// <paramref name="isRemake"/>, else loaded as it is asked for. Under <see cref="_lock"/>.
+    /// Starts creating asset <paramref name="id"/> into <paramref name="slot"/>, once the load already on its way
+    /// there, if any, is done, and has whoever asks for it meanwhile wait for what it creates: created again after a
+    /// change when <paramref name="isRecreation"/>, else loaded as it is asked for. Under <see cref="_lock"/>.
     /// </summary>
-    private Task<Result<T>> MakeAsync<T>(Slot<T> slot, ulong id, bool isRemake)
+    private Task<Result<T>> CreateAsync<T>(Slot<T> slot, ulong id, bool isRecreation)
         where T : IAsset<T>
     {
         Task<Result<T>>? before = slot.Loading;
-        int make = ++slot.Started;
-        Task<Result<T>> making = Task.Run(() => MakeAfterAsync(slot, id, make, before, isRemake), _quitting);
-        slot.Loading = making;
+        int creation = ++slot.Started;
+        Task<Result<T>> creating = Task.Run(
+            () => CreateAfterAsync(slot, id, creation, before, isRecreation),
+            _quitting);
+        slot.Loading = creating;
 
-        return making;
+        return creating;
     }
 
     /// <summary>
-    /// Reads and makes asset <paramref name="id"/> (<see cref="ReadAsync{T}"/>) once <paramref name="before"/>, the
+    /// Reads and creates asset <paramref name="id"/> (<see cref="ReadAsync{T}"/>) once <paramref name="before"/>, the
     /// load that was on its way, is done, recording what it loads meanwhile as what it is made from, and takes in what
-    /// it made: held weakly, and told, as <see cref="AssetReloaded{T}"/> when it is made again after a change
-    /// (<paramref name="isRemake"/>) and had loaded before, else as <see cref="AssetLoaded{T}"/>, the first time or
+    /// it created: held weakly, and told, as <see cref="AssetReloaded{T}"/> when it is created again after a change
+    /// (<paramref name="isRecreation"/>) and had loaded before, else as <see cref="AssetLoaded{T}"/>, the first time or
     /// again once what loaded was let go. One that fails while what loaded before is still held hands that out, as it
-    /// stays in use; else the failure is kept until its file changes. Make number <paramref name="make"/> of
+    /// stays in use; else the failure is kept until its file changes. Creation number <paramref name="creation"/> of
     /// <paramref name="slot"/>: one started after it, for a later change, takes over the slot.
     /// </summary>
-    private async Task<Result<T>> MakeAfterAsync<T>(
+    private async Task<Result<T>> CreateAfterAsync<T>(
         Slot<T> slot,
         ulong id,
-        int make,
+        int creation,
         Task<Result<T>>? before,
-        bool isRemake)
+        bool isRecreation)
         where T : IAsset<T>
     {
         if (before is not null) await before.ConfigureAwait(false);
@@ -805,7 +807,7 @@ public sealed class Assets : IDisposable
         // What it was made from last time is forgotten: this make records its own.
         lock (_lock)
         {
-            _madeFrom[id] = [];
+            _createdFrom[id] = [];
         }
 
         // Whatever loads on this flow from here, as it is read, is recorded as what it is made from.
@@ -815,12 +817,12 @@ public sealed class Assets : IDisposable
         T? kept = default;
         lock (_lock)
         {
-            isReload = isRemake && slot.Loaded is not null;
+            isReload = isRecreation && slot.Loaded is not null;
             if (made.Ok) slot.Loaded = new WeakReference(made.Value);
             else if (slot.Loaded?.Target is T held) kept = held;
 
             // A failure with nothing held stays, as this make, until the file changes.
-            if (slot.Started == make && (made.Ok || kept is not null)) slot.Loading = null;
+            if (slot.Started == creation && (made.Ok || kept is not null)) slot.Loading = null;
         }
 
         if (kept is not null)
@@ -950,21 +952,21 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Records that <paramref name="maker"/>, being made, loads <paramref name="source"/>; false when
-    /// <paramref name="source"/> is <paramref name="maker"/> or is made from it, so waiting for it would wait for ever.
-    /// Under <see cref="_lock"/>.
+    /// Records that <paramref name="beingCreated"/> loads <paramref name="source"/>; false when
+    /// <paramref name="source"/> is <paramref name="beingCreated"/> or is made from it, so waiting for it would wait
+    /// for ever. Under <see cref="_lock"/>.
     /// </summary>
-    private bool HasRecorded(ulong maker, AssetRef source)
+    private bool HasRecorded(ulong beingCreated, AssetRef source)
     {
-        if (!_madeFrom.TryGetValue(maker, out List<AssetRef>? sources))
+        if (!_createdFrom.TryGetValue(beingCreated, out List<AssetRef>? sources))
         {
             sources = [];
-            _madeFrom.Add(maker, sources);
+            _createdFrom.Add(beingCreated, sources);
         }
 
         if (!sources.Contains(source)) sources.Add(source);
 
-        return !IsMadeFrom(source.Id, maker, _madeFrom);
+        return !IsCreatedFrom(source.Id, beingCreated, _createdFrom);
     }
 
     /// <summary>
@@ -1021,10 +1023,10 @@ public sealed class Assets : IDisposable
         public abstract Type Type { get; }
 
         /// <summary>
-        /// Makes it again, as asset <paramref name="id"/> of <paramref name="assets"/>
-        /// (<see cref="RemakeAsync{T}(Slot{T}, ulong)"/>). Under <see cref="_lock"/>.
+        /// Creates it again, as asset <paramref name="id"/> of <paramref name="assets"/>
+        /// (<see cref="RecreateAsync{T}(Slot{T}, ulong)"/>). Under <see cref="_lock"/>.
         /// </summary>
-        public abstract Task RemakeAsync(Assets assets, ulong id);
+        public abstract Task RecreateAsync(Assets assets, ulong id);
     }
 
     /// <inheritdoc cref="Slot"/>
@@ -1051,6 +1053,6 @@ public sealed class Assets : IDisposable
         /// </summary>
         public int Started { get; set; }
 
-        public override Task RemakeAsync(Assets assets, ulong id) => assets.RemakeAsync(this, id);
+        public override Task RecreateAsync(Assets assets, ulong id) => assets.RecreateAsync(this, id);
     }
 }
