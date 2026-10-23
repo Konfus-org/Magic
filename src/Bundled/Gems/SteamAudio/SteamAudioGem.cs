@@ -11,6 +11,7 @@ using Magic.Contexts.CmdLine;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
+using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -64,6 +65,11 @@ namespace Magic.SteamAudio;
 /// An audio file, a model's triangles and its sub-scene in the acoustic scene are kept while the world's domains name
 /// them, or a sound plays the file or a body is shaped like the model, and let go as the world empties for a new one
 /// without them (<see cref="WorldStream.IsEmptied"/>).
+/// </para>
+/// <para>
+/// A sound plays at its own speed, its time running in real time, whatever the world's time scale. While the world is
+/// paused, every sound holds where it is but those of entities tagged <see cref="Tag.Unpausable"/>, such as a pause
+/// menu's music; while the app is paused, the device is, and nothing is heard.
 /// </para>
 /// </summary>
 internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
@@ -214,6 +220,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// Which frame this is, stamped on each voice seen in it: one not stamped is of an entity gone.
     /// </summary>
     private uint _frame;
+
+    /// <summary>
+    /// The device is paused, as the app is (<see cref="Idle"/>), until the next frame. Main thread.
+    /// </summary>
+    private bool _isDevicePaused;
 
     /// <summary>
     /// How many times the solids have been gathered, each frame handed over stamped with it. Main thread.
@@ -410,8 +421,14 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         if (_isAudioStarted) SDL_QuitSubSystem(SDL_INIT_AUDIO);
     }
 
-    public void LateUpdate(in Frame frame)
+    public unsafe void LateUpdate(in Frame frame)
     {
+        if (_isDevicePaused)
+        {
+            _isDevicePaused = false;
+            SDL_ResumeAudioStreamDevice(_device);
+        }
+
         WorldStream stream = _world.Stream;
         _frame++;
         TakeArrived();
@@ -426,7 +443,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             TakeReleased(_sounds);
         }
 
-        FollowSounds(stream.IsHeld ? 0 : frame.DeltaSeconds);
+        FollowSounds(stream.IsHeld ? 0 : frame.RealDeltaSeconds, frame.IsPaused);
 
         if (_sounds is null) return;
 
@@ -443,7 +460,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         filling.PlacingSeconds = stream.IsHeld ? double.PositiveInfinity : PlacingSeconds;
         Steer(_sounds, filling);
         Reflect(_sounds, filling);
-        _sinceGathered += frame.DeltaSeconds;
+        _sinceGathered += frame.RealDeltaSeconds;
         filling.HasSolids = _sinceGathered >= GatherSeconds;
         if (filling.HasSolids)
         {
@@ -458,6 +475,18 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         Volatile.Write(ref _isNewest, 1);
         _wake.Set();
         _heard.Record(_holds.Length - _free.Count);
+    }
+
+    /// <summary>
+    /// Pauses the device while the app is paused, so nothing is heard until the next frame resumes it, as sound holds
+    /// with the frames.
+    /// </summary>
+    public unsafe void Idle(EngineThread thread)
+    {
+        if (thread != EngineThread.Main || _isDevicePaused || _device is null) return;
+
+        _isDevicePaused = true;
+        SDL_PauseAudioStreamDevice(_device);
     }
 
     /// <summary>
@@ -797,9 +826,10 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// <summary>
     /// Brings every voice up to date with its entity's sound, and writes back how far in it is: a script's writes are
     /// carried over, a sound that is not heard has its time run on as if it were, and the voices that want to be heard
-    /// are listed for <see cref="Assign"/>.
+    /// are listed for <see cref="Assign"/>. While the world is paused (<paramref name="isPaused"/>), only the sounds of
+    /// entities tagged <see cref="Tag.Unpausable"/> are; every other holds where it is.
     /// </summary>
-    private void FollowSounds(float seconds)
+    private void FollowSounds(float seconds, bool isPaused)
     {
         _wanted.Clear();
         foreach (EcsChunk<Transform, Sound> chunk in _world.Query<Transform, Sound>())
@@ -807,7 +837,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             (ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Sound> sounds) = chunk;
             for (int i = 0; i < entities.Length; i++)
             {
-                Follow(entities[i], transforms[i], ref sounds[i], seconds);
+                bool isHeld = isPaused && !IsUnpausable(entities[i]);
+                Follow(entities[i], transforms[i], ref sounds[i], isHeld ? 0 : seconds, isHeld);
             }
         }
 
@@ -826,7 +857,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         _gone.Clear();
     }
 
-    private void Follow(Entity entity, in Transform transform, ref Sound sound, float seconds)
+    /// <summary>
+    /// <see cref="FollowSounds"/> for one entity's sound, its time run on by <paramref name="seconds"/> when it is not
+    /// heard; held where it is, when <paramref name="isHeld"/>, it wants no voice, so it is not heard.
+    /// </summary>
+    private void Follow(Entity entity, in Transform transform, ref Sound sound, float seconds, bool isHeld)
     {
         if (!_voices.TryGetValue(entity, out Voice? voice))
         {
@@ -887,7 +922,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             RunSilently(voice, ref sound, audio, seconds);
         }
 
-        bool isAudible = sound.Playback == Playback.Playing && audio?.Samples.Length > 0
+        bool isAudible = !isHeld && sound.Playback == Playback.Playing && audio?.Samples.Length > 0
             && (sound.Space == SoundSpace.Everywhere || voice.Distance < sound.Range);
         if (isAudible && _sounds is not null) _wanted.Add(voice);
 
@@ -897,6 +932,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         voice.WrittenPlayback = sound.Playback;
         voice.Sound = sound;
     }
+
+    /// <summary>
+    /// Whether <paramref name="entity"/> is tagged <see cref="Tag.Unpausable"/>, so its sound plays while the world is
+    /// paused.
+    /// </summary>
+    private bool IsUnpausable(Entity entity)
+        => _world.Has<Tags>(entity) && _world.Get<Tags>(entity).Has(Tag.Unpausable);
 
     /// <summary>
     /// Gives slots to the nearest voices that want one, sounds everywhere first, as many as there are, taking slots

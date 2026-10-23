@@ -3,6 +3,7 @@ using System.Text.Json;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
+using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
@@ -46,6 +47,10 @@ namespace Magic.Services;
 /// in place of the world, it starts as the domain is readied, so what it spawns is readied with it, and runs from the
 /// frame after the world is first shown, unless its class is <see cref="Attributes.ImpatientAttribute">[Impatient]</see>
 /// and it starts while the loading domain shows, as the loading domain's own scripts do.
+/// </para>
+/// <para>
+/// The world has a clock of its own: it can be paused (<see cref="IsPaused"/>), as a game pauses, and its time sped up
+/// or slowed down (<see cref="TimeScale"/>). Each frame tells what runs the world both (<see cref="Frame"/>).
 /// </para>
 /// <para>
 /// The whole world can be saved as data (<see cref="SaveAsync"/>) and put back from it (<see cref="Restore"/>): the
@@ -116,6 +121,27 @@ public sealed class World : IDisposable
     public bool IsLoaded => _domains?.IsLoaded ?? false;
 
     /// <summary>
+    /// Whether the world is paused, from the next frame (<see cref="Frame.IsPaused"/>): its time stands still, so there
+    /// are no fixed steps and physics holds, and of the scripts and systems only those whose class is
+    /// <see cref="Attributes.UnpausableAttribute">[Unpausable]</see>, or a script on an entity tagged
+    /// <see cref="Tag.Unpausable"/>, run; of the sounds, only such an entity's play. The gems go on, so the world is
+    /// still drawn, and the window, the input and the debug UI work. While a domain loads in place of the world
+    /// (<see cref="IsLoading"/>) it is not paused, as the gems ready the new one on the frames' fixed steps; it is again
+    /// once that one is shown. Saved with the world. The app's own pause, which holds the frames, is
+    /// <see cref="App.IsPaused"/>.
+    /// </summary>
+    public bool IsPaused { get; set; }
+
+    /// <summary>
+    /// How fast the world's time runs against real time, from the next frame: 1 as it is, 0.5 half as fast, 2 twice as
+    /// fast, and below 0 as 0, which stands it still with every script still running. The fixed steps keep their length
+    /// and come more or less often, up to <c>Core.maxFixedSteps</c> a frame, past which the world falls behind what
+    /// was asked; sound plays at its own speed whatever this is. 1 while a domain loads in place of the world
+    /// (<see cref="IsLoading"/>), as <see cref="IsPaused"/> says. Saved with the world.
+    /// </summary>
+    public float TimeScale { get; set => field = Math.Max(value, 0); } = 1;
+
+    /// <summary>
     /// The gems that take in what a domain spawns before it does, and ready one that replaces the world before it is
     /// shown (<see cref="IPreloader"/>), set by whoever made the gems once every one is, since the world is made while
     /// they are; none until then. One that throws as it answers is left out from then on.
@@ -148,8 +174,9 @@ public sealed class World : IDisposable
     public void Close(Handle<Domain> domain) => _domains?.Close(domain);
 
     /// <summary>
-    /// The world as data (<see cref="WorldState"/>), to put back with <see cref="Restore"/>: the domains open, and
-    /// every entity with its components and its scripts (<see cref="IScripts.Save"/>). It is taken on the main thread
+    /// The world as data (<see cref="WorldState"/>), to put back with <see cref="Restore"/>: the domains open, every
+    /// entity with its components and its scripts (<see cref="IScripts.Save"/>), whether it is paused and how fast its
+    /// time runs. It is taken on the main thread
     /// in one go, so it is the world as of one moment: now, on the main thread, else when the main thread next runs
     /// what it is handed; each entity's components copied out and its scripts' values read. The components are then
     /// written as JSON on a worker, which tells <paramref name="progress"/> how far it is, 0 to 1. The loading domain's
@@ -167,13 +194,19 @@ public sealed class World : IDisposable
 
         IEcs ecs = _ecs;
         Domains domains = _domains;
-        (List<DomainState> Domains, List<Saving> Entities) taken = _threads.IsCurrent(EngineThread.Main)
+        Taken taken = _threads.IsCurrent(EngineThread.Main)
             ? Take(ecs, domains)
             : await _threads.PostAsync(EngineThread.Main, () => Take(ecs, domains), cancel).ConfigureAwait(false);
         List<EntityState> entities = await Task.Run(() => Write(taken.Entities, progress, cancel), cancel)
             .ConfigureAwait(false);
 
-        return new WorldState { Domains = taken.Domains, Entities = entities };
+        return new WorldState
+        {
+            Domains = taken.Domains,
+            Entities = entities,
+            IsPaused = taken.IsPaused,
+            TimeScale = taken.TimeScale,
+        };
     }
 
     /// <summary>
@@ -190,8 +223,9 @@ public sealed class World : IDisposable
     /// opens, so a prefab added since is spawned and one gone has its entities destroyed, and what its prefabs draw is
     /// taken in and held as it would be; once every domain has, every gem readies the world again, and it is shown once
     /// they all have, drawn as it loaded. No player is put, as the one saved is among the entities. A domain that had
-    /// spawned nothing, as one still opening, opens again from the start. A component or a script no code loaded
-    /// declares, or whose saved values no longer fit it, is an error, and the entity goes without it. Main thread;
+    /// spawned nothing, as one still opening, opens again from the start. The world is paused, or not, and its time
+    /// scaled as it was saved. A component or a script no code loaded declares, or whose saved values no longer fit
+    /// it, is an error, and the entity goes without it. Main thread;
     /// without a gem that provides the ECS, nothing is restored, which is warned about.
     /// </summary>
     public void Restore(WorldState state)
@@ -249,6 +283,8 @@ public sealed class World : IDisposable
             EntityJsonConverter.Remap = null;
         }
 
+        IsPaused = state.IsPaused;
+        TimeScale = state.TimeScale;
         Debugging.Info($"Restored the world: {state.Entities.Count} entities in {state.Domains.Count} domains.");
     }
 
@@ -539,10 +575,10 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
-    /// The world as it is now, as <see cref="SaveAsync"/> takes it: the domains, and every entity but the loading
-    /// domain's with its components copied out and its scripts' values read. Main thread.
+    /// The world as it is now, as <see cref="SaveAsync"/> takes it: the domains, every entity but the loading domain's
+    /// with its components copied out and its scripts' values read, and its pause and time scale. Main thread.
     /// </summary>
-    private (List<DomainState> Domains, List<Saving> Entities) Take(IEcs ecs, Domains domains)
+    private Taken Take(IEcs ecs, Domains domains)
     {
         List<Saving> entities = [];
         HashSet<Entity> loading = domains.GetLoadingEntities();
@@ -559,7 +595,7 @@ public sealed class World : IDisposable
             }
         }
 
-        return (domains.Save(), entities);
+        return new Taken(domains.Save(), entities, IsPaused, TimeScale);
     }
 
     /// <summary>
@@ -597,4 +633,9 @@ public sealed class World : IDisposable
     /// scripts' values, which is all it needs of the world, so the JSON can be written anywhere afterwards.
     /// </summary>
     private sealed record Saving(int Id, IComponent[] Components, ScriptState[] Scripts);
+
+    /// <summary>
+    /// The world as <see cref="SaveAsync"/> takes it on the main thread, before its entities are written as JSON.
+    /// </summary>
+    private sealed record Taken(List<DomainState> Domains, List<Saving> Entities, bool IsPaused, float TimeScale);
 }

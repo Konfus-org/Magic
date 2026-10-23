@@ -244,7 +244,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         // Laid out in window pixels: the font size says how big the UI is. ImGui needs a time step of more than 0,
         // which a frame's may not be.
         io->DisplaySize = new Vector2(_window.Width, _window.Height).Im;
-        io->DeltaTime = Math.Max(frame.DeltaSeconds, 1e-4f);
+        io->DeltaTime = Math.Max(frame.RealDeltaSeconds, 1e-4f);
         ImGui_GetStyle()->FontSizeBase = _settings.FontSize;
         ImGui_NewFrame();
         _isInFrame = true;

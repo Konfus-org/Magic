@@ -13,6 +13,8 @@ release ([Native libraries](../README.md#native-libraries)). SDL comes from the 
 - **Sounds everywhere**, such as music, sound the same wherever the listener is.
 - **Solids.** Static and kinematic bodies near the player block and echo sound, shaped as their models. An
   `Acoustics` component sets what a solid is made of.
+- **Pausing.** While the world is paused, sounds hold where they are, except those of entities tagged `unpausable`.
+  While the app is paused, nothing is heard. Sounds play at their own speed whatever the world's time scale.
 
 Its settings, such as the volume and how many sounds play at once, are on `SteamAudioSettings` and show in the
 settings window (F4), under Audio. Some of them restart the engine when changed.

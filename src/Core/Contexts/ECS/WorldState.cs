@@ -6,8 +6,9 @@ using Magic.Services;
 namespace Magic.Contexts.ECS;
 
 /// <summary>
-/// The world as data (<see cref="World.SaveAsync"/>), which outlives the run that made it: the domains open, and every
-/// entity with its components and its scripts, which <see cref="World.Restore"/> puts back. The engine carries one
+/// The world as data (<see cref="World.SaveAsync"/>), which outlives the run that made it: the domains open, every
+/// entity with its components and its scripts, and whether the world is paused and how fast its time runs, which
+/// <see cref="World.Restore"/> puts back. The engine carries one
 /// across a restart (<see cref="App.Restart"/>). It names a component by its type's name and a script by its
 /// asset, and holds their values as JSON, so it keeps nothing of the code that made it: it restores into the code
 /// loaded then, as a file read would, which is what lets a restart load code again.
@@ -20,6 +21,16 @@ public sealed record WorldState
     public required IReadOnlyList<DomainState> Domains { get; init; }
 
     public required IReadOnlyList<EntityState> Entities { get; init; }
+
+    /// <summary>
+    /// <see cref="World.IsPaused"/>.
+    /// </summary>
+    public bool IsPaused { get; set; }
+
+    /// <summary>
+    /// <see cref="World.TimeScale"/>.
+    /// </summary>
+    public float TimeScale { get; set; } = 1;
 }
 
 /// <summary>

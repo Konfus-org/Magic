@@ -1,4 +1,5 @@
 using System.Numerics;
+using Magic.Attributes;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
@@ -13,8 +14,10 @@ namespace Magic.Samples.Assets.Scripts;
 /// attaches as <c>{ "id": 3315 }</c>. WASD or the left stick move it where it looks, E and Q or the right and left
 /// triggers straight up and down, and Shift or the left shoulder <see cref="FastFactor"/> times as fast. It looks
 /// around with the mouse while the right button is held, so the pointer is free otherwise, or with the right stick.
-/// Until it is flown it stays where it spawned, looking the way it spawned facing.
+/// Until it is flown it stays where it spawned, looking the way it spawned facing. It flies while the world is paused,
+/// by real time, so the paused world can be looked around.
 /// </summary>
+[Unpausable]
 internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBehavior
 {
     private const float FastFactor = 4;
@@ -66,7 +69,7 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
             ? new Vector2(_input[Control.MouseMotionX].Value, _input[Control.MouseMotionY].Value) * MouseTurn
             : Vector2.Zero;
         Vector2 turn = mouse + (new Vector2(_input[Control.GamepadRightX].Value, -_input[Control.GamepadRightY].Value)
-            * (StickTurn * frame.DeltaSeconds));
+            * (StickTurn * frame.RealDeltaSeconds));
         float right = ReadAxis(Control.KeyD, Control.KeyA) + _input[Control.GamepadLeftX].Value;
         float forward = ReadAxis(Control.KeyW, Control.KeyS) + _input[Control.GamepadLeftY].Value;
         float up = ReadAxis(Control.KeyE, Control.KeyQ)
@@ -83,7 +86,7 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
         bool isFast = _input[Control.KeyLeftShift].IsDown || _input[Control.GamepadLeftShoulder].IsDown;
         ref Transform transform = ref _world.Get<Transform>(owner);
         transform.Rotation = rotation;
-        transform.Position += move * (Speed * (isFast ? FastFactor : 1) * frame.DeltaSeconds);
+        transform.Position += move * (Speed * (isFast ? FastFactor : 1) * frame.RealDeltaSeconds);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using Magic.Contexts.CmdLine;
 using Magic.Contexts.Frames;
+using Magic.Contexts.Threading;
 using Magic.Services;
 
 namespace Magic.Interfaces;
@@ -22,8 +23,9 @@ namespace Magic.Interfaces;
 /// main thread; Render on the render thread, one frame behind, while the main thread runs the next frame's Update,
 /// FixedUpdate and LateUpdate. Sync is the one point where both hold still. So a gem prepares in LateUpdate what Render
 /// will read, into a buffer Render is not reading, swaps the two in Sync, and Render reads only that: never what
-/// Update, FixedUpdate and LateUpdate change. Once the frames end, Stop runs on the main thread, then Dispose on the
-/// render thread, each gem in reverse order. Implement the hooks the gem needs; the rest are never called.
+/// Update, FixedUpdate and LateUpdate change. While the app is paused, Idle runs on both threads in place of the
+/// frames. Once the frames end, Stop runs on the main thread, then Dispose on the render thread, each gem in reverse
+/// order. Implement the hooks the gem needs; the rest are never called.
 /// </para>
 /// <para>
 /// What a worker makes for a gem reaches it as data: the gem keeps what arrived and takes it in at the start of the
@@ -70,6 +72,16 @@ public interface IGem
     /// <see cref="IGpuDriver.Commands"/> here, so the provider, made before it, submits after it.
     /// </summary>
     void Render(in Frame frame)
+    {
+    }
+
+    /// <summary>
+    /// The app is paused (<see cref="App.IsPaused"/>), so no frame runs: about 60 times a second this runs instead, on
+    /// the main thread and then on the render thread, <paramref name="thread"/> saying which, for what must go on while
+    /// the frames hold, such as the window answering the OS or a line typed in the terminal that steps the app. The
+    /// main thread's in the order the gems were made, the render thread's in reverse.
+    /// </summary>
+    void Idle(EngineThread thread)
     {
     }
 

@@ -169,6 +169,12 @@ public sealed class Threads : IDisposable
     internal void Drain(EngineThread thread) => Queue(thread).RunPending();
 
     /// <summary>
+    /// Blocks until work is handed to <paramref name="thread"/> or <paramref name="timeout"/> passes. On that thread: the
+    /// main thread waits so while the app is paused, and wakes for what it is handed.
+    /// </summary>
+    internal void Wait(EngineThread thread, TimeSpan timeout) => Queue(thread).Wait(timeout);
+
+    /// <summary>
     /// Makes the calling thread <paramref name="thread"/> (<see cref="IsCurrent"/>), until <see cref="Release"/>.
     /// </summary>
     internal void Claim(EngineThread thread) => Queue(thread).Owner = Environment.CurrentManagedThreadId;
@@ -247,11 +253,12 @@ public sealed class Threads : IDisposable
         }
 
         /// <summary>
-        /// Blocks until work arrives or the queue ends (<see cref="End"/>).
+        /// Blocks until work arrives, the queue ends (<see cref="End"/>) or <paramref name="timeout"/> passes, for ever
+        /// without one.
         /// </summary>
-        public void Wait()
+        public void Wait(TimeSpan timeout)
         {
-            _arrived.Wait();
+            _arrived.Wait(timeout);
 
             // Before running what came: work added from here on sets it again.
             _arrived.Reset();
@@ -281,7 +288,7 @@ public sealed class Threads : IDisposable
         {
             while (!_work.Reader.Completion.IsCompleted)
             {
-                Wait();
+                Wait(Timeout.InfiniteTimeSpan);
                 RunPending();
             }
         }

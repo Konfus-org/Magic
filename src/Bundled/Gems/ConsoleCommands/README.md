@@ -16,4 +16,7 @@ printf 'wait loaded\nscreenshot\nquit\n' | Magic --project samples --seconds 600
 - `open` loads a domain by its asset path and holds the next lines until it is there.
 - `screenshot` saves the window's next image as a PNG in `Screenshots/` next to Magic. Headless, there is nothing to
   take.
+- `pause` and `resume` pause the world. `timescale 0.5` runs its time at half speed.
+- `pause app` holds the frames. `step` runs one frame, or `step 10` ten, and holds the next lines until they have run.
+  `resume app` lets the frames go on. While the app is paused, only lines from the terminal run.
 - A piped script carries on across an engine restart.

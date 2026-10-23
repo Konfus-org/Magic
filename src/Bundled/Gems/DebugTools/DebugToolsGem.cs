@@ -74,7 +74,7 @@ internal sealed class DebugToolsGem(
         if (!settings.FrameRate) return;
 
         _frames++;
-        _seconds += frame.DeltaSeconds;
+        _seconds += frame.RealDeltaSeconds;
         if (_seconds >= 0.5)
         {
             _frameRate = string.Create(

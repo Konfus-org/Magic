@@ -7,6 +7,7 @@ using Magic.Contexts.CmdLine;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Input;
+using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -25,10 +26,10 @@ namespace Magic.SdlPlatform;
 /// clipboard, and turns keyboards, mice and gamepads into <see cref="IInput"/>'s controls and typed text. Headless, it
 /// opens no window and reads gamepads only: keyboards and mice need a window to type and point into.
 /// <para>
-/// SDL's windows and events belong to the thread that started it, the render thread: <see cref="Render"/> pumps the
-/// events there and writes what they change, as plain data, to a channel, and <see cref="Update"/> applies it on the
-/// main thread, where <see cref="IInput"/> and <see cref="IWindow"/> are read, before the gems that take them. So input
-/// stays fixed for the rest of a frame.
+/// SDL's windows and events belong to the thread that started it, the render thread: <see cref="Render"/>, and
+/// <see cref="Idle"/> while the app is paused, pump the events there and write what they change, as plain data, to a
+/// channel, and <see cref="Update"/> applies it on the main thread, where <see cref="IInput"/> and
+/// <see cref="IWindow"/> are read, before the gems that take them. So input stays fixed for the rest of a frame.
 /// </para>
 /// </summary>
 internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
@@ -325,13 +326,73 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// Pumps SDL's events into changes for the main thread. Render thread.
+    /// Pumps SDL's events (<see cref="Pump"/>). Render thread.
+    /// </summary>
+    public void Render(in Frame frame) => Pump();
+
+    /// <summary>
+    /// Pumps SDL's events (<see cref="Pump"/>) while the app is paused, so the window still answers the OS: it moves,
+    /// closes and is never taken for hung. What they change is applied on the next frame. Render thread.
+    /// </summary>
+    public void Idle(EngineThread thread)
+    {
+        if (thread == EngineThread.Render) Pump();
+    }
+
+    /// <summary>
+    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
+    /// </summary>
+    private static void StartFrame(DeviceKind kind, ControlState[] states)
+    {
+        for (int i = 0; i < states.Length; i++)
+        {
+            states[i] = states[i] with { WasPressed = false, WasReleased = false };
+        }
+
+        if (kind != DeviceKind.Mouse) return;
+
+        states[Control.MouseMotionX.Index] = default;
+        states[Control.MouseMotionY.Index] = default;
+        states[Control.MouseWheelX.Index] = default;
+        states[Control.MouseWheelY.Index] = default;
+    }
+
+    /// <summary>
+    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
+    /// within a frame, so a tap between two frames shows as both.
+    /// </summary>
+    private static void SetState(ControlState[] states, Control control, float value)
+    {
+        ref ControlState state = ref states[control.Index];
+        bool isDown = MathF.Abs(value) >= 0.5f;
+        state = new ControlState(
+            value,
+            isDown,
+            state.WasPressed || (isDown && !state.IsDown),
+            state.WasReleased || (!isDown && state.IsDown));
+    }
+
+    /// <summary>
+    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
+    /// </summary>
+    private static unsafe string ReadClipboard()
+    {
+        byte* text = SDL_GetClipboardText();
+        string value = CString.Read(text);
+        SDL_free(text);
+
+        return value;
+    }
+
+    /// <summary>
+    /// Gives the window what the main thread set, and pumps SDL's events into changes for the main thread. Render
+    /// thread.
     /// </summary>
     [SuppressMessage(
         "Style",
         "IDE0010:Add missing cases",
         Justification = "SDL has far more events than the gem reads; the rest are ignored on purpose.")]
-    public unsafe void Render(in Frame frame)
+    private unsafe void Pump()
     {
         ApplyWanted();
         SDL_Event sdlEvent;
@@ -430,51 +491,6 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         {
             ReadAxes(id, (SDL_Gamepad*)gamepad);
         }
-    }
-
-    /// <summary>
-    /// What happened last frame is over: pressed and released clear, and a mouse's motion and wheel go back to 0.
-    /// </summary>
-    private static void StartFrame(DeviceKind kind, ControlState[] states)
-    {
-        for (int i = 0; i < states.Length; i++)
-        {
-            states[i] = states[i] with { WasPressed = false, WasReleased = false };
-        }
-
-        if (kind != DeviceKind.Mouse) return;
-
-        states[Control.MouseMotionX.Index] = default;
-        states[Control.MouseMotionY.Index] = default;
-        states[Control.MouseWheelX.Index] = default;
-        states[Control.MouseWheelY.Index] = default;
-    }
-
-    /// <summary>
-    /// Gives a control a new value, and with it whether it went down or came up. Pressed and released only ever turn on
-    /// within a frame, so a tap between two frames shows as both.
-    /// </summary>
-    private static void SetState(ControlState[] states, Control control, float value)
-    {
-        ref ControlState state = ref states[control.Index];
-        bool isDown = MathF.Abs(value) >= 0.5f;
-        state = new ControlState(
-            value,
-            isDown,
-            state.WasPressed || (isDown && !state.IsDown),
-            state.WasReleased || (!isDown && state.IsDown));
-    }
-
-    /// <summary>
-    /// The clipboard's text, which SDL hands out as a copy that is freed once read.
-    /// </summary>
-    private static unsafe string ReadClipboard()
-    {
-        byte* text = SDL_GetClipboardText();
-        string value = CString.Read(text);
-        SDL_free(text);
-
-        return value;
     }
 
     /// <summary>

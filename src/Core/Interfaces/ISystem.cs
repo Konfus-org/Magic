@@ -6,7 +6,9 @@ namespace Magic.Interfaces;
 /// <summary>
 /// Work over every entity, which the ECS runs every frame on the main thread. A system that looks at certain components
 /// says which (<see cref="ISystem{T1}"/> and on, up to four), and work over many entities is an
-/// <see cref="IParallelSystem"/>, which runs on the ECS's threads.
+/// <see cref="IParallelSystem"/>, which runs on the ECS's threads. While the world is paused (<see cref="Frame.IsPaused"/>)
+/// a system waits, unless its class is <see cref="Attributes.UnpausableAttribute">[Unpausable]</see>, as one that copies
+/// what is drawn is.
 /// </summary>
 public interface ISystem
 {

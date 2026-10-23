@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Magic.Attributes;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
@@ -115,6 +116,7 @@ internal sealed class WorldCopy : IDisposable
     /// What the renderer needs that the world has one of, or a few: its cameras, the player, its directional lights,
     /// the sky, the weather and the effects, read in one place, once a frame, after starting the frame's copy.
     /// </summary>
+    [Unpausable]
     private sealed class ReadWorld(WorldCopy owner, World world) : ISystem
     {
         /// <summary>
@@ -315,6 +317,7 @@ internal sealed class WorldCopy : IDisposable
         }
     }
 
+    [Unpausable]
     private sealed class InstanceCopier(Slots<InstanceCopy> instances) : IParallelSystem<Transform, Renderer>
     {
         public Phase Phase => Phase.LateUpdate;

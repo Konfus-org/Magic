@@ -14,6 +14,7 @@ compresses every texture. Later runs read them from [the cache](../src/Core/READ
   four times as fast.
 - On a gamepad, the sticks move and look, the triggers go up and down and the left shoulder goes faster.
 - A left click, or the gamepad's south button, throws a ball.
+- P pauses the world and plays a hum. You can still fly around. P again lets it go on.
 - Each sample shows its own keys at the top of the screen.
 
 ## Opening a sample

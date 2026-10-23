@@ -28,6 +28,14 @@ public readonly record struct Tag(int Id)
     /// </summary>
     public static readonly Tag Global = Of("global");
 
+    /// <summary>
+    /// An entity that goes on while the world is paused (<see cref="World.IsPaused"/>), as a pause menu does: its
+    /// scripts run and its sounds play. Physics does not step while the world is paused, so its body holds all the
+    /// same. To mark a class of script or system rather than one entity, use
+    /// <see cref="Attributes.UnpausableAttribute"/>.
+    /// </summary>
+    public static readonly Tag Unpausable = Of("unpausable");
+
     public bool IsValid => Id != 0;
 
     /// <summary>

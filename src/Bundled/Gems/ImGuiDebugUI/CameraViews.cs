@@ -1,4 +1,5 @@
 using System.Numerics;
+using Magic.Attributes;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
@@ -55,6 +56,7 @@ internal readonly record struct CameraView(
 /// The views the window's cameras show, copied in LateUpdate, before the gem's own LateUpdate puts text in the world
 /// where they show it. A camera that draws into a render texture shows nothing in the window, so it has no view here.
 /// </summary>
+[Unpausable]
 internal sealed class CameraViews(IWindow window) : ISystem<Transform, Camera>
 {
     public Phase Phase => Phase.LateUpdate;

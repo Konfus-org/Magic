@@ -12,6 +12,11 @@ namespace Magic.Interfaces;
 /// tagged <see cref="Tag.Player"/>), the frame's DeltaSeconds then the time since the last call, so what moves by it
 /// moves as far.
 /// </para>
+/// <para>
+/// While the world is paused (<see cref="Frame.IsPaused"/>), Update and LateUpdate wait, unless the class is
+/// <see cref="Attributes.UnpausableAttribute">[Unpausable]</see> or the entity is tagged <see cref="Tag.Unpausable"/>,
+/// and FixedUpdate never runs, as there are no fixed steps.
+/// </para>
 /// </summary>
 public interface IBehavior : IScript
 {

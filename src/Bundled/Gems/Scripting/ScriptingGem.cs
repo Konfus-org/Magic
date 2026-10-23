@@ -44,6 +44,10 @@ namespace Magic.Scripting;
 /// as its frame's delta. FixedUpdate is never held back, nor is an entity without a <see cref="Transform"/>, which is
 /// nowhere.
 /// </para>
+/// <para>
+/// While the world is paused (<see cref="Frame.IsPaused"/>), a behaviour's hooks wait, unless its class is
+/// <see cref="UnpausableAttribute"/> or its entity is tagged <see cref="Tag.Unpausable"/>; scripts still start.
+/// </para>
 /// </summary>
 internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPreloader, IDisposable
 {
@@ -361,6 +365,11 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private static bool IsImpatient(Type type) => type.IsDefined(typeof(ImpatientAttribute), inherit: false);
 
     /// <summary>
+    /// Whether scripts of <paramref name="type"/> run while the world is paused.
+    /// </summary>
+    private static bool IsUnpausable(Type type) => type.IsDefined(typeof(UnpausableAttribute), inherit: false);
+
+    /// <summary>
     /// What <paramref name="ex"/> was: what a script threw, when reflection wrapped it.
     /// </summary>
     private static Exception Unwrap(Exception ex)
@@ -425,6 +434,22 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         int end = field.Name.IndexOf('>', StringComparison.Ordinal);
 
         return field.Name.StartsWith('<') && end > 1 ? field.Name[1..end] : field.Name;
+    }
+
+    /// <summary>
+    /// <paramref name="frame"/> as <paramref name="attached"/> is called with it: its deltas the time on each clock since
+    /// the frame it was last called in, so a behaviour called less often, far from the player, moves as far; the frame's
+    /// own before its first call.
+    /// </summary>
+    private static Frame GetCallFrame(Attached attached, in Frame frame)
+    {
+        if (attached.LastCalled is not { } last) return frame;
+
+        return frame with
+        {
+            DeltaSeconds = (float)(frame.Seconds - last.Seconds),
+            RealDeltaSeconds = (float)(frame.RealSeconds - last.RealSeconds),
+        };
     }
 
     /// <summary>
@@ -955,11 +980,9 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     }
 
     /// <summary>
-    /// Calls each behaviour's hook for <paramref name="phase"/>, in the order they were made, but those held while the
-    /// world loads (<see cref="Attached.IsHeld"/>): FixedUpdate every step, and Update and LateUpdate when the
-    /// behaviour is due, decided once a frame in Update (<see cref="IsDue"/>), with the time since the behaviour's last
-    /// call as the frame's delta. A script whose entity is gone ends first; a behaviour that throws is logged and ends,
-    /// and the others go on.
+    /// Calls the hook for <paramref name="phase"/> of each behaviour that runs this frame (<see cref="IsRunning"/>), in
+    /// the order they were made (<see cref="TryCall"/>). A script whose entity is gone ends first; a behaviour that
+    /// throws is logged and ends, and the others go on.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -979,7 +1002,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
                 continue;
             }
 
-            if (attached.IsHeld || attached.Behavior is not { } behavior) continue;
+            if (!IsRunning(attached, frame) || attached.Behavior is not { } behavior) continue;
 
             try
             {
@@ -1001,9 +1024,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
     /// <summary>
     /// The behaviour's hook for <paramref name="phase"/>: FixedUpdate every step; Update and LateUpdate only on a frame
-    /// the behaviour is due, with the time waited since its last call as the delta. Whether it ran.
+    /// the behaviour is due, decided in Update (<see cref="IsDue"/>), with the time since its last call as the deltas
+    /// (<see cref="GetCallFrame"/>), LateUpdate, the last of the two, then marking it called. Whether it ran.
     /// </summary>
-    private bool TryCall(Attached attached, IBehavior behavior, Phase phase, Frame frame)
+    private bool TryCall(Attached attached, IBehavior behavior, Phase phase, in Frame frame)
     {
         if (phase == Phase.FixedUpdate)
         {
@@ -1012,27 +1036,35 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             return true;
         }
 
+        if (phase == Phase.Update) attached.IsDue = IsDue(attached.Entity, frame.Index);
+
+        if (!attached.IsDue) return false;
+
         if (phase == Phase.Update)
         {
-            attached.IsDue = IsDue(attached.Entity, frame.Index);
-            attached.UpdateWaited += frame.DeltaSeconds;
-
-            if (!attached.IsDue) return false;
-
-            behavior.Update(frame with { DeltaSeconds = attached.UpdateWaited });
-            attached.UpdateWaited = 0;
+            behavior.Update(GetCallFrame(attached, frame));
 
             return true;
         }
 
-        attached.LateUpdateWaited += frame.DeltaSeconds;
-
-        if (!attached.IsDue) return false;
-
-        behavior.LateUpdate(frame with { DeltaSeconds = attached.LateUpdateWaited });
-        attached.LateUpdateWaited = 0;
+        behavior.LateUpdate(GetCallFrame(attached, frame));
+        attached.LastCalled = frame;
 
         return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="attached"/>'s hooks run this frame: not while it is held for the world loading, and while
+    /// the world is paused only when its class is <see cref="UnpausableAttribute"/> or its entity is tagged
+    /// <see cref="Tag.Unpausable"/>.
+    /// </summary>
+    private bool IsRunning(Attached attached, in Frame frame)
+    {
+        if (attached.IsHeld) return false;
+
+        return !frame.IsPaused
+            || IsUnpausable(attached.Instance.GetType())
+            || (_ecs.Has<Tags>(attached.Entity) && _ecs.Get<Tags>(attached.Entity).Has(Tag.Unpausable));
     }
 
     /// <summary>
@@ -1072,13 +1104,9 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         internal bool IsHeld { get; set; }
 
         /// <summary>
-        /// Seconds since its Update was last called, which the next call is handed as its frame's delta.
+        /// The frame its Update and LateUpdate were last called in, which its next call's deltas are measured from
+        /// (<see cref="GetCallFrame"/>); none before its first.
         /// </summary>
-        internal float UpdateWaited { get; set; }
-
-        /// <summary>
-        /// As <see cref="UpdateWaited"/>, for LateUpdate.
-        /// </summary>
-        internal float LateUpdateWaited { get; set; }
+        internal Frame? LastCalled { get; set; }
     }
 }

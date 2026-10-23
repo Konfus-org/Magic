@@ -9,6 +9,8 @@ adding its handle to an entity's `Scripts` component, and detaches it by removin
 - **Starting.** A script is made, given its values and started in the frame after it is attached.
 - **Running.** Behaviours' `Update`, `FixedUpdate` and `LateUpdate` run after the ECS's systems, in the order the
   scripts were attached. A behaviour that throws is logged and ends.
+- **Pausing.** While the world is paused, only behaviours whose class is `[Unpausable]`, or whose entity is tagged
+  `unpausable`, run. Scripts still start.
 - **Ending.** A script ends when its handle is removed or its entity is destroyed. It is disposed if it is
   `IDisposable`.
 - **Reloading.** When the project's code is rebuilt, each script is replaced by a new copy of its class, on the same

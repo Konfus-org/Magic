@@ -14,6 +14,11 @@ The run ends when a gem calls `App.Quit`, the `--frames` or `--seconds` limit is
 `--headless` run. `App.Restart` restarts the run in the same process, with the world as it was. A gem that
 can't be made, or throws in a hook, is logged as an error, and the run goes on without it.
 
+`App.IsPaused` pauses the app, as a debugger does: no frame runs, and the last image stays shown. `App.Step` runs one
+frame at a time. While the app is paused, the main thread still runs the work handed to it, and each gem's `Idle` runs
+in place of the frames, so the window answers the OS and lines typed in the terminal still run. The game's own pause is
+the world's ([The world](#the-world)).
+
 ## The frame
 
 Each frame runs on two threads. The main thread runs every gem's `Update`, `FixedUpdate` (once per fixed step),
@@ -22,6 +27,14 @@ Gem constructors and `Dispose` also run on the render thread. A gem implements o
 ([`IGem`](Interfaces/IGem.cs)). `Sync` runs while the render thread is idle. Prepare what `Render` reads in
 `LateUpdate`, into a copy `Render` isn't using, and swap the copies in `Sync`. Main-thread hooks run in the order the
 gems were made, and `Render` in reverse.
+
+### Time
+
+Every hook gets a `Frame` with two clocks. `DeltaSeconds` and `Seconds` are the world's time: `World.TimeScale` speeds
+it up or slows it down, and it stands still while the world is paused. `RealDeltaSeconds` and `RealSeconds` are real
+time. Game code moves by the world's time. What moves while the world is paused, such as a camera or a menu, moves by
+real time. `FixedUpdate` runs once per fixed step of the world's time, 60 a second unless `Core.fixedRate` says
+otherwise. A frame runs at most `Core.maxFixedSteps` of them, 4 by default, and the world drops the time past that.
 
 ### Threads
 
@@ -36,9 +49,10 @@ main thread at the start of the next frame. Watching returns a `Subscription`; d
 
 ## What a gem can ask for
 
-A gem gets what it needs as constructor parameters, and keeps it: Core's services, such as `App` (the project and
-quitting), `Events`, `Assets` and `World`; interfaces other gems provide, optional when the parameter has a default value; its own settings class
-([Gem settings](#gem-settings)); and `IServiceProvider`, only to make objects at run time.
+A gem gets what it needs as constructor parameters, and keeps it: Core's services, such as `App` (the project,
+pausing and quitting), `Events`, `Assets` and `World`; interfaces other gems provide, optional when the parameter has
+a default value; its own settings class ([Gem settings](#gem-settings)); and `IServiceProvider`, only to make objects
+at run time.
 
 Every other interface the gem's class implements is what it provides. Only one gem can provide each interface, except
 `ILogSink` and `IPreloader`. A gem that provides `IEcs` or `IScripts` can't take `World`.
@@ -76,11 +90,12 @@ each winning over the one before:
 4. `--set Gem.path=value` on the command line.
 5. Changes made while running, until another preset is applied.
 
-A setting's key is the gem's name, then the property's path, with dots between: `Gem.path`. A preset is a JSON asset of
-values by key; the engine's [presets](../Bundled/Resources/Presets/) are examples. `Settings` reads and changes
-settings by key, applies presets and lists every setting for a UI, such as the settings window (F4). Mark a setting
-the gem reads only at start with `[RequireRestart]`; changing it restarts the run. `[Category("Tab/Header")]` groups a
-setting in a settings UI, and `[Range]` limits a number.
+A setting's key is the gem's name, then the property's path, with dots between: `Gem.path`. Core's own settings, such
+as the fixed rate, are under `Core`. A preset is a JSON asset of values by key; the engine's
+[presets](../Bundled/Resources/Presets/) are examples. `Settings` reads and changes settings by key, applies presets
+and lists every setting for a UI, such as the settings window (F4). Mark a setting the gem reads only at start with
+`[RequireRestart]`; changing it restarts the run. `[Category("Tab/Header")]` groups a setting in a settings UI, and
+`[Range]` limits a number.
 
 ## The log
 
@@ -125,8 +140,8 @@ project's own folder is read first and never written; a `Release` build bakes on
 A component is an unmanaged struct that implements `IComponent`. Declare one in a gem or the project's code, and files
 name it by its type name. The samples' `Assets/Components/` has examples. `Transform` holds an entity's position, in
 metres. A `tags` list on an entity gives it a `Tags` component; the engine uses `spawn` for where a domain puts the
-player, `player` for the player's camera, and `global` for an entity no domain owns
-([The world](#the-world)).
+player, `player` for the player's camera, `global` for an entity no domain owns ([The world](#the-world)), and
+`unpausable` for an entity that goes on while the world is paused.
 
 ## Scripts
 
@@ -142,6 +157,8 @@ component to attach or detach one. The samples' `Assets/Scripts/` has examples.
   aren't attached to an entity.
 - `[Impatient]` scripts, such as a loading domain's, run while the loading domain shows. Every other script, and every
   script in the domain being readied, runs from the frame after that domain is shown.
+- `[Unpausable]` scripts and systems run while the world is paused, and so do the scripts of an entity tagged
+  `unpausable`. Every other behaviour and system waits, and no `FixedUpdate` runs.
 
 ## The world
 
@@ -164,6 +181,11 @@ list them with `World.GetGlobals`. Restoring a saved world destroys the globals 
 A gem that prepares what spawns, such as uploading models, implements `IPreloader`. It reads `World.Stream` in its
 hooks, and the world asks it each frame how far it has what is being loaded and whether the domain being readied is
 ready.
+
+Pause the world with `World.IsPaused`, as a game pauses. Its time stands still, so physics holds, and only what is
+unpausable runs ([Scripts](#scripts)). The world is still drawn. `World.TimeScale` speeds its time up or slows it
+down. While a domain loads in place of the world, the world runs unpaused at normal speed. Both are saved with the
+world.
 
 ## The GPU
 
@@ -206,7 +228,8 @@ it touched each step. `IPhysics` finds the nearest body along a segment, and the
 An entity with a `Sound` component plays the `Audio` asset it names. Write the `Sound` to play, pause, stop, seek or
 change it. A sound in the world is heard from the player's camera. A sound set to play everywhere, such as music,
 sounds the same anywhere. An `Acoustics` component next to a `Physics` says what a body is made of, for an audio gem
-that simulates how sound travels.
+that simulates how sound travels. While the world is paused, sounds hold where they are, except those of an entity
+tagged `unpausable`, such as pause music.
 
 ## The debug UI
 

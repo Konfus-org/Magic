@@ -14,7 +14,8 @@ public enum Phase
     Update,
 
     /// <summary>
-    /// Moving the world on by fixed steps, as many as fit in the time since the last frame: simulation. Main thread.
+    /// Moving the world on by fixed steps, as many as fit in the world's time since the last frame, so none while it
+    /// is paused: simulation. Main thread.
     /// </summary>
     FixedUpdate,
 

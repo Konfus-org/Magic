@@ -9,7 +9,9 @@ namespace Magic.Interfaces;
 /// The scripts (<see cref="IScript"/>): makes them, and runs a copy of each an entity's
 /// <see cref="Contexts.Components.Scripts"/> names, made for that entity with the values a prefab gives it, until the
 /// entity no longer names it or is destroyed. An <see cref="IBehavior"/> has its hooks called each frame, less often
-/// far from the player; a script that is also a system, of any kind, is added to the <see cref="IEcs"/>.
+/// far from the player, and not while the world is paused unless its class is
+/// <see cref="Attributes.UnpausableAttribute">[Unpausable]</see> or its entity is tagged <see cref="Tag.Unpausable"/>; a
+/// script that is also a system, of any kind, is added to the <see cref="IEcs"/>.
 /// </summary>
 public interface IScripts
 {

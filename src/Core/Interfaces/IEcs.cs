@@ -137,7 +137,10 @@ public interface IEcs
 
     /// <summary>
     /// Runs <paramref name="system"/> every frame, in its <see cref="ISystem.Phase"/>, after the systems registered
-    /// before it, until the subscription is disposed. A system that throws is logged and taken off; the others go on.
+    /// before it, until the subscription is disposed, but not while the world is paused
+    /// (<see cref="Contexts.Frames.Frame.IsPaused"/>) unless its class is
+    /// <see cref="Attributes.UnpausableAttribute">[Unpausable]</see>. A system that throws is logged and taken off; the
+    /// others go on.
     /// </summary>
     Subscription Register(ISystem system);
 

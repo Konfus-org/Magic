@@ -18,6 +18,15 @@
                 },
                 { "id": 3317, "speed": 40, "most": 50, "model": { "id": 517 }, "material": { "id": 3322 } }
             ]
+        },
+        {
+            "name": "Pause",
+            "tags": [ "unpausable" ],
+            "components": {
+                "Transform": {},
+                "Sound": { "audio": { "id": 3702 }, "playback": "paused", "loop": true, "volume": 0.5, "space": "everywhere" }
+            },
+            "scripts": [ { "id": 3453 } ]
         }
     ]
 }

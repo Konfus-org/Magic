@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using Arch.Core;
+using Magic.Attributes;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Subscriptions;
@@ -22,7 +23,8 @@ namespace Magic.ArchEcs;
 /// <summary>
 /// The entity world, in one Arch world, on the main thread. Entities are Arch's, bit for bit, and components live in
 /// Arch's chunks, so a query hands out spans straight over them and allocates nothing. Systems run in this gem's hook
-/// for their phase, in the order they were added; a parallel system's chunks are spread over Arch's own job threads.
+/// for their phase, in the order they were added, and while the world is paused only the unpausable ones; a parallel
+/// system's chunks are spread over Arch's own job threads.
 /// Arch trusts its caller, so this gem checks what Arch would let go wrong silently, and throws instead; the README's
 /// Guards table says which.
 /// </summary>
@@ -403,7 +405,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     }
 
     /// <summary>
-    /// Runs the phase's systems. One that throws is logged and taken off, and the phase goes on without it.
+    /// Runs the phase's systems, while the world is paused only those whose class is <see cref="UnpausableAttribute"/>.
+    /// One that throws is logged and taken off, and the phase goes on without it.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -413,6 +416,8 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     {
         foreach (Scheduled scheduled in _systems[(int)phase])
         {
+            if (frame.IsPaused && !scheduled.IsUnpausable) continue;
+
             try
             {
                 scheduled.Run(frame);
@@ -442,7 +447,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         }
 
         int index = (int)phase;
-        Scheduled scheduled = new(system, run);
+        Scheduled scheduled = new(system, run, system.GetType().IsDefined(typeof(UnpausableAttribute), inherit: false));
         _systems[index] = [.. _systems[index], scheduled];
 
         return new Subscription(() => TakeOff(index, scheduled));
@@ -571,9 +576,10 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     private delegate void ChunkRun(in Frame frame, in Chunk chunk);
 
     /// <summary>
-    /// A system added to a phase: the system, which names it in the log and takes it off, and how to run it.
+    /// A system added to a phase: the system, which names it in the log and takes it off, how to run it, and whether
+    /// it runs while the world is paused (<see cref="UnpausableAttribute"/>).
     /// </summary>
-    private readonly record struct Scheduled(object System, Action<Frame> Run);
+    private readonly record struct Scheduled(object System, Action<Frame> Run, bool IsUnpausable);
 
     /// <summary>
     /// A parallel system's run over one chunk, on one of Arch's job threads. What it throws is kept for the main
