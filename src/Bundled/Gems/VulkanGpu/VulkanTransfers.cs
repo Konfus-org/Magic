@@ -327,6 +327,7 @@ internal sealed unsafe class VulkanTransfers : IDisposable
         VkSubmitInfo2 submit = new() { commandBufferInfoCount = 1, pCommandBufferInfos = &buffer };
         VkResult result = _device.Api.vkQueueSubmit2(_device.Queue, 1, &submit, VkFence.Null);
         if (result == VkResult.Success) result = _device.Api.vkQueueWaitIdle(_device.Queue);
+        if (result == VkResult.ErrorDeviceLost) _device.LogFault();
 
         _device.Api.vkFreeCommandBuffers(_pool, 1, &commandBuffer);
 

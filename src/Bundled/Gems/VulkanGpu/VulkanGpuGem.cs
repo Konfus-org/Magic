@@ -665,6 +665,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         };
         VkResult result = _device.Api.vkQueueSubmit2(_device.Queue, 1, &submit, VkFence.Null);
         if (result != VkResult.Success) Debugging.Error($"The GPU did not take frame {_frame}: {result}");
+        if (result == VkResult.ErrorDeviceLost) _device.LogFault();
     }
 
     /// <summary>

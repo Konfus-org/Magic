@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Text;
 using Magic.Contexts.Utils;
 using Magic.SdlBindings;
 using Magic.Services;
@@ -37,6 +39,13 @@ internal sealed unsafe class VulkanDevice
     /// </summary>
     private readonly bool _hasVideo;
     private readonly bool _hasSdlVulkan;
+
+    /// <summary>
+    /// Whether the driver can say why the GPU was lost (VK_EXT_device_fault), and whether it has been asked: only the
+    /// first loss is logged, as every wait and submit after it fails the same way.
+    /// </summary>
+    private readonly bool _canReportFaults;
+    private bool _isFaultLogged;
 
     public VulkanDevice(VulkanGpuSettings settings)
     {
@@ -81,6 +90,7 @@ internal sealed unsafe class VulkanDevice
         InstanceApi.vkGetPhysicalDeviceFeatures(PhysicalDevice, out VkPhysicalDeviceFeatures supported);
         HasAnisotropy = supported.samplerAnisotropy;
         HasDepthBiasClamp = supported.depthBiasClamp;
+        _canReportFaults = CanReportFaults();
         Handle = CreateDevice(supported);
         Api = Vulkan.GetApi(Instance, Handle);
         Api.vkGetDeviceQueue(QueueFamily, 0, out VkQueue queue);
@@ -199,6 +209,52 @@ internal sealed unsafe class VulkanDevice
         VkSemaphoreWaitInfo wait = new() { semaphoreCount = 1, pSemaphores = &timeline, pValues = &frame };
         VkResult result = Api.vkWaitSemaphores(&wait, ulong.MaxValue);
         if (result != VkResult.Success) Debugging.Error($"Waiting for frame {frame} on the GPU failed: {result}");
+        if (result == VkResult.ErrorDeviceLost) LogFault();
+    }
+
+    /// <summary>
+    /// Logs why the GPU was lost, as far as its driver can say: what happened, each address the GPU faulted at with
+    /// what it did there, such as reading memory that is not there, and what the vendor adds. Call it when a wait or
+    /// submit returns <see cref="VkResult.ErrorDeviceLost"/>; a driver without VK_EXT_device_fault says nothing more.
+    /// </summary>
+    internal void LogFault()
+    {
+        if (!_canReportFaults || _isFaultLogged) return;
+
+        _isFaultLogged = true;
+
+        // The driver is asked twice: how many addresses and vendor entries it has, then what they are.
+        VkDeviceFaultCountsEXT counts = new();
+        Api.vkGetDeviceFaultInfoEXT(&counts, null);
+        VkDeviceFaultAddressInfoKHR[] addresses = new VkDeviceFaultAddressInfoKHR[counts.addressInfoCount];
+        VkDeviceFaultVendorInfoKHR[] vendors = new VkDeviceFaultVendorInfoKHR[counts.vendorInfoCount];
+        VkDeviceFaultInfoEXT info = new();
+        fixed (VkDeviceFaultAddressInfoKHR* firstAddress = addresses)
+        fixed (VkDeviceFaultVendorInfoKHR* firstVendor = vendors)
+        {
+            info.pAddressInfos = firstAddress;
+            info.pVendorInfos = firstVendor;
+            Api.vkGetDeviceFaultInfoEXT(&counts, &info);
+        }
+
+        StringBuilder sb = new($"The GPU was lost: {CString.Read(info.description)}");
+        foreach (VkDeviceFaultAddressInfoKHR address in addresses)
+        {
+            sb.Append(
+                CultureInfo.InvariantCulture,
+                $"\n{address.addressType} at 0x{address.reportedAddress:X16}, "
+                    + $"precise to {address.addressPrecision} bytes");
+        }
+
+        foreach (VkDeviceFaultVendorInfoKHR vendor in vendors)
+        {
+            sb.Append(
+                CultureInfo.InvariantCulture,
+                $"\n{CString.Read(vendor.description)}: code 0x{vendor.vendorFaultCode:X}, "
+                    + $"data 0x{vendor.vendorFaultData:X}");
+        }
+
+        Debugging.Error(sb.ToString());
     }
 
     /// <summary>
@@ -254,6 +310,16 @@ internal sealed unsafe class VulkanDevice
         Vulkan.vkEnumerateInstanceExtensionProperties(out uint count);
         Span<VkExtensionProperties> extensions = new VkExtensionProperties[count];
         Vulkan.vkEnumerateInstanceExtensionProperties(extensions);
+
+        return HasExtension(extensions, name);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="extensions"/>, as Vulkan lists those of the instance or of a GPU, name
+    /// <paramref name="name"/>.
+    /// </summary>
+    private static bool HasExtension(ReadOnlySpan<VkExtensionProperties> extensions, ReadOnlySpan<byte> name)
+    {
         foreach (VkExtensionProperties extension in extensions)
         {
             if (name.SequenceEqual(
@@ -458,12 +524,37 @@ internal sealed unsafe class VulkanDevice
     }
 
     /// <summary>
+    /// Whether the driver can say why the GPU was lost: it has VK_EXT_device_fault, with the feature that reports it.
+    /// </summary>
+    private bool CanReportFaults()
+    {
+        InstanceApi.vkEnumerateDeviceExtensionProperties(PhysicalDevice, out uint count);
+        Span<VkExtensionProperties> extensions = new VkExtensionProperties[count];
+        InstanceApi.vkEnumerateDeviceExtensionProperties(PhysicalDevice, extensions);
+
+        if (!HasExtension(extensions, Vulkan.VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) return false;
+
+        VkPhysicalDeviceFaultFeaturesEXT fault = new();
+        VkPhysicalDeviceFeatures2 features = new() { pNext = &fault };
+        InstanceApi.vkGetPhysicalDeviceFeatures2(PhysicalDevice, &features);
+
+        return fault.deviceFault;
+    }
+
+    /// <summary>
     /// The device with the features the gem needs, which choosing it made sure of, and those it uses where they are
-    /// there: anisotropy, a clamp on depth bias, an instance offset in indirect draws, clip distances.
+    /// there: anisotropy, a clamp on depth bias, an instance offset in indirect draws, clip distances, the driver's
+    /// report of why the GPU was lost.
     /// </summary>
     private VkDevice CreateDevice(in VkPhysicalDeviceFeatures supported)
     {
-        VkPhysicalDeviceVulkan13Features features13 = new() { dynamicRendering = true, synchronization2 = true };
+        VkPhysicalDeviceFaultFeaturesEXT fault = new() { deviceFault = true };
+        VkPhysicalDeviceVulkan13Features features13 = new()
+        {
+            pNext = _canReportFaults ? &fault : null,
+            dynamicRendering = true,
+            synchronization2 = true,
+        };
         VkPhysicalDeviceVulkan12Features features12 = new()
         {
             pNext = &features13,
@@ -495,6 +586,7 @@ internal sealed unsafe class VulkanDevice
         };
         List<VkUtf8String> names = [];
         if (HasSurfaces) names.Add(Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+        if (_canReportFaults) names.Add(Vulkan.VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 
         using VkStringArray extensions = new(names);
         VkDeviceCreateInfo info = new()
