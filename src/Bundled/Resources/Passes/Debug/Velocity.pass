@@ -1,8 +1,0 @@
-{
-    "description": "Motion since last frame: grey still, red and green across the view, a thousand pixels a second saturating.",
-    "stage": "ui",
-    "kind": "fullscreen",
-    "shader": { "id": 11936 },
-    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
-    "writes": [ { "name": "DebugView" } ]
-}

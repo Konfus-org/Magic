@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
@@ -10,29 +9,19 @@ using Magic.Services;
 namespace Magic.ImGuiDebugUI.Resources.Scripts;
 
 /// <summary>
-/// The pipeline script that draws the debug UI: ImGui's frame, a frame behind, from the <see cref="DrawLists"/> the
-/// main thread copied, over whatever target its pass names, the window once every view in it is composed
-/// (<c>Resources/Passes/DebugUi.pass</c>, in <c>Resources/Pipelines/Overlay.pipeline</c>). It takes in ImGui's textures
-/// as they are, uploads the vertices and indices, and records the draws into the pass's render pass, encoded as
-/// the target expects. It owns every GPU object it draws with: its textures, buffers, sampler and a pipeline per
-/// target format, made the first time one is drawn into, and lets them go with the listing that made it. Render
-/// thread.
+/// The overlay script that draws the debug UI: ImGui's frame, a frame behind, from the <see cref="DrawLists"/> the main
+/// thread copied, over the window once every view in it is shown. It takes in ImGui's textures as they are, uploads
+/// the vertices and indices, and records the draws into the overlay's render pass, encoded as the target expects, its
+/// shaders reading the vertices, the draw's texture and its constants through the heap. It owns every GPU object it
+/// draws with: its textures, buffers, sampler and a pipeline per target format, made the first time one is drawn into,
+/// and lets them go as it is disposed. Render thread.
 /// </summary>
-internal sealed class DebugUi : IPipelineScript, IDisposable
+internal sealed class DebugUi : IOverlayScript, IDisposable
 {
     private const string VertexShader = "Shaders/Overlay/Overlay.vert.hlsl";
     private const string FragmentShader = "Shaders/Overlay/Overlay.frag.hlsl";
 
-    private static readonly GpuVertexBuffer[] _buffers = [new(0, (uint)Unsafe.SizeOf<ImDrawVert_t>())];
-
-    private static readonly GpuVertexInput[] _inputs =
-    [
-        new(0, 0, GpuVertexFormat.Float2, 0),
-        new(1, 0, GpuVertexFormat.Float2, 8),
-        new(2, 0, GpuVertexFormat.Ubyte4Norm, 16),
-    ];
-
-    private readonly IGpu _gpu;
+    private readonly IGpuDriver _gpu;
     private readonly DrawLists _lists;
     private readonly Dictionary<uint, (GpuTexture Texture, int Width, int Height, uint Version)> _textures = [];
     private readonly List<uint> _gone = [];
@@ -49,10 +38,10 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     private volatile Compiled? _shaders;
 
     /// <summary>
-    /// Made by the renderer for each listing of the frame it builds, with the debug UI's draw lists, which the debug UI
-    /// this gem provides copies each frame; another gem's debug UI has none, and the script is not made.
+    /// Made by the renderer with the debug UI's draw lists, which the debug UI this gem provides copies each frame;
+    /// another gem's debug UI has none, and the script is not made.
     /// </summary>
-    public DebugUi(IDebugUI ui, IGpu gpu, IShaderCompiler compiler, App app)
+    public DebugUi(IDebugUI ui, IGpuDriver gpu, IShaderCompiler compiler, App app)
     {
         _gpu = gpu;
         _lists = ui is ImGuiDebugUIGem imgui
@@ -82,7 +71,7 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     /// Takes in ImGui's textures as they are, then draws them over the target; nothing while there is nothing to draw
     /// or the pipeline is not made. The sampler is made here, on the render thread, the first time.
     /// </summary>
-    public void Record(in PipelineScriptContext context)
+    public void Record(in OverlayContext context)
     {
         if (_sampler == GpuSampler.None)
             _sampler = _gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
@@ -93,32 +82,38 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
 
         if (_lists.Calls.Length == 0 || context.Area.IsEmpty || pipeline == GpuPipeline.None) return;
 
-        Upload(ref _vertexBuffer, ref _vertexBytes, GpuBufferUsage.Vertex, MemoryMarshal.AsBytes(_lists.Vertices));
+        Upload(
+            ref _vertexBuffer,
+            ref _vertexBytes,
+            GpuBufferUsage.GraphicsRead,
+            MemoryMarshal.AsBytes(_lists.Vertices));
         Upload(ref _indexBuffer, ref _indexBytes, GpuBufferUsage.Index, MemoryMarshal.AsBytes(_lists.Indices));
 
         // ImGui's vertices are in window pixels: the vertex stage is given one over the area's size to place them, and
         // the fragment stage the target's encoding.
+        OverlayConstants constants = new(
+            new Vector2(1f / context.Area.Width, 1f / context.Area.Height),
+            _vertexBuffer,
+            0,
+            GpuTexture.None,
+            _sampler,
+            (uint)context.Encoding,
+            0);
         using GpuRenderPass pass = context.Begin()
             .Pipeline(pipeline)
-            .VertexBuffers([_vertexBuffer])
-            .IndexBuffer(_indexBuffer, GpuIndexSize.Bits16)
-            .Constants(GpuStage.Vertex, new Vector4(1f / context.Area.Width, 1f / context.Area.Height, 0, 0))
-            .Constants(GpuStage.Fragment, new ImGuiConstants((uint)context.Encoding));
+            .Reads([_vertexBuffer])
+            .IndexBuffer(_indexBuffer, GpuIndexSize.Bits16);
 
-        // Each draw clipped to its rectangle, its texture bound only when it changes; one whose texture is not taken in
-        // is left out.
-        uint bound = 0;
+        // Each draw clipped to its rectangle, its vertices counted from its first and its texture read; one whose
+        // texture is not taken in is left out.
         foreach (DrawCall call in _lists.Calls)
         {
             if (!_textures.TryGetValue(call.Texture, out (GpuTexture Texture, int, int, uint) texture)) continue;
 
-            if (bound != call.Texture)
-            {
-                pass.Textures(GpuStage.Fragment, [new GpuSampledTexture(texture.Texture, _sampler)]);
-                bound = call.Texture;
-            }
-
-            pass.Scissor(call.Clip).DrawIndexed(call.Indices, call.FirstIndex, call.VertexOffset);
+            pass.Reads([texture.Texture])
+                .Scissor(call.Clip)
+                .Constants(constants with { FirstVertex = (uint)call.VertexOffset, Texture = texture.Texture })
+                .DrawIndexed(call.Indices, call.FirstIndex);
         }
     }
 
@@ -202,8 +197,6 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
                 Fragment = fragment.Value,
                 ColorFormats = [format],
                 Blends = [GpuBlend.Alpha],
-                VertexBuffers = _buffers,
-                VertexInputs = _inputs,
                 Cull = GpuCull.None,
             })
             : Result.Failure<GpuPipeline>(vertex.Ok ? fragment.Error : vertex.Error);
@@ -228,18 +221,19 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     }
 
     /// <summary>
-    /// The fragment stage's constant block, laid out as <c>Overlay.frag.hlsl</c>'s <c>cbuffer Overlay</c>: the
-    /// target's <see cref="TargetEncoding"/>, which the shader encodes ImGui's sRGB colours for, padded to one 16-byte
-    /// row.
+    /// The constant block both stages read, laid out as the overlay shaders' <c>OverlayConstants</c>: one over the
+    /// target's size, the vertices, the draw's first vertex and texture, the sampler, and the target's
+    /// <see cref="TargetEncoding"/>, which the fragment stage encodes ImGui's sRGB colours for.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    private readonly struct ImGuiConstants(uint encoding)
-    {
-        public readonly uint Encoding = encoding;
-        public readonly uint Pad0;
-        public readonly uint Pad1;
-        public readonly uint Pad2;
-    }
+    private readonly record struct OverlayConstants(
+        Vector2 InvTargetSize,
+        GpuBuffer Vertices,
+        uint FirstVertex,
+        GpuTexture Texture,
+        GpuSampler Sampler,
+        uint Encoding,
+        uint Padding);
 
     /// <summary>
     /// The two stages as compiled, or why each did not.

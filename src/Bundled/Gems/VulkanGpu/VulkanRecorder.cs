@@ -9,10 +9,10 @@ namespace Magic.VulkanGpu;
 /// as the renderer and its shaders are written for:
 /// <list type="bullet">
 /// <item>A pass ends where everything it wrote is done before anything after it uses it. Before a pass begins, every
-/// resource its commands touch (its targets, what it binds to read, what a compute pass says it writes, its vertex,
-/// index and argument buffers) is waited for and put in the layout the pass uses, in one barrier.</item>
-/// <item>A stage's bindings and constants stay until bound again; each draw or dispatch writes the descriptor sets it
-/// needs from them into sets of this frame's, as the pipeline's shapes say, and names its constants' offsets.</item>
+/// resource its commands touch (its targets, what it says it reads and writes, its index and argument buffers) is
+/// waited for and put in the layout the pass uses, in one barrier.</item>
+/// <item>A pipeline binds the heap as it is bound, and its constants are pushed before a draw or dispatch when they
+/// changed.</item>
 /// <item>The viewport is flipped, so clip space is +Y up, as the shaders are written for, and a pass starts with the
 /// viewport and the scissor over its whole target.</item>
 /// <item>A pass into a window draws into the image the window acquired this frame, acquired the first time one does;
@@ -22,45 +22,29 @@ namespace Magic.VulkanGpu;
 internal sealed unsafe class VulkanRecorder(
     VulkanDevice device,
     VulkanResources resources,
-    VulkanPipelines pipelines,
-    VulkanDescriptors descriptors,
     VulkanWindows windows,
     VulkanBarriers barriers,
-    VulkanTimer timer)
+    VulkanTimer timer,
+    VulkanHeap heap)
 {
-    private const int MaxSampled = 16;
-    private const int MaxReads = 8;
     private const uint ArgumentsStride = 20;
+
+    private const VkPipelineStageFlags2 GraphicsShaders = VkPipelineStageFlags2.VertexShader
+        | VkPipelineStageFlags2.FragmentShader;
 
     private readonly VulkanDevice _device = device;
     private readonly VulkanResources _resources = resources;
-    private readonly VulkanPipelines _pipelines = pipelines;
-    private readonly VulkanDescriptors _descriptors = descriptors;
     private readonly VulkanWindows _windows = windows;
     private readonly VulkanBarriers _barriers = barriers;
     private readonly VulkanTimer _timer = timer;
+    private readonly VulkanHeap _heap = heap;
 
     /// <summary>
-    /// What each stage (by <see cref="GpuStage"/>) has bound to read, and the offset of its constants this frame.
+    /// The constants as last set, and whether they changed, or a pipeline was bound, since they were last pushed.
     /// </summary>
-    private readonly GpuSampledTexture[][] _sampled =
-        [new GpuSampledTexture[MaxSampled], new GpuSampledTexture[MaxSampled], new GpuSampledTexture[MaxSampled]];
-    private readonly GpuTexture[][] _textures =
-        [new GpuTexture[MaxReads], new GpuTexture[MaxReads], new GpuTexture[MaxReads]];
-    private readonly GpuBuffer[][] _buffers =
-        [new GpuBuffer[MaxReads], new GpuBuffer[MaxReads], new GpuBuffer[MaxReads]];
-    private readonly uint[] _constants = new uint[3];
-
-    /// <summary>
-    /// What the compute pass under way writes, in the order its shader numbers them.
-    /// </summary>
-    private readonly List<GpuTextureLevel> _writtenTextures = [];
-    private readonly List<GpuBuffer> _writtenBuffers = [];
-
-    /// <summary>
-    /// The pipeline's descriptor sets, by set number, that must be written again before the next draw or dispatch.
-    /// </summary>
-    private readonly bool[] _isSetStale = new bool[4];
+    private readonly byte[] _push = new byte[VulkanHeap.ConstantBytes];
+    private int _pushLength;
+    private bool _isPushStale;
 
     private GpuCommands _commands = new();
     private VkCommandBuffer _commandBuffer;
@@ -80,8 +64,8 @@ internal sealed unsafe class VulkanRecorder(
     private bool _isGroupTimed;
 
     /// <summary>
-    /// Records <paramref name="commands"/> into <paramref name="commandBuffer"/>, which frame slot
-    /// <paramref name="slot"/>'s descriptors and constants serve; each top-level debug group timed when
+    /// Records <paramref name="commands"/> into <paramref name="commandBuffer"/> for frame slot
+    /// <paramref name="slot"/>, whose images the windows acquire; each top-level debug group timed when
     /// <paramref name="isTimed"/>.
     /// </summary>
     internal void Record(GpuCommands commands, VkCommandBuffer commandBuffer, int slot, bool isTimed)
@@ -92,7 +76,8 @@ internal sealed unsafe class VulkanRecorder(
         _isTimed = isTimed;
         _pipeline = null;
         _depth = 0;
-        Array.Fill(_constants, 0u);
+        _pushLength = 0;
+        _isPushStale = false;
         ReadOnlySpan<GpuCommand> list = commands.Commands;
         for (int i = 0; i < list.Length; i++)
         {
@@ -101,14 +86,6 @@ internal sealed unsafe class VulkanRecorder(
             Run(list, i);
         }
     }
-
-    private static VkPipelineStageFlags2 ToStages(GpuStage stage) => stage switch
-    {
-        GpuStage.Vertex => VkPipelineStageFlags2.VertexShader,
-        GpuStage.Fragment => VkPipelineStageFlags2.FragmentShader,
-        GpuStage.Compute => VkPipelineStageFlags2.ComputeShader,
-        _ => throw new ArgumentOutOfRangeException(nameof(stage), stage, "There is no such shader stage."),
-    };
 
     private static int FindEnd(ReadOnlySpan<GpuCommand> list, int begin, GpuCommandType end)
     {
@@ -119,21 +96,6 @@ internal sealed unsafe class VulkanRecorder(
 
         return list.Length;
     }
-
-    private static VkWriteDescriptorSet MakeWrite(
-        VkDescriptorSet set,
-        uint binding,
-        SetShape shape,
-        VkDescriptorImageInfo* pImageInfo = null,
-        VkDescriptorBufferInfo* pBufferInfo = null) => new()
-        {
-            dstSet = set,
-            dstBinding = binding,
-            descriptorCount = 1,
-            descriptorType = VulkanPipelines.GetDescriptorType(shape, binding),
-            pImageInfo = pImageInfo,
-            pBufferInfo = pBufferInfo,
-        };
 
     /// <summary>
     /// One recorded command, as its Vulkan calls.
@@ -155,8 +117,6 @@ internal sealed unsafe class VulkanRecorder(
                 BeginComputePass(list, index);
                 break;
             case GpuCommandType.EndComputePass:
-                _writtenTextures.Clear();
-                _writtenBuffers.Clear();
                 break;
             case GpuCommandType.Viewport:
                 SetViewport(command.Area);
@@ -166,9 +126,6 @@ internal sealed unsafe class VulkanRecorder(
                 break;
             case GpuCommandType.Pipeline:
                 BindPipeline(command.Pipeline);
-                break;
-            case GpuCommandType.VertexBuffers:
-                BindVertexBuffers(command);
                 break;
             case GpuCommandType.IndexBuffer:
                 if (_resources.Buffers[command.Buffer.Id] is { } indices)
@@ -180,23 +137,14 @@ internal sealed unsafe class VulkanRecorder(
                 }
 
                 break;
-            case GpuCommandType.Buffers:
-                _commands.GetBuffers(command).CopyTo(_buffers[(int)command.Stage]);
-                MarkStale(command.Stage);
-                break;
-            case GpuCommandType.RawTextures:
-                _commands.GetTextures(command).CopyTo(_textures[(int)command.Stage]);
-                MarkStale(command.Stage);
-                break;
-            case GpuCommandType.Textures:
-                _commands.GetSampled(command).CopyTo(_sampled[(int)command.Stage]);
-                MarkStale(command.Stage);
-                break;
             case GpuCommandType.Constants:
-                _constants[(int)command.Stage] = _descriptors.Push(_slot, _commands.GetBytes(command));
+                SetConstants(command);
+                break;
+            case GpuCommandType.Reads or GpuCommandType.Writes:
+                // Waited for as the pass began.
                 break;
             case GpuCommandType.Draw:
-                BindSets();
+                PushConstants();
                 _device.Api.vkCmdDraw(
                     _commandBuffer,
                     command.Count,
@@ -205,7 +153,7 @@ internal sealed unsafe class VulkanRecorder(
                     command.FirstInstance);
                 break;
             case GpuCommandType.DrawIndexed:
-                BindSets();
+                PushConstants();
                 _device.Api.vkCmdDrawIndexed(
                     _commandBuffer,
                     command.Count,
@@ -215,7 +163,7 @@ internal sealed unsafe class VulkanRecorder(
                     command.FirstInstance);
                 break;
             case GpuCommandType.DrawIndexedFromBuffer:
-                BindSets();
+                PushConstants();
                 if (_resources.Buffers[command.Buffer.Id] is { } draws)
                 {
                     _device.Api.vkCmdDrawIndexedIndirect(
@@ -228,11 +176,11 @@ internal sealed unsafe class VulkanRecorder(
 
                 break;
             case GpuCommandType.Dispatch:
-                BindSets();
+                PushConstants();
                 _device.Api.vkCmdDispatch(_commandBuffer, command.GroupsX, command.GroupsY, command.GroupsZ);
                 break;
             case GpuCommandType.DispatchFromBuffer:
-                BindSets();
+                PushConstants();
                 if (_resources.Buffers[command.Buffer.Id] is { } groups)
                     _device.Api.vkCmdDispatchIndirect(_commandBuffer, groups.Handle, command.Offset);
 
@@ -326,7 +274,7 @@ internal sealed unsafe class VulkanRecorder(
             };
         }
 
-        UseReads(list, index + 1, FindEnd(list, index, GpuCommandType.EndRenderPass));
+        UseReads(list, index + 1, FindEnd(list, index, GpuCommandType.EndRenderPass), GraphicsShaders);
         _barriers.Record(_device.Api, _commandBuffer);
         VkRenderingInfo info = new()
         {
@@ -343,79 +291,41 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// Waits for what the compute pass writes and reads, in the layouts it uses them in.
+    /// Waits for what the compute pass reads and writes, in the layouts it uses them in.
     /// </summary>
     private void BeginComputePass(ReadOnlySpan<GpuCommand> list, int index)
     {
-        ref readonly GpuCommand begin = ref list[index];
-        const VkAccessFlags2 Writes = VkAccessFlags2.ShaderStorageRead | VkAccessFlags2.ShaderStorageWrite;
-        foreach (GpuTextureLevel level in _commands.GetLevels(begin))
-        {
-            _writtenTextures.Add(level);
-
-            if (_resources.Textures[level.Texture.Id] is not { } texture) continue;
-
-            _barriers.UseOne(
-                texture,
-                level.Level,
-                texture.GetArrayLayer(level.Layer),
-                VkImageLayout.General,
-                VkPipelineStageFlags2.ComputeShader,
-                Writes,
-                isWrite: true);
-        }
-
-        foreach (GpuBuffer written in _commands.GetBuffers(begin))
-        {
-            _writtenBuffers.Add(written);
-            if (_resources.Buffers[written.Id] is { } buffer)
-                _barriers.Use(ref buffer.State, VkPipelineStageFlags2.ComputeShader, Writes, isWrite: true);
-        }
-
-        UseReads(list, index + 1, FindEnd(list, index, GpuCommandType.EndComputePass));
+        UseReads(
+            list,
+            index + 1,
+            FindEnd(list, index, GpuCommandType.EndComputePass),
+            VkPipelineStageFlags2.ComputeShader);
         _barriers.Record(_device.Api, _commandBuffer);
-        _isSetStale[1] = true;
     }
 
     /// <summary>
-    /// Gathers the barriers for what the commands from <paramref name="start"/> to before <paramref name="end"/> read:
-    /// the textures and buffers each stage binds, and the vertex, index and argument buffers.
+    /// Gathers the barriers for what the commands from <paramref name="start"/> to before <paramref name="end"/> use:
+    /// what the pass says its shaders, running in <paramref name="stages"/>, read and write, and the index and argument
+    /// buffers.
     /// </summary>
-    private void UseReads(ReadOnlySpan<GpuCommand> list, int start, int end)
+    private void UseReads(ReadOnlySpan<GpuCommand> list, int start, int end, VkPipelineStageFlags2 stages)
     {
         for (int i = start; i < end; i++)
         {
             ref readonly GpuCommand command = ref list[i];
             switch (command.Type)
             {
-                case GpuCommandType.Textures:
-                    foreach (GpuSampledTexture sampled in _commands.GetSampled(command))
+                case GpuCommandType.Reads:
+                    foreach (GpuResource resource in _commands.GetResources(command))
                     {
-                        UseSampled(sampled.Texture, command.Stage);
+                        UseResource(resource, stages, isWrite: false);
                     }
 
                     break;
-                case GpuCommandType.RawTextures:
-                    foreach (GpuTexture texture in _commands.GetTextures(command))
+                case GpuCommandType.Writes:
+                    foreach (GpuResource resource in _commands.GetResources(command))
                     {
-                        UseSampled(texture, command.Stage);
-                    }
-
-                    break;
-                case GpuCommandType.Buffers:
-                    foreach (GpuBuffer buffer in _commands.GetBuffers(command))
-                    {
-                        UseBuffer(buffer, ToStages(command.Stage), VkAccessFlags2.ShaderStorageRead);
-                    }
-
-                    break;
-                case GpuCommandType.VertexBuffers:
-                    foreach (GpuBuffer buffer in _commands.GetBuffers(command))
-                    {
-                        UseBuffer(
-                            buffer,
-                            VkPipelineStageFlags2.VertexAttributeInput,
-                            VkAccessFlags2.VertexAttributeRead);
+                        UseResource(resource, stages, isWrite: true);
                     }
 
                     break;
@@ -448,24 +358,51 @@ internal sealed unsafe class VulkanRecorder(
         }
     }
 
-    /// <summary>
-    /// A texture a stage reads whole, filtered or texel by texel: a shader declares both as sampled images.
-    /// </summary>
-    private void UseSampled(GpuTexture texture, GpuStage stage)
-    {
-        if (_resources.Textures[texture.Id] is not { Window: null } read) return;
-
-        _barriers.UseWhole(
-            read,
-            VkImageLayout.ShaderReadOnlyOptimal,
-            ToStages(stage),
-            VkAccessFlags2.ShaderSampledRead,
-            isWrite: false);
-    }
-
     private void UseBuffer(GpuBuffer buffer, VkPipelineStageFlags2 stages, VkAccessFlags2 access)
     {
         if (_resources.Buffers[buffer.Id] is { } read) _barriers.Use(ref read.State, stages, access, isWrite: false);
+    }
+
+    /// <summary>
+    /// A resource a shader reads or writes: a texture read is laid out to be sampled, as the heap's sampled
+    /// descriptors say, and one written to be read and written as storage, as its levels' descriptors say.
+    /// </summary>
+    private void UseResource(GpuResource resource, VkPipelineStageFlags2 stages, bool isWrite)
+    {
+        const VkAccessFlags2 Storage = VkAccessFlags2.ShaderStorageRead | VkAccessFlags2.ShaderStorageWrite;
+        if (resource.Buffer != GpuBuffer.None)
+        {
+            if (_resources.Buffers[resource.Buffer.Id] is { } buffer)
+            {
+                _barriers.Use(
+                    ref buffer.State,
+                    stages,
+                    isWrite ? Storage : VkAccessFlags2.ShaderStorageRead,
+                    isWrite);
+            }
+
+            return;
+        }
+
+        if (_resources.Textures[resource.Level.Texture.Id] is not { Window: null } texture) return;
+
+        VkImageLayout layout = isWrite ? VkImageLayout.General : VkImageLayout.ShaderReadOnlyOptimal;
+        VkAccessFlags2 access = isWrite ? Storage : VkAccessFlags2.ShaderSampledRead;
+        if (resource.IsWhole)
+        {
+            _barriers.UseWhole(texture, layout, stages, access, isWrite);
+
+            return;
+        }
+
+        _barriers.UseOne(
+            texture,
+            resource.Level.Level,
+            texture.GetArrayLayer(resource.Level.Layer),
+            layout,
+            stages,
+            access,
+            isWrite);
     }
 
     /// <summary>
@@ -538,174 +475,36 @@ internal sealed unsafe class VulkanRecorder(
 
         _pipeline = bound;
         _device.Api.vkCmdBindPipeline(_commandBuffer, bound.BindPoint, bound.Handle);
-        Array.Fill(_isSetStale, true);
-    }
 
-    private void BindVertexBuffers(in GpuCommand command)
-    {
-        ReadOnlySpan<GpuBuffer> run = _commands.GetBuffers(command);
-        VkBuffer* buffers = stackalloc VkBuffer[Math.Max(run.Length, 1)];
-        ulong* offsets = stackalloc ulong[Math.Max(run.Length, 1)];
-        for (int i = 0; i < run.Length; i++)
-        {
-            buffers[i] = _resources.Buffers[run[i].Id]?.Handle ?? VkBuffer.Null;
-            offsets[i] = 0;
-        }
-
-        _device.Api.vkCmdBindVertexBuffers(_commandBuffer, 0, (uint)run.Length, buffers, offsets);
+        // Another bind point's pipeline may have disturbed the heap and the constants since they were last set.
+        _heap.Bind(_commandBuffer, bound.BindPoint);
+        _isPushStale = true;
     }
 
     /// <summary>
-    /// A stage's bindings changed: the read set it is written into must be written again.
+    /// A constant block, kept to push before the next draw or dispatch.
     /// </summary>
-    private void MarkStale(GpuStage stage)
+    private void SetConstants(in GpuCommand command)
     {
-        if (stage == GpuStage.Fragment) _isSetStale[2] = true;
-        else _isSetStale[0] = true;
+        ReadOnlySpan<byte> bytes = _commands.GetBytes(command);
+        _pushLength = Math.Min(bytes.Length, _push.Length);
+        bytes[.._pushLength].CopyTo(_push);
+        _isPushStale = true;
     }
 
     /// <summary>
-    /// Writes into sets of this frame's whatever the pipeline reads that changed since the last draw or dispatch, and
-    /// binds them, with every stage's constants at their offsets.
+    /// Pushes the constants if they changed, or a pipeline was bound, since they were last pushed.
     /// </summary>
-    private void BindSets()
+    private void PushConstants()
     {
-        if (_pipeline is not { } pipeline) return;
+        if (_pipeline is not { } pipeline || !_isPushStale || _pushLength == 0) return;
 
-        VkDescriptorSet uniforms = VkDescriptorSet.Null;
-        for (int set = 0; set < pipeline.Sets.Length; set++)
+        _isPushStale = false;
+        uint size = ((uint)_pushLength + 3) & ~3u;
+        fixed (byte* values = _push)
         {
-            SetShape shape = pipeline.Sets[set];
-
-            if (shape.IsEmpty) continue;
-
-            GpuStage stage = (pipeline.BindPoint, set) switch
-            {
-                (VkPipelineBindPoint.Compute, _) => GpuStage.Compute,
-                (_, < 2) => GpuStage.Vertex,
-                _ => GpuStage.Fragment,
-            };
-            if (shape.Kind == SetKind.Uniform)
-            {
-                if (uniforms.IsNull) uniforms = _descriptors.GetUniformSet(_slot);
-
-                uint offset = _constants[(int)stage];
-                _device.Api.vkCmdBindDescriptorSets(
-                    _commandBuffer,
-                    pipeline.BindPoint,
-                    pipeline.Layout,
-                    (uint)set,
-                    1,
-                    &uniforms,
-                    1,
-                    &offset);
-
-                continue;
-            }
-
-            if (!_isSetStale[set]) continue;
-
-            _isSetStale[set] = false;
-            VkDescriptorSet written = _descriptors.Allocate(_slot, _pipelines.GetSetLayout(shape));
-            if (shape.Kind == SetKind.Write) WriteWrites(written, shape);
-            else WriteReads(written, shape, stage);
-
-            _device.Api.vkCmdBindDescriptorSets(
-                _commandBuffer,
-                pipeline.BindPoint,
-                pipeline.Layout,
-                (uint)set,
-                1,
-                &written);
+            _device.Api.vkCmdPushConstants(_commandBuffer, pipeline.Layout, VkShaderStageFlags.All, 0, size, values);
         }
-    }
-
-    /// <summary>
-    /// A read set from what <paramref name="stage"/> bound: its sampled textures with their samplers, the textures it
-    /// reads texel by texel, then its storage buffers, each from register 0.
-    /// </summary>
-    private void WriteReads(VkDescriptorSet set, SetShape shape, GpuStage stage)
-    {
-        uint count = shape.Sampled + shape.Textures + shape.Buffers;
-        VkWriteDescriptorSet* writes = stackalloc VkWriteDescriptorSet[(int)count];
-        VkDescriptorImageInfo* images = stackalloc VkDescriptorImageInfo[(int)Math.Max(
-            shape.Sampled + shape.Textures,
-            1)];
-        VkDescriptorBufferInfo* buffers = stackalloc VkDescriptorBufferInfo[(int)Math.Max(shape.Buffers, 1)];
-        uint written = 0;
-        for (uint binding = 0; binding < shape.Sampled + shape.Textures; binding++)
-        {
-            bool isSampled = binding < shape.Sampled;
-            GpuTexture id = isSampled
-                ? _sampled[(int)stage][binding].Texture
-                : _textures[(int)stage][binding - shape.Sampled];
-
-            if (_resources.Textures[id.Id] is not { Window: null } texture) continue;
-
-            images[binding] = new VkDescriptorImageInfo
-            {
-                sampler = isSampled ? _resources.Samplers[_sampled[(int)stage][binding].Sampler.Id] : VkSampler.Null,
-                imageView = texture.SampledView,
-                imageLayout = VkImageLayout.ShaderReadOnlyOptimal,
-            };
-            writes[written++] = MakeWrite(set, binding, shape, pImageInfo: &images[binding]);
-        }
-
-        for (uint i = 0; i < shape.Buffers; i++)
-        {
-            if (_resources.Buffers[_buffers[(int)stage][i].Id] is not { } buffer) continue;
-
-            buffers[i] = new VkDescriptorBufferInfo
-            {
-                buffer = buffer.Handle,
-                offset = 0,
-                range = Vulkan.VK_WHOLE_SIZE
-            };
-            writes[written++] = MakeWrite(set, shape.Sampled + shape.Textures + i, shape, pBufferInfo: &buffers[i]);
-        }
-
-        _device.Api.vkUpdateDescriptorSets(written, writes, 0, null);
-    }
-
-    /// <summary>
-    /// The compute pass's write set: the levels it said it writes, then its buffers, in that order.
-    /// </summary>
-    private void WriteWrites(VkDescriptorSet set, SetShape shape)
-    {
-        uint count = shape.Textures + shape.Buffers;
-        VkWriteDescriptorSet* writes = stackalloc VkWriteDescriptorSet[(int)count];
-        VkDescriptorImageInfo* images = stackalloc VkDescriptorImageInfo[(int)Math.Max(shape.Textures, 1)];
-        VkDescriptorBufferInfo* buffers = stackalloc VkDescriptorBufferInfo[(int)Math.Max(shape.Buffers, 1)];
-        uint written = 0;
-        for (int i = 0; i < shape.Textures && i < _writtenTextures.Count; i++)
-        {
-            GpuTextureLevel level = _writtenTextures[i];
-
-            if (_resources.Textures[level.Texture.Id] is not { } texture || texture.StorageViews.Length == 0) continue;
-
-            uint layer = texture.GetArrayLayer(level.Layer);
-            images[i] = new VkDescriptorImageInfo
-            {
-                imageView = texture.StorageViews[(layer * texture.Description.Levels) + level.Level],
-                imageLayout = VkImageLayout.General,
-            };
-            writes[written++] = MakeWrite(set, (uint)i, shape, pImageInfo: &images[i]);
-        }
-
-        for (int i = 0; i < shape.Buffers && i < _writtenBuffers.Count; i++)
-        {
-            if (_resources.Buffers[_writtenBuffers[i].Id] is not { } buffer) continue;
-
-            buffers[i] = new VkDescriptorBufferInfo
-            {
-                buffer = buffer.Handle,
-                offset = 0,
-                range = Vulkan.VK_WHOLE_SIZE
-            };
-            writes[written++] = MakeWrite(set, shape.Textures + (uint)i, shape, pBufferInfo: &buffers[i]);
-        }
-
-        _device.Api.vkUpdateDescriptorSets(written, writes, 0, null);
     }
 
     /// <summary>

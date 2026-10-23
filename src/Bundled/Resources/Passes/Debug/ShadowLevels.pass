@@ -1,8 +1,0 @@
-{
-    "description": "The key light's clipmap level each pixel reads, a colour each, dim where a coarser stands in; teal where none.",
-    "stage": "ui",
-    "kind": "fullscreen",
-    "shader": { "id": 11941 },
-    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
-    "writes": [ { "name": "DebugView" } ]
-}

@@ -1,8 +1,0 @@
-{
-    "description": "The light from everywhere each pixel gathers from the probes; teal where the world draws none.",
-    "stage": "ui",
-    "kind": "fullscreen",
-    "shader": { "id": 11946 },
-    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
-    "writes": [ { "name": "DebugView" } ]
-}

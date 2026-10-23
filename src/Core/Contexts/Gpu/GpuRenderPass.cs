@@ -46,17 +46,6 @@ public readonly record struct GpuRenderPass : IDisposable
     }
 
     /// <summary>
-    /// The vertex buffers, from slot 0, as the pipeline's <see cref="GpuPipelineDescription.VertexBuffers"/> number
-    /// them.
-    /// </summary>
-    public GpuRenderPass VertexBuffers(ReadOnlySpan<GpuBuffer> buffers)
-    {
-        _commands.VertexBuffers(buffers);
-
-        return this;
-    }
-
-    /// <summary>
     /// The index buffer, of indices <paramref name="size"/> wide.
     /// </summary>
     public GpuRenderPass IndexBuffer(GpuBuffer buffer, GpuIndexSize size)
@@ -67,46 +56,35 @@ public readonly record struct GpuRenderPass : IDisposable
     }
 
     /// <summary>
-    /// The buffers <paramref name="stage"/> (vertex or fragment) reads, from register 0, as its <c>READ(n)</c>s number
-    /// them after its textures (Shaders/Include/Bindings.hlsli).
+    /// The pipeline's one constant block, which both its stages see, copied now: at most 128 bytes, laid out as the
+    /// shaders' <c>CONSTANTS</c> struct is (Shaders/Include/Heap.hlsli), for the draws after it.
     /// </summary>
-    public GpuRenderPass Buffers(GpuStage stage, ReadOnlySpan<GpuBuffer> buffers)
-    {
-        _commands.Buffers(stage, buffers);
-
-        return this;
-    }
-
-    /// <summary>
-    /// The textures <paramref name="stage"/> reads texel by texel, with no sampler, from register 0, as its
-    /// <c>READ(n)</c>s number them after its sampled textures.
-    /// </summary>
-    public GpuRenderPass RawTextures(GpuStage stage, ReadOnlySpan<GpuTexture> textures)
-    {
-        _commands.RawTextures(stage, textures);
-
-        return this;
-    }
-
-    /// <summary>
-    /// The textures <paramref name="stage"/> reads through a sampler, from register 0: the nth is its <c>READ(n)</c>
-    /// with <c>SAMPLER(n)</c>.
-    /// </summary>
-    public GpuRenderPass Textures(GpuStage stage, ReadOnlySpan<GpuSampledTexture> textures)
-    {
-        _commands.Textures(stage, textures);
-
-        return this;
-    }
-
-    /// <summary>
-    /// The one constant block of <paramref name="stage"/> (<c>UNIFORM(0)</c>), copied now: a struct laid out as the
-    /// <c>cbuffer</c> is, in whole 16-byte rows.
-    /// </summary>
-    public GpuRenderPass Constants<T>(GpuStage stage, in T constants)
+    public GpuRenderPass Constants<T>(in T constants)
         where T : unmanaged
     {
-        _commands.Constants(stage, in constants);
+        _commands.Constants(in constants);
+
+        return this;
+    }
+
+    /// <summary>
+    /// What the pass's shaders read through the heap: each is waited for and laid out to read before the pass begins,
+    /// wherever in the pass this is recorded.
+    /// </summary>
+    public GpuRenderPass Reads(ReadOnlySpan<GpuResource> resources)
+    {
+        _commands.Reads(resources);
+
+        return this;
+    }
+
+    /// <summary>
+    /// What the pass's fragment shaders write through the heap, beside its targets: each is waited for and laid out to
+    /// write before the pass begins.
+    /// </summary>
+    public GpuRenderPass Writes(ReadOnlySpan<GpuResource> resources)
+    {
+        _commands.Writes(resources);
 
         return this;
     }

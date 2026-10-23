@@ -1,8 +1,8 @@
 {
     "entities": [
         {"name": "Sky", "components": {"Sky": {"material": {"id": 4569236087865836549}}}},
-        {"name": "Weather", "components": {"Weather": {"wind": {"x": 3, "y": 0, "z": 1}, "coverage": 0.25}}},
-        {"name": "PostProcessing", "components": {"PostProcessing": {"effects": {"id": 3362}}}},
+        {"name": "Weather", "components": {"Weather": {"effects": [{"type": "Wind", "velocity": {"x": 3, "y": 0, "z": 1}}, {"type": "Clouds", "coverage": 0.25}, {"type": "Air"}]}}},
+        {"name": "PostProcessing", "components": {"PostProcessing": {"effects": [{"type": "Exposure", "shader": {"id": 1494037537170761089}}, {"type": "Tonemap", "shader": {"id": 8644084645777035739}}]}}},
         {"name": "Sun", "components": {"Transform": {"rotation": {"x": 0.41808, "y": 0.27027, "z": -0.13182, "w": 0.8572}}, "DirectionalLight": {"mode": "sun", "color": {"r": 1, "g": 0.97, "b": 0.93}, "intensity": 120000}}},
         {"name": "Floor", "components": {"Transform": {"position": {"x": 0, "y": 0.0, "z": 0}, "scale": {"x": 60.0, "y": 0.01, "z": 60.0}}, "Renderer": {"model": {"id": 519}, "materials": [{"id": 3619}]}, "Physics": {}}},
         {"name": "Arch to Hub", "prefab": {"id": 3730}, "components": {"Transform": {"position": {"x": -7.0, "y": 0.0, "z": 3.0}, "rotation": {"x": 0.0, "y": 0.70711, "z": -0.0, "w": 0.70711}}}},

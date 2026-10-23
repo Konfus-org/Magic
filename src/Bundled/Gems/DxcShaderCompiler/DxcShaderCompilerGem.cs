@@ -18,7 +18,7 @@ namespace Magic.DxcShaderCompiler;
 /// <summary>
 /// <see cref="IShaderCompiler"/> on Microsoft's DirectXShaderCompiler (DXC), called directly so every option is the
 /// engine's: HLSL 2021, Shader Model 6.0, warnings as errors, and SPIR-V for Vulkan 1.1, whose subgroup operations are
-/// HLSL's wave intrinsics. What a shader binds is read from its SPIR-V, by name (<see cref="SpirvBindings"/>). A
+/// HLSL's wave intrinsics. What a shader binds is read from its SPIR-V (<see cref="SpirvBindings"/>). A
 /// shader's includes are shader assets, spliced in before DXC sees it.
 /// What it compiles is kept in the cache (<see cref="Caches"/>, which it writes for as <see cref="ICache{T}"/> of
 /// <see cref="GpuShader"/>): named by its source with its includes spliced in, its name, its stage and its format, so
@@ -59,7 +59,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     /// Raised whenever DXC's arguments change, or how a shader is written to the cache, so what was compiled before is
     /// compiled again.
     /// </summary>
-    public int Version => 4;
+    public int Version => 6;
 
     /// <summary>
     /// Compiles every shader again when debug info was turned on or off while running.
@@ -73,8 +73,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
     }
 
     /// <summary>
-    /// The code's length, then what <see cref="GpuShader"/> declares in its order, its bindings each as name, kind and
-    /// register, the code's bytes last.
+    /// The code's length, then what <see cref="GpuShader"/> declares in its order, the code's bytes last.
     /// </summary>
     public void Write(GpuShader value, Stream bytes)
     {
@@ -82,17 +81,10 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         writer.Write(value.Code.Length);
         writer.Write(value.EntryPoint);
         writer.Write((int)value.Stage);
+        writer.Write(value.ConstantBytes);
         writer.Write(value.ThreadCountX);
         writer.Write(value.ThreadCountY);
         writer.Write(value.ThreadCountZ);
-        writer.Write(value.Bindings.Count);
-        foreach (GpuShaderBinding binding in value.Bindings)
-        {
-            writer.Write(binding.Name);
-            writer.Write((byte)binding.Kind);
-            writer.Write(binding.Register);
-        }
-
         writer.Write(value.Code.Span);
     }
 
@@ -102,23 +94,15 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         int length = reader.ReadInt32();
         string entryPoint = reader.ReadString();
         GpuStage stage = (GpuStage)reader.ReadInt32();
+        uint constantBytes = reader.ReadUInt32();
         uint threadsX = reader.ReadUInt32();
         uint threadsY = reader.ReadUInt32();
         uint threadsZ = reader.ReadUInt32();
-        int count = reader.ReadInt32();
-        List<GpuShaderBinding> bindings = new(count);
-        for (int i = 0; i < count; i++)
-        {
-            string name = reader.ReadString();
-            GpuBindingKind kind = (GpuBindingKind)reader.ReadByte();
-            bindings.Add(new GpuShaderBinding(name, kind, reader.ReadUInt32()));
-        }
-
         GpuShader shader = new()
         {
             EntryPoint = entryPoint,
             Stage = stage,
-            Bindings = bindings,
+            ConstantBytes = constantBytes,
             ThreadCountX = threadsX,
             ThreadCountY = threadsY,
             ThreadCountZ = threadsZ,
@@ -338,8 +322,8 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
     /// <summary>
     /// <paramref name="source"/>, its includes spliced in and its stage defined, compiled by DXC for
-    /// <paramref name="profile"/> into SPIR-V, the one <paramref name="format"/> there is, with what it binds, by name,
-    /// read from it (<see cref="SpirvBindings"/>).
+    /// <paramref name="profile"/> into SPIR-V, the one <paramref name="format"/> there is, with what it binds read from
+    /// it (<see cref="SpirvBindings"/>).
     /// </summary>
     private Result<GpuShader> Compile(
         string source,
@@ -354,8 +338,7 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
 
         Result<GpuShader> reflected = SpirvBindings.Read(spirv.Value, stage);
 
-        if (!reflected.Ok)
-            return Result.Failure<GpuShader>($"{name}: what it binds could not be read: {reflected.Error}");
+        if (!reflected.Ok) return Result.Failure<GpuShader>($"{name}: {reflected.Error}");
 
         return format == GpuShaderFormat.Spirv
             ? Result.Success(reflected.Value with { Code = spirv.Value, EntryPoint = "main" })
@@ -371,9 +354,8 @@ internal sealed partial class DxcShaderCompilerGem(Assets assets, Caches caches,
         List<string> arguments = ["-E", "main", "-T", profile, "-HV", "2021", "-WX", "-O3", "-Zpc"];
 
         // A resource the shader does not use is dropped, so what is read from the SPIR-V is what the shader uses; its
-        // interface is kept whole, so the stages' varyings line up.
-        arguments.AddRange(
-            ["-spirv", "-fspv-target-env=vulkan1.1", "-fspv-flatten-resource-arrays", "-fspv-preserve-interface"]);
+        // interface is kept whole, so the stages' varyings line up. Arrays of resources stay arrays: they are the heap.
+        arguments.AddRange(["-spirv", "-fspv-target-env=vulkan1.1", "-fspv-preserve-interface"]);
         if (_settings.DebugInfo) arguments.Add("-fspv-debug=vulkan-with-source");
 
         byte[] text = Encoding.UTF8.GetBytes(source);

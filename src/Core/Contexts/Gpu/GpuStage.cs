@@ -1,7 +1,7 @@
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A shader stage: what a shader is compiled for, and the stage a command binds resources to.
+/// A shader stage: what a shader is compiled for.
 /// </summary>
 public enum GpuStage : byte
 {

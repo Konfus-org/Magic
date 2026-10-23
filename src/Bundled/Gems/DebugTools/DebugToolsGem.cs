@@ -10,12 +10,11 @@ namespace Magic.DebugTools;
 /// <summary>
 /// The debug UI's windows, each opened and closed by its key: the console (the key left of 1), with the log and a line
 /// to run commands on; the telemetry (F3), with what the engine measures; and the settings (F4), with every gem's
-/// settings to change while running, the preset, and what the frame shows, which F5 and F6 step through; and the frame
-/// rate in the top left corner while the settings say, with the debug view shown under it. They are drawn with
-/// <see cref="IDebugUI"/>'s widgets in Update, so the gem takes the UI and is made after it. It is a log sink, so the
-/// console has every line logged from the moment the gem is made. Without an input gem no key opens a window; without
-/// a window Copy has no clipboard; without a commands gem the console only shows the log and adds no commands; without
-/// a GPU there is no frame to view.
+/// settings to change while running and the preset; and the frame rate in the top left corner while the settings say.
+/// They are drawn with <see cref="IDebugUI"/>'s widgets in Update, so the gem takes the UI and is made after it. It is
+/// a log sink, so the console has every line logged from the moment the gem is made. Without an input gem no key opens
+/// a window; without a window Copy has no clipboard; without a commands gem the console only shows the log and adds no
+/// commands.
 /// </summary>
 internal sealed class DebugToolsGem(
     DebugToolsSettings settings,
@@ -23,7 +22,6 @@ internal sealed class DebugToolsGem(
     Settings gemSettings,
     Assets assets,
     App app,
-    Events events,
     ICommands? commands = null,
     IInput? input = null,
     IWindow? window = null) : IGem, ILogSink, IDisposable
@@ -42,8 +40,6 @@ internal sealed class DebugToolsGem(
         gemSettings,
         assets,
         commands,
-        events,
-        input,
         app.Quitting);
 
     /// <summary>

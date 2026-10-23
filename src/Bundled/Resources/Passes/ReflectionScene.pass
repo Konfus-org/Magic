@@ -1,6 +1,0 @@
-{
-    "stage": "transparency",
-    "kind": "fullscreen",
-    "shader": { "id": 11288 },
-    "writes": [ { "name": "ReflectionScene", "mipmaps": true } ]
-}

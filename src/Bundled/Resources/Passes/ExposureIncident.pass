@@ -1,8 +1,0 @@
-{
-    // The view's exposure metered from the light the world's sun and sky shed, not from what the view sees.
-    "stage": "post",
-    "kind": "compute",
-    "shader": { "id": 11261 },
-    "writes": [ { "name": "Exposure" } ],
-    "dispatch": { "groups": [ 1, 1, 1 ] }
-}

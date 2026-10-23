@@ -23,8 +23,10 @@ static const uint BannerScale = 2u;
 static const uint BannerMargin = 8u;
 static const float3 BannerText = float3(1.0, 1.0, 1.0);
 
-// The glyph at column of row, counting the renderer's lines first, then the raised codes' in code order.
-uint BannerGlyph(ByteAddressBuffer text, ByteAddressBuffer raised, uint written, uint row, uint column)
+// The glyph at column of row, counting the renderer's lines first, then the raised codes' in code order. The buffers are
+// byte-addressed, read-only or not.
+template<typename TBuffer>
+uint BannerGlyph(TBuffer text, TBuffer raised, uint written, uint row, uint column)
 {
     if (row < written)
     {
@@ -51,7 +53,8 @@ uint BannerGlyph(ByteAddressBuffer text, ByteAddressBuffer raised, uint written,
 }
 
 // color at pixel of the view (from its top left, size across) with the banner over it.
-float3 FailureBanner(float3 color, uint2 pixel, uint2 size, ByteAddressBuffer text, ByteAddressBuffer raised, float time)
+template<typename TBuffer>
+float3 FailureBanner(float3 color, uint2 pixel, uint2 size, TBuffer text, TBuffer raised, float time)
 {
     uint written = text.Load(0u);
     uint lines = written;

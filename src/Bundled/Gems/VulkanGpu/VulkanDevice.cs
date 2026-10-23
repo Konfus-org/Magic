@@ -83,6 +83,7 @@ internal sealed unsafe class VulkanDevice
 
         PhysicalDevice = ChoosePhysicalDevice(settings, out VkPhysicalDeviceProperties properties);
         Limits = properties.limits;
+        DescriptorLimits = GetDescriptorLimits(PhysicalDevice);
         Name = $"{CString.Read(properties.deviceName)} (vulkan)";
         InstanceApi.vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, out _memory);
         QueueFamily = FindQueueFamily(PhysicalDevice, out uint timestampBits);
@@ -121,6 +122,11 @@ internal sealed unsafe class VulkanDevice
     internal uint TimestampBits { get; }
 
     internal VkPhysicalDeviceLimits Limits { get; }
+
+    /// <summary>
+    /// How many descriptors of each kind a set written after it is bound may hold, which the heap is sized by.
+    /// </summary>
+    internal VkPhysicalDeviceVulkan12Properties DescriptorLimits { get; }
 
     /// <summary>
     /// The GPU and the API, for logs: <c>NVIDIA GeForce RTX 4070 (vulkan)</c>.
@@ -363,6 +369,28 @@ internal sealed unsafe class VulkanDevice
     };
 
     /// <summary>
+    /// Whether the GPU reads resources through the heap as its shaders do: arrays of them indexed by any lane, holding
+    /// nothing in most slots, written while frames read other slots; storage images read and written whatever their
+    /// format; and storage written from every stage, as the heap's buffers and levels are writable in each.
+    /// </summary>
+    private static bool HasHeapFeatures(
+        in VkPhysicalDeviceVulkan12Features features12,
+        in VkPhysicalDeviceFeatures core)
+        => features12.runtimeDescriptorArray
+            && features12.descriptorBindingPartiallyBound
+            && features12.descriptorBindingUpdateUnusedWhilePending
+            && features12.descriptorBindingSampledImageUpdateAfterBind
+            && features12.descriptorBindingStorageImageUpdateAfterBind
+            && features12.descriptorBindingStorageBufferUpdateAfterBind
+            && features12.shaderSampledImageArrayNonUniformIndexing
+            && features12.shaderStorageImageArrayNonUniformIndexing
+            && features12.shaderStorageBufferArrayNonUniformIndexing
+            && core.shaderStorageImageReadWithoutFormat
+            && core.shaderStorageImageWriteWithoutFormat
+            && core.vertexPipelineStoresAndAtomics
+            && core.fragmentStoresAndAtomics;
+
+    /// <summary>
     /// The instance extensions windows' surfaces need on this platform, as SDL names them; none where SDL has no Vulkan.
     /// </summary>
     private List<VkUtf8String> GetSurfaceExtensions()
@@ -471,8 +499,8 @@ internal sealed unsafe class VulkanDevice
         return best.IsNotNull
             ? best
             : throw new InvalidOperationException("No GPU here runs Vulkan 1.3 with dynamic rendering, "
-                + "synchronization2, timeline semaphores, multi-draw indirect and depth clamping: update the GPU's "
-                + "driver.");
+                + "synchronization2, timeline semaphores, descriptor indexing, multi-draw indirect and depth clamping: "
+                + "update the GPU's driver.");
     }
 
     private bool HasRequiredFeatures(VkPhysicalDevice device)
@@ -486,10 +514,20 @@ internal sealed unsafe class VulkanDevice
             && features13.synchronization2
             && features12.timelineSemaphore
             && features12.hostQueryReset
+            && HasHeapFeatures(features12, features.features)
             && features.features.multiDrawIndirect
             && features.features.depthClamp
             && features.features.independentBlend
             && features.features.imageCubeArray;
+    }
+
+    private VkPhysicalDeviceVulkan12Properties GetDescriptorLimits(VkPhysicalDevice device)
+    {
+        VkPhysicalDeviceVulkan12Properties properties12 = new();
+        VkPhysicalDeviceProperties2 properties = new() { pNext = &properties12 };
+        InstanceApi.vkGetPhysicalDeviceProperties2(device, &properties);
+
+        return properties12;
     }
 
     /// <summary>
@@ -560,6 +598,15 @@ internal sealed unsafe class VulkanDevice
             pNext = &features13,
             timelineSemaphore = true,
             hostQueryReset = true,
+            runtimeDescriptorArray = true,
+            descriptorBindingPartiallyBound = true,
+            descriptorBindingUpdateUnusedWhilePending = true,
+            descriptorBindingSampledImageUpdateAfterBind = true,
+            descriptorBindingStorageImageUpdateAfterBind = true,
+            descriptorBindingStorageBufferUpdateAfterBind = true,
+            shaderSampledImageArrayNonUniformIndexing = true,
+            shaderStorageImageArrayNonUniformIndexing = true,
+            shaderStorageBufferArrayNonUniformIndexing = true,
         };
         VkPhysicalDeviceFeatures2 features = new()
         {
@@ -570,6 +617,10 @@ internal sealed unsafe class VulkanDevice
                 depthClamp = true,
                 independentBlend = true,
                 imageCubeArray = true,
+                shaderStorageImageReadWithoutFormat = true,
+                shaderStorageImageWriteWithoutFormat = true,
+                vertexPipelineStoresAndAtomics = true,
+                fragmentStoresAndAtomics = true,
                 samplerAnisotropy = supported.samplerAnisotropy,
                 depthBiasClamp = supported.depthBiasClamp,
                 drawIndirectFirstInstance = supported.drawIndirectFirstInstance,

@@ -15,13 +15,11 @@
     <Project Path="src/Bundled/Gems/AssimpModelLoader/AssimpModelLoader.csproj" />
     <Project Path="src/Bundled/Gems/Box3DPhysics/Box3DPhysics.csproj" />
     <Project Path="src/Bundled/Gems/ClusterGenerator/ClusterGenerator.csproj" />
-    <Project Path="src/Bundled/Gems/ClusterRendering/ClusterRendering.csproj" />
     <Project Path="src/Bundled/Gems/ConsoleCommands/ConsoleCommands.csproj" />
     <Project Path="src/Bundled/Gems/DebugTools/DebugTools.csproj" />
     <Project Path="src/Bundled/Gems/DxcShaderCompiler/DxcShaderCompiler.csproj" />
     <Project Path="src/Bundled/Gems/ImGuiDebugUI/ImGuiDebugUI.csproj" />
     <Project Path="src/Bundled/Gems/LogMetrics/LogMetrics.csproj" />
-    <Project Path="src/Bundled/Gems/PipelineLoader/PipelineLoader.csproj" />
     <Project Path="src/Bundled/Gems/PrefabLoader/PrefabLoader.csproj" />
     <Project Path="src/Bundled/Gems/Scripting/Scripting.csproj" />
     <Project Path="src/Bundled/Gems/SdlAudioLoader/SdlAudioLoader.csproj" />
@@ -30,6 +28,7 @@
     <Project Path="src/Bundled/Gems/SdlPlatform/SdlPlatform.csproj" />
     <Project Path="src/Bundled/Gems/SdlTextureLoader/SdlTextureLoader.csproj" />
     <Project Path="src/Bundled/Gems/SteamAudio/SteamAudio.csproj" />
+    <Project Path="src/Bundled/Gems/VoxelRendering/VoxelRendering.csproj" />
     <Project Path="src/Bundled/Gems/VulkanGpu/VulkanGpu.csproj" />
   </Folder>
   <Project Path="src/Bundled/Resources/Resources.csproj" />

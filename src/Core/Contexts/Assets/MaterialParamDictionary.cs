@@ -5,8 +5,8 @@ using System.Diagnostics.CodeAnalysis;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// The params of a <see cref="Material"/>, or of a pass a <see cref="Pipeline"/> runs, by the names of their shader's
-/// members: <c>material.Params["roughness"] = 0.8f</c>. A script may set them while the asset is in use, on the main
+/// The params of a <see cref="Material"/>, by the names of its shader's members:
+/// <c>material.Params["roughness"] = 0.8f</c>. A script may set them while the asset is in use, on the main
 /// thread, and whatever draws with them reads them from any thread. Its values are a snapshot that never changes, which
 /// each change replaces whole, so a reader on another thread never sees one half made; and each change counts in
 /// <see cref="Version"/>, which whatever draws from it compares with the count it last read, so nothing has to tell it.

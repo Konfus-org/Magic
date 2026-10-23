@@ -3,8 +3,8 @@ using System.Numerics;
 namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
-/// One look <see cref="Looks"/> eases the world to: the params it gives the tonemap, the bloom and the samples' grade,
-/// each at the value that changes nothing unless it says, as a prefab writes it:
+/// One look <see cref="Looks"/> eases the world to: what it gives the tonemap and the grade, each at the value that
+/// changes nothing unless it says, as a prefab writes it:
 /// <c>{ "name": "Noir", "saturation": 0, "contrast": 1.35, "vignette": 0.55 }</c>.
 /// </summary>
 internal sealed class Look
@@ -15,11 +15,6 @@ internal sealed class Look
     /// EV added before the tonemap.
     /// </summary>
     public float Exposure { get; set; }
-
-    /// <summary>
-    /// How strongly what is bright glows.
-    /// </summary>
-    public float Bloom { get; set; } = 0.04f;
 
     public float Saturation { get; set; } = 1;
 

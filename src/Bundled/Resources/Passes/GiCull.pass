@@ -1,7 +1,0 @@
-{
-    "stage": "probes",
-    "kind": "compute",
-    "shader": { "id": 11321 },
-    "writes": [ { "name": "GiJobs" } ],
-    "dispatch": { "per": "instances" }
-}

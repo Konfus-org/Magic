@@ -112,9 +112,9 @@ internal sealed class VulkanTexture
     internal VkImageView[] TargetViews { get; set; } = [];
 
     /// <summary>
-    /// Per level, then per layer: what compute writes, a level of a 3D texture whole.
+    /// Per level: what a shader writes, every layer of the level, as the heap's arrays of levels hold it.
     /// </summary>
-    internal VkImageView[] StorageViews { get; set; } = [];
+    internal VkImageView[] LevelViews { get; set; } = [];
 
     /// <summary>
     /// Array layers a texture so described has: six for a cube, one for a 3D texture, whose depth is one layer's.
@@ -167,7 +167,7 @@ internal sealed class VulkanTexture
 }
 
 /// <summary>
-/// The GPU's objects by the ids <see cref="Interfaces.IGpu"/> hands out: buffers, textures and samplers, each
+/// The GPU's objects by the ids <see cref="Interfaces.IGpuDriver"/> hands out: buffers, textures and samplers, each
 /// with memory of its own, as the few hundred a renderer makes are far under the GPU's limit on allocations. What is
 /// released goes once the frames that could still use it are done.
 /// </summary>
@@ -289,11 +289,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device) : IDisposable
             texture.TargetViews = CreateTargetViews(texture);
         }
 
-        if ((usage & VkImageUsageFlags.Storage)
-            != VkImageUsageFlags.None)
-        {
-            texture.StorageViews = CreateStorageViews(texture);
-        }
+        if ((usage & VkImageUsageFlags.Storage) != VkImageUsageFlags.None)
+            texture.LevelViews = CreateLevelViews(texture);
 
         return texture;
     }
@@ -344,7 +341,7 @@ internal sealed unsafe class VulkanResources(VulkanDevice device) : IDisposable
             _device.Api.vkDestroyImageView(view);
         }
 
-        foreach (VkImageView view in texture.StorageViews)
+        foreach (VkImageView view in texture.LevelViews)
         {
             _device.Api.vkDestroyImageView(view);
         }
@@ -423,20 +420,22 @@ internal sealed unsafe class VulkanResources(VulkanDevice device) : IDisposable
     }
 
     /// <summary>
-    /// A view of each level of each layer as compute writes it: a 3D texture's level whole, as a 3D storage image.
+    /// A view of each level, every layer of it, as a shader writes it: a 2D texture's level as a 2D image, an
+    /// array's or a cube's as a 2D array, a 3D texture's whole.
     /// </summary>
-    private VkImageView[] CreateStorageViews(VulkanTexture texture)
+    private VkImageView[] CreateLevelViews(VulkanTexture texture)
     {
-        VkImageViewType type = texture.Description.Kind == GpuTextureKind.Texture3D
-            ? VkImageViewType.Image3D
-            : VkImageViewType.Image2D;
-        VkImageView[] views = new VkImageView[texture.Description.Levels * texture.Layers];
-        for (uint layer = 0; layer < texture.Layers; layer++)
+        VkImageViewType type = texture.Description.Kind switch
         {
-            for (uint level = 0; level < texture.Description.Levels; level++)
-            {
-                views[(layer * texture.Description.Levels) + level] = CreateView(texture, type, level, 1, layer, 1);
-            }
+            GpuTextureKind.Texture2D => VkImageViewType.Image2D,
+            GpuTextureKind.Texture3D => VkImageViewType.Image3D,
+            GpuTextureKind.Texture2DArray or GpuTextureKind.Cube => VkImageViewType.Image2DArray,
+            _ => VkImageViewType.Image2DArray,
+        };
+        VkImageView[] views = new VkImageView[texture.Description.Levels];
+        for (uint level = 0; level < views.Length; level++)
+        {
+            views[level] = CreateView(texture, type, level, 1, 0, texture.Layers);
         }
 
         return views;
@@ -444,7 +443,8 @@ internal sealed unsafe class VulkanResources(VulkanDevice device) : IDisposable
 }
 
 /// <summary>
-/// Objects by handle id: dense, id 0 never used, freed ids used again.
+/// Objects by handle id: dense, id 0 never used, a freed id used again once it is handed back
+/// (<see cref="Recycle"/>), which waits until no frame in flight can still use what it held.
 /// </summary>
 internal sealed class Table<T>
 {
@@ -485,7 +485,7 @@ internal sealed class Table<T>
     }
 
     /// <summary>
-    /// Forgets <paramref name="id"/>, handing back what it held.
+    /// Forgets <paramref name="id"/>, handing back what it held; the id is not handed out again until it is recycled.
     /// </summary>
     internal T? Free(uint id)
     {
@@ -494,8 +494,12 @@ internal sealed class Table<T>
         T? item = _items[(int)id];
         _items[(int)id] = default;
         _isLive[(int)id] = false;
-        _free.Push(id);
 
         return item;
     }
+
+    /// <summary>
+    /// Hands a freed id out again, once nothing can still use what it held: a shader reading the heap at that id included.
+    /// </summary>
+    internal void Recycle(uint id) => _free.Push(id);
 }

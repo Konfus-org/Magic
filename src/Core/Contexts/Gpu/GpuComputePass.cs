@@ -1,7 +1,7 @@
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A compute pass being recorded (<see cref="GpuCommands.ComputePass"/>): the commands legal inside one, each handing
+/// A compute pass being recorded (<see cref="GpuCommands.ComputePass()"/>): the commands legal inside one, each handing
 /// the pass back so they chain. Disposing it ends the pass, so it is a <c>using</c> block. What is bound stays bound
 /// until the pass ends; a dispatch uses whatever is bound when it is recorded.
 /// </summary>
@@ -24,46 +24,34 @@ public readonly record struct GpuComputePass : IDisposable
     }
 
     /// <summary>
-    /// The buffers the shader reads, from register 0, as its <c>READ(n)</c>s number them after its textures
-    /// (Shaders/Include/Bindings.hlsli).
+    /// What the pass's shaders read through the heap (Shaders/Include/Heap.hlsli): each is waited for and laid out to
+    /// read before the pass begins, wherever in the pass this is recorded.
     /// </summary>
-    public GpuComputePass Buffers(ReadOnlySpan<GpuBuffer> buffers)
+    public GpuComputePass Reads(ReadOnlySpan<GpuResource> resources)
     {
-        _commands.Buffers(GpuStage.Compute, buffers);
+        _commands.Reads(resources);
 
         return this;
     }
 
     /// <summary>
-    /// The textures the shader reads texel by texel, with no sampler, from register 0, as its <c>READ(n)</c>s number
-    /// them after its sampled textures.
+    /// What the pass's shaders write through the heap: each is waited for and laid out to write before the pass begins.
     /// </summary>
-    public GpuComputePass RawTextures(ReadOnlySpan<GpuTexture> textures)
+    public GpuComputePass Writes(ReadOnlySpan<GpuResource> resources)
     {
-        _commands.RawTextures(GpuStage.Compute, textures);
+        _commands.Writes(resources);
 
         return this;
     }
 
     /// <summary>
-    /// The textures the shader reads through a sampler, from register 0: the nth is its <c>READ(n)</c> with
-    /// <c>SAMPLER(n)</c>.
-    /// </summary>
-    public GpuComputePass Textures(ReadOnlySpan<GpuSampledTexture> textures)
-    {
-        _commands.Textures(GpuStage.Compute, textures);
-
-        return this;
-    }
-
-    /// <summary>
-    /// The shader's one constant block (<c>UNIFORM(0)</c>), copied now: a struct laid out as the <c>cbuffer</c> is, in
-    /// whole 16-byte rows.
+    /// The shader's one constant block, copied now: at most 128 bytes, laid out as its <c>CONSTANTS</c> struct is, for
+    /// the dispatches after it.
     /// </summary>
     public GpuComputePass Constants<T>(in T constants)
         where T : unmanaged
     {
-        _commands.Constants(GpuStage.Compute, in constants);
+        _commands.Constants(in constants);
 
         return this;
     }

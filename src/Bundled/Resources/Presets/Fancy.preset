@@ -1,12 +1,8 @@
 {
-    // A step up from Default: drawn at the screen's own size, finer clusters, sharper sun shadows close up, textures
-    // filtered with every tap, and global illumination's probes traced with more rays more often.
+    // A step up from Default: drawn at the screen's own size, finer clusters, and textures filtered with every tap.
     "settings": {
-        "ClusterRendering.renderScale": 1,
-        "ClusterRendering.clusterError": 0.75,
-        "ClusterRendering.shadowFinest": 6,
-        "ClusterRendering.anisotropy": 16,
-        "ClusterRendering.giRays": 96,
-        "ClusterRendering.giUpdateEvery": 2
+        "VoxelRendering.renderScale": 1,
+        "VoxelRendering.clusterError": 0.75,
+        "VoxelRendering.anisotropy": 16
     }
 }

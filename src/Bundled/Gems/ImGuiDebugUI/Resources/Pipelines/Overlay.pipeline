@@ -1,5 +1,0 @@
-{
-    // What is drawn over each target once every view in it is composed: the debug UI. The renderer runs it as its
-    // overlay pipeline unless its settings name another; a project replaces it by having its own at this path.
-    "entries": [ { "pass": { "id": 11711 } } ]
-}

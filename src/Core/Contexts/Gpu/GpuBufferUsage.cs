@@ -7,20 +7,19 @@ namespace Magic.Contexts.Gpu;
 public enum GpuBufferUsage : byte
 {
     None = 0,
-    Vertex = 1 << 0,
-    Index = 1 << 1,
+    Index = 1 << 0,
 
     /// <summary>
     /// The arguments of draws and dispatches the GPU reads from a buffer
     /// (<see cref="GpuRenderPass.DrawIndexedFromBuffer"/>, <see cref="GpuComputePass.DispatchFromBuffer"/>).
     /// </summary>
-    Arguments = 1 << 2,
+    Arguments = 1 << 1,
 
     /// <summary>
     /// Read by vertex and fragment shaders as a storage buffer.
     /// </summary>
-    GraphicsRead = 1 << 3,
+    GraphicsRead = 1 << 2,
 
-    ComputeRead = 1 << 4,
-    ComputeWrite = 1 << 5,
+    ComputeRead = 1 << 3,
+    ComputeWrite = 1 << 4,
 }

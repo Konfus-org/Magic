@@ -18,10 +18,9 @@
         "AssimpModelLoader",
         "ClusterGenerator",
         "PrefabLoader",
-        "PipelineLoader",
         "ImGuiDebugUI",
         "DebugTools",
-        "ClusterRendering",
+        "VoxelRendering",
         "LogMetrics"
     ]
 }

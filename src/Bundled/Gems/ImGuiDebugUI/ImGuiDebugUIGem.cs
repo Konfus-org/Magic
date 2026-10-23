@@ -39,8 +39,8 @@ namespace Magic.ImGuiDebugUI;
 /// ImGui's frame is the main thread's. <see cref="Update"/> hands ImGui the frame's input and starts its frame, so the
 /// widgets gems made after this one call in their Update go into it; <see cref="LateUpdate"/> draws what is reported;
 /// <see cref="Sync"/>, while both threads hold still, ends the frame and copies what ImGui drew
-/// (<see cref="DrawLists"/>); the renderer draws that copy over the window with the gem's pipeline script
-/// (<see cref="Resources.Scripts.DebugUi"/>), a pass of its overlay stage, once every view in the window is composed.
+/// (<see cref="DrawLists"/>); the renderer draws that copy over the window with the gem's overlay script
+/// (<see cref="Resources.Scripts.DebugUi"/>), once every view in the window is shown.
 /// Reports come from any thread and are kept until they have shown (<see cref="Reports"/>).
 /// </para>
 /// </summary>
@@ -204,7 +204,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public bool Enabled => _isShowing;
 
     /// <summary>
-    /// What ImGui drew last frame, copied in <see cref="Sync"/>, which the gem's pipeline script draws from on the
+    /// What ImGui drew last frame, copied in <see cref="Sync"/>, which the gem's overlay script draws from on the
     /// render thread.
     /// </summary>
     internal DrawLists DrawLists { get; } = new();

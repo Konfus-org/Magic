@@ -1,5 +1,0 @@
-{
-    "stage": "transparency",
-    "kind": "draw",
-    "draw": { "drawn": "transparent", "colors": [ "Hdr" ], "depth": "Depth", "contents": "keep" }
-}

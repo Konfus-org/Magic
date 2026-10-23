@@ -3,7 +3,7 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// The bytecode a GPU takes (<see cref="IGpu.ShaderFormat"/>), which <see cref="IShaderCompiler"/> compiles to.
+/// The bytecode a GPU takes (<see cref="IGpuDriver.ShaderFormat"/>), which <see cref="IShaderCompiler"/> compiles to.
 /// </summary>
 public enum GpuShaderFormat : byte
 {

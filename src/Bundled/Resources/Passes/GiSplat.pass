@@ -1,7 +1,0 @@
-{
-    "stage": "probes",
-    "kind": "compute",
-    "shader": { "id": 11322 },
-    "writes": [ { "name": "GiSplat" } ],
-    "dispatch": { "groups": [ 4096 ] }
-}

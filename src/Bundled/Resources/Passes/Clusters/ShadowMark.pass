@@ -1,7 +1,0 @@
-{
-    "stage": "shadows",
-    "kind": "compute",
-    "shader": { "id": 60041 },
-    "writes": [ { "name": "ShadowTables" } ],
-    "dispatch": { "per": "view" }
-}

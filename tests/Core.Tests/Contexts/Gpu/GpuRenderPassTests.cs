@@ -87,18 +87,6 @@ public sealed class GpuRenderPassTests
     }
 
     [Fact]
-    public void VertexBuffers_records_the_buffers()
-    {
-        GpuCommands commands = new();
-        GpuRenderPass pass = commands.RenderPass([], GpuContents.Keep);
-        GpuBuffer[] buffers = [new GpuBuffer(1), new GpuBuffer(2)];
-
-        pass.VertexBuffers(buffers);
-
-        Assert.Equal(buffers, commands.GetBuffers(commands.Commands[^1]).ToArray());
-    }
-
-    [Fact]
     public void IndexBuffer_records_the_buffer_and_its_index_size()
     {
         GpuCommands commands = new();
@@ -112,59 +100,12 @@ public sealed class GpuRenderPassTests
     }
 
     [Fact]
-    public void Buffers_records_the_stage_that_reads_them()
-    {
-        GpuCommands commands = new();
-        GpuRenderPass pass = commands.RenderPass([], GpuContents.Keep);
-
-        pass.Buffers(GpuStage.Fragment, [new GpuBuffer(1)]);
-
-        Assert.Equal(GpuStage.Fragment, commands.Commands[^1].Stage);
-    }
-
-    [Fact]
-    public void Buffers_records_the_buffers()
-    {
-        GpuCommands commands = new();
-        GpuRenderPass pass = commands.RenderPass([], GpuContents.Keep);
-        GpuBuffer[] buffers = [new GpuBuffer(1), new GpuBuffer(2)];
-
-        pass.Buffers(GpuStage.Fragment, buffers);
-
-        Assert.Equal(buffers, commands.GetBuffers(commands.Commands[^1]).ToArray());
-    }
-
-    [Fact]
-    public void Textures_records_the_sampled_textures()
-    {
-        GpuCommands commands = new();
-        GpuRenderPass pass = commands.RenderPass([], GpuContents.Keep);
-        GpuSampledTexture[] textures = [new GpuSampledTexture(new GpuTexture(1), new GpuSampler(2))];
-
-        pass.Textures(GpuStage.Fragment, textures);
-
-        Assert.Equal(textures, commands.GetSampled(commands.Commands[^1]).ToArray());
-    }
-
-    [Fact]
-    public void RawTextures_records_the_textures()
-    {
-        GpuCommands commands = new();
-        GpuRenderPass pass = commands.RenderPass([], GpuContents.Keep);
-        GpuTexture[] textures = [new GpuTexture(1), new GpuTexture(2)];
-
-        pass.RawTextures(GpuStage.Vertex, textures);
-
-        Assert.Equal(textures, commands.GetTextures(commands.Commands[^1]).ToArray());
-    }
-
-    [Fact]
     public void Constants_records_the_structs_bytes()
     {
         GpuCommands commands = new();
         GpuRenderPass pass = commands.RenderPass([], GpuContents.Keep);
 
-        pass.Constants(GpuStage.Vertex, 0x01020304u);
+        pass.Constants(0x01020304u);
 
         Assert.Equal(BitConverter.GetBytes(0x01020304u), commands.GetBytes(commands.Commands[^1]).ToArray());
     }

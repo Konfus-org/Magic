@@ -99,7 +99,7 @@ internal static class VulkanGpuExtensions
             const GpuBufferUsage Shaders = GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead
                 | GpuBufferUsage.ComputeWrite;
             VkBufferUsageFlags flags = VkBufferUsageFlags.TransferSrc | VkBufferUsageFlags.TransferDst;
-            if ((usage & GpuBufferUsage.Vertex) != GpuBufferUsage.None) flags |= VkBufferUsageFlags.VertexBuffer;
+
             if ((usage & GpuBufferUsage.Index) != GpuBufferUsage.None) flags |= VkBufferUsageFlags.IndexBuffer;
             if ((usage & GpuBufferUsage.Arguments) != GpuBufferUsage.None) flags |= VkBufferUsageFlags.IndirectBuffer;
             if ((usage & Shaders) != GpuBufferUsage.None) flags |= VkBufferUsageFlags.StorageBuffer;
@@ -112,20 +112,16 @@ internal static class VulkanGpuExtensions
     {
         /// <summary>
         /// What Vulkan is told an image is for: always copied, blitted for its mips and read back; sampled wherever a
-        /// shader reads it, texel by texel or filtered, as a shader declares a texture it only reads as a sampled one;
-        /// a storage image where compute writes it.
+        /// shader reads it, texel by texel or filtered, as the heap holds a texture it reads as a sampled one; a
+        /// storage image where compute writes it.
         /// </summary>
         internal VkImageUsageFlags ToVulkan()
         {
-            const GpuTextureUsage Reads = GpuTextureUsage.Sampled | GpuTextureUsage.GraphicsRead
-                | GpuTextureUsage.ComputeRead;
             VkImageUsageFlags flags = VkImageUsageFlags.TransferSrc | VkImageUsageFlags.TransferDst;
-            if ((usage & Reads) != GpuTextureUsage.None) flags |= VkImageUsageFlags.Sampled;
-            if ((usage
-                & GpuTextureUsage.ColorTarget) != GpuTextureUsage.None)
-            {
+            if ((usage & GpuTextureUsage.Sampled) != GpuTextureUsage.None) flags |= VkImageUsageFlags.Sampled;
+
+            if ((usage & GpuTextureUsage.ColorTarget) != GpuTextureUsage.None)
                 flags |= VkImageUsageFlags.ColorAttachment;
-            }
 
             if ((usage & GpuTextureUsage.DepthTarget) != GpuTextureUsage.None)
                 flags |= VkImageUsageFlags.DepthStencilAttachment;
@@ -194,20 +190,6 @@ internal static class VulkanGpuExtensions
             GpuCompare.GreaterOrEqual => VkCompareOp.GreaterOrEqual,
             GpuCompare.Always => VkCompareOp.Always,
             _ => throw new ArgumentOutOfRangeException(nameof(compare), compare, "There is no such comparison."),
-        };
-    }
-
-    extension(GpuVertexFormat format)
-    {
-        internal VkFormat ToVulkan() => format switch
-        {
-            GpuVertexFormat.Float1 => VkFormat.R32Sfloat,
-            GpuVertexFormat.Float2 => VkFormat.R32G32Sfloat,
-            GpuVertexFormat.Float3 => VkFormat.R32G32B32Sfloat,
-            GpuVertexFormat.Float4 => VkFormat.R32G32B32A32Sfloat,
-            GpuVertexFormat.Uint1 => VkFormat.R32Uint,
-            GpuVertexFormat.Ubyte4Norm => VkFormat.R8G8B8A8Unorm,
-            _ => throw new ArgumentOutOfRangeException(nameof(format), format, "There is no such vertex format."),
         };
     }
 

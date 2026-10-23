@@ -8,8 +8,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Magic.Attributes;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Gpu;
-using Magic.Contexts.Input;
 using Magic.Contexts.Settings;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
@@ -20,37 +18,21 @@ using Magic.Services;
 namespace Magic.DebugTools;
 
 /// <summary>
-/// The settings: the preset applied, which can be switched, and what the frame shows (<see cref="DebugViewChanged"/>),
-/// which F5 and F6 step through whether or not the window is open, and which says its name and what it shows as a line
-/// on screen while it is a debug view; a filter, which while it has text shows every setting it finds in place of the
-/// tabs; then a tab per category of settings (<see cref="CategoryAttribute"/> up to its slash, else the gem's name), in
-/// it a header per sub-category (past the slash, else the gem's name), which a click folds away, and under it a row per
-/// setting (<see cref="Settings.All"/>): labelled in words, its key and description shown while the mouse rests on it,
-/// a number kept to its <see cref="RangeAttribute"/>. A setting marked <see cref="RequireRestartAttribute"/> says on
-/// its row that a change starts the engine again. An edit is set through <see cref="Settings.Set{T}"/>, live until the
-/// next preset; nothing is saved. Copy gives the open tab, or what the filter finds, as <c>Gem.setting=value</c> lines,
-/// the form <c>--set</c> takes. Its commands: <c>get Gem</c>, <c>set Gem.setting=value</c>, <c>preset [Name]</c> and
-/// <c>view [Name]</c>.
+/// The settings: the preset applied, which can be switched; a filter, which while it has text shows every setting it
+/// finds in place of the tabs; then a tab per category of settings (<see cref="CategoryAttribute"/> up to its slash,
+/// else the gem's name), in it a header per sub-category (past the slash, else the gem's name), which a click folds
+/// away, and under it a row per setting (<see cref="Settings.All"/>): labelled in words, its key and description shown
+/// while the mouse rests on it, a number kept to its <see cref="RangeAttribute"/>. A setting marked
+/// <see cref="RequireRestartAttribute"/> says on its row that a change starts the engine again. An edit is set through
+/// <see cref="Settings.Set{T}"/>, live until the next preset; nothing is saved. Copy gives the open tab, or what the
+/// filter finds, as <c>Gem.setting=value</c> lines, the form <c>--set</c> takes. Its commands: <c>get Gem</c>,
+/// <c>set Gem.setting=value</c> and <c>preset [Name]</c>.
 /// </summary>
 internal sealed class SettingsWindow : IDisposable
 {
-    /// <summary>
-    /// Where the debug views are: a pass each, named for what it shows, which whatever draws the frame runs by name
-    /// (<see cref="DebugViewChanged"/>).
-    /// </summary>
-    private const string ViewsFolder = "Passes/Debug";
-
-    /// <summary>
-    /// What the view choice says of the frame as it is.
-    /// </summary>
-    private const string NormalTip = "The frame as it is. A debug view shows one thing the frame made, "
-        + "its depth or its normals, say, in its place.";
-
     private readonly ToolWindow _window;
     private readonly IDebugUI _ui;
     private readonly Settings _settings;
-    private readonly Events _events;
-    private readonly IInput? _input;
     private readonly CancellationToken _stopping;
     private readonly SubscriptionList _commands = new();
     private readonly List<Row> _rows = [];
@@ -61,34 +43,10 @@ internal sealed class SettingsWindow : IDisposable
     private readonly Dictionary<string, int> _headerCounts = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The debug views there are, by name: the passes in <c>Passes/Debug</c>, each named for what it shows, and what
-    /// each says it shows, filled as the passes load.
-    /// </summary>
-    private readonly string[] _viewNames;
-    private readonly string[] _viewDescriptions;
-
-    /// <summary>
     /// Every preset there is, as the preset choice shows them, by name, and the name of each.
     /// </summary>
     private readonly Handle<Preset>[] _presets;
     private readonly string[] _presetNames;
-
-    /// <summary>
-    /// The frame as it is, then every debug view in words, as the view choice shows them.
-    /// </summary>
-    private readonly string[] _views;
-
-    /// <summary>
-    /// The debug view shown in place of the finished image, as last chosen here (<see cref="DebugViewChanged"/>);
-    /// empty for the frame as it is.
-    /// </summary>
-    private string _debugView = string.Empty;
-
-    /// <summary>
-    /// The line on screen for the view shown, made when the view changes.
-    /// </summary>
-    private string _viewLine = string.Empty;
-    private string _linedView = string.Empty;
 
     private string[] _tabs = [];
     private int _tab;
@@ -104,38 +62,19 @@ internal sealed class SettingsWindow : IDisposable
         Settings settings,
         Assets assets,
         ICommands? commands,
-        Events events,
-        IInput? input,
         CancellationToken stopping)
     {
         _window = window;
         _ui = ui;
         _settings = settings;
-        _events = events;
-        _input = input;
         _stopping = stopping;
 
-        // The presets and the debug views as their choices show them: sorted by name, each handle moved with its name.
+        // The presets as their choice shows them: sorted by name, each handle moved with its name.
         _presets = [.. settings.Presets];
         _presetNames = Array.ConvertAll(
             _presets,
             preset => Path.GetFileNameWithoutExtension(assets.GetPath(preset)) ?? string.Empty);
         Array.Sort(_presetNames, _presets, StringComparer.OrdinalIgnoreCase);
-        Handle<Pass>[] passes = Array.ConvertAll([.. assets.GetPaths(ViewsFolder)], assets.Find<Pass>);
-        _viewNames = Array.ConvertAll(
-            passes,
-            pass => Path.GetFileNameWithoutExtension(assets.GetPath(pass)) ?? string.Empty);
-        Array.Sort(_viewNames, passes, StringComparer.OrdinalIgnoreCase);
-        _viewDescriptions = new string[_viewNames.Length];
-        Array.Fill(_viewDescriptions, string.Empty);
-        _views = new string[_viewNames.Length + 1];
-        _views[0] = "Normal";
-        for (int i = 0; i < _viewNames.Length; i++)
-        {
-            _views[i + 1] = ToWords(_viewNames[i]);
-        }
-
-        DescribeViewsAsync(assets, passes, stopping).FireAndForget();
 
         if (commands is null) return;
 
@@ -151,27 +90,18 @@ internal sealed class SettingsWindow : IDisposable
             "preset",
             "Logs the preset applied and every preset there is; with a name, applies that preset.",
             RunPreset));
-        _commands.Add(commands.Register(
-            "view",
-            "Shows a debug view, a pass in Passes/Debug by its file name, in place of the finished image; "
-                + "alone, the frame as it is.",
-            RunView));
     }
 
     public void Dispose() => _commands.Dispose();
 
     internal void Update()
     {
-        StepView();
-        ShowView();
-
         if (!_window.Begin(out bool copy)) return;
 
         IReadOnlyList<Setting> all = _settings.All;
         Collect(all);
 
         DrawPreset();
-        DrawView();
         _ui.Input("##filter", ref _filter, hint: "Filter", focus: true);
         _ui.Tooltip("Every setting, in any tab, whose name, key or description has this.");
 
@@ -404,90 +334,6 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
-    /// What the frame shows, as a choice of the frame as it is or one of the debug views, with what the one chosen
-    /// shows as its tooltip.
-    /// </summary>
-    private void DrawView()
-    {
-        int index = GetViewIndex();
-        if (_ui.Choice("View", ref index, _views)) Show(index == 0 ? string.Empty : _viewNames[index - 1]);
-
-        _ui.Tooltip(index == 0 || _viewDescriptions[index - 1].Length == 0 ? NormalTip : _viewDescriptions[index - 1]);
-    }
-
-    /// <summary>
-    /// Where the view shown is in the choice: 0 for the frame as it is, or a view not listed.
-    /// </summary>
-    private int GetViewIndex()
-    {
-        return Array.FindIndex(_viewNames, name => string.Equals(name, _debugView, StringComparison.OrdinalIgnoreCase))
-            + 1;
-    }
-
-    /// <summary>
-    /// Shows the debug view <paramref name="name"/> in place of the finished image, or the frame as it is for an empty
-    /// name: told to whatever draws the frame.
-    /// </summary>
-    private void Show(string name)
-    {
-        _debugView = name;
-        _events.Publish(new DebugViewChanged(name));
-    }
-
-    /// <summary>
-    /// F5 shows the next view and F6 the one before, round through the frame as it is, whether or not the window is
-    /// open.
-    /// </summary>
-    private void StepView()
-    {
-        if (_input is not { } input) return;
-
-        bool isForward = input[Control.KeyF5].WasPressed;
-
-        if (!isForward && !input[Control.KeyF6].WasPressed) return;
-
-        int step = isForward ? 1 : -1;
-        int index = (GetViewIndex() + step + _views.Length) % _views.Length;
-        Show(index == 0 ? string.Empty : _viewNames[index - 1]);
-    }
-
-    /// <summary>
-    /// While a debug view is shown, a line on screen under the frame rate saying which, and what it shows, so a frame
-    /// of black or a flat colour reads, and a screenshot says what it is of.
-    /// </summary>
-    private void ShowView()
-    {
-        if (_debugView.Length == 0) return;
-
-        int index = GetViewIndex();
-        string description = index == 0 ? string.Empty : _viewDescriptions[index - 1];
-
-        // Made again when the view changes, or its description has loaded since.
-        if (!string.Equals(_linedView, _debugView, StringComparison.Ordinal)
-            || !_viewLine.EndsWith(description, StringComparison.Ordinal))
-        {
-            _linedView = _debugView;
-            string name = index == 0 ? _debugView : _views[index];
-            _viewLine = description.Length == 0 ? $"View: {name}" : $"View: {name}. {description}";
-        }
-
-        _ui.Text(_viewLine);
-    }
-
-    /// <summary>
-    /// Loads each view's pass for what it says it shows; one that does not load has no description, which the renderer
-    /// says why when it is shown.
-    /// </summary>
-    private async Task DescribeViewsAsync(Assets assets, Handle<Pass>[] passes, CancellationToken cancel)
-    {
-        for (int i = 0; i < passes.Length; i++)
-        {
-            Result<Pass> pass = await assets.LoadAsync(passes[i], cancel).ConfigureAwait(false);
-            if (pass.Ok) _viewDescriptions[i] = pass.Value.Description;
-        }
-    }
-
-    /// <summary>
     /// A row's widget for what its setting holds: a checkbox, a slider, a choice, or a text field, which is a string's
     /// text or anything else's JSON and is set when Enter is pressed in it. A setting read only as its gem starts is
     /// its value alone.
@@ -644,33 +490,6 @@ internal sealed class SettingsWindow : IDisposable
         }
 
         ApplyAsync(_presets[chosen], _stopping).FireAndForget();
-    }
-
-    /// <summary>
-    /// <c>view Name</c> shows that debug view, a pass in <c>Passes/Debug</c> by its file name, in place of the finished
-    /// image; <c>view</c> alone shows the frame as it is again.
-    /// </summary>
-    private void RunView(ReadOnlySpan<string> words)
-    {
-        if (words.Length == 0)
-        {
-            Show(string.Empty);
-            Debugging.Info("View: the frame as it is.");
-
-            return;
-        }
-
-        string wanted = words[0];
-        string? view = Array.Find(_viewNames, name => string.Equals(name, wanted, StringComparison.OrdinalIgnoreCase));
-        if (view is null)
-        {
-            Debugging.Warn($"view takes one of the debug views: {string.Join(", ", _viewNames)}.");
-
-            return;
-        }
-
-        Show(view);
-        Debugging.Info($"View: {ToWords(view)}.");
     }
 
     /// <summary>

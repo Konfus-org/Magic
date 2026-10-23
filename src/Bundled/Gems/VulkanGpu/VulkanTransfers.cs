@@ -7,12 +7,17 @@ namespace Magic.VulkanGpu;
 
 /// <summary>
 /// Uploads, staged at the call into the next frame's slot's mapped buffer, 16-byte aligned, and copied at the start of
-/// that frame's submit, before its commands, in call order; and reads back, which wait for the GPU. A staging buffer a
+/// that frame's submit, before its commands, in call order, each then left as a shader reads it; and reads back, which
+/// wait for the GPU. A staging buffer a
 /// frame outgrows stays until the frame that copies from it is done, and the slot keeps the bigger one.
 /// </summary>
 internal sealed unsafe class VulkanTransfers : IDisposable
 {
     private const ulong InitialBytes = 1024 * 1024;
+
+    private const VkPipelineStageFlags2 Shaders = VkPipelineStageFlags2.VertexShader
+        | VkPipelineStageFlags2.FragmentShader
+        | VkPipelineStageFlags2.ComputeShader;
 
     private readonly VulkanDevice _device;
     private readonly VulkanResources _resources;
@@ -130,6 +135,30 @@ internal sealed unsafe class VulkanTransfers : IDisposable
         }
 
         RecordCopies(commandBuffer, barriers, start, _transfers.Count);
+
+        // What was uploaded is left as a shader reads it, for a shader that reads it through the heap, which no pass
+        // declares: the barrier goes with the first pass's.
+        foreach (Transfer transfer in _transfers)
+        {
+            if (transfer.Buffer is { } buffer)
+            {
+                barriers.Use(ref buffer.State, Shaders, VkAccessFlags2.ShaderRead, isWrite: false);
+
+                continue;
+            }
+
+            if (transfer.Texture is not { } texture) continue;
+
+            barriers.UseOne(
+                texture,
+                transfer.Region.Level,
+                texture.GetArrayLayer(transfer.Region.Layer),
+                VkImageLayout.ShaderReadOnlyOptimal,
+                Shaders,
+                VkAccessFlags2.ShaderSampledRead,
+                isWrite: false);
+        }
+
         _transfers.Clear();
         _copied.Clear();
     }

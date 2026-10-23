@@ -26,6 +26,12 @@ public static class Json
     public static JsonSerializerOptions Options { get; } = MakeDialect();
 
     /// <summary>
+    /// The code loaded, which a file that names a type by its name finds it in, as a render effect is
+    /// (<see cref="Contexts.Rendering.RenderEffects{T}"/>): the run's, set as the engine starts it.
+    /// </summary>
+    internal static Assemblies? Assemblies { get; set; }
+
+    /// <summary>
     /// <paramref name="utf8"/> as a <typeparamref name="T"/>, or why it is not one. A byte order mark, which editors on
     /// Windows may start a file with and JSON does not allow, is skipped.
     /// </summary>

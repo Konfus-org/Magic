@@ -18,7 +18,7 @@ public enum GpuTextureKind : byte
 }
 
 /// <summary>
-/// A texture for <see cref="IGpu.CreateTexture"/> to make. <paramref name="Layers"/> is the layer count of a
+/// A texture for <see cref="IGpuDriver.CreateTexture"/> to make. <paramref name="Layers"/> is the layer count of a
 /// <see cref="GpuTextureKind.Texture2DArray"/>, the depth of a <see cref="GpuTextureKind.Texture3D"/>, and 6 for a
 /// <see cref="GpuTextureKind.Cube"/>.
 /// </summary>

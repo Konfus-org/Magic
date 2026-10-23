@@ -1,8 +1,0 @@
-{
-    "stage": "occlusion",
-    "kind": "compute",
-    "shader": { "id": 11282 },
-    "creates": [ { "name": "ContactShadows", "filter": "nearest", "format": "r8_unorm" } ],
-    "writes": [ { "name": "ContactShadows" } ],
-    "dispatch": { "per": "view" }
-}

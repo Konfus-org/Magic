@@ -1,7 +1,0 @@
-{
-    "stage": "post",
-    "kind": "fullscreen",
-    "shader": { "id": 10005 },
-    "creates": [ { "name": "Ldr", "format": "rgba16_float" } ],
-    "writes": [ { "name": "Ldr" } ]
-}

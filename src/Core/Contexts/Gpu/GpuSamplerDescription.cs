@@ -33,7 +33,7 @@ public enum GpuWrap : byte
 }
 
 /// <summary>
-/// A sampler for <see cref="IGpu.CreateSampler"/> to make. <paramref name="Anisotropy"/> above 1 filters
+/// A sampler for <see cref="IGpuDriver.CreateSampler"/> to make. <paramref name="Anisotropy"/> above 1 filters
 /// anisotropically with up to that many taps. With <paramref name="Compare"/> it is a comparison sampler
 /// (<c>SamplerComparisonState</c>): a tap is 1 where <c>reference op stored</c> holds, filtered over the taps.
 /// </summary>

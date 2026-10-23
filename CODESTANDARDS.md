@@ -67,8 +67,9 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 - A script is a `.cs` asset whose class, named like the file, is an `IScript`: an `IBehavior` for one entity each
   frame, or a system script for many.
 - A game is its assets and scripts, never a gem.
-- A script's constructor takes its `Entity` first if it uses it, then services, and only keeps them. A pipeline
-  script takes services only. A script's values are public `{ get; set; }` properties. `Start()` runs once they're set.
+- A script's constructor takes its `Entity` first if it uses it, then services, and only keeps them. A pipeline or
+  overlay script takes services only. A script's values are public `{ get; set; }` properties. `Start()` runs once
+  they're set.
 
 ### Assets
 
@@ -231,9 +232,10 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 
 - HLSL 2021 only, Shader Model 6.0 with wave intrinsics, warnings as errors. The gem that provides `IShaderCompiler`
   compiles shaders and loads their `#include`s from the assets.
-- Bind resources with the macros in `Include/Bindings.hlsli`, never by register. Its header lists the conventions.
+- Read every resource through the heap with the macros in `Include/Heap.hlsli`; never bind one by register.
+  `Include/Bindings.hlsli`'s header lists the conventions.
 - Use wave intrinsics only where the result can't depend on the wave size (32 or 64), or the order is already
-  arbitrary. No 16-bit types and no runtime-indexed resource arrays.
+  arbitrary. No 16-bit types, and no runtime-indexed resource arrays but the heap's.
 - Guard a value where it can go wrong: clamp roughness with the library's helper, keep n·v above 0, normalise with
   the helper that allows zero, and use `SampleGrad` or `SampleLevel` inside a branch.
 - Few variants: a define for what changes the pipeline, a `[branch]` on a value the whole draw shares for the rest.
@@ -279,7 +281,7 @@ Write all code to run on Windows, Linux and macOS.
 
 ### Graphics
 
-- Draw through `IGpu`: a gem records commands as plain data, and the GPU provider turns them into API calls.
+- Draw through `IGpuDriver`: a gem records commands as plain data, and the GPU provider turns them into API calls.
   Backend-specific code lives only in the GPU provider.
 - Draw into a render target, a `GpuTexture`, asking its format and size. Never assume a window.
 - Use a GPU feature only if Vulkan 1.3 has it on every GPU the engine runs on, a Mac's MoltenVK and KosmicKrisp

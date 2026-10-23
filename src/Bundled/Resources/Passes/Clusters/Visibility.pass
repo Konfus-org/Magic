@@ -1,5 +1,0 @@
-{
-    "stage": "visibility",
-    "kind": "draw",
-    "draw": { "drawn": "visibility", "colors": [ "Visibility" ], "depth": "Depth", "contents": "clear", "args": "BinArgs", "first": 0, "instances": "VisiblePieces" }
-}

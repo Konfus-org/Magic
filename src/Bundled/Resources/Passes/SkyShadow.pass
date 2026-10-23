@@ -1,9 +1,0 @@
-{
-    // The sky's shadow on the ground around the camera (Templates/SkyShadow.frag.hlsl): the share of the key light's
-    // light, by colour, that its air and clouds let through, which everything the key light lights reads by name
-    // (Include/SkyShadow.hlsli).
-    "stage": "probes",
-    "kind": "draw",
-    "creates": [ { "name": "SkyShadow", "filter": "linear", "format": "r11_g11_b10_float", "scale": 0, "width": 1024, "height": 1024 } ],
-    "draw": { "drawn": "sky_shadow", "colors": [ "SkyShadow" ], "contents": "discard" }
-}

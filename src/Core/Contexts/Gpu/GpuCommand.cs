@@ -17,9 +17,6 @@ public enum GpuCommandType : byte
 
     EndRenderPass,
 
-    /// <summary>
-    /// The run of levels: the textures the pass writes; the second run, of buffers: the buffers it writes.
-    /// </summary>
     BeginComputePass,
 
     EndComputePass,
@@ -40,34 +37,25 @@ public enum GpuCommandType : byte
     Pipeline,
 
     /// <summary>
-    /// The run of buffers: the vertex buffers, from slot 0.
-    /// </summary>
-    VertexBuffers,
-
-    /// <summary>
     /// <see cref="GpuCommand.Buffer"/>, of indices of <see cref="GpuCommand.IndexSize"/>.
     /// </summary>
     IndexBuffer,
 
     /// <summary>
-    /// <see cref="GpuCommand.Stage"/>; the run of buffers: what it reads, from register 0.
-    /// </summary>
-    Buffers,
-
-    /// <summary>
-    /// Stage; the run of textures: what it reads texel by texel, with no sampler, from register 0.
-    /// </summary>
-    RawTextures,
-
-    /// <summary>
-    /// Stage; the run of sampled textures: what it reads through a sampler, from register 0.
-    /// </summary>
-    Textures,
-
-    /// <summary>
-    /// Stage; the run of bytes: the stage's one constant block.
+    /// The run of bytes: the pipeline's one constant block, which every stage reads.
     /// </summary>
     Constants,
+
+    /// <summary>
+    /// Inside a pass. The run of resources: what the pass's shaders read through the heap, which the pass waits for and
+    /// lays out to read before it begins.
+    /// </summary>
+    Reads,
+
+    /// <summary>
+    /// Inside a pass. The run of resources: what the pass's shaders write through the heap.
+    /// </summary>
+    Writes,
 
     /// <summary>
     /// <see cref="GpuCommand.Count"/> vertices from <see cref="GpuCommand.First"/>, <see cref="GpuCommand.Instances"/>
@@ -156,13 +144,11 @@ public enum GpuIndexSize : byte
 
 /// <summary>
 /// One GPU command, as <see cref="GpuCommands"/> records it: plain data whose <see cref="Type"/> says which fields mean
-/// something; the rest are default. A run (of texture levels, sampled textures, textures, buffers, regions or bytes)
-/// is a slice of the list's own, which the list hands back by the command (<see cref="GpuCommands.GetLevels"/> and
-/// the others like it).
+/// something; the rest are default. A run (of texture levels, buffers, resources, regions or bytes) is a slice of the
+/// list's own, which the list hands back by the command (<see cref="GpuCommands.GetLevels"/> and the others like it).
 /// </summary>
 public readonly record struct GpuCommand(
     GpuCommandType Type,
-    GpuStage Stage = GpuStage.Vertex,
     GpuPipeline Pipeline = default,
     GpuBuffer Buffer = default,
     GpuTexture Texture = default,
@@ -173,8 +159,6 @@ public readonly record struct GpuCommand(
     GpuIndexSize IndexSize = GpuIndexSize.Bits16,
     int RunStart = 0,
     int RunLength = 0,
-    int SecondRunStart = 0,
-    int SecondRunLength = 0,
     uint Count = 0,
     uint Instances = 1,
     uint First = 0,

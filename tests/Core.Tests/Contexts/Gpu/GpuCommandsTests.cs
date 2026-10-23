@@ -52,28 +52,6 @@ public sealed class GpuCommandsTests
     }
 
     [Fact]
-    public void ComputePass_records_the_textures_it_writes()
-    {
-        GpuCommands commands = new();
-        GpuTextureLevel[] textures = [new GpuTextureLevel(new GpuTexture(1), Layer: 2)];
-
-        commands.ComputePass(textures, []).Dispose();
-
-        Assert.Equal(textures, commands.GetLevels(commands.Commands[0]).ToArray());
-    }
-
-    [Fact]
-    public void ComputePass_records_the_buffers_it_writes()
-    {
-        GpuCommands commands = new();
-        GpuBuffer[] buffers = [new GpuBuffer(4), new GpuBuffer(5)];
-
-        commands.ComputePass([], buffers).Dispose();
-
-        Assert.Equal(buffers, commands.GetBuffers(commands.Commands[0]).ToArray());
-    }
-
-    [Fact]
     public void CopyTexture_records_the_source_then_the_destination()
     {
         GpuCommands commands = new();

@@ -15,7 +15,7 @@ using static Magic.SdlBindings.SDL3;
 namespace Magic.VulkanGpu;
 
 /// <summary>
-/// <see cref="IGpu"/> on Vulkan: ids for Vulkan objects, uploads staged at the call and copied at the start of the
+/// <see cref="IGpuDriver"/> on Vulkan: ids for Vulkan objects, uploads staged at the call and copied at the start of the
 /// frame's submit, then the recorded commands (<see cref="VulkanRecorder"/>), in one command
 /// buffer. A window is a render target like a texture, whose image is acquired the first time a frame draws into it;
 /// the window itself is the platform gem's, found by its id in the SDL every gem shares, so the platform is made first
@@ -23,7 +23,7 @@ namespace Magic.VulkanGpu;
 /// has finished the frame last recorded from it, and what was released goes then. Everything here runs on the render
 /// thread, which made the window.
 /// </summary>
-internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
+internal sealed unsafe class VulkanGpuGem : IGem, IGpuDriver, IDisposable
 {
     /// <summary>
     /// Frames the CPU records ahead of the GPU.
@@ -60,8 +60,8 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
     private readonly Threads _threads;
     private readonly VulkanDevice _device;
     private readonly VulkanResources _resources;
+    private readonly VulkanHeap _heap;
     private readonly VulkanPipelines _pipelines;
-    private readonly VulkanDescriptors _descriptors;
     private readonly VulkanWindows _windows;
     private readonly VulkanTransfers _transfers;
     private readonly VulkanTimer _timer;
@@ -76,7 +76,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
     private readonly VkCommandPool[] _pools = new VkCommandPool[FramesInFlight];
     private readonly VkCommandBuffer[] _commandBuffers = new VkCommandBuffer[FramesInFlight];
     private readonly ulong[] _slotFrames = new ulong[FramesInFlight];
-    private readonly List<(Kind Kind, object Item)>[] _retired = new List<(Kind Kind, object Item)>[FramesInFlight];
+    private readonly List<Retired>[] _retired = new List<Retired>[FramesInFlight];
 
     /// <summary>
     /// What callers released since the last submit, by kind and id.
@@ -126,12 +126,12 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
 
         _device = new VulkanDevice(settings);
         _resources = new VulkanResources(_device);
-        _pipelines = new VulkanPipelines(_device);
-        _descriptors = new VulkanDescriptors(_device, _resources, _pipelines, FramesInFlight);
+        _heap = new VulkanHeap(_device);
+        _pipelines = new VulkanPipelines(_device, _heap);
         _windows = new VulkanWindows(_device, settings, _acquireWait, FramesInFlight);
         _transfers = new VulkanTransfers(_device, _resources, _staged, FramesInFlight);
         _timer = new VulkanTimer(_device, _groupDuration, _frameDuration, FramesInFlight);
-        _recorder = new VulkanRecorder(_device, _resources, _pipelines, _descriptors, _windows, _barriers, _timer);
+        _recorder = new VulkanRecorder(_device, _resources, _windows, _barriers, _timer, _heap);
         for (int slot = 0; slot < FramesInFlight; slot++)
         {
             _retired[slot] = [];
@@ -184,9 +184,8 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
 
         _timer.Dispose();
         _transfers.Dispose();
-        _descriptors.Dispose();
         _windows.Dispose();
-        _pipelines.Dispose();
+        _heap.Dispose();
         _resources.Dispose();
         _device.Destroy();
     }
@@ -204,23 +203,34 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
     {
         ThrowIfNotRender();
 
-        VulkanBuffer buffer = _resources.CreateBuffer(bytes, usage.ToVulkan(), isHost: false);
+        VkBufferUsageFlags flags = usage.ToVulkan();
+        VulkanBuffer buffer = _resources.CreateBuffer(bytes, flags, isHost: false);
+        uint id = _resources.Buffers.Add(buffer);
+        _heap.Write(id, buffer, flags);
 
-        return new GpuBuffer(_resources.Buffers.Add(buffer));
+        return new GpuBuffer(id);
     }
 
     public GpuTexture CreateTexture(in GpuTextureDescription description)
     {
         ThrowIfNotRender();
 
-        return new GpuTexture(_resources.Textures.Add(_resources.CreateTexture(description)));
+        VulkanTexture texture = _resources.CreateTexture(description);
+        uint id = _resources.Textures.Add(texture);
+        _heap.Write(id, texture);
+
+        return new GpuTexture(id);
     }
 
     public GpuSampler CreateSampler(in GpuSamplerDescription description)
     {
         ThrowIfNotRender();
 
-        return new GpuSampler(_resources.Samplers.Add(_resources.CreateSampler(description)));
+        VkSampler sampler = _resources.CreateSampler(description);
+        uint id = _resources.Samplers.Add(sampler);
+        _heap.Write(id, sampler);
+
+        return new GpuSampler(id);
     }
 
     public Result<GpuPipeline> CreatePipeline(GpuPipelineDescription description)
@@ -460,7 +470,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
     /// <summary>
     /// The slot the frame being recorded is drawn from, taken back from the GPU the first time the frame needs it:
     /// once the GPU has finished the frame last drawn from it, what that frame released goes, and its command buffer,
-    /// descriptors, staging and timings are the new frame's.
+    /// staging and timings are the new frame's.
     /// </summary>
     private int TakeSlot()
     {
@@ -473,7 +483,6 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         _timer.Collect(slot);
         DestroyRetired(slot);
         _device.Api.vkResetCommandPool(_pools[slot], VkCommandPoolResetFlags.None);
-        _descriptors.Reset(slot);
         _transfers.Reset(slot);
 
         return slot;
@@ -669,12 +678,13 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
     }
 
     /// <summary>
-    /// What callers released leaves the tables; its Vulkan objects go once the last frame submitted is done, since that
-    /// and any frame before it may still use them.
+    /// What callers released leaves the tables; its Vulkan objects go, and its ids are handed out again, once the last
+    /// frame submitted is done, since that and any frame before it may still use them, a shader reading the heap at
+    /// those ids included.
     /// </summary>
     private void FreeReleased()
     {
-        List<(Kind Kind, object Item)> retired = _retired[(int)((_frame + FramesInFlight - 1) % FramesInFlight)];
+        List<Retired> retired = _retired[(int)((_frame + FramesInFlight - 1) % FramesInFlight)];
         foreach ((Kind kind, uint id) in _releasing)
         {
             object? item = kind switch
@@ -686,7 +696,7 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
                 Kind.Pipeline => _resources.Pipelines.Free(id),
                 _ => null,
             };
-            if (item is not null) retired.Add((kind, item));
+            if (item is not null) retired.Add(new Retired(kind, item, id));
         }
 
         _releasing.Clear();
@@ -694,24 +704,29 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
 
     private void DestroyRetired(int slot)
     {
-        foreach ((Kind kind, object item) in _retired[slot])
+        foreach ((Kind kind, object item, uint id) in _retired[slot])
         {
             switch (kind)
             {
                 case Kind.Buffer:
                     _resources.Destroy((VulkanBuffer)item);
+                    _resources.Buffers.Recycle(id);
                     break;
                 case Kind.Texture:
                     _resources.Destroy((VulkanTexture)item);
+                    _resources.Textures.Recycle(id);
                     break;
                 case Kind.Window:
                     _windows.Release((VulkanWindow)item);
+                    _resources.Textures.Recycle(id);
                     break;
                 case Kind.Sampler:
                     _device.Api.vkDestroySampler((VkSampler)item);
+                    _resources.Samplers.Recycle(id);
                     break;
                 case Kind.Pipeline:
                     _pipelines.Destroy((VulkanPipeline)item);
+                    _resources.Pipelines.Recycle(id);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(slot), kind, "There is no such kind of GPU object.");
@@ -745,6 +760,11 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
         Sampler,
         Pipeline,
     }
+
+    /// <summary>
+    /// What a frame released: the kind of object, the object, and the id it had, handed out again once it is destroyed.
+    /// </summary>
+    private readonly record struct Retired(Kind Kind, object Item, uint Id);
 
     /// <summary>
     /// A capture begun this frame: the window target's id, where its image was copied to (none when it could not be),

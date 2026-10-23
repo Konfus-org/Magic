@@ -1,9 +1,0 @@
-{
-    // The glow of every level of BloomChain (Shaders/Post/Bloom.frag.hlsl), premultiplied, which tonemapping lays over
-    // the view.
-    "stage": "post",
-    "kind": "fullscreen",
-    "shader": { "id": 11265 },
-    "creates": [ { "name": "Bloom", "format": "rgba16_float", "size": "output", "scale": 0.5 } ],
-    "writes": [ { "name": "Bloom" } ]
-}

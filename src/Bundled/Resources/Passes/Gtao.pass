@@ -1,8 +1,0 @@
-{
-    "stage": "occlusion",
-    "kind": "compute",
-    "shader": { "id": 11284 },
-    "creates": [ { "name": "AmbientOcclusionNoisy", "filter": "nearest", "format": "rgba16_float", "scale": 0.5 } ],
-    "writes": [ { "name": "AmbientOcclusionNoisy" } ],
-    "dispatch": { "per": "output:AmbientOcclusionNoisy" }
-}

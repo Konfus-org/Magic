@@ -2,6 +2,7 @@ using System.Numerics;
 using Magic.Contexts.Components;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Input;
+using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -9,9 +10,9 @@ namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
 /// Changes the world's weather while keys are held: [ and ] the cloud cover, - and = the wind, which carries the
-/// clouds, ruffles the trees and sends waves over the grass, and , and . the fog. The weather is a component, read by
-/// whatever draws the sky and the air every frame, so writing it is all it takes, every frame if need be.
-/// <c>{ "id": 3448 }</c>.
+/// clouds, ruffles the trees and sends waves over the grass, and , and . the fog, each added to the weather when it
+/// lists none. The weather is a component, read by whatever draws the sky and the air every frame, so writing it is all
+/// it takes, every frame if need be. <c>{ "id": 3448 }</c>.
 /// </summary>
 internal sealed class WeatherKeys(World world, IInput input) : IBehavior
 {
@@ -44,12 +45,27 @@ internal sealed class WeatherKeys(World world, IInput input) : IBehavior
         {
             for (int i = 0; i < weathers.Length; i++)
             {
-                ref Weather weather = ref weathers[i];
-                weather.Coverage = Math.Clamp(weather.Coverage + cover, 0, 1);
+                ref RenderEffects<IWeatherEffect> effects = ref weathers[i].Effects;
+                if (cover != 0)
+                {
+                    effects.TryGet(out Clouds clouds);
+                    effects.Set(clouds with { Coverage = Math.Clamp(clouds.Coverage + cover, 0, 1) });
+                }
+
                 // The wind keeps its way and changes only its speed, blowing along +X when it had none.
-                Vector3 way = weather.Wind == Vector3.Zero ? Vector3.UnitX : Vector3.Normalize(weather.Wind);
-                weather.Wind = way * Math.Clamp(weather.Wind.Length() + wind, 0, MostWind);
-                weather.Fog = Math.Clamp(weather.Fog + fog, 0, MostFog);
+                if (wind != 0)
+                {
+                    effects.TryGet(out Wind blowing);
+                    Vector3 velocity = blowing.Velocity;
+                    Vector3 way = velocity == Vector3.Zero ? Vector3.UnitX : Vector3.Normalize(velocity);
+                    effects.Set(new Wind(way * Math.Clamp(velocity.Length() + wind, 0, MostWind)));
+                }
+
+                if (fog != 0)
+                {
+                    effects.TryGet(out Fog misty);
+                    effects.Set(misty with { Density = Math.Clamp(misty.Density + fog, 0, MostFog) });
+                }
             }
         }
     }

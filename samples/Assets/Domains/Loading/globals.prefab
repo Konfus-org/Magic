@@ -1,7 +1,8 @@
 {
     "entities": [
         {"name": "Camera", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": -4.0}}, "Camera": {}}},
-        {"name": "PostProcessing", "components": {"PostProcessing": {"effects": {"id": 3362}}}},
+        {"name": "Weather", "components": {"Weather": {"effects": [{"type": "Air"}]}}},
+        {"name": "PostProcessing", "components": {"PostProcessing": {"effects": [{"type": "Exposure", "shader": {"id": 1494037537170761089}}, {"type": "Tonemap", "shader": {"id": 8644084645777035739}}]}}},
         {"name": "Ring", "components": {"Transform": {"position": {"x": 0, "y": 0, "z": 0}, "rotation": {"x": 0.60876, "y": 0, "z": 0, "w": 0.79335}, "scale": {"x": 0.8, "y": 0.8, "z": 0.8}}, "Renderer": {"model": {"id": 518}, "materials": [{"id": 3325}]}}, "scripts": [{"id": 3432, "degreesPerSecond": 120}]},
         {"name": "Glow", "components": {"Transform": {"position": {"x": 0, "y": 1.5, "z": -1.5}}, "PointLight": {"color": {"r": 0.6, "g": 0.9, "b": 1}, "intensity": 40, "range": 8}}},
         {"name": "Help", "scripts": [{"id": 3450, "text": "Loading...", "isOnScreen": true}]}

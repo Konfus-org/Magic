@@ -1,8 +1,0 @@
-{
-    // The tonemapped view copied aside for the grade to read (Shaders/GradeCopy.frag.hlsl).
-    "stage": "post",
-    "kind": "fullscreen",
-    "shader": { "id": 3653 },
-    "creates": [ { "name": "Toned", "format": "rgba16_float", "size": "output" } ],
-    "writes": [ { "name": "Toned" } ]
-}

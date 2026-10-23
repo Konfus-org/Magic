@@ -1,5 +1,0 @@
-{
-    "stage": "sky",
-    "kind": "draw",
-    "draw": { "drawn": "sky", "colors": [ "Hdr" ], "depth": "Depth", "contents": "keep" }
-}

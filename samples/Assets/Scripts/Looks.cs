@@ -3,8 +3,7 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Input;
-using Magic.Contexts.Utils;
-using Magic.Extensions;
+using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -12,25 +11,19 @@ namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
 /// Steps the world through <see cref="Options"/>, its looks, on <see cref="Key"/>, easing from one to the next over
-/// about <see cref="Seconds"/>: it sets the params of the passes the world's effects pipeline runs, the tonemap's
-/// exposure, the bloom's strength and the samples' grade, by each pass's name, while the pipeline is drawn, which
-/// whatever draws the world takes from the next frame. The name of the look it is going to shows on screen.
-/// <c>{ "id": 3445, "options": [ { "name": "Clear" }, { "name": "Noir", "saturation": 0 } ] }</c>.
+/// about <see cref="Seconds"/>: it sets the world's post effects, the tonemap's bias and the grade, where the world
+/// lists them, which whatever draws the world takes from the next frame. The name of the look it is going to shows on
+/// screen. <c>{ "id": 3445, "options": [ { "name": "Clear" }, { "name": "Noir", "saturation": 0 } ] }</c>.
 /// </summary>
-internal sealed class Looks(World world, IInput input, Services.Assets assets, IDebugUI? debugUI = null) : IBehavior
+internal sealed class Looks(World world, IInput input, IDebugUI? debugUI = null) : IBehavior
 {
-    /// <summary>
-    /// The world's effects pipeline, once it has loaded: written whole by the load, read on the main thread.
-    /// </summary>
-    private Pipeline? _effects;
-
     /// <summary>
     /// Which of <see cref="Options"/> it is going to.
     /// </summary>
     private int _shown;
 
     /// <summary>
-    /// The params as the world shows them now, easing toward the look it is going to.
+    /// The look as the world shows it now, easing toward the look it is going to.
     /// </summary>
     private Look _now = new();
 
@@ -46,20 +39,9 @@ internal sealed class Looks(World world, IInput input, Services.Assets assets, I
     /// </summary>
     public float Seconds { get; set; } = 1.5f;
 
-    public void Start()
-    {
-        // The world's effects pipeline, from the first post-processing there is.
-        foreach ((_, Span<PostProcessing> effects) in world.Query<PostProcessing>())
-        {
-            if (effects.Length > 0) LoadAsync(effects[0].Effects).FireAndForget();
-
-            return;
-        }
-    }
-
     public void Update(in Frame frame)
     {
-        if (Options.Count == 0 || _effects is not { } effects) return;
+        if (Options.Count == 0) return;
 
         if (input[Key].WasPressed) _shown = (_shown + 1) % Options.Count;
 
@@ -69,31 +51,34 @@ internal sealed class Looks(World world, IInput input, Services.Assets assets, I
         _now = new Look
         {
             Exposure = float.Lerp(_now.Exposure, to.Exposure, t),
-            Bloom = float.Lerp(_now.Bloom, to.Bloom, t),
             Saturation = float.Lerp(_now.Saturation, to.Saturation, t),
             Contrast = float.Lerp(_now.Contrast, to.Contrast, t),
             Tint = Vector3.Lerp(_now.Tint, to.Tint, t),
             Vignette = float.Lerp(_now.Vignette, to.Vignette, t),
         };
 
-        // A param set to the value it has counts nothing, so once the look has settled nothing is redone.
-        Set(effects, "Tonemap", "exposureBias", _now.Exposure);
-        Set(effects, "Bloom", "strength", _now.Bloom);
-        Set(effects, "Grade", "saturation", _now.Saturation);
-        Set(effects, "Grade", "contrast", _now.Contrast);
-        Set(effects, "Grade", "tint", _now.Tint);
-        Set(effects, "Grade", "vignette", _now.Vignette);
+        // The grade's saturation and contrast are what they change by, none at zero, where a look's are what they are
+        // times, none at one.
+        foreach ((_, Span<PostProcessing> posts) in world.Query<PostProcessing>())
+        {
+            for (int i = 0; i < posts.Length; i++)
+            {
+                ref RenderEffects<IPostEffect> effects = ref posts[i].Effects;
+                if (effects.TryGet(out Tonemap tonemap)) effects.Set(tonemap with { Bias = _now.Exposure });
+
+                if (!effects.TryGet(out Grade grade)) continue;
+
+                Grade now = grade with
+                {
+                    Saturation = _now.Saturation - 1,
+                    Contrast = _now.Contrast - 1,
+                    Tint = new Color(_now.Tint.X, _now.Tint.Y, _now.Tint.Z),
+                    Vignette = _now.Vignette,
+                };
+                effects.Set(now);
+            }
+        }
+
         if (debugUI is { Enabled: true }) debugUI.Text($"Look: {to.Name} (L for the next)");
-    }
-
-    private static void Set(Pipeline effects, string pass, string name, MaterialParam value)
-    {
-        if (effects.Params.TryGetValue(pass, out MaterialParamDictionary? passParams)) passParams[name] = value;
-    }
-
-    private async Task LoadAsync(Handle<Pipeline> handle)
-    {
-        Result<Pipeline> loaded = await assets.LoadAsync(handle, CancellationToken.None).ConfigureAwait(false);
-        if (loaded.Ok) _effects = loaded.Value;
     }
 }

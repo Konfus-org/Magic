@@ -28,8 +28,8 @@ its worlds by then fails.
 The project to run: a .magic file or the folder holding one, relative to the repository root.
 
 .PARAMETER Commands
-Console lines sent after the world has loaded and settled, before the first screenshot, such as one choosing a debug
-view. `help` in a run lists them.
+Console lines sent after the world has loaded and settled, before the first screenshot, such as one changing a
+setting. `help` in a run lists them.
 
 .PARAMETER Domains
 Domains to open after the first screenshot, each by its asset path, a screenshot taken of each once it has settled.
@@ -38,7 +38,7 @@ Domains to open after the first screenshot, each by its asset path, a screenshot
 tools/Screenshot.ps1
 
 .EXAMPLE
-tools/Screenshot.ps1 -Commands 'view Albedo'
+tools/Screenshot.ps1 -Commands 'set VoxelRendering.renderScale=1'
 
 .EXAMPLE
 tools/Screenshot.ps1 -Domains 'Domains/Valley/Valley.domain'

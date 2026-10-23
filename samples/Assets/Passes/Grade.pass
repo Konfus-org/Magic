@@ -1,7 +1,0 @@
-{
-    // The samples' grade over the tonemapped view, back into it (Shaders/Grade.frag.hlsl).
-    "stage": "post",
-    "kind": "fullscreen",
-    "shader": { "id": 3654 },
-    "writes": [ { "name": "Ldr" } ]
-}

@@ -1,8 +1,0 @@
-{
-    "description": "The G-buffer's world normals as colour, +X red, +Y green, +Z blue; black where nothing was drawn.",
-    "stage": "ui",
-    "kind": "fullscreen",
-    "shader": { "id": 11931 },
-    "creates": [ { "name": "DebugView", "format": "rgba16_float" } ],
-    "writes": [ { "name": "DebugView" } ]
-}

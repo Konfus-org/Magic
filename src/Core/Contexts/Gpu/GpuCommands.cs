@@ -9,11 +9,11 @@ namespace Magic.Contexts.Gpu;
 
 /// <summary>
 /// A frame's GPU commands, in order, with the handles and bytes they point into: plain data, which the
-/// <see cref="IGpu"/> provider turns into its API's calls when it submits the frame, and then clears. The render
-/// thread's, as <see cref="IGpu"/> is. A gem records into <see cref="IGpu.Commands"/> in its Render hook, so what a
-/// gem made later records goes on top.
+/// <see cref="IGpuDriver"/> provider turns into its API's calls when it submits the frame, and then clears. The render
+/// thread's, as <see cref="IGpuDriver"/> is. A gem records into <see cref="IGpuDriver.Commands"/> in its Render hook,
+/// so what a gem made later records goes on top.
 /// <para>
-/// Drawing and computing happen inside a pass: <see cref="RenderPass"/> and <see cref="ComputePass"/> each hand back
+/// Drawing and computing happen inside a pass: <see cref="RenderPass"/> and <see cref="ComputePass()"/> each hand back
 /// the commands that are legal inside it, which chain, and end the pass when disposed, so a pass is a
 /// <c>using</c> block. Between passes a frame copies, makes mipmaps and names stretches of itself for a GPU debugger
 /// (<see cref="DebugGroup"/>, a <c>using</c> block too).
@@ -23,9 +23,8 @@ public sealed class GpuCommands
 {
     private readonly List<GpuCommand> _commands = [];
     private readonly List<GpuTextureLevel> _levels = [];
-    private readonly List<GpuSampledTexture> _sampled = [];
-    private readonly List<GpuTexture> _textures = [];
     private readonly List<GpuBuffer> _buffers = [];
+    private readonly List<GpuResource> _resources = [];
     private readonly List<GpuTextureRegion> _regions = [];
     private readonly List<byte> _bytes = [];
 
@@ -40,24 +39,16 @@ public sealed class GpuCommands
         => CollectionsMarshal.AsSpan(_levels).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
-    /// The run of sampled textures <paramref name="command"/> points at.
+    /// The run of buffers <paramref name="command"/> points at.
     /// </summary>
-    public ReadOnlySpan<GpuSampledTexture> GetSampled(in GpuCommand command)
-        => CollectionsMarshal.AsSpan(_sampled).Slice(command.RunStart, command.RunLength);
+    public ReadOnlySpan<GpuBuffer> GetBuffers(in GpuCommand command)
+        => CollectionsMarshal.AsSpan(_buffers).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
-    /// The run of textures <paramref name="command"/> points at.
+    /// The run of resources <paramref name="command"/> points at.
     /// </summary>
-    public ReadOnlySpan<GpuTexture> GetTextures(in GpuCommand command)
-        => CollectionsMarshal.AsSpan(_textures).Slice(command.RunStart, command.RunLength);
-
-    /// <summary>
-    /// The run of buffers <paramref name="command"/> points at: its second run for a compute pass, whose first is its
-    /// levels.
-    /// </summary>
-    public ReadOnlySpan<GpuBuffer> GetBuffers(in GpuCommand command) => command.Type == GpuCommandType.BeginComputePass
-        ? CollectionsMarshal.AsSpan(_buffers).Slice(command.SecondRunStart, command.SecondRunLength)
-        : CollectionsMarshal.AsSpan(_buffers).Slice(command.RunStart, command.RunLength);
+    public ReadOnlySpan<GpuResource> GetResources(in GpuCommand command)
+        => CollectionsMarshal.AsSpan(_resources).Slice(command.RunStart, command.RunLength);
 
     /// <summary>
     /// The run of texture regions <paramref name="command"/> points at.
@@ -75,9 +66,8 @@ public sealed class GpuCommands
     {
         _commands.Clear();
         _levels.Clear();
-        _sampled.Clear();
-        _textures.Clear();
         _buffers.Clear();
+        _resources.Clear();
         _regions.Clear();
         _bytes.Clear();
     }
@@ -124,21 +114,12 @@ public sealed class GpuCommands
     }
 
     /// <summary>
-    /// Starts a compute pass that writes <paramref name="textures"/>, each one level of one layer, and
-    /// <paramref name="buffers"/>. The pass ends when what is handed back is disposed.
+    /// Starts a compute pass, which says what its shaders read and write with <see cref="GpuComputePass.Reads"/> and
+    /// <see cref="GpuComputePass.Writes"/>. The pass ends when what is handed back is disposed.
     /// </summary>
-    public GpuComputePass ComputePass(ReadOnlySpan<GpuTextureLevel> textures, ReadOnlySpan<GpuBuffer> buffers)
+    public GpuComputePass ComputePass()
     {
-        int levelStart = _levels.Count;
-        _levels.AddRange(textures);
-        int bufferStart = _buffers.Count;
-        _buffers.AddRange(buffers);
-        _commands.Add(new GpuCommand(
-            GpuCommandType.BeginComputePass,
-            RunStart: levelStart,
-            RunLength: textures.Length,
-            SecondRunStart: bufferStart,
-            SecondRunLength: buffers.Length));
+        _commands.Add(new GpuCommand(GpuCommandType.BeginComputePass));
 
         return new GpuComputePass(this);
     }
@@ -202,47 +183,20 @@ public sealed class GpuCommands
     internal void Pipeline(GpuPipeline pipeline)
         => _commands.Add(new GpuCommand(GpuCommandType.Pipeline, Pipeline: pipeline));
 
-    internal void VertexBuffers(ReadOnlySpan<GpuBuffer> buffers)
-    {
-        int start = _buffers.Count;
-        _buffers.AddRange(buffers);
-        _commands.Add(new GpuCommand(GpuCommandType.VertexBuffers, RunStart: start, RunLength: buffers.Length));
-    }
-
     internal void IndexBuffer(GpuBuffer buffer, GpuIndexSize size)
         => _commands.Add(new GpuCommand(GpuCommandType.IndexBuffer, Buffer: buffer, IndexSize: size));
 
-    internal void Buffers(GpuStage stage, ReadOnlySpan<GpuBuffer> buffers)
-    {
-        int start = _buffers.Count;
-        _buffers.AddRange(buffers);
-        _commands.Add(new GpuCommand(GpuCommandType.Buffers, Stage: stage, RunStart: start, RunLength: buffers.Length));
-    }
-
-    internal void RawTextures(GpuStage stage, ReadOnlySpan<GpuTexture> textures)
-    {
-        int start = _textures.Count;
-        _textures.AddRange(textures);
-        _commands.Add(
-            new GpuCommand(GpuCommandType.RawTextures, Stage: stage, RunStart: start, RunLength: textures.Length));
-    }
-
-    internal void Textures(GpuStage stage, ReadOnlySpan<GpuSampledTexture> textures)
-    {
-        int start = _sampled.Count;
-        _sampled.AddRange(textures);
-        _commands.Add(
-            new GpuCommand(GpuCommandType.Textures, Stage: stage, RunStart: start, RunLength: textures.Length));
-    }
-
-    internal void Constants<T>(GpuStage stage, in T constants)
+    internal void Constants<T>(in T constants)
         where T : unmanaged
     {
         int start = _bytes.Count;
         _bytes.AddRange(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)));
-        _commands.Add(
-            new GpuCommand(GpuCommandType.Constants, Stage: stage, RunStart: start, RunLength: Unsafe.SizeOf<T>()));
+        _commands.Add(new GpuCommand(GpuCommandType.Constants, RunStart: start, RunLength: Unsafe.SizeOf<T>()));
     }
+
+    internal void Reads(ReadOnlySpan<GpuResource> resources) => Use(GpuCommandType.Reads, resources);
+
+    internal void Writes(ReadOnlySpan<GpuResource> resources) => Use(GpuCommandType.Writes, resources);
 
     internal void Draw(uint vertices, uint instances, uint firstVertex, uint firstInstance)
         => _commands.Add(new GpuCommand(
@@ -270,4 +224,11 @@ public sealed class GpuCommands
 
     internal void DispatchFromBuffer(GpuBuffer arguments, uint offset)
         => _commands.Add(new GpuCommand(GpuCommandType.DispatchFromBuffer, Buffer: arguments, Offset: offset));
+
+    private void Use(GpuCommandType type, ReadOnlySpan<GpuResource> resources)
+    {
+        int start = _resources.Count;
+        _resources.AddRange(resources);
+        _commands.Add(new GpuCommand(type, RunStart: start, RunLength: resources.Length));
+    }
 }

@@ -1,5 +1,0 @@
-{
-    "stage": "g_buffer",
-    "kind": "draw",
-    "draw": { "drawn": "surfaces", "colors": [ "Albedo", "Normal", "Material", "Hdr", "Velocity" ], "contents": "clear", "args": "ResolveArgs", "instances": "TileList" }
-}

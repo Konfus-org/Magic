@@ -1,8 +1,0 @@
-{
-    "stage": "probes",
-    "kind": "compute",
-    "shader": { "id": 11326 },
-    "creates": [ { "name": "GiRays", "kind": "buffer", "type": "float4", "stride": 16, "per": "giRays" } ],
-    "writes": [ { "name": "GiRays" } ],
-    "dispatch": { "per": "giRays" }
-}

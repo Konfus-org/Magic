@@ -3,7 +3,7 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A buffer <see cref="IGpu.CreateBuffer"/> made.
+/// A buffer <see cref="IGpuDriver.CreateBuffer"/> made.
 /// </summary>
 public readonly record struct GpuBuffer(uint Id)
 {

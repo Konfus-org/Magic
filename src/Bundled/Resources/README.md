@@ -34,6 +34,6 @@ done again only when the file or its `.meta` changes.
 ## Hot reload
 
 Core watches every root while Magic runs. When you save a file or its `.meta`, the asset reloads, and so does
-everything made from it: editing a pass reloads every pipeline that uses it. If the new file fails to load, the error
+everything made from it: editing a shader reloads every pipeline that uses it. If the new file fails to load, the error
 is logged and the old asset stays in use. Rebuilding the project's code reloads its scripts and prefabs. Gems hear
 about each change on `Events`.

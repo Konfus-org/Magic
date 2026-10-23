@@ -25,7 +25,7 @@ gems were made, and `Render` in reverse.
 
 ### Threads
 
-`Threads` runs work on the main or render thread from any thread, and returns a task that ends once it has run. `IGpu`
+`Threads` runs work on the main or render thread from any thread, and returns a task that ends once it has run. `IGpuDriver`
 belongs to the render thread. `World`, `IEcs`, `IInput`, `IWindow` and `IDebugUI`'s widgets belong to the main thread,
 but opening a domain, spawning an asset that must load first and saving the world work from any thread.
 
@@ -138,7 +138,8 @@ component to attach or detach one. The samples' `Assets/Scripts/` has examples.
 - Public settable properties are the values, and their initializers the defaults. `Start()` runs once they're set.
 - `IBehavior` adds optional `Update`, `FixedUpdate` and `LateUpdate` hooks. A script that is also a system, such as an
   `ISystemScript<T>`, runs in the ECS while its entity lives.
-- An `IPipelineScript` draws part of a frame where a pass of kind `script` names it. It isn't attached to an entity.
+- An `IRenderPipeline` records a frame, and an `IOverlayScript` draws over the window ([Rendering](#rendering)). They
+  aren't attached to an entity.
 - `[Impatient]` scripts, such as a loading domain's, run while the loading domain shows. Every other script, and every
   script in the domain being readied, runs from the frame after that domain is shown.
 
@@ -166,15 +167,33 @@ ready.
 
 ## The GPU
 
-`IGpu` is the GPU, one level above the graphics API. Use it on the render thread, in `Render`, to make buffers,
-textures and pipelines and record commands. A render target is a `GpuTexture`: one a gem made, or a window's.
-`IShaderCompiler` compiles HLSL, and `#include "path"` loads the shader asset at `Shaders/path`
+`IGpuDriver` is the GPU, one level above the graphics API. Use it on the render thread, in `Render`, to make buffers,
+textures and pipelines and record commands. A render target is a `GpuTexture`: one a gem made, or a window's. Shaders
+read every buffer, texture and sampler through the heap, by the id their handle holds, and a pass lists what it reads
+and writes. `IShaderCompiler` compiles HLSL, and `#include "path"` loads the shader asset at `Shaders/path`
 ([Shaders](../Bundled/Resources/Shaders/README.md)).
 
-A renderer draws the world from components, such as `Camera`, the lights and `PostProcessing`. A `Pipeline` asset is an
-ordered list of `Pass`es and other pipelines, and a `Pass` is one step of a frame: its stage, shader and the resources
-it uses by name. The engine's `Pipelines/` and `Passes/` are examples. Publish `DebugViewChanged` to show a debug view
-in place of the finished image.
+## Rendering
+
+A renderer gem provides `IRendering` and draws the world from components, such as `Camera`, the lights, `Weather` and
+`PostProcessing`. Its frame is a pipeline script: a script whose class implements `IRenderPipeline` and records the
+frame with `IRendering`, the renderer's steps and its own passes in order. The renderer's settings name the script. To
+change the frame, copy the renderer's own script into the project's assets, rename the class, change it, and name the
+copy in the settings.
+
+- **Steps.** Culling, the visibility draw, the depth pyramid, resolving surfaces and the sky are the renderer's. The
+  script picks their order and the textures they draw into.
+- **Resources.** A texture or buffer the script asks for is this frame's alone. What lasts from frame to frame, such
+  as each view's exposure and depth pyramid, is the renderer's.
+- **Effects.** `PostProcessing` and `Weather` each hold their effects in a `RenderEffects`, one of each type, in order.
+  A file names each effect by its type: `{ "type": "Tonemap", "shader": { "id": 8644084645777035739 }, "bias": 0 }`.
+  A script changes one with `TryGet` and `Set`, adds one with `Set` and takes one out with `Remove`.
+- **Your own post effect** is a struct that implements `IPostEffect`, with its shader as a field, and a compute
+  shader. Its `Record` passes the image through its shader with `IRendering.Effect`.
+- **Overlays.** An `IOverlayScript`, such as the debug UI's, draws over the window once the frame's views are shown,
+  with its own pipelines.
+- **Reading back.** `IRendering.CaptureAsync` reads the window as shown, for screenshots. `ReadAsync` reads a texture or
+  buffer as the frame left it.
 
 ## Physics
 

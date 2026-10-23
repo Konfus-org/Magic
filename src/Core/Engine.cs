@@ -234,6 +234,7 @@ public sealed class Engine
         Debugging.Info($"Running {project.Name} from {folder}");
         Events events = new();
         Assemblies assemblies = new();
+        Json.Assemblies = assemblies;
         using Assets assets = new(files, app, events);
         ServiceCollection services = CreateCoreServices(
             files,

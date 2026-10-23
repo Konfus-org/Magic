@@ -1,0 +1,25 @@
+# VoxelRendering
+
+A renderer. It draws the world on the GPU as clusters, at the detail each part of the view needs. It needs a GPU
+provider whose shaders read resources through a heap, a shader compiler, and a gem that runs scripts. It draws the
+clusters and cards a cluster generator makes for each model.
+
+- **The frame** is a pipeline script, a C# class that records the renderer's steps and its own passes in order
+  ([Rendering](../../../Core/README.md#rendering)). The settings name it. By default it is `Scripts/DefaultPipeline.cs`
+  from the gem's resources. To change the frame, or light it with a shader of your own, copy that file into the
+  project's assets, rename the class, change it, and name the copy in the settings.
+- **The look** comes from the world's `PostProcessing` effects, in order. The gem's `Shaders/Effects/` has the
+  shaders for `Exposure`, `Tonemap` and `Grade`. A world without effects shows the lit view as it is.
+- **The weather** comes from the world's `Weather` effects: its `Wind` and `Clouds` move and shape the sky's clouds.
+- **Overlays.** The overlay script draws over the window after its views are drawn. By default it is
+  `Scripts/DebugUi.cs`, the debug UI's.
+- **Failures.** A model that fails to load, or a material that fails to load or compile, is drawn with a magenta
+  failure material. A pass whose shader fails is left out, and a banner across the view says why.
+- **Loading.** Nothing is drawn until it can be drawn properly, and what had to wait fades in. A domain appears whole in
+  its first frame. A frame shows only once every pass's shader is compiled.
+
+Its settings, such as the render scale, are on `VoxelRenderingSettings` and show in the settings window (F4).
+Textures are compressed to BC7 the first time they load, and kept in the cache.
+
+- It lights the world by its directional lights and its sky, without shadows. Point and spot lights give no light.
+- Transparent surfaces are not drawn.

@@ -1,7 +1,0 @@
-{
-    "stage": "probes",
-    "kind": "compute",
-    "shader": { "id": 11324 },
-    "writes": [ { "name": "GiField" } ],
-    "dispatch": { "per": "1310720" }
-}

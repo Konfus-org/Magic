@@ -1,7 +1,0 @@
-{
-    "stage": "transparency",
-    "kind": "fullscreen",
-    "shader": { "id": 11250 },
-    "creates": [ { "name": "SceneColor", "format": "rgba16_float", "levels": 6 } ],
-    "writes": [ { "name": "SceneColor", "mipmaps": true } ]
-}

@@ -1,8 +1,0 @@
-{
-    // The air and the weather's fog between the camera and what it sees (Shaders/Sky/Air.frag.hlsl), over the lit scene
-    // and the sky.
-    "stage": "sky",
-    "kind": "fullscreen",
-    "shader": { "id": 11233 },
-    "writes": [ { "name": "Hdr", "contents": "keep", "blend": "premultiplied" } ]
-}

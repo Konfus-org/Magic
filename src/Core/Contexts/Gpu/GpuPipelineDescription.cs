@@ -3,23 +3,6 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// The type of a vertex input.
-/// </summary>
-public enum GpuVertexFormat : byte
-{
-    Float1,
-    Float2,
-    Float3,
-    Float4,
-    Uint1,
-
-    /// <summary>
-    /// Four bytes, read as 0 to 1.
-    /// </summary>
-    Ubyte4Norm,
-}
-
-/// <summary>
 /// Which faces a pipeline does not draw. Mirrored geometry (a negative scale) draws with <see cref="Front"/>.
 /// </summary>
 public enum GpuCull : byte
@@ -61,22 +44,12 @@ public enum GpuBlend : byte
 }
 
 /// <summary>
-/// One vertex buffer slot of a pipeline: its stride in bytes, and whether it steps per instance rather than per vertex.
-/// </summary>
-public readonly record struct GpuVertexBuffer(uint Slot, uint Stride, bool PerInstance = false);
-
-/// <summary>
-/// One vertex shader input: the location it is read at (<c>TEXCOORDn</c>), the <see cref="GpuVertexBuffer.Slot"/> of
-/// the buffer it comes from, its format, and its byte offset within a vertex.
-/// </summary>
-public readonly record struct GpuVertexInput(uint Location, uint Slot, GpuVertexFormat Format, uint Offset);
-
-/// <summary>
-/// A graphics pipeline for <see cref="IGpu.CreatePipeline(GpuPipelineDescription)"/> to make: both shaders, the vertex
-/// layout, the colour targets (one per <c>SV_Target</c> the fragment shader writes, in order; none for a depth-only
-/// pipeline) and an optional depth target. Triangles are clockwise from outside, and the defaults are the engine's
-/// other conventions (back faces culled, reverse-Z), so a GPU reads them rather than knowing them. Depth is tested
-/// whenever <see cref="DepthFormat"/> is set, and written unless <see cref="DepthWrite"/> is off.
+/// A graphics pipeline for <see cref="IGpuDriver.CreatePipeline(GpuPipelineDescription)"/> to make: both shaders, the
+/// colour targets (one per <c>SV_Target</c> the fragment shader writes, in order; none for a depth-only pipeline) and
+/// an optional depth target. The vertex shader reads its vertices from the heap by <c>SV_VertexID</c>. Triangles are
+/// clockwise from outside, and the defaults are the engine's other conventions (back faces culled, reverse-Z), so a
+/// GPU reads them rather than knowing them. Depth is tested whenever <see cref="DepthFormat"/> is set, and written
+/// unless <see cref="DepthWrite"/> is off.
 /// </summary>
 public sealed record GpuPipelineDescription
 {
@@ -91,10 +64,6 @@ public sealed record GpuPipelineDescription
     /// <see cref="ColorFormats"/>; a target past the end does not blend.
     /// </summary>
     public IReadOnlyList<GpuBlend> Blends { get; init; } = [];
-
-    public IReadOnlyList<GpuVertexBuffer> VertexBuffers { get; init; } = [];
-
-    public IReadOnlyList<GpuVertexInput> VertexInputs { get; init; } = [];
 
     /// <summary>
     /// The depth target's format, or <see cref="GpuFormat.Invalid"/> for none.

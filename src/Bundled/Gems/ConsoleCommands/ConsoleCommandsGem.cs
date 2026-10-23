@@ -5,7 +5,6 @@ using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Subscriptions;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -50,10 +49,8 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     private readonly IFileSystem _files;
     private readonly World _world;
     private readonly Assets _assets;
-    private readonly Threads _threads;
     private readonly CancellationToken _stopping;
-    private readonly IGpu? _gpu;
-    private readonly IWindow? _window;
+    private readonly IRendering? _rendering;
 
     /// <summary>
     /// What an <c>open</c> is opening, the lines after it held back until it is done: this run's, as the world is, so a
@@ -63,20 +60,16 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
 
     public ConsoleCommandsGem(
         App app,
-        Threads threads,
         IFileSystem files,
         World world,
         Assets assets,
-        IGpu? gpu = null,
-        IWindow? window = null)
+        IRendering? rendering = null)
     {
         _files = files;
         _world = world;
         _assets = assets;
-        _threads = threads;
         _stopping = app.Quitting;
-        _gpu = gpu;
-        _window = window;
+        _rendering = rendering;
         _commands.Add("help", new Command("Lists every command and what it does.", _ => Help()));
         _commands.Add("quit", new Command("Quits the app.", _ => app.Quit("quit typed in the terminal")));
         _commands.Add(
@@ -302,25 +295,20 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     /// </summary>
     private void Screenshot()
     {
-        if (_gpu is not { } gpu || _window is not { } window)
+        if (_rendering is not { } rendering)
         {
-            Debugging.Warn("There is no window to take a screenshot of.");
+            Debugging.Warn("There is no renderer to take a screenshot with.");
 
             return;
         }
 
         string name = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss.fff", CultureInfo.InvariantCulture) + ".png";
-        SaveAsync(gpu, window, _files.Combine(AppContext.BaseDirectory, "Screenshots", name)).FireAndForget();
+        SaveAsync(rendering, _files.Combine(AppContext.BaseDirectory, "Screenshots", name)).FireAndForget();
     }
 
-    private async Task SaveAsync(IGpu gpu, IWindow window, string path)
+    private async Task SaveAsync(IRendering rendering, string path)
     {
-        // The capture is asked for on the render thread, which the GPU is used from, and its image awaited here.
-        Task<Result<GpuImage>> capture = await _threads.PostAsync(
-            EngineThread.Render,
-            () => gpu.CaptureAsync(gpu.GetWindowTarget(window)),
-            _stopping).ConfigureAwait(false);
-        Result<GpuImage> image = await capture.ConfigureAwait(false);
+        Result<GpuImage> image = await rendering.CaptureAsync(_stopping).ConfigureAwait(false);
         if (!image.Ok)
         {
             Debugging.Error($"No screenshot was taken: {image.Error}");

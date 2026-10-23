@@ -16,15 +16,5 @@ public enum GpuTextureUsage : byte
     ColorTarget = 1 << 1,
     DepthTarget = 1 << 2,
 
-    /// <summary>
-    /// Read by vertex and fragment shaders as a storage texture, with no sampler.
-    /// </summary>
-    GraphicsRead = 1 << 3,
-
-    /// <summary>
-    /// Read by compute shaders as a storage texture, with no sampler.
-    /// </summary>
-    ComputeRead = 1 << 4,
-
-    ComputeWrite = 1 << 5,
+    ComputeWrite = 1 << 3,
 }

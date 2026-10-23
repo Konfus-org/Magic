@@ -39,8 +39,8 @@ some steps, `-Project` runs another project, and `-Seconds` sets how long each d
 
 Runs a project with a window until its world has loaded and settled, takes a screenshot and prints its path. It
 doesn't build. `$png = tools/Screenshot.ps1` keeps the paths. `-Domains` then opens each domain it names and
-screenshots it, `-Commands` sends console lines first (`'view Albedo'` picks a debug view), and `-Project` runs another
-project.
+screenshots it, `-Commands` sends console lines first (`'set VoxelRendering.renderScale=1'` changes a setting), and
+`-Project` runs another project.
 
 ## AgentTaskComplete.ps1
 

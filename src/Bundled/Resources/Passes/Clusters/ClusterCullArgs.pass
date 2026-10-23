@@ -1,8 +1,0 @@
-{
-    "stage": "cull",
-    "kind": "compute",
-    "shader": { "id": 60023 },
-    "writes": [ { "name": "CullCounts" }, { "name": "CullArgs" } ],
-    "dispatch": { "groups": [ 1 ] },
-    "params": { "row": { "x": 0 }, "counter": { "x": 0 }, "per": { "x": 1 }, "mark": { "x": 1 } }
-}

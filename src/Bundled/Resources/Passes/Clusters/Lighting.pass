@@ -1,6 +1,0 @@
-{
-    "stage": "lighting",
-    "kind": "fullscreen",
-    "shader": { "id": 11243 },
-    "writes": [ { "name": "Hdr", "contents": "keep", "blend": "add" } ]
-}

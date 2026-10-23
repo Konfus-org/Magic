@@ -66,8 +66,8 @@ public interface IGem
 
     /// <summary>
     /// <see cref="Phase.Render"/>: draw what Sync swapped in, after the gems that take this one have drawn. A gem
-    /// that draws takes <see cref="IGpu"/> in its constructor and records into <see cref="IGpu.Commands"/> here, so
-    /// the provider, made before it, submits after it.
+    /// that draws takes <see cref="IGpuDriver"/> in its constructor and records into
+    /// <see cref="IGpuDriver.Commands"/> here, so the provider, made before it, submits after it.
     /// </summary>
     void Render(in Frame frame)
     {
