@@ -86,6 +86,7 @@ internal sealed class Shoot(Entity owner, World world, IInput input, IWindow win
                 new Size(window.Width, window.Height),
                 Reach);
             if (physics.RayCast(camera.Position, far) is { } hit) aim = Vector3.Normalize(hit.Point - at.Position);
+            else aim = Vector3.Normalize(far - at.Position);
         }
 
         Renderer renderer = new() { Model = Model, Materials = new MaterialSlots { Material } };
