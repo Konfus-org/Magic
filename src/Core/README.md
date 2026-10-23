@@ -30,9 +30,9 @@ gems were made, and `Render` in reverse.
 
 ### Time
 
-Every hook gets a `Frame` with two clocks. `DeltaSeconds` and `Seconds` are the world's time: `World.TimeScale` speeds
-it up or slows it down, and it stands still while the world is paused. `RealDeltaSeconds` and `RealSeconds` are real
-time. Game code moves by the world's time. What moves while the world is paused, such as a camera or a menu, moves by
+Every hook gets a `Frame` with two clocks, in seconds. `WorldDeltaSec` and `WorldSec` are the world's time:
+`World.TimeScale` speeds it up or slows it down, and it stands still while the world is paused. `RealDeltaSec` and
+`RealSec` are real time. Game code moves by the world's time. What moves while the world is paused, such as a camera or a menu, moves by
 real time. `FixedUpdate` runs once per fixed step of the world's time, 60 a second unless `Core.fixedRate` says
 otherwise. A frame runs at most `Core.maxFixedSteps` of them, 4 by default, and the world drops the time past that.
 

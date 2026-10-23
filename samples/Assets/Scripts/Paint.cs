@@ -8,7 +8,7 @@ using Magic.Services;
 namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
-/// Shows <see cref="Hit"/> on its entity for <see cref="Seconds"/> after something strikes its body, then its own
+/// Shows <see cref="Hit"/> on its entity for <see cref="HitSec"/> after something strikes its body, then its own
 /// material again: the way to change one entity's look, putting another material in its renderer's slot, since a
 /// material is shared by everything drawn with it. The entity carries a <see cref="Contacts"/> beside its
 /// <see cref="Physics"/>. <c>{ "id": 3444, "hit": { "id": 3460 } }</c>.
@@ -21,13 +21,13 @@ internal sealed class Paint(Entity owner, World world) : IBehavior
     private Handle<Material> _own;
 
     /// <summary>
-    /// The frame clock's seconds when it goes back.
+    /// When it goes back, on the world's clock.
     /// </summary>
-    private double _until;
+    private double _untilSec;
 
     public Handle<Material> Hit { get; set; }
 
-    public float Seconds { get; set; } = 1.5f;
+    public float HitSec { get; set; } = 1.5f;
 
     public void Start() => _own = world.Get<Renderer>(owner).Materials[0];
 
@@ -35,10 +35,10 @@ internal sealed class Paint(Entity owner, World world) : IBehavior
     {
         foreach (Contact contact in world.Get<Contacts>(owner))
         {
-            if (contact.Phase == ContactPhase.Enter) _until = frame.Seconds + Seconds;
+            if (contact.Phase == ContactPhase.Enter) _untilSec = frame.WorldSec + HitSec;
         }
 
-        Handle<Material> showing = frame.Seconds < _until ? Hit : _own;
+        Handle<Material> showing = frame.WorldSec < _untilSec ? Hit : _own;
         ref Renderer renderer = ref world.Get<Renderer>(owner);
         if (renderer.Materials[0] != showing) renderer.Materials[0] = showing;
     }

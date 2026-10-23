@@ -43,7 +43,7 @@ public interface IGem
 
     /// <summary>
     /// <see cref="Phase.FixedUpdate"/>: move the world on by one fixed step. Runs as many times as there are steps in
-    /// the time since the last frame, none for some frames; <paramref name="frame"/>'s DeltaSeconds is the step.
+    /// the time since the last frame, none for some frames; <paramref name="frame"/>'s WorldDeltaSec is the step.
     /// </summary>
     void FixedUpdate(in Frame frame)
     {

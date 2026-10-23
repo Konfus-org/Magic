@@ -34,7 +34,7 @@ internal sealed class WeatherKeys(World world, IInput input) : IBehavior
     public void Update(in Frame frame)
     {
         // How far each pair of keys moves its part of the weather this frame, a share of that part's range.
-        float step = Rate * frame.DeltaSeconds;
+        float step = Rate * frame.WorldDeltaSec;
         float cover = Read(Control.KeyRightBracket, Control.KeyLeftBracket) * step;
         float wind = Read(Control.KeyEquals, Control.KeyMinus) * step * MostWind;
         float fog = Read(Control.KeyPeriod, Control.KeyComma) * step * MostFog;

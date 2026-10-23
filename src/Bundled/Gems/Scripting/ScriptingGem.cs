@@ -447,8 +447,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
         return frame with
         {
-            DeltaSeconds = (float)(frame.Seconds - last.Seconds),
-            RealDeltaSeconds = (float)(frame.RealSeconds - last.RealSeconds),
+            WorldDeltaSec = (float)(frame.WorldSec - last.WorldSec),
+            RealDeltaSec = (float)(frame.RealSec - last.RealSec),
         };
     }
 

@@ -69,7 +69,7 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
             ? new Vector2(_input[Control.MouseMotionX].Value, _input[Control.MouseMotionY].Value) * MouseTurn
             : Vector2.Zero;
         Vector2 turn = mouse + (new Vector2(_input[Control.GamepadRightX].Value, -_input[Control.GamepadRightY].Value)
-            * (StickTurn * frame.RealDeltaSeconds));
+            * (StickTurn * frame.RealDeltaSec));
         float right = ReadAxis(Control.KeyD, Control.KeyA) + _input[Control.GamepadLeftX].Value;
         float forward = ReadAxis(Control.KeyW, Control.KeyS) + _input[Control.GamepadLeftY].Value;
         float up = ReadAxis(Control.KeyE, Control.KeyQ)
@@ -86,7 +86,7 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
         bool isFast = _input[Control.KeyLeftShift].IsDown || _input[Control.GamepadLeftShoulder].IsDown;
         ref Transform transform = ref _world.Get<Transform>(owner);
         transform.Rotation = rotation;
-        transform.Position += move * (Speed * (isFast ? FastFactor : 1) * frame.RealDeltaSeconds);
+        transform.Position += move * (Speed * (isFast ? FastFactor : 1) * frame.RealDeltaSec);
     }
 
     /// <summary>

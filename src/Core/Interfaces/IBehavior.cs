@@ -9,7 +9,7 @@ namespace Magic.Interfaces;
 /// <para>
 /// <see cref="FixedUpdate"/> runs every step. <see cref="Update"/> and <see cref="LateUpdate"/> run each frame near the
 /// player, but whatever runs the scripts may call them less often for an entity far from the player's cameras (those
-/// tagged <see cref="Tag.Player"/>), the frame's DeltaSeconds then the time since the last call, so what moves by it
+/// tagged <see cref="Tag.Player"/>), the frame's WorldDeltaSec then the time since the last call, so what moves by it
 /// moves as far.
 /// </para>
 /// <para>
@@ -29,7 +29,7 @@ public interface IBehavior : IScript
 
     /// <summary>
     /// <see cref="Phase.FixedUpdate"/>: move the entity on by one fixed step, as many times as there are steps since
-    /// the last frame; <paramref name="frame"/>'s DeltaSeconds is the step.
+    /// the last frame; <paramref name="frame"/>'s WorldDeltaSec is the step.
     /// </summary>
     void FixedUpdate(in Frame frame)
     {

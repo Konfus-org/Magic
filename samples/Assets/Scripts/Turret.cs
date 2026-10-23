@@ -35,7 +35,7 @@ internal sealed class Turret(Entity owner, World world) : IBehavior
         ref Transform transform = ref world.Get<Transform>(owner);
         Vector3 toward = player - transform.Position;
         float wanted = MathF.Atan2(toward.X, toward.Z);
-        float most = DegreesPerSecond * (MathF.PI / 180) * frame.DeltaSeconds;
+        float most = DegreesPerSecond * (MathF.PI / 180) * frame.WorldDeltaSec;
         _yaw += Math.Clamp(MathF.IEEERemainder(wanted - _yaw, MathF.Tau), -most, most);
         transform.Rotation = Quaternion.CreateFromAxisAngle(Vector3.UnitY, _yaw);
     }

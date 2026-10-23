@@ -51,8 +51,8 @@ internal sealed class SkyKeys(World world, IInput input, Services.Assets assets,
         // clouds move at a steady rate.
         float hazier = input[Control.KeyRight].Value - input[Control.KeyLeft].Value;
         float higher = input[Control.KeyPageUp].Value - input[Control.KeyPageDown].Value;
-        Haze = Math.Clamp(Haze * MathF.Exp(hazier * frame.DeltaSeconds), 0.2f, 12);
-        CloudHeight = Math.Clamp(CloudHeight + (higher * 1500 * frame.DeltaSeconds), 300, 8000);
+        Haze = Math.Clamp(Haze * MathF.Exp(hazier * frame.WorldDeltaSec), 0.2f, 12);
+        CloudHeight = Math.Clamp(CloudHeight + (higher * 1500 * frame.WorldDeltaSec), 300, 8000);
 
         // A param set to the value it has counts nothing, so while no key is held nothing is redone.
         sky.Params["haze"] = Haze;

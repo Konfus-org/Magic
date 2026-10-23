@@ -133,7 +133,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// <summary>
     /// The time and the substeps of the step handed over, for the physics thread.
     /// </summary>
-    private float _stepSeconds;
+    private float _stepSec;
     private int _substeps;
 
     /// <summary>
@@ -203,7 +203,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             for (int i = 0; i < entities.Length; i++)
             {
                 if (CanBeNear(transforms[i], farthest))
-                    Follow(entities[i], ref transforms[i], ref physics[i], frame.DeltaSeconds);
+                    Follow(entities[i], ref transforms[i], ref physics[i], frame.WorldDeltaSec);
             }
         }
 
@@ -225,7 +225,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
         // While the world's stream holds it, the bodies are made but not stepped, so the first step once it is shown
         // has only to step them.
-        if (!_world.Stream.IsHeld) Kick(frame.DeltaSeconds);
+        if (!_world.Stream.IsHeld) Kick(frame.WorldDeltaSec);
     }
 
     /// <summary>
@@ -543,7 +543,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// Makes the body for a new entity in range of a player camera, or carries what its components changed since the
     /// last step over to its body; one out of range is left unstamped, for the sweep to drop.
     /// </summary>
-    private void Follow(Entity entity, ref Transform transform, ref Physics physics, float step)
+    private void Follow(Entity entity, ref Transform transform, ref Physics physics, float stepSec)
     {
         Handle<Model> model = GetModel(entity);
         ModelShape? shape = _shapes.Get(model);
@@ -574,7 +574,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         if (physics.Motion == Motion.Kinematic)
         {
             b3Transform target = new() { p = ToVec(transform.Position), q = ToQuat(transform.Rotation) };
-            b3Body_SetTargetTransform(body.Id, target, step, isMoved);
+            b3Body_SetTargetTransform(body.Id, target, stepSec, isMoved);
         }
         else if (isMoved)
         {
@@ -738,7 +738,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// Hands the physics thread the step: which bodies' contacts to read after it, the time and the substeps, then
     /// wakes it. The world is that thread's until the step has ended.
     /// </summary>
-    private void Kick(float seconds)
+    private void Kick(float stepSec)
     {
         _listening.Clear();
         foreach ((ReadOnlySpan<Entity> entities, _) in _world.Query<Contacts>())
@@ -749,7 +749,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             }
         }
 
-        _stepSeconds = seconds;
+        _stepSec = stepSec;
         _substeps = _settings.Substeps;
         _isApplied = false;
         _stepped.Reset();
@@ -797,7 +797,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private unsafe void Step()
     {
-        b3World_Step(_box3d, _stepSeconds, _substeps);
+        b3World_Step(_box3d, _stepSec, _substeps);
         b3BodyEvents events = b3World_GetBodyEvents(_box3d);
         _moves.Clear();
         for (int i = 0; i < events.moveCount; i++)

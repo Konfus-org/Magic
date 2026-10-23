@@ -12,18 +12,18 @@ namespace Magic.Contexts.Frames;
 /// the app is paused (<see cref="App.IsPaused"/>), as no frame does.
 /// </summary>
 /// <param name="Index">Counts frames from 0.</param>
-/// <param name="DeltaSeconds">The world's time since the previous frame, 0 on the first and while the world is paused;
-/// in FixedUpdate, the fixed step.</param>
-/// <param name="Seconds">The world's time since the first frame; in FixedUpdate, the time the step reaches.</param>
-/// <param name="RealDeltaSeconds">Real time since the previous frame started, 0 on the first.</param>
-/// <param name="RealSeconds">Real time since the first frame started.</param>
+/// <param name="WorldDeltaSec">The world's time since the previous frame, 0 on the first and while the world is
+/// paused; in FixedUpdate, the fixed step.</param>
+/// <param name="WorldSec">The world's time since the first frame; in FixedUpdate, the time the step reaches.</param>
+/// <param name="RealDeltaSec">Real time since the previous frame started, 0 on the first.</param>
+/// <param name="RealSec">Real time since the first frame started.</param>
 /// <param name="IsPaused">Whether the world is paused this frame (<see cref="World.IsPaused"/>): there are no fixed
 /// steps, and of the scripts and systems only those that are <see cref="UnpausableAttribute">[Unpausable]</see>, or a
 /// script on an entity tagged <see cref="Tag.Unpausable"/>, run.</param>
 public readonly record struct Frame(
     ulong Index,
-    float DeltaSeconds,
-    double Seconds,
-    float RealDeltaSeconds,
-    double RealSeconds,
+    float WorldDeltaSec,
+    double WorldSec,
+    float RealDeltaSec,
+    double RealSec,
     bool IsPaused);

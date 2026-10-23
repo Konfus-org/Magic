@@ -408,7 +408,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     /// </summary>
     private void KeepResident(Renderables copy, Vector3 player, in Frame frame)
     {
-        _instances.Update(copy, (float)frame.RealSeconds, player, copy.IsHolding);
+        _instances.Update(copy, (float)frame.RealSec, player, copy.IsHolding);
         _failures.Label(_instances);
         _materials.Purge();
         _models.Purge();
@@ -492,7 +492,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
             image,
             !_settings.Upscale,
             _cleared.Add(target.Texture),
-            (float)frame.RealSeconds,
+            (float)frame.RealSec,
             (uint)(frame.Index % uint.MaxValue));
 
     /// <summary>

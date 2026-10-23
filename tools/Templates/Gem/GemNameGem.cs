@@ -13,15 +13,15 @@ namespace GemName;
 internal sealed class GemNameGem(GemNameSettings settings) : IGem
 {
     /// <summary>
-    /// When it last said it was running, in seconds since the run started.
+    /// When it last said it was running, on the world's clock.
     /// </summary>
-    private double _said;
+    private double _saidSec;
 
     public void Update(in Frame frame)
     {
-        if (frame.Seconds - _said < settings.Interval) return;
+        if (frame.WorldSec - _saidSec < settings.Interval) return;
 
-        _said = frame.Seconds;
+        _saidSec = frame.WorldSec;
         Debugging.Info($"GemName is running, at frame {frame.Index}.");
     }
 }

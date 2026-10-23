@@ -11,7 +11,7 @@ namespace Magic.Attributes;
 /// for drawing it. Without it, a behaviour's Update and LateUpdate and a system wait while the world is paused, unless
 /// the behaviour's entity is tagged <see cref="Tag.Unpausable"/>, which marks one entity rather than a class. There
 /// are no fixed steps while the world is paused, so nothing's FixedUpdate runs then, with it or without. What moves
-/// while the world is paused moves by <see cref="Frame.RealDeltaSeconds"/>, as the world's time stands still.
+/// while the world is paused moves by <see cref="Frame.RealDeltaSec"/>, as the world's time stands still.
 /// </summary>
 [AttributeUsage(AttributeTargets.Class)]
 public sealed class UnpausableAttribute : Attribute;

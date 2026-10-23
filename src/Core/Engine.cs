@@ -108,7 +108,7 @@ public sealed class Engine
     private double _fixedSec;
 
     /// <summary>
-    /// Both clocks (<see cref="Frame.RealSeconds"/>, <see cref="Frame.Seconds"/>) as of the last frame started, from
+    /// Both clocks (<see cref="Frame.RealSec"/>, <see cref="Frame.WorldSec"/>) as of the last frame started, from
     /// where the run before left them when this one goes on from it, else 0: what a run started again goes on from.
     /// Main thread.
     /// </summary>
@@ -680,17 +680,17 @@ public sealed class Engine
     /// </summary>
     private void RunFixedSteps(in Frame frame, double fixedStepSec)
     {
-        for (int step = 0; _fixedSec + fixedStepSec <= frame.Seconds; step++)
+        for (int step = 0; _fixedSec + fixedStepSec <= frame.WorldSec; step++)
         {
             if (step == _core.MaxFixedSteps)
             {
-                _fixedSec = frame.Seconds;
+                _fixedSec = frame.WorldSec;
 
                 break;
             }
 
             _fixedSec += fixedStepSec;
-            RunPhase(Phase.FixedUpdate, frame with { DeltaSeconds = (float)fixedStepSec, Seconds = _fixedSec });
+            RunPhase(Phase.FixedUpdate, frame with { WorldDeltaSec = (float)fixedStepSec, WorldSec = _fixedSec });
         }
     }
 

@@ -12,7 +12,7 @@ namespace Magic.Internal;
 internal sealed class CoreSettings : ISettings
 {
     /// <summary>
-    /// Fixed steps a second: each FixedUpdate moves the world on by one over this, its frame's DeltaSeconds.
+    /// Fixed steps a second: each FixedUpdate moves the world on by one over this, its frame's WorldDeltaSec.
     /// </summary>
     [Range(1, 1000)]
     public int FixedRate { get; set; } = 60;

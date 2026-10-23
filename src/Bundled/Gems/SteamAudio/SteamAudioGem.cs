@@ -100,7 +100,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// How often the solids near the player are gathered again: what stays put needs no look every frame, and walking a
     /// world of tens of thousands of entities is most of what the gem costs the main thread.
     /// </summary>
-    private const float GatherSeconds = 0.1f;
+    private const float GatherSec = 0.1f;
 
     [SuppressMessage(
         "Style",
@@ -209,7 +209,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     private int _newest = 1;
     private int _reading = 2;
     private int _isNewest;
-    private float _sinceGathered = GatherSeconds;
+    private float _sinceGatheredSec = GatherSec;
 
     /// <summary>
     /// The run is ending: the simulation thread returns when next woken.
@@ -443,7 +443,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             TakeReleased(_sounds);
         }
 
-        FollowSounds(stream.IsHeld ? 0 : frame.RealDeltaSeconds, frame.IsPaused);
+        FollowSounds(stream.IsHeld ? 0 : frame.RealDeltaSec, frame.IsPaused);
 
         if (_sounds is null) return;
 
@@ -460,11 +460,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         filling.PlacingSeconds = stream.IsHeld ? double.PositiveInfinity : PlacingSeconds;
         Steer(_sounds, filling);
         Reflect(_sounds, filling);
-        _sinceGathered += frame.RealDeltaSeconds;
-        filling.HasSolids = _sinceGathered >= GatherSeconds;
+        _sinceGatheredSec += frame.RealDeltaSec;
+        filling.HasSolids = _sinceGatheredSec >= GatherSec;
         if (filling.HasSolids)
         {
-            _sinceGathered = 0;
+            _sinceGatheredSec = 0;
             _gathered++;
             _surroundings.Gather(_world, CollectionsMarshal.AsSpan(_players), _settings.Range, filling.Solids);
         }
@@ -597,9 +597,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// Runs a sound's time on as if it were heard, at its pitch: one that loops wraps, and one that does not stops at
     /// its end.
     /// </summary>
-    private static void RunSilently(Voice voice, ref Sound sound, Audio audio, float seconds)
+    private static void RunSilently(Voice voice, ref Sound sound, Audio audio, float deltaSec)
     {
-        voice.Time += seconds * Math.Clamp(sound.Pitch, 0.5f, 2);
+        voice.Time += deltaSec * Math.Clamp(sound.Pitch, 0.5f, 2);
 
         if (voice.Time < audio.Seconds) return;
 
@@ -714,7 +714,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         ForgetAudios(audios);
         _surroundings.Forget(models);
-        _sinceGathered = GatherSeconds;
+        _sinceGatheredSec = GatherSec;
         _firstGathering = _gathered + 1;
     }
 
@@ -829,7 +829,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// are listed for <see cref="Assign"/>. While the world is paused (<paramref name="isPaused"/>), only the sounds of
     /// entities tagged <see cref="Tag.Unpausable"/> are; every other holds where it is.
     /// </summary>
-    private void FollowSounds(float seconds, bool isPaused)
+    private void FollowSounds(float deltaSec, bool isPaused)
     {
         _wanted.Clear();
         foreach (EcsChunk<Transform, Sound> chunk in _world.Query<Transform, Sound>())
@@ -838,7 +838,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             for (int i = 0; i < entities.Length; i++)
             {
                 bool isHeld = isPaused && !IsUnpausable(entities[i]);
-                Follow(entities[i], transforms[i], ref sounds[i], isHeld ? 0 : seconds, isHeld);
+                Follow(entities[i], transforms[i], ref sounds[i], isHeld ? 0 : deltaSec, isHeld);
             }
         }
 
@@ -858,10 +858,10 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// <see cref="FollowSounds"/> for one entity's sound, its time run on by <paramref name="seconds"/> when it is not
+    /// <see cref="FollowSounds"/> for one entity's sound, its time run on by <paramref name="deltaSec"/> when it is not
     /// heard; held where it is, when <paramref name="isHeld"/>, it wants no voice, so it is not heard.
     /// </summary>
-    private void Follow(Entity entity, in Transform transform, ref Sound sound, float seconds, bool isHeld)
+    private void Follow(Entity entity, in Transform transform, ref Sound sound, float deltaSec, bool isHeld)
     {
         if (!_voices.TryGetValue(entity, out Voice? voice))
         {
@@ -919,7 +919,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
         else if (voice.Slot < 0 && sound.Playback == Playback.Playing && audio is not null)
         {
-            RunSilently(voice, ref sound, audio, seconds);
+            RunSilently(voice, ref sound, audio, deltaSec);
         }
 
         bool isAudible = !isHeld && sound.Playback == Playback.Playing && audio?.Samples.Length > 0

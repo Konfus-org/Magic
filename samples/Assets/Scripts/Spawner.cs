@@ -10,11 +10,11 @@ using Magic.Services;
 namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
-/// A fountain: every <see cref="Every"/> seconds it makes an entity of its own, a small body thrown up from its entity a
-/// little to one side, which falls, bounces and goes <see cref="Lifetime"/> seconds later, as its
+/// A fountain: every <see cref="EverySec"/> it makes an entity of its own, a small body thrown up from its entity a
+/// little to one side, which falls, bounces and goes <see cref="LifetimeSec"/> later, as its
 /// <see cref="Expires"/> says and <see cref="ExpireSystem"/> sees to. A behaviour making entities at run time, with
 /// the components it builds them of:
-/// <c>{ "id": 3440, "every": 0.25, "model": { "id": 514 }, "material": { "id": 3322 } }</c>. They are its own, so
+/// <c>{ "id": 3440, "everySec": 0.25, "model": { "id": 514 }, "material": { "id": 3322 } }</c>. They are its own, so
 /// those still there go when its entity does, as when its domain closes, which ends the system that would have ended
 /// them.
 /// </summary>
@@ -31,18 +31,18 @@ internal sealed class Spawner(Entity owner, World world) : IBehavior, IDisposabl
     private readonly Queue<Entity> _bodies = new();
 
     /// <summary>
-    /// The frame clock's seconds when it makes the next.
+    /// When it makes the next, on the world's clock.
     /// </summary>
-    private double _next;
+    private double _nextSec;
 
     /// <summary>
     /// How many it has made, which turns each throw on from the last.
     /// </summary>
     private int _made;
 
-    public float Every { get; set; } = 0.25f;
+    public float EverySec { get; set; } = 0.25f;
 
-    public float Lifetime { get; set; } = 6;
+    public float LifetimeSec { get; set; } = 6;
 
     /// <summary>
     /// Metres a second each is thrown up at.
@@ -70,11 +70,11 @@ internal sealed class Spawner(Entity owner, World world) : IBehavior, IDisposabl
 
     public void Update(in Frame frame)
     {
-        if (frame.Seconds < _next) return;
+        if (frame.WorldSec < _nextSec) return;
 
         // Each throw goes the golden angle round from the last, up at the speed and out at a quarter of it, from half a
         // metre up and turned a way of its own. The bodies the system has ended since are let go from the front.
-        _next = frame.Seconds + Every;
+        _nextSec = frame.WorldSec + EverySec;
         Transform from = world.Get<Transform>(owner);
         float angle = _made++ * Turn;
         Vector3 aside = new(MathF.Cos(angle), 0, MathF.Sin(angle));
@@ -96,6 +96,6 @@ internal sealed class Spawner(Entity owner, World world) : IBehavior, IDisposabl
             _bodies.Dequeue();
         }
 
-        _bodies.Enqueue(world.Create([at, renderer, body, new Expires { At = frame.Seconds + Lifetime }]));
+        _bodies.Enqueue(world.Create([at, renderer, body, new Expires { At = frame.WorldSec + LifetimeSec }]));
     }
 }

@@ -23,7 +23,7 @@ internal sealed class Rotate(Entity owner, World world) : IBehavior
     {
         // This frame's turn about the world's up, after the rotation it has, normalised so rounding never builds up.
         ref Transform transform = ref world.Get<Transform>(owner);
-        float radians = DegreesPerSecond * frame.DeltaSeconds * (MathF.PI / 180);
+        float radians = DegreesPerSecond * frame.WorldDeltaSec * (MathF.PI / 180);
         transform.Rotation = Quaternion.Normalize(
             Quaternion.CreateFromAxisAngle(Vector3.UnitY, radians) * transform.Rotation);
     }

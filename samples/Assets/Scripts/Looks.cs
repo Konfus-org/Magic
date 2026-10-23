@@ -11,7 +11,7 @@ namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
 /// Steps the world through <see cref="Options"/>, its looks, on <see cref="Key"/>, easing from one to the next over
-/// about <see cref="Seconds"/>: it sets the world's post effects, the tonemap's bias and the grade, where the world
+/// about <see cref="EaseSec"/>: it sets the world's post effects, the tonemap's bias and the grade, where the world
 /// lists them, which whatever draws the world takes from the next frame. The name of the look it is going to shows on
 /// screen. <c>{ "id": 3445, "options": [ { "name": "Clear" }, { "name": "Noir", "saturation": 0 } ] }</c>.
 /// </summary>
@@ -37,7 +37,7 @@ internal sealed class Looks(World world, IInput input, IDebugUI? debugUI = null)
     /// <summary>
     /// About how long it takes to ease from one look to the next.
     /// </summary>
-    public float Seconds { get; set; } = 1.5f;
+    public float EaseSec { get; set; } = 1.5f;
 
     public void Update(in Frame frame)
     {
@@ -47,7 +47,7 @@ internal sealed class Looks(World world, IInput input, IDebugUI? debugUI = null)
 
         // Eased toward the look at a pace no frame rate changes, nearly there once the seconds have gone by.
         Look to = Options[_shown];
-        float t = 1 - MathF.Exp(-frame.DeltaSeconds * 3 / Seconds);
+        float t = 1 - MathF.Exp(-frame.WorldDeltaSec * 3 / EaseSec);
         _now = new Look
         {
             Exposure = float.Lerp(_now.Exposure, to.Exposure, t),

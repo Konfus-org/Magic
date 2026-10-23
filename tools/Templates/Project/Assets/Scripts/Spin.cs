@@ -23,7 +23,7 @@ internal sealed class Spin(Entity owner, World world) : IBehavior
     public void Update(in Frame frame)
     {
         ref Transform transform = ref world.Get<Transform>(owner);
-        float radians = float.DegreesToRadians(DegreesPerSecond * frame.DeltaSeconds);
+        float radians = float.DegreesToRadians(DegreesPerSecond * frame.WorldDeltaSec);
         Quaternion turn = Quaternion.CreateFromAxisAngle(Vector3.UnitY, radians);
         transform.Rotation = Quaternion.Normalize(transform.Rotation * turn);
     }

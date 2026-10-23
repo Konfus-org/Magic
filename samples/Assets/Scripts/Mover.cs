@@ -8,7 +8,7 @@ using Magic.Services;
 namespace Magic.Samples.Assets.Scripts;
 
 /// <summary>
-/// Carries its entity from where it spawned to <see cref="Offset"/> from there and back every <see cref="Seconds"/>,
+/// Carries its entity from where it spawned to <see cref="Offset"/> from there and back every <see cref="PeriodSec"/>,
 /// easing at each end: on a kinematic body, a platform, which pushes what lies on it and what it runs into, as the
 /// physics gem moves a kinematic body where its transform says.
 /// <c>{ "id": 3443, "offset": { "x": 6, "y": 0, "z": 0 } }</c>.
@@ -22,14 +22,14 @@ internal sealed class Mover(Entity owner, World world) : IBehavior
 
     public Vector3 Offset { get; set; }
 
-    public float Seconds { get; set; } = 4;
+    public float PeriodSec { get; set; } = 4;
 
     public void Start() => _start = world.Get<Transform>(owner).Position;
 
     public void FixedUpdate(in Frame frame)
     {
         // 0 to 1 and back once a period, easing at each end.
-        float along = (1 - MathF.Cos((float)(frame.Seconds * Math.Tau / Seconds))) / 2;
+        float along = (1 - MathF.Cos((float)(frame.WorldSec * Math.Tau / PeriodSec))) / 2;
         world.Get<Transform>(owner).Position = _start + (Offset * along);
     }
 }

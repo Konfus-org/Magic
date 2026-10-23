@@ -21,7 +21,7 @@ internal sealed class WaveSystem : IParallelSystemScript<Transform, Wave>
     public void Run(in Frame frame, EcsChunk<Transform, Wave> chunk)
     {
         (_, Span<Transform> transforms, Span<Wave> waves) = chunk;
-        float along = (float)frame.Seconds * Speed;
+        float along = (float)frame.WorldSec * Speed;
         for (int i = 0; i < transforms.Length; i++)
         {
             transforms[i].Position.Y = waves[i].Base + (waves[i].Height * MathF.Sin(along - waves[i].Phase));

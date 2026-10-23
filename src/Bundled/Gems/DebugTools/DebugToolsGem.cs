@@ -46,7 +46,7 @@ internal sealed class DebugToolsGem(
     /// The frames and seconds since the frame rate was last worked out, and what it read.
     /// </summary>
     private int _frames;
-    private double _seconds;
+    private double _countedSec;
     private string _frameRate = string.Empty;
 
     public void Dispose()
@@ -74,14 +74,14 @@ internal sealed class DebugToolsGem(
         if (!settings.FrameRate) return;
 
         _frames++;
-        _seconds += frame.RealDeltaSeconds;
-        if (_seconds >= 0.5)
+        _countedSec += frame.RealDeltaSec;
+        if (_countedSec >= 0.5)
         {
             _frameRate = string.Create(
                 CultureInfo.InvariantCulture,
-                $"{_frames / _seconds:0} fps  {_seconds * 1000 / _frames:0.00} ms");
+                $"{_frames / _countedSec:0} fps  {_countedSec * 1000 / _frames:0.00} ms");
             _frames = 0;
-            _seconds = 0;
+            _countedSec = 0;
         }
 
         if (_frameRate.Length > 0) ui.Text(_frameRate);
