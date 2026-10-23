@@ -23,10 +23,11 @@ internal readonly record struct Solid(
 /// <summary>
 /// What is solid near the player, as sound hears it: every entity with a <see cref="Transform"/> and a
 /// <see cref="Physics"/> that stays put or is moved by code, near the player's cameras, with the triangles of its
-/// model, fitted once per model on a worker, and the material its <see cref="Acoustics"/> says. Gathered a few times a
-/// second on the main thread, which reads the world, for the simulation thread to bring the acoustic scene up to date
-/// with (<see cref="SoundWorld"/>). A body that falls and is pushed is left out: it moves every step, and placing each
-/// move in Steam Audio's scene costs far more than what a crate or a ball does to what is heard.
+/// model, fitted once per model on a worker and kept until a new world takes the old one's place without it
+/// (<see cref="Forget"/>), and the material its <see cref="Acoustics"/> says. Gathered a few times a second on the
+/// main thread, which reads the world, for the simulation thread to bring the acoustic scene up to date with
+/// (<see cref="SoundWorld"/>). A body that falls and is pushed is left out: it moves every step, and placing each move
+/// in Steam Audio's scene costs far more than what a crate or a ball does to what is heard.
 /// </summary>
 internal sealed class Surroundings(Assets assets)
 {
@@ -55,7 +56,7 @@ internal sealed class Surroundings(Assets assets)
     private HashSet<Entity> _near = [];
 
     /// <summary>
-    /// The farthest any model fitted so far reaches from its origin at scale 1, and at least 1: at an entity's scale, a
+    /// The farthest any model fitted here reaches from its origin at scale 1, and at least 1: at an entity's scale, a
     /// bound on how far it could reach, which tells from its transform alone whether it could be near.
     /// </summary>
     internal float Longest { get; private set; } = 1;
@@ -92,6 +93,33 @@ internal sealed class Surroundings(Assets assets)
             _meshes[fitted.Model] = fitted.Mesh;
             Longest = Math.Max(Longest, fitted.Mesh.Reach);
         }
+    }
+
+    /// <summary>
+    /// Lets go of the triangles of every model not in <paramref name="kept"/>, so the next solid shaped like one fits
+    /// it again, and works the farthest reach out again over those left; a model still being fitted stays, to be let go
+    /// at a later forget once it is there.
+    /// </summary>
+    internal void Forget(HashSet<Handle<Model>> kept)
+    {
+        // Listed first, as the models cannot change while they are walked.
+        List<Handle<Model>> gone = [];
+        Longest = 1;
+        foreach ((Handle<Model> model, AcousticMesh? mesh) in _meshes)
+        {
+            if (mesh is null) continue;
+
+            if (kept.Contains(model)) Longest = Math.Max(Longest, mesh.Reach);
+            else gone.Add(model);
+        }
+
+        foreach (Handle<Model> model in gone)
+        {
+            _meshes.Remove(model);
+        }
+
+        if (gone.Count > 0)
+            Debugging.Verbose($"{gone.Count} models' triangles let go, which only the world before needed.");
     }
 
     /// <summary>

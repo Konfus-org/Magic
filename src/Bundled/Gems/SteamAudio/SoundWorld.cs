@@ -13,8 +13,9 @@ namespace Magic.SteamAudio;
 /// <summary>
 /// What sound is muffled and echoed by, in Steam Audio: the solids the main thread gathered
 /// (<see cref="Surroundings"/>), each model and material one sub-scene of its triangles, shared by every solid shaped
-/// and made alike, and each solid an instance of its sub-scene, moved as its transform moves. The simulation thread's
-/// alone, which brings it up to date before each simulation.
+/// and made alike and kept until a new world takes the old one's place without it (<see cref="Forget"/>), and each
+/// solid an instance of its sub-scene, moved as its transform moves. The simulation thread's alone, which brings it up
+/// to date before each simulation.
 /// <para>
 /// Steam Audio's space is right-handed, the engine's left-handed, so everything here is the world mirrored along Z: the
 /// listener and the sounds are mirrored the same way, so what is to the left stays to the left.
@@ -122,6 +123,40 @@ internal sealed class SoundWorld : IDisposable
     {
         _solids.Clear();
         _solids.AddRange(solids);
+    }
+
+    /// <summary>
+    /// Releases every sub-scene that no solid in the scene, nor any of those last taken, is shaped and made as, so the
+    /// next solid that is makes it again: once a new world has taken the old one's place and the scene has taken a
+    /// gathering of it, so the old world's solids are out.
+    /// </summary>
+    internal void Forget()
+    {
+        HashSet<(Handle<Model> Model, AcousticMaterial Material)> used = [];
+        foreach (Instance instance in _instances.Values)
+        {
+            used.Add((instance.Model, instance.Material));
+        }
+
+        foreach (Solid solid in _solids)
+        {
+            used.Add((solid.Model, solid.Material));
+        }
+
+        // Listed first, as the sub-scenes cannot change while they are walked.
+        List<(Handle<Model> Model, AcousticMaterial Material)> gone = [];
+        foreach ((Handle<Model> Model, AcousticMaterial Material) key in _subScenes.Keys)
+        {
+            if (!used.Contains(key)) gone.Add(key);
+        }
+
+        foreach ((Handle<Model> Model, AcousticMaterial Material) key in gone)
+        {
+            if (_subScenes.Remove(key, out SubScene? subScene)) subScene.Release();
+        }
+
+        if (gone.Count > 0)
+            Debugging.Verbose($"{gone.Count} acoustic sub-scenes released, which only the world before needed.");
     }
 
     /// <summary>

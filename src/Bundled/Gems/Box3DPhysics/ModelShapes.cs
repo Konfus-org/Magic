@@ -12,9 +12,10 @@ namespace Magic.Box3DPhysics;
 /// What a model collides as, made once per model and shared by every body shaped like it: its bounds, which a box, a
 /// sphere or a capsule is fitted to, and its triangles as Box3D mesh data, for a mesh. A model loads on a worker as
 /// any asset does and is fitted there, so a body waits for it; one that does not load, or an entity with no model,
-/// takes a unit cube's bounds, so a body always has a shape. A model made again while running keeps the shape it was
-/// first fitted with until the run restarts. Main thread: a worker fits a shape, and the main thread takes it in as a
-/// step starts (<see cref="TakeArrived"/>), so a shape is only ever read, put in and let go there.
+/// takes a unit cube's bounds, so a body always has a shape. A shape is kept until a new world takes the old one's
+/// place and nothing left needs it (<see cref="Forget"/>), so a model made again while running keeps the shape it was
+/// first fitted with until then. Main thread: a worker fits a shape, and the main thread takes it in as a step starts
+/// (<see cref="TakeArrived"/>), so a shape is only ever read, put in and let go there.
 /// </summary>
 internal sealed class ModelShapes(Assets assets) : IDisposable
 {
@@ -70,6 +71,32 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
             _shapes[fitted.Model] = fitted.Shape;
             Longest = Math.Max(Longest, fitted.Shape.Reach);
         }
+    }
+
+    /// <summary>
+    /// Frees the shape of every model not in <paramref name="kept"/>, so the next body shaped like one fits it again,
+    /// and works the farthest reach out again over those left; a shape still loading stays, to be let go at a later
+    /// forget once it is there. How many were freed. Only between steps, once no body is shaped like any of them.
+    /// </summary>
+    internal int Forget(HashSet<Handle<Model>> kept)
+    {
+        // Listed first, as the shapes cannot change while they are walked.
+        List<Handle<Model>> gone = [];
+        Longest = 1;
+        foreach ((Handle<Model> model, ModelShape? shape) in _shapes)
+        {
+            if (shape is null) continue;
+
+            if (kept.Contains(model)) Longest = Math.Max(Longest, shape.Reach);
+            else gone.Add(model);
+        }
+
+        foreach (Handle<Model> model in gone)
+        {
+            if (_shapes.Remove(model, out ModelShape? shape)) shape?.Free();
+        }
+
+        return gone.Count;
     }
 
     /// <summary>

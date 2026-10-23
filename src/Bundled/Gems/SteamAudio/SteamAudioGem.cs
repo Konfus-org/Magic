@@ -61,6 +61,11 @@ namespace Magic.SteamAudio;
 /// the solids near the listener are all placed meanwhile, with no limit on how long an update of the scene takes, as no
 /// sound waits on it, so the first sound heard is muffled and echoed as it should be.
 /// </para>
+/// <para>
+/// An audio file, a model's triangles and its sub-scene in the acoustic scene are kept while a domain that took them in
+/// is open, or a sound plays the file or a body is shaped like the model, and let go once a new world takes the old
+/// one's place without them (<see cref="ForgetAsync"/>).
+/// </para>
 /// </summary>
 internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 {
@@ -153,9 +158,17 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
-    /// The domains whose sounds and solids are being loaded before they spawn, checked every frame until all are.
+    /// The domains taken in, from when their sounds and solids begin to load until what was handed back is disposed:
+    /// each checked every frame until all are in (<see cref="CheckPreloads"/>), then holding them through a forget
+    /// (<see cref="ForgetAsync"/>).
     /// </summary>
     private readonly List<Preload> _preloads = [];
+
+    /// <summary>
+    /// The domains whose hold was disposed, on any thread, for the main thread to let go of at the start of its hook.
+    /// </summary>
+    private readonly Channel<Preload> _letGo = Channel.CreateUnbounded<Preload>(
+        new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// Set by the main thread when it has handed over a frame, or as the run ends, waking the simulation thread.
@@ -241,6 +254,20 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// thread for the main thread.
     /// </summary>
     private int _placed;
+
+    /// <summary>
+    /// The first gathering since a new world last took the old one's place, from which the scene lets go of what only
+    /// the old world's solids needed, and what ends the forgetting once it has; none when nothing is being forgotten.
+    /// Main thread.
+    /// </summary>
+    private int _forgetAt;
+    private TaskCompletionSource? _forgetting;
+
+    /// <summary>
+    /// The gathering the scene last let go at (<see cref="SoundWorld.Forget"/>), written by the simulation thread for
+    /// the main thread.
+    /// </summary>
+    private int _forgotten;
 
     public unsafe SteamAudioGem(
         World world,
@@ -427,6 +454,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     {
         _frame++;
         TakeArrived();
+        TakeLetGo();
         _surroundings.TakeArrived();
         CheckPreloads();
         FindListener();
@@ -464,10 +492,18 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         filling.Gathered = _gathered;
+        filling.ForgetAt = _forgetAt;
         _filling = Interlocked.Exchange(ref _newest, _filling);
         Volatile.Write(ref _isNewest, 1);
         _wake.Set();
         _heard.Record(_holds.Length - _free.Count);
+
+        // Forgetting ends once the scene has let go at a gathering made since it began.
+        if (_forgetting is not null && Volatile.Read(ref _forgotten) >= _forgetAt)
+        {
+            _forgetting.TrySetResult();
+            _forgetting = null;
+        }
 
         // Readying ends once the scene holds every solid of a gathering made since it began.
         if (_readied is null || Volatile.Read(ref _placed) < _readyAt) return;
@@ -495,9 +531,59 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     }
 
     /// <summary>
+    /// Lets go of what the old world alone played and was solid as: at once, every audio file that no sound left and no
+    /// domain still held plays, and the triangles of every model no body left and no such domain is shaped like; then
+    /// the acoustic scene's sub-scenes no solid is shaped like, once the simulation thread has taken a gathering made
+    /// since, the old world's solids gone from it. Ends once the scene has let go; at once with nothing to play sound
+    /// on, as there is no scene.
+    /// </summary>
+    public Task ForgetAsync(CancellationToken cancel)
+    {
+        // What a domain still holds is kept, as are the audio files the sounds left play and the models the bodies left
+        // are shaped like.
+        TakeLetGo();
+        HashSet<Handle<Audio>> audios = [];
+        HashSet<Handle<Model>> models = [];
+        foreach (Preload preload in _preloads)
+        {
+            audios.UnionWith(preload.Audios);
+            models.UnionWith(preload.Models);
+        }
+
+        foreach ((_, Span<Sound> sounds) in _world.Query<Sound>())
+        {
+            foreach (Sound sound in sounds)
+            {
+                audios.Add(sound.Audio);
+            }
+        }
+
+        foreach ((ReadOnlySpan<Entity> entities, _) in _world.Query<Physics>())
+        {
+            foreach (Entity entity in entities)
+            {
+                if (_world.Has<Renderer>(entity)) models.Add(_world.Get<Renderer>(entity).Model);
+            }
+        }
+
+        ForgetAudios(audios);
+        _surroundings.Forget(models);
+
+        if (_sounds is null) return Task.CompletedTask;
+
+        // The next frame gathers the solids at once, and the scene lets go once it has taken that gathering or a later
+        // one.
+        _sinceGathered = GatherSeconds;
+        _forgetAt = _gathered + 1;
+        _forgetting ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        return _forgetting.Task.WaitAsync(cancel);
+    }
+
+    /// <summary>
     /// Loads every audio file a sound among <paramref name="prefabs"/> plays, and fits every model a solid among them
     /// is shaped like, before they spawn, so each sound is heard, muffled and echoed, from its first frame. Done once
-    /// all are in; they are kept for the run, so what it hands back holds nothing.
+    /// all are in; what it hands back holds them, so no forget lets them go, until it is disposed.
     /// </summary>
     public async Task<Subscription> PreloadAsync(
         IReadOnlyList<Prefab> prefabs,
@@ -529,7 +615,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             cancel).ConfigureAwait(false);
         await preload.Done.Task.ConfigureAwait(false);
 
-        return Subscription.None;
+        return new Subscription(() => _letGo.Writer.TryWrite(preload));
     }
 
     /// <summary>
@@ -691,14 +777,51 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     }
 
     /// <summary>
+    /// Takes in the domains let go of since the last frame, which no longer hold what they took in.
+    /// </summary>
+    private void TakeLetGo()
+    {
+        while (_letGo.Reader.TryRead(out Preload? letGo))
+        {
+            _preloads.Remove(letGo);
+        }
+    }
+
+    /// <summary>
+    /// Lets go of every audio file not in <paramref name="kept"/>, loaded or failed, so a sound that plays one again
+    /// loads it again; one still loading stays, to be let go at a later forget once it is in.
+    /// </summary>
+    private void ForgetAudios(HashSet<Handle<Audio>> kept)
+    {
+        // Listed first, as the files cannot change while they are walked.
+        List<Handle<Audio>> gone = [];
+        foreach ((Handle<Audio> handle, Audio? audio) in _audios)
+        {
+            if (!kept.Contains(handle) && (audio is not null || _failed.Contains(handle))) gone.Add(handle);
+        }
+
+        foreach (Handle<Audio> handle in gone)
+        {
+            _audios.Remove(handle);
+            _failed.Remove(handle);
+        }
+
+        if (gone.Count > 0) Debugging.Verbose($"{gone.Count} audio files let go, which only the world before played.");
+    }
+
+    /// <summary>
     /// Checks each domain whose sounds and solids are being loaded: one whose open was cancelled is let go; else how
-    /// many are in tells how far it is, and once all are, whoever waits for it goes on and spawns it.
+    /// many are in tells how far it is, and once all are, whoever waits for it goes on and spawns it, while the domain
+    /// holds them.
     /// </summary>
     private void CheckPreloads()
     {
         for (int i = _preloads.Count - 1; i >= 0; i--)
         {
             Preload preload = _preloads[i];
+
+            if (preload.Done.Task.IsCompleted) continue;
+
             if (preload.Cancel.IsCancellationRequested)
             {
                 _preloads.RemoveAt(i);
@@ -727,11 +850,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 preload.Progress.Report(share);
             }
 
-            if (done == count)
-            {
-                _preloads.RemoveAt(i);
-                preload.Done.TrySetResult();
-            }
+            if (done == count) preload.Done.TrySetResult();
         }
     }
 
@@ -1187,9 +1306,17 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 SimulationFrame frame = _frames[_reading];
                 if (frame.HasSolids) taken = frame.Gathered;
 
-                // Once the scene holds every solid of the gathering last taken, the main thread is told, for readying.
+                // Once the scene holds every solid of the gathering last taken, the main thread is told, for readying;
+                // once it has taken a gathering made since the world was last forgotten, the old world's solids are out
+                // of it, and it lets go of what none left needs, and the main thread is told, for forgetting.
                 Simulate(_sounds, _soundWorld, frame);
                 if (_soundWorld.IsWhole) Volatile.Write(ref _placed, taken);
+
+                if (taken >= frame.ForgetAt && _forgotten < frame.ForgetAt)
+                {
+                    _soundWorld.Forget();
+                    Volatile.Write(ref _forgotten, frame.ForgetAt);
+                }
 
                 if (frame.IsReflecting && Array.IndexOf(frame.IsEchoing, true) >= 0
                     && Stopwatch.GetElapsedTime(traced).TotalSeconds >= frame.ReflectionPeriod)
@@ -1405,6 +1532,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         internal int Gathered { get; set; }
 
         /// <summary>
+        /// The first gathering since a new world last took the old one's place: once the scene has taken it, or a later
+        /// one, it lets go of what no solid left needs (<see cref="SoundWorld.Forget"/>).
+        /// </summary>
+        internal int ForgetAt { get; set; }
+
+        /// <summary>
         /// How long the scene's update may spend placing new solids (<see cref="SoundWorld.Update"/>).
         /// </summary>
         internal double PlacingSeconds { get; set; }
@@ -1417,8 +1550,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// A domain whose sounds and solids are being loaded before it spawns: which, how far that is as last told, the
-    /// task whoever opens it awaits, and the token that cancels the open, checked each frame.
+    /// A domain taken in: the audio files its sounds play and the models its solids are shaped like, loaded before it
+    /// spawns and held until it lets them go, how far the loading is as last told, the task whoever opens it awaits,
+    /// and the token that cancels the open, checked each frame until it is done.
     /// </summary>
     private sealed class Preload(
         HashSet<Handle<Audio>> audios,
