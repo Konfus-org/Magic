@@ -36,8 +36,7 @@ internal sealed class Domains : IDisposable
     private readonly IEcs _ecs;
     private readonly Assets _assets;
     private readonly Threads _threads;
-    private readonly Project _project;
-    private readonly Lifetime _lifetime;
+    private readonly App _app;
     private readonly Events _events;
     private readonly SubscriptionList _watching = new();
 
@@ -85,15 +84,13 @@ internal sealed class Domains : IDisposable
         Assets assets,
         Threads threads,
         Events events,
-        Project project,
-        Lifetime lifetime)
+        App app)
     {
         _world = world;
         _ecs = ecs;
         _assets = assets;
         _threads = threads;
-        _project = project;
-        _lifetime = lifetime;
+        _app = app;
         _events = events;
         _watching.Add(events.Watch<AssetReloaded<Domain>>(DomainReloaded));
         _watching.Add(events.Watch<AssetReloaded<Prefab>>(PrefabReloaded));
@@ -282,7 +279,7 @@ internal sealed class Domains : IDisposable
         // Held out of sight from now: every gem readies the world at once, so nothing that runs it runs until it is
         // shown.
         BeginLoading();
-        ReadyAllAsync("the world put back", _lifetime.Stopping).FireAndForget();
+        ReadyAllAsync("the world put back", _app.Quitting).FireAndForget();
 
         // A domain that had spawned nothing opens again from the start; any other opens around the entities made for
         // what its prefabs and its player had spawned.
@@ -508,9 +505,9 @@ internal sealed class Domains : IDisposable
 
         Result<Prefab>[] prefabs = await Task.WhenAll(reading).ConfigureAwait(false);
         Prefab? player = null;
-        if (open.IsReplacing && _project.Player != Handle<Prefab>.None)
+        if (open.IsReplacing && _app.Project.Player != Handle<Prefab>.None)
         {
-            Result<Prefab> loaded = await _assets.LoadAsync(_project.Player, cancel).ConfigureAwait(false);
+            Result<Prefab> loaded = await _assets.LoadAsync(_app.Project.Player, cancel).ConfigureAwait(false);
             if (loaded.Ok) player = loaded.Value;
             else Debugging.Error($"The project's player is not spawned: {loaded.Error}");
         }
@@ -758,7 +755,7 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private async Task RestoreAsync(DomainState saved, Dictionary<Handle<Prefab>, Entity[]>? kept, Entity[]? player)
     {
-        Result<Domain> file = await _assets.LoadAsync(saved.Domain, _lifetime.Stopping).ConfigureAwait(false);
+        Result<Domain> file = await _assets.LoadAsync(saved.Domain, _app.Quitting).ConfigureAwait(false);
         if (!file.Ok)
         {
             Debugging.Error($"{_assets.GetPath(saved.Domain) ?? "A domain"} is not restored: {file.Error}");
@@ -783,9 +780,9 @@ internal sealed class Domains : IDisposable
 
                 return true;
             },
-            _lifetime.Stopping).ConfigureAwait(false);
+            _app.Quitting).ConfigureAwait(false);
 
-        if (isOpening) await ArriveAsync(open, null, _lifetime.Stopping).ConfigureAwait(false);
+        if (isOpening) await ArriveAsync(open, null, _app.Quitting).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -799,8 +796,8 @@ internal sealed class Domains : IDisposable
         await Task.WhenAll(restoring).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         Task readied = await _threads.PostAsync(
             EngineThread.Main,
-            () => ReadyAllAsync("the world put back", _lifetime.Stopping),
-            _lifetime.Stopping)
+            () => ReadyAllAsync("the world put back", _app.Quitting),
+            _app.Quitting)
             .ConfigureAwait(false);
         await readied.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         _arrived.Writer.TryWrite(new Arrived(null, null, default));
@@ -878,7 +875,9 @@ internal sealed class Domains : IDisposable
         if (_keeping is not null) return;
 
         string path = LoadingDomain + Domain.Extensions[0];
-        Handle<Domain> handle = _project.Loading == Handle<Domain>.None ? _assets.Find<Domain>(path) : _project.Loading;
+        Handle<Domain> handle = _app.Project.Loading == Handle<Domain>.None
+            ? _assets.Find<Domain>(path)
+            : _app.Project.Loading;
         if (handle == Handle<Domain>.None)
         {
             Debugging.Warn($"There is no loading domain: the project names none, and there is no {path}.");
@@ -898,7 +897,7 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private async Task KeepLoadingAsync(Keeping keeping)
     {
-        Result<Domain> file = await _assets.LoadAsync(keeping.Handle, _lifetime.Stopping).ConfigureAwait(false);
+        Result<Domain> file = await _assets.LoadAsync(keeping.Handle, _app.Quitting).ConfigureAwait(false);
         if (!file.Ok)
         {
             Debugging.Error($"The loading domain does not open: {file.Error}");
@@ -914,7 +913,7 @@ internal sealed class Domains : IDisposable
             DomainOpenMode.Additive,
             isLoadingDomain: true,
             isReplacing: false);
-        Read read = await ReadAsync(reading, null, _lifetime.Stopping).ConfigureAwait(false);
+        Read read = await ReadAsync(reading, null, _app.Quitting).ConfigureAwait(false);
         await _threads.PostAsync(
             EngineThread.Main,
             () =>
@@ -1087,7 +1086,7 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private async Task AddAsync(Open open, Placed placed)
     {
-        Result<Prefab> prefab = await _assets.LoadAsync(placed.Placement.File, _lifetime.Stopping)
+        Result<Prefab> prefab = await _assets.LoadAsync(placed.Placement.File, _app.Quitting)
             .ConfigureAwait(false);
         _arrived.Writer.TryWrite(new Arrived(open, placed, prefab));
     }

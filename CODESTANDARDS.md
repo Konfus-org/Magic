@@ -51,7 +51,7 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 - A gem takes all it depends on, settings included, as constructor parameters and keeps them.
 - Never get a service from a container later. Only code that builds objects from constructors takes `IServiceProvider`.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
-- A gem gets the command line and project file from the `Args` and `Project` services, never by reading them itself.
+- A gem gets the command line and project file from the `Args` and `App` services, never by reading them itself.
 - A gem's options come from its settings object, which is plain data like a file type ([Assets](#assets)).
 - A gem follows setting changes between frames. Mark a setting it reads only at start `[RequireRestart]`.
 - A gem frees what it started in `Dispose`, once none of its work still runs on a worker.
@@ -193,7 +193,7 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 
 ### Naming
 
-- A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `Lifetime.Stop(reason)`. If it
+- A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `App.Quit(reason)`. If it
   doesn't (`Process()`, `_scratch`), name the object: what is processed, what is held.
 - `Get` never fails. `Is`, `Has` and `Can` answer a question with a bool. `Try` returns whether it worked, with the
   result in an `out` parameter or a `Result`. `TryGet` is a lookup that can fail.

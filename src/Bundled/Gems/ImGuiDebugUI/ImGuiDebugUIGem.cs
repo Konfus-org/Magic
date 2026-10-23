@@ -165,7 +165,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ImGuiDebugUISettings settings,
         Assets assets,
         IWindow window,
-        Lifetime lifetime,
+        App app,
         World world,
         IInput? input = null)
     {
@@ -173,7 +173,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _window = window;
         _input = input;
         _assets = assets;
-        _stopping = lifetime.Stopping;
+        _stopping = app.Quitting;
         _fontAsked = settings.Font;
 
         // ImGui writes no ini file, and is told the renderer takes the textures it makes and changes, and draws by

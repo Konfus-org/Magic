@@ -23,7 +23,7 @@ public static class Engine
     /// <summary>
     /// Runs the project <paramref name="args"/> names. The calling thread must be the process's first: it becomes the
     /// render thread, which the OS ties windows and their events to, and makes and ends the gems; the frames' game side
-    /// runs on a main thread started beside it. Returns once a gem stops the run or its frame or time limit is reached,
+    /// runs on a main thread started beside it. Returns once a gem quits the app or its frame or time limit is reached,
     /// or false straight away when the project cannot be opened (the reason is logged). Whatever fails after that is
     /// logged, and the run goes on without it.
     /// <para>
@@ -40,8 +40,9 @@ public static class Engine
     public static bool Run(Args args)
     {
         FileSystem files = new();
-        Result<Project> opened = OpenProject(files, args.ProjectPath);
-        if (!opened.Ok)
+        Result<string> found = FindProject(files, args.ProjectPath);
+        Result<Project> opened = found.Ok ? ReadProject(files, found.Value) : Result.Failure<Project>(found.Error);
+        if (!found.Ok || !opened.Ok)
         {
             Debugging.Error(opened.Error);
 
@@ -49,22 +50,23 @@ public static class Engine
         }
 
         Project project = opened.Value;
+        string folder = files.GetParent(found.Value);
 
         // A run that restarts runs again at once, with the command line, the world and the frame clock it ended with.
         (Args Args, WorldState? State, double Seconds)? next = (args, null, 0);
         while (next is { } run)
         {
-            next = Run(files, project, run.Args, run.State, run.Seconds);
+            next = Run(files, project, folder, run.Args, run.State, run.Seconds);
         }
 
         return true;
     }
 
     /// <summary>
-    /// Runs <paramref name="project"/> once, until the run ends, going on from <paramref name="state"/>, the world as
-    /// the run before left it, and <paramref name="seconds"/>, its frame clock, when there is one: what to run it
-    /// again with at once when the run restarts (<see cref="Lifetime.Restart"/>), the command line with every setting
-    /// as it is now, the world as it is and its frame clock, else null.
+    /// Runs <paramref name="project"/>, in <paramref name="folder"/>, once, until the run ends, going on from
+    /// <paramref name="state"/>, the world as the run before left it, and <paramref name="seconds"/>, its frame clock,
+    /// when there is one: what to run it again with at once when the run restarts (<see cref="App.Restart"/>), the
+    /// command line with every setting as it is now, the world as it is and its frame clock, else null.
     /// </summary>
     [SuppressMessage(
         "Usage",
@@ -75,14 +77,15 @@ public static class Engine
     private static (Args Args, WorldState? State, double Seconds)? Run(
         FileSystem files,
         Project project,
+        string folder,
         Args args,
         WorldState? state,
         double seconds)
     {
-        using Lifetime lifetime = new();
-        using Threads threads = new(lifetime);
+        using App app = new(project, folder);
+        using Threads threads = new(app);
 
-        // Headless, Ctrl+C stops the run, and its gems end; with a window it ends the process at once, as in any
+        // Headless, Ctrl+C quits the app, and its gems end; with a window it ends the process at once, as in any
         // program.
         using PosixSignalRegistration? interrupt = args.Headless
             ? PosixSignalRegistration.Create(
@@ -90,20 +93,19 @@ public static class Engine
                 context =>
                 {
                     context.Cancel = true;
-                    lifetime.Stop("Ctrl+C");
+                    app.Quit("Ctrl+C");
                 })
             : null;
 
-        Debugging.Info($"Running {project.Name} from {project.Root}");
+        Debugging.Info($"Running {project.Name} from {folder}");
         Events events = new();
         Assemblies assemblies = new();
-        using Assets assets = new(files, project, lifetime, events);
+        using Assets assets = new(files, app, events);
         ServiceCollection services = CreateCoreServices(
             files,
-            lifetime,
+            app,
             threads,
             events,
-            project,
             args,
             assemblies,
             assets);
@@ -130,7 +132,7 @@ public static class Engine
         using FrameLoop frames = new(
             gems,
             world,
-            lifetime,
+            app,
             threads,
             events,
             settings,
@@ -153,9 +155,9 @@ public static class Engine
                 // On the main thread, the world's, once the last frame is done: the save takes the world here and now,
                 // before what the ending run has handed this thread, a cancelled open closing its domain among it,
                 // and before the gems end the world's scripts. The JSON is then written on a worker from what was
-                // taken, so it may outlast the gems. Stopping is cancelled already, as the run is ending, so the
+                // taken, so it may outlast the gems. Quitting is cancelled already, as the run is ending, so the
                 // save runs on no token.
-                if (lifetime.IsRestarting)
+                if (app.IsRestarting)
                     next = (settings.RestartArgs(), world.SaveAsync(null, CancellationToken.None), frames.Seconds);
 
                 // Still on the main thread: each gem ends what it owns of this thread's, the scripts among it, after
@@ -175,28 +177,23 @@ public static class Engine
     }
 
     /// <summary>
-    /// Reads the project at <paramref name="path"/>: a .magic file, or the folder holding exactly one.
+    /// Reads the project's .magic file at <paramref name="file"/>.
     /// </summary>
-    private static Result<Project> OpenProject(FileSystem files, string path)
+    private static Result<Project> ReadProject(FileSystem files, string file)
     {
-        Result<string> found = FindProject(files, path);
-
-        if (!found.Ok) return Result.Failure<Project>(found.Error);
-
-        Result<byte[]> bytes = files.Read(found.Value);
+        Result<byte[]> bytes = files.Read(file);
 
         if (!bytes.Ok) return Result.Failure<Project>(bytes.Error);
 
         Result<Project> read = Json.Read<Project>(bytes.Value);
 
-        if (!read.Ok) return Result.Failure<Project>($"{found.Value} is not a valid project: {read.Error}");
-
-        Project project = read.Value;
-        project.Root = files.GetParent(found.Value);
-
-        return Result.Success(project);
+        return read.Ok ? read : Result.Failure<Project>($"{file} is not a valid project: {read.Error}");
     }
 
+    /// <summary>
+    /// The project's .magic file at <paramref name="path"/>: that file, or the one in the folder there, which must hold
+    /// exactly one.
+    /// </summary>
     private static Result<string> FindProject(FileSystem files, string path)
     {
         if (files.FileExists(path)) return Result.Success(path);
@@ -224,25 +221,23 @@ public static class Engine
     /// </summary>
     private static ServiceCollection CreateCoreServices(
         IFileSystem files,
-        Lifetime lifetime,
+        App app,
         Threads threads,
         Events events,
-        Project project,
         Args args,
         Assemblies assemblies,
         Assets assets)
     {
         ServiceCollection services = new();
+        services.AddSingleton(app);
         services.AddSingleton(assemblies);
         services.AddSingleton(assets);
         services.AddSingleton(files);
-        services.AddSingleton(lifetime);
         services.AddSingleton(threads);
         services.AddSingleton(events);
-        services.AddSingleton(project);
         services.AddSingleton(args);
-        services.AddSingleton(_ => new Settings(assets, files, events, project, args, lifetime));
-        services.AddSingleton(provider => new Caches(files, provider, project));
+        services.AddSingleton(_ => new Settings(assets, files, events, app, args));
+        services.AddSingleton(provider => new Caches(files, provider, app));
         services.AddSingleton(provider => new World(
             provider.GetService<IEcs>(),
             provider.GetService<IScripts>(),
@@ -250,8 +245,7 @@ public static class Engine
             assets,
             threads,
             events,
-            project,
-            lifetime));
+            app));
 
         return services;
     }

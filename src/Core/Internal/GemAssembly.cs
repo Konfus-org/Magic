@@ -48,7 +48,7 @@ internal readonly record struct GemAssembly(
 
     /// <summary>
     /// Every assembly loaded so far, by its path. A context is never unloaded, so each loads once for the process: a
-    /// run started again (<see cref="Lifetime.Restart"/>) finds the assembly it had, not a second copy of each type.
+    /// run started again (<see cref="App.Restart"/>) finds the assembly it had, not a second copy of each type.
     /// </summary>
     private static readonly Dictionary<string, Assembly> _loaded = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Lock _loading = new();

@@ -34,7 +34,7 @@ namespace Magic.SdlPlatform;
 internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 {
     private readonly SdlPlatformSettings _settings;
-    private readonly Lifetime _lifetime;
+    private readonly App _app;
     private readonly Assets _assets;
     private readonly unsafe SDL_Window* _window;
 
@@ -102,16 +102,15 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     public unsafe SdlPlatformGem(
         SdlPlatformSettings settings,
         Args run,
-        Lifetime lifetime,
-        Project project,
+        App app,
         Assets assets)
     {
-        _lifetime = lifetime;
+        _app = app;
         _settings = settings;
         _askedWidth = settings.Width;
         _askedHeight = settings.Height;
         _assets = assets;
-        _title = project.Name;
+        _title = app.Project.Name;
         _icon = assets.Default<Icon>();
 
         // Ctrl+C is Core's to handle (--headless); left alone, SDL would turn it into a quit event.
@@ -140,7 +139,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
         if (run.Headless) return;
 
-        fixed (byte* title = CString.ToBytes(project.Name))
+        fixed (byte* title = CString.ToBytes(app.Project.Name))
         {
             _window = SDL_CreateWindow(
                 title,
@@ -341,10 +340,10 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
             switch ((SDL_EventType)sdlEvent.type)
             {
                 case SDL_EVENT_QUIT:
-                    _lifetime.Stop("the system asked Magic to quit");
+                    _app.Quit("the system asked Magic to quit");
                     break;
                 case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
-                    _lifetime.Stop("window closed");
+                    _app.Quit("window closed");
                     break;
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                     if (TryReadWindowSize(out int width, out int height))
@@ -724,9 +723,9 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         if (icon == Handle<Icon>.None) return;
 
-        Result<Icon> loaded = await _assets.LoadAsync(icon, _lifetime.Stopping).ConfigureAwait(false);
+        Result<Icon> loaded = await _assets.LoadAsync(icon, _app.Quitting).ConfigureAwait(false);
         Result<Texture> image = loaded.Ok
-            ? await _assets.LoadAsync(loaded.Value.Image, _lifetime.Stopping).ConfigureAwait(false)
+            ? await _assets.LoadAsync(loaded.Value.Image, _app.Quitting).ConfigureAwait(false)
             : Result.Failure<Texture>(loaded.Error);
         if (!image.Ok)
         {

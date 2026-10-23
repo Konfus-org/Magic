@@ -28,16 +28,16 @@ namespace Magic.Services;
 /// </summary>
 public sealed class Threads : IDisposable
 {
-    private readonly Lifetime _lifetime;
+    private readonly App _app;
     private readonly WorkQueue _main = new("main");
     private readonly WorkQueue _render = new("render");
 
     /// <summary>
     /// Makes the calling thread, the process's first, the render thread.
     /// </summary>
-    internal Threads(Lifetime lifetime)
+    internal Threads(App app)
     {
-        _lifetime = lifetime;
+        _app = app;
         _render.Owner = Environment.CurrentManagedThreadId;
         Thread.CurrentThread.Name ??= "Render";
     }
@@ -118,9 +118,9 @@ public sealed class Threads : IDisposable
     /// <summary>
     /// Runs <paramref name="work"/> on a thread of its own named <paramref name="name"/>: for work that lasts as long
     /// as the run and would hold a pool thread the whole time, such as reading the terminal. It is given
-    /// <see cref="Lifetime.Stopping"/>, and the task ends with it: with what it threw, or cancelled when it stops for
-    /// the token. The thread is a background one, so work that cannot look at the token (a blocking read) does not keep
-    /// the process alive.
+    /// <see cref="App.Quitting"/>, and the task ends with it: with what it threw, or cancelled when it stops for the
+    /// token. The thread is a background one, so work that cannot look at the token (a blocking read) does not keep the
+    /// process alive.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -129,17 +129,17 @@ public sealed class Threads : IDisposable
     public Task RunAsync(string name, Action<CancellationToken> work)
     {
         TaskCompletionSource ended = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        CancellationToken stopping = _lifetime.Stopping;
+        CancellationToken quitting = _app.Quitting;
         Thread thread = new(() =>
         {
             try
             {
-                work(stopping);
+                work(quitting);
                 ended.SetResult();
             }
-            catch (OperationCanceledException) when (stopping.IsCancellationRequested)
+            catch (OperationCanceledException) when (quitting.IsCancellationRequested)
             {
-                ended.SetCanceled(stopping);
+                ended.SetCanceled(quitting);
             }
             catch (Exception ex)
             {

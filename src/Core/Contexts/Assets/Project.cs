@@ -3,8 +3,8 @@ using Magic.Services;
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// The project being run: what its .magic file holds, and the folder that file is in. Plain data;
-/// <see cref="Engine"/> finds and reads it.
+/// The project being run: what its .magic file holds. Plain data; <see cref="Engine"/> finds and reads it, and the
+/// <see cref="App"/> holds it with the folder it is in.
 /// </summary>
 public sealed class Project
 {
@@ -33,9 +33,4 @@ public sealed class Project
     /// dependencies do not decide, gems are made in this order.
     /// </summary>
     public IReadOnlyList<string> Gems { get; set; } = [];
-
-    /// <summary>
-    /// The folder the .magic file is in. Set when the file is read, so it is never part of the file.
-    /// </summary>
-    public string Root { get; internal set; } = string.Empty;
 }

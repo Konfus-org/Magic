@@ -43,7 +43,7 @@ namespace Magic.Services;
 /// <para>
 /// The whole world can be saved as data (<see cref="SaveAsync"/>) and put back from it (<see cref="Restore"/>): the
 /// domains open, every entity with its components and its scripts as they are. The engine does so across a restart
-/// (<see cref="Lifetime.Restart"/>), so the world goes on as it was. Put back, it loads as a domain that replaces it
+/// (<see cref="App.Restart"/>), so the world goes on as it was. Put back, it loads as a domain that replaces it
 /// does, but with no loading domain shown, as it is there already: held out of sight from the frame it is put back
 /// until its domains have been taken in again and every gem has readied it, then shown, drawn as it loaded.
 /// </para>
@@ -55,8 +55,7 @@ public sealed class World : IDisposable
     private readonly Assemblies _assemblies;
     private readonly Assets _assets;
     private readonly Threads _threads;
-    private readonly Project _project;
-    private readonly Lifetime _lifetime;
+    private readonly App _app;
 
     /// <summary>
     /// The domains open in the world, and all that opening, closing and keeping them takes; null without a gem that
@@ -71,17 +70,15 @@ public sealed class World : IDisposable
         Assets assets,
         Threads threads,
         Events events,
-        Project project,
-        Lifetime lifetime)
+        App app)
     {
         _ecs = ecs;
         _scripts = scripts;
         _assemblies = assemblies;
         _assets = assets;
         _threads = threads;
-        _project = project;
-        _lifetime = lifetime;
-        _domains = ecs is null ? null : new Domains(this, ecs, assets, threads, events, project, lifetime);
+        _app = app;
+        _domains = ecs is null ? null : new Domains(this, ecs, assets, threads, events, app);
     }
 
     /// <summary>
@@ -136,11 +133,6 @@ public sealed class World : IDisposable
     /// Closes <paramref name="domain"/>, destroying what it spawned; nothing happens when it is not open.
     /// </summary>
     public void Close(Handle<Domain> domain) => _domains?.Close(domain);
-
-    /// <summary>
-    /// Ends the game: the frames stop, and the gems end.
-    /// </summary>
-    public void End(string reason) => _lifetime.Stop(reason);
 
     /// <summary>
     /// The world as data (<see cref="WorldState"/>), to put back with <see cref="Restore"/>: the domains open, and
@@ -413,7 +405,7 @@ public sealed class World : IDisposable
             return;
         }
 
-        Result<Domain> opened = await OpenAsync(_project.EntryPoint, DomainOpenMode.Replace, null, _lifetime.Stopping)
+        Result<Domain> opened = await OpenAsync(_app.Project.EntryPoint, DomainOpenMode.Replace, null, _app.Quitting)
             .ConfigureAwait(false);
 
         if (opened.Ok) return;
@@ -423,7 +415,7 @@ public sealed class World : IDisposable
             _assets.Default<Domain>(),
             DomainOpenMode.Replace,
             null,
-            _lifetime.Stopping).ConfigureAwait(false);
+            _app.Quitting).ConfigureAwait(false);
         if (!fallback.Ok) Debugging.Error($"The default domain does not open either: {fallback.Error}");
     }
 
@@ -439,14 +431,14 @@ public sealed class World : IDisposable
         IReadOnlyList<Handle<Domain>> domains = _domains is null ? [] : _assets.GetProjectAssets<Domain>();
         foreach (Handle<Domain> domain in domains)
         {
-            if (domain == _project.EntryPoint || domain == _project.Loading) continue;
+            if (domain == _app.Project.EntryPoint || domain == _app.Project.Loading) continue;
 
-            Result<Domain> opened = await OpenAsync(domain, DomainOpenMode.Replace, null, _lifetime.Stopping)
+            Result<Domain> opened = await OpenAsync(domain, DomainOpenMode.Replace, null, _app.Quitting)
                 .ConfigureAwait(false);
             if (!opened.Ok) Debugging.Error($"{_assets.GetPath(domain)} does not open to be baked: {opened.Error}");
         }
 
-        _lifetime.Stop("every domain of the project is baked");
+        _app.Quit("every domain of the project is baked");
     }
 
     /// <summary>

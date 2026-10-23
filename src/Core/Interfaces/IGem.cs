@@ -1,4 +1,3 @@
-using Magic.Contexts.Assets;
 using Magic.Contexts.CmdLine;
 using Magic.Contexts.Frames;
 using Magic.Services;
@@ -9,8 +8,8 @@ namespace Magic.Interfaces;
 /// A plugin. Everything Magic does beyond running frames lives in one: a gem is an assembly holding exactly one
 /// class that implements IGem, conventionally <c>internal sealed class XGem</c>.
 /// <para>
-/// Its constructor parameters are what it needs: Core's services (<see cref="IFileSystem"/>, <see cref="Lifetime"/>,
-/// <see cref="Threads"/>, <see cref="Events"/>, <see cref="Project"/>, <see cref="Args"/>, <see cref="Settings"/>, and
+/// Its constructor parameters are what it needs: Core's services (<see cref="IFileSystem"/>, <see cref="App"/>,
+/// <see cref="Threads"/>, <see cref="Events"/>, <see cref="Args"/>, <see cref="Settings"/>, and
 /// <see cref="IServiceProvider"/> to find a service by its type as it runs) or interfaces other gems implement. Every
 /// other interface the class implements is what it provides to the gems made after it, an <see cref="IAssetLoader{T}"/>
 /// as any other, but <see cref="ILogSink"/>, which Core adds to the log instead, and <see cref="IPreloader"/>, which

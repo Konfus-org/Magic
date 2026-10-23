@@ -52,13 +52,13 @@ internal sealed class DebugUi : IPipelineScript, IDisposable
     /// Made by the renderer for each listing of the frame it builds, with the debug UI's draw lists, which the debug UI
     /// this gem provides copies each frame; another gem's debug UI has none, and the script is not made.
     /// </summary>
-    public DebugUi(IDebugUI ui, IGpu gpu, IShaderCompiler compiler, Lifetime lifetime)
+    public DebugUi(IDebugUI ui, IGpu gpu, IShaderCompiler compiler, App app)
     {
         _gpu = gpu;
         _lists = ui is ImGuiDebugUIGem imgui
             ? imgui.DrawLists
             : throw new InvalidOperationException("The debug UI is not ImGui's, so it has no draw lists to draw.");
-        CompileAsync(compiler, lifetime.Stopping).FireAndForget();
+        CompileAsync(compiler, app.Quitting).FireAndForget();
     }
 
     public void Dispose()

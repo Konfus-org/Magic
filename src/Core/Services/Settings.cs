@@ -45,7 +45,7 @@ public sealed class Settings : IDisposable
     private readonly IFileSystem _files;
     private readonly Handle<Preset> _default;
     private readonly JsonObject _commandLine;
-    private readonly Lifetime _lifetime;
+    private readonly App _app;
     private readonly Subscription _reloads;
 
     /// <summary>
@@ -83,14 +83,14 @@ public sealed class Settings : IDisposable
     /// <c>--preset</c> names, before any gem is made, as each is made from them. A name no preset has is an error, and
     /// only the default is applied.
     /// </summary>
-    internal Settings(Assets assets, IFileSystem files, Events events, Project project, Args args, Lifetime lifetime)
+    internal Settings(Assets assets, IFileSystem files, Events events, App app, Args args)
     {
         _assets = assets;
         _args = args;
-        _lifetime = lifetime;
+        _app = app;
         _files = files;
         _default = assets.Find<Preset>(GetPath(DefaultPreset));
-        _commandLine = ParseCommandLine(project, args.Settings);
+        _commandLine = ParseCommandLine(app.Project, args.Settings);
 
         Handle<Preset> applied = args.Preset.Length == 0 ? _default : assets.Find<Preset>(GetPath(args.Preset));
         if (applied == Handle<Preset>.None)
@@ -334,7 +334,7 @@ public sealed class Settings : IDisposable
             _changes.Clear();
         }
 
-        if (restart is { } reason) _lifetime.Restart(reason);
+        if (restart is { } reason) _app.Restart(reason);
     }
 
     /// <summary>

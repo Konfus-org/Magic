@@ -76,7 +76,7 @@ internal sealed class FrameLoop : IDisposable
     private readonly bool[] _left;
 
     private readonly World _world;
-    private readonly Lifetime _lifetime;
+    private readonly App _app;
     private readonly Threads _threads;
     private readonly Events _events;
     private readonly Settings _settings;
@@ -104,7 +104,7 @@ internal sealed class FrameLoop : IDisposable
     internal FrameLoop(
         IReadOnlyList<IGem> gems,
         World world,
-        Lifetime lifetime,
+        App app,
         Threads threads,
         Events events,
         Settings settings,
@@ -128,7 +128,7 @@ internal sealed class FrameLoop : IDisposable
         _stops = GetHooked(nameof(IGem.Stop), isReversed: true);
         _left = new bool[_gems.Length];
         _world = world;
-        _lifetime = lifetime;
+        _app = app;
         _threads = threads;
         _events = events;
         _settings = settings;
@@ -157,11 +157,11 @@ internal sealed class FrameLoop : IDisposable
         long start = Stopwatch.GetTimestamp();
         double began = Seconds;
         double previousSeconds = began;
-        for (ulong index = 0; !_lifetime.IsStopping; index++)
+        for (ulong index = 0; !_app.IsQuitting; index++)
         {
             if (index == _frameLimit)
             {
-                _lifetime.Stop($"ran {_frameLimit} frames");
+                _app.Quit($"ran {_frameLimit} frames");
 
                 break;
             }
@@ -169,7 +169,7 @@ internal sealed class FrameLoop : IDisposable
             double seconds = began + Stopwatch.GetElapsedTime(start).TotalSeconds;
             if (seconds >= _timeLimit.TotalSeconds)
             {
-                _lifetime.Stop($"ran {_timeLimit.TotalSeconds} s");
+                _app.Quit($"ran {_timeLimit.TotalSeconds} s");
 
                 break;
             }

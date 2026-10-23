@@ -22,7 +22,7 @@ internal sealed class DebugToolsGem(
     IDebugUI ui,
     Settings gemSettings,
     Assets assets,
-    Lifetime lifetime,
+    App app,
     Events events,
     ICommands? commands = null,
     IInput? input = null,
@@ -44,7 +44,7 @@ internal sealed class DebugToolsGem(
         commands,
         events,
         input,
-        lifetime.Stopping);
+        app.Quitting);
 
     /// <summary>
     /// The frames and seconds since the frame rate was last worked out, and what it read.

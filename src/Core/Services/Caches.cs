@@ -2,7 +2,6 @@ using System.Buffers.Binary;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
-using Magic.Contexts.Assets;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -53,7 +52,7 @@ public sealed class Caches
     /// </summary>
     private readonly string _bundled;
 
-    internal Caches(IFileSystem files, IServiceProvider services, Project project)
+    internal Caches(IFileSystem files, IServiceProvider services, App app)
     {
         _files = files;
         _services = services;
@@ -61,8 +60,8 @@ public sealed class Caches
         string machine = Environment.GetEnvironmentVariable("MagicCache") is { Length: > 0 } named
             ? named
             : files.Combine(local, "Magic", "Cache");
-        _folder = files.Combine(machine, project.Name);
-        _bundled = files.Combine(project.Root, "Cache");
+        _folder = files.Combine(machine, app.Project.Name);
+        _bundled = files.Combine(app.Folder, "Cache");
     }
 
     /// <summary>

@@ -203,8 +203,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
     private readonly Assemblies _assemblies;
     private readonly Settings _gemSettings;
     private readonly Threads _threads;
-    private readonly Lifetime _lifetime;
-    private readonly Project _project;
+    private readonly App _app;
     private readonly ICommands? _commands;
     private readonly McpServerOptions _options;
     private readonly CancellationTokenSource _stopping = new();
@@ -228,7 +227,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
     /// </summary>
     private ulong _frame;
 
-    public McpGem(McpSettings settings, World world, Assets assets, Assemblies assemblies, Settings gemSettings, Threads threads, Lifetime lifetime, Project project, ICommands? commands = null)
+    public McpGem(McpSettings settings, World world, Assets assets, Assemblies assemblies, Settings gemSettings, Threads threads, App app, ICommands? commands = null)
     {
         _settings = settings;
         _world = world;
@@ -236,8 +235,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
         _assemblies = assemblies;
         _gemSettings = gemSettings;
         _threads = threads;
-        _lifetime = lifetime;
-        _project = project;
+        _app = app;
         _commands = commands;
         _options = new McpServerOptions
         {
@@ -505,8 +503,8 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
         return Serialize(new
         {
-            Project = _project.Name,
-            _project.Root,
+            Project = _app.Project.Name,
+            Root = _app.Folder,
             Frame = _frame,
             Entities = entities,
             Domains = domains,
@@ -711,7 +709,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
     private string Quit()
     {
-        _lifetime.Stop("an MCP client asked to quit");
+        _app.Quit("an MCP client asked to quit");
         return "quitting";
     }
 

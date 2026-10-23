@@ -57,7 +57,7 @@ public sealed class Assets : IDisposable
 
     private readonly IFileSystem _files;
     private readonly Events _events;
-    private readonly CancellationToken _stopping;
+    private readonly CancellationToken _quitting;
 
     /// <summary>
     /// The engine's own <c>Resources/</c>, Core's: where the default and failure assets are, and only there.
@@ -126,12 +126,12 @@ public sealed class Assets : IDisposable
     /// Starts reading the project's <c>Assets/</c> and the engine's own <c>Resources/</c>, the first roots; the gems'
     /// are added as they load (<see cref="Register"/>).
     /// </summary>
-    internal Assets(IFileSystem files, Project project, Lifetime lifetime, Events events)
+    internal Assets(IFileSystem files, App app, Events events)
     {
         _files = files;
         _events = events;
-        _stopping = lifetime.Stopping;
-        _project = files.Combine(project.Root, "Assets");
+        _quitting = app.Quitting;
+        _project = files.Combine(app.Folder, "Assets");
         _engine = GemAssembly.GetResources(files, typeof(Assets).Assembly);
 
         WatchAsync().FireAndForget();
@@ -638,9 +638,9 @@ public sealed class Assets : IDisposable
         Justification = "Whatever goes wrong taking in one batch is logged, and the next is still taken in.")]
     private async Task WatchAsync()
     {
-        await _indexed.Task.WaitAsync(_stopping).ConfigureAwait(false);
+        await _indexed.Task.WaitAsync(_quitting).ConfigureAwait(false);
         ChannelReader<string> changes = _changes.Reader;
-        while (await changes.WaitToReadAsync(_stopping).ConfigureAwait(false))
+        while (await changes.WaitToReadAsync(_quitting).ConfigureAwait(false))
         {
             // What the watches saw, taken until nothing more has come for the settle time; a sidecar's change is its
             // file's.
@@ -654,7 +654,7 @@ public sealed class Assets : IDisposable
                         : path);
                 }
 
-                await Task.Delay(_settle, _stopping).ConfigureAwait(false);
+                await Task.Delay(_settle, _quitting).ConfigureAwait(false);
             }
             while (changes.TryPeek(out _));
 
@@ -749,7 +749,7 @@ public sealed class Assets : IDisposable
     {
         Task<Result<T>>? before = slot.Loading;
         int make = ++slot.Started;
-        Task<Result<T>> making = Task.Run(() => MakeAfterAsync(slot, id, make, before, isRemake), _stopping);
+        Task<Result<T>> making = Task.Run(() => MakeAfterAsync(slot, id, make, before, isRemake), _quitting);
         slot.Loading = making;
 
         return making;
@@ -849,7 +849,7 @@ public sealed class Assets : IDisposable
                 + $"{string.Join(", ", T.Extensions)}.");
         }
 
-        Result<byte[]> bytes = await _files.ReadAsync(indexed.File, _stopping).ConfigureAwait(false);
+        Result<byte[]> bytes = await _files.ReadAsync(indexed.File, _quitting).ConfigureAwait(false);
 
         if (!bytes.Ok) return Result.Failure<T>($"{indexed.Path} could not be read: {bytes.Error}");
 
@@ -873,7 +873,7 @@ public sealed class Assets : IDisposable
 
         try
         {
-            loaded = await processor.ProcessAsync(loaded.Value, indexed.Version, _stopping).ConfigureAwait(false);
+            loaded = await processor.ProcessAsync(loaded.Value, indexed.Version, _quitting).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -899,7 +899,7 @@ public sealed class Assets : IDisposable
 
         if (!isMade) return new(Result.Failure<T>($"the gem that reads {typeof(T).Name}s was not made."));
 
-        if (loader is not null) return loader.LoadAsync(file.Path, bytes, file.Settings, _stopping);
+        if (loader is not null) return loader.LoadAsync(file.Path, bytes, file.Settings, _quitting);
 
         bool isJson = typeof(T).IsAssignableTo(typeof(IJsonAsset<T>));
 

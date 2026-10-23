@@ -23,7 +23,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
 {
     /// <summary>
     /// The lines read from the terminal, the process's rather than a run's: a run started again
-    /// (<see cref="Lifetime.Restart"/>) goes on from where the last left off, so what is piped in is one script for the
+    /// (<see cref="App.Restart"/>) goes on from where the last left off, so what is piped in is one script for the
     /// whole process.
     /// </summary>
     private static readonly Channel<string> _lines = Channel.CreateUnbounded<string>(
@@ -62,7 +62,7 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
     private Task? _opening;
 
     public ConsoleCommandsGem(
-        Lifetime lifetime,
+        App app,
         Threads threads,
         IFileSystem files,
         World world,
@@ -74,11 +74,11 @@ internal sealed class ConsoleCommandsGem : IGem, ICommands
         _world = world;
         _assets = assets;
         _threads = threads;
-        _stopping = lifetime.Stopping;
+        _stopping = app.Quitting;
         _gpu = gpu;
         _window = window;
         _commands.Add("help", new Command("Lists every command and what it does.", _ => Help()));
-        _commands.Add("quit", new Command("Stops the run.", _ => lifetime.Stop("quit typed in the terminal")));
+        _commands.Add("quit", new Command("Quits the app.", _ => app.Quit("quit typed in the terminal")));
         _commands.Add(
             "wait",
             new Command(

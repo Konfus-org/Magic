@@ -143,7 +143,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         World world,
         Events events,
         Threads threads,
-        Lifetime lifetime,
+        App app,
         ClusterRenderingSettings settings,
         IWindow? window = null,
         IDebugUI? debug = null,
@@ -152,7 +152,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         _gpu = gpu;
         _settings = settings;
         _assets = assets;
-        CancellationToken stopping = lifetime.Stopping;
+        CancellationToken stopping = app.Quitting;
         _stopping = stopping;
         _failures = new FailureHandler(assets, debug);
         _graph = new PassGraph(gpu, compiler, assets, scripts, threads, _failures, stopping);

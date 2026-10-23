@@ -10,8 +10,8 @@ Magic opens the project's `.magic` file, makes the gems, opens the project's fir
 game ends. Then each gem's `Stop` and `Dispose` run, the last gem made first. `Magic --help` lists the command-line
 options.
 
-The run ends when a gem calls `Lifetime.Stop`, the `--frames` or `--seconds` limit is reached, or Ctrl+C is pressed in
-a `--headless` run. `Lifetime.Restart` restarts the run in the same process, with the world as it was. A gem that
+The run ends when a gem calls `App.Quit`, the `--frames` or `--seconds` limit is reached, or Ctrl+C is pressed in a
+`--headless` run. `App.Restart` restarts the run in the same process, with the world as it was. A gem that
 can't be made, or throws in a hook, is logged as an error, and the run goes on without it.
 
 ## The frame
@@ -36,8 +36,8 @@ main thread at the start of the next frame. Watching returns a `Subscription`; d
 
 ## What a gem can ask for
 
-A gem gets what it needs as constructor parameters, and keeps it: Core's services, such as `Events`, `Assets` and
-`World`; interfaces other gems provide, optional when the parameter has a default value; its own settings class
+A gem gets what it needs as constructor parameters, and keeps it: Core's services, such as `App` (the project and
+quitting), `Events`, `Assets` and `World`; interfaces other gems provide, optional when the parameter has a default value; its own settings class
 ([Gem settings](#gem-settings)); and `IServiceProvider`, only to make objects at run time.
 
 Every other interface the gem's class implements is what it provides. Only one gem can provide each interface, except
