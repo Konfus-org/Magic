@@ -28,11 +28,12 @@ namespace Magic.ClusterRendering;
 /// copy, one frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is drawn
 /// whole in its first frame, and one that replaces the world is readied, drawn out of sight while the window keeps the
 /// loading domain's last image, until its light, its shadows and its exposure have settled, so it is shown as it should
-/// be from its first frame shown. While a debug view is named (<see cref="DebugViewChanged"/>), its pass
-/// (<c>Passes/Debug/Name.pass</c>) runs after the world's effects and what it draws is shown in place of the finished
-/// image, or the failure's magenta saying nothing draws while it is not ready; while the debug UI shows, each instance
-/// drawn as the failure says why where it is. Once every view is shown, the overlay stage runs once for each target,
-/// the window whether or not a view draws into it, with the overlay pipeline's passes, the debug UI's among them.
+/// be from its first frame shown; each new world settles from none of the old one's (<see cref="ForgetAsync"/>).
+/// While a debug view is named (<see cref="DebugViewChanged"/>), its pass (<c>Passes/Debug/Name.pass</c>) runs after
+/// the world's effects and what it draws is shown in place of the finished image, or the failure's magenta saying
+/// nothing draws while it is not ready; while the debug UI shows, each instance drawn as the failure says why where it
+/// is. Once every view is shown, the overlay stage runs once for each target, the window whether or not a view draws
+/// into it, with the overlay pipeline's passes, the debug UI's among them.
 /// </para>
 /// </summary>
 internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>, ICache<CompressedTexture>, IDisposable
@@ -122,12 +123,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private Handle<Curve> _fogFalloffAsked;
     private Curve? _fogFalloff;
-
-    /// <summary>
-    /// Whether the last frame's copy of the world was loading, so the frame the loading domain takes the world's place
-    /// is told from the ones after it. Render thread.
-    /// </summary>
-    private bool _wasLoading;
 
     /// <summary>
     /// A new world took the old one's place since global illumination was last planned, so its next plan forgets the
@@ -241,17 +236,24 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             _output.Forget();
         }
 
-        // A new world: the loading domain taking the world's place, or the domain replacing it readied from this frame.
-        _isForgetting |= (copy.IsLoading && !_wasLoading) || _preloader.Settling == 0;
-        _wasLoading = copy.IsLoading;
+        // A new world took the old one's place in this copy (ForgetAsync): this frame forgets the old one, which ends
+        // the forgetting now, its light once global illumination is next planned.
+        bool isForgetting = copy.Forgetting is not null;
+        copy.Forgetting?.TrySetResult();
+        _isForgetting |= isForgetting;
         CameraCopy? main = GetMainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
-        UpdateRows(copy, main, player, frame);
+        UpdateRows(copy, main, player, isForgetting, frame);
         (SurfaceKey skySurface, int skyRow) = _resources.GetSky(copy.Sky);
         UpdateGraph(copy, skySurface);
         PlanGi(main, frame);
         Curve? fogFalloff = GetFogFalloff(copy.Weather?.FogFalloff ?? Handle<Curve>.None);
         Settle(copy, fogFalloff);
+
+        // In a new world every view starts afresh, let go after the resources let go of what nothing holds this frame,
+        // so the render texture a camera draws into is held again before they next do.
+        if (isForgetting) _views.Forget();
+
         List<View> views = _views.Prepare(
             new ViewFrame(copy, frame, skyRow, MakeCounts(), player, HasJitter(), fogFalloff));
         View? shown = views.Find(view => view.Target.IsWindow) ?? (views.Count > 0 ? views[0] : null);
@@ -316,6 +318,13 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     public Task ReadyAsync(CancellationToken cancel) => _preloader.ReadyAsync(cancel);
 
     /// <summary>
+    /// Forgets the old world as the first copy of the new one is drawn, a frame from now: every view starts afresh, its
+    /// history, exposure and last frame gone, every shadow of the key light is drawn again, and global illumination
+    /// forgets the old world's light as it is next planned.
+    /// </summary>
+    public Task ForgetAsync(CancellationToken cancel) => _world.ForgetAsync(cancel);
+
+    /// <summary>
     /// Takes in what <paramref name="prefabs"/> draw before they spawn, so they are drawn whole in their first frame:
     /// their models into the pool, their materials packed with their textures in and every surface's pipelines
     /// compiled, and the frame built for the effects they name. Done once all of it is in, or failed, and so drawn as
@@ -362,10 +371,11 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// The instances' and lights' rows and the shadow plan from this frame's copy of the world, what nothing holds any
-    /// more let go, then what came in since the last frame, so the materials the frame draws with are the ones in.
+    /// The instances' and lights' rows and the shadow plan from this frame's copy of the world, every shadow drawn
+    /// again when the frame <paramref name="forgets"/> the world before it, what nothing holds any more let go, then
+    /// what came in since the last frame, so the materials the frame draws with are the ones in.
     /// </summary>
-    private void UpdateRows(Renderables copy, CameraCopy? main, Vector3? player, in Frame frame)
+    private void UpdateRows(Renderables copy, CameraCopy? main, Vector3? player, bool forgets, in Frame frame)
     {
         _world.UpdateRows((float)frame.Seconds, player ?? default, _preloader.IsHolding);
         _movedInstances.Add(_world.Instances.Moved.Count);
@@ -377,6 +387,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
                 _world.Lights.ChangedWords,
                 _world.Instances.Moved.Count,
                 frame.Index,
+                forgets,
                 _settings);
         }
 

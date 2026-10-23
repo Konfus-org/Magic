@@ -85,6 +85,12 @@ internal sealed class WorldProcessor : IDisposable
     /// </summary>
     private Renderables _back = new();
 
+    /// <summary>
+    /// The forgetting the next copy carries (<see cref="ForgetAsync"/>); none when no new world took the old one's
+    /// place since the last copy began. Main thread.
+    /// </summary>
+    private TaskCompletionSource? _forgetting;
+
     internal WorldProcessor(World world, GpuResources resources, FailureHandler failures, Assets assets)
     {
         Instances = new Instances(resources, failures, assets);
@@ -148,15 +154,30 @@ internal sealed class WorldProcessor : IDisposable
     /// </summary>
     internal void Swap() => (Front, _back) = (_back, Front);
 
+    /// <summary>
+    /// The next copy, the first of the new world that took the old one's place, carries the forgetting
+    /// (<see cref="Renderables.Forgetting"/>), and the task ends once Render takes it, the frame that draws that copy
+    /// forgetting the old world. Main thread.
+    /// </summary>
+    internal Task ForgetAsync(CancellationToken cancel)
+    {
+        _forgetting ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        return _forgetting.Task.WaitAsync(cancel);
+    }
+
     private static Vector3 GetIntensity(Color color, float intensity)
         => new Vector3(color.R, color.G, color.B) * intensity;
 
     /// <summary>
-    /// Starts a frame's copy, before the copiers run: the copy Render read two frames ago is written over.
+    /// Starts a frame's copy, before the copiers run: the copy Render read two frames ago is written over, carrying the
+    /// forgetting asked for since the last.
     /// </summary>
     private Renderables Begin()
     {
         _back.Clear();
+        _back.Forgetting = _forgetting;
+        _forgetting = null;
         _instances.Begin(_back.Instances);
         _lights.Begin(_back.Lights);
 
@@ -520,6 +541,13 @@ internal sealed class Renderables
     /// </summary>
     internal bool IsLoading { get; set; }
 
+    /// <summary>
+    /// A new world took the old one's place since the copy before (<see cref="WorldProcessor.ForgetAsync"/>): Render
+    /// forgets what it built up from the old world as it draws this copy, the first without it, and ends this; none
+    /// when no new world did.
+    /// </summary>
+    internal TaskCompletionSource? Forgetting { get; set; }
+
     internal void Clear()
     {
         Instances.Clear();
@@ -534,6 +562,7 @@ internal sealed class Renderables
         Weather = null;
         Effects = Handle<Pipeline>.None;
         IsLoading = false;
+        Forgetting = null;
     }
 }
 

@@ -19,11 +19,11 @@ namespace Magic.Internal;
 /// The domains open in the world, and all that takes: opening one (<see cref="OpenAsync"/>), its prefabs read on
 /// workers, taken in by the gems that need time to (<see cref="IPreloader"/>) and spawned on the main thread, the
 /// loading domain, taken in once and kept, shown from the frame one begins to replace the world, and the one replacing
-/// it readied by those gems out of sight before it is shown, closing one, each kept as its files change, and the
-/// domains' part of a saved world (<see cref="Save"/>, <see cref="Restore"/>), readied out of sight too as it is put
-/// back. The world makes one when a gem provides the ECS, and is the one place to act on it: nothing else holds this; a
-/// gem below the world hears that one is loading on <see cref="Events"/> (<see cref="WorldLoading"/>). Main thread, but
-/// where a member says otherwise.
+/// it readied by those gems out of sight before it is shown, the world emptied each time something takes its place
+/// (<see cref="EmptyWorld"/>), closing one, each kept as its files change, and the domains' part of a saved world
+/// (<see cref="Save"/>, <see cref="Restore"/>), readied out of sight too as it is put back. The world makes one when a
+/// gem provides the ECS, and is the one place to act on it: nothing else holds this; a gem below the world hears that
+/// one is loading on <see cref="Events"/> (<see cref="WorldLoading"/>). Main thread, but where a member says otherwise.
 /// </summary>
 internal sealed class Domains : IDisposable
 {
@@ -77,6 +77,12 @@ internal sealed class Domains : IDisposable
     /// that hears it runs.
     /// </summary>
     private bool _isTelling;
+
+    /// <summary>
+    /// Ends once every gem has forgotten the world last emptied (<see cref="EmptyWorld"/>), which a domain joining
+    /// since waits for before the gems take it in.
+    /// </summary>
+    private Task _forgotten = Task.CompletedTask;
 
     internal Domains(
         World world,
@@ -214,14 +220,18 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Closes every open domain, destroying what each spawned, as a world put back closes what is open first.
+    /// Empties the world for a saved one put back in its place: every open domain closes, every entity left is
+    /// destroyed, its globals too, as the saved world holds its own, and every gem forgets it
+    /// (<see cref="EmptyWorld"/>).
     /// </summary>
-    internal void CloseAll()
+    internal void Clear()
     {
         for (int i = _domains.Count - 1; i >= 0; i--)
         {
             Close(_domains[i]);
         }
+
+        EmptyWorld("the world put back", keepsGlobals: false);
     }
 
     /// <summary>
@@ -248,19 +258,7 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// The loading domain's entities, which a saved world leaves out: it is shown again as a domain opens anew.
     /// </summary>
-    internal HashSet<Entity> GetLoadingEntities()
-    {
-        HashSet<Entity> loading = [];
-        if (_loading is { } shown)
-        {
-            foreach (Placed placed in shown.Prefabs.Values)
-            {
-                loading.UnionWith(placed.Entities ?? []);
-            }
-        }
-
-        return loading;
-    }
+    internal HashSet<Entity> GetLoadingEntities() => _loading is { } shown ? GetSpawned([shown]) : [];
 
     /// <summary>
     /// Puts the saved domains <paramref name="saved"/> back in place of the world, once every entity of the saved world
@@ -282,8 +280,9 @@ internal sealed class Domains : IDisposable
         ReadyAllAsync("the world put back", _app.Quitting).FireAndForget();
 
         // A domain that had spawned nothing opens again from the start; any other opens around the entities made for
-        // what its prefabs and its player had spawned.
-        List<Task> restoring = new(saved.Count);
+        // what its prefabs and its player had spawned. The world put back is shown once each has arrived, and every gem
+        // has forgotten the world before it.
+        List<Task> restoring = [_forgotten];
         foreach (DomainState state in saved)
         {
             Task restore;
@@ -366,6 +365,25 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
+    /// The entities <paramref name="domains"/> spawned: their prefabs' and their players'.
+    /// </summary>
+    private static HashSet<Entity> GetSpawned(IReadOnlyList<Open> domains)
+    {
+        HashSet<Entity> spawned = [];
+        foreach (Open open in domains)
+        {
+            foreach (Placed placed in open.Prefabs.Values)
+            {
+                spawned.UnionWith(placed.Entities ?? []);
+            }
+
+            spawned.UnionWith(open.Player ?? []);
+        }
+
+        return spawned;
+    }
+
+    /// <summary>
     /// The entities made for the saved <paramref name="ids"/>, those the save held.
     /// </summary>
     private static Entity[] GetEntities(IReadOnlyList<int> ids, Dictionary<int, Entity> made)
@@ -398,8 +416,28 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Starts opening <paramref name="open"/>, its file loaded: when it replaces the world, the open domains close and
-    /// the loading domain is shown. The domain already open with its handle when there is one, which is kept.
+    /// <paramref name="preloader"/> forgets the world as <paramref name="what"/> takes its place
+    /// (<see cref="IPreloader.ForgetAsync"/>): what it throws, but its being cancelled, is an error, and the new world
+    /// goes on without waiting for it. Awaited here, so one that throws as it is called fails this task rather than the
+    /// call that empties the world.
+    /// </summary>
+    private static async Task ForgetOneAsync(IPreloader preloader, string what, CancellationToken cancel)
+    {
+        try
+        {
+            await preloader.ForgetAsync(cancel).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Debugging.Error($"Gem {preloader.GetType().Name} threw as it forgot the world {what} takes the place of, "
+                + $"which goes on without it: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// Starts opening <paramref name="open"/>, its file loaded: when it replaces the world, the open domains close,
+    /// the world empties for it (<see cref="EmptyWorld"/>) and the loading domain is shown. The domain already open
+    /// with its handle when there is one, which is kept.
     /// </summary>
     private Open? Begin(Open open)
     {
@@ -414,8 +452,13 @@ internal sealed class Domains : IDisposable
 
         if (already is not null) return already;
 
-        if (open.IsReplacing && BeginLoading()) ShowLoading();
+        if (open.IsReplacing)
+        {
+            EmptyWorld(open.Name, keepsGlobals: true);
+            if (BeginLoading()) ShowLoading();
+        }
 
+        open.Forgotten = _forgotten;
         _domains.Add(open);
 
         return null;
@@ -435,6 +478,41 @@ internal sealed class Domains : IDisposable
         _events.Publish(new WorldLoading(true));
 
         return true;
+    }
+
+    /// <summary>
+    /// The world empties as <paramref name="what"/> takes its place, before anything of it spawns: every entity no
+    /// domain shown spawned is destroyed, what scripts and gems made among them, but the world's globals when it
+    /// <paramref name="keepsGlobals"/> (<see cref="World.CreateGlobal"/>); then every gem that takes in what spawns
+    /// forgets the old world, all at once (<see cref="IPreloader.ForgetAsync"/>), which a domain joining from now waits
+    /// for before the gems take it in.
+    /// </summary>
+    private void EmptyWorld(string what, bool keepsGlobals)
+    {
+        HashSet<Entity> kept = GetSpawned(GetShown());
+        if (keepsGlobals) kept.UnionWith(_world.GetGlobals());
+
+        List<Entity> left = [];
+        foreach (EcsChunk chunk in _ecs.Query())
+        {
+            foreach (Entity entity in chunk.Entities)
+            {
+                if (!kept.Contains(entity)) left.Add(entity);
+            }
+        }
+
+        Destroy([.. left]);
+        if (left.Count > 0)
+            Debugging.Info($"Destroyed {left.Count} entities no domain spawned, as {what} takes the world's place.");
+
+        IReadOnlyList<IPreloader> preloaders = _world.Preloaders;
+        Task[] forgetting = new Task[preloaders.Count];
+        for (int i = 0; i < forgetting.Length; i++)
+        {
+            forgetting[i] = ForgetOneAsync(preloaders[i], what, _app.Quitting);
+        }
+
+        _forgotten = Task.WhenAll(forgetting);
     }
 
     /// <summary>
@@ -489,9 +567,10 @@ internal sealed class Domains : IDisposable
     /// <summary>
     /// Every prefab in <paramref name="open"/>'s folder, each read on a worker, with the player when it replaces the
     /// world, and the models they draw loaded, then all of it taken in by the gems that need time to
-    /// (<see cref="IPreloader"/>), so whatever draws or simulates them has them the frame they spawn, the loading
-    /// domain's too, which is kept so (<see cref="ShowLoading"/>). The reads are the first half of the progress, the
-    /// gems' taking in the second. On a worker.
+    /// (<see cref="IPreloader"/>), once they have forgotten the world emptied before it joined, so whatever draws or
+    /// simulates them has them the frame they spawn, the loading domain's too, which is kept so
+    /// (<see cref="ShowLoading"/>). The reads are the first half of the progress, the gems' taking in the second. On a
+    /// worker.
     /// </summary>
     private async Task<Read> ReadAsync(Open open, IProgress<float>? progress, CancellationToken cancel)
     {
@@ -540,6 +619,8 @@ internal sealed class Domains : IDisposable
             if (model.Ok) models.Add(model.Value);
         }
 
+        // The old world is let go before the new one is taken in, so the gems never hold both.
+        await open.Forgotten.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
         SubscriptionList holds = await PreloadAsync(spawning, progress, cancel).ConfigureAwait(false);
         progress?.Report(1);
 
@@ -622,7 +703,9 @@ internal sealed class Domains : IDisposable
     /// What <paramref name="open"/> spawns is read: spawned now, all of it as one spawn, but what a domain put back
     /// kept (<see cref="Reopen"/>), which only takes its prefab as it is now; the player at its spawn when it replaces
     /// the world; unless it was closed meanwhile. A domain that replaces the world takes the loading domain's place in
-    /// this frame, out of sight, and is readied (<see cref="Ready"/>) until <paramref name="cancel"/>.
+    /// this frame: the loading domain closes, its last image left on the window, and the world empties for it
+    /// (<see cref="EmptyWorld"/>) before it spawns, out of sight, and is readied (<see cref="Ready"/>) until
+    /// <paramref name="cancel"/>.
     /// </summary>
     private Result<Domain> Arrive(Open open, Read read, CancellationToken cancel)
     {
@@ -631,6 +714,13 @@ internal sealed class Domains : IDisposable
             read.Holds.Dispose();
 
             return Result.Failure<Domain>("It was closed before it was there.");
+        }
+
+        if (open.IsReplacing)
+        {
+            if (_loading is { } loading) Close(loading);
+
+            EmptyWorld(open.Name, keepsGlobals: true);
         }
 
         // What the gems took in is kept while the domain is open. Each prefab spawns, but one a domain put back already
@@ -673,16 +763,14 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Readies <paramref name="open"/>, spawned in place of the world: the loading domain closes, its last image left on
-    /// the window, and every gem that took the domain in readies it, all at once (<see cref="IPreloader.ReadyAsync"/>),
-    /// until <paramref name="cancel"/> or the domain closing stops them.
+    /// Readies <paramref name="open"/>, spawned in place of the world: every gem that took the domain in readies it,
+    /// all at once (<see cref="IPreloader.ReadyAsync"/>), until <paramref name="cancel"/> or the domain closing stops
+    /// them; it is ready once they have, and every gem has forgotten the world it was spawned in place of.
     /// </summary>
     private void Ready(Open open, CancellationToken cancel)
     {
-        if (_loading is { } loading) Close(loading);
-
         open.Readying = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        open.Readied = ReadyAllAsync(open.Name, open.Readying.Token);
+        open.Readied = Task.WhenAll(_forgotten, ReadyAllAsync(open.Name, open.Readying.Token));
     }
 
     /// <summary>
@@ -786,10 +874,10 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Waits until every domain of a world put back has arrived, <paramref name="restoring"/>, or is not coming, then
-    /// has every gem ready the world again, as what they took in and spawned is there now, which takes the place of the
-    /// readying it was held by as it was put back (<see cref="Restore"/>); once they all have, it is shown as the next
-    /// frame starts (<see cref="Pump"/>).
+    /// Waits until every domain of a world put back has arrived, or is not coming, and every gem has forgotten the
+    /// world before it, <paramref name="restoring"/>, then has every gem ready the world again, as what they took in
+    /// and spawned is there now, which takes the place of the readying it was held by as it was put back
+    /// (<see cref="Restore"/>); once they all have, it is shown as the next frame starts (<see cref="Pump"/>).
     /// </summary>
     private async Task RevealRestoredAsync(List<Task> restoring)
     {
@@ -812,6 +900,7 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private void Reopen(Open open, Dictionary<Handle<Prefab>, Entity[]> kept, Entity[]? player)
     {
+        open.Forgotten = _forgotten;
         _domains.Add(open);
         open.Player = player;
         foreach (Placement placement in GetPlacements(open.Handle, open.Domain))
@@ -886,16 +975,17 @@ internal sealed class Domains : IDisposable
         }
 
         _keeping = new Keeping(handle);
-        KeepLoadingAsync(_keeping).FireAndForget();
+        KeepLoadingAsync(_keeping, _forgotten).FireAndForget();
     }
 
     /// <summary>
-    /// Reads the loading domain <paramref name="keeping"/> names and has every gem that needs time to take it in, then
-    /// keeps it, on the main thread, and shows it if the world is still loading and the domain replacing it is not there
-    /// yet; lets it go when it was forgotten meanwhile (<see cref="ForgetLoading"/>). One that does not open is an error,
-    /// and none is shown until its files change.
+    /// Reads the loading domain <paramref name="keeping"/> names and has every gem that needs time to take it in, once
+    /// they have <paramref name="forgotten"/> the world emptied for it, then keeps it, on the main thread, and shows it
+    /// if the world is still loading and the domain replacing it is not there yet; lets it go when it was forgotten
+    /// meanwhile (<see cref="ForgetLoading"/>). One that does not open is an error, and none is shown until its files
+    /// change.
     /// </summary>
-    private async Task KeepLoadingAsync(Keeping keeping)
+    private async Task KeepLoadingAsync(Keeping keeping, Task forgotten)
     {
         Result<Domain> file = await _assets.LoadAsync(keeping.Handle, _app.Quitting).ConfigureAwait(false);
         if (!file.Ok)
@@ -912,7 +1002,10 @@ internal sealed class Domains : IDisposable
             file.Value,
             DomainOpenMode.Additive,
             isLoadingDomain: true,
-            isReplacing: false);
+            isReplacing: false)
+        {
+            Forgotten = forgotten
+        };
         Read read = await ReadAsync(reading, null, _app.Quitting).ConfigureAwait(false);
         await _threads.PostAsync(
             EngineThread.Main,
@@ -1210,9 +1303,16 @@ internal sealed class Domains : IDisposable
         internal CancellationTokenSource? Readying { get; set; }
 
         /// <summary>
-        /// Ends once every gem has readied it, or stopped (<see cref="Readying"/>).
+        /// Ends once every gem has readied it, or stopped (<see cref="Readying"/>), and has forgotten the world it was
+        /// spawned in place of.
         /// </summary>
         internal Task Readied { get; set; } = Task.CompletedTask;
+
+        /// <summary>
+        /// Ends once every gem has forgotten the world last emptied as it joined (<see cref="EmptyWorld"/>), which it
+        /// waits for before the gems take it in.
+        /// </summary>
+        internal Task Forgotten { get; set; } = Task.CompletedTask;
 
         /// <summary>
         /// Ends once it is shown, with it, or with why not when it was closed first.

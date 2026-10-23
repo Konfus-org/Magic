@@ -22,6 +22,12 @@ public readonly record struct Tag(int Id)
     /// </summary>
     public static readonly Tag Player = Of("player");
 
+    /// <summary>
+    /// An entity of the world's own rather than a domain's (<see cref="World.CreateGlobal"/>), which outlives every
+    /// domain that replaces the world. A domain's own entities go with it whatever their tags.
+    /// </summary>
+    public static readonly Tag Global = Of("global");
+
     public bool IsValid => Id != 0;
 
     /// <summary>

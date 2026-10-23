@@ -13,12 +13,11 @@ namespace Magic.Services;
 
 /// <summary>
 /// The game world: everything in it, and the one place to act on it. It opens and closes domains, puts assets in the
-/// world (<see cref="Spawn"/>), makes, finds and changes entities, adds systems and ends the game, over the pieces
-/// underneath, which stay separate: the ECS a gem provides (<see cref="IEcs"/>), the scripts a gem runs
-/// (<see cref="IScripts"/>), and the assets. Core always makes it, and opens the project's entry point through it on
-/// the first frame. Without a gem that provides the ECS it holds no entities: no domain opens, which is warned about,
-/// and a call that needs entities throws, saying so; ending the game still works. Main thread, but where a member says
-/// otherwise.
+/// world (<see cref="Spawn"/>), makes, finds and changes entities and adds systems, over the pieces underneath, which
+/// stay separate: the ECS a gem provides (<see cref="IEcs"/>), the scripts a gem runs (<see cref="IScripts"/>), and
+/// the assets. Core always makes it, and opens the project's entry point through it on the first frame. Without a gem
+/// that provides the ECS it holds no entities: no domain opens, which is warned about, and a call that needs entities
+/// throws, saying so. Main thread, but where a member says otherwise.
 /// <para>
 /// A domain is a folder holding a <c>.domain</c> file (<see cref="Domain"/>) beside the prefabs it spawns: every one in
 /// the folder, read on workers with the models they draw, then all spawned in one frame, a cell, named <c>x_y_z</c>, at
@@ -32,6 +31,13 @@ namespace Magic.Services;
 /// it. Opening one beside them (<see cref="DomainOpenMode.Additive"/>) shows no loading domain and puts no player.
 /// Closing a domain destroys what it spawned. While it is open, a prefab of it read again is spawned again as it is now,
 /// and prefabs added, moved or removed in its folder are spawned or destroyed.
+/// </para>
+/// <para>
+/// The world empties each time something takes its place: as a domain begins to replace it, as that domain arrives,
+/// the loading domain closing, and as a saved world is put back. Every entity no domain shown spawned is destroyed,
+/// what scripts and gems made among them, but its globals (<see cref="CreateGlobal"/>), which only a saved world put
+/// back destroys, and every gem that needs to forgets what it built up from the old world
+/// (<see cref="IPreloader.ForgetAsync"/>) before the new one is taken in.
 /// </para>
 /// <para>
 /// A script attached to an entity (<see cref="Attach"/>) joins its <see cref="Scripts"/>, and the gem that runs
@@ -165,10 +171,12 @@ public sealed class World : IDisposable
 
     /// <summary>
     /// Puts the world back as <paramref name="state"/> holds it (<see cref="SaveAsync"/>), in place of whatever is
-    /// open: closes what is open, makes every entity empty first, so that whichever is made earlier, a reference to one
-    /// in a component or a script maps to it, then gives each its components and its scripts, put back as they were and
-    /// not started (<see cref="IScripts.Restore"/>), and opens each domain again around the entities its prefabs had
-    /// spawned, so closing one and a prefab read again still find them. The world loads meanwhile
+    /// open: empties the world, closing what is open and destroying every entity, its globals too, as the saved world
+    /// holds its own, while every gem forgets it (<see cref="IPreloader.ForgetAsync"/>); then makes each saved entity
+    /// with no components first, so that whichever is made earlier, a reference to one in a component or a script maps
+    /// to it, then gives each its components and its scripts, put back as they were and not started
+    /// (<see cref="IScripts.Restore"/>), and opens each domain again around the entities its prefabs had spawned, so
+    /// closing one and a prefab read again still find them. The world loads meanwhile
     /// (<see cref="IsLoading"/>), held out of sight from this call as one that replaced it is while it is readied
     /// (<see cref="IPreloader.ReadyAsync"/>), so nothing that runs it runs, its scripts put back included; no loading
     /// domain is shown, as what is put back is there already. Each domain's folder is read on workers after, as when it
@@ -188,7 +196,7 @@ public sealed class World : IDisposable
             return;
         }
 
-        _domains.CloseAll();
+        _domains.Clear();
 
         // Every saved entity is made empty first, so a component or a script read below that refers to another finds
         // it made, whichever comes first.
@@ -239,7 +247,8 @@ public sealed class World : IDisposable
 
     /// <summary>
     /// Puts <paramref name="asset"/> in the world at <paramref name="at"/>, as it says
-    /// (<see cref="ISpawnable.Spawn"/>), and hands back the entities made: the caller's to destroy.
+    /// (<see cref="ISpawnable.Spawn"/>), and hands back the entities made: the caller's to destroy, until the world
+    /// empties for a domain that replaces it.
     /// </summary>
     public Entity[] Spawn(ISpawnable asset, Transform at) => asset.Spawn(this, at);
 
@@ -280,6 +289,50 @@ public sealed class World : IDisposable
     public ReadOnlySpan<Entity> Create<T1, T2>(ReadOnlySpan<T1> first, ReadOnlySpan<T2> second)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent => GetEcs().Create(first, second);
+
+    /// <summary>
+    /// Makes an entity of <paramref name="components"/> that is the world's own rather than a domain's, a global:
+    /// tagged <see cref="Tag.Global"/> beside the tags they give it, it outlives every domain that replaces the world,
+    /// and only its maker, or a saved world put back in its place (<see cref="Restore"/>), destroys it. Throws when its
+    /// tags have no room for the tag.
+    /// </summary>
+    public Entity CreateGlobal(ReadOnlySpan<IComponent> components)
+    {
+        Tags tags = default;
+        foreach (IComponent component in components)
+        {
+            if (component is Tags given) tags = given;
+        }
+
+        if (!tags.Has(Tag.Global) && !tags.Add(Tag.Global))
+        {
+            throw new ArgumentException(
+                $"The entity's tags have no room to tag it global: an entity has at most {Tags.Capacity}.",
+                nameof(components));
+        }
+
+        Entity entity = GetEcs().Create(components);
+        GetEcs().Set(entity, in tags);
+
+        return entity;
+    }
+
+    /// <summary>
+    /// The world's globals (<see cref="CreateGlobal"/>): every entity tagged <see cref="Tag.Global"/>.
+    /// </summary>
+    public IReadOnlyList<Entity> GetGlobals()
+    {
+        List<Entity> globals = [];
+        foreach ((ReadOnlySpan<Entity> entities, Span<Tags> tags) in GetEcs().Query<Tags>())
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                if (tags[i].Has(Tag.Global)) globals.Add(entities[i]);
+            }
+        }
+
+        return globals;
+    }
 
     /// <inheritdoc cref="IEcs.Destroy"/>
     public void Destroy(Entity entity) => GetEcs().Destroy(entity);

@@ -10,11 +10,23 @@ namespace Magic.Interfaces;
 /// domain is about to spawn, before spawning any of them, and spawns once every such gem has taken them in; a domain
 /// that replaces the world is then readied by each, spawned and out of sight, and shown once every one has, as is a
 /// saved world put back. So a domain is there whole in its first frame: nothing dissolves in, stands still or starts
-/// late. A gem is one by implementing it; like <see cref="ILogSink"/>, it is not provided to other gems, so any number
-/// of gems can be one.
+/// late. Each time a new world takes the old one's place, every such gem first forgets the old one, so nothing of it
+/// carries over. A gem is one by implementing it; like <see cref="ILogSink"/>, it is not provided to other gems, so
+/// any number of gems can be one.
 /// </summary>
 public interface IPreloader
 {
+    /// <summary>
+    /// Forgets what this gem built up from the world, as a new one takes its place: whatever it worked out over frames
+    /// from what was there, which the new world would otherwise start from, and whatever it holds for the old world
+    /// alone. Called on the main thread once the old world's entities are destroyed, all but its globals, and before
+    /// anything of the new one spawns: as a domain begins to replace the world, before the loading domain shows; as it
+    /// arrives, once the loading domain has closed; and as a saved world is put back. The task ends once it has, on any
+    /// thread; the new world is taken in (<see cref="PreloadAsync"/>), and shown, only once every gem's has. A gem with
+    /// nothing to forget leaves it as it is.
+    /// </summary>
+    Task ForgetAsync(CancellationToken cancel) => Task.CompletedTask;
+
     /// <summary>
     /// Takes in everything <paramref name="prefabs"/> name that this gem needs before it can draw or simulate them.
     /// The task ends once all of it is in, or cannot be (what does not load is drawn as the failure), telling

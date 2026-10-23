@@ -122,6 +122,21 @@ internal sealed class Views(
     }
 
     /// <summary>
+    /// Lets every view go, as a new world takes the old one's place, so each camera starts afresh at
+    /// <see cref="Prepare"/>, as a new one does: its history empty, its exposure not yet metered and no last frame to
+    /// take velocity from.
+    /// </summary>
+    internal void Forget()
+    {
+        foreach (View view in _views.Values)
+        {
+            view.Dispose();
+        }
+
+        _views.Clear();
+    }
+
+    /// <summary>
     /// The window's image, which a camera draws into its section of; none without a window.
     /// </summary>
     internal GpuTexture GetWindow() => resources.GetWindowTarget(window);

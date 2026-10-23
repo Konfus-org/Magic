@@ -149,7 +149,7 @@ internal sealed class Shadows(GpuResources resources)
     /// Places the clipmap about <paramref name="camera"/> for <paramref name="light"/>, the way the key light's light
     /// travels, swaps the lights' tables, and makes the pool and the tables again when the settings size them
     /// otherwise; <paramref name="changedLightWords"/> is how many words the bitmask of the world's lights that changed
-    /// has.
+    /// has. Every page of the clipmap is drawn again when the frame <paramref name="forgets"/> the world before it.
     /// </summary>
     internal void Plan(
         Vector3 camera,
@@ -157,6 +157,7 @@ internal sealed class Shadows(GpuResources resources)
         int changedLightWords,
         int moved,
         ulong frame,
+        bool forgets,
         ClusterRenderingSettings settings)
     {
         int poolSize = GetPoolSize(settings);
@@ -189,7 +190,7 @@ internal sealed class Shadows(GpuResources resources)
             // Never 0, which every entry of a table just made holds, so nothing is wanted before it is marked.
             Frame = (uint)(frame % (uint.MaxValue - 1)) + 1,
             Direction = direction,
-            AllDirty = isMade || isMoved || isTurned ? 1u : 0u,
+            AllDirty = isMade || isMoved || isTurned || forgets ? 1u : 0u,
             CameraDepth = depth - _depthOrigin,
             DepthRange = depthRange,
             Finest = finest,

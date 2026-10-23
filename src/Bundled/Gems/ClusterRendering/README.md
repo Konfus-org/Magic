@@ -19,7 +19,7 @@ fog. Effects such as global illumination, reflections and tonemapping are passes
 - **Failures.** A model that fails to load, or a material that fails to load or compile, is drawn with a magenta
   failure material. A pass that fails draws magenta, and a banner across the view says why.
 - **Loading.** Nothing is drawn until it can be drawn properly, and what had to wait fades in. A domain appears whole in
-  its first frame.
+  its first frame. A domain that replaces the world starts with none of the old world's light, shadows or history.
 
 Its settings, such as the render scale and shadow quality, are on `ClusterRenderingSettings` and show in the settings
 window (F4). By default each view is drawn smaller than its target and upscaled. Textures are compressed to BC7 the

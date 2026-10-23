@@ -125,7 +125,8 @@ project's own folder is read first and never written; a `Release` build bakes on
 A component is an unmanaged struct that implements `IComponent`. Declare one in a gem or the project's code, and files
 name it by its type name. The samples' `Assets/Components/` has examples. `Transform` holds an entity's position, in
 metres. A `tags` list on an entity gives it a `Tags` component; the engine uses `spawn` for where a domain puts the
-player, and `player` for the player's camera.
+player, `player` for the player's camera, and `global` for an entity no domain owns
+([The world](#the-world)).
 
 ## Scripts
 
@@ -152,6 +153,11 @@ A domain is a folder with a `.domain` file and the prefabs it spawns
 place of the open ones shows the project's loading domain until it is ready, then puts the player at the entity tagged
 `spawn`. Closing a domain destroys what it spawned. A gem that prepares what spawns, such as uploading models,
 implements `IPreloader`.
+
+Opening a domain in place of the open ones empties the world. Every entity no open domain spawned is destroyed,
+including what scripts made. Then each `IPreloader` forgets what it built up from the old world, such as cached
+lighting, before the new domain loads. A global outlives this: make one with `World.CreateGlobal`, and list them with
+`World.GetGlobals`. Restoring a saved world destroys the globals too.
 
 ## The GPU
 
