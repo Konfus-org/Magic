@@ -251,7 +251,7 @@ internal sealed class GemLoader : IDisposable
         if (GemAssembly.LoadCode(_files, path, what, again: false) is not { } assembly) return;
 
         CodeFile code = new(path, what);
-        code.Keep(_assemblies.Register(path, assembly));
+        code.SwapRegistration(_assemblies.Register(path, assembly));
         _code.Add(code);
     }
 
@@ -270,7 +270,7 @@ internal sealed class GemLoader : IDisposable
             return;
         }
 
-        code.Keep(_assemblies.Register(code.Path, assembly));
+        code.SwapRegistration(_assemblies.Register(code.Path, assembly));
         await _assets.RemakeAsync<Script>().ConfigureAwait(false);
         await _assets.RemakeAsync<Prefab>().ConfigureAwait(false);
     }
@@ -356,7 +356,7 @@ internal sealed class GemLoader : IDisposable
         /// <summary>
         /// Keeps <paramref name="registration"/>, of the code loaded again, and ends the one it takes the place of.
         /// </summary>
-        internal void Keep(Subscription registration)
+        internal void SwapRegistration(Subscription registration)
             => Interlocked.Exchange(ref _registration, registration).Dispose();
 
         /// <summary>

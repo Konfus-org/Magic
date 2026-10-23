@@ -52,7 +52,7 @@ internal sealed class Season(Services.Assets assets, IInput input, IDebugUI? deb
             material.Params["snowLine"] = SnowLine;
         }
 
-        if (debugUI is { Enabled: true }) debugUI.Text($"Snow line: {SnowLine:0} m (up and down arrows)");
+        if (debugUI is { IsEnabled: true }) debugUI.Text($"Snow line: {SnowLine:0} m (up and down arrows)");
     }
 
     private async Task LoadAsync()

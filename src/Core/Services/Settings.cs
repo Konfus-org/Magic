@@ -23,15 +23,15 @@ namespace Magic.Services;
 /// with settings declares a class for them (<see cref="ISettings"/>), and the object its constructor gets is made here,
 /// in layers, each winning over the one before: the class's initialisers, the default
 /// <see cref="Contexts.Assets.Preset"/> (<c>Presets/Default.preset</c>, the project's own settings), the preset applied
-/// over it, <c>--set</c>, then what is <see cref="Set{T}"/> while running, until another preset is applied. A setting
-/// is named by its key, <c>Gem.path</c>: the gem, as the project lists it, then where the setting sits in its settings,
-/// with dots between levels. <see cref="All"/> lists every setting as it is now, for a UI.
+/// over it, <c>--set</c>, then what is <see cref="TrySet{T}"/> while running, until another preset is applied. A
+/// setting is named by its key, <c>Gem.path</c>: the gem, as the project lists it, then where the setting sits in its
+/// settings, with dots between levels. <see cref="All"/> lists every setting as it is now, for a UI.
 /// <para>
 /// A change is checked at once, and copied into the objects the gems hold at the frame's sync point, after the main
 /// thread has waited for the render thread and before Sync, so a gem reads its settings on either engine thread and
 /// never sees one change halfway. A setting a gem reads only as it starts is marked
 /// <see cref="RequireRestartAttribute"/>: changed, the run ends and starts again at once with every setting as it is
-/// (<see cref="RestartArgs"/>). The default and the applied preset are applied again when their files change. Any
+/// (<see cref="GetRestartArgs"/>). The default and the applied preset are applied again when their files change. Any
 /// thread.
 /// </para>
 /// </summary>
@@ -100,8 +100,8 @@ public sealed class Settings : IDisposable
             applied = _default;
         }
 
-        JsonObject defaults = ReadNow(_default);
-        _layers = new Layers(defaults, applied == _default ? defaults : ReadNow(applied), []);
+        JsonObject defaults = ReadPresetNow(_default);
+        _layers = new Layers(defaults, applied == _default ? defaults : ReadPresetNow(applied), []);
         Preset = applied;
         Debugging.Info($"Preset {GetName(applied)}");
         _reloads = events.Watch<AssetReloaded<Preset>>(Reloaded);
@@ -121,8 +121,8 @@ public sealed class Settings : IDisposable
 
     /// <summary>
     /// Every setting as it is now, what was just set included, gem by gem in the order the gems were made and in a
-    /// fixed order within each: what a settings UI lists, each changed with <see cref="Set{T}"/> by its key. Complete
-    /// once every gem is made.
+    /// fixed order within each: what a settings UI lists, each changed with <see cref="TrySet{T}"/> by its key.
+    /// Complete once every gem is made.
     /// </summary>
     public IReadOnlyList<Setting> All
     {
@@ -148,7 +148,7 @@ public sealed class Settings : IDisposable
     /// once, though its gem sees it only at the next sync point. Why not, when no gem with settings has it, or it is no
     /// <typeparamref name="T"/>.
     /// </summary>
-    public Result<T> Get<T>(string key)
+    public Result<T> TryGet<T>(string key)
     {
         if (!IsKey(key)) return Result.Failure<T>(FormatNotKey(key));
 
@@ -183,11 +183,11 @@ public sealed class Settings : IDisposable
 
     /// <summary>
     /// Changes the setting at <paramref name="key"/> to <paramref name="value"/> until another preset is applied,
-    /// <c>Set("SdlPlatform.vsync", false)</c>; its gem sees it at the next sync point. The value is anything the
+    /// <c>TrySet("SdlPlatform.vsync", false)</c>; its gem sees it at the next sync point. The value is anything the
     /// setting reads as JSON, a <see cref="JsonNode"/> included. Why not, when no gem with settings has it or the value
     /// does not fit it; then nothing changes.
     /// </summary>
-    public Result Set<T>(string key, T value)
+    public Result TrySet<T>(string key, T value)
     {
         if (!IsKey(key)) return Result.Failure(FormatNotKey(key));
 
@@ -214,15 +214,15 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
-    /// <see cref="Set{T}"/> from one <c>Gem.setting=value</c> line, as <c>--set</c> and a console take it: the value is
-    /// JSON when it parses as JSON (<c>1920</c>, <c>true</c>, <c>"1"</c>), and a string when it does not. Why not, when
-    /// the line is not one, or as <see cref="Set{T}"/> says.
+    /// <see cref="TrySet{T}"/> from one <c>Gem.setting=value</c> line, as <c>--set</c> and a console take it: the value
+    /// is JSON when it parses as JSON (<c>1920</c>, <c>true</c>, <c>"1"</c>), and a string when it does not. Why not,
+    /// when the line is not one, or as <see cref="TrySet{T}"/> says.
     /// </summary>
-    public Result Set(string line)
+    public Result TrySet(string line)
     {
         Result<(string Key, JsonNode? Value)> parsed = Parse(line);
 
-        return parsed.Ok ? Set(parsed.Value.Key, parsed.Value.Value) : Result.Failure(parsed.Error);
+        return parsed.Ok ? TrySet(parsed.Value.Key, parsed.Value.Value) : Result.Failure(parsed.Error);
     }
 
     /// <summary>
@@ -341,7 +341,7 @@ public sealed class Settings : IDisposable
     /// The command line that runs the engine again with every setting as it is now: the one this run was given, with
     /// the preset applied, and what was set while running as <c>--set</c> lines after its own, so each still wins.
     /// </summary>
-    internal Args RestartArgs()
+    internal Args GetRestartArgs()
     {
         lock (_lock)
         {
@@ -644,7 +644,7 @@ public sealed class Settings : IDisposable
         "VSTHRD002:Avoid problematic synchronous waits",
         Justification = "The gems are made from the presets, so the run waits for them once, before any gem is made; "
             + "they are read on a worker and need neither engine thread, so the wait cannot deadlock.")]
-    private JsonObject ReadNow(Handle<Preset> preset)
+    private JsonObject ReadPresetNow(Handle<Preset> preset)
     {
         // A missing default has been logged already.
         if (preset == Handle<Preset>.None) return [];

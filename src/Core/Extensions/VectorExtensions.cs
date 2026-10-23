@@ -25,7 +25,7 @@ public static class VectorExtensions
             // The pixel as a direction from the camera at a depth of 1: its place across the area the camera draws
             // into, -1 to 1 each way with +Y up, times the tangent of half the field of view along each axis.
             Rectangle area = camera.Target.IsWindow
-                ? camera.Target.Section.AreaIn(size)
+                ? camera.Target.Section.GetAreaIn(size)
                 : new Rectangle(Point.Empty, size);
             float tanY = MathF.Tan(camera.FieldOfView * (MathF.PI / 360));
             float tanX = tanY * area.Width / area.Height;

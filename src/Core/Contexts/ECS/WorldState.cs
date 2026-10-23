@@ -52,7 +52,7 @@ public sealed record DomainState(
 public sealed record EntityState(int Id, IReadOnlyList<ComponentState> Components, IReadOnlyList<ScriptState> Scripts);
 
 /// <summary>
-/// A component on an entity of the saved world: which, by its type's name (<see cref="Assemblies.Get{T}"/>), and its
+/// A component on an entity of the saved world: which, by its type's name (<see cref="Assemblies.TryGet{T}"/>), and its
 /// fields as JSON.
 /// </summary>
 public sealed record ComponentState(string Type, JsonElement Values);

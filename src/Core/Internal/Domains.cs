@@ -338,7 +338,7 @@ internal sealed class Domains : IDisposable
         {
             foreach (PlacedPrefab placed in open.Prefabs.Values)
             {
-                if (placed.Placement.IsCell == cells && placed.Prefab?.PlaceOf(Tag.Spawn) is { } spawn)
+                if (placed.Placement.IsCell == cells && placed.Prefab?.FindWith(Tag.Spawn) is { } spawn)
                 {
                     Transform at = spawn.Under(new Transform { Position = placed.Placement.Corner });
 

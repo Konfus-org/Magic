@@ -126,7 +126,7 @@ internal sealed class GpuMaterials
         _stopping = stopping;
         _getTextureRef = GetTextureRef;
         _materials = new(assets, "A material does not load, so it is drawn as the failure", Task.FromResult, stopping);
-        _defaultMaterial = assets.Default<Material>();
+        _defaultMaterial = assets.GetDefault<Material>();
         Record(_defaultMaterial);
         foreach (Handle<Material> failure in failures.Materials)
         {

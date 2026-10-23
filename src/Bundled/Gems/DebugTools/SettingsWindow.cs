@@ -24,7 +24,7 @@ namespace Magic.DebugTools;
 /// away, and under it a row per setting (<see cref="Settings.All"/>): labelled in words, its key and description shown
 /// while the mouse rests on it, a number kept to its <see cref="RangeAttribute"/>. A setting marked
 /// <see cref="RequireRestartAttribute"/> says on its row that a change starts the engine again. An edit is set through
-/// <see cref="Settings.Set{T}"/>, live until the next preset; nothing is saved. Copy gives the open tab, or what the
+/// <see cref="Settings.TrySet{T}"/>, live until the next preset; nothing is saved. Copy gives the open tab, or what the
 /// filter finds, as <c>Gem.setting=value</c> lines, the form <c>--set</c> takes. Its commands: <c>get Gem</c>,
 /// <c>set Gem.setting=value</c> and <c>preset [Name]</c>.
 /// </summary>
@@ -403,7 +403,7 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void Change(Setting setting, object? value)
     {
-        Result set = _settings.Set(setting.Key, value);
+        Result set = _settings.TrySet(setting.Key, value);
         if (!set.Ok) Debugging.Warn(set.Error);
     }
 
@@ -413,7 +413,7 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private bool TrySetLine(string line)
     {
-        Result set = _settings.Set(line);
+        Result set = _settings.TrySet(line);
         if (!set.Ok) Debugging.Warn(set.Error);
 
         return set.Ok;

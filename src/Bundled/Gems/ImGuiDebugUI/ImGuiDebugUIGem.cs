@@ -201,7 +201,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         LoadFontAsync().FireAndForget();
     }
 
-    public bool Enabled => _isShowing;
+    public bool IsEnabled => _isShowing;
 
     /// <summary>
     /// What ImGui drew last frame, copied in <see cref="Sync"/>, which the gem's overlay script draws from on the
@@ -890,7 +890,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private async Task LoadFontAsync()
     {
-        Handle<Font> handle = _settings.Font == Handle<Font>.None ? _assets.Default<Font>() : _settings.Font;
+        Handle<Font> handle = _settings.Font == Handle<Font>.None ? _assets.GetDefault<Font>() : _settings.Font;
         Result<Font> font = await _assets.LoadAsync(handle, _stopping).ConfigureAwait(false);
         if (!font.Ok)
         {

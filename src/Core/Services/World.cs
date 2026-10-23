@@ -508,7 +508,7 @@ public sealed class World : IDisposable
 
         Debugging.Error($"The entry point does not open, so the default domain does. {opened.Error}");
         Result<Domain> fallback = await OpenAsync(
-            _assets.Default<Domain>(),
+            _assets.GetDefault<Domain>(),
             DomainOpenMode.Replace,
             null,
             _app.Quitting).ConfigureAwait(false);
@@ -599,13 +599,13 @@ public sealed class World : IDisposable
     }
 
     /// <summary>
-    /// A saved component read back as the type its name names (<see cref="Assemblies.Get{T}"/>); null, and an error
+    /// A saved component read back as the type its name names (<see cref="Assemblies.TryGet{T}"/>); null, and an error
     /// logged once per name in <paramref name="failed"/>, when no code loaded declares it or its values no longer fit
     /// it.
     /// </summary>
     private IComponent? ReadComponent(ComponentState saved, HashSet<string> failed)
     {
-        Result<Type> type = _assemblies.Get<IComponent>(saved.Type);
+        Result<Type> type = _assemblies.TryGet<IComponent>(saved.Type);
         Result<object> read = type.Ok ? Json.Read(saved.Values, type.Value) : Result.Failure<object>(type.Error);
 
         if (read.Ok) return (IComponent)read.Value;

@@ -112,7 +112,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         _askedHeight = settings.Height;
         _assets = assets;
         _title = app.Project.Name;
-        _icon = assets.Default<Icon>();
+        _icon = assets.GetDefault<Icon>();
 
         // Ctrl+C is Core's to handle (--headless); left alone, SDL would turn it into a quit event.
         fixed (byte* on = "1"u8)

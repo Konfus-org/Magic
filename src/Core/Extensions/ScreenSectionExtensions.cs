@@ -17,7 +17,7 @@ public static class ScreenSectionExtensions
         /// The section's rectangle of a window of <paramref name="size"/>, in pixels: halves and quarters split at the
         /// middle, the odd pixel going right and down.
         /// </summary>
-        public Rectangle AreaIn(Size size)
+        public Rectangle GetAreaIn(Size size)
         {
             int halfWidth = size.Width / 2;
             int halfHeight = size.Height / 2;

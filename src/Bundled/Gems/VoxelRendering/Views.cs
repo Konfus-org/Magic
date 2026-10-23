@@ -137,7 +137,7 @@ internal sealed class Views(IGpuDriver gpu, IWindow? window, VoxelRenderingSetti
         GpuTexture image = GetWindow();
         Size size = image == GpuTexture.None ? Size.Empty : gpu.GetSize(image);
 
-        return size.IsEmpty ? null : new ViewTarget(image, target.Section.AreaIn(size), gpu.GetFormat(image), true);
+        return size.IsEmpty ? null : new ViewTarget(image, target.Section.GetAreaIn(size), gpu.GetFormat(image), true);
     }
 }
 

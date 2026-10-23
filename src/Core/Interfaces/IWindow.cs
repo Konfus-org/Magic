@@ -13,7 +13,7 @@ public interface IWindow
     string Title { get; set; }
 
     /// <summary>
-    /// What the window shows in its title bar and task bar: the default icon (<see cref="Assets.Default{T}"/>) until
+    /// What the window shows in its title bar and task bar: the default icon (<see cref="Assets.GetDefault{T}"/>) until
     /// it is set. A new one shows once it has loaded.
     /// </summary>
     Handle<Icon> Icon { get; set; }

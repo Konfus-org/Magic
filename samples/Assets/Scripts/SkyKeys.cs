@@ -58,7 +58,7 @@ internal sealed class SkyKeys(World world, IInput input, Services.Assets assets,
         sky.Params["haze"] = Haze;
         sky.Params["cloudHeight"] = CloudHeight;
 
-        if (debugUI is not { Enabled: true }) return;
+        if (debugUI is not { IsEnabled: true }) return;
 
         debugUI.Text($"Haze {Haze:0.0} (left and right), clouds at {CloudHeight:0} m (page up and down)");
     }

@@ -24,6 +24,6 @@ internal sealed class Pause(Entity owner, World world, IInput input, IDebugUI? d
         ref Sound sound = ref world.Get<Sound>(owner);
         sound.Playback = world.IsPaused ? Playback.Playing : Playback.Paused;
 
-        if (world.IsPaused && debugUI is { Enabled: true }) debugUI.Text("Paused (P goes on)");
+        if (world.IsPaused && debugUI is { IsEnabled: true }) debugUI.Text("Paused (P goes on)");
     }
 }

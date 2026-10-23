@@ -1,8 +1,8 @@
 namespace Magic.Contexts.Assets;
 
 /// <summary>
-/// What broke, which picks the asset drawn in a broken one's place (<see cref="Services.Assets.Failure{T}"/>): magenta
-/// is a shader, red an asset that did not load. Its name is the file's: <c>Materials/Failures/Texture.mat</c>.
+/// What broke, which picks the asset drawn in a broken one's place (<see cref="Services.Assets.GetFailure{T}"/>):
+/// magenta is a shader, red an asset that did not load. Its name is the file's: <c>Materials/Failures/Texture.mat</c>.
 /// </summary>
 public enum FailureType : byte
 {

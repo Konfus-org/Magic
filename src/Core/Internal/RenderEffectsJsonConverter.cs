@@ -12,8 +12,9 @@ namespace Magic.Internal;
 /// <summary>
 /// A <see cref="RenderEffects{T}"/> as JSON: an array of its effects in order, each an object of its fields with its
 /// type's name first, <c>[ { "type": "Tonemap", "shader": { "id": 7102 }, "bias": 0 } ]</c>, the type found in the code
-/// loaded (<see cref="Assemblies.Get{T}"/>). A type it does not know, one listed twice, or more than it has room for,
-/// fails the read. The serializer has no form for an inline array: it writes one as <c>{}</c> and cannot read it back.
+/// loaded (<see cref="Assemblies.TryGet{T}"/>). A type it does not know, one listed twice, or more than it has room
+/// for, fails the read. The serializer has no form for an inline array: it writes one as <c>{}</c> and cannot read it
+/// back.
 /// </summary>
 [SuppressMessage(
     "Performance",
@@ -110,7 +111,7 @@ internal sealed class RenderEffectsJsonConverter : JsonConverterFactory
             if (Json.Assemblies is not { } assemblies)
                 throw new JsonException($"{name} cannot be found, as no code is loaded to find it in.");
 
-            Result<Type> type = assemblies.Get<T>(name);
+            Result<Type> type = assemblies.TryGet<T>(name);
 
             if (!type.Ok) throw new JsonException(type.Error);
 

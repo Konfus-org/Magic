@@ -2,7 +2,7 @@ namespace Magic.Contexts.Settings;
 
 /// <summary>
 /// One gem setting as it is now, as <see cref="Services.Settings.All"/> lists them for a settings UI: what to call it,
-/// what it is, and the value to show. It is changed with <see cref="Services.Settings.Set{T}"/> by its
+/// what it is, and the value to show. It is changed with <see cref="Services.Settings.TrySet{T}"/> by its
 /// <see cref="Key"/>.
 /// </summary>
 /// <param name="Name">The setting's name in its gem's settings, as a preset writes it: <c>renderScale</c>.</param>
@@ -26,8 +26,8 @@ public sealed record Setting(
     IReadOnlyList<Attribute> Attributes)
 {
     /// <summary>
-    /// The key that names it, <c>Owner.name</c>: what <see cref="Services.Settings.Get{T}"/>,
-    /// <see cref="Services.Settings.Set{T}"/>, <c>--set</c> and a preset take.
+    /// The key that names it, <c>Owner.name</c>: what <see cref="Services.Settings.TryGet{T}"/>,
+    /// <see cref="Services.Settings.TrySet{T}"/>, <c>--set</c> and a preset take.
     /// </summary>
     public string Key => $"{Owner}.{Name}";
 }

@@ -29,7 +29,7 @@ public interface IDebugUI
     /// <summary>
     /// Whether what is reported shows now: skip building text while it is false. Logging never depends on it.
     /// </summary>
-    bool Enabled { get; }
+    bool IsEnabled { get; }
 
     /// <summary>
     /// <paramref name="text"/> at <paramref name="position"/> in the world, in the next frame drawn: call it every

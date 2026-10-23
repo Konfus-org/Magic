@@ -79,6 +79,6 @@ internal sealed class Looks(World world, IInput input, IDebugUI? debugUI = null)
             }
         }
 
-        if (debugUI is { Enabled: true }) debugUI.Text($"Look: {to.Name} (L for the next)");
+        if (debugUI is { IsEnabled: true }) debugUI.Text($"Look: {to.Name} (L for the next)");
     }
 }

@@ -130,7 +130,7 @@ public static class Debugging
         string message,
         [CallerMemberName] string member = "",
         [CallerFilePath] string file = "",
-        [CallerLineNumber] int line = 0) => Crash(Stamp(LogLevel.Critical, message, member, file, line));
+        [CallerLineNumber] int line = 0) => Crash(CreateLine(LogLevel.Critical, message, member, file, line));
 
     /// <summary>
     /// State that cannot be: when <paramref name="condition"/> is false, the run is <see cref="Critical"/>, with the
@@ -144,7 +144,7 @@ public static class Debugging
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0)
     {
-        if (!condition) Crash(Stamp(LogLevel.Critical, FormatFailed(expression, message), member, file, line));
+        if (!condition) Crash(CreateLine(LogLevel.Critical, FormatFailed(expression, message), member, file, line));
     }
 
     /// <summary>
@@ -210,11 +210,11 @@ public static class Debugging
         }
     }
 
-    private static LogLine Stamp(LogLevel level, string message, string member, string file, int line)
+    private static LogLine CreateLine(LogLevel level, string message, string member, string file, int line)
         => new(DateTime.Now, level, message, Frame, Environment.CurrentManagedThreadId, file, line, member);
 
     private static void Write(LogLevel level, string message, string member, string file, int line)
-        => _entries.Writer.TryWrite(new Entry(Stamp(level, message, member, file, line), null));
+        => _entries.Writer.TryWrite(new Entry(CreateLine(level, message, member, file, line), null));
 
     private static string FormatFailed(string expression, string message)
         => message.Length == 0 ? $"Assert failed: {expression}" : $"Assert failed: {expression}: {message}";

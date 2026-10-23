@@ -84,10 +84,10 @@ internal sealed class FailureHandler
     {
         _assets = assets;
         _debug = debug;
-        Model = assets.Failure<Model>(FailureType.Mesh);
+        Model = assets.GetFailure<Model>(FailureType.Mesh);
         foreach (FailureType type in Enum.GetValues<FailureType>())
         {
-            _materials[type] = assets.Failure<Material>(type);
+            _materials[type] = assets.GetFailure<Material>(type);
         }
     }
 
@@ -204,7 +204,7 @@ internal sealed class FailureHandler
     /// </summary>
     internal void Label(Instances instances)
     {
-        if (_debug is not { Enabled: true } shown) return;
+        if (_debug is not { IsEnabled: true } shown) return;
 
         foreach ((int slot, (string why, string what)) in _marked)
         {

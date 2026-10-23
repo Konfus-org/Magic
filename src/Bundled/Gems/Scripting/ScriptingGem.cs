@@ -529,7 +529,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// </summary>
     private Result<Script> TryGetClass(string path, Handle<Script> handle)
     {
-        Result<Type> type = _assemblies.Get<IScript>(Path.GetFileNameWithoutExtension(path));
+        Result<Type> type = _assemblies.TryGet<IScript>(Path.GetFileNameWithoutExtension(path));
 
         return type.Ok
             ? Result.Success(new Script { Handle = handle, Type = type.Value })

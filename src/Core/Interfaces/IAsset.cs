@@ -15,7 +15,7 @@ public interface IAsset<TSelf>
 {
     /// <summary>
     /// The file extensions of the type, matched ignoring case against the end of a file's name, so <c>.hlsl</c> is a
-    /// <c>.surf.hlsl</c>'s too: what its files are found by. Its default (<see cref="Assets.Default{T}"/>) is
+    /// <c>.surf.hlsl</c>'s too: what its files are found by. Its default (<see cref="Assets.GetDefault{T}"/>) is
     /// <c>Default</c> and one of them exactly, tried in order, so the default shader, <c>Default.surf.hlsl</c>, is
     /// found because <c>.surf.hlsl</c> is listed.
     /// </summary>

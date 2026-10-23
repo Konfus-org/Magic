@@ -42,7 +42,7 @@ internal sealed class Portal(Entity owner, World world, IDebugUI? debugUI = null
     public void Update(in Frame frame)
     {
         Vector3 at = world.Get<Transform>(owner).Position;
-        if (debugUI is { Enabled: true } && Label.Length > 0) debugUI.Text(at + (Vector3.UnitY * LabelHeight), Label);
+        if (debugUI is { IsEnabled: true } && Label.Length > 0) debugUI.Text(at + (Vector3.UnitY * LabelHeight), Label);
 
         if (_isOpening || world.IsLoading || !PlayerCamera.TryGetPosition(world, out Vector3 player)) return;
         if (Vector3.DistanceSquared(player, at) > Radius * Radius) return;

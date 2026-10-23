@@ -35,7 +35,7 @@ internal sealed class Label(Entity owner, World world, IDebugUI? debugUI = null)
 
     public void Update(in Frame frame)
     {
-        if (debugUI is not { Enabled: true } || Text.Length == 0) return;
+        if (debugUI is not { IsEnabled: true } || Text.Length == 0) return;
 
         if (!IsOnScreen)
         {

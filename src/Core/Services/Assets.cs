@@ -83,12 +83,12 @@ public sealed class Assets : IDisposable
     /// <summary>
     /// The default and failure assets found missing, by path, each said once.
     /// </summary>
-    private readonly ConcurrentDictionary<string, bool> _missingNamed = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, bool> _reportedMissing = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The asset being made on the flow that runs now, which whatever it loads is recorded against; 0 for none.
     /// </summary>
-    private readonly AsyncLocal<ulong> _maker = new();
+    private readonly AsyncLocal<ulong> _assetBeingCreated = new();
 
     /// <summary>
     /// What each asset loaded as it was made last, or has loaded so far as it is made now: what it is made from.
@@ -175,16 +175,16 @@ public sealed class Assets : IDisposable
     /// any other, found by its path, never the default. Every asset type has one. None, and an error logged once, when
     /// it is missing.
     /// </summary>
-    public Handle<T> Default<T>()
+    public Handle<T> GetDefault<T>()
         where T : IAsset<T> => Get<T>(typeof(T).Name + "s", DefaultName, "default");
 
     /// <summary>
     /// What is drawn in a broken <typeparamref name="T"/>'s place when <paramref name="type"/> broke: the asset named
     /// for the type of failure in the type's <c>Failures</c> folder, <c>Materials/Failures/Texture.mat</c>, in the
-    /// engine's own <c>Resources/</c> alone, as a default is (<see cref="Default{T}"/>). Only the types a renderer
+    /// engine's own <c>Resources/</c> alone, as a default is (<see cref="GetDefault{T}"/>). Only the types a renderer
     /// draws a failure as have one. None, and an error logged once, when it is missing.
     /// </summary>
-    public Handle<T> Failure<T>(FailureType type)
+    public Handle<T> GetFailure<T>(FailureType type)
         where T : IAsset<T> => Get<T>($"{typeof(T).Name}s/{FailuresFolder}", type.ToString(), $"{type} failure");
 
     /// <summary>
@@ -247,7 +247,7 @@ public sealed class Assets : IDisposable
         if (asset == Handle<T>.None)
             return new(Result.Failure<T>($"No {typeof(T).Name} was asked for: the handle is none."));
 
-        ulong maker = _maker.Value;
+        ulong maker = _assetBeingCreated.Value;
         lock (_lock)
         {
             // Loaded as another asset is made, it is recorded as what that one is made from, and refused when it is
@@ -608,7 +608,7 @@ public sealed class Assets : IDisposable
             }
         }
 
-        if (_missingNamed.TryAdd($"{folder}/{name}", true))
+        if (_reportedMissing.TryAdd($"{folder}/{name}", true))
         {
             Debugging.Error($"There is no {what} {typeof(T).Name}: no asset is {folder}/{name} or "
                 + $"{folder}/{name}/{name} with a {typeof(T).Name}'s extension "
@@ -809,7 +809,7 @@ public sealed class Assets : IDisposable
         }
 
         // Whatever loads on this flow from here, as it is read, is recorded as what it is made from.
-        _maker.Value = id;
+        _assetBeingCreated.Value = id;
         Result<T> made = await ReadAsync<T>(id).ConfigureAwait(false);
         bool isReload;
         T? kept = default;

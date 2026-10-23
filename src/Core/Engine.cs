@@ -61,24 +61,24 @@ public sealed class Engine
     /// <summary>
     /// The gems, in the order they were made.
     /// </summary>
-    private readonly Hooked[] _gems;
+    private readonly LoopGem[] _gems;
 
     /// <summary>
     /// For each phase, the gems that implement its hook, in the order the phase runs them.
     /// </summary>
-    private readonly Hooked[][] _hooked;
+    private readonly LoopGem[][] _gemsByPhase;
 
     /// <summary>
     /// The gems that implement Stop, in reverse order: every one of them, a gem that left the loop included, since
     /// what it owns of the main thread's still ends.
     /// </summary>
-    private readonly Hooked[] _stops;
+    private readonly LoopGem[] _stops;
 
     /// <summary>
     /// The gems that implement Idle, in the order they were made: the main thread idles them in this order, the render
     /// thread in reverse.
     /// </summary>
-    private readonly Hooked[] _idles;
+    private readonly LoopGem[] _idles;
 
     private readonly World _world;
     private readonly App _app;
@@ -132,21 +132,21 @@ public sealed class Engine
         Clocks clocks,
         ManualResetEventSlim rendered)
     {
-        _gems = new Hooked[gems.Count];
+        _gems = new LoopGem[gems.Count];
         for (int i = 0; i < gems.Count; i++)
         {
             Type type = gems[i].Gem.GetType();
-            _gems[i] = new Hooked(gems[i].Gem, type.Assembly.GetName().Name ?? type.Name, gems[i].Registrations);
+            _gems[i] = new LoopGem(gems[i].Gem, type.Assembly.GetName().Name ?? type.Name, gems[i].Registrations);
         }
 
-        _hooked = new Hooked[_phases.Length][];
+        _gemsByPhase = new LoopGem[_phases.Length][];
         for (int phase = 0; phase < _phases.Length; phase++)
         {
-            _hooked[phase] = GetHooked(_gems, _phases[phase], isReversed: phase == (int)Phase.Render);
+            _gemsByPhase[phase] = GetGemsImplementing(_gems, _phases[phase], isReversed: phase == (int)Phase.Render);
         }
 
-        _stops = GetHooked(_gems, nameof(IGem.Stop), isReversed: true);
-        _idles = GetHooked(_gems, nameof(IGem.Idle), isReversed: false);
+        _stops = GetGemsImplementing(_gems, nameof(IGem.Stop), isReversed: true);
+        _idles = GetGemsImplementing(_gems, nameof(IGem.Idle), isReversed: false);
         _world = world;
         _app = app;
         _threads = threads;
@@ -372,7 +372,7 @@ public sealed class Engine
     /// <summary>
     /// Calls <paramref name="gem"/>'s hook for <paramref name="phase"/>.
     /// </summary>
-    private static void Call(IGem gem, Phase phase, in Frame frame)
+    private static void CallHook(IGem gem, Phase phase, in Frame frame)
     {
         switch (phase)
         {
@@ -397,32 +397,32 @@ public sealed class Engine
     }
 
     /// <summary>
-    /// Those of <paramref name="gems"/> that implement the hook named <paramref name="name"/>, in the order the gems
+    /// Those of <paramref name="gems"/> that implement the hook named <paramref name="hook"/>, in the order the gems
     /// were made, or the reverse when <paramref name="isReversed"/>: Render and Stop, so a gem finishes what the gems
     /// that take it drew, and ends after them. A hook a gem leaves to <see cref="IGem"/>'s own does nothing, so it is
     /// never called, nor timed.
     /// </summary>
-    private static Hooked[] GetHooked(Hooked[] gems, string name, bool isReversed)
+    private static LoopGem[] GetGemsImplementing(LoopGem[] gems, string hook, bool isReversed)
     {
-        List<Hooked> hooked = [];
+        List<LoopGem> implementing = [];
         for (int turn = 0; turn < gems.Length; turn++)
         {
-            Hooked gem = gems[isReversed ? gems.Length - 1 - turn : turn];
+            LoopGem gem = gems[isReversed ? gems.Length - 1 - turn : turn];
 
             // Only the interface map tells a hook the gem's class has from IGem's own, a default method that does
             // nothing, which the class leaves to it.
             InterfaceMapping map = gem.Gem.GetType().GetInterfaceMap(typeof(IGem));
             for (int method = 0; method < map.InterfaceMethods.Length; method++)
             {
-                if (string.Equals(map.InterfaceMethods[method].Name, name, StringComparison.Ordinal)
+                if (string.Equals(map.InterfaceMethods[method].Name, hook, StringComparison.Ordinal)
                     && map.TargetMethods[method].DeclaringType != typeof(IGem))
                 {
-                    hooked.Add(gem);
+                    implementing.Add(gem);
                 }
             }
         }
 
-        return [.. hooked];
+        return [.. implementing];
     }
 
     /// <summary>
@@ -467,7 +467,7 @@ public sealed class Engine
             // scripts. The JSON is then written on a worker from what was taken, so it may outlast the gems. Quitting
             // is cancelled already, as the run is ending, so the save runs on no token.
             if (_app.IsRestarting)
-                _restart = (_settings.RestartArgs(), _world.SaveAsync(null, CancellationToken.None), _clocks);
+                _restart = (_settings.GetRestartArgs(), _world.SaveAsync(null, CancellationToken.None), _clocks);
 
             // Each gem ends what it owns of this thread's, the scripts among it, after the save took them and before
             // the gems are disposed on the render thread.
@@ -566,23 +566,23 @@ public sealed class Engine
         Justification = "Whatever a gem throws as it stops, it is logged and the rest still stop.")]
     private void StopGems()
     {
-        foreach (Hooked hooked in _stops)
+        foreach (LoopGem loopGem in _stops)
         {
             long start = _hookDuration.Start();
             try
             {
-                hooked.Gem.Stop();
+                loopGem.Gem.Stop();
             }
             catch (Exception ex)
             {
-                Debugging.Error($"Gem {hooked.Name} threw in Stop: {ex}");
+                Debugging.Error($"Gem {loopGem.Name} threw in Stop: {ex}");
 
                 continue;
             }
 
             _hookDuration.RecordSince(
                 start,
-                new(Metrics.GemNameTag, hooked.Name),
+                new(Metrics.GemNameTag, loopGem.Name),
                 new(Metrics.FramePhaseTag, nameof(IGem.Stop)));
         }
     }
@@ -742,19 +742,19 @@ public sealed class Engine
         Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the engine goes on.")]
     private void RunPhase(Phase phase, in Frame frame)
     {
-        foreach (Hooked hooked in _hooked[(int)phase])
+        foreach (LoopGem loopGem in _gemsByPhase[(int)phase])
         {
-            if (hooked.HasLeft) continue;
+            if (loopGem.HasLeft) continue;
 
             long start = _hookDuration.Start();
             try
             {
-                Call(hooked.Gem, phase, frame);
+                CallHook(loopGem.Gem, phase, frame);
             }
             catch (Exception ex)
             {
-                Debugging.Error($"Gem {hooked.Name} threw in {_phases[(int)phase]} and left the frame loop: {ex}");
-                hooked.HasLeft = true;
+                Debugging.Error($"Gem {loopGem.Name} threw in {_phases[(int)phase]} and left the frame loop: {ex}");
+                loopGem.HasLeft = true;
 
                 continue;
             }
@@ -762,7 +762,7 @@ public sealed class Engine
             // Outside the try: a listener that throws is its own failure, not this gem's.
             _hookDuration.RecordSince(
                 start,
-                new(Metrics.GemNameTag, hooked.Name),
+                new(Metrics.GemNameTag, loopGem.Name),
                 new(Metrics.FramePhaseTag, _phases[(int)phase]));
         }
     }
@@ -781,26 +781,26 @@ public sealed class Engine
         bool isReversed = thread == EngineThread.Render;
         for (int turn = 0; turn < _idles.Length; turn++)
         {
-            Hooked hooked = _idles[isReversed ? _idles.Length - 1 - turn : turn];
+            LoopGem loopGem = _idles[isReversed ? _idles.Length - 1 - turn : turn];
 
-            if (hooked.HasLeft) continue;
+            if (loopGem.HasLeft) continue;
 
             long start = _hookDuration.Start();
             try
             {
-                hooked.Gem.Idle(thread);
+                loopGem.Gem.Idle(thread);
             }
             catch (Exception ex)
             {
-                Debugging.Error($"Gem {hooked.Name} threw in Idle and left the frame loop: {ex}");
-                hooked.HasLeft = true;
+                Debugging.Error($"Gem {loopGem.Name} threw in Idle and left the frame loop: {ex}");
+                loopGem.HasLeft = true;
 
                 continue;
             }
 
             _hookDuration.RecordSince(
                 start,
-                new(Metrics.GemNameTag, hooked.Name),
+                new(Metrics.GemNameTag, loopGem.Name),
                 new(Metrics.FramePhaseTag, nameof(IGem.Idle)));
         }
     }
@@ -814,7 +814,7 @@ public sealed class Engine
     /// A gem in the frame loop, by the name the project lists it as, which its assembly is named for, what is
     /// registered for it, and whether it threw and left the loop for good: written and read on both threads.
     /// </summary>
-    private sealed class Hooked(IGem gem, string name, SubscriptionList registrations)
+    private sealed class LoopGem(IGem gem, string name, SubscriptionList registrations)
     {
         public IGem Gem { get; } = gem;
 

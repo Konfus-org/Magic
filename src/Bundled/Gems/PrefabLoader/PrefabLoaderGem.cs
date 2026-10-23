@@ -14,8 +14,8 @@ namespace Magic.PrefabLoader;
 /// <summary>
 /// Reads <c>.prefab</c> files into <see cref="Prefab"/>s (<see cref="IAssetLoader{T}"/>), what the engine spawns: each
 /// entity a <see cref="PrefabPart"/>, with its components read as their types by name
-/// (<see cref="Assemblies.Get{T}"/>), its scripts named by the id of their <see cref="Script"/> and their values read
-/// as its properties' types (<see cref="PrefabScript"/>), its tags as a <see cref="Tags"/> and its scripts as a
+/// (<see cref="Assemblies.TryGet{T}"/>), its scripts named by the id of their <see cref="Script"/> and their values
+/// read as its properties' types (<see cref="PrefabScript"/>), its tags as a <see cref="Tags"/> and its scripts as a
 /// <see cref="Scripts"/> among its components, and the entities under it, a prefab it places among them. What it loads
 /// as it reads one is what that one is made from, so it is read again when one of them changes.
 /// </summary>
@@ -162,7 +162,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         List<IComponent> components = [];
         foreach ((string component, JsonElement json) in entity.Components)
         {
-            Result<Type> type = _assemblies.Get<IComponent>(component);
+            Result<Type> type = _assemblies.TryGet<IComponent>(component);
             Result<object> read = type.Ok ? Json.Read(json, type.Value) : Result.Failure<object>(type.Error);
             if (!read.Ok)
             {

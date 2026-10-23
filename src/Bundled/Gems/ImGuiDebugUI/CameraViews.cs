@@ -71,7 +71,7 @@ internal sealed class CameraViews(IWindow window) : ISystem<Transform, Camera>
         {
             for (int i = 0; i < cameras.Length; i++)
             {
-                Rectangle area = cameras[i].Target.Section.AreaIn(size);
+                Rectangle area = cameras[i].Target.Section.GetAreaIn(size);
 
                 if (!cameras[i].Target.IsWindow || area.Width <= 0 || area.Height <= 0) continue;
 

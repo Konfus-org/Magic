@@ -703,7 +703,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
     private string SetSetting(string key, JsonElement value)
     {
-        Result set = _gemSettings.Set(key, value);
+        Result set = _gemSettings.TrySet(key, value);
         return set.Ok ? "set" : throw new McpException(set.Error);
     }
 
@@ -715,7 +715,7 @@ internal sealed class McpGem : IGem, ILogSink, IDisposable
 
     private Type FindComponentType(string name)
     {
-        Result<Type> type = _assemblies.Get<IComponent>(name);
+        Result<Type> type = _assemblies.TryGet<IComponent>(name);
         return type.Ok ? type.Value : throw new McpException($"{type.Error} component_types lists them.");
     }
 
