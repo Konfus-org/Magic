@@ -4,6 +4,7 @@ using System.IO;
 using System.Numerics;
 using System.Threading.Channels;
 using Magic.Contexts.Assets;
+using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Subscriptions;
@@ -28,7 +29,7 @@ namespace Magic.ClusterRendering;
 /// copy, one frame behind. What a domain draws is taken in before it spawns (<see cref="IPreloader"/>), so it is drawn
 /// whole in its first frame, and one that replaces the world is readied, drawn out of sight while the window keeps the
 /// loading domain's last image, until its light, its shadows and its exposure have settled, so it is shown as it should
-/// be from its first frame shown; each new world settles from none of the old one's (<see cref="ForgetAsync"/>).
+/// be from its first frame shown; each new world settles from none of the old one's (<see cref="WorldStream.IsEmptied"/>).
 /// While a debug view is named (<see cref="DebugViewChanged"/>), its pass (<c>Passes/Debug/Name.pass</c>) runs after
 /// the world's effects and what it draws is shown in place of the finished image, or the failure's magenta saying
 /// nothing draws while it is not ready; while the debug UI shows, each instance drawn as the failure says why where it
@@ -123,12 +124,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     /// </summary>
     private Handle<Curve> _fogFalloffAsked;
     private Curve? _fogFalloff;
-
-    /// <summary>
-    /// A new world took the old one's place since global illumination was last planned, so its next plan forgets the
-    /// old world's light (<see cref="GiVolume.Plan"/>). Render thread.
-    /// </summary>
-    private bool _isForgetting;
 
     public ClusterRenderingGem(
         IGpu gpu,
@@ -228,31 +223,30 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     public void Render(in Frame frame)
     {
         TakeChanges();
-        _preloader.Take();
         Renderables copy = _world.Front;
-        if (!copy.IsLoading)
+        _preloader.Take(copy.Stream);
+        if (!copy.IsLoading) _output.Forget();
+
+        // A new world took the old one's place in this copy: its light and the key light's shadows are made again from
+        // nothing.
+        if (copy.Stream.IsEmptied)
         {
-            _preloader.Show();
-            _output.Forget();
+            _gi.Clear();
+            _shadows.Forget();
         }
 
-        // A new world took the old one's place in this copy (ForgetAsync): this frame forgets the old one, which ends
-        // the forgetting now, its light once global illumination is next planned.
-        bool isForgetting = copy.Forgetting is not null;
-        copy.Forgetting?.TrySetResult();
-        _isForgetting |= isForgetting;
         CameraCopy? main = GetMainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
-        UpdateRows(copy, main, player, isForgetting, frame);
+        UpdateRows(copy, main, player, frame);
         (SurfaceKey skySurface, int skyRow) = _resources.GetSky(copy.Sky);
         UpdateGraph(copy, skySurface);
-        PlanGi(main, frame);
+        PlanGi(copy, main, frame);
         Curve? fogFalloff = GetFogFalloff(copy.Weather?.FogFalloff ?? Handle<Curve>.None);
-        Settle(copy, fogFalloff);
+        Answer(copy, fogFalloff);
 
         // In a new world every view starts afresh, let go after the resources let go of what nothing holds this frame,
         // so the render texture a camera draws into is held again before they next do.
-        if (isForgetting) _views.Forget();
+        if (copy.Stream.IsEmptied) _views.Forget();
 
         List<View> views = _views.Prepare(
             new ViewFrame(copy, frame, skyRow, MakeCounts(), player, HasJitter(), fogFalloff));
@@ -301,7 +295,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             RenderView(view, listing, skySurface, frame);
         }
 
-        if (_preloader.IsHolding) DrawKept(shown);
+        if (copy.IsHolding) DrawKept(shown);
         else if (copy.IsLoading && shown.Target.IsWindow) _output.Keep(GetFinished(shown));
 
         _resources.Frame.ReleaseUnlisted(listing);
@@ -311,29 +305,17 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// Readies the domain taken in, spawned in place of the world: drawn out of sight, the window showing the image kept
-    /// as the world loaded, until all that builds up over frames has settled (<see cref="Settle"/>), the window showing
-    /// it once the world is shown.
+    /// How far what streams into the world is taken in, as the render thread last found it: its models in the pool,
+    /// its materials packed with their textures in and every surface's pipelines compiled, and the frame built for the
+    /// effects it names; what failed counts as in, drawn as the failure (<see cref="Preloader"/>).
     /// </summary>
-    public Task ReadyAsync(CancellationToken cancel) => _preloader.ReadyAsync(cancel);
+    public float GetProgress(in WorldStream stream) => _preloader.GetProgress(stream);
 
     /// <summary>
-    /// Forgets the old world as the first copy of the new one is drawn, a frame from now: every view starts afresh, its
-    /// history, exposure and last frame gone, every shadow of the key light is drawn again, and global illumination
-    /// forgets the old world's light as it is next planned.
+    /// Ready once the world being readied, drawn out of sight while the window shows the image kept as it loaded, has
+    /// settled, as the render thread last found it (<see cref="Answer"/>).
     /// </summary>
-    public Task ForgetAsync(CancellationToken cancel) => _world.ForgetAsync(cancel);
-
-    /// <summary>
-    /// Takes in what <paramref name="prefabs"/> draw before they spawn, so they are drawn whole in their first frame:
-    /// their models into the pool, their materials packed with their textures in and every surface's pipelines
-    /// compiled, and the frame built for the effects they name. Done once all of it is in, or failed, and so drawn as
-    /// the failure; what it hands back keeps it in the pool until it is disposed.
-    /// </summary>
-    public Task<Subscription> PreloadAsync(
-        IReadOnlyList<Prefab> prefabs,
-        IProgress<float> progress,
-        CancellationToken cancel) => _preloader.PreloadAsync(prefabs, progress, cancel);
+    public bool IsReady(in WorldStream stream) => _preloader.IsReady(stream);
 
     /// <summary>
     /// The view's finished image: what the post stage made, else the lit scene as it is; none until either is made.
@@ -371,13 +353,12 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// The instances' and lights' rows and the shadow plan from this frame's copy of the world, every shadow drawn
-    /// again when the frame <paramref name="forgets"/> the world before it, what nothing holds any more let go, then
-    /// what came in since the last frame, so the materials the frame draws with are the ones in.
+    /// The instances' and lights' rows and the shadow plan from this frame's copy of the world, what nothing holds any
+    /// more let go, then what came in since the last frame, so the materials the frame draws with are the ones in.
     /// </summary>
-    private void UpdateRows(Renderables copy, CameraCopy? main, Vector3? player, bool forgets, in Frame frame)
+    private void UpdateRows(Renderables copy, CameraCopy? main, Vector3? player, in Frame frame)
     {
-        _world.UpdateRows((float)frame.Seconds, player ?? default, _preloader.IsHolding);
+        _world.UpdateRows((float)frame.Seconds, player ?? default, copy.IsHolding);
         _movedInstances.Add(_world.Instances.Moved.Count);
         if (main is { } camera)
         {
@@ -387,7 +368,6 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
                 _world.Lights.ChangedWords,
                 _world.Instances.Moved.Count,
                 frame.Index,
-                forgets,
                 _settings);
         }
 
@@ -397,7 +377,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
 
     /// <summary>
     /// The pass graph for this frame's pipelines and the surface variants the instances draw, the debug view's pass
-    /// appended, and the preloads checked against what came in.
+    /// appended.
     /// </summary>
     private void UpdateGraph(Renderables copy, SurfaceKey skySurface)
     {
@@ -410,15 +390,13 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
             _preloader.GetEffects(copy.Effects),
             GetOverlay(),
             new SurfaceVariants(_raster, _resources.ResolveBins, _resources.TransparentSurfaces, skySurface));
-        _preloader.Check(_preloader.GetEffects(copy.Effects));
     }
 
     /// <summary>
-    /// The global illumination's plan around the main camera when the pipeline traces it, forgetting the old world's
-    /// light the first time after a new world took its place; cleared otherwise, so a pipeline without it carries no
-    /// stale field.
+    /// The global illumination's plan around the main camera when the pipeline traces it, settling from the first frame
+    /// <paramref name="copy"/>'s world is readied; cleared otherwise, so a pipeline without it carries no stale field.
     /// </summary>
-    private void PlanGi(CameraCopy? main, in Frame frame)
+    private void PlanGi(Renderables copy, CameraCopy? main, in Frame frame)
     {
         if (_graph.Current?.HasPass("GiField") == true && main is { } eye)
         {
@@ -427,10 +405,8 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
                 _world.Instances.Moved,
                 _world.Instances.Recoloured,
                 frame.DeltaSeconds,
-                _preloader.Settling,
-                _isForgetting,
+                copy.IsHolding ? copy.Stream.Frame : null,
                 _settings);
-            _isForgetting = false;
             _giRays.Add(_gi.Rays);
 
             return;
@@ -488,7 +464,7 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
         }
 
         // While the world is readied out of sight, the window shows the image kept in its place (DrawKept).
-        if (!_preloader.IsHolding || !view.Target.IsWindow)
+        if (!_world.Front.IsHolding || !view.Target.IsWindow)
         {
             BoundResource? image = _debugView.Length > 0 ? DebugImage(view) : GetFinished(view);
             bool clears = _cleared.Add(view.Target.Texture);
@@ -511,17 +487,23 @@ internal sealed class ClusterRenderingGem : IGem, IPreloader, ICache<ModelField>
     }
 
     /// <summary>
-    /// Counts the frame of a domain being readied, which is ready once what builds up over frames has settled: drawn
-    /// for as many frames as the slowest of it takes from nothing (<see cref="GetSettleFrames"/>), the frame built for
-    /// the world's effects, every instance's look in and <paramref name="fogFalloff"/>, the fog's, in when the weather
-    /// asks for one (<see cref="Preloader.Settle"/>). Whether or not anything is drawn, so a run with no window loads.
+    /// Writes down for the main thread how far what streams into <paramref name="copy"/>'s world is taken in, and
+    /// whether the world being readied has settled: drawn for as many frames as the slowest of what builds up over
+    /// frames takes from nothing (<see cref="GetSettleFrames"/>), the frame built for the world's effects, every
+    /// instance's look in and <paramref name="fogFalloff"/>, the fog's, in when the weather asks for one
+    /// (<see cref="Preloader.Answer"/>). Whether or not anything is drawn, so a run with no window loads.
     /// </summary>
-    private void Settle(Renderables copy, Curve? fogFalloff)
+    private void Answer(Renderables copy, Curve? fogFalloff)
     {
-        _preloader.Settle(_preloader.Settling >= GetSettleFrames()
-            && _graph.IsBuiltFor(_preloader.GetEffects(copy.Effects))
-            && !_world.Instances.HasWaiting()
-            && (fogFalloff is not null || _fogFalloffAsked == Handle<Curve>.None));
+        Handle<Pipeline> effects = _preloader.GetEffects(copy.Effects);
+        _preloader.Answer(
+            copy.Stream,
+            effects,
+            copy.IsHolding
+                && copy.Stream.Frame >= GetSettleFrames()
+                && _graph.IsBuiltFor(effects)
+                && !_world.Instances.HasWaiting()
+                && (fogFalloff is not null || _fogFalloffAsked == Handle<Curve>.None));
     }
 
     /// <summary>

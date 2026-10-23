@@ -3,14 +3,11 @@ using System.Diagnostics.Metrics;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Components;
 using Magic.Contexts.ECS;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Queries;
-using Magic.Contexts.Subscriptions;
-using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -32,11 +29,11 @@ namespace Magic.Box3DPhysics;
 /// and reach the body with the next step. A body whose entity or component is gone is destroyed at the next step, as is
 /// one that has gone farther from every player camera than the settings' range, so a world full of bodies is simulated
 /// only around the player; an entity past the range waits where it is, body or no body, until the player comes back.
-/// The models a domain's bodies are shaped like are fitted before it spawns (<see cref="IPreloader"/>), so its bodies
-/// are there from its first step; one that replaces the world has them made as it is readied, but takes no step until
-/// the loading is over (<see cref="WorldLoading"/>), so nothing moves before the world is shown. A shape is kept while
-/// a domain that took it in is open, or anything is shaped like it, and freed once a new world takes the old one's
-/// place without it (<see cref="ForgetAsync"/>).
+/// The models a domain's bodies are shaped like are fitted before it spawns (<see cref="GetProgress"/>), so its bodies
+/// are there from its first step; one that replaces the world has them made as it is readied, but takes no step while
+/// the world's stream holds it (<see cref="WorldStream.IsHeld"/>), so nothing moves before the world is shown. A shape
+/// is kept while the world's domains name it or anything is shaped like it, and freed as the world empties for a new
+/// one without it (<see cref="WorldStream.IsEmptied"/>).
 /// <para>
 /// It answers <see cref="IPhysics"/> from the bodies as the last step left them, waiting for a step still running,
 /// and after each step writes what every body that listens, one whose entity has a <see cref="Contacts"/>, is
@@ -54,7 +51,7 @@ namespace Magic.Box3DPhysics;
 [SuppressMessage(
     "Design",
     "CA1001:Types that own disposable fields should be disposable",
-    Justification = "The shapes and the watch are the main thread's, the world's, and end in Stop there; "
+    Justification = "The shapes are the main thread's, the world's, and end in Stop there; "
         + "Dispose would run on the render thread. The step's event and semaphore hold no OS handle and outlive the "
         + "physics thread, which may still be waking as the run ends.")]
 internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
@@ -91,28 +88,13 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         _buckets);
 
     private readonly World _world;
-    private readonly Threads _threads;
     private readonly Box3DPhysicsSettings _settings;
     private readonly ModelShapes _shapes;
-    private readonly Subscription _watching;
     private readonly List<Body> _bodies = [];
     private readonly Dictionary<Entity, int> _slots = [];
     private readonly Stack<int> _free = [];
     private readonly List<Entity> _gone = [];
     private readonly List<Vector3> _cameras = [];
-
-    /// <summary>
-    /// The domains taken in, from when their models begin to be fitted until what was handed back is disposed: each
-    /// checked every step until all are (<see cref="CheckPreloads"/>), then holding their shapes through a forget
-    /// (<see cref="ForgetAsync"/>). Main thread.
-    /// </summary>
-    private readonly List<Preload> _preloads = [];
-
-    /// <summary>
-    /// The domains whose hold was disposed, on any thread, for the main thread to let go of as a step starts.
-    /// </summary>
-    private readonly Channel<Preload> _letGo = Channel.CreateUnbounded<Preload>(
-        new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
     /// Set while no step is in flight: reset as one is handed over, set by the physics thread once it has stepped the
@@ -160,24 +142,6 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     private bool _isApplied = true;
 
     /// <summary>
-    /// A domain replacing the world is being readied, and its bodies are made but no step is taken until the loading is
-    /// told over (<see cref="ReadyAsync"/>). Main thread.
-    /// </summary>
-    private bool _isHeld;
-
-    /// <summary>
-    /// Ends the readying once a fixed step has made the domain's bodies; none when nothing is being readied. Main
-    /// thread.
-    /// </summary>
-    private TaskCompletionSource? _readied;
-
-    /// <summary>
-    /// Ends the forgetting once a fixed step has freed the shapes the old world alone needed; none when no new world
-    /// took the old one's place since. Main thread.
-    /// </summary>
-    private TaskCompletionSource? _forgetting;
-
-    /// <summary>
     /// The run is ending: the physics thread returns when next woken.
     /// </summary>
     private volatile bool _isEnding;
@@ -186,14 +150,11 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         World world,
         Assets assets,
         Threads threads,
-        Events events,
         Box3DPhysicsSettings settings)
     {
         _world = world;
-        _threads = threads;
         _settings = settings;
         _shapes = new ModelShapes(assets);
-        _watching = events.Watch<WorldLoading>(loading => _isHeld &= loading.IsLoading);
 
         b3SetAssertFcn(&OnAssert);
         b3SetLogFcn(&OnLog);
@@ -210,10 +171,14 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
     /// <summary>
     /// Takes in the last step's results once the step has ended, if the fixed step has not yet, so a script's Update
-    /// sees the bodies as the step left them.
+    /// sees the bodies as the step left them. As the world empties for a new one, frees what the old one alone needed
+    /// first (<see cref="Forget"/>).
     /// </summary>
     public void Update(in Frame frame)
     {
+        WorldStream stream = _world.Stream;
+        if (stream.IsEmptied) Forget(stream.Prefabs);
+
         if (!_isApplied && _stepped.IsSet) Apply();
     }
 
@@ -223,30 +188,14 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         WaitForStep();
         if (!_isApplied) Apply();
 
-        // A new step: the shapes fitted since the last are taken in, the domains let go of since no longer hold theirs,
-        // those waiting on theirs are told how far they are, and gravity follows its setting.
+        // A new step: the shapes fitted since the last are taken in, and gravity follows its setting.
         _step++;
         _shapes.TakeArrived();
-        while (_letGo.Reader.TryRead(out Preload? letGo))
-        {
-            _preloads.Remove(letGo);
-        }
-
-        CheckPreloads();
         if (_settings.Gravity != -b3World_GetGravity(_box3d).y)
             b3World_SetGravity(_box3d, new b3Vec3 { y = -_settings.Gravity });
 
-        // Where the player's cameras are, which the range is measured from.
-        _cameras.Clear();
-        foreach ((_, _, Span<Transform> transforms, Span<Tags> tags) in _world.Query<Camera, Transform, Tags>())
-        {
-            for (int i = 0; i < tags.Length; i++)
-            {
-                if (tags[i].Has(Tag.Player)) _cameras.Add(transforms[i].Position);
-            }
-        }
-
         // Each entity that could be in range makes its body, or carries its changes over to it, and stamps it seen.
+        FindCameras();
         float farthest = _settings.Range * Leave;
         foreach (EcsChunk<Transform, Physics> chunk in _world.Query<Transform, Physics>())
         {
@@ -274,25 +223,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
         _gone.Clear();
 
-        // A new world took the old one's place: with the bodies of what went with it dropped, the shapes nothing left
-        // needs are freed before the step can read any of them.
-        if (_forgetting is { } forgetting)
-        {
-            Forget();
-            forgetting.TrySetResult();
-            _forgetting = null;
-        }
-
-        if (!_isHeld)
-        {
-            Kick(frame.DeltaSeconds);
-
-            return;
-        }
-
-        // The domain's bodies are made, so its first step, once it is shown, has only to step them.
-        _readied?.TrySetResult();
-        _readied = null;
+        // While the world's stream holds it, the bodies are made but not stepped, so the first step once it is shown
+        // has only to step them.
+        if (!_world.Stream.IsHeld) Kick(frame.DeltaSeconds);
     }
 
     /// <summary>
@@ -301,7 +234,6 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     public void Stop()
     {
-        _watching.Dispose();
         WaitForStep();
         _isEnding = true;
         _kick.Release();
@@ -355,60 +287,26 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// Frees, at the next fixed step, the shapes the old world alone needed: once that step has dropped the bodies of
-    /// the entities destroyed with it, every shape that no entity with a <see cref="Physics"/> left and no domain still
-    /// held is shaped like (<see cref="Forget"/>). Ends once they are freed.
+    /// How many of the models the bodies about to spawn are shaped like have their shape fitted, starting the fit of
+    /// those not on their way, so each gets its body in its first step rather than waiting for its model.
     /// </summary>
-    public Task ForgetAsync(CancellationToken cancel)
+    public float GetProgress(in WorldStream stream)
     {
-        _forgetting ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        HashSet<Handle<Model>> models = GetModels(stream.TakingIn);
+        int fitted = 0;
+        foreach (Handle<Model> model in models)
+        {
+            if (_shapes.Get(model) is not null) fitted++;
+        }
 
-        return _forgetting.Task.WaitAsync(cancel);
+        return models.Count == 0 ? 1 : (float)fitted / models.Count;
     }
 
     /// <summary>
-    /// Fits the shape of every model a body among <paramref name="prefabs"/> is shaped like, before they spawn, so
-    /// each gets its body in its first step rather than waiting for its model. Done once every shape is there; what it
-    /// hands back holds them, so no forget frees them, until it is disposed.
+    /// Ready once a fixed step has made the body of every entity in range whose shape is fitted, so the first step
+    /// once the world is shown has only to step them; the steps meanwhile are held (<see cref="WorldStream.IsHeld"/>).
     /// </summary>
-    public async Task<Subscription> PreloadAsync(
-        IReadOnlyList<Prefab> prefabs,
-        IProgress<float> progress,
-        CancellationToken cancel)
-    {
-        HashSet<Handle<Model>> models = GetModels(prefabs);
-        Preload preload = new(models, progress, cancel);
-        await _threads.PostAsync(
-            EngineThread.Main,
-            () =>
-            {
-                foreach (Handle<Model> model in models)
-                {
-                    _shapes.Get(model);
-                }
-
-                _preloads.Add(preload);
-            },
-            cancel).ConfigureAwait(false);
-        await preload.Done.Task.ConfigureAwait(false);
-
-        return new Subscription(() => _letGo.Writer.TryWrite(preload));
-    }
-
-    /// <summary>
-    /// Makes the domain's bodies at the next fixed step, their shapes fitted before it spawned, and takes no step from
-    /// now until the loading is told over (<see cref="WorldLoading"/>), the frame after the world is first shown, so
-    /// nothing has fallen or moved by then, and the first step has only to step them. Ready once they are made.
-    /// </summary>
-    public Task ReadyAsync(CancellationToken cancel)
-    {
-        _isHeld = true;
-        TaskCompletionSource readied = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _readied?.TrySetCanceled(CancellationToken.None);
-        _readied = readied;
-
-        return readied.Task.WaitAsync(cancel);
-    }
+    public bool IsReady(in WorldStream stream) => !IsMissingBodies();
 
     internal static b3Vec3 ToVec(Vector3 vector) => new() { x = vector.X, y = vector.Y, z = vector.Z };
 
@@ -1047,63 +945,69 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         => _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
 
     /// <summary>
-    /// Checks each domain whose models are being fitted: one whose open was cancelled is let go, and whoever waited is
-    /// told; else how many shapes are there tells how far it is, and once all are, whoever waits for it goes on and
-    /// spawns it, while the domain holds them.
+    /// Where the player's cameras are, which the range is measured from, into <see cref="_cameras"/>.
     /// </summary>
-    private void CheckPreloads()
+    private void FindCameras()
     {
-        for (int i = _preloads.Count - 1; i >= 0; i--)
+        _cameras.Clear();
+        foreach ((_, _, Span<Transform> transforms, Span<Tags> tags) in _world.Query<Camera, Transform, Tags>())
         {
-            Preload preload = _preloads[i];
-
-            if (preload.Done.Task.IsCompleted) continue;
-
-            if (preload.Cancel.IsCancellationRequested)
+            for (int i = 0; i < tags.Length; i++)
             {
-                _preloads.RemoveAt(i);
-                preload.Done.TrySetCanceled(preload.Cancel);
-
-                continue;
+                if (tags[i].Has(Tag.Player)) _cameras.Add(transforms[i].Position);
             }
-
-            int done = 0;
-            foreach (Handle<Model> model in preload.Models)
-            {
-                if (_shapes.Get(model) is not null) done++;
-            }
-
-            float share = preload.Models.Count == 0 ? 1 : (float)done / preload.Models.Count;
-            if (share != preload.Reported)
-            {
-                preload.Reported = share;
-                preload.Progress.Report(share);
-            }
-
-            if (done == preload.Models.Count) preload.Done.TrySetResult();
         }
     }
 
     /// <summary>
-    /// Frees every shape that no entity with a <see cref="Physics"/> and no domain still held is shaped like
-    /// (<see cref="ModelShapes.Forget"/>). Every body left is shaped like one of those entities' models: the step has
-    /// just dropped each body it did not follow, and remade or dropped any whose model changed. Main thread, between
-    /// steps.
+    /// Whether an entity in range of a player camera, its shape fitted, has no body yet, as a fixed step makes them.
     /// </summary>
-    private void Forget()
+    private bool IsMissingBodies()
     {
-        HashSet<Handle<Model>> kept = [];
+        FindCameras();
+        foreach ((ReadOnlySpan<Entity> entities, Span<Transform> transforms, _) in _world.Query<Transform, Physics>())
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                if (_slots.ContainsKey(entities[i]) || !CanBeNear(transforms[i], _settings.Range)) continue;
+
+                if (_shapes.Get(GetModel(entities[i])) is { } shape && IsNear(transforms[i], shape, _settings.Range))
+                    return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The world emptied for a new one: once the step still running is taken in, the bodies of the entities destroyed
+    /// with the old world are dropped, then every shape that nothing <paramref name="prefabs"/> spawns, and no entity
+    /// with a <see cref="Physics"/> left, is shaped like is freed (<see cref="ModelShapes.Forget"/>). Every body left is
+    /// shaped like one of those. Main thread, between steps.
+    /// </summary>
+    private void Forget(IReadOnlyList<Prefab> prefabs)
+    {
+        WaitForStep();
+        if (!_isApplied) Apply();
+
+        foreach (Entity entity in _slots.Keys)
+        {
+            if (!_world.IsAlive(entity)) _gone.Add(entity);
+        }
+
+        foreach (Entity entity in _gone)
+        {
+            Destroy(entity);
+        }
+
+        _gone.Clear();
+        HashSet<Handle<Model>> kept = GetModels(prefabs);
         foreach ((ReadOnlySpan<Entity> entities, _) in _world.Query<Physics>())
         {
             foreach (Entity entity in entities)
             {
                 kept.Add(GetModel(entity));
             }
-        }
-
-        foreach (Preload preload in _preloads)
-        {
-            kept.UnionWith(preload.Models);
         }
 
         int freed = _shapes.Forget(kept);
@@ -1153,23 +1057,5 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         internal int Capacity;
 
         internal int Count;
-    }
-
-    /// <summary>
-    /// A domain taken in: the models its bodies are shaped like, fitted before it spawns and held until it lets them
-    /// go, how far the fitting is as last told, the task whoever opens it awaits, and the token that cancels the open,
-    /// checked each step until it is done.
-    /// </summary>
-    private sealed class Preload(HashSet<Handle<Model>> models, IProgress<float> progress, CancellationToken cancel)
-    {
-        internal HashSet<Handle<Model>> Models { get; } = models;
-
-        internal IProgress<float> Progress { get; } = progress;
-
-        internal CancellationToken Cancel { get; } = cancel;
-
-        internal TaskCompletionSource Done { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        internal float Reported { get; set; } = -1;
     }
 }

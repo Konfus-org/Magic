@@ -151,13 +151,18 @@ a `WorldState`, and restoring puts it back.
 A domain is a folder with a `.domain` file and the prefabs it spawns
 ([Domains](../Bundled/Resources/Domains/README.md)). It loads fully, then spawns in one frame. Opening a domain in
 place of the open ones shows the project's loading domain until it is ready, then puts the player at the entity tagged
-`spawn`. Closing a domain destroys what it spawned. A gem that prepares what spawns, such as uploading models,
-implements `IPreloader`.
+`spawn`. Closing a domain destroys what it spawned.
 
-Opening a domain in place of the open ones empties the world. Every entity no open domain spawned is destroyed,
-including what scripts made. Then each `IPreloader` forgets what it built up from the old world, such as cached
-lighting, before the new domain loads. A global outlives this: make one with `World.CreateGlobal`, and list them with
-`World.GetGlobals`. Restoring a saved world destroys the globals too.
+`World.Stream` says, each frame, where the world is in having a domain take its place. It is `Loading` while the
+loading domain shows, `Readying` while the new domain is drawn out of sight, and `Shown` on the frame it appears. It
+also lists the prefabs the domains spawn, and those still being loaded. The world empties as `Loading` and `Readying`
+begin: every entity no open domain spawned is destroyed, including what scripts made, and each gem forgets what it
+built up from the old world, such as cached lighting. A global outlives this: make one with `World.CreateGlobal`, and
+list them with `World.GetGlobals`. Restoring a saved world destroys the globals too.
+
+A gem that prepares what spawns, such as uploading models, implements `IPreloader`. It reads `World.Stream` in its
+hooks, and the world asks it each frame how far it has what is being loaded and whether the domain being readied is
+ready.
 
 ## The GPU
 

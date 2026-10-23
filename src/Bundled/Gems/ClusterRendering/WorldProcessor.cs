@@ -85,12 +85,6 @@ internal sealed class WorldProcessor : IDisposable
     /// </summary>
     private Renderables _back = new();
 
-    /// <summary>
-    /// The forgetting the next copy carries (<see cref="ForgetAsync"/>); none when no new world took the old one's
-    /// place since the last copy began. Main thread.
-    /// </summary>
-    private TaskCompletionSource? _forgetting;
-
     internal WorldProcessor(World world, GpuResources resources, FailureHandler failures, Assets assets)
     {
         Instances = new Instances(resources, failures, assets);
@@ -154,30 +148,15 @@ internal sealed class WorldProcessor : IDisposable
     /// </summary>
     internal void Swap() => (Front, _back) = (_back, Front);
 
-    /// <summary>
-    /// The next copy, the first of the new world that took the old one's place, carries the forgetting
-    /// (<see cref="Renderables.Forgetting"/>), and the task ends once Render takes it, the frame that draws that copy
-    /// forgetting the old world. Main thread.
-    /// </summary>
-    internal Task ForgetAsync(CancellationToken cancel)
-    {
-        _forgetting ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        return _forgetting.Task.WaitAsync(cancel);
-    }
-
     private static Vector3 GetIntensity(Color color, float intensity)
         => new Vector3(color.R, color.G, color.B) * intensity;
 
     /// <summary>
-    /// Starts a frame's copy, before the copiers run: the copy Render read two frames ago is written over, carrying the
-    /// forgetting asked for since the last.
+    /// Starts a frame's copy, before the copiers run: the copy Render read two frames ago is written over.
     /// </summary>
     private Renderables Begin()
     {
         _back.Clear();
-        _back.Forgetting = _forgetting;
-        _forgetting = null;
         _instances.Begin(_back.Instances);
         _lights.Begin(_back.Lights);
 
@@ -220,7 +199,7 @@ internal sealed class WorldProcessor : IDisposable
             next.Sky = FindFirst<Sky>()?.Material;
             next.Weather = FindFirst<Weather>();
             next.Effects = FindFirst<PostProcessing>()?.Effects ?? Handle<Pipeline>.None;
-            next.IsLoading = world.IsLoading;
+            next.Stream = world.Stream;
         }
 
         /// <summary>
@@ -536,17 +515,22 @@ internal sealed class Renderables
     internal Handle<Pipeline> Effects { get; set; }
 
     /// <summary>
+    /// What streams into the world this frame (Core's <c>World.Stream</c>): what the renderer takes in and holds, and
+    /// whether the world is loading, being readied out of sight, or emptied for a new one.
+    /// </summary>
+    internal WorldStream Stream { get; set; } = WorldStream.None;
+
+    /// <summary>
     /// Whether a domain is opening in place of the world (Core's <c>World.IsLoading</c>): false from the frame the world
     /// is first shown, the first the window shows it in rather than the image kept as it loaded.
     /// </summary>
-    internal bool IsLoading { get; set; }
+    internal bool IsLoading => Stream.State is StreamState.Loading or StreamState.Readying;
 
     /// <summary>
-    /// A new world took the old one's place since the copy before (<see cref="WorldProcessor.ForgetAsync"/>): Render
-    /// forgets what it built up from the old world as it draws this copy, the first without it, and ends this; none
-    /// when no new world did.
+    /// Whether the world is drawn out of sight, being readied, the window holding the image kept as it loaded in its
+    /// place.
     /// </summary>
-    internal TaskCompletionSource? Forgetting { get; set; }
+    internal bool IsHolding => Stream.State == StreamState.Readying;
 
     internal void Clear()
     {
@@ -561,8 +545,7 @@ internal sealed class Renderables
         Sky = null;
         Weather = null;
         Effects = Handle<Pipeline>.None;
-        IsLoading = false;
-        Forgetting = null;
+        Stream = WorldStream.None;
     }
 }
 

@@ -95,7 +95,8 @@ internal sealed class GiVolume
     internal uint ProbeThreads { get; private set; }
 
     /// <summary>
-    /// Nothing is held: the next frame makes every level whole.
+    /// Nothing is held: the next plan makes every level whole, and every probe lets go of what it held, as when a new
+    /// world takes the old one's place, so none of the old world's light is carried into it.
     /// </summary>
     internal void Clear()
     {
@@ -113,8 +114,7 @@ internal sealed class GiVolume
     /// <paramref name="moved"/> and from <paramref name="recoloured"/>, and uploads them with which probes are traced
     /// this frame and how much of what they held they keep, from the frame's <paramref name="seconds"/>; or, while a
     /// domain is readied, its <paramref name="settling"/>-th frame drawn, every probe, keeping that frame's share of the
-    /// mean of its tracings. When a new world <paramref name="forgets"/> the old one, every level is made again whole
-    /// and every probe lets go of what it held, so nothing of the old world's light is carried into it.
+    /// mean of its tracings. With nothing held (<see cref="Clear"/>), every probe lets go of what it held.
     /// </summary>
     internal void Plan(
         Vector3 camera,
@@ -122,13 +122,13 @@ internal sealed class GiVolume
         IReadOnlyList<MovedSphere> recoloured,
         float seconds,
         int? settling,
-        bool forgets,
         ClusterRenderingSettings settings)
     {
         int levels = Math.Clamp(settings.GiLevels, 1, MaxLevels);
         float finest = Math.Clamp(settings.GiVoxel, 0.05f, 4);
         uint every = BitOperations.RoundUpToPowerOf2((uint)Math.Clamp(settings.GiUpdateEvery, 1, 64));
         uint rays = (uint)Math.Clamp(settings.GiRays, 8, 256);
+        bool isFresh = !_levels[0].IsHeld;
 
         // While a domain is readied, the n-th frame's tracing keeps n of n + 1 shares, the mean of every one so far, up
         // to what the level keeps at its own pace.
@@ -140,7 +140,7 @@ internal sealed class GiVolume
             float voxel = finest * (1 << index);
             level.Clear();
             (int X, int Y, int Z) origin = (Snap(camera.X, voxel), Snap(camera.Y, voxel), Snap(camera.Z, voxel));
-            if (forgets || !level.IsHeld || level.Voxel != voxel) level.MarkAll(origin);
+            if (!level.IsHeld || level.Voxel != voxel) level.MarkAll(origin);
             else level.MarkMoved(origin);
 
             level.Voxel = voxel;
@@ -169,7 +169,7 @@ internal sealed class GiVolume
             Seed = _frame,
             Steadies = isSettling ? 0u : 1u,
             Camera = camera,
-            Forgets = forgets ? 1u : 0u,
+            Forgets = isFresh ? 1u : 0u,
         };
         _rows.Set(0, Unsafe.As<GpuGi, GpuGiLevel>(ref header));
         for (int index = 0; index < MaxLevels; index++)

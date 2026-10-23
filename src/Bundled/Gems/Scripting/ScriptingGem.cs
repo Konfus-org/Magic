@@ -26,11 +26,12 @@ namespace Magic.Scripting;
 /// <see cref="Scripts"/> says which it runs: every frame (<see cref="Reconcile"/>) a copy is made for each script an
 /// entity names and has no copy of, its constructor given the entity first and then the services it asks for, given
 /// the values the prefab holds for it (<see cref="Attach"/>) or its defaults, then started; and a copy whose entity no
-/// longer names it, or is gone, ends. While a domain loads in place of the world (<see cref="WorldLoading"/>), a script
-/// starts only as the new domain is readied (<see cref="ReadyAsync"/>), so what it spawns is readied with the domain,
-/// and its hooks and systems wait until the loading is over, so the frame that first shows the world draws it as it
-/// loaded. One whose class is <see cref="ImpatientAttribute"/> starts and runs while the loading domain shows instead,
-/// but one made as the new domain is readied waits all the same, as it belongs to the world not shown yet.
+/// longer names it, or is gone, ends. While a domain loads in place of the world (<see cref="WorldStream"/>), a script
+/// starts only as the new domain is readied (<see cref="StreamState.Readying"/>), so what it spawns is readied with the
+/// domain, and its hooks and systems wait until the world runs again (<see cref="StreamState.Loaded"/>), so the frame
+/// that first shows the world draws it as it loaded. One whose class is <see cref="ImpatientAttribute"/> starts and
+/// runs while the loading domain shows instead, but one made as the new domain is readied waits all the same, as it
+/// belongs to the world not shown yet; as does one put back with a saved world.
 /// A system goes on the <see cref="IEcs"/>, through the Add that takes its kind; an <see cref="IBehavior"/> has its
 /// hooks called in this gem's. A pipeline script is made the same way for no entity, and never asks for one. A script
 /// read again, as the code it is in was built, has each live copy ended and a new one of its class started in its
@@ -130,21 +131,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private readonly HashSet<string> _unkept = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Whether a domain is loading in place of the world, as last told (<see cref="WorldLoading"/>): a script that is
-    /// not <see cref="ImpatientAttribute"/> waits while one is. Main thread.
+    /// What streams into the world, as last told (<see cref="WorldStream"/>), heard as each frame begins: this gem is
+    /// one the world is built on, so cannot take the world to read it. Main thread.
     /// </summary>
-    private bool _isLoading;
-
-    /// <summary>
-    /// Whether the domain replacing the world is being readied (<see cref="ReadyAsync"/>), until the loading is told
-    /// over: scripts start, held, those that are <see cref="ImpatientAttribute"/> too. Main thread.
-    /// </summary>
-    private bool _isReadying;
-
-    /// <summary>
-    /// Ends the readying once an Update finds no script left to start; none when nothing is being readied. Main thread.
-    /// </summary>
-    private TaskCompletionSource? _readied;
+    private WorldStream _stream = WorldStream.None;
 
     public ScriptingGem(
         ScriptingSettings settings,
@@ -160,7 +150,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         _assemblies = assemblies;
         _services = services;
         _watching.Add(events.Watch<AssetReloaded<Script>>(reloaded => Restart(reloaded.Asset)));
-        _watching.Add(events.Watch<WorldLoading>(FollowLoading));
+        _watching.Add(events.Watch<WorldStream>(FollowStream));
     }
 
     public void Dispose() => _watching.Dispose();
@@ -246,34 +236,35 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     }
 
     /// <summary>
-    /// Takes in nothing: a prefab's scripts are read with it, so all a domain's scripts need is to start as it is
-    /// readied (<see cref="ReadyAsync"/>).
+    /// Has everything at once: a prefab's scripts are read with it, so all a domain's scripts need is to start as it is
+    /// readied (<see cref="IsReady"/>).
     /// </summary>
-    public Task<Subscription> PreloadAsync(
-        IReadOnlyList<Prefab> prefabs,
-        IProgress<float> progress,
-        CancellationToken cancel)
-    {
-        progress.Report(1);
-
-        return Task.FromResult(Subscription.None);
-    }
+    public float GetProgress(in WorldStream stream) => 1;
 
     /// <summary>
-    /// Starts the scripts of the domain replacing the world, spawned and out of sight, from the next Update, so what
-    /// they spawn as they start is readied with it; held, their hooks and systems wait until the loading is told over
-    /// (<see cref="WorldLoading"/>), so the frame that first shows the world draws it as it loaded. The task ends once
-    /// an Update finds no script left to start, those the started ones attached among them, and none whose asset is
-    /// still on its way.
+    /// Ready once no script on any entity is left to start, those the started ones attached among them, and none
+    /// waits for its asset: while the world is readied, each Update starts them all, held, so what they spawn as they
+    /// start is readied with it, and their hooks and systems wait until the world runs.
     /// </summary>
-    public Task ReadyAsync(CancellationToken cancel)
+    public bool IsReady(in WorldStream stream)
     {
-        _isReadying = true;
-        TaskCompletionSource readied = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        _readied?.TrySetCanceled(CancellationToken.None);
-        _readied = readied;
+        foreach ((ReadOnlySpan<Entity> entities, Span<Scripts> scripts) in _ecs.Query<Scripts>())
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                foreach (Handle<Script> handle in scripts[i])
+                {
+                    // One whose asset did not load never starts; any other, in, coming or not yet asked for, will.
+                    if (IsUnstarted(entities[i], handle)
+                        && (!_loaded.TryGetValue(handle, out Result<Script>? known) || known is not { Ok: false }))
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
 
-        return readied.Task.WaitAsync(cancel);
+        return true;
     }
 
     public void Update(in Frame frame)
@@ -582,8 +573,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         }
 
         // Each starts once its asset is there, fetched first when no prefab loaded it; while a domain loads in place of
-        // the world, only an impatient one starts, unless the new domain is being readied.
-        int started = 0;
+        // the world, only an impatient one starts, until the new domain is readied.
         foreach ((Entity entity, Handle<Script> handle) in _starting)
         {
             if (!_loaded.TryGetValue(handle, out Result<Script>? known))
@@ -595,14 +585,13 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
             if (known is not { Ok: true, Value: { } script }) continue;
 
-            if (_isLoading && !_isReadying && !IsImpatient(script.Type)) continue;
+            if (_stream.State == StreamState.Loading && !IsImpatient(script.Type)) continue;
 
             IReadOnlyDictionary<string, object?> values =
                 _pending.Remove((entity, handle), out IReadOnlyDictionary<string, object?>? given)
                     ? given
                     : ReadOnlyDictionary<string, object?>.Empty;
             Keep(entity, script, Start(entity, script, values));
-            started++;
         }
 
         // Values given for an entity that is gone are dropped; those for a script held back above stay for its start.
@@ -610,38 +599,18 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         {
             if (!_ecs.IsAlive(waiting.Entity)) _pending.Remove(waiting);
         }
-
-        // A readying is over once a frame starts nothing and waits for no asset.
-        if (_readied is not { } readied || started > 0 || IsFetching()) return;
-
-        readied.TrySetResult();
-        _readied = null;
     }
 
     /// <summary>
-    /// Whether a script found with no copy this frame waits for its asset (<see cref="Fetch"/>), so has yet to start.
+    /// What streams into the world changed (<see cref="WorldStream"/>): once the world runs again, the frame after it
+    /// was first shown, the scripts held while it loaded run, their systems added to the ECS, from this frame on. One
+    /// whose system cannot be added is an error, and its entity goes without it.
     /// </summary>
-    private bool IsFetching()
+    private void FollowStream(WorldStream stream)
     {
-        foreach ((_, Handle<Script> handle) in _starting)
-        {
-            if (_loaded.TryGetValue(handle, out Result<Script>? known) && known is null) return true;
-        }
+        _stream = stream;
 
-        return false;
-    }
-
-    /// <summary>
-    /// The loading began, or was told over (<see cref="WorldLoading"/>): once it is over, the scripts started while the
-    /// new domain was readied run, their systems added to the ECS, from this frame on, the one after the world was
-    /// first shown. One whose system cannot be added is an error, and its entity goes without it.
-    /// </summary>
-    private void FollowLoading(WorldLoading loading)
-    {
-        _isLoading = loading.IsLoading;
-        _isReadying = false;
-
-        if (_isLoading) return;
+        if (stream.State != StreamState.Loaded) return;
 
         for (int i = 0; i < _attached.Count; i++)
         {
@@ -734,15 +703,18 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             return Result.Failure<Attached>($"it threw as it started: {Unwrap(ex)}");
         }
 
-        return Schedule(entity, script.Handle, values, made.Value);
+        // Held while the world loads, unless its class is impatient and the new domain is not yet being readied.
+        bool isHeld = _stream.IsHeld || (_stream.State == StreamState.Loading && !IsImpatient(type));
+
+        return Schedule(entity, script.Handle, values, made.Value, isHeld);
     }
 
     /// <summary>
     /// <paramref name="entity"/>'s own copy of <paramref name="script"/> as <paramref name="state"/> saved it: a new
-    /// one made for the entity, each saved value set back on its property or field, not started, and added to the ECS
-    /// as each kind of system it is. A value its class no longer has, or that no longer fits, is warned about once and
-    /// left. Why not, when it cannot be made. Its values among what was saved are what a copy started again on a build
-    /// is given.
+    /// one made for the entity, each saved value set back on its property or field, not started, and held until the
+    /// world put back with it runs, then added to the ECS as each kind of system it is. A value its class no longer has,
+    /// or that no longer fits, is warned about once and left. Why not, when it cannot be made. Its values among what
+    /// was saved are what a copy started again on a build is given.
     /// </summary>
     private Result<Attached> Put(Entity entity, Script script, ScriptState state)
     {
@@ -775,14 +747,14 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             }
         }
 
-        return Schedule(entity, script.Handle, values, made.Value);
+        // A world put back is readied from the call that puts it back, before that is told: its scripts wait with it.
+        return Schedule(entity, script.Handle, values, made.Value, isHeld: true);
     }
 
     /// <summary>
     /// Hands back <paramref name="made"/> whole, to run until its entity goes, added to the ECS as each kind of system
-    /// it is; held instead while the world loads, its class not <see cref="ImpatientAttribute"/>, or whatever its class
-    /// while the domain replacing the world is readied, as it is that world's, its systems added once the loading is
-    /// over (<see cref="FollowLoading"/>). Why not, when adding one throws.
+    /// it is; held instead when it <paramref name="isHeld"/>, its systems added once the world runs again
+    /// (<see cref="FollowStream"/>). Why not, when adding one throws.
     /// </summary>
     [SuppressMessage(
         "Reliability",
@@ -792,12 +764,10 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         Entity entity,
         Handle<Script> script,
         IReadOnlyDictionary<string, object?> values,
-        IScript made)
+        IScript made,
+        bool isHeld)
     {
-        Attached attached = new(entity, script, values, made, new SubscriptionList())
-        {
-            IsHeld = _isReadying || (_isLoading && !IsImpatient(made.GetType())),
-        };
+        Attached attached = new(entity, script, values, made, new SubscriptionList()) { IsHeld = isHeld };
 
         return attached.IsHeld ? Result.Success(attached) : TryRegisterSystems(attached);
     }
@@ -1096,8 +1066,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         internal bool IsDue { get; set; } = true;
 
         /// <summary>
-        /// Started while the world loaded, it waits until the loading is over: its hooks are not called and its systems
-        /// are not on the ECS (<see cref="FollowLoading"/>).
+        /// Started while the world loaded, or put back with it, it waits until the world runs again: its hooks are not
+        /// called and its systems are not on the ECS (<see cref="FollowStream"/>).
         /// </summary>
         internal bool IsHeld { get; set; }
 
