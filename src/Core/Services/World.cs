@@ -203,7 +203,7 @@ public sealed class World : IDisposable
             return;
         }
 
-        _domains.Clear();
+        _domains.EmptyWorldForRestore();
 
         // Every saved entity is made empty first, so a component or a script read below that refers to another finds
         // it made, whichever comes first.

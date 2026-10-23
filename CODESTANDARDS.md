@@ -195,9 +195,15 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 
 - A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `App.Quit(reason)`. If it
   doesn't (`Process()`, `_scratch`), name the object: what is processed, what is held.
-- `Get` never fails. `Is`, `Has` and `Can` answer a question with a bool. `Try` returns whether it worked, with the
+- Put the action first and its subject second, as English does (`ReadDomain`, `ShowDomain`). Name what a member acts
+  on, even at some length: read the name as if it had no summary.
+- `Get` never fails; it may return null when the thing has none (`Assets.GetPath` of a handle with no file). `Is`,
+  `Has` and `Can` answer a question with a bool, keys in files included. `Try` returns whether it worked, with the
   result in an `out` parameter or a `Result`. `TryGet` is a lookup that can fail.
-- Other verbs: `Make`, `Parse`, `Format`, `Find` (may return null), `To` for a conversion.
+- Other verbs: `Create` for what brings a new thing into being, never `Make`; `Parse`; `Format`; `Find`, which
+  searches and may find nothing; `To` for a conversion.
+- A number that is a time ends in its unit, abbreviated (`FixedStepSec`, `_settleMs`). A `TimeSpan` names what time
+  it is, with no unit (`_settleTime`).
 - `Register` hands something to a service and returns the `Subscription` that takes it back. `Add` and `Remove`
   belong to a collection.
 - A method that returns a value is never a bare noun (`Amount`, `RowOf`).
