@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using Magic.Contexts.Gpu;
+using Magic.Extensions;
 using Magic.SdlBindings;
 using Magic.Services;
 using Vortice.Vulkan;
@@ -170,7 +170,7 @@ internal sealed unsafe class VulkanWindows(
 
         if (window.Swapchain.IsNull) return false;
 
-        long start = Stopwatch.GetTimestamp();
+        long start = _acquireWait.Start();
         VkResult result = _device.Api.vkAcquireNextImageKHR(
             window.Swapchain,
             ulong.MaxValue,
@@ -191,7 +191,7 @@ internal sealed unsafe class VulkanWindows(
                 out image);
         }
 
-        _acquireWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+        _acquireWait.RecordSince(start);
         if (result is not (VkResult.Success or VkResult.SuboptimalKHR))
         {
             Debugging.Warn($"Window {window.Id}'s image was not acquired: {result}");

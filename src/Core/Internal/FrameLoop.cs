@@ -5,6 +5,7 @@ using System.Reflection;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Telemetry;
 using Magic.Contexts.Threading;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 
@@ -36,24 +37,18 @@ internal sealed class FrameLoop : IDisposable
     /// </summary>
     private const int MaxFixedSteps = 4;
 
-    private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateHistogram(
+    private static readonly Histogram<double> _frameDuration = Metrics.Meter.CreateTimer(
         Metrics.FrameDuration,
-        "s",
         "Time from one frame's start to the next's.",
-        tags: null,
-        advice: Metrics.FrameBuckets);
-    private static readonly Histogram<double> _renderWait = Metrics.Meter.CreateHistogram(
+        Metrics.FrameBuckets);
+    private static readonly Histogram<double> _renderWait = Metrics.Meter.CreateTimer(
         Metrics.RenderWaitDuration,
-        "s",
         "How long the main thread waited for the render thread to finish the frame before, ahead of Sync.",
-        tags: null,
-        advice: Metrics.FrameBuckets);
-    private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateHistogram(
+        Metrics.FrameBuckets);
+    private static readonly Histogram<double> _hookDuration = Metrics.Meter.CreateTimer(
         Metrics.HookDuration,
-        "s",
         "How long one gem's hook took, tagged with the gem's name and the phase.",
-        tags: null,
-        advice: Metrics.FrameBuckets);
+        Metrics.FrameBuckets);
     private static readonly string[] _phases = Enum.GetNames<Phase>();
 
     private readonly IGem[] _gems;
@@ -222,8 +217,7 @@ internal sealed class FrameLoop : IDisposable
     {
         foreach (int i in _stops)
         {
-            bool timed = _hookDuration.Enabled;
-            long start = timed ? Stopwatch.GetTimestamp() : 0;
+            long start = _hookDuration.Start();
             try
             {
                 _gems[i].Stop();
@@ -235,13 +229,10 @@ internal sealed class FrameLoop : IDisposable
                 continue;
             }
 
-            if (timed)
-            {
-                _hookDuration.Record(
-                    Stopwatch.GetElapsedTime(start).TotalSeconds,
-                    new(Metrics.GemNameTag, _names[i]),
-                    new(Metrics.FramePhaseTag, nameof(IGem.Stop)));
-            }
+            _hookDuration.RecordSince(
+                start,
+                new(Metrics.GemNameTag, _names[i]),
+                new(Metrics.FramePhaseTag, nameof(IGem.Stop)));
         }
     }
 
@@ -309,10 +300,9 @@ internal sealed class FrameLoop : IDisposable
 
     private void WaitForRender()
     {
-        bool timed = _renderWait.Enabled;
-        long start = timed ? Stopwatch.GetTimestamp() : 0;
+        long start = _renderWait.Start();
         _rendered.Wait();
-        if (timed) _renderWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+        _renderWait.RecordSince(start);
     }
 
     /// <summary>
@@ -330,8 +320,7 @@ internal sealed class FrameLoop : IDisposable
         {
             if (Volatile.Read(ref _left[i])) continue;
 
-            bool timed = _hookDuration.Enabled;
-            long start = timed ? Stopwatch.GetTimestamp() : 0;
+            long start = _hookDuration.Start();
             try
             {
                 Call(_gems[i], phase, frame);
@@ -345,13 +334,10 @@ internal sealed class FrameLoop : IDisposable
             }
 
             // Outside the try: a listener that throws is its own failure, not this gem's.
-            if (timed)
-            {
-                _hookDuration.Record(
-                    Stopwatch.GetElapsedTime(start).TotalSeconds,
-                    new(Metrics.GemNameTag, _names[i]),
-                    new(Metrics.FramePhaseTag, _phases[(int)phase]));
-            }
+            _hookDuration.RecordSince(
+                start,
+                new(Metrics.GemNameTag, _names[i]),
+                new(Metrics.FramePhaseTag, _phases[(int)phase]));
         }
     }
 

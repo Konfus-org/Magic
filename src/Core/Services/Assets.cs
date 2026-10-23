@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Globalization;
@@ -51,12 +50,10 @@ public sealed class Assets : IDisposable
     /// build copying a folder, writes several times in a row.
     /// </summary>
     private static readonly TimeSpan _settle = TimeSpan.FromMilliseconds(300);
-    private static readonly Histogram<double> _loadDuration = Metrics.Meter.CreateHistogram(
+    private static readonly Histogram<double> _loadDuration = Metrics.Meter.CreateTimer(
         Metrics.AssetLoadDuration,
-        "s",
         "How long an asset took to read, make and post-process, tagged with its type.",
-        tags: null,
-        advice: Metrics.WorkBuckets);
+        Metrics.WorkBuckets);
 
     private readonly IFileSystem _files;
     private readonly Events _events;
@@ -819,11 +816,9 @@ public sealed class Assets : IDisposable
     private async Task<Result<T>> ReadAsync<T>(ulong id)
         where T : IAsset<T>
     {
-        long start = Stopwatch.GetTimestamp();
+        long start = _loadDuration.Start();
         Result<T> read = await ReadAndProcessAsync<T>(id).ConfigureAwait(false);
-        _loadDuration.Record(
-            Stopwatch.GetElapsedTime(start).TotalSeconds,
-            new KeyValuePair<string, object?>(Metrics.AssetTypeTag, typeof(T).Name));
+        _loadDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.AssetTypeTag, typeof(T).Name));
 
         return read;
     }

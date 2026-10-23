@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Numerics;
@@ -79,18 +78,14 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         HistogramBucketBoundaries
         = [0.0001, 0.00025, 0.0005, 0.001, 0.002, 0.004, 0.008, 1.0 / 60, 1.0 / 30, 0.05, 0.1, 0.25, 0.5, 1]
     };
-    private static readonly Histogram<double> _stepDuration = _meter.CreateHistogram(
+    private static readonly Histogram<double> _stepDuration = _meter.CreateTimer(
         "magic.gems.box3d_physics.step.duration",
-        "s",
         "How long the physics thread took to step the world and read what moved.",
-        tags: null,
-        advice: _buckets);
-    private static readonly Histogram<double> _stepWait = _meter.CreateHistogram(
+        _buckets);
+    private static readonly Histogram<double> _stepWait = _meter.CreateTimer(
         "magic.gems.box3d_physics.step_wait.duration",
-        "s",
         "How long the main thread waited for a step still running, ahead of a fixed step, a query or the end.",
-        tags: null,
-        advice: _buckets);
+        _buckets);
 
     private readonly World _world;
     private readonly Threads _threads;
@@ -827,10 +822,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         if (_stepped.IsSet) return;
 
-        bool timed = _stepWait.Enabled;
-        long start = timed ? Stopwatch.GetTimestamp() : 0;
+        long start = _stepWait.Start();
         _stepped.Wait();
-        if (timed) _stepWait.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+        _stepWait.RecordSince(start);
     }
 
     /// <summary>
@@ -848,10 +842,9 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
             if (_isEnding) return;
 
-            bool timed = _stepDuration.Enabled;
-            long start = timed ? Stopwatch.GetTimestamp() : 0;
+            long start = _stepDuration.Start();
             Step();
-            if (timed) _stepDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+            _stepDuration.RecordSince(start);
 
             _stepped.Set();
         }

@@ -1,9 +1,9 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using Magic.Contexts.Telemetry;
 using Magic.Contexts.Threading;
+using Magic.Extensions;
 
 namespace Magic.Services;
 
@@ -224,12 +224,10 @@ public sealed class Threads : IDisposable
     /// </summary>
     private sealed class WorkQueue(string name) : IDisposable
     {
-        private static readonly Histogram<double> _workDuration = Metrics.Meter.CreateHistogram(
+        private static readonly Histogram<double> _workDuration = Metrics.Meter.CreateTimer(
             Metrics.WorkDuration,
-            "s",
             "How long one piece of work handed to an engine thread took, tagged with the thread.",
-            tags: null,
-            advice: Metrics.FrameBuckets);
+            Metrics.FrameBuckets);
 
         // Completed when the thread ends: a write after that fails, so nothing is left behind unrun.
         private readonly Channel<Pending> _work = Channel.CreateUnbounded<Pending>(
@@ -306,8 +304,7 @@ public sealed class Threads : IDisposable
             Justification = "Whatever posted work throws, it is logged and the thread goes on.")]
         private void Run(in Pending pending)
         {
-            bool timed = pending.IsTimed && _workDuration.Enabled;
-            long start = timed ? Stopwatch.GetTimestamp() : 0;
+            long start = pending.IsTimed ? _workDuration.Start() : 0;
             try
             {
                 pending.Work();
@@ -318,11 +315,7 @@ public sealed class Threads : IDisposable
             }
 
             // Outside the try: a listener that throws is its own failure, not the work's.
-            if (!timed) return;
-
-            _workDuration.Record(
-                Stopwatch.GetElapsedTime(start).TotalSeconds,
-                new KeyValuePair<string, object?>(Metrics.ThreadNameTag, name));
+            _workDuration.RecordSince(start, new KeyValuePair<string, object?>(Metrics.ThreadNameTag, name));
         }
 
         /// <summary>

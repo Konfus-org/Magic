@@ -4,9 +4,9 @@ namespace Magic.Contexts.Telemetry;
 
 /// <summary>
 /// The names of what Core measures and tags it with (Core's README, Telemetry), so a listener that singles one out
-/// compares against the name Core records under rather than a copy of it; and, for Core's own parts, the meter
-/// (<c>Magic.Core</c>) they record on and the bucket boundaries its histograms of time advise, as exporters' own are
-/// made for milliseconds and would put everything in the first.
+/// compares against the name Core records under rather than a copy of it; the meter (<c>Magic.Core</c>) Core's own
+/// parts record on; and the bucket boundaries histograms of time advise, as exporters' own are made for milliseconds
+/// and would put everything in the first.
 /// </summary>
 public static class Metrics
 {
@@ -55,13 +55,11 @@ public static class Metrics
     /// </summary>
     public const string AssetTypeTag = "magic.core.asset.type";
 
-    internal static Meter Meter { get; } = new("Magic.Core");
-
     /// <summary>
     /// For what happens within a frame: a tenth of a millisecond to a second, with edges at the frame budgets of 240,
     /// 144, 120, 60 and 30 frames a second.
     /// </summary>
-    internal static InstrumentAdvice<double> FrameBuckets { get; } = new()
+    public static InstrumentAdvice<double> FrameBuckets { get; } = new()
     {
         HistogramBucketBoundaries =
         [
@@ -70,6 +68,8 @@ public static class Metrics
             0.05, 0.1, 0.25, 0.5, 1,
         ],
     };
+
+    internal static Meter Meter { get; } = new("Magic.Core");
 
     /// <summary>
     /// For work that spans frames, such as a load: a millisecond to ten seconds.

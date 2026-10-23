@@ -4,6 +4,7 @@ using System.Diagnostics.Metrics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
+using Magic.Extensions;
 using Magic.SdlBindings;
 using Magic.Services;
 using static Magic.SdlBindings.SDL3;
@@ -97,12 +98,10 @@ internal sealed unsafe class Voices : IDisposable
     /// </summary>
     private const int Feed = 4096;
 
-    private static readonly Histogram<double> _renderDuration = SteamAudioGem.Meter.CreateHistogram(
+    private static readonly Histogram<double> _renderDuration = SteamAudioGem.Meter.CreateTimer(
         "magic.gems.steam_audio.render.duration",
-        "s",
         "How long the audio thread took to fill the device once, every sound and echo mixed.",
-        tags: null,
-        advice: SteamAudioGem.Buckets);
+        SteamAudioGem.Buckets);
     private static readonly Counter<int> _late = SteamAudioGem.Meter.CreateCounter<int>(
         "magic.gems.steam_audio.render.late",
         "{fill}",

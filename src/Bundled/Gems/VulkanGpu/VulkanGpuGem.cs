@@ -2,8 +2,10 @@ using System.Diagnostics.Metrics;
 using System.Drawing;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
+using Magic.Contexts.Telemetry;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
+using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.SdlBindings;
 using Magic.Services;
@@ -29,37 +31,19 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
     private const int FramesInFlight = 2;
 
     private static readonly Meter _meter = new("Magic.Gems.VulkanGpu");
-
-    /// <summary>
-    /// For what spans up to a frame: a tenth of a millisecond to a second, with edges at the frame budgets of 240, 144,
-    /// 120, 60 and 30 frames a second.
-    /// </summary>
-    private static readonly InstrumentAdvice<double> _frameBuckets = new()
-    {
-        HistogramBucketBoundaries =
-        [
-            0.0001, 0.00025, 0.0005, 0.001, 0.002,
-            1.0 / 240, 1.0 / 144, 1.0 / 120, 1.0 / 60, 1.0 / 30,
-            0.05, 0.1, 0.25, 0.5, 1,
-        ],
-    };
     private static readonly Counter<long> _staged = _meter.CreateCounter<long>(
         "magic.gems.vulkan_gpu.upload.size",
         "By",
         "Bytes staged to upload to the GPU.");
-    private static readonly Histogram<double> _acquireWait = _meter.CreateHistogram(
+    private static readonly Histogram<double> _acquireWait = _meter.CreateTimer(
         "magic.gems.vulkan_gpu.present.acquire.duration",
-        "s",
         "How long the render thread waited for a window's next image: the time vsync holds the frame.",
-        tags: null,
-        advice: _frameBuckets);
-    private static readonly Histogram<double> _groupDuration = _meter.CreateHistogram(
+        Metrics.FrameBuckets);
+    private static readonly Histogram<double> _groupDuration = _meter.CreateTimer(
         "magic.gems.vulkan_gpu.group.duration",
-        "s",
         "The GPU's time on each debug group of a frame, a renderer's pass, added up where one recurs, by the GPU's "
         + "own clock, as the frame runs.",
-        tags: null,
-        advice: new InstrumentAdvice<double>
+        new InstrumentAdvice<double>
         {
             HistogramBucketBoundaries =
             [
@@ -67,12 +51,10 @@ internal sealed unsafe class VulkanGpuGem : IGem, IGpu, IDisposable
                 0.001, 0.002, 0.004, 0.008, 0.016, 1.0 / 30, 0.1,
             ],
         });
-    private static readonly Histogram<double> _frameDuration = _meter.CreateHistogram(
+    private static readonly Histogram<double> _frameDuration = _meter.CreateTimer(
         "magic.gems.vulkan_gpu.frame.duration",
-        "s",
         "The GPU's time on a frame, from its first command to its last, by the GPU's own clock.",
-        tags: null,
-        advice: _frameBuckets);
+        Metrics.FrameBuckets);
 
     private readonly VulkanGpuSettings _settings;
     private readonly Threads _threads;

@@ -119,18 +119,14 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         "magic.gems.steam_audio.scene.solids",
         "{solid}",
         "Solids in the acoustic scene, which sound is muffled and echoed by.");
-    private static readonly Histogram<double> _simulateDuration = _meter.CreateHistogram(
+    private static readonly Histogram<double> _simulateDuration = _meter.CreateTimer(
         "magic.gems.steam_audio.simulate.duration",
-        "s",
         "How long the simulation thread took to bring the scene up to date and work out the direct sound.",
-        tags: null,
-        advice: _buckets);
-    private static readonly Histogram<double> _traceDuration = _meter.CreateHistogram(
+        _buckets);
+    private static readonly Histogram<double> _traceDuration = _meter.CreateTimer(
         "magic.gems.steam_audio.trace.duration",
-        "s",
         "How long one trace of the echoes took, on the simulation thread.",
-        tags: null,
-        advice: _buckets);
+        _buckets);
 
     private readonly World _world;
     private readonly Assets _assets;
@@ -1216,7 +1212,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private unsafe void Simulate(Voices sounds, SoundWorld soundWorld, SimulationFrame frame)
     {
-        long start = Stopwatch.GetTimestamp();
+        long start = _simulateDuration.Start();
         if (frame.HasSolids) soundWorld.Take(frame.Solids);
 
         if (soundWorld.Update(frame.ListenerPosition, frame.PlacingSeconds))
@@ -1236,7 +1232,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         iplSimulatorRunDirect(_simulator);
-        _simulateDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+        _simulateDuration.RecordSince(start);
         _solids.Record(soundWorld.Count);
     }
 
@@ -1246,7 +1242,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private unsafe void Trace(Voices sounds, SimulationFrame frame)
     {
-        long start = Stopwatch.GetTimestamp();
+        long start = _traceDuration.Start();
         IPLSimulationSharedInputs shared = new()
         {
             listener = frame.Listener,
@@ -1277,7 +1273,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         iplSimulatorRunReflections(_simulator);
-        _traceDuration.Record(Stopwatch.GetElapsedTime(start).TotalSeconds);
+        _traceDuration.RecordSince(start);
     }
 
     /// <summary>

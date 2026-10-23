@@ -189,7 +189,8 @@ debug windows open with `` ` `` (console), F3 (telemetry) and F4 (settings).
 
 The engine publishes measurements as .NET metrics (`System.Diagnostics.Metrics`). A gem records on a `Meter` named
 `Magic.Gems.<Gem>`, and Core on `Magic.Core`. Name instruments as OpenTelemetry does, lowercase and dotted, starting
-with the meter's name in snake case (`magic.gems.<gem>.`); times end in `.duration`. To read them, use a
-`MeterListener`, OpenTelemetry's exporters or `dotnet-counters`. A listener's callback runs on the thread that
-recorded and must not block. Core times each frame, each gem's hook and each asset load; the names are constants on
-`Metrics`.
+with the meter's name in snake case (`magic.gems.<gem>.`); times end in `.duration`. Make a time's histogram with
+`meter.CreateTimer`, and time with `Start` and `RecordSince`, which measure only while something listens. To read
+them, use a `MeterListener`, OpenTelemetry's exporters or `dotnet-counters`. A listener's callback runs on the thread
+that recorded and must not block. Core times each frame, each gem's hook and each asset load; the names are constants
+on `Metrics`.
