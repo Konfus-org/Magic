@@ -169,39 +169,27 @@ public sealed class Threads : IDisposable
     internal void Drain(EngineThread thread) => Queue(thread).RunPending();
 
     /// <summary>
-    /// Runs <paramref name="frames"/> on a new thread, the main thread, and the render thread's work on the calling
-    /// thread, the render thread, until <paramref name="frames"/> returns: the main thread then runs what it was left,
-    /// takes no more and hands the render thread its end. Then <paramref name="end"/> runs here, once the render thread
-    /// has run what it was left and takes no more.
+    /// Makes the calling thread <paramref name="thread"/> (<see cref="IsCurrent"/>), until <see cref="Release"/>.
     /// </summary>
-    internal void Run(Action frames, Action end)
-    {
-        Thread main = new(() => RunMain(frames)) { Name = "Main" };
-        main.Start();
-        _render.RunUntilEnded();
-        end();
-        main.Join();
+    internal void Claim(EngineThread thread) => Queue(thread).Owner = Environment.CurrentManagedThreadId;
 
-        // Only now: while the gems dispose, the main thread's is still nobody else's.
-        _main.Owner = 0;
-    }
+    /// <summary>
+    /// Makes <paramref name="thread"/>'s work nobody's again, as it is before the thread starts: once it has ended,
+    /// for the shutdown that runs alone on the render thread.
+    /// </summary>
+    internal void Release(EngineThread thread) => Queue(thread).Owner = 0;
 
-    private void RunMain(Action frames)
-    {
-        _main.Owner = Environment.CurrentManagedThreadId;
-        try
-        {
-            frames();
-        }
-        finally
-        {
-            // Nothing more is taken, then what came before that runs; the render thread's end is handed last, so
-            // everything handed to it before the frames ended still runs.
-            _main.End();
-            _main.RunPending();
-            _render.TryEnqueue(_render.End, isTimed: false);
-        }
-    }
+    /// <summary>
+    /// Runs <paramref name="thread"/>'s work on the calling thread as it is handed, until <see cref="End"/> and the
+    /// last of it has run.
+    /// </summary>
+    internal void RunUntilEnded(EngineThread thread) => Queue(thread).RunUntilEnded();
+
+    /// <summary>
+    /// <paramref name="thread"/> takes no more work, and runs what it was left; anything handed to it after is
+    /// dropped.
+    /// </summary>
+    internal void End(EngineThread thread) => Queue(thread).End();
 
     private WorkQueue Queue(EngineThread thread)
     {
