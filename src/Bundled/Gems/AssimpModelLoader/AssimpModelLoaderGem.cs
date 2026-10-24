@@ -19,7 +19,7 @@ namespace Magic.AssimpModelLoader;
 /// meshes' vertices, which are turned into the engine's frame, metres with +Y up and the front at +Z, so a model is the
 /// size it was made at. Files load on workers, several at once, each an import of its own.
 /// </summary>
-internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, IDisposable
+internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>
 {
     /// <summary>
     /// What Assimp does to a file as it reads it. Normals are the file's, never made: a mesh without them is refused.
@@ -31,34 +31,6 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
         | aiProcess_FlipUVs
         | aiProcess_SortByPType
         | aiProcess_ImproveCacheLocality;
-
-    /// <summary>
-    /// Held while an import starts or ends, and while the loader stops.
-    /// </summary>
-    private readonly Lock _importing = new();
-
-    /// <summary>
-    /// Imports running now: the loader does not stop under one.
-    /// </summary>
-    private int _running;
-
-    /// <summary>
-    /// The loader has stopped: nothing more is imported.
-    /// </summary>
-    private bool _stopped;
-
-    /// <summary>
-    /// Stops once the imports running on workers are done, which nothing else waits for as the gem ends; none starts
-    /// after, so no import is left calling into a gem that has gone.
-    /// </summary>
-    public void Dispose()
-    {
-        SpinWait spin = default;
-        while (!TryStop())
-        {
-            spin.SpinOnce();
-        }
-    }
 
     public ValueTask<Result<Model>> LoadAsync(
         string path,
@@ -112,7 +84,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
             }
 
             List<Mesh> meshes = [];
-            Walk(scene, scene->mRootNode, Matrix4x4.Identity, ToEngine(scene, format), origin, meshes);
+            BakeMeshes(scene, scene->mRootNode, Matrix4x4.Identity, ToEngine(scene, format), origin, meshes);
 
             return Result.Success(new Model { Meshes = meshes });
         }
@@ -129,7 +101,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     /// Bakes the triangle meshes of <paramref name="node"/> and those under it into <paramref name="meshes"/>, each
     /// with its node's transform under <paramref name="parent"/>.
     /// </summary>
-    private static void Walk(
+    private static void BakeMeshes(
         aiScene* scene,
         aiNode* node,
         Matrix4x4 parent,
@@ -148,7 +120,7 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
 
         for (uint i = 0; i < node->mNumChildren; i++)
         {
-            Walk(scene, node->mChildren[i], world, toEngine, origin, meshes);
+            BakeMeshes(scene, node->mChildren[i], world, toEngine, origin, meshes);
         }
     }
 
@@ -285,40 +257,8 @@ internal sealed unsafe class AssimpModelLoaderGem : IGem, IAssetLoader<Model>, I
     {
         Result<ModelMeta> meta = Json.Read<ModelMeta>(settings);
 
-        if (!meta.Ok) return Result.Failure<Model>($"its .meta is not a model's: {meta.Error}");
-
-        lock (_importing)
-        {
-            if (_stopped) return Result.Failure<Model>("the model loader has stopped.");
-
-            _running++;
-        }
-
-        try
-        {
-            return Import(path, bytes, meta.Value.Origin);
-        }
-        finally
-        {
-            lock (_importing)
-            {
-                _running--;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Stops the loader when no import is running, and lets none start after; false while one is.
-    /// </summary>
-    private bool TryStop()
-    {
-        lock (_importing)
-        {
-            if (_running > 0) return false;
-
-            _stopped = true;
-        }
-
-        return true;
+        return meta.Ok
+            ? Import(path, bytes, meta.Value.Origin)
+            : Result.Failure<Model>($"its .meta is not a model's: {meta.Error}");
     }
 }

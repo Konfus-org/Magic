@@ -7,6 +7,8 @@ using Magic.Contexts.CmdLine;
 using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Input;
+using Magic.Contexts.Settings;
+using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Threading;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
@@ -34,9 +36,24 @@ namespace Magic.SdlPlatform;
 /// </summary>
 internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 {
+    /// <summary>
+    /// Each stick and trigger: the control it sets, SDL's axis it is read from, and whether it is a stick's y, which
+    /// SDL grows downward.
+    /// </summary>
+    private static readonly (Control Control, SDL_GamepadAxis Axis, bool IsY)[] _axes =
+    [
+        (Control.GamepadLeftX, SDL_GAMEPAD_AXIS_LEFTX, false),
+        (Control.GamepadLeftY, SDL_GAMEPAD_AXIS_LEFTY, true),
+        (Control.GamepadRightX, SDL_GAMEPAD_AXIS_RIGHTX, false),
+        (Control.GamepadRightY, SDL_GAMEPAD_AXIS_RIGHTY, true),
+        (Control.GamepadLeftTrigger, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, false),
+        (Control.GamepadRightTrigger, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, false),
+    ];
+
     private readonly SdlPlatformSettings _settings;
     private readonly App _app;
     private readonly Assets _assets;
+    private readonly Subscription _settingsChanges;
     private readonly unsafe SDL_Window* _window;
 
     /// <summary>
@@ -84,32 +101,20 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     private Texture? _wantedIcon;
 
     /// <summary>
-    /// The icon is loaded from the first frame, once every gem is made, so the gems that read icons and images are
-    /// there; never headless, as there is no window to show it.
-    /// </summary>
-    private bool _isIconShown;
-
-    /// <summary>
     /// Window pixels per screen point, which SDL's mouse positions are in. The render thread's.
     /// </summary>
     private float _pixelDensity = 1;
-
-    /// <summary>
-    /// The size the settings last asked the window to be, so a drag that changes it is left alone.
-    /// </summary>
-    private int _askedWidth;
-    private int _askedHeight;
 
     public unsafe SdlPlatformGem(
         SdlPlatformSettings settings,
         Args run,
         App app,
-        Assets assets)
+        Assets assets,
+        Events events)
     {
         _app = app;
         _settings = settings;
-        _askedWidth = settings.Width;
-        _askedHeight = settings.Height;
+        _settingsChanges = events.Watch<SettingsChanged>(ResizeOnChange);
         _assets = assets;
         _title = app.Project.Name;
         _icon = assets.GetDefault<Icon>();
@@ -164,6 +169,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
         if (!SDL_StartTextInput(_window)) Debugging.Warn($"Typed text is not read: {CString.Read(SDL_GetError())}");
 
         // The main thread has not started: its state is set here, before anything reads it.
+        _pixelDensity = ReadPixelDensity();
         if (TryReadWindowSize(out int width, out int height))
         {
             Width = width;
@@ -289,6 +295,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
 
     public unsafe void Dispose()
     {
+        _settingsChanges.Dispose();
         foreach (nint gamepad in _gamepads.Values)
         {
             SDL_CloseGamepad((SDL_Gamepad*)gamepad);
@@ -304,13 +311,10 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     /// </summary>
     public void Update(in Frame frame)
     {
-        if (!_isIconShown && Id != 0)
-        {
-            _isIconShown = true;
-            ShowAsync(_icon).FireAndForget();
-        }
+        // The icon is loaded from the first frame, once every gem is made, so the gems that read icons and images are
+        // there; never headless, as there is no window to show it.
+        if (frame.Index == 0 && Id != 0) ShowAsync(_icon).FireAndForget();
 
-        Resize();
         for (int i = 0; i < _devices.Count; i++)
         {
             StartFrame(_devices[i].Kind, _controls[i]);
@@ -407,6 +411,7 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
                     _app.Quit("window closed");
                     break;
                 case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+                    _pixelDensity = ReadPixelDensity();
                     if (TryReadWindowSize(out int width, out int height))
                         Write(new Change(ChangeKind.Resized, Width: width, Height: height));
 
@@ -495,14 +500,17 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     }
 
     /// <summary>
-    /// Asks the render thread to resize the window when the settings ask for a size they did not before.
+    /// Asks the render thread to resize the window when the settings ask for another size; a drag that changed it is
+    /// left alone otherwise.
     /// </summary>
-    private unsafe void Resize()
+    private unsafe void ResizeOnChange(SettingsChanged changed)
     {
-        if (_window == null || (_settings.Width == _askedWidth && _settings.Height == _askedHeight)) return;
+        if (_window == null || changed is not { Before: SdlPlatformSettings before, After: SdlPlatformSettings after })
+            return;
 
-        (_askedWidth, _askedHeight) = (_settings.Width, _settings.Height);
-        Volatile.Write(ref _wantedSize, new WindowSize(_askedWidth, _askedHeight));
+        if (before.Width == after.Width && before.Height == after.Height) return;
+
+        Volatile.Write(ref _wantedSize, new WindowSize(after.Width, after.Height));
     }
 
     /// <summary>
@@ -687,42 +695,28 @@ internal sealed class SdlPlatformGem : IGem, IWindow, IInput, IDisposable
     {
         // SDL's stick y grows downward; Magic's is up positive, unless the settings invert it.
         float up = _settings.IsStickYInverted ? 1 : -1;
-        Set(DeviceKind.Gamepad, id, Control.GamepadLeftX, ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX)));
-        Set(
-            DeviceKind.Gamepad,
-            id,
-            Control.GamepadLeftY,
-            up * ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY)));
-        Set(
-            DeviceKind.Gamepad,
-            id,
-            Control.GamepadRightX,
-            ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTX)));
-        Set(
-            DeviceKind.Gamepad,
-            id,
-            Control.GamepadRightY,
-            up * ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHTY)));
-        Set(
-            DeviceKind.Gamepad,
-            id,
-            Control.GamepadLeftTrigger,
-            ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER)));
-        Set(
-            DeviceKind.Gamepad,
-            id,
-            Control.GamepadRightTrigger,
-            ToStick(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER)));
+        foreach ((Control control, SDL_GamepadAxis axis, bool isY) in _axes)
+        {
+            float value = ToStick(SDL_GetGamepadAxis(gamepad, axis));
+            Set(DeviceKind.Gamepad, id, control, isY ? up * value : value);
+        }
     }
 
     /// <summary>
-    /// The window's size in pixels, and the pixel density mouse positions are scaled by.
+    /// Window pixels per screen point, which SDL's mouse positions are in; 1 when SDL cannot say.
+    /// </summary>
+    private unsafe float ReadPixelDensity()
+    {
+        float density = SDL_GetWindowPixelDensity(_window);
+
+        return density > 0 ? density : 1;
+    }
+
+    /// <summary>
+    /// The window's size in pixels.
     /// </summary>
     private unsafe bool TryReadWindowSize(out int width, out int height)
     {
-        float density = SDL_GetWindowPixelDensity(_window);
-        _pixelDensity = density > 0 ? density : 1;
-
         int pixelsWide;
         int pixelsHigh;
         bool isRead = SDL_GetWindowSizeInPixels(_window, &pixelsWide, &pixelsHigh);

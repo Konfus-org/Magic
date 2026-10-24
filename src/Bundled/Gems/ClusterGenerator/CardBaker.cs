@@ -184,7 +184,7 @@ internal static class CardBaker
 
         private readonly Vector2[] _uvs = new Vector2[Size * Size];
 
-        private readonly Vector3[] _faces = new Vector3[Size * Size];
+        private readonly Vector3[] _normals = new Vector3[Size * Size];
 
         internal Vector3 Centre { get; } = centre;
 
@@ -227,7 +227,7 @@ internal static class CardBaker
 
                     _depths[at] = depth;
                     _uvs[at] = (wa * a.Uv) + (wb * b.Uv) + (wc * c.Uv);
-                    _faces[at] = (wa * a.Normal) + (wb * b.Normal) + (wc * c.Normal);
+                    _normals[at] = (wa * a.Normal) + (wb * b.Normal) + (wc * c.Normal);
                 }
             }
         }
@@ -274,7 +274,7 @@ internal static class CardBaker
 
                     covered++;
                     uv += _uvs[at];
-                    normal += _faces[at];
+                    normal += _normals[at];
                     depth += _depths[at];
                 }
             }

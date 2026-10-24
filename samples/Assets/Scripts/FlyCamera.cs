@@ -37,9 +37,6 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
     /// </summary>
     private const float MaxPitch = 89 * (MathF.PI / 180);
 
-    private readonly World _world = world;
-    private readonly IInput _input = input;
-
     /// <summary>
     /// Which way it looks: a turn about the world's up, right positive, then a tilt, down positive.
     /// </summary>
@@ -56,7 +53,7 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
     /// </summary>
     public void Start()
     {
-        Vector3 forward = Vector3.Transform(Vector3.UnitZ, _world.Get<Transform>(owner).Rotation);
+        Vector3 forward = Vector3.Transform(Vector3.UnitZ, world.Get<Transform>(owner).Rotation);
         _yaw = MathF.Atan2(forward.X, forward.Z);
         _pitch = MathF.Atan2(-forward.Y, new Vector2(forward.X, forward.Z).Length());
     }
@@ -65,15 +62,15 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
     {
         // The turn: the mouse's motion while its right button is held, and the right stick's push over the frame, up
         // looking up, as the tilt is down positive. The move: each pair of keys and the stick for it, added.
-        Vector2 mouse = _input[Control.MouseRight].IsDown
-            ? new Vector2(_input[Control.MouseMotionX].Value, _input[Control.MouseMotionY].Value) * MouseTurn
+        Vector2 mouse = input[Control.MouseRight].IsDown
+            ? new Vector2(input[Control.MouseMotionX].Value, input[Control.MouseMotionY].Value) * MouseTurn
             : Vector2.Zero;
-        Vector2 turn = mouse + (new Vector2(_input[Control.GamepadRightX].Value, -_input[Control.GamepadRightY].Value)
+        Vector2 turn = mouse + (new Vector2(input[Control.GamepadRightX].Value, -input[Control.GamepadRightY].Value)
             * (StickTurn * frame.RealDeltaSec));
-        float right = ReadAxis(Control.KeyD, Control.KeyA) + _input[Control.GamepadLeftX].Value;
-        float forward = ReadAxis(Control.KeyW, Control.KeyS) + _input[Control.GamepadLeftY].Value;
-        float up = ReadAxis(Control.KeyE, Control.KeyQ)
-            + ReadAxis(Control.GamepadRightTrigger, Control.GamepadLeftTrigger);
+        float right = Axis.Read(input, Control.KeyD, Control.KeyA) + input[Control.GamepadLeftX].Value;
+        float forward = Axis.Read(input, Control.KeyW, Control.KeyS) + input[Control.GamepadLeftY].Value;
+        float up = Axis.Read(input, Control.KeyE, Control.KeyQ)
+            + Axis.Read(input, Control.GamepadRightTrigger, Control.GamepadLeftTrigger);
 
         _yaw += turn.X;
         _pitch = Math.Clamp(_pitch + turn.Y, -MaxPitch, MaxPitch);
@@ -83,14 +80,9 @@ internal sealed class FlyCamera(Entity owner, World world, IInput input) : IBeha
         Vector3 move = Vector3.Transform(new Vector3(right, 0, forward), rotation) + (Vector3.UnitY * up);
         if (move.LengthSquared() > 1) move = Vector3.Normalize(move);
 
-        bool isFast = _input[Control.KeyLeftShift].IsDown || _input[Control.GamepadLeftShoulder].IsDown;
-        ref Transform transform = ref _world.Get<Transform>(owner);
+        bool isFast = input[Control.KeyLeftShift].IsDown || input[Control.GamepadLeftShoulder].IsDown;
+        ref Transform transform = ref world.Get<Transform>(owner);
         transform.Rotation = rotation;
         transform.Position += move * (Speed * (isFast ? FastFactor : 1) * frame.RealDeltaSec);
     }
-
-    /// <summary>
-    /// One control's value less another's: -1 to 1 for a pair of keys.
-    /// </summary>
-    private float ReadAxis(Control positive, Control negative) => _input[positive].Value - _input[negative].Value;
 }

@@ -26,7 +26,7 @@ internal enum TextureUsage : byte
 
 /// <summary>
 /// What a texture's <c>.meta</c> holds beside its id: how its image is made into a <see cref="Texture"/>,
-/// <c>{ "usage": "normal", "mipmaps": false, "wrap": "clamp" }</c>.
+/// <c>{ "usage": "normal", "hasMipmaps": false, "wrap": "clamp" }</c>.
 /// </summary>
 internal sealed class TextureMeta
 {

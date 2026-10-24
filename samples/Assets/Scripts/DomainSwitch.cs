@@ -46,7 +46,7 @@ internal sealed class DomainSwitch(Entity owner, World world) : IBehavior
             return;
         }
 
-        Going.ToAsync(world, Domain, DomainOpenMode.Additive).FireAndForget();
+        SampleDomains.OpenAsync(world, Domain, DomainOpenMode.Additive).FireAndForget();
     }
 
     private bool IsOpen()

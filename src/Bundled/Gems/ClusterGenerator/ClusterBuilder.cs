@@ -63,7 +63,7 @@ internal static class ClusterBuilder
     /// </summary>
     internal static ClusterHierarchy? Build(Model model, CancellationToken cancel)
     {
-        float step = StepOf(model);
+        float step = GetPositionStep(model);
 
         if (step <= 0) return null;
 
@@ -88,7 +88,7 @@ internal static class ClusterBuilder
             // level; a group that would not simplify has its border frozen instead.
             List<List<Part>> groups = Group(current, vertices, places);
             byte[] locks = LockBorders(groups, places, frozen);
-            List<Part>?[] made = new List<Part>?[groups.Count];
+            Simplified?[] made = new Simplified?[groups.Count];
             Parallel.For(
                 0,
                 groups.Count,
@@ -97,14 +97,46 @@ internal static class ClusterBuilder
             current = [];
             for (int g = 0; g < made.Length; g++)
             {
-                if (made[g] is { } parts) current.AddRange(parts);
-                else Freeze(groups[g], places, locks, frozen);
+                if (made[g] is not { } simplified)
+                {
+                    Freeze(groups[g], places, locks, frozen);
+
+                    continue;
+                }
+
+                // What the group became is its clusters' parent.
+                foreach (Part part in groups[g])
+                {
+                    part.ParentError = simplified.Error;
+                    part.ParentErrorBounds = simplified.ErrorBounds;
+                }
+
+                current.AddRange(simplified.Parts);
             }
 
             if (current.Count == 0) break;
         }
 
         return BuildHierarchy(all, vertices, step);
+    }
+
+    /// <summary>
+    /// The box around <paramref name="model"/>'s vertices; min past max when it has none.
+    /// </summary>
+    internal static (Vector3 Min, Vector3 Max) GetBounds(Model model)
+    {
+        Vector3 min = new(float.MaxValue);
+        Vector3 max = new(float.MinValue);
+        foreach (Mesh mesh in model.Meshes)
+        {
+            foreach (Vertex vertex in mesh.Vertices.Span)
+            {
+                min = Vector3.Min(min, vertex.Position);
+                max = Vector3.Max(max, vertex.Position);
+            }
+        }
+
+        return (min, max);
     }
 
     /// <summary>
@@ -197,23 +229,17 @@ internal static class ClusterBuilder
     }
 
     /// <summary>
-    /// The grid's step: the farthest any vertex is from the origin along an axis, over <see cref="PositionSteps"/>.
+    /// The grid's step: the farthest any vertex is from the origin along an axis, over <see cref="PositionSteps"/>; 0
+    /// for a model with no vertices.
     /// </summary>
-    private static float StepOf(Model model)
+    private static float GetPositionStep(Model model)
     {
-        float farthest = 0;
-        bool any = false;
-        foreach (Mesh mesh in model.Meshes)
-        {
-            foreach (Vertex vertex in mesh.Vertices.Span)
-            {
-                Vector3 size = Vector3.Abs(vertex.Position);
-                farthest = MathF.Max(farthest, MathF.Max(size.X, MathF.Max(size.Y, size.Z)));
-                any = true;
-            }
-        }
+        (Vector3 min, Vector3 max) = GetBounds(model);
 
-        if (!any) return 0;
+        if (min.X > max.X) return 0;
+
+        Vector3 reach = Vector3.Max(Vector3.Abs(min), Vector3.Abs(max));
+        float farthest = MathF.Max(reach.X, MathF.Max(reach.Y, reach.Z));
 
         // A model all at its origin still has a step, as a step of 0 says it has no vertices.
         return farthest > 0 ? farthest / PositionSteps : 1e-6f;
@@ -528,9 +554,10 @@ internal static class ClusterBuilder
     /// simplified into as their parent. The mesh's own open border is locked too: a leaf, a quad open all round, would
     /// otherwise collapse away for the little it moves the surface, though all it covered goes with it, and a tree
     /// would stand bare from a few metres off. Null when it would keep too much (<see cref="MinReduction"/>), or
-    /// nothing: its clusters stay the coarsest there are of their part of the model.
+    /// nothing: its clusters stay the coarsest there are of their part of the model. It reads the group and the model
+    /// alone, so groups are simplified at once.
     /// </summary>
-    private static unsafe List<Part>? Simplify(
+    private static unsafe Simplified? Simplify(
         List<Part> group,
         Vertex[] vertices,
         int[] slots,
@@ -591,13 +618,8 @@ internal static class ClusterBuilder
 
         if (keptCount == 0 || keptCount / 3 > triangleCount * MinReduction) return null;
 
-        // What the group became is its clusters' parent, with the most error of theirs and of the simplification.
+        // What the group became has the most error of its clusters' and of the simplification.
         error = MathF.Max(error, moved);
-        foreach (Part part in group)
-        {
-            part.ParentError = error;
-            part.ParentErrorBounds = bounds;
-        }
 
         // A kept triangle's slot is its corners': slots never share a vertex, and the simplifier only moves a corner
         // to another of the triangles around it.
@@ -621,7 +643,7 @@ internal static class ClusterBuilder
             made.AddRange(Split(own, [.. slotTriangles], sources, slot, level, error, bounds));
         }
 
-        return made;
+        return new Simplified(made, error, bounds);
     }
 
     /// <summary>
@@ -732,4 +754,10 @@ internal static class ClusterBuilder
 
         internal float ParentError { get; set; } = float.PositiveInfinity;
     }
+
+    /// <summary>
+    /// What a group was simplified into: the next level's clusters, and as their clusters' parent, the most error and
+    /// the sphere around the error bounds.
+    /// </summary>
+    private sealed record Simplified(List<Part> Parts, float Error, Vector4 ErrorBounds);
 }

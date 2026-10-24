@@ -50,7 +50,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
 
         if (!read.Ok) return Result.Failure<Prefab>(read.Error);
 
-        Result<List<PrefabPart>> parts = await PartsOfAsync(read.Value.Entities, path, cancel).ConfigureAwait(false);
+        Result<List<PrefabPart>> parts = await ReadPartsAsync(read.Value.Entities, path, cancel).ConfigureAwait(false);
 
         return parts.Ok ? Result.Success(new Prefab { Parts = parts.Value }) : Result.Failure<Prefab>(parts.Error);
     }
@@ -80,29 +80,6 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     }
 
     /// <summary>
-    /// The entity's <see cref="Scripts"/>, naming each of its part's <paramref name="scripts"/>, or null when it has
-    /// none. One named twice, or past <see cref="Scripts.Capacity"/>, is warned about and left out of the part.
-    /// </summary>
-    private static Scripts? ParseScripts(List<PrefabScript> scripts, string name, string path)
-    {
-        if (scripts.Count == 0) return null;
-
-        // A script that cannot be held is taken out of the part's list too, the index stepping back over the gap.
-        Scripts held = default;
-        for (int i = 0; i < scripts.Count; i++)
-        {
-            if (!held.Add(scripts[i].Script.Handle))
-            {
-                Debugging.Warn($"{path}'s {name} goes without script {scripts[i].Script.Type.Name}: it is named twice, "
-                    + $"or an entity has at most {Scripts.Capacity} scripts.");
-                scripts.RemoveAt(i--);
-            }
-        }
-
-        return held;
-    }
-
-    /// <summary>
     /// <paramref name="type"/>'s public property with a setter that a file names <paramref name="key"/>, in Core's
     /// dialect; null when it has none.
     /// </summary>
@@ -123,7 +100,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     /// <summary>
     /// The script a script entry names by its id; null when it names none.
     /// </summary>
-    private static Handle<Script>? HandleOf(IReadOnlyDictionary<string, JsonElement> entry)
+    private static Handle<Script>? FindScriptHandle(IReadOnlyDictionary<string, JsonElement> entry)
     {
         return entry.TryGetValue(Id, out JsonElement id) && id.ValueKind == JsonValueKind.Number
             && id.TryGetUInt64(out ulong value)
@@ -132,7 +109,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
             : null;
     }
 
-    private async Task<Result<List<PrefabPart>>> PartsOfAsync(
+    private async Task<Result<List<PrefabPart>>> ReadPartsAsync(
         IReadOnlyList<PrefabFileEntity> entities,
         string path,
         CancellationToken cancel)
@@ -140,7 +117,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
         List<PrefabPart> parts = [];
         foreach (PrefabFileEntity entity in entities)
         {
-            Result<PrefabPart> part = await PartOfAsync(entity, path, cancel).ConfigureAwait(false);
+            Result<PrefabPart> part = await ReadPartAsync(entity, path, cancel).ConfigureAwait(false);
 
             if (!part.Ok) return Result.Failure<List<PrefabPart>>(part.Error);
 
@@ -154,9 +131,10 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     /// The part <paramref name="entity"/> is: its components, its tags among them, its scripts, and the parts under it,
     /// those of the prefab it places first; why not, when a script is not named by its id, or the prefab it places does
     /// not load. A component no code declares or whose values are not its, logged once, and a script that does not load
-    /// or is given a value it does not take, are errors, and the part goes without them.
+    /// or is given a value it does not take, are errors, and the part goes without them; a script named twice, or past
+    /// <see cref="Scripts.Capacity"/>, is warned about and left out.
     /// </summary>
-    private async Task<Result<PrefabPart>> PartOfAsync(PrefabFileEntity entity, string path, CancellationToken cancel)
+    private async Task<Result<PrefabPart>> ReadPartAsync(PrefabFileEntity entity, string path, CancellationToken cancel)
     {
         string name = entity.Name.Length > 0 ? entity.Name : "an entity";
         List<IComponent> components = [];
@@ -177,16 +155,18 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
 
         if (ParseTags(entity, name, path) is { } tags) components.Add(tags);
 
+        // Each script that loads, the entity's Scripts naming it, but one named twice or past what an entity holds.
         List<PrefabScript> scripts = [];
+        Scripts held = default;
         foreach (IReadOnlyDictionary<string, JsonElement> entry in entity.Scripts)
         {
-            if (HandleOf(entry) is not { } handle)
+            if (FindScriptHandle(entry) is not { } handle)
             {
                 return Result.Failure<PrefabPart>(
                     $"{name} has a script that is not named by its id, {{ \"{Id}\": N }}, a whole number above 0.");
             }
 
-            Result<PrefabScript> script = await ScriptAsync(handle, entry, cancel).ConfigureAwait(false);
+            Result<PrefabScript> script = await LoadScriptAsync(handle, entry, cancel).ConfigureAwait(false);
             if (!script.Ok)
             {
                 string named = _assets.GetPath(handle) ?? handle.Id.ToString(CultureInfo.InvariantCulture);
@@ -195,10 +175,18 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
                 continue;
             }
 
+            if (!held.Add(handle))
+            {
+                Debugging.Warn($"{path}'s {name} goes without script {script.Value.Script.Type.Name}: it is named "
+                    + $"twice, or an entity has at most {Scripts.Capacity} scripts.");
+
+                continue;
+            }
+
             scripts.Add(script.Value);
         }
 
-        if (ParseScripts(scripts, name, path) is { } held) components.Add(held);
+        if (scripts.Count > 0) components.Add(held);
 
         List<PrefabPart> children = [];
         if (entity.Prefab != Handle<Prefab>.None)
@@ -211,7 +199,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
             children.AddRange(placed.Value.Parts);
         }
 
-        Result<List<PrefabPart>> under = await PartsOfAsync(entity.Children, path, cancel).ConfigureAwait(false);
+        Result<List<PrefabPart>> under = await ReadPartsAsync(entity.Children, path, cancel).ConfigureAwait(false);
 
         if (!under.Ok) return Result.Failure<PrefabPart>(under.Error);
 
@@ -226,7 +214,7 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
     /// as the value of its public property of that name, read as the property's type; why not, when it does not load,
     /// declares no script, or is given a key it has no property for or a value that is not one.
     /// </summary>
-    private async Task<Result<PrefabScript>> ScriptAsync(
+    private async Task<Result<PrefabScript>> LoadScriptAsync(
         Handle<Script> handle,
         IReadOnlyDictionary<string, JsonElement> entry,
         CancellationToken cancel)
@@ -251,14 +239,18 @@ internal sealed class PrefabLoaderGem(Assets assets, Assemblies assemblies) : IG
                     $"it is given {key}, which it has no public property with a setter for.");
             }
 
-            try
+            // Read as a component's values are; a null is the property's none.
+            object? value = null;
+            if (json.ValueKind != JsonValueKind.Null)
             {
-                values[property.Name] = json.Deserialize(property.PropertyType, Json.Options);
+                Result<object> read = Json.Read(json, property.PropertyType);
+
+                if (!read.Ok) return Result.Failure<PrefabScript>($"its {key} is not one: {read.Error}");
+
+                value = read.Value;
             }
-            catch (JsonException ex)
-            {
-                return Result.Failure<PrefabScript>($"its {key} is not one: {ex.Message}");
-            }
+
+            values[property.Name] = value;
         }
 
         return Result.Success(new PrefabScript(loaded.Value, values));

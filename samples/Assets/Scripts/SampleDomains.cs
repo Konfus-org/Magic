@@ -8,9 +8,9 @@ namespace Magic.Samples.Assets.Scripts;
 /// Opens a domain for the samples' scripts that move the player between them, and says why when it does not open, as
 /// the world only hands the reason back.
 /// </summary>
-internal static class Going
+internal static class SampleDomains
 {
-    public static async Task ToAsync(World world, Handle<Domain> domain, DomainOpenMode mode)
+    public static async Task OpenAsync(World world, Handle<Domain> domain, DomainOpenMode mode)
     {
         Result<Domain> opened = await world.OpenAsync(domain, mode).ConfigureAwait(false);
         if (!opened.Ok) Debugging.Error($"A sample did not open: {opened.Error}");

@@ -49,8 +49,8 @@ internal sealed class SkyKeys(World world, IInput input, Services.Assets assets,
 
         // The haze grows and shrinks by a share of itself, so a step looks alike whether the air is clear or thick; the
         // clouds move at a steady rate.
-        float hazier = input[Control.KeyRight].Value - input[Control.KeyLeft].Value;
-        float higher = input[Control.KeyPageUp].Value - input[Control.KeyPageDown].Value;
+        float hazier = Axis.Read(input, Control.KeyRight, Control.KeyLeft);
+        float higher = Axis.Read(input, Control.KeyPageUp, Control.KeyPageDown);
         Haze = Math.Clamp(Haze * MathF.Exp(hazier * frame.WorldDeltaSec), 0.2f, 12);
         CloudHeight = Math.Clamp(CloudHeight + (higher * 1500 * frame.WorldDeltaSec), 300, 8000);
 

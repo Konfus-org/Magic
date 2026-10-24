@@ -31,7 +31,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     /// <summary>
     /// SDL_ttf has stopped: nothing more loads.
     /// </summary>
-    private bool _stopped;
+    private bool _isStopped;
 
     public SdlFontLoaderGem()
     {
@@ -50,7 +50,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     {
         lock (_loading)
         {
-            _stopped = true;
+            _isStopped = true;
             TTF_Quit();
         }
     }
@@ -155,8 +155,8 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
         // The atlas doubles a side at a time, the narrower one, until every character fits.
         int width = 256;
         int height = 256;
-        List<(int X, int Y)> places = [];
-        while (!TryPlace(drawn, width, height, places))
+        List<(int X, int Y)>? places;
+        while ((places = FindPlaces(drawn, width, height)) is null)
         {
             if (width <= height) width *= 2;
             else height *= 2;
@@ -192,12 +192,12 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
     }
 
     /// <summary>
-    /// Shelf packing, into <paramref name="places"/>: characters left to right, in rows as tall as the tallest in each;
-    /// false when they do not all fit in <paramref name="width"/> × <paramref name="height"/>.
+    /// Where each of <paramref name="drawn"/> goes, by shelf packing: characters left to right, in rows as tall as the
+    /// tallest in each; null when they do not all fit in <paramref name="width"/> × <paramref name="height"/>.
     /// </summary>
-    private static bool TryPlace(List<Drawn> drawn, int width, int height, List<(int X, int Y)> places)
+    private static List<(int X, int Y)>? FindPlaces(List<Drawn> drawn, int width, int height)
     {
-        places.Clear();
+        List<(int X, int Y)> places = new(drawn.Count);
         int x = 0;
         int y = 0;
         int rowHeight = 0;
@@ -210,14 +210,14 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
                 rowHeight = 0;
             }
 
-            if (glyph.Width > width || y + glyph.Height > height) return false;
+            if (glyph.Width > width || y + glyph.Height > height) return null;
 
             places.Add((x, y));
             x += glyph.Width + Padding;
             rowHeight = Math.Max(rowHeight, glyph.Height);
         }
 
-        return true;
+        return places;
     }
 
     private Result<Font> Load(ReadOnlySpan<byte> bytes, JsonElement settings)
@@ -228,7 +228,7 @@ internal sealed unsafe class SdlFontLoaderGem : IGem, IAssetLoader<Font>, IDispo
 
         lock (_loading)
         {
-            return _stopped ? Result.Failure<Font>("the font loader has stopped.") : Draw(bytes, meta.Value.Size);
+            return _isStopped ? Result.Failure<Font>("the font loader has stopped.") : Draw(bytes, meta.Value.Size);
         }
     }
 

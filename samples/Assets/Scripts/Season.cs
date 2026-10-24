@@ -43,7 +43,7 @@ internal sealed class Season(Services.Assets assets, IInput input, IDebugUI? deb
     {
         if (_loaded is not { } materials) return;
 
-        float move = input[Control.KeyUp].Value - input[Control.KeyDown].Value;
+        float move = Axis.Read(input, Control.KeyUp, Control.KeyDown);
         SnowLine = Math.Clamp(SnowLine + (move * MetresPerSecond * frame.WorldDeltaSec), Lowest, Highest);
 
         // A param set to the value it has counts nothing, so while no key is held nothing is redone.

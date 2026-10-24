@@ -4,8 +4,9 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Magic.Contexts.Assets;
-using Magic.Contexts.Frames;
 using Magic.Contexts.Gpu;
+using Magic.Contexts.Settings;
+using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
 using Magic.Interfaces;
@@ -22,10 +23,11 @@ namespace Magic.ClusterGenerator;
 /// its file or sidecar, or the setting, changes. A card's atlases are handed out with the assets
 /// (<see cref="Assets.Add{T}"/>), so whatever draws loads them as it loads any texture.
 /// </summary>
-internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterGeneratorSettings settings) :
+internal sealed class ClusterGeneratorGem :
     IGem,
     ILoadPostProcessor<Model>,
-    ICache<ClustersAndCards>
+    ICache<ClustersAndCards>,
+    IDisposable
 {
     /// <summary>
     /// Raised whenever the clusters or the cards would come out otherwise or how they are written changes, so what was
@@ -45,16 +47,22 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// </summary>
     private const float FlatShare = 0.05f;
 
-    private readonly Assets _assets = assets;
-    private readonly ClusterGeneratorSettings _settings = settings;
-    private readonly Caches _caches = caches;
+    private readonly Assets _assets;
+    private readonly ClusterGeneratorSettings _settings;
+    private readonly Caches _caches;
+    private readonly Subscription _settingsChanges;
 
-    /// <summary>
-    /// The card height the models were last made with, so a change while running makes them again.
-    /// </summary>
-    private float _cardHeight = settings.CardHeight;
+    public ClusterGeneratorGem(Assets assets, Caches caches, ClusterGeneratorSettings settings, Events events)
+    {
+        _assets = assets;
+        _settings = settings;
+        _caches = caches;
+        _settingsChanges = events.Watch<SettingsChanged>(RecreateOnCardHeight);
+    }
 
     public int Version => CacheVersion;
+
+    public void Dispose() => _settingsChanges.Dispose();
 
     /// <summary>
     /// Whether it has cards, and their distance and meshes, each mesh its material slot, then its vertices and its
@@ -157,17 +165,6 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
         }
     }
 
-    /// <summary>
-    /// Creates every model again when the card height was changed while running, so its cards start where it now says.
-    /// </summary>
-    public void Update(in Frame frame)
-    {
-        if (_settings.CardHeight == _cardHeight) return;
-
-        _cardHeight = _settings.CardHeight;
-        _assets.RecreateAsync<Model>().FireAndForget();
-    }
-
     public async Task<Result<Model>> ProcessAsync(Model asset, ulong version, CancellationToken cancel)
     {
         ulong key = asset.Handle.Id;
@@ -217,7 +214,7 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     /// </summary>
     private static ModelCards? CreateCards(Model model, float cardHeight)
     {
-        (Vector3 min, Vector3 max) = GetBounds(model);
+        (Vector3 min, Vector3 max) = ClusterBuilder.GetBounds(model);
         Vector3 size = max - min;
         float radius = min.X > max.X ? 0 : MathF.Max(size.X, MathF.Max(size.Y, size.Z)) / 2;
 
@@ -232,8 +229,8 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
                 (Vector3 centre, float half, byte[] surface, byte[] normals) = CardBaker.Bake(model.Meshes[i]);
                 Card card = new()
                 {
-                    Surface = CreateAtlas(HandleOf(model.Handle, i, 1), surface),
-                    Normals = CreateAtlas(HandleOf(model.Handle, i, 2), normals),
+                    Surface = CreateAtlas(GetAtlasId(model.Handle, i, 1), surface),
+                    Normals = CreateAtlas(GetAtlasId(model.Handle, i, 2), normals),
                 };
                 cards[i] = CreateCardMesh(centre, half, model.Meshes[i].MaterialSlot, card);
             });
@@ -287,10 +284,10 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     }
 
     /// <summary>
-    /// The handle of the <paramref name="atlas"/>th atlas of <paramref name="model"/>'s <paramref name="mesh"/>th card:
-    /// the same each time it is made, so whatever draws takes a new one in place of the old.
+    /// The id of the <paramref name="atlas"/>th atlas of <paramref name="model"/>'s <paramref name="mesh"/>th card: the
+    /// same each time it is made, so whatever draws takes a new one in place of the old.
     /// </summary>
-    private static ulong HandleOf(Handle<Model> model, int mesh, int atlas)
+    private static ulong GetAtlasId(Handle<Model> model, int mesh, int atlas)
     {
         XxHash3 hash = new();
         hash.Append(BitConverter.GetBytes(model.Id));
@@ -303,22 +300,15 @@ internal sealed class ClusterGeneratorGem(Assets assets, Caches caches, ClusterG
     }
 
     /// <summary>
-    /// The box around <paramref name="model"/>'s vertices; min past max when it has none.
+    /// Creates every model again when the card height changes while running, so its cards start where it now says.
     /// </summary>
-    private static (Vector3 Min, Vector3 Max) GetBounds(Model model)
+    private void RecreateOnCardHeight(SettingsChanged changed)
     {
-        Vector3 min = new(float.MaxValue);
-        Vector3 max = new(float.MinValue);
-        foreach (Mesh mesh in model.Meshes)
+        if (changed is { Before: ClusterGeneratorSettings before, After: ClusterGeneratorSettings after }
+            && before.CardHeight != after.CardHeight)
         {
-            foreach (Vertex vertex in mesh.Vertices.Span)
-            {
-                min = Vector3.Min(min, vertex.Position);
-                max = Vector3.Max(max, vertex.Position);
-            }
+            _assets.RecreateAsync<Model>().FireAndForget();
         }
-
-        return (min, max);
     }
 
     /// <summary>

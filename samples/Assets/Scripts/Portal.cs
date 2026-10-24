@@ -48,6 +48,6 @@ internal sealed class Portal(Entity owner, World world, IDebugUI? debugUI = null
         if (Vector3.DistanceSquared(player, at) > Radius * Radius) return;
 
         _isOpening = true;
-        Going.ToAsync(world, Destination, DomainOpenMode.Replace).FireAndForget();
+        SampleDomains.OpenAsync(world, Destination, DomainOpenMode.Replace).FireAndForget();
     }
 }

@@ -35,9 +35,9 @@ internal sealed class WeatherKeys(World world, IInput input) : IBehavior
     {
         // How far each pair of keys moves its part of the weather this frame, a share of that part's range.
         float step = Rate * frame.WorldDeltaSec;
-        float cover = Read(Control.KeyRightBracket, Control.KeyLeftBracket) * step;
-        float wind = Read(Control.KeyEquals, Control.KeyMinus) * step * MostWind;
-        float fog = Read(Control.KeyPeriod, Control.KeyComma) * step * MostFog;
+        float cover = Axis.Read(input, Control.KeyRightBracket, Control.KeyLeftBracket) * step;
+        float wind = Axis.Read(input, Control.KeyEquals, Control.KeyMinus) * step * MostWind;
+        float fog = Axis.Read(input, Control.KeyPeriod, Control.KeyComma) * step * MostFog;
 
         if (cover == 0 && wind == 0 && fog == 0) return;
 
@@ -69,9 +69,4 @@ internal sealed class WeatherKeys(World world, IInput input) : IBehavior
             }
         }
     }
-
-    /// <summary>
-    /// One key's value less another's: -1 to 1.
-    /// </summary>
-    private float Read(Control more, Control less) => input[more].Value - input[less].Value;
 }
