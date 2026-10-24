@@ -30,7 +30,7 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
     /// </summary>
     private readonly Channel<(Handle<Model> Model, ModelShape Shape)> _fitted = Channel
         .CreateUnbounded<(Handle<Model> Model, ModelShape Shape)>(new UnboundedChannelOptions { SingleReader = true });
-    private bool _disposed;
+    private bool _isDisposed;
 
     /// <summary>
     /// The farthest any shape here reaches from its model's origin at scale 1 (<see cref="ModelShape.Reach"/>), and
@@ -44,7 +44,7 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
     /// </summary>
     public void Dispose()
     {
-        _disposed = true;
+        _isDisposed = true;
         foreach (ModelShape? shape in _shapes.Values)
         {
             shape?.Free();
@@ -61,7 +61,7 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
     {
         while (_fitted.Reader.TryRead(out (Handle<Model> Model, ModelShape Shape) fitted))
         {
-            if (_disposed)
+            if (_isDisposed)
             {
                 fitted.Shape.Free();
 
@@ -125,7 +125,7 @@ internal sealed class ModelShapes(Assets assets) : IDisposable
         ModelShape shape;
         if (loaded.Ok)
         {
-            shape = ModelShape.Of(loaded.Value) ?? _unitCube;
+            shape = ModelShape.Create(loaded.Value) ?? _unitCube;
         }
         else
         {
@@ -166,7 +166,7 @@ internal sealed unsafe class ModelShape(Vector3 min, Vector3 max)
     /// triangles as the model winds them, which Box3D takes as their front, the side things rest on. Null for a model
     /// with no triangles, which takes the unit cube's.
     /// </summary>
-    internal static ModelShape? Of(Model model)
+    internal static ModelShape? Create(Model model)
     {
         int vertexCount = 0;
         int indexCount = 0;

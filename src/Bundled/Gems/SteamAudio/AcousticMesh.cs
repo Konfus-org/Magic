@@ -35,7 +35,7 @@ internal sealed class AcousticMesh
     /// <summary>
     /// The triangles of every mesh of <paramref name="model"/>; null for a model with none.
     /// </summary>
-    internal static unsafe AcousticMesh? Of(Model model)
+    internal static unsafe AcousticMesh? Create(Model model)
     {
         int vertexCount = 0;
         int triangleCount = 0;

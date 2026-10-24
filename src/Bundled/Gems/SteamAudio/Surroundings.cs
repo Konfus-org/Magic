@@ -35,7 +35,7 @@ internal sealed class Surroundings(Assets assets)
     /// How much farther than the range a solid goes before it leaves, so one at the edge is not added and taken out
     /// every other frame.
     /// </summary>
-    private const float Leave = 1.25f;
+    private const float LeaveScale = 1.25f;
 
     /// <summary>
     /// Each model's triangles once a worker has fitted them; null while its model loads.
@@ -59,7 +59,7 @@ internal sealed class Surroundings(Assets assets)
     /// The farthest any model fitted here reaches from its origin at scale 1, and at least 1: at an entity's scale, a
     /// bound on how far it could reach, which tells from its transform alone whether it could be near.
     /// </summary>
-    internal float Longest { get; private set; } = 1;
+    private float _longest = 1;
 
     /// <summary>
     /// Adds every model a solid among <paramref name="parts"/>, and the parts under them, is shaped like.
@@ -91,7 +91,7 @@ internal sealed class Surroundings(Assets assets)
         while (_fitted.Reader.TryRead(out (Handle<Model> Model, AcousticMesh Mesh) fitted))
         {
             _meshes[fitted.Model] = fitted.Mesh;
-            Longest = Math.Max(Longest, fitted.Mesh.Reach);
+            _longest = Math.Max(_longest, fitted.Mesh.Reach);
         }
     }
 
@@ -104,12 +104,12 @@ internal sealed class Surroundings(Assets assets)
     {
         // Listed first, as the models cannot change while they are walked.
         List<Handle<Model>> gone = [];
-        Longest = 1;
+        _longest = 1;
         foreach ((Handle<Model> model, AcousticMesh? mesh) in _meshes)
         {
             if (mesh is null) continue;
 
-            if (kept.Contains(model)) Longest = Math.Max(Longest, mesh.Reach);
+            if (kept.Contains(model)) _longest = Math.Max(_longest, mesh.Reach);
             else gone.Add(model);
         }
 
@@ -138,7 +138,7 @@ internal sealed class Surroundings(Assets assets)
         into.Clear();
         (_wasNear, _near) = (_near, _wasNear);
         _near.Clear();
-        float farthest = range * Leave;
+        float farthest = range * LeaveScale;
         foreach (EcsChunk<Transform, Physics> chunk in world.Query<Transform, Physics>())
         {
             (ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Physics> physics) = chunk;
@@ -194,7 +194,7 @@ internal sealed class Surroundings(Assets assets)
         if (!_meshes.TryGetValue(model, out AcousticMesh? mesh))
         {
             _meshes.Add(model, null);
-            FitAsync(model).FireAndForget();
+            Task.Run(() => FitAsync(model)).FireAndForget();
         }
 
         return mesh;
@@ -207,7 +207,7 @@ internal sealed class Surroundings(Assets assets)
     private async Task FitAsync(Handle<Model> model)
     {
         Result<Model> loaded = await assets.LoadAsync(model, CancellationToken.None).ConfigureAwait(false);
-        AcousticMesh mesh = loaded.Ok ? AcousticMesh.Of(loaded.Value) ?? _unitCube : _unitCube;
+        AcousticMesh mesh = loaded.Ok ? AcousticMesh.Create(loaded.Value) ?? _unitCube : _unitCube;
         _fitted.Writer.TryWrite((model, mesh));
     }
 
@@ -220,7 +220,7 @@ internal sealed class Surroundings(Assets assets)
     {
         if (listeners.IsEmpty) return true;
 
-        float limit = range + (Vector3.Abs(transform.Scale).Length() * Longest);
+        float limit = range + (Vector3.Abs(transform.Scale).Length() * _longest);
         foreach (Vector3 listener in listeners)
         {
             if (Vector3.DistanceSquared(transform.Position, listener) < limit * limit) return true;

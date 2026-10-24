@@ -286,29 +286,29 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         _world.Remove<T>(alive);
     }
 
-    public EcsQuery Query() => new(WalkOf(All.Description, All.Cut));
+    public EcsQuery Query() => new(GetWalk(All.Description, All.Cut));
 
     public EcsQuery<T1> Query<T1>()
         where T1 : unmanaged, IComponent
-        => new(WalkOf(All<T1>.Description, All<T1>.Cut));
+        => new(GetWalk(All<T1>.Description, All<T1>.Cut));
 
     public EcsQuery<T1, T2> Query<T1, T2>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        => new(WalkOf(All<T1, T2>.Description, All<T1, T2>.Cut));
+        => new(GetWalk(All<T1, T2>.Description, All<T1, T2>.Cut));
 
     public EcsQuery<T1, T2, T3> Query<T1, T2, T3>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        => new(WalkOf(All<T1, T2, T3>.Description, All<T1, T2, T3>.Cut));
+        => new(GetWalk(All<T1, T2, T3>.Description, All<T1, T2, T3>.Cut));
 
     public EcsQuery<T1, T2, T3, T4> Query<T1, T2, T3, T4>()
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent
-        => new(WalkOf(All<T1, T2, T3, T4>.Description, All<T1, T2, T3, T4>.Cut));
+        => new(GetWalk(All<T1, T2, T3, T4>.Description, All<T1, T2, T3, T4>.Cut));
 
     public Subscription Register(ISystem system) => Schedule(system, system.Phase, frame => system.Run(frame, Query()));
 
@@ -335,7 +335,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         => Schedule(system, system.Phase, frame => system.Run(frame, Query<T1, T2, T3, T4>()));
 
     public Subscription Register(IParallelSystem system)
-        => AddParallel(
+        => ScheduleParallel(
             system,
             system.Phase,
             All.Description,
@@ -343,7 +343,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
 
     public Subscription Register<T1>(IParallelSystem<T1> system)
         where T1 : unmanaged, IComponent
-        => AddParallel(
+        => ScheduleParallel(
             system,
             system.Phase,
             All<T1>.Description,
@@ -352,7 +352,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     public Subscription Register<T1, T2>(IParallelSystem<T1, T2> system)
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
-        => AddParallel(
+        => ScheduleParallel(
             system,
             system.Phase,
             All<T1, T2>.Description,
@@ -362,7 +362,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T1 : unmanaged, IComponent
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
-        => AddParallel(
+        => ScheduleParallel(
             system,
             system.Phase,
             All<T1, T2, T3>.Description,
@@ -373,7 +373,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
         where T2 : unmanaged, IComponent
         where T3 : unmanaged, IComponent
         where T4 : unmanaged, IComponent
-        => AddParallel(
+        => ScheduleParallel(
             system,
             system.Phase,
             All<T1, T2, T3, T4>.Description,
@@ -457,7 +457,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// Schedules a parallel system: every frame, <paramref name="run"/> on each chunk <paramref name="description"/>
     /// matches, on Arch's job threads.
     /// </summary>
-    private Subscription AddParallel(object system, Phase phase, QueryDescription description, ChunkRun run)
+    private Subscription ScheduleParallel(object system, Phase phase, QueryDescription description, ChunkRun run)
         => Schedule(system, phase, frame => RunParallel(description, new ChunkJob(this, frame, run)));
 
     private void TakeOff(int phase, Scheduled scheduled)
@@ -474,7 +474,7 @@ internal sealed class ArchEcsGem : IGem, IEcs, IDisposable
     /// The walk over the chunks <paramref name="description"/> matches, each cut down by <paramref name="cut"/>; made
     /// the first time it is asked for.
     /// </summary>
-    private IEnumerable<TChunk> WalkOf<TChunk>(in QueryDescription description, Func<Chunk, TChunk> cut)
+    private IEnumerable<TChunk> GetWalk<TChunk>(in QueryDescription description, Func<Chunk, TChunk> cut)
         where TChunk : allows ref struct
     {
         ThrowIfNotMain();

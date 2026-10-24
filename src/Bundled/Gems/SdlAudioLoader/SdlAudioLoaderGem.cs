@@ -19,7 +19,7 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
     /// <summary>
     /// Bytes decoded at a time, a fraction of a second of most files.
     /// </summary>
-    private const int Chunk = 64 * 1024;
+    private const int ChunkBytes = 64 * 1024;
 
     /// <summary>
     /// Read while a file decodes, by as many workers as there are; written while SDL_mixer stops.
@@ -115,17 +115,18 @@ internal sealed unsafe class SdlAudioLoaderGem : IGem, IAssetLoader<Audio>, IDis
                 // Decoded as floats, a chunk at a time onto the end of a buffer that doubles whenever the next chunk
                 // might not fit, until the decoder has nothing left.
                 spec.format = SDL_AUDIO_F32;
-                float[] samples = new float[Chunk / sizeof(float)];
+                float[] samples = new float[ChunkBytes / sizeof(float)];
                 int count = 0;
                 while (true)
                 {
                     cancel.ThrowIfCancellationRequested();
-                    if (samples.Length - count < Chunk / sizeof(float)) Array.Resize(ref samples, samples.Length * 2);
+                    if (samples.Length - count < ChunkBytes / sizeof(float))
+                        Array.Resize(ref samples, samples.Length * 2);
 
                     int read;
                     fixed (float* into = &samples[count])
                     {
-                        read = MIX_DecodeAudio(decoder, into, Chunk, &spec);
+                        read = MIX_DecodeAudio(decoder, into, ChunkBytes, &spec);
                     }
 
                     if (read < 0)

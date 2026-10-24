@@ -60,7 +60,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// How much farther than the range a body goes before it is dropped, so one at the edge is not made and dropped
     /// every other step.
     /// </summary>
-    private const float Leave = 1.25f;
+    private const float LeaveScale = 1.25f;
 
     /// <summary>
     /// The most touching contacts read for one body, which bounds the stack they are read onto; a body touching more
@@ -94,6 +94,10 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     private readonly Dictionary<Entity, int> _slots = [];
     private readonly Stack<int> _free = [];
     private readonly List<Entity> _gone = [];
+
+    /// <summary>
+    /// Where the player's cameras are, as last found (<see cref="FindCameras"/>).
+    /// </summary>
     private readonly List<Vector3> _cameras = [];
 
     /// <summary>
@@ -108,18 +112,14 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     private readonly SemaphoreSlim _kick = new(0);
 
     /// <summary>
-    /// The bodies whose contacts the step reads, by slot: those whose entity has a <see cref="Contacts"/>, listed by
-    /// the main thread as it hands the step over.
+    /// What the main thread hands the physics thread for a step (<see cref="Kick"/>), and what the step reads for the
+    /// main thread to take in (<see cref="Apply"/>): each one thread's at a time, as the world is.
     /// </summary>
-    private readonly List<int> _listening = [];
+    private readonly StepInput _stepInput = new();
+    private readonly StepOutput _stepOutput = new();
 
     /// <summary>
-    /// What the last step moved, read by the physics thread for the main thread to take in (<see cref="Apply"/>).
-    /// </summary>
-    private readonly List<Moved> _moves = [];
-
-    /// <summary>
-    /// What each listening body touches after the last step, by slot, read as the moves are.
+    /// What each listening body touches after the last step, by slot, as the main thread takes the step in.
     /// </summary>
     private readonly Dictionary<int, Contacts> _touched = [];
     private b3WorldId _box3d;
@@ -129,12 +129,6 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// of range.
     /// </summary>
     private uint _step;
-
-    /// <summary>
-    /// The time and the substeps of the step handed over, for the physics thread.
-    /// </summary>
-    private float _stepSec;
-    private int _substeps;
 
     /// <summary>
     /// The last step's results have been taken in: false from a hand-over until <see cref="Apply"/>. Main thread.
@@ -184,9 +178,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
     public void FixedUpdate(in Frame frame)
     {
-        // The step before is waited for and taken in, so the world is the main thread's again.
-        WaitForStep();
-        if (!_isApplied) Apply();
+        // The step before is taken in, so the world is the main thread's again.
+        FinishStep();
 
         // A new step: the shapes fitted since the last are taken in, and gravity follows its setting.
         _step++;
@@ -195,15 +188,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             b3World_SetGravity(_box3d, new b3Vec3 { y = -_settings.Gravity });
 
         // Each entity that could be in range makes its body, or carries its changes over to it, and stamps it seen.
-        FindCameras();
-        float farthest = _settings.Range * Leave;
+        ReadOnlySpan<Vector3> cameras = FindCameras();
+        float farthest = _settings.Range * LeaveScale;
         foreach (EcsChunk<Transform, Physics> chunk in _world.Query<Transform, Physics>())
         {
             (ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<Physics> physics) = chunk;
             for (int i = 0; i < entities.Length; i++)
             {
-                if (CanBeNear(transforms[i], farthest))
-                    Follow(entities[i], ref transforms[i], ref physics[i], frame.WorldDeltaSec);
+                if (CanBeNear(transforms[i], farthest, cameras))
+                    Follow(entities[i], ref transforms[i], ref physics[i], frame.WorldDeltaSec, cameras);
             }
         }
 
@@ -215,7 +208,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
         foreach (Entity entity in _gone)
         {
-            Destroy(entity);
+            DestroyBody(entity);
         }
 
         if (_gone.Count > 0)
@@ -244,7 +237,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     public RayHit? RayCast(Vector3 from, Vector3 to, Motions motions = Motions.All)
     {
         WaitForStep();
-        b3RayResult result = b3World_CastRayClosest(_box3d, ToVec(from), ToVec(to - from), FilterOf(motions));
+        b3RayResult result = b3World_CastRayClosest(_box3d, ToVec(from), ToVec(to - from), ToFilter(motions));
 
         if (!result.hit) return null;
 
@@ -277,7 +270,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
                 _box3d,
                 ToVec(center),
                 &proxy,
-                FilterOf(motions),
+                ToFilter(motions),
                 (delegate* unmanaged[Cdecl]<b3ShapeId, void*, bool>)
                     (delegate* unmanaged[Cdecl]<b3ShapeId, void*, byte>)&OnOverlap,
                 &query);
@@ -320,7 +313,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// <summary>
     /// Whether the components changed in a way that shapes the body, which is then made again.
     /// </summary>
-    private static bool IsRemade(in Body body, Handle<Model> model, in Transform transform, in Physics physics)
+    private static bool IsReshaped(in Body body, Handle<Model> model, in Transform transform, in Physics physics)
     {
         return model != body.Model
             || transform.Scale != body.Transform.Scale
@@ -434,7 +427,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// A query's filter: Box3D's default, accepting the shapes whose category, their body's motion, is among
     /// <paramref name="motions"/>.
     /// </summary>
-    private static b3QueryFilter FilterOf(Motions motions)
+    private static b3QueryFilter ToFilter(Motions motions)
     {
         b3QueryFilter filter = b3DefaultQueryFilter();
         filter.maskBits = (ulong)motions;
@@ -442,7 +435,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         return filter;
     }
 
-    private static Motions GetMotions(Motion motion)
+    private static Motions ToMotions(Motion motion)
     {
         return motion switch
         {
@@ -540,30 +533,36 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// Makes the body for a new entity in range of a player camera, or carries what its components changed since the
-    /// last step over to its body; one out of range is left unstamped, for the sweep to drop.
+    /// Makes the body for a new entity in range of a player camera, one of <paramref name="cameras"/>, or carries what
+    /// its components changed since the last step over to its body; one out of range is left unstamped, for the sweep
+    /// to drop.
     /// </summary>
-    private void Follow(Entity entity, ref Transform transform, ref Physics physics, float stepSec)
+    private void Follow(
+        Entity entity,
+        ref Transform transform,
+        ref Physics physics,
+        float stepSec,
+        ReadOnlySpan<Vector3> cameras)
     {
         Handle<Model> model = GetModel(entity);
         ModelShape? shape = _shapes.Get(model);
         bool hasBody = _slots.TryGetValue(entity, out int slot);
 
-        if (!IsNear(transform, shape, hasBody ? _settings.Range * Leave : _settings.Range)) return;
+        if (!IsNear(transform, shape, hasBody ? _settings.Range * LeaveScale : _settings.Range, cameras)) return;
 
         if (!hasBody)
         {
-            Create(entity, model, shape, transform, physics);
+            CreateBody(entity, model, shape, transform, physics);
 
             return;
         }
 
         ref Body body = ref CollectionsMarshal.AsSpan(_bodies)[slot];
         body.Seen = _step;
-        if (IsRemade(body, model, transform, physics))
+        if (IsReshaped(body, model, transform, physics))
         {
-            Destroy(entity);
-            Create(entity, model, shape, transform, physics);
+            DestroyBody(entity);
+            CreateBody(entity, model, shape, transform, physics);
 
             return;
         }
@@ -599,19 +598,19 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// Whether the entity could be within <paramref name="range"/> of a player camera, from its transform alone: its
-    /// centre's distance less the farthest any shape reaches at its scale (<see cref="ModelShapes.Longest"/>), so
-    /// whatever <see cref="IsNear"/> would call near passes, and the step never looks up the model, the shape or the
-    /// body of the many entities far from every player, which is most of a world. With no player camera, everything
-    /// could be.
+    /// Whether the entity could be within <paramref name="range"/> of a player camera, one of
+    /// <paramref name="cameras"/>, from its transform alone: its centre's distance less the farthest any shape reaches
+    /// at its scale (<see cref="ModelShapes.Longest"/>), so whatever <see cref="IsNear"/> would call near passes, and
+    /// the step never looks up the model, the shape or the body of the many entities far from every player, which is
+    /// most of a world. With no player camera, everything could be.
     /// </summary>
-    private bool CanBeNear(in Transform transform, float range)
+    private bool CanBeNear(in Transform transform, float range, ReadOnlySpan<Vector3> cameras)
     {
-        if (_cameras.Count == 0) return true;
+        if (cameras.IsEmpty) return true;
 
         float limit = range + (transform.Scale.Length() * _shapes.Longest);
         float limitSquared = limit * limit;
-        foreach (Vector3 camera in _cameras)
+        foreach (Vector3 camera in cameras)
         {
             if (Vector3.DistanceSquared(transform.Position, camera) < limitSquared) return true;
         }
@@ -620,13 +619,13 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// Whether the entity's shape reaches within <paramref name="range"/> of a player camera: its centre's distance
-    /// less how far the shape reaches from it, so the ground is near from anywhere on it. With no player camera,
-    /// everything is near.
+    /// Whether the entity's shape reaches within <paramref name="range"/> of a player camera, one of
+    /// <paramref name="cameras"/>: its centre's distance less how far the shape reaches from it, so the ground is near
+    /// from anywhere on it. With no player camera, everything is near.
     /// </summary>
-    private bool IsNear(in Transform transform, ModelShape? shape, float range)
+    private static bool IsNear(in Transform transform, ModelShape? shape, float range, ReadOnlySpan<Vector3> cameras)
     {
-        if (_cameras.Count == 0) return true;
+        if (cameras.IsEmpty) return true;
 
         // How far the shape reaches from the entity's position: half its bounds' diagonal, plus how far their centre is
         // from it; a shape still loading is taken to reach the scale's length.
@@ -634,7 +633,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         float reach = shape is null
             ? scale.Length()
             : (((shape.Max - shape.Min) * scale).Length() + ((shape.Max + shape.Min) * scale).Length()) * 0.5f;
-        foreach (Vector3 camera in _cameras)
+        foreach (Vector3 camera in cameras)
         {
             if (Vector3.Distance(transform.Position, camera) - reach < range) return true;
         }
@@ -645,7 +644,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// <summary>
     /// Makes the entity's body and shape, once its model's shape is there; until then the entity waits, unmoved.
     /// </summary>
-    private unsafe void Create(
+    private unsafe void CreateBody(
         Entity entity,
         Handle<Model> model,
         ModelShape? shape,
@@ -681,7 +680,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         b3BodyId id = b3CreateBody(_box3d, &def);
         b3ShapeDef shapeDef = b3DefaultShapeDef();
         shapeDef.baseMaterial = GetMaterial(physics.Surface, physics.Bounce);
-        shapeDef.filter.categoryBits = (ulong)GetMotions(physics.Motion);
+        shapeDef.filter.categoryBits = (ulong)ToMotions(physics.Motion);
         Shape kind = physics.Shape;
         if (kind == Shape.Mesh && (physics.Motion != Motion.Static || shape.Mesh is null))
         {
@@ -725,7 +724,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             + $"at ({transform.Position.X:0.###}, {transform.Position.Y:0.###}, {transform.Position.Z:0.###}).");
     }
 
-    private void Destroy(Entity entity)
+    private void DestroyBody(Entity entity)
     {
         if (!_slots.Remove(entity, out int slot)) return;
 
@@ -735,25 +734,37 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// Hands the physics thread the step: which bodies' contacts to read after it, the time and the substeps, then
-    /// wakes it. The world is that thread's until the step has ended.
+    /// Hands the physics thread the step: the time and the substeps, and the bodies whose contacts to read after it,
+    /// those whose entity has a <see cref="Contacts"/>, then wakes it. The world is that thread's until the step has
+    /// ended.
     /// </summary>
     private void Kick(float stepSec)
     {
-        _listening.Clear();
+        _stepInput.Listening.Clear();
         foreach ((ReadOnlySpan<Entity> entities, _) in _world.Query<Contacts>())
         {
             for (int i = 0; i < entities.Length; i++)
             {
-                if (_slots.TryGetValue(entities[i], out int slot)) _listening.Add(slot);
+                if (_slots.TryGetValue(entities[i], out int slot))
+                    _stepInput.Listening.Add(new Listener(slot, _bodies[slot].Id));
             }
         }
 
-        _stepSec = stepSec;
-        _substeps = _settings.Substeps;
+        _stepInput.StepSec = stepSec;
+        _stepInput.Substeps = _settings.Substeps;
         _isApplied = false;
         _stepped.Reset();
         _kick.Release();
+    }
+
+    /// <summary>
+    /// Waits for a step still running and takes in what it read, so the world is the main thread's again and the
+    /// components are as the step left them.
+    /// </summary>
+    private void FinishStep()
+    {
+        WaitForStep();
+        if (!_isApplied) Apply();
     }
 
     /// <summary>
@@ -784,7 +795,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             if (_isEnding) return;
 
             long startTimestamp = _stepDuration.Start();
-            Step();
+            Step(_stepInput, _stepOutput);
             _stepDuration.RecordSince(startTimestamp);
 
             _stepped.Set();
@@ -792,54 +803,50 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// Steps the world, then reads every body that moved and what each listening body touches into the results the
-    /// main thread takes in. Physics thread.
+    /// Steps the world as <paramref name="input"/> says, then reads every body that moved and what each listening body
+    /// touches into <paramref name="output"/>, for the main thread to take in. Physics thread.
     /// </summary>
-    private unsafe void Step()
+    private unsafe void Step(StepInput input, StepOutput output)
     {
-        b3World_Step(_box3d, _stepSec, _substeps);
+        b3World_Step(_box3d, input.StepSec, input.Substeps);
         b3BodyEvents events = b3World_GetBodyEvents(_box3d);
-        _moves.Clear();
+        output.Moves.Clear();
         for (int i = 0; i < events.moveCount; i++)
         {
             ref b3BodyMoveEvent moved = ref events.moveEvents[i];
-            int slot = (int)(nuint)moved.userData - 1;
-            b3BodyId id = _bodies[slot].Id;
-            _moves.Add(new Moved(
-                slot,
+            output.Moves.Add(new Moved(
+                (int)(nuint)moved.userData - 1,
                 FromVec(moved.transform.p),
                 FromQuat(moved.transform.q),
-                FromVec(b3Body_GetLinearVelocity(id)),
-                FromVec(b3Body_GetAngularVelocity(id)),
+                FromVec(b3Body_GetLinearVelocity(moved.bodyId)),
+                FromVec(b3Body_GetAngularVelocity(moved.bodyId)),
                 moved.fellAsleep));
         }
 
-        _touched.Clear();
-        foreach (int slot in _listening)
+        output.Touches.Clear();
+        foreach (Listener listener in input.Listening)
         {
-            _touched[slot] = GetTouching(slot);
+            AddTouching(listener, output.Touches);
         }
     }
 
     /// <summary>
-    /// What the body in <paramref name="slot"/> touches after the step, each as <see cref="ContactPhase.Stay"/>: the
-    /// main thread works the phase out against what the component held. Physics thread.
+    /// What <paramref name="listener"/>'s body touches after the step, into <paramref name="touches"/>: at most as many
+    /// as a <see cref="Contacts"/> holds, each a contact with points. Physics thread.
     /// </summary>
-    private unsafe Contacts GetTouching(int slot)
+    private static unsafe void AddTouching(Listener listener, List<Touching> touches)
     {
-        Contacts now = default;
-        int written = 0;
-        b3BodyId id = _bodies[slot].Id;
-        int capacity = Math.Min(b3Body_GetContactCapacity(id), MostTouching);
+        int capacity = Math.Min(b3Body_GetContactCapacity(listener.Id), MostTouching);
         b3ContactData* data = stackalloc b3ContactData[capacity];
-        int count = b3Body_GetContactData(id, data, capacity);
+        int count = b3Body_GetContactData(listener.Id, data, capacity);
+        int written = 0;
         for (int i = 0; i < count && written < Contacts.Capacity; i++)
         {
-            Contact contact = GetContact(slot, data[i]);
-            if (contact.Phase != ContactPhase.None) now[written++] = contact;
-        }
+            if (ReadTouching(listener.Slot, data[i]) is not { } touching) continue;
 
-        return now;
+            touches.Add(touching);
+            written++;
+        }
     }
 
     /// <summary>
@@ -852,7 +859,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     {
         _isApplied = true;
         Span<Body> bodies = CollectionsMarshal.AsSpan(_bodies);
-        foreach (ref readonly Moved moved in CollectionsMarshal.AsSpan(_moves))
+        foreach (ref readonly Moved moved in CollectionsMarshal.AsSpan(_stepOutput.Moves))
         {
             ref Body body = ref bodies[moved.Slot];
 
@@ -886,6 +893,28 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             }
         }
 
+        // What each listening body touches, the other body named by its entity, each as Stay until phased below; the
+        // step lists one body's touches together.
+        _touched.Clear();
+        int written = 0;
+        foreach (Touching touching in _stepOutput.Touches)
+        {
+            ref Contacts read = ref CollectionsMarshal.GetValueRefOrAddDefault(
+                _touched,
+                touching.Slot,
+                out bool isListed);
+            if (!isListed) written = 0;
+
+            read[written++] = new Contact
+            {
+                Other = bodies[touching.OtherSlot].Entity,
+                Point = touching.Point,
+                Normal = touching.Normal,
+                Impulse = touching.Impulse,
+                Phase = ContactPhase.Stay,
+            };
+        }
+
         foreach ((ReadOnlySpan<Entity> entities, Span<Contacts> contacts) in _world.Query<Contacts>())
         {
             for (int i = 0; i < entities.Length; i++)
@@ -899,11 +928,11 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     }
 
     /// <summary>
-    /// One of Box3D's touching contacts as the body in <paramref name="slot"/> sees it: the other body's entity, the
+    /// One of Box3D's touching contacts as the body in <paramref name="slot"/> sees it: the other body's slot, the
     /// mean of the contact points, the normal turned to point away from the other body, and the impulse along it;
-    /// a contact with no points, the two only near, is <see cref="ContactPhase.None"/>.
+    /// none for a contact with no points, the two only near. Physics thread.
     /// </summary>
-    private unsafe Contact GetContact(int slot, in b3ContactData data)
+    private static unsafe Touching? ReadTouching(int slot, in b3ContactData data)
     {
         bool isA = GetSlot(data.shapeIdA) == slot;
         int other = isA ? GetSlot(data.shapeIdB) : GetSlot(data.shapeIdA);
@@ -927,27 +956,20 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
             }
         }
 
-        if (points == 0) return default;
+        if (points == 0) return null;
 
         normal = Vector3.Normalize(normal);
 
-        return new Contact
-        {
-            Other = _bodies[other].Entity,
-            Point = point / points,
-            Normal = isA ? -normal : normal,
-            Impulse = impulse,
-            Phase = ContactPhase.Stay,
-        };
+        return new Touching(slot, other, point / points, isA ? -normal : normal, impulse);
     }
 
     private Handle<Model> GetModel(Entity entity)
         => _world.Has<Renderer>(entity) ? _world.Get<Renderer>(entity).Model : Handle<Model>.None;
 
     /// <summary>
-    /// Where the player's cameras are, which the range is measured from, into <see cref="_cameras"/>.
+    /// Where the player's cameras are, which the range is measured from: <see cref="_cameras"/>, found again.
     /// </summary>
-    private void FindCameras()
+    private ReadOnlySpan<Vector3> FindCameras()
     {
         _cameras.Clear();
         foreach ((_, _, Span<Transform> transforms, Span<Tags> tags) in _world.Query<Camera, Transform, Tags>())
@@ -957,6 +979,8 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
                 if (tags[i].Has(Tag.Player)) _cameras.Add(transforms[i].Position);
             }
         }
+
+        return CollectionsMarshal.AsSpan(_cameras);
     }
 
     /// <summary>
@@ -964,14 +988,15 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private bool IsMissingBodies()
     {
-        FindCameras();
+        ReadOnlySpan<Vector3> cameras = FindCameras();
+        float range = _settings.Range;
         foreach ((ReadOnlySpan<Entity> entities, Span<Transform> transforms, _) in _world.Query<Transform, Physics>())
         {
             for (int i = 0; i < entities.Length; i++)
             {
-                if (_slots.ContainsKey(entities[i]) || !CanBeNear(transforms[i], _settings.Range)) continue;
+                if (_slots.ContainsKey(entities[i]) || !CanBeNear(transforms[i], range, cameras)) continue;
 
-                if (_shapes.Get(GetModel(entities[i])) is { } shape && IsNear(transforms[i], shape, _settings.Range))
+                if (_shapes.Get(GetModel(entities[i])) is { } shape && IsNear(transforms[i], shape, range, cameras))
                     return true;
             }
         }
@@ -987,8 +1012,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
     /// </summary>
     private void Forget(IReadOnlyList<Prefab> prefabs)
     {
-        WaitForStep();
-        if (!_isApplied) Apply();
+        FinishStep();
 
         foreach (Entity entity in _slots.Keys)
         {
@@ -997,7 +1021,7 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
 
         foreach (Entity entity in _gone)
         {
-            Destroy(entity);
+            DestroyBody(entity);
         }
 
         _gone.Clear();
@@ -1025,6 +1049,44 @@ internal sealed class Box3DPhysicsGem : IGem, IPhysics, IPreloader
         Vector3 Velocity,
         Vector3 AngularVelocity,
         bool FellAsleep);
+
+    /// <summary>
+    /// A body whose contacts a step reads: its slot, and its id in Box3D.
+    /// </summary>
+    private readonly record struct Listener(int Slot, b3BodyId Id);
+
+    /// <summary>
+    /// What the listening body in <paramref name="Slot"/> touches after a step, read by the physics thread: the other
+    /// body's slot, which the main thread names by its entity, the mean contact point, the normal pointing away from
+    /// the other body, and the impulse along it.
+    /// </summary>
+    private readonly record struct Touching(int Slot, int OtherSlot, Vector3 Point, Vector3 Normal, float Impulse);
+
+    /// <summary>
+    /// What the main thread hands the physics thread for one step: the time and the substeps, and the bodies whose
+    /// contacts it reads after. Written before the step is handed over (<see cref="Kick"/>), read by the physics thread
+    /// until it has stepped.
+    /// </summary>
+    private sealed class StepInput
+    {
+        internal float StepSec { get; set; }
+
+        internal int Substeps { get; set; }
+
+        internal List<Listener> Listening { get; } = [];
+    }
+
+    /// <summary>
+    /// What one step read for the main thread: every body that moved, and what each listening body touches, one body's
+    /// touches together. Written by the physics thread as it steps, taken in by the main thread once it has
+    /// (<see cref="Apply"/>).
+    /// </summary>
+    private sealed class StepOutput
+    {
+        internal List<Moved> Moves { get; } = [];
+
+        internal List<Touching> Touches { get; } = [];
+    }
 
     /// <summary>
     /// An entity's body, with its components as the body last saw them, which the next step's are compared with.

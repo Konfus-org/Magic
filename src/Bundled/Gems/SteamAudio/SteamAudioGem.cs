@@ -41,7 +41,7 @@ namespace Magic.SteamAudio;
 /// entity's sound is compared with the copy kept from the last, as the physics gem compares bodies: what a script
 /// changed is carried over, and how far in each sound is, and whether one has ended, is written back. The nearest
 /// sounds, as many as the settings' voices, are heard; the rest go on in silence, their time running, until they are
-/// near again. SDL's audio thread plays the heard ones (<see cref="Voices"/>).
+/// near again. SDL's audio thread plays the heard ones (<see cref="Mixer"/>).
 /// <para>
 /// Steam Audio's scene and simulator are a thread of the gem's own, the simulation thread: the main thread gathers,
 /// each frame, where the listener and each heard sound are and what is solid near the player
@@ -78,12 +78,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// The share of a sound's range over which it fades out, at its far end, as Steam Audio's own fall-off never
     /// reaches silence.
     /// </summary>
-    private const float Fade = 0.2f;
+    private const float FadeShare = 0.2f;
 
     /// <summary>
     /// How far a sound at the listener's head is taken to be: one closer has no side to be heard from.
     /// </summary>
-    private const float Closest = 0.001f;
+    private const float ClosestDistance = 0.001f;
 
     /// <summary>
     /// Occlusion rays cast from the listener toward the sphere around each sound, the most a sound is traced with.
@@ -174,10 +174,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     private readonly unsafe _IPLEmbreeDevice_t* _embree;
     private readonly unsafe _IPLScene_t* _scene;
     private readonly unsafe _IPLSimulator_t* _simulator;
-    private readonly Voices? _sounds;
+    private readonly Mixer? _mixer;
     private readonly SoundWorld? _soundWorld;
     private readonly bool _isAudioStarted;
-    private readonly bool _isSimulating;
 
     /// <summary>
     /// What the main thread holds of each slot: the voice in it, which start it is, and the stream and pinned samples
@@ -187,15 +186,23 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     private readonly Stack<int> _free = [];
 
     /// <summary>
-    /// The slot each reflector echoes, or -1; the main thread's copy of what it told the slots.
+    /// The slot each reflector echoes, or -1, which each slot is told (<see cref="WriteReflectors"/>).
     /// </summary>
     private readonly int[] _reflected = [];
 
     /// <summary>
-    /// What the simulation thread works from: three, so the main thread fills one, the simulation thread reads another,
-    /// and the third is the newest filled, swapped whole between them.
+    /// What the simulation thread works from, a triple buffer: the main thread fills one, the simulation thread reads
+    /// another, and the third is the newest filled, swapped whole between them.
     /// </summary>
     private readonly SimulationFrame[] _frames = [];
+
+    /// <summary>
+    /// The settings the simulator was created with as its most, which a trace keeps to on the simulation thread
+    /// however the held settings change before a restart.
+    /// </summary>
+    private readonly int _rays;
+    private readonly float _reverbSec;
+    private readonly int _order;
     private unsafe SDL_AudioStream* _device;
     private GCHandle _self;
     private IPLCoordinateSpace3 _listener = new()
@@ -209,17 +216,17 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     private int _newest = 1;
     private int _reading = 2;
     private int _isNewest;
-    private float _sinceGatheredSec = GatherSec;
+
+    /// <summary>
+    /// When the solids were last gathered, on the real clock; never, until the first frame or once the world empties,
+    /// so they are gathered at once.
+    /// </summary>
+    private double _gatheredAtSec = double.NegativeInfinity;
 
     /// <summary>
     /// The run is ending: the simulation thread returns when next woken.
     /// </summary>
     private bool _isEnding;
-
-    /// <summary>
-    /// Which frame this is, stamped on each voice seen in it: one not stamped is of an entity gone.
-    /// </summary>
-    private uint _frame;
 
     /// <summary>
     /// The device is paused, as the app is (<see cref="Idle"/>), until the next frame. Main thread.
@@ -254,6 +261,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         _world = world;
         _assets = assets;
         _settings = settings;
+        _rays = settings.Rays;
+        _reverbSec = settings.ReverbSec;
+        _order = settings.Order;
         _surroundings = new Surroundings(assets);
         if (run.IsHeadless)
         {
@@ -312,10 +322,10 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             sceneType = sceneSettings.type,
             reflectionType = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION,
             maxNumOcclusionSamples = OcclusionSamples,
-            maxNumRays = settings.Rays,
+            maxNumRays = _rays,
             numDiffuseSamples = 32,
-            maxDuration = settings.ReverbSec,
-            maxOrder = settings.Order,
+            maxDuration = _reverbSec,
+            maxOrder = _order,
             maxNumSources = Math.Max(1, settings.ReflectionSources),
             numThreads = Math.Max(1, Environment.ProcessorCount / 4),
             samplingRate = settings.SampleRate,
@@ -326,15 +336,15 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         _simulator = simulator;
         iplSceneCommit(scene);
         iplSimulatorSetScene(simulator, scene);
-        Voices sounds = new(context, hrtf, simulator, settings);
+        Mixer mixer = new(context, hrtf, simulator, settings);
         iplSimulatorCommit(simulator);
 
-        _self = GCHandle.Alloc(sounds);
+        _self = GCHandle.Alloc(mixer);
         SDL_AudioSpec device = new() { format = SDL_AUDIO_F32, channels = 2, freq = settings.SampleRate };
         _device = SDL_OpenAudioDeviceStream(
             SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
             &device,
-            &Voices.OnAudio,
+            &Mixer.OnAudio,
             (void*)GCHandle.ToIntPtr(_self));
         if (_device is null)
         {
@@ -342,13 +352,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             Debugging.Warn("Sound is not played, as SDL could not open this machine's audio device: "
                 + $"{CString.Read(SDL_GetError())}. Every sound goes on in silence.");
             _self.Free();
-            sounds.Dispose();
+            mixer.Dispose();
 
             return;
         }
 
         // Every slot starts free, pushed last first so the first is taken first.
-        _sounds = sounds;
+        _mixer = mixer;
         _soundWorld = new SoundWorld(context, scene, sceneSettings);
         _holds = new Hold[settings.Voices];
         for (int i = _holds.Length - 1; i >= 0; i--)
@@ -363,7 +373,6 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         Array.Fill(_reflected, -1);
         _frames = [new SimulationFrame(settings), new SimulationFrame(settings), new SimulationFrame(settings)];
         SDL_ResumeAudioStreamDevice(_device);
-        _isSimulating = true;
         threads.RunAsync("Audio simulation", RunSimulation).FireAndForget();
         string tracer = sceneSettings.type == IPL_SCENETYPE_EMBREE ? "Embree" : "its own tracer";
         Debugging.Info($"Steam Audio {STEAMAUDIO_VERSION_MAJOR}.{STEAMAUDIO_VERSION_MINOR}.{STEAMAUDIO_VERSION_PATCH} "
@@ -393,11 +402,11 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         foreach (Hold hold in _holds)
         {
-            hold.Let();
+            hold.Release();
         }
 
         _soundWorld?.Dispose();
-        _sounds?.Dispose();
+        _mixer?.Dispose();
         _wake.Dispose();
         _simulationEnded.Dispose();
         if (_context is not null)
@@ -430,24 +439,23 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         WorldStream stream = _world.Stream;
-        _frame++;
         TakeArrived();
         _surroundings.TakeArrived();
         if (stream.IsEmptied) Forget(stream.Prefabs);
 
         FindListener();
-        if (_sounds is not null)
+        if (_mixer is not null)
         {
-            _sounds.Volume = _settings.Volume;
-            _sounds.IsReflecting = _settings.HasReflections && _reflected.Length > 0;
-            TakeReleased(_sounds);
+            _mixer.Volume = _settings.Volume;
+            _mixer.IsReflecting = _settings.HasReflections && _reflected.Length > 0;
+            TakeReleased(_mixer);
         }
 
-        FollowSounds(stream.IsHeld ? 0 : frame.RealDeltaSec, frame.IsPaused);
+        FollowSounds(frame.Index, stream.IsHeld ? 0 : frame.RealDeltaSec, frame.IsPaused);
 
-        if (_sounds is null) return;
+        if (_mixer is null) return;
 
-        if (!stream.IsHeld) Assign();
+        if (!stream.IsHeld) Assign(frame.Index);
 
         // This frame's listener, slots, echoes and, a few times a second, the solids near the player, written into the
         // frame being filled, which is then swapped in as the newest and the simulation thread woken to take it.
@@ -455,16 +463,15 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         filling.Listener = _listener;
         filling.ListenerPosition = _listenerPosition;
         filling.Bounces = _settings.Bounces;
-        filling.IsReflecting = _sounds.IsReflecting;
+        filling.IsReflecting = _mixer.IsReflecting;
         filling.ReflectionPeriodSec = 1 / Math.Clamp(_settings.ReflectionRate, 1, 60);
         filling.PlacingSec = stream.IsHeld ? double.PositiveInfinity : PlacingSec;
-        Steer(_sounds, filling);
-        Reflect(_sounds, filling);
-        _sinceGatheredSec += frame.RealDeltaSec;
-        filling.HasSolids = _sinceGatheredSec >= GatherSec;
+        Steer(_mixer, filling);
+        Reflect(_mixer, filling);
+        filling.HasSolids = frame.RealSec - _gatheredAtSec >= GatherSec;
         if (filling.HasSolids)
         {
-            _sinceGatheredSec = 0;
+            _gatheredAtSec = frame.RealSec;
             _gathered++;
             _surroundings.Gather(_world, CollectionsMarshal.AsSpan(_players), _settings.Range, filling.Solids);
         }
@@ -504,7 +511,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         Volatile.Write(ref _isEnding, true);
         _wake.Set();
-        if (_isSimulating) _simulationEnded.Wait(CancellationToken.None);
+        if (_soundWorld is not null) _simulationEnded.Wait(CancellationToken.None);
     }
 
     /// <summary>
@@ -516,11 +523,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     {
         HashSet<Handle<Audio>> audios = [];
         HashSet<Handle<Model>> models = [];
-        foreach (Prefab prefab in stream.TakingIn)
-        {
-            AddAudios(prefab.Parts, audios);
-            Surroundings.AddModels(prefab.Parts, models);
-        }
+        AddAudiosAndModels(stream.TakingIn, audios, models);
 
         int done = 0;
         foreach (Handle<Audio> audio in audios)
@@ -530,7 +533,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         foreach (Handle<Model> model in models)
         {
-            if (_sounds is null || _surroundings.IsFitted(model)) done++;
+            if (_mixer is null || _surroundings.IsFitted(model)) done++;
         }
 
         int count = audios.Count + models.Count;
@@ -543,7 +546,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// it and placed with no limit on time while it is held; at once with nothing to play sound on, as there is no
     /// scene.
     /// </summary>
-    public bool IsReady(in WorldStream stream) => _sounds is null || Volatile.Read(ref _placed) >= _firstGathering;
+    public bool IsReady(in WorldStream stream) => _mixer is null || Volatile.Read(ref _placed) >= _firstGathering;
 
     /// <summary>
     /// Sounds everywhere first, then the nearest: the order voices are given slots in.
@@ -558,11 +561,30 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         return a.Distance.CompareTo(b.Distance);
     }
 
-    private static void Check(IPLerror error, string what)
+    /// <summary>
+    /// Throws when Steam Audio could not make <paramref name="what"/>, as the gem cannot play sound without it.
+    /// </summary>
+    internal static void Check(IPLerror error, string what)
     {
         if (error == IPL_STATUS_SUCCESS) return;
 
         throw new InvalidOperationException($"Steam Audio could not make {what}: {error}.");
+    }
+
+    /// <summary>
+    /// The audio files <paramref name="prefabs"/>' sounds play, into <paramref name="audios"/>, and the models their
+    /// solids are shaped like, into <paramref name="models"/>.
+    /// </summary>
+    private static void AddAudiosAndModels(
+        IReadOnlyList<Prefab> prefabs,
+        HashSet<Handle<Audio>> audios,
+        HashSet<Handle<Model>> models)
+    {
+        foreach (Prefab prefab in prefabs)
+        {
+            AddAudios(prefab.Parts, audios);
+            Surroundings.AddModels(prefab.Parts, models);
+        }
     }
 
     private static void AddAudios(IReadOnlyList<PrefabPart> parts, HashSet<Handle<Audio>> audios)
@@ -690,12 +712,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     {
         HashSet<Handle<Audio>> audios = [];
         HashSet<Handle<Model>> models = [];
-        foreach (Prefab prefab in prefabs)
-        {
-            AddAudios(prefab.Parts, audios);
-            Surroundings.AddModels(prefab.Parts, models);
-        }
-
+        AddAudiosAndModels(prefabs, audios, models);
         foreach ((_, Span<Sound> sounds) in _world.Query<Sound>())
         {
             foreach (Sound sound in sounds)
@@ -714,7 +731,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         ForgetAudios(audios);
         _surroundings.Forget(models);
-        _sinceGatheredSec = GatherSec;
+        _gatheredAtSec = double.NegativeInfinity;
         _firstGathering = _gathered + 1;
     }
 
@@ -777,14 +794,14 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         _listenerPosition = found.Position;
         _listener = ToSpace(found.Position, found.Rotation);
-        _sounds?.Listener = _listener;
+        _mixer?.Listener = _listener;
     }
 
     /// <summary>
     /// Takes back every slot the audio thread let go since the last frame: its stream is destroyed and its samples
     /// unpinned, and a sound that ended of itself is stopped. Also tells again a free the audio thread had no room for.
     /// </summary>
-    private void TakeReleased(Voices sounds)
+    private void TakeReleased(Mixer mixer)
     {
         for (int i = 0; i < _holds.Length; i++)
         {
@@ -792,14 +809,15 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
             if (hold.Stream == 0) continue;
 
-            // Not let go yet: a free the audio thread had no room for is told again.
-            Voices.Slot slot = sounds.Slots[i];
+            // Not let go yet: a free the audio thread had no room for is told again. A slot whose voice was taken from
+            // it is being freed.
+            Mixer.Slot slot = mixer.Slots[i];
             if (slot.Released != hold.Generation)
             {
-                if (hold.IsFreeing && !hold.IsFreeTold)
+                if (hold.Voice is null && !hold.IsFreeTold)
                 {
-                    hold.IsFreeTold = sounds.TryTell(
-                        new VoiceCommand { Action = VoiceAction.Free, Slot = i, Generation = hold.Generation });
+                    hold.IsFreeTold = mixer.TryTell(
+                        new SlotCommand { Action = SlotAction.Free, Slot = i, Generation = hold.Generation });
                 }
 
                 continue;
@@ -818,18 +836,22 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 if (_reflected[k] == i) _reflected[k] = -1;
             }
 
-            hold.Let();
+            hold.Release();
             _free.Push(i);
         }
+
+        // Before a slot let go is started again, so it starts with no echo.
+        WriteReflectors(mixer);
     }
 
     /// <summary>
-    /// Brings every voice up to date with its entity's sound, and writes back how far in it is: a script's writes are
-    /// carried over, a sound that is not heard has its time run on as if it were, and the voices that want to be heard
-    /// are listed for <see cref="Assign"/>. While the world is paused (<paramref name="isPaused"/>), only the sounds of
-    /// entities tagged <see cref="Tag.Unpausable"/> are; every other holds where it is.
+    /// Brings every voice up to date with its entity's sound in frame <paramref name="frame"/>, and writes back how far
+    /// in it is: a script's writes are carried over, a sound that is not heard has its time run on as if it were, and
+    /// the voices that want to be heard are listed for <see cref="Assign"/>. While the world is paused
+    /// (<paramref name="isPaused"/>), only the sounds of entities tagged <see cref="Tag.Unpausable"/> are; every other
+    /// holds where it is.
     /// </summary>
-    private void FollowSounds(float deltaSec, bool isPaused)
+    private void FollowSounds(ulong frame, float deltaSec, bool isPaused)
     {
         _wanted.Clear();
         foreach (EcsChunk<Transform, Sound> chunk in _world.Query<Transform, Sound>())
@@ -838,7 +860,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             for (int i = 0; i < entities.Length; i++)
             {
                 bool isHeld = isPaused && !IsUnpausable(entities[i]);
-                Follow(entities[i], transforms[i], ref sounds[i], isHeld ? 0 : deltaSec, isHeld);
+                Follow(entities[i], transforms[i], ref sounds[i], frame, isHeld ? 0 : deltaSec, isHeld);
             }
         }
 
@@ -846,7 +868,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         // the voices cannot change while they are walked.
         foreach ((Entity entity, Voice voice) in _voices)
         {
-            if (voice.Seen != _frame) _gone.Add(entity);
+            if (voice.Seen != frame) _gone.Add(entity);
         }
 
         foreach (Entity entity in _gone)
@@ -858,41 +880,41 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// <see cref="FollowSounds"/> for one entity's sound, its time run on by <paramref name="deltaSec"/> when it is not
-    /// heard; held where it is, when <paramref name="isHeld"/>, it wants no voice, so it is not heard.
+    /// <see cref="FollowSounds"/> for one entity's sound, seen in frame <paramref name="frame"/>, its time run on by
+    /// <paramref name="deltaSec"/> when it is not heard; held where it is, when <paramref name="isHeld"/>, it wants no
+    /// voice, so it is not heard.
     /// </summary>
-    private void Follow(Entity entity, in Transform transform, ref Sound sound, float deltaSec, bool isHeld)
+    private void Follow(
+        Entity entity,
+        in Transform transform,
+        ref Sound sound,
+        ulong frame,
+        float deltaSec,
+        bool isHeld)
     {
         if (!_voices.TryGetValue(entity, out Voice? voice))
         {
-            voice = new Voice
-            {
-                Entity = entity,
-                Sound = sound,
-                TimeSec = sound.TimeSec,
-                WrittenTimeSec = sound.TimeSec,
-                WrittenPlayback = sound.Playback
-            };
+            voice = new Voice { Entity = entity, Sound = sound, TimeSec = sound.TimeSec };
             _voices.Add(entity, voice);
         }
 
-        // What a script wrote since the last frame, told from what the gem wrote back then: another audio or space
-        // needs another slot, another audio from its start; another time is sought; and a pause or stop lets the slot
-        // go, a stop back to the start.
-        voice.Seen = _frame;
+        // What a script wrote since the last frame, told from the sound as the gem wrote it back then: another audio or
+        // space needs another slot, another audio from its start; another time is sought; and a pause or stop lets the
+        // slot go, a stop back to the start.
+        voice.Seen = frame;
         if (sound.Audio != voice.Sound.Audio || sound.Space != voice.Sound.Space)
         {
             Free(voice);
             if (sound.Audio != voice.Sound.Audio) voice.TimeSec = 0;
         }
 
-        if (sound.TimeSec != voice.WrittenTimeSec)
+        if (sound.TimeSec != voice.Sound.TimeSec)
         {
             voice.TimeSec = Math.Max(0, sound.TimeSec);
             voice.IsSeeking = true;
         }
 
-        if (sound.Playback != voice.WrittenPlayback && sound.Playback != Playback.Playing)
+        if (sound.Playback != voice.Sound.Playback && sound.Playback != Playback.Playing)
         {
             Free(voice);
             if (sound.Playback == Playback.Stopped) voice.TimeSec = 0;
@@ -900,7 +922,6 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         // How far in it is now: one that ended is stopped, one heard is where the audio thread has played to unless a
         // seek is on its way, and one playing but not heard runs on in silence.
-        voice.Sound = sound;
         voice.Position = transform.Position;
         voice.Rotation = transform.Rotation;
         voice.Distance = Vector3.Distance(transform.Position, _listenerPosition);
@@ -912,9 +933,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             sound.Playback = Playback.Stopped;
             voice.TimeSec = 0;
         }
-        else if (voice.Slot >= 0 && _sounds is not null && !voice.IsSeeking)
+        else if (voice.Slot >= 0 && _mixer is not null && !voice.IsSeeking)
         {
-            Voices.Slot slot = _sounds.Slots[voice.Slot];
+            Mixer.Slot slot = _mixer.Slots[voice.Slot];
             if (slot.Started == voice.Generation) voice.TimeSec = slot.TimeSec;
         }
         else if (voice.Slot < 0 && sound.Playback == Playback.Playing && audio is not null)
@@ -924,12 +945,10 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         bool isAudible = !isHeld && sound.Playback == Playback.Playing && audio?.Samples.Length > 0
             && (sound.Space == SoundSpace.Everywhere || voice.Distance < sound.Range);
-        if (isAudible && _sounds is not null) _wanted.Add(voice);
+        if (isAudible && _mixer is not null) _wanted.Add(voice);
 
         // Written back for scripts to read, and kept to tell what a script writes next from it.
         sound.TimeSec = (float)voice.TimeSec;
-        voice.WrittenTimeSec = sound.TimeSec;
-        voice.WrittenPlayback = sound.Playback;
         voice.Sound = sound;
     }
 
@@ -941,21 +960,22 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         => _world.Has<Tags>(entity) && _world.Get<Tags>(entity).Has(Tag.Unpausable);
 
     /// <summary>
-    /// Gives slots to the nearest voices that want one, sounds everywhere first, as many as there are, taking slots
-    /// from the voices that no longer want one or are no longer among the nearest, which go on in silence.
+    /// Gives slots to the nearest voices that want one in frame <paramref name="frame"/>, sounds everywhere first, as
+    /// many as there are, taking slots from the voices that no longer want one or are no longer among the nearest,
+    /// which go on in silence.
     /// </summary>
-    private void Assign()
+    private void Assign(ulong frame)
     {
         _wanted.Sort(_byNearness);
         int heard = Math.Min(_wanted.Count, _holds.Length);
         for (int i = 0; i < heard; i++)
         {
-            _wanted[i].Chosen = _frame;
+            _wanted[i].Chosen = frame;
         }
 
         foreach (Hold hold in _holds)
         {
-            if (hold.Voice is { } voice && voice.Chosen != _frame) Free(voice);
+            if (hold.Voice is { } voice && voice.Chosen != frame) Free(voice);
         }
 
         for (int i = 0; i < heard && _free.Count > 0; i++)
@@ -971,7 +991,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private unsafe void Start(Voice voice)
     {
-        if (_sounds is null || voice.Audio is not { } audio) return;
+        if (_mixer is null || voice.Audio is not { } audio) return;
 
         int index = _free.Peek();
         // From the file's rate and channels to the device's rate, mono for a sound in the world, which Steam Audio
@@ -997,9 +1017,9 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         }
 
         MemoryHandle pin = audio.Samples.Pin();
-        VoiceCommand command = new()
+        SlotCommand command = new()
         {
-            Action = VoiceAction.Start,
+            Action = SlotAction.Start,
             Slot = index,
             Generation = hold.Generation + 1,
             TimeSec = voice.TimeSec,
@@ -1011,7 +1031,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             DurationSec = audio.DurationSec,
             IsEverywhere = voice.Sound.Space == SoundSpace.Everywhere,
         };
-        if (!_sounds.TryTell(command))
+        if (!_mixer.TryTell(command))
         {
             pin.Dispose();
             SDL_DestroyAudioStream(stream);
@@ -1034,14 +1054,12 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// </summary>
     private void Free(Voice voice)
     {
-        if (voice.Slot < 0 || _sounds is null) return;
+        if (voice.Slot < 0 || _mixer is null) return;
 
         Hold hold = _holds[voice.Slot];
         hold.Voice = null;
-        hold.IsFreeing = true;
-        hold.IsFreeTold = _sounds.TryTell(
-            new VoiceCommand { Action = VoiceAction.Free, Slot = voice.Slot, Generation = hold.Generation });
-        _sounds.Slots[voice.Slot].Reflector = -1;
+        hold.IsFreeTold = _mixer.TryTell(
+            new SlotCommand { Action = SlotAction.Free, Slot = voice.Slot, Generation = hold.Generation });
         voice.Slot = -1;
         Debugging.Verbose($"Entity {voice.Entity.Id}'s sound goes on in silence.");
     }
@@ -1051,7 +1069,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// from the listener and what the simulation thread is to work out for it: its place, its focus, how it falls off,
     /// and what is in the way unless it is unoccluded. A slot no sound is in is simulated for nothing.
     /// </summary>
-    private unsafe void Steer(Voices sounds, SimulationFrame filling)
+    private unsafe void Steer(Mixer mixer, SimulationFrame filling)
     {
         IPLVector3 listener = _listener.origin;
         for (int i = 0; i < _holds.Length; i++)
@@ -1062,18 +1080,18 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
             // A sound in the world fades to silence over the far end of its range, as Steam Audio's fall-off never
             // does; a seek the audio thread had no room for is told again next frame.
-            Voices.Slot slot = sounds.Slots[i];
+            Mixer.Slot slot = mixer.Slots[i];
             Sound sound = voice.Sound;
             bool isWorld = sound.Space == SoundSpace.World;
-            float fade = isWorld ? Math.Clamp((sound.Range - voice.Distance) / (sound.Range * Fade), 0, 1) : 1;
+            float fade = isWorld ? Math.Clamp((sound.Range - voice.Distance) / (sound.Range * FadeShare), 0, 1) : 1;
             slot.Gain = sound.Volume * fade;
             slot.Pitch = sound.Pitch;
             slot.IsLooping = sound.IsLooping;
             if (voice.IsSeeking)
             {
-                voice.IsSeeking = !sounds.TryTell(new VoiceCommand
+                voice.IsSeeking = !mixer.TryTell(new SlotCommand
                 {
-                    Action = VoiceAction.Seek,
+                    Action = SlotAction.Seek,
                     Slot = i,
                     Generation = voice.Generation,
                     TimeSec = voice.TimeSec
@@ -1086,7 +1104,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             // straight from it, the same worked out as applied: fallen off with distance, dulled by the air, quieter
             // off its front, and muffled by what is in the way unless it is unoccluded.
             IPLVector3 position = SoundWorld.ToVector(voice.Position);
-            slot.Direction = voice.Distance < Closest
+            slot.Direction = voice.Distance < ClosestDistance
                 ? new IPLVector3 { z = -1 }
                 : iplCalculateRelativeDirection(_context, position, listener, _listener.ahead, _listener.up);
             IPLDirectSimulationFlags simulated = IPL_DIRECTSIMULATIONFLAGS_DISTANCEATTENUATION
@@ -1126,15 +1144,15 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// Gives the reflectors to the nearest heard sounds in the world that echo, keeping each with the sound it has
     /// while that is still among them, and writes where each reflector's sound is for the simulation thread.
     /// </summary>
-    private void Reflect(Voices sounds, SimulationFrame filling)
+    private void Reflect(Mixer mixer, SimulationFrame filling)
     {
         if (_reflected.Length == 0) return;
 
-        // The slots of the nearest heard sounds in the world that are not dry, one for each reflector, from the voices
+        // The slots of the nearest heard mixer in the world that are not dry, one for each reflector, from the voices
         // wanting a slot, which are sorted nearest first.
         Span<int> nearest = stackalloc int[_reflected.Length];
         int count = 0;
-        if (sounds.IsReflecting)
+        if (mixer.IsReflecting)
         {
             foreach (Voice voice in _wanted)
             {
@@ -1151,31 +1169,33 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         nearest = nearest[..count];
         for (int k = 0; k < _reflected.Length; k++)
         {
-            if (_reflected[k] < 0 || nearest.Contains(_reflected[k])) continue;
-
-            sounds.Slots[_reflected[k]].Reflector = -1;
-            _reflected[k] = -1;
+            if (!nearest.Contains(_reflected[k])) _reflected[k] = -1;
         }
 
         // A sound newly among them takes a free reflector; one already echoed keeps its own.
         foreach (int slot in nearest)
         {
-            if (Array.IndexOf(_reflected, slot) >= 0) continue;
-
-            int free = Array.IndexOf(_reflected, -1);
-            _reflected[free] = slot;
-            sounds.Slots[slot].Reflector = free;
+            if (Array.IndexOf(_reflected, slot) < 0) _reflected[Array.IndexOf(_reflected, -1)] = slot;
         }
 
+        WriteReflectors(mixer);
         for (int k = 0; k < _reflected.Length; k++)
         {
-            int slot = _reflected[k];
-            filling.IsEchoing[k] = slot >= 0 && _holds[slot].Voice is not null;
-            if (filling.IsEchoing[k] && _holds[slot].Voice is { } voice)
-            {
-                filling.Echoes[k] =
-                ToSpace(voice.Position, voice.Rotation);
-            }
+            Voice? echoed = _reflected[k] >= 0 ? _holds[_reflected[k]].Voice : null;
+            filling.IsEchoing[k] = echoed is not null;
+            if (echoed is not null) filling.Echoes[k] = ToSpace(echoed.Position, echoed.Rotation);
+        }
+    }
+
+    /// <summary>
+    /// Tells each slot which reflector it is echoed through, as <see cref="_reflected"/> says, or none: the audio thread
+    /// reads it as it mixes.
+    /// </summary>
+    private void WriteReflectors(Mixer mixer)
+    {
+        for (int i = 0; i < _holds.Length; i++)
+        {
+            mixer.Slots[i].Reflector = Array.IndexOf(_reflected, i);
         }
     }
 
@@ -1187,7 +1207,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     {
         try
         {
-            if (_sounds is null || _soundWorld is null) return;
+            if (_mixer is null || _soundWorld is null) return;
 
             long tracedTimestamp = 0;
             int taken = 0;
@@ -1209,7 +1229,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                 // Once the scene holds every solid of the gathering last taken, the main thread is told, for readying;
                 // once it has taken the first gathering since the world last emptied, the old world's solids are out of
                 // it, and it lets go of what none left needs, once.
-                Simulate(_sounds, _soundWorld, frame);
+                Simulate(_mixer, _soundWorld, frame);
                 if (_soundWorld.IsWhole) Volatile.Write(ref _placed, taken);
 
                 if (taken >= frame.ForgetAt && forgotten < frame.ForgetAt)
@@ -1222,7 +1242,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
                     && Stopwatch.GetElapsedTime(tracedTimestamp).TotalSeconds >= frame.ReflectionPeriodSec)
                 {
                     tracedTimestamp = Stopwatch.GetTimestamp();
-                    Trace(_sounds, frame);
+                    Trace(_mixer, frame);
                 }
             }
         }
@@ -1237,7 +1257,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// the direct sound of every slot worked out from where the frame says the listener and each sound are. On the
     /// simulation thread.
     /// </summary>
-    private unsafe void Simulate(Voices sounds, SoundWorld soundWorld, SimulationFrame frame)
+    private unsafe void Simulate(Mixer mixer, SoundWorld soundWorld, SimulationFrame frame)
     {
         long startTimestamp = _simulateDuration.Start();
         if (frame.HasSolids) soundWorld.Take(frame.Solids);
@@ -1254,7 +1274,7 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         {
             for (int i = 0; i < frame.Slots.Length; i++)
             {
-                iplSourceSetInputs(sounds.Slots[i].Source, IPL_SIMULATIONFLAGS_DIRECT, &inputs[i]);
+                iplSourceSetInputs(mixer.Slots[i].Source, IPL_SIMULATIONFLAGS_DIRECT, &inputs[i]);
             }
         }
 
@@ -1267,20 +1287,20 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     /// One trace: each reflector put where its sound is, or set to trace nothing, and the echoes worked out. On the
     /// simulation thread.
     /// </summary>
-    private unsafe void Trace(Voices sounds, SimulationFrame frame)
+    private unsafe void Trace(Mixer mixer, SimulationFrame frame)
     {
         long startTimestamp = _traceDuration.Start();
         IPLSimulationSharedInputs shared = new()
         {
             listener = frame.Listener,
-            numRays = _settings.Rays,
+            numRays = _rays,
             numBounces = frame.Bounces,
-            duration = _settings.ReverbSec,
-            order = _settings.Order,
+            duration = _reverbSec,
+            order = _order,
             irradianceMinDistance = 1,
         };
         iplSimulatorSetSharedInputs(_simulator, IPL_SIMULATIONFLAGS_REFLECTIONS, &shared);
-        IReadOnlyList<Voices.Reflector> reflectors = sounds.Reflectors;
+        IReadOnlyList<Mixer.Reflector> reflectors = mixer.Reflectors;
         for (int k = 0; k < reflectors.Count; k++)
         {
             IPLSimulationInputs source = new()
@@ -1304,13 +1324,16 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
     }
 
     /// <summary>
-    /// A sound as the gem follows it: the component as last seen, what the gem last wrote back, how far in it is, and
-    /// the slot it is heard in, or -1.
+    /// A sound as the gem follows it: the component as the gem last wrote it back, how far in it is, and the slot it
+    /// is heard in, or -1.
     /// </summary>
     private sealed class Voice
     {
         internal Entity Entity { get; init; }
 
+        /// <summary>
+        /// The component as the gem last wrote it back, which what a script writes next is told from.
+        /// </summary>
         internal Sound Sound { get; set; }
 
         internal Audio? Audio { get; set; }
@@ -1327,17 +1350,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         /// </summary>
         internal double TimeSec { get; set; }
 
-        internal float WrittenTimeSec { get; set; }
-
-        internal Playback WrittenPlayback { get; set; }
-
         /// <summary>
         /// Its time was set other than by playing, so the audio thread is to be told to play from there.
         /// </summary>
         internal bool IsSeeking { get; set; }
 
         /// <summary>
-        /// The audio thread said it ended of itself, which the next frame writes back as stopped.
+        /// The audio thread said it ended of itself, which following the sounds this frame writes back as stopped.
         /// </summary>
         internal bool HasEnded { get; set; }
 
@@ -1347,17 +1366,21 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
 
         internal float Distance { get; set; }
 
-        internal uint Seen { get; set; }
+        /// <summary>
+        /// The frame it was last seen in: one not seen this frame is of an entity gone.
+        /// </summary>
+        internal ulong Seen { get; set; }
 
         /// <summary>
         /// The frame it was last among the nearest that are heard.
         /// </summary>
-        internal uint Chosen { get; set; }
+        internal ulong Chosen { get; set; }
     }
 
     /// <summary>
     /// What the main thread holds of one slot: the voice heard in it, which start it is, and what it handed the audio
-    /// thread for that start, a stream and pinned samples, kept until the audio thread lets the start go.
+    /// thread for that start, a stream and pinned samples, kept until the audio thread lets the start go. One with a
+    /// stream and no voice is being freed.
     /// </summary>
     private sealed class Hold
     {
@@ -1370,10 +1393,8 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
         internal nint Stream { get; private set; }
 
         /// <summary>
-        /// The audio thread is to let the start go; and has been told so.
+        /// The audio thread has been told to let the start go.
         /// </summary>
-        internal bool IsFreeing { get; set; }
-
         internal bool IsFreeTold { get; set; }
 
         internal unsafe void Take(Voice voice, int generation, SDL_AudioStream* stream, MemoryHandle pin)
@@ -1382,14 +1403,13 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             Generation = generation;
             Stream = (nint)stream;
             _pin = pin;
-            IsFreeing = false;
             IsFreeTold = false;
         }
 
         /// <summary>
         /// Destroys the stream and unpins the samples, once the audio thread no longer reads them.
         /// </summary>
-        internal unsafe void Let()
+        internal unsafe void Release()
         {
             if (Stream != 0) SDL_DestroyAudioStream((SDL_AudioStream*)Stream);
 
@@ -1397,7 +1417,6 @@ internal sealed class SteamAudioGem : IGem, IPreloader, IDisposable
             _pin = default;
             Stream = 0;
             Voice = null;
-            IsFreeing = false;
             IsFreeTold = false;
         }
     }
