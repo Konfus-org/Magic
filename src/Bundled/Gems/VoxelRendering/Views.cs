@@ -13,8 +13,8 @@ using Magic.Interfaces;
 namespace Magic.VoxelRendering;
 
 /// <summary>
-/// What every view's constants are worked out from this frame: the copy of the world, the frame, where the player is,
-/// and the heap ids of the world's tables and the rest the views name (<see cref="WorldIds"/>).
+/// What the frame's constants and every view's are worked out from: the copy of the world, the frame, where the player
+/// is, and what the world's constants name (<see cref="WorldIds"/>).
 /// </summary>
 internal readonly record struct ViewFrame(
     Renderables Copy,
@@ -23,23 +23,22 @@ internal readonly record struct ViewFrame(
     WorldIds World);
 
 /// <summary>
-/// What a view's constants name the world by (<see cref="ViewConstants"/>): the heap ids of its tables, its geometry,
-/// the sampler materials are read with and the frame's raised failure codes, the sky's material row, and the heap id of
-/// the sky's harmonics.
+/// What the world's constants name (<see cref="WorldConstants"/>): its tables, its geometry, the sampler materials are
+/// read with and the frame's raised failure codes, the sky's material row, and the sky's harmonics.
 /// </summary>
 internal readonly record struct WorldIds(
-    uint Instances,
-    uint Models,
-    uint Levels,
-    uint Clusters,
-    uint Cards,
-    uint Materials,
-    uint MaterialBins,
-    uint Geometry,
-    uint MaterialSampler,
-    uint Failures,
+    GpuBuffer Instances,
+    GpuBuffer Models,
+    GpuBuffer Levels,
+    GpuBuffer Clusters,
+    GpuBuffer Cards,
+    GpuBuffer Materials,
+    GpuBuffer MaterialBins,
+    GpuBuffer Geometry,
+    GpuSampler MaterialSampler,
+    GpuBuffer Failures,
     uint SkyMaterial,
-    uint SkySh);
+    GpuBuffer SkySh);
 
 /// <summary>
 /// Where a view draws: a texture, the rectangle of it, its format, and whether it is a window's.
@@ -60,16 +59,35 @@ internal readonly record struct ViewTarget(GpuTexture Texture, Rectangle Area, G
 }
 
 /// <summary>
-/// Every camera's view drawn into the window: where it draws, its section of the window, and its constants, worked out
-/// each frame from the <see cref="WorldCopy"/>'s copy into a buffer of its own its shaders read. A view whose camera
-/// draws into a render texture is not drawn yet. Render thread.
+/// The frame's constants, which every pass reads, and every camera's view drawn into the window: where it draws, its
+/// section of the window, and its constants. Each worked out each frame from the <see cref="WorldCopy"/>'s copy into a
+/// buffer of its own, which a pass's header names (<see cref="PassHeader"/>). A view whose camera draws into a render
+/// texture is not drawn yet. Render thread.
 /// </summary>
-internal sealed class Views(IGpuDriver gpu, IWindow? window, VoxelRenderingSettings settings) : IDisposable
+internal sealed class Views : IDisposable
 {
+    private readonly IGpuDriver _gpu;
+    private readonly IWindow? _window;
+    private readonly VoxelRenderingSettings _settings;
     private readonly Dictionary<Entity, View> _views = [];
     private readonly HashSet<Entity> _seen = [];
     private readonly List<View> _drawn = [];
-    private GpuTexture _window;
+    private GpuTexture _windowImage;
+
+    internal Views(IGpuDriver gpu, IWindow? window, VoxelRenderingSettings settings)
+    {
+        _gpu = gpu;
+        _window = window;
+        _settings = settings;
+        World = gpu.CreateBuffer(
+            GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead,
+            (uint)Unsafe.SizeOf<WorldConstants>());
+    }
+
+    /// <summary>
+    /// The buffer of this frame's <see cref="WorldConstants"/>.
+    /// </summary>
+    internal GpuBuffer World { get; }
 
     public void Dispose()
     {
@@ -78,15 +96,18 @@ internal sealed class Views(IGpuDriver gpu, IWindow? window, VoxelRenderingSetti
             view.Dispose();
         }
 
-        gpu.Release(_window);
+        _gpu.Release(World);
+        _gpu.Release(_windowImage);
     }
 
     /// <summary>
-    /// The views this frame draws: each camera whose target has an image, its constants worked out and sent; a view
-    /// whose camera is gone is let go.
+    /// The frame's constants, sent, and the views this frame draws: each camera whose target has an image, its
+    /// constants worked out and sent; a view whose camera is gone is let go.
     /// </summary>
     internal List<View> Prepare(in ViewFrame frame)
     {
+        WorldConstants world = GetWorld(frame);
+        _gpu.Upload(World, 0, MemoryMarshal.AsBytes(new ReadOnlySpan<WorldConstants>(in world)));
         _drawn.Clear();
         _seen.Clear();
         foreach (CameraCopy camera in frame.Copy.Cameras)
@@ -94,13 +115,13 @@ internal sealed class Views(IGpuDriver gpu, IWindow? window, VoxelRenderingSetti
             _seen.Add(camera.Entity);
             if (!_views.TryGetValue(camera.Entity, out View? view))
             {
-                view = new View(gpu, camera.Entity.Id);
+                view = new View(_gpu, camera.Entity.Id);
                 _views[camera.Entity] = view;
             }
 
             if (GetTarget(camera.Camera.Target) is not { } target) continue;
 
-            view.Prepare(camera, target, settings, frame);
+            view.Prepare(camera, target, _settings, frame);
             _drawn.Add(view);
         }
 
@@ -121,10 +142,89 @@ internal sealed class Views(IGpuDriver gpu, IWindow? window, VoxelRenderingSetti
     /// </summary>
     internal GpuTexture GetWindow()
     {
-        if (window is not null && _window == GpuTexture.None) _window = gpu.GetWindowTarget(window);
+        if (_window is not null && _windowImage == GpuTexture.None) _windowImage = _gpu.GetWindowTarget(_window);
 
-        return _window;
+        return _windowImage;
     }
+
+    /// <summary>
+    /// The world's constants as the frame holds them: its clocks, its lights, weather and sky, and what it names.
+    /// </summary>
+    private static WorldConstants GetWorld(in ViewFrame frame)
+    {
+        Renderables copy = frame.Copy;
+        RenderEffects<IWeatherEffect> weather = copy.Weather?.Effects ?? default;
+        weather.TryGet(out Wind wind);
+        weather.TryGet(out Clouds clouds);
+        WorldIds ids = frame.World;
+
+        return new WorldConstants
+        {
+            Clocks = new FrameConstants(frame.Frame),
+            Lights = GetLights(copy),
+            Instances = ids.Instances,
+            Models = ids.Models,
+            Levels = ids.Levels,
+            Clusters = ids.Clusters,
+            Cards = ids.Cards,
+            Materials = ids.Materials,
+            MaterialBins = ids.MaterialBins,
+            Geometry = ids.Geometry,
+            SkyMaterial = ids.SkyMaterial,
+            MaterialSampler = ids.MaterialSampler,
+            Failures = ids.Failures,
+            SkySh = ids.SkySh,
+            Weather = new WeatherConstants
+            {
+                Wind = wind.Velocity,
+                Coverage = Math.Clamp(clouds.Coverage, 0, 1),
+                CloudColor = new Vector3(clouds.Color.R, clouds.Color.G, clouds.Color.B),
+                Density = Math.Clamp(clouds.Density, 0, 1),
+                CloudShadow = new Vector3(clouds.Shadow.R, clouds.Shadow.G, clouds.Shadow.B),
+            },
+            Celestial = GetCelestial(copy),
+        };
+    }
+
+    /// <summary>
+    /// The lights the frame holds: its key light, none without one, and the other directional lights, as many as fit.
+    /// </summary>
+    private static WorldLights GetLights(Renderables copy)
+    {
+        WorldLights lights = new()
+        {
+            Key = new DirectionalLightConstants
+            {
+                Direction = copy.KeyLightDirection,
+                AngularRadius = copy.KeyLight?.AngularRadius ?? 0,
+                Illuminance = copy.KeyLight?.Illuminance ?? Vector3.Zero,
+            },
+            DirectionalCount = (uint)Math.Min(copy.Directional.Count, DirectionalLights.Capacity),
+        };
+        for (int i = 0; i < (int)lights.DirectionalCount; i++)
+        {
+            lights.Directional[i] = new DirectionalLightConstants
+            {
+                Direction = copy.Directional[i].Direction,
+                Illuminance = copy.Directional[i].Illuminance,
+            };
+        }
+
+        return lights;
+    }
+
+    /// <summary>
+    /// The sky's sun and moon as the frame holds them, each pointing straight down and giving no light without one.
+    /// </summary>
+    private static CelestialConstants GetCelestial(Renderables copy) => new()
+    {
+        SunDirection = copy.Sun?.Direction ?? -Vector3.UnitY,
+        SunAngularRadius = copy.Sun?.AngularRadius ?? 0,
+        SunIlluminance = copy.Sun?.Illuminance ?? Vector3.Zero,
+        MoonDirection = copy.Moon?.Direction ?? -Vector3.UnitY,
+        MoonAngularRadius = copy.Moon?.AngularRadius ?? 0,
+        MoonIlluminance = copy.Moon?.Illuminance ?? Vector3.Zero,
+    };
 
     /// <summary>
     /// Where a camera draws this frame: its section of the window; none while the window has no image, and none for a
@@ -135,9 +235,11 @@ internal sealed class Views(IGpuDriver gpu, IWindow? window, VoxelRenderingSetti
         if (!target.IsWindow) return null;
 
         GpuTexture image = GetWindow();
-        Size size = image == GpuTexture.None ? Size.Empty : gpu.GetSize(image);
+        Size size = image == GpuTexture.None ? Size.Empty : _gpu.GetSize(image);
 
-        return size.IsEmpty ? null : new ViewTarget(image, target.Section.GetAreaIn(size), gpu.GetFormat(image), true);
+        return size.IsEmpty
+            ? null
+            : new ViewTarget(image, target.Section.GetAreaIn(size), _gpu.GetFormat(image), true);
     }
 }
 
@@ -149,7 +251,7 @@ internal sealed class View : IDisposable
 {
     /// <summary>
     /// A view's exposure until an exposure effect meters it: 1, the light as it is, not yet metered, as
-    /// Shaders/Effects/Exposure.comp.hlsl keeps it.
+    /// Shaders/Post/Exposure.slang keeps it.
     /// </summary>
     private static readonly float[] _unmetered = [1, 0, 0, 0];
 
@@ -182,8 +284,6 @@ internal sealed class View : IDisposable
     internal GpuBuffer Exposure { get; }
 
     internal ViewTarget Target { get; private set; }
-
-    internal ViewConstants Values { get; private set; }
 
     /// <summary>
     /// The view as the pipeline script sees it this frame.
@@ -220,17 +320,11 @@ internal sealed class View : IDisposable
             _hasLast = true;
         }
 
-        RenderEffects<IWeatherEffect> weather = frame.Copy.Weather?.Effects ?? default;
-        weather.TryGet(out Wind wind);
-        weather.TryGet(out Clouds clouds);
-        weather.TryGet(out Fog fog);
-        WorldIds world = frame.World;
-        Values = new ViewConstants
+        ViewConstants values = new()
         {
             ViewProj = viewProj,
             Rotation = view,
             PrevViewProj = _lastViewProj,
-            Frame = new FrameConstants(frame.Frame),
             CameraPosition = position,
             ClusterError = Math.Clamp(settings.ClusterError, 0.25f, 16),
             ViewSize = new Vector2(width, height),
@@ -238,46 +332,14 @@ internal sealed class View : IDisposable
             ProjScale = new Vector2(1 / tanX, 1 / tanY),
             Near = lens.Near,
             Far = lens.Far,
-            KeyLightDirection = frame.Copy.KeyLightDirection,
-            KeyLightAngularRadius = frame.Copy.KeyLight?.AngularRadius ?? 0,
-            KeyLightIlluminance = frame.Copy.KeyLight?.Illuminance ?? Vector3.Zero,
-            KeyLightThroughSky = frame.Copy.KeyLight is { IsSkyLight: true } ? 1u : 0u,
             OutputSize = new Vector2(target.Area.Width, target.Area.Height),
             CameraMotion = position - _lastPosition,
             PixelScale = height * 0.5f / tanY,
             PriorityPosition = (frame.Player ?? position) - position,
             TextureMipScale = 1,
             TargetEncoding = (uint)target.Encoding,
-            SkyMaterial = world.SkyMaterial,
-            MaterialSampler = world.MaterialSampler,
-            Failures = world.Failures,
-            Instances = world.Instances,
-            Models = world.Models,
-            Levels = world.Levels,
-            Clusters = world.Clusters,
-            Cards = world.Cards,
-            Materials = world.Materials,
-            MaterialBins = world.MaterialBins,
-            Geometry = world.Geometry,
-            Exposure = Exposure.Id,
-            SkySh = world.SkySh,
-            DirectionalCount = (uint)Math.Min(frame.Copy.Directional.Count, DirectionalLights.Capacity),
-            Weather = new WeatherConstants
-            {
-                Wind = wind.Velocity,
-                Coverage = Math.Clamp(clouds.Coverage, 0, 1),
-                CloudColor = new Vector3(clouds.Color.R, clouds.Color.G, clouds.Color.B),
-                Density = Math.Clamp(clouds.Density, 0, 1),
-                CloudShadow = new Vector3(clouds.Shadow.R, clouds.Shadow.G, clouds.Shadow.B),
-                Fog = MathF.Max(fog.Density, 0),
-                FogColor = new Vector3(fog.Color.R, fog.Color.G, fog.Color.B),
-                FogStart = MathF.Max(fog.Start, 0),
-            },
-            SkyLights = GetSkyLights(frame.Copy),
-            Directional = GetDirectionalLights(frame.Copy.Directional),
+            Exposure = Exposure,
         };
-
-        ViewConstants values = Values;
         _gpu.Upload(Constants, 0, MemoryMarshal.AsBytes(new ReadOnlySpan<ViewConstants>(in values)));
         Render = new RenderView(
             Id,
@@ -314,36 +376,5 @@ internal sealed class View : IDisposable
 
         static uint ToPixels(float size, float target)
             => (uint)Math.Clamp(MathF.Round(size), 1, Math.Max(1, MathF.Ceiling(target * 4)));
-    }
-
-    /// <summary>
-    /// The sky's sun and moon as the frame holds them, each pointing straight down and giving no light without one.
-    /// </summary>
-    private static SkyLightConstants GetSkyLights(Renderables copy) => new()
-    {
-        SunDirection = copy.Sun?.Direction ?? -Vector3.UnitY,
-        SunAngularRadius = copy.Sun?.AngularRadius ?? 0,
-        SunIlluminance = copy.Sun?.Illuminance ?? Vector3.Zero,
-        MoonDirection = copy.Moon?.Direction ?? -Vector3.UnitY,
-        MoonAngularRadius = copy.Moon?.AngularRadius ?? 0,
-        MoonIlluminance = copy.Moon?.Illuminance ?? Vector3.Zero,
-    };
-
-    /// <summary>
-    /// The directional lights that light the world alone, as many as the frame holds.
-    /// </summary>
-    private static DirectionalLights GetDirectionalLights(List<DirectionalCopy> lights)
-    {
-        DirectionalLights held = default;
-        for (int i = 0; i < Math.Min(lights.Count, DirectionalLights.Capacity); i++)
-        {
-            held[i] = new DirectionalLightConstants
-            {
-                Direction = lights[i].Direction,
-                Illuminance = lights[i].Illuminance,
-            };
-        }
-
-        return held;
     }
 }

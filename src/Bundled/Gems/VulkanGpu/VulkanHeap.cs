@@ -6,7 +6,7 @@ namespace Magic.VulkanGpu;
 
 /// <summary>
 /// The heap: one descriptor set holding every buffer, texture and sampler the GPU made, each at its handle's id in the
-/// array for its kind, as Shaders/Include/Heap.hlsli declares them; and the one pipeline layout of every pipeline, that
+/// array for its kind, as Shaders/Core/Heap.slang declares them; and the one pipeline layout of every pipeline, that
 /// set and a push constant block. A resource's descriptors are written as it is made, and its slot is written again
 /// only once its id is handed out again, which waits until no frame in flight can read it, so the set is never written
 /// where a frame still reads it.
@@ -15,7 +15,7 @@ internal sealed unsafe class VulkanHeap : IDisposable
 {
     /// <summary>
     /// The levels each texture has room for in the arrays of levels: a texture's level is at its id times this, plus
-    /// the level. Heap.hlsli's HEAP_LEVELS_PER_TEXTURE.
+    /// the level. Heap.slang's LevelsPerTexture.
     /// </summary>
     internal const uint LevelsPerTexture = 16;
 

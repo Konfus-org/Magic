@@ -33,7 +33,8 @@
 
   <!-- Where a library comes from: a Repository at a Tag, with the Submodules it builds from, paths in the repository
        and none unless named; or the archive at Url its author publishes, verified by Sha256, with the shared library at
-       Library in it. How it is built: in Release with its CMakeOptions, one CMake argument each, installed unless
+       Library in it, and the shared libraries it Loads itself, which go beside it under their own names. How it is
+       built: in Release with its CMakeOptions, one CMake argument each, installed unless
        CMakeTarget names the one target to build, after the libraries it DependsOn; or, for a library with no build of
        its own, compiled from its Sources. What is bound of it: its Headers, read with what it Defines, every
        declaration under its IncludePath bound under its C name, the functions and constants in a static class its
@@ -47,6 +48,7 @@
       <Url />
       <Sha256 />
       <Library />
+      <Loads />
       <CMakeOptions />
       <CMakeTarget />
       <DependsOn />
@@ -80,6 +82,8 @@
       <_NativeInclude Include="@(NativeLibrary)" Condition="'%(NativeLibrary.IncludePath)' != ''" />
       <_NativeGenerated Include="@(NativeLibrary)" Condition="'%(NativeLibrary.Headers)' != ''" />
       <_NativeBuilt Include="@(NativeLibrary->'%(Native)')" Condition="'%(NativeLibrary.HeadersOnly)' != 'true'" />
+      <_NativeLoaded Include="%(NativeLibrary.Loads)" Folder="$(MagicNativeLibs)%(NativeLibrary.Identity)/built/native/" />
+      <_NativeBuilt Include="@(_NativeLoaded->'%(Folder)%(Filename)%(Extension)')" />
       <_NativeShim Include="%(NativeLibrary.Shims)" Folder="%(NativeLibrary.ShimFolder)" />
       <_NativeShim>
         <Header>$([System.String]::Copy('%(Identity)').Split('=')[0].Trim())</Header>
@@ -382,11 +386,29 @@ if (Log.HasLoggedErrors)
     return false;
 }
 
+// What a library takes to built/native/: its shared library, under its item's name, and those it Loads, under theirs.
+string[] Taken(int i)
+{
+    string native = Libraries[i].GetMetadata("Native");
+    return new[] { native }.Concat(Split(Libraries[i].GetMetadata("Loads")).Select(loaded => Path.GetDirectoryName(native) + "/" + Path.GetFileName(loaded))).ToArray();
+}
+
+// A file copied by its name, so where Linux and macOS install the name as a link to the versioned file, what is copied
+// is the file.
+void Copy(string from, string to)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(to));
+    using (FileStream reading = File.OpenRead(from))
+    using (FileStream writing = File.Create(to))
+    {
+        reading.CopyTo(writing);
+    }
+}
+
 // The library's one shared library, taken to built/native/, where the project's build copies it from: at Library in
 // what was downloaded, else found by name in what was installed, then in CMake's working folder (a target built
-// alone). It is read through its name, so where Linux and macOS install the name as a link to the versioned file, what
-// is copied is the file. A working folder can be gone, as CI drops them before caching, and then nothing was rebuilt
-// and what was taken last time stands.
+// alone); and those it Loads, in what was downloaded. A working folder can be gone, as CI drops them before caching,
+// and then nothing was rebuilt and what was taken last time stands.
 bool Take(int i)
 {
     string native = Libraries[i].GetMetadata("Native");
@@ -408,11 +430,18 @@ bool Take(int i)
         return false;
     }
 
-    Directory.CreateDirectory(Path.GetDirectoryName(native));
-    using (FileStream from = File.OpenRead(found))
-    using (FileStream to = File.Create(native))
+    Copy(found, native);
+    string[] loads = Split(Libraries[i].GetMetadata("Loads"));
+    string[] taken = Taken(i);
+    for (int load = 0; load < loads.Length; load++)
     {
-        from.CopyTo(to);
+        if (!File.Exists(folders[i] + "/source/" + loads[load]))
+        {
+            Log.LogError("", "BND016", "", "", 0, 0, 0, 0, "{0} built, but there is no {1} in {2}: the item's Loads does not name a library it has.", names[i], loads[load], folders[i]);
+            return false;
+        }
+
+        Copy(folders[i] + "/source/" + loads[load], taken[load + 1]);
     }
 
     return true;
@@ -472,7 +501,7 @@ Mutex Lane()
     }
 }
 
-Func<int, bool> ready = i => File.Exists(markers[i]) && (Libraries[i].GetMetadata("HeadersOnly") == "true" || File.Exists(Libraries[i].GetMetadata("Native")));
+Func<int, bool> ready = i => File.Exists(markers[i]) && (Libraries[i].GetMetadata("HeadersOnly") == "true" || Taken(i).All(File.Exists));
 if (!Enumerable.Range(0, count).All(ready))
 {
     // Yielding while it waits and builds: the node builds other projects meanwhile, as a project waiting on a
@@ -608,7 +637,7 @@ Success = !Log.HasLoggedErrors;
        command line or the environment can change with no file changing. -->
   <Target Name="_DeclareNativeLibraries" DependsOnTargets="_LocateNativeLibraries" Condition="'@(NativeLibrary)' != '' and '$(DesignTimeBuild)' != 'true'">
     <WriteLinesToFile File="$(MagicNativeSuperbuild)declared.txt" Overwrite="true" WriteOnlyWhenDifferent="true"
-                      Lines="@(NativeLibrary->'%(Identity)|%(Repository)|%(Tag)|%(Submodules)|%(Url)|%(Sha256)|%(Library)|%(CMakeOptions)|%(CMakeTarget)|%(DependsOn)|%(Sources)|%(IncludePath)|%(Defines)|%(HeadersOnly)|%(Native)')" />
+                      Lines="@(NativeLibrary->'%(Identity)|%(Repository)|%(Tag)|%(Submodules)|%(Url)|%(Sha256)|%(Library)|%(Loads)|%(CMakeOptions)|%(CMakeTarget)|%(DependsOn)|%(Sources)|%(IncludePath)|%(Defines)|%(HeadersOnly)|%(Native)')" />
   </Target>
 
   <!-- Before the project's references, so a cold native build goes on while Core compiles. Skipped while nothing it

@@ -24,8 +24,8 @@ namespace Magic.Interfaces;
 /// </para>
 /// <para>
 /// The provider is made before every gem that takes it, so its Render runs after theirs: take it, and record in
-/// Render. Shaders are HLSL compiled for it by an <see cref="IShaderCompiler"/> into <see cref="ShaderFormat"/>, which
-/// read what they use through the heap (Shaders/Include/Heap.hlsli). A released object lives on until no frame in
+/// Render. Shaders are Slang compiled for it by an <see cref="IShaderCompiler"/> into <see cref="ShaderFormat"/>, which
+/// read what they use through the heap (Shaders/Core/Heap.slang). A released object lives on until no frame in
 /// flight can still use it. Making a buffer, texture or sampler that fails throws, being a caller's mistake (a format
 /// the GPU cannot use that way) or the machine out of memory; a pipeline is a <see cref="Result{T}"/>, its shaders
 /// being content.

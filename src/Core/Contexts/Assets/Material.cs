@@ -23,8 +23,8 @@ public enum MaterialType : byte
 }
 
 /// <summary>
-/// What a surface looks like: a surface shader (<c>.surf.hlsl</c>), values for the parameters its
-/// <c>MaterialParams</c> declares, and how it is blended. A <c>.mat</c> file is this class as JSON:
+/// What a surface looks like: a surface shader (Shaders/Core/Surface.slang), values for the parameters its struct
+/// declares, and how it is blended. A <c>.mat</c> file is this class as JSON:
 /// <c>{ "shader": { "id": 10001 }, "params": { "roughness": { "x": 0.8 } } }</c>. Its params, how it is blended and
 /// its sides may be set while it is drawn, on the main thread, and are drawn so from the next frame; what is set holds
 /// until the material is made again, as its file changes, and is not saved with the world.
@@ -48,8 +48,8 @@ public sealed class Material : IJsonAsset<Material>
     public bool IsDoubleSided { get; set; }
 
     /// <summary>
-    /// Values by the names of the shader's <c>MaterialParams</c> members, matched as HLSL does, case and all; one left
-    /// out takes the shader's default. Its values change, never the dictionary, so whatever draws it sees each change.
+    /// Values by the names of the fields of the shader's struct, case and all; one left out takes the field's
+    /// initializer. Its values change, never the dictionary, so whatever draws it sees each change.
     /// </summary>
     public MaterialParamDictionary Params { get; init; } = [];
 }

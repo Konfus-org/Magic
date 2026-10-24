@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
@@ -18,8 +19,7 @@ namespace Magic.ImGuiDebugUI.Resources.Scripts;
 /// </summary>
 internal sealed class DebugUi : IOverlayScript, IDisposable
 {
-    private const string VertexShader = "Shaders/Overlay/Overlay.vert.hlsl";
-    private const string FragmentShader = "Shaders/Overlay/Overlay.frag.hlsl";
+    private const string OverlayShader = "Shaders/Overlay/Overlay.slang";
 
     private readonly IGpuDriver _gpu;
     private readonly DrawLists _lists;
@@ -41,13 +41,13 @@ internal sealed class DebugUi : IOverlayScript, IDisposable
     /// Made by the renderer with the debug UI's draw lists, which the debug UI this gem provides copies each frame;
     /// another gem's debug UI has none, and the script is not made.
     /// </summary>
-    public DebugUi(IDebugUI ui, IGpuDriver gpu, IShaderCompiler compiler, App app)
+    public DebugUi(IDebugUI ui, IGpuDriver gpu, IShaderCompiler compiler, Assets assets, App app)
     {
         _gpu = gpu;
         _lists = ui is ImGuiDebugUIGem imgui
             ? imgui.DrawLists
             : throw new InvalidOperationException("The debug UI is not ImGui's, so it has no draw lists to draw.");
-        CompileAsync(compiler, app.Quitting).FireAndForget();
+        CompileAsync(compiler, assets.Find<Shader>(OverlayShader), app.Quitting).FireAndForget();
     }
 
     public void Dispose()
@@ -97,8 +97,7 @@ internal sealed class DebugUi : IOverlayScript, IDisposable
             0,
             GpuTexture.None,
             _sampler,
-            (uint)context.Encoding,
-            0);
+            (uint)context.Encoding);
         using GpuRenderPass pass = context.Begin()
             .Pipeline(pipeline)
             .Reads([_vertexBuffer])
@@ -205,25 +204,23 @@ internal sealed class DebugUi : IOverlayScript, IDisposable
         return _pipelines[format] = made.Ok ? made.Value : GpuPipeline.None;
     }
 
-    private async Task CompileAsync(IShaderCompiler compiler, CancellationToken stopping)
+    private async Task CompileAsync(IShaderCompiler compiler, Handle<Shader> shader, CancellationToken stopping)
     {
         Result<GpuShader> vertex = await compiler.CompileAsync(
-            VertexShader,
-            GpuStage.Vertex,
+            new ShaderEntry(shader, "DrawOverlay"),
             _gpu.ShaderFormat,
             stopping).ConfigureAwait(false);
         Result<GpuShader> fragment = await compiler.CompileAsync(
-            FragmentShader,
-            GpuStage.Fragment,
+            new ShaderEntry(shader, "ShadeOverlay"),
             _gpu.ShaderFormat,
             stopping).ConfigureAwait(false);
         _shaders = new Compiled(vertex, fragment);
     }
 
     /// <summary>
-    /// The constant block both stages read, laid out as the overlay shaders' <c>OverlayConstants</c>: one over the
-    /// target's size, the vertices, the draw's first vertex and texture, the sampler, and the target's
-    /// <see cref="TargetEncoding"/>, which the fragment stage encodes ImGui's sRGB colours for.
+    /// The constants both stages read, laid out as Overlay.slang's <c>OverlayConstants</c>: one over the target's size,
+    /// the vertices, the draw's first vertex and texture, the sampler, and the target's <see cref="TargetEncoding"/>,
+    /// which the fragment stage encodes ImGui's sRGB colours for.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct OverlayConstants(
@@ -232,8 +229,7 @@ internal sealed class DebugUi : IOverlayScript, IDisposable
         uint FirstVertex,
         GpuTexture Texture,
         GpuSampler Sampler,
-        uint Encoding,
-        uint Padding);
+        uint Encoding);
 
     /// <summary>
     /// The two stages as compiled, or why each did not.

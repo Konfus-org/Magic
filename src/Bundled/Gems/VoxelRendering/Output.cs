@@ -1,6 +1,7 @@
 using System.Drawing;
+using System.Numerics;
 using System.Runtime.InteropServices;
-using Magic.Contexts.Frames;
+using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
@@ -13,14 +14,15 @@ namespace Magic.VoxelRendering;
 /// Shows a view: its finished image scaled into its rectangle of its target and encoded as its image's format expects
 /// (<see cref="TargetEncoding"/>): as it is for a render texture, sRGB and dithered for an SDR window, PQ or scRGB for an
 /// HDR one. Over the image, the failure banner: what the failures said, as glyphs (<see cref="FailureHandler.Text"/>),
-/// and the codes the frame's shaders raised (<see cref="Raised"/>). A pipeline per target format, made the first time
-/// one is drawn into. It also keeps a copy of the window's image as the world loads (<see cref="Keep"/>), shown while
-/// the world that replaces it is readied out of sight. Render thread.
+/// and the codes the frame's shaders raised (<see cref="Raised"/>), pulsing by the frame's clocks, which its header
+/// names. A pipeline per target format, made the first time one is drawn into. It also keeps a copy of the window's
+/// image as the world loads (<see cref="Keep"/>), shown while the world that replaces it is readied out of sight.
+/// Render thread.
 /// </summary>
 internal sealed class Output : IDisposable
 {
-    private const string Vertex = "Shaders/Passes/Fullscreen.vert.hlsl";
-    private const string Fragment = "Shaders/Rendering/Output/Output.frag.hlsl";
+    private const string Vertex = "Shaders/Core/Pass.slang";
+    private const string Fragment = "Shaders/Renderer/Output.slang";
 
     /// <summary>
     /// What empties the raised codes each frame, a word per code.
@@ -28,6 +30,11 @@ internal sealed class Output : IDisposable
     private static readonly byte[] _noCodes = new byte[FailureHandler.CodeCount * sizeof(uint)];
 
     private readonly IGpuDriver _gpu;
+
+    /// <summary>
+    /// The buffer of the frame's constants, which the header names.
+    /// </summary>
+    private readonly GpuBuffer _world;
 
     /// <summary>
     /// The failure banner's glyphs as last sent, and which packing of them that was.
@@ -43,16 +50,22 @@ internal sealed class Output : IDisposable
     /// </summary>
     private volatile Compiled? _shaders;
 
-    internal Output(IGpuDriver gpu, IShaderCompiler compiler, CancellationToken stopping)
+    internal Output(
+        IGpuDriver gpu,
+        IShaderCompiler compiler,
+        Assets assets,
+        GpuBuffer world,
+        CancellationToken stopping)
     {
         _gpu = gpu;
+        _world = world;
         _banner = gpu.CreateBuffer(GpuBufferUsage.GraphicsRead, FailureHandler.TextWords * sizeof(uint));
         Raised = gpu.CreateBuffer(
             GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite,
             (uint)_noCodes.Length);
         _linear = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
         _nearest = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Nearest, GpuWrap.Clamp));
-        CompileAsync(compiler, stopping).FireAndForget();
+        CompileAsync(compiler, assets, stopping).FireAndForget();
     }
 
     /// <summary>
@@ -85,7 +98,7 @@ internal sealed class Output : IDisposable
     /// <paramref name="isCrisp"/> as it is scaled, with the failure banner over it (<see cref="SendBanner"/>). The rest
     /// of the target is cleared first when <paramref name="clears"/>; only the clear until the pipeline is made.
     /// </summary>
-    internal void Draw(ViewTarget target, GpuTexture image, bool isCrisp, bool clears, in Frame frame)
+    internal void Draw(ViewTarget target, GpuTexture image, bool isCrisp, bool clears)
     {
         GpuPipeline pipeline = GetPipeline(target.Format);
         if (pipeline == GpuPipeline.None || image == GpuTexture.None)
@@ -96,14 +109,12 @@ internal sealed class Output : IDisposable
         }
 
         OutputConstants constants = new(
-            image.Id,
-            (isCrisp ? _nearest : _linear).Id,
-            _banner.Id,
-            Raised.Id,
-            target.Area.Width,
-            target.Area.Height,
-            (uint)target.Encoding,
-            new FrameConstants(frame));
+            image,
+            isCrisp ? _nearest : _linear,
+            _banner,
+            Raised,
+            new Vector2(target.Area.Width, target.Area.Height),
+            (uint)target.Encoding);
         using GpuDebugGroup group = _gpu.Commands.DebugGroup("Output");
         using GpuRenderPass render = _gpu.Commands
             .RenderPass([new GpuTextureLevel(target.Texture)], clears ? GpuContents.Clear : GpuContents.Keep);
@@ -111,7 +122,7 @@ internal sealed class Output : IDisposable
             .Scissor(target.Area)
             .Reads([image, _banner, Raised])
             .Pipeline(pipeline)
-            .Constants(constants)
+            .Constants(new PassConstants<OutputConstants>(new PassHeader(_world, GpuBuffer.None), constants))
             .Draw(3);
     }
 
@@ -190,33 +201,32 @@ internal sealed class Output : IDisposable
         return pipeline;
     }
 
-    private async Task CompileAsync(IShaderCompiler compiler, CancellationToken stopping)
+    private async Task CompileAsync(IShaderCompiler compiler, Assets assets, CancellationToken stopping)
     {
-        Result<GpuShader> vertex = await compiler.CompileAsync(Vertex, GpuStage.Vertex, GpuShaderFormat.Spirv, stopping)
-            .ConfigureAwait(false);
+        Result<GpuShader> vertex = await compiler.CompileAsync(
+            new ShaderEntry(assets.Find<Shader>(Vertex), "DrawFullscreen"),
+            GpuShaderFormat.Spirv,
+            stopping).ConfigureAwait(false);
         Result<GpuShader> fragment = await compiler.CompileAsync(
-            Fragment,
-            GpuStage.Fragment,
+            new ShaderEntry(assets.Find<Shader>(Fragment), "ShowImage"),
             GpuShaderFormat.Spirv,
             stopping).ConfigureAwait(false);
         _shaders = new Compiled(vertex, fragment);
     }
 
     /// <summary>
-    /// The output's constants, as Output.frag.hlsl's <c>OutputConstants</c>: the image and the sampler it is read
-    /// through, the banner's glyphs and the raised codes, the view's size as it is shown, how it is encoded, and the
-    /// frame's clocks, the banner pulsing by its real time and its number dithering it.
+    /// The output's constants, as Output.slang's <c>OutputConstants</c>: the image and the sampler it is read
+    /// through, the banner's glyphs and the raised codes, the view's size as it is shown, and how it is encoded.
     /// </summary>
+    [ShaderStruct("Shaders/Renderer/Output.slang", "OutputConstants")]
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct OutputConstants(
-        uint Image,
-        uint Sampler,
-        uint Text,
-        uint Failures,
-        float Width,
-        float Height,
-        uint Encoding,
-        FrameConstants Frame);
+        GpuTexture Image,
+        GpuSampler Sampler,
+        GpuBuffer Text,
+        GpuBuffer Failures,
+        Vector2 Size,
+        uint Encoding);
 
     /// <summary>
     /// The two stages as compiled, or why each did not.

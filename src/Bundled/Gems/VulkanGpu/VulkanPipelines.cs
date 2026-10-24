@@ -5,15 +5,22 @@ using Vortice.Vulkan;
 namespace Magic.VulkanGpu;
 
 /// <summary>
-/// A pipeline, with the heap's layout it reads the heap and pushes its constants through.
+/// A pipeline, with the heap's layout it reads the heap and pushes its constants through, and the bytes of constants
+/// its shaders take, which each of its draws or dispatches pushes.
 /// </summary>
-internal sealed class VulkanPipeline(VkPipeline handle, VkPipelineLayout layout, VkPipelineBindPoint bindPoint)
+internal sealed class VulkanPipeline(
+    VkPipeline handle,
+    VkPipelineLayout layout,
+    VkPipelineBindPoint bindPoint,
+    uint constantBytes)
 {
     internal VkPipeline Handle { get; } = handle;
 
     internal VkPipelineLayout Layout { get; } = layout;
 
     internal VkPipelineBindPoint BindPoint { get; } = bindPoint;
+
+    internal uint ConstantBytes { get; } = constantBytes;
 }
 
 /// <summary>
@@ -38,9 +45,14 @@ internal sealed unsafe class VulkanPipelines(VulkanDevice device, VulkanHeap hea
                 return Result.Failure<VulkanPipeline>("The GPU would not take the shaders' code.");
 
             VkPipeline pipeline = CreateGraphicsPipeline(description, vertex, fragment, out VkResult result);
+            uint constantBytes = Math.Max(description.Vertex.ConstantBytes, description.Fragment.ConstantBytes);
 
             return result == VkResult.Success
-                ? Result.Success(new VulkanPipeline(pipeline, _heap.PipelineLayout, VkPipelineBindPoint.Graphics))
+                ? Result.Success(new VulkanPipeline(
+                    pipeline,
+                    _heap.PipelineLayout,
+                    VkPipelineBindPoint.Graphics,
+                    constantBytes))
                 : Result.Failure<VulkanPipeline>($"The GPU would not make the pipeline: {result}.");
         }
         finally
@@ -78,7 +90,11 @@ internal sealed unsafe class VulkanPipelines(VulkanDevice device, VulkanHeap hea
             _device.Api.vkDestroyShaderModule(module);
 
             return result == VkResult.Success
-                ? Result.Success(new VulkanPipeline(pipeline, _heap.PipelineLayout, VkPipelineBindPoint.Compute))
+                ? Result.Success(new VulkanPipeline(
+                    pipeline,
+                    _heap.PipelineLayout,
+                    VkPipelineBindPoint.Compute,
+                    compute.ConstantBytes))
                 : Result.Failure<VulkanPipeline>($"The GPU would not make the compute pipeline: {result}.");
         }
     }

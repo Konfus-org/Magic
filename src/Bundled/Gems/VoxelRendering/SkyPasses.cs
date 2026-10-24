@@ -8,15 +8,20 @@ using Magic.Services;
 namespace Magic.VoxelRendering;
 
 /// <summary>
-/// The sky's passes (<see cref="IRendering.CaptureSky"/>, <see cref="IRendering.DrawSky"/>), each composed with the
-/// world's sky: its light captured each frame into the renderer's own textures, kept from frame to frame, the DFG table
-/// every shading reads, the sky as a cube and its levels, its light from everywhere as harmonics, and its reflections
-/// for each roughness; and the sky drawn over what nothing was drawn on. Render thread.
+/// The sky's passes (<see cref="IRendering.CaptureSky"/>, <see cref="IRendering.DrawSky"/>), those that draw the sky
+/// specialized with the world's sky (Shaders/Renderer/Sky.slang): its light captured each frame into the renderer's own
+/// textures, kept from frame to frame, the sky as a cube and its levels, its light from everywhere as harmonics, and
+/// its reflections for each roughness, beside the DFG table every shading reads, written once; and the sky drawn over
+/// what nothing was drawn on. Render thread.
 /// </summary>
 internal sealed class SkyPasses : IDisposable
 {
-    private const GpuTextureUsage Target = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled;
     private const GpuTextureUsage Computed = GpuTextureUsage.ComputeWrite | GpuTextureUsage.Sampled;
+
+    /// <summary>
+    /// The renderer's own sky, which the passes that draw the sky are specialized with for a world without one.
+    /// </summary>
+    private const string FallbackSky = "FallbackSky";
 
     // The sky's reflections' levels, roughness 0 to 1, and the samples of the lobe each texel takes.
     private const uint SpecularLevels = 6;
@@ -24,23 +29,31 @@ internal sealed class SkyPasses : IDisposable
 
     private readonly IGpuDriver _gpu;
     private readonly Passes _passes;
+    private readonly GpuPipelines _pipelines;
+    private readonly Assets _assets;
     private readonly GpuTexture _dfg;
     private readonly GpuTexture _cube;
     private readonly GpuTexture _specular;
     private readonly GpuSampler _sampler;
-    private readonly Handle<Shader> _makeDfg;
-    private readonly Handle<Shader> _capture;
-    private readonly Handle<Shader> _project;
-    private readonly Handle<Shader> _prefilter;
-    private readonly Handle<Shader> _draw;
+    private readonly ShaderEntry _writeDfgTable;
+    private readonly ShaderEntry _filterSkyLight;
+    private ShaderEntry _captureSky;
+    private ShaderEntry _drawSky;
 
-    internal SkyPasses(IGpuDriver gpu, Passes passes, Assets assets)
+    /// <summary>
+    /// The pipeline the DFG table was last written with, which writes it again once it is made again.
+    /// </summary>
+    private GpuPipeline _dfgWrittenWith;
+
+    internal SkyPasses(IGpuDriver gpu, Passes passes, GpuPipelines pipelines, Assets assets)
     {
         _gpu = gpu;
         _passes = passes;
+        _pipelines = pipelines;
+        _assets = assets;
         _dfg = gpu.CreateTexture(new GpuTextureDescription(GpuFormat.Rgba16Float, Computed, 32, 32));
         _cube = gpu.CreateTexture(
-            new GpuTextureDescription(GpuFormat.Rgba16Float, Target, 128, 128, Levels: 8, Kind: GpuTextureKind.Cube));
+            new GpuTextureDescription(GpuFormat.Rgba16Float, Computed, 128, 128, Levels: 8, Kind: GpuTextureKind.Cube));
         _specular = gpu.CreateTexture(new GpuTextureDescription(
             GpuFormat.Rgba16Float,
             Computed,
@@ -52,17 +65,41 @@ internal sealed class SkyPasses : IDisposable
             GpuBufferUsage.GraphicsRead | GpuBufferUsage.ComputeRead | GpuBufferUsage.ComputeWrite,
             9 * 16);
         _sampler = gpu.CreateSampler(new GpuSamplerDescription(GpuFilter.Linear, GpuWrap.Clamp));
-        _makeDfg = assets.Find<Shader>("Shaders/Rendering/Sky/Dfg.comp.hlsl");
-        _capture = assets.Find<Shader>("Shaders/Rendering/Sky/Capture.frag.hlsl");
-        _project = assets.Find<Shader>("Shaders/Rendering/Sky/Sh.comp.hlsl");
-        _prefilter = assets.Find<Shader>("Shaders/Rendering/Sky/Prefilter.comp.hlsl");
-        _draw = assets.Find<Shader>("Shaders/Rendering/Sky/Sky.frag.hlsl");
+        Handle<Shader> module = assets.Find<Shader>("Shaders/Renderer/Sky.slang");
+        ShaderType[] fallback = [new ShaderType(Handle<Shader>.None, FallbackSky)];
+        _writeDfgTable = new ShaderEntry(module, "WriteDfgTable");
+        _filterSkyLight = new ShaderEntry(module, "FilterSkyLight");
+        _captureSky = new ShaderEntry(module, "CaptureSky") { Types = fallback };
+        _drawSky = new ShaderEntry(module, "DrawSky") { Types = fallback };
     }
 
     /// <summary>
     /// The sky's light from everywhere as nine harmonics, a float4 each, as last captured.
     /// </summary>
     internal GpuBuffer Sh { get; }
+
+    /// <summary>
+    /// The world's sky's shader, which the passes that draw the sky are specialized with, or none for the renderer's
+    /// own: this frame's.
+    /// </summary>
+    internal Handle<Shader> Sky
+    {
+        get;
+        set
+        {
+            if (value == field) return;
+
+            field = value;
+            ShaderType[] sky =
+            [
+                value == Handle<Shader>.None
+                    ? new ShaderType(Handle<Shader>.None, FallbackSky)
+                    : ShaderType.Of(value, _assets.GetPath(value) ?? string.Empty),
+            ];
+            _captureSky = _captureSky with { Types = sky };
+            _drawSky = _drawSky with { Types = sky };
+        }
+    }
 
     public void Dispose()
     {
@@ -75,54 +112,54 @@ internal sealed class SkyPasses : IDisposable
 
     internal SkyLight Capture(RenderView seenFrom)
     {
-        _passes.Dispatch(_makeDfg, new DfgConstants(_dfg), new GpuGroups(4, 4), [], [_dfg]);
-        for (uint face = 0; face < 6; face++)
+        GpuPipeline dfg = _pipelines.GetCompute(_writeDfgTable);
+        if (dfg != _dfgWrittenWith && dfg != GpuPipeline.None)
         {
-            _passes.Fullscreen(
-                _capture,
-                new CaptureConstants(seenFrom.Constants, face),
-                new GpuTextureLevel(_cube, 0, face),
-                GpuContents.Keep,
-                []);
+            _passes.Dispatch(seenFrom, _writeDfgTable, new DfgConstants(_dfg), new GpuGroups(4, 4), [], [_dfg]);
+            _dfgWrittenWith = dfg;
         }
 
+        _passes.Dispatch(seenFrom, _captureSky, new CaptureConstants(_cube), new GpuGroups(16, 16, 6), [], [_cube]);
         _gpu.Commands.GenerateMipmaps(_cube);
-        _passes.Dispatch(_project, new ShConstants(_cube, _sampler, Sh), new GpuGroups(1), [_cube], [Sh]);
         _passes.Dispatch(
-            _prefilter,
-            new PrefilterConstants(_cube, _sampler, _specular, SpecularLevels, SpecularSamples),
-            new GpuGroups(16, 16, 6 * SpecularLevels),
+            seenFrom,
+            _filterSkyLight,
+            new FilterConstants(_cube, _sampler, _specular, Sh, SpecularLevels, SpecularSamples),
+            new GpuGroups(16, 16, (6 * SpecularLevels) + 1),
             [_cube],
-            [_specular]);
+            [_specular, Sh]);
 
         return new SkyLight(_dfg, Sh, _specular, _sampler);
     }
 
     internal void Draw(RenderView view, GpuTexture depth, GpuTexture target)
-        => _passes.Fullscreen(
-            _draw,
-            new SkyConstants(view.Constants, depth, view.Exposure),
-            new GpuTextureLevel(target),
-            GpuContents.Keep,
-            [depth, view.Exposure]);
+        => _passes.Dispatch(
+            view,
+            _drawSky,
+            new SkyConstants(depth, target),
+            GpuGroups.For(view.Size, 8),
+            [depth, view.Exposure],
+            [target]);
 
+    [ShaderStruct("Shaders/Renderer/Sky.slang", "DfgConstants")]
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct DfgConstants(GpuTexture Dfg);
 
+    [ShaderStruct("Shaders/Renderer/Sky.slang", "CaptureConstants")]
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct CaptureConstants(GpuBuffer View, uint Face);
+    private readonly record struct CaptureConstants(GpuTexture Cube);
 
+    [ShaderStruct("Shaders/Renderer/Sky.slang", "FilterConstants")]
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct ShConstants(GpuTexture Cube, GpuSampler Sampler, GpuBuffer Sh);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct PrefilterConstants(
+    private readonly record struct FilterConstants(
         GpuTexture Cube,
         GpuSampler Sampler,
         GpuTexture Specular,
+        GpuBuffer Sh,
         uint Levels,
         uint Samples);
 
+    [ShaderStruct("Shaders/Renderer/Sky.slang", "SkyConstants")]
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct SkyConstants(GpuBuffer View, GpuTexture Depth, GpuBuffer Exposure);
+    private readonly record struct SkyConstants(GpuTexture Depth, GpuTexture Target);
 }

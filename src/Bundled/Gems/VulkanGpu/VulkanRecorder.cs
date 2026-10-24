@@ -1,4 +1,5 @@
 using Magic.Contexts.Gpu;
+using Magic.Services;
 using Vortice.Vulkan;
 using Rectangle = System.Drawing.Rectangle;
 
@@ -43,6 +44,11 @@ internal sealed unsafe class VulkanRecorder(
     /// The constants as last set, and whether they changed, or a pipeline was bound, since they were last pushed.
     /// </summary>
     private readonly byte[] _push = new byte[VulkanHeap.ConstantBytes];
+
+    /// <summary>
+    /// The pipelines a draw or dispatch pushed other than the constants their shaders take, each said once.
+    /// </summary>
+    private readonly HashSet<VulkanPipeline> _misfits = [];
     private int _pushLength;
     private bool _isPushStale;
 
@@ -58,10 +64,11 @@ internal sealed unsafe class VulkanRecorder(
     private bool _isSkipping;
 
     /// <summary>
-    /// How deep in debug groups the commands are, and whether the top-level one is timed.
+    /// How deep in debug groups the commands are, and whether the top-level one is timed, and its name.
     /// </summary>
     private int _depth;
     private bool _isGroupTimed;
+    private string _group = string.Empty;
 
     /// <summary>
     /// Records <paramref name="commands"/> into <paramref name="commandBuffer"/> for frame slot
@@ -493,14 +500,23 @@ internal sealed unsafe class VulkanRecorder(
     }
 
     /// <summary>
-    /// Pushes the constants if they changed, or a pipeline was bound, since they were last pushed.
+    /// Pushes the constants if they changed, or a pipeline was bound, since they were last pushed; says so, once a
+    /// pipeline, when they are not as many bytes as its shaders take, which read them as another struct.
     /// </summary>
     private void PushConstants()
     {
-        if (_pipeline is not { } pipeline || !_isPushStale || _pushLength == 0) return;
+        if (_pipeline is not { } pipeline || !_isPushStale) return;
 
         _isPushStale = false;
         uint size = ((uint)_pushLength + 3) & ~3u;
+        if (size != pipeline.ConstantBytes && _misfits.Add(pipeline))
+        {
+            Debugging.Error($"{_group} pushes {size} bytes of constants to shaders that take {pipeline.ConstantBytes}: "
+                + "the struct it pushes is not the one they declare.");
+        }
+
+        if (size == 0) return;
+
         fixed (byte* values = _push)
         {
             _device.Api.vkCmdPushConstants(_commandBuffer, pipeline.Layout, VkShaderStageFlags.All, 0, size, values);
@@ -643,7 +659,11 @@ internal sealed unsafe class VulkanRecorder(
     private void BeginDebugGroup(in GpuCommand command)
     {
         ReadOnlySpan<byte> name = _commands.GetBytes(command);
-        if (_depth++ == 0) _isGroupTimed = _isTimed && _timer.Start(_commandBuffer, _timer.GetName(name));
+        if (_depth++ == 0)
+        {
+            _group = _timer.GetName(name);
+            _isGroupTimed = _isTimed && _timer.Start(_commandBuffer, _group);
+        }
 
         if (!_device.HasDebugUtils) return;
 

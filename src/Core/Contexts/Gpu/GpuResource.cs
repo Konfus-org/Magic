@@ -2,7 +2,7 @@ namespace Magic.Contexts.Gpu;
 
 /// <summary>
 /// What a pass says it reads or writes: a buffer, a texture whole, or one level of one layer of a texture. A shader
-/// that reads through the heap (Shaders/Include/Heap.hlsli) binds nothing, so its pass lists what it touches, and the
+/// that reads through the heap (Shaders/Core/Heap.slang) binds nothing, so its pass lists what it touches, and the
 /// GPU waits for each and lays it out before the pass begins (<see cref="GpuComputePass.Reads"/> and the like).
 /// </summary>
 public readonly record struct GpuResource

@@ -24,7 +24,7 @@ public readonly record struct GpuComputePass : IDisposable
     }
 
     /// <summary>
-    /// What the pass's shaders read through the heap (Shaders/Include/Heap.hlsli): each is waited for and laid out to
+    /// What the pass's shaders read through the heap (Shaders/Core/Heap.slang): each is waited for and laid out to
     /// read before the pass begins, wherever in the pass this is recorded.
     /// </summary>
     public GpuComputePass Reads(ReadOnlySpan<GpuResource> resources)
@@ -45,13 +45,24 @@ public readonly record struct GpuComputePass : IDisposable
     }
 
     /// <summary>
-    /// The shader's one constant block, copied now: at most 128 bytes, laid out as its <c>CONSTANTS</c> struct is, for
-    /// the dispatches after it.
+    /// The shader's one constant block, copied now: at most 128 bytes, laid out as its uniform entry point parameters
+    /// are, one after another, for the dispatches after it.
     /// </summary>
     public GpuComputePass Constants<T>(in T constants)
         where T : unmanaged
     {
         _commands.Constants(in constants);
+
+        return this;
+    }
+
+    /// <summary>
+    /// The shader's one constant block as bytes, as <see cref="Constants{T}"/> takes it, for constants whose layout is
+    /// known only as the pass is recorded.
+    /// </summary>
+    public GpuComputePass Constants(ReadOnlySpan<byte> constants)
+    {
+        _commands.Constants(constants);
 
         return this;
     }

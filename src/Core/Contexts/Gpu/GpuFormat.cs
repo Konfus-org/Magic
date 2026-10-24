@@ -2,7 +2,7 @@ namespace Magic.Contexts.Gpu;
 
 /// <summary>
 /// The texture formats the engine renders with. Depth is always <see cref="D32Float"/>, reverse-Z
-/// (Shaders/Include/Bindings.hlsli). The BC7 formats are only sampled: a texture of them is uploaded a 4 x 4 block of
+/// (Shaders/README.md). The BC7 formats are only sampled: a texture of them is uploaded a 4 x 4 block of
 /// texels in each 16 bytes, a level smaller than a block taking one.
 /// </summary>
 public enum GpuFormat : byte

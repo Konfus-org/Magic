@@ -18,7 +18,7 @@ internal sealed class DefaultPipeline : IRenderPipeline
     private const GpuTextureUsage Target = GpuTextureUsage.ColorTarget | GpuTextureUsage.Sampled;
 
     /// <summary>
-    /// The shader that lights each pixel from the G-buffer and the sky: Shaders/Rendering/Lighting/Lighting.comp.hlsl.
+    /// The shader that lights each pixel from the G-buffer and the sky: Shaders/Renderer/Lighting.slang.
     /// </summary>
     public Handle<Shader> Lighting { get; set; } = new(4017178266632588897);
 
@@ -50,20 +50,15 @@ internal sealed class DefaultPipeline : IRenderPipeline
             GpuTexture hdr = rendering.Texture(
                 ViewTexture(view, GpuFormat.Rgba16Float, Target | GpuTextureUsage.ComputeWrite));
             rendering.Dispatch(
+                view,
                 Lighting,
-                new LightingConstants(view.Constants, g, sky, view.Exposure, hdr),
+                new LightingConstants(g, sky, hdr),
                 GpuGroups.For(view.Size, 8),
                 [g.Depth, g.Albedo, g.Normal, g.Surface, g.Emissive, sky.Dfg, sky.Sh, sky.Specular, view.Exposure],
                 [hdr, rendering.Failures]);
             rendering.DrawSky(view, depth, hdr);
 
-            GpuTexture image = hdr;
-            foreach (IPostEffect effect in rendering.PostEffects)
-            {
-                image = effect.Record(rendering, view, image);
-            }
-
-            rendering.Output(view, image);
+            rendering.Output(view, rendering.ApplyPostEffects(view, hdr));
         }
     }
 
@@ -73,11 +68,10 @@ internal sealed class DefaultPipeline : IRenderPipeline
     private static GpuTextureDescription ViewTexture(RenderView view, GpuFormat format, GpuTextureUsage usage)
         => new(format, usage | GpuTextureUsage.Sampled, (uint)view.Size.Width, (uint)view.Size.Height);
 
+    /// <summary>
+    /// The lighting's constants after its header, as ShadeLighting.slang's <c>LightingConstants</c>: the G-buffer, the
+    /// sky's light, and the image lit into.
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct LightingConstants(
-        GpuBuffer View,
-        GBuffer GBuffer,
-        SkyLight Sky,
-        GpuBuffer Exposure,
-        GpuTexture Hdr);
+    private readonly record struct LightingConstants(GBuffer GBuffer, SkyLight Sky, GpuTexture Hdr);
 }

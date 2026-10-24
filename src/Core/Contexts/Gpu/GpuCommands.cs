@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using Magic.Contexts.Assets;
@@ -187,11 +186,13 @@ public sealed class GpuCommands
         => _commands.Add(new GpuCommand(GpuCommandType.IndexBuffer, Buffer: buffer, IndexSize: size));
 
     internal void Constants<T>(in T constants)
-        where T : unmanaged
+        where T : unmanaged => Constants(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)));
+
+    internal void Constants(ReadOnlySpan<byte> constants)
     {
         int start = _bytes.Count;
-        _bytes.AddRange(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)));
-        _commands.Add(new GpuCommand(GpuCommandType.Constants, RunStart: start, RunLength: Unsafe.SizeOf<T>()));
+        _bytes.AddRange(constants);
+        _commands.Add(new GpuCommand(GpuCommandType.Constants, RunStart: start, RunLength: constants.Length));
     }
 
     internal void Reads(ReadOnlySpan<GpuResource> resources) => Use(GpuCommandType.Reads, resources);

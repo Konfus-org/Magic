@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Magic.Contexts.Frames;
+using Magic.Contexts.Gpu;
 
 namespace Magic.VoxelRendering;
 
@@ -25,12 +26,91 @@ internal enum GpuInstanceFlags : uint
 }
 
 /// <summary>
-/// A view's constants for a frame, in the buffer its shaders read them from (<c>ViewConstants</c> in
-/// Shaders/Rendering/Include/View.hlsli, member for member: change both together): its camera, its sizes, the world's
-/// lights and weather, and the heap ids of the world's tables. Every group of members is 16 bytes, which packs the same
-/// in every API's storage buffers. A matrix is its four rows, as System.Numerics keeps them, applied to a row vector,
-/// <c>mul(v, M)</c>.
+/// The first of every pass's constants, Shaders/Core/Pass.slang's <c>PassHeader</c>: the buffer of the frame's
+/// <see cref="WorldConstants"/>, and of the view's <see cref="ViewConstants"/> the pass is drawn for, none for a pass
+/// drawn for no view.
 /// </summary>
+[ShaderStruct("Shaders/Core/Pass.slang", "PassHeader")]
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct PassHeader(GpuBuffer Frame, GpuBuffer View);
+
+/// <summary>
+/// A pass's constants: the header, then the pass's own, as its entry point takes them, one uniform parameter after the
+/// other.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct PassConstants<T>(PassHeader Header, T Values)
+    where T : unmanaged;
+
+/// <summary>
+/// The image a post effect is handed and the texture of its size and format it writes, Shaders/Core/Post.slang's
+/// <c>PostImages</c>, which its constants hold after the header.
+/// </summary>
+[ShaderStruct("Shaders/Core/Post.slang", "PostImages")]
+[StructLayout(LayoutKind.Sequential)]
+internal readonly record struct PostImages(GpuTexture Image, GpuTexture Output);
+
+/// <summary>
+/// The world as a frame draws it, in the buffer every pass's header names, Shaders/Renderer/World.slang's
+/// <c>WorldConstants</c>: the frame's clocks first, the world's lights, the heap ids of its tables and the rest its
+/// passes read, its weather and its sky's sun and moon. A new frame global is a member here and there.
+/// </summary>
+[ShaderStruct("Shaders/Renderer/World.slang", "WorldConstants")]
+[StructLayout(LayoutKind.Sequential)]
+internal struct WorldConstants
+{
+    internal FrameConstants Clocks;
+    internal WorldLights Lights;
+
+    /// <summary>
+    /// The world's tables (<see cref="GpuTables"/>) and the clusters' geometry.
+    /// </summary>
+    internal GpuBuffer Instances;
+    internal GpuBuffer Models;
+    internal GpuBuffer Levels;
+    internal GpuBuffer Clusters;
+    internal GpuBuffer Cards;
+    internal GpuBuffer Materials;
+    internal GpuBuffer MaterialBins;
+    internal GpuBuffer Geometry;
+
+    /// <summary>
+    /// The sky's material's row, which a sky's passes load it from.
+    /// </summary>
+    internal uint SkyMaterial;
+
+    /// <summary>
+    /// The sampler materials' textures are read with.
+    /// </summary>
+    internal GpuSampler MaterialSampler;
+
+    /// <summary>
+    /// The frame's raised failure codes, a word each (Shaders/Core/Failure.slang).
+    /// </summary>
+    internal GpuBuffer Failures;
+
+    /// <summary>
+    /// The sky's light from everywhere, nine harmonics.
+    /// </summary>
+    internal GpuBuffer SkySh;
+
+    /// <summary>
+    /// The world's weather, as its <c>Weather</c> says, or still and clear without one.
+    /// </summary>
+    internal WeatherConstants Weather;
+
+    /// <summary>
+    /// The sky's sun and moon, which the sky draws whether or not either lights the world now.
+    /// </summary>
+    internal CelestialConstants Celestial;
+}
+
+/// <summary>
+/// A view's constants for a frame, in the buffer its passes' headers name, Shaders/Renderer/World.slang's
+/// <c>ViewConstants</c>: its camera, its sizes and its exposure. A matrix is row-major, as System.Numerics keeps it,
+/// applied to a row vector.
+/// </summary>
+[ShaderStruct("Shaders/Renderer/World.slang", "ViewConstants")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct ViewConstants
 {
@@ -48,8 +128,6 @@ internal struct ViewConstants
     /// The last frame's <see cref="ViewProj"/>.
     /// </summary>
     internal Matrix4x4 PrevViewProj;
-
-    internal FrameConstants Frame;
 
     /// <summary>
     /// Where the camera is, which every position a shader works with is relative to.
@@ -73,22 +151,6 @@ internal struct ViewConstants
     internal Vector2 ProjScale;
     internal float Near;
     internal float Far;
-
-    /// <summary>
-    /// The directional light that casts the shadows: the way its light travels, and its disc's half-angle in radians.
-    /// </summary>
-    internal Vector3 KeyLightDirection;
-    internal float KeyLightAngularRadius;
-
-    /// <summary>
-    /// The key light's illuminance in lux, times its colour; zero with none.
-    /// </summary>
-    internal Vector3 KeyLightIlluminance;
-
-    /// <summary>
-    /// 1 when the key light is the sky's sun or moon, whose light reaches the world through the sky's air and clouds.
-    /// </summary>
-    internal uint KeyLightThroughSky;
 
     /// <summary>
     /// The view's size in pixels as it is shown, and this frame's sub-pixel offset of <see cref="ViewProj"/>.
@@ -116,66 +178,17 @@ internal struct ViewConstants
     internal uint TargetEncoding;
 
     /// <summary>
-    /// The sky's material's row, which a sky's passes load its params from.
+    /// The view's exposure, which lighting and the sky are pre-exposed by (<see cref="View.Exposure"/>).
     /// </summary>
-    internal uint SkyMaterial;
-
-    /// <summary>
-    /// The heap id of the sampler materials' textures are read with.
-    /// </summary>
-    internal uint MaterialSampler;
-
-    /// <summary>
-    /// The heap id of the frame's raised failure codes, a word each (Shaders/Include/Failure.hlsli).
-    /// </summary>
-    internal uint Failures;
-
-    /// <summary>
-    /// The heap ids of the world's tables (<see cref="GpuTables"/>).
-    /// </summary>
-    internal uint Instances;
-    internal uint Models;
-    internal uint Levels;
-    internal uint Clusters;
-
-    internal uint Cards;
-    internal uint Materials;
-    internal uint MaterialBins;
-    internal uint Geometry;
-
-    /// <summary>
-    /// The heap ids of the view's exposure, which lighting and the sky are pre-exposed by, and of the sky's harmonics.
-    /// </summary>
-    internal uint Exposure;
-    internal uint SkySh;
-
-    /// <summary>
-    /// How many of <see cref="Directional"/> light the world.
-    /// </summary>
-    internal uint DirectionalCount;
-    internal uint Padding;
-
-    /// <summary>
-    /// The world's weather, as its <c>Weather</c> says, or still and clear without one.
-    /// </summary>
-    internal WeatherConstants Weather;
-
-    /// <summary>
-    /// The sky's sun and moon, which the sky draws whether or not either lights the world now.
-    /// </summary>
-    internal SkyLightConstants SkyLights;
-
-    /// <summary>
-    /// The directional lights that light the world alone, without shadows, the first <see cref="DirectionalCount"/>.
-    /// </summary>
-    internal DirectionalLights Directional;
+    internal GpuBuffer Exposure;
 }
 
 /// <summary>
-/// The frame's clocks, as Shaders/Include/Frame.hlsli's <c>FrameConstants</c>, member for member, which a
-/// <see cref="ViewConstants"/> and the output's constants hold: the world's time and the real time since the first
-/// frame, the real time since the last, and the frame's number.
+/// The frame's clocks, Shaders/Core/Pass.slang's <c>FrameConstants</c>, which a <see cref="WorldConstants"/> starts
+/// with: the world's time and the real time since the first frame, the real time since the last, and the frame's
+/// number.
 /// </summary>
+[ShaderStruct("Shaders/Core/Pass.slang", "FrameConstants")]
 [StructLayout(LayoutKind.Sequential)]
 internal readonly record struct FrameConstants(float WorldSec, float RealSec, float RealDeltaSec, uint Index)
 {
@@ -186,38 +199,50 @@ internal readonly record struct FrameConstants(float WorldSec, float RealSec, fl
 }
 
 /// <summary>
-/// The sky's sun and moon in a <see cref="ViewConstants"/>, as Shaders/Include/SkyLights.hlsli's
-/// <c>SkyLightConstants</c>, member for member: the way each one's light travels, its illuminance in lux times its
-/// colour, zero without one, and its disc's half-angle in radians.
+/// The sky's sun and moon in a <see cref="WorldConstants"/>, Shaders/Core/Sky.slang's <c>CelestialConstants</c>: the
+/// way each one's light travels, its illuminance in lux times its colour, zero without one, and its disc's half-angle
+/// in radians.
 /// </summary>
+[ShaderStruct("Shaders/Core/Sky.slang", "CelestialConstants")]
 [StructLayout(LayoutKind.Sequential)]
-internal struct SkyLightConstants
+internal struct CelestialConstants
 {
     internal Vector3 SunDirection;
     internal float SunAngularRadius;
     internal Vector3 SunIlluminance;
     internal float MoonAngularRadius;
     internal Vector3 MoonDirection;
-    internal float Padding0;
     internal Vector3 MoonIlluminance;
-    internal float Padding1;
 }
 
 /// <summary>
-/// A directional light that lights the world alone in a <see cref="ViewConstants"/>: the way its light travels, and its
-/// illuminance in lux times its colour.
+/// A directional light, Shaders/Lighting/Lights.slang's <c>DirectionalLight</c>: the way its light travels, its disc's
+/// half-angle in radians, and its illuminance in lux times its colour.
 /// </summary>
+[ShaderStruct("Shaders/Lighting/Lights.slang", "DirectionalLight")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct DirectionalLightConstants
 {
     internal Vector3 Direction;
-    internal float Padding0;
+    internal float AngularRadius;
     internal Vector3 Illuminance;
-    internal float Padding1;
 }
 
 /// <summary>
-/// The directional lights a <see cref="ViewConstants"/> holds: as many as a world's are lit by besides its sun and moon.
+/// The lights the world is lit by, Shaders/Lighting/Lights.slang's <c>WorldLights</c>: the key light, which casts the
+/// shadows, and the other directional lights, the first <see cref="DirectionalCount"/>.
+/// </summary>
+[ShaderStruct("Shaders/Lighting/Lights.slang", "WorldLights")]
+[StructLayout(LayoutKind.Sequential)]
+internal struct WorldLights
+{
+    internal DirectionalLightConstants Key;
+    internal uint DirectionalCount;
+    internal DirectionalLights Directional;
+}
+
+/// <summary>
+/// The directional lights a <see cref="WorldLights"/> holds besides the key light.
 /// </summary>
 [InlineArray(Capacity)]
 internal struct DirectionalLights
@@ -228,11 +253,11 @@ internal struct DirectionalLights
 }
 
 /// <summary>
-/// The world's weather in a <see cref="ViewConstants"/>, as Shaders/Include/Weather.hlsli's <c>WeatherConstants</c>,
-/// member for member: the wind in metres per second, how much of the sky the clouds cover and how thick they are, 0 to
-/// 1 each, and their linear colours where the sun lights them and in their own shade; how much fog there is a metre,
-/// its tint, the metres before it begins, and its share by height as a curve.
+/// The world's weather in a <see cref="WorldConstants"/>, Shaders/Core/Weather.slang's <c>WeatherConstants</c>: the
+/// wind in metres per second, how much of the sky the clouds cover and how thick they are, 0 to 1 each, and their
+/// linear colours where the sun lights them and in their own shade.
 /// </summary>
+[ShaderStruct("Shaders/Core/Weather.slang", "WeatherConstants")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct WeatherConstants
 {
@@ -241,19 +266,6 @@ internal struct WeatherConstants
     internal Vector3 CloudColor;
     internal float Density;
     internal Vector3 CloudShadow;
-    internal float Fog;
-    internal Vector3 FogColor;
-    internal float FogStart;
-    internal CurveRows FogFalloff;
-}
-
-/// <summary>
-/// A curve's sixteen floats, Shaders/Include/Curve.hlsli's <c>Curve</c>.
-/// </summary>
-[InlineArray(16)]
-internal struct CurveRows
-{
-    private float _value;
 }
 
 /// <summary>
@@ -261,6 +273,7 @@ internal struct CurveRows
 /// and w its position; the last frame's the same way, which velocity is worked out from; its largest scale, flags,
 /// model row, when its fade started, and its eight material slots' rows, two to a word.
 /// </summary>
+[ShaderStruct("Shaders/Renderer/World.slang", "GpuInstance")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuInstance
 {
@@ -301,6 +314,7 @@ internal struct MaterialRows
 /// A model on the GPU: its sphere about its origin, its clusters, levels and cards, the unit-scale distance its cards
 /// are drawn from, 0 for none, its grid's step, and how far from its sphere's middle its clusters' error spheres reach.
 /// </summary>
+[ShaderStruct("Shaders/Renderer/World.slang", "GpuModel")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuModel
 {
@@ -330,6 +344,7 @@ internal struct GpuModel
 /// One level of a model's clusters: where they are, the least error of any of them and the most of any of their
 /// parents', which bound the distances it is drawn at.
 /// </summary>
+[ShaderStruct("Shaders/Renderer/World.slang", "GpuLevel")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuLevel
 {
@@ -344,6 +359,7 @@ internal struct GpuLevel
 /// vertices and triangles start in the geometry's words, its counts, packed by <see cref="PackCounts"/>, and its
 /// model's grid step, which its vertices' positions are in.
 /// </summary>
+[ShaderStruct("Shaders/Renderer/World.slang", "GpuCluster")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuCluster
 {
@@ -371,6 +387,7 @@ internal struct GpuCluster
 /// height and turn about +Y, its material slot, and its atlases' texture refs, <see cref="GpuTextures.None"/> while
 /// they load.
 /// </summary>
+[ShaderStruct("Shaders/Renderer/World.slang", "GpuCard")]
 [StructLayout(LayoutKind.Sequential)]
 internal struct GpuCard
 {
@@ -387,7 +404,8 @@ internal struct GpuCard
 }
 
 /// <summary>
-/// One row of the materials' table: a surface's <c>MaterialParams</c>, packed by its <see cref="ParamLayout"/>.
+/// One row of the materials' table: a surface's or a sky's struct, laid out as its reflection says
+/// (<see cref="ShaderStruct"/>).
 /// </summary>
 [InlineArray(32)]
 internal struct GpuMaterial

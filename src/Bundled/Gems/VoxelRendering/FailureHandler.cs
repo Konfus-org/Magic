@@ -11,15 +11,15 @@ namespace Magic.VoxelRendering;
 /// until their shader changes (<see cref="Break"/>). What does not load, said in the log as it is found
 /// (<see cref="Report"/>). And what is shown: in words across each view, the passes that are left out, which the
 /// pipelines say (<see cref="GpuPipelines.Failed"/>), the world's own failures after them, and what only the GPU finds
-/// wrong, which a shader raises as a code (Include/Failure.hlsli), packed as glyphs a shader draws itself
-/// (<see cref="Text"/>, laid out as Include/FailureBanner.hlsli reads it, which the output draws over each view's
+/// wrong, which a shader raises as a code (Shaders/Core/Failure.slang), packed as glyphs a shader draws itself
+/// (<see cref="Text"/>, laid out as Shaders/Core/Failure.slang reads it, which the output draws over each view's
 /// finished image); and while the debug UI shows, at each instance drawn as the failure, why (<see cref="Label"/>).
 /// Render thread.
 /// </summary>
 internal sealed class FailureHandler
 {
     /// <summary>
-    /// Codes a shader can raise, as Include/Failure.hlsli numbers them.
+    /// Codes a shader can raise, as Shaders/Core/Failure.slang numbers them.
     /// </summary>
     internal const int CodeCount = 8;
 
@@ -30,7 +30,7 @@ internal sealed class FailureHandler
     internal const int TextWords = 1 + ((MaxLines + CodeCount) * LineGlyphs);
 
     /// <summary>
-    /// Glyphs a row holds, as Include/FailureBanner.hlsli lays them out.
+    /// Glyphs a row holds, as Shaders/Core/Failure.slang lays them out.
     /// </summary>
     private const int LineGlyphs = 96;
 
@@ -40,7 +40,7 @@ internal sealed class FailureHandler
     private const int MaxLines = 24;
 
     /// <summary>
-    /// The words of each code, in the order Include/Failure.hlsli numbers them: change both together.
+    /// The words of each code, in the order Shaders/Core/Failure.slang numbers them: change both together.
     /// </summary>
     private static readonly string[] _codes =
     [
@@ -274,8 +274,9 @@ internal sealed class FailureHandler
     }
 
     /// <summary>
-    /// A line as the glyphs the font has, capitals, digits, an exclamation mark and space (Include/DebugText.hlsli),
-    /// from <paramref name="first"/>: a small letter as its capital, anything else a space, and spaces past its end.
+    /// A line as the glyphs the font has, capitals, digits, an exclamation mark and space
+    /// (Shaders/Core/Failure.slang), from <paramref name="first"/>: a small letter as its capital, anything else a
+    /// space, and spaces past its end.
     /// </summary>
     private void Write(string line, int first)
     {

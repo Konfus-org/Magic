@@ -3,9 +3,8 @@ using Magic.Interfaces;
 namespace Magic.Contexts.Gpu;
 
 /// <summary>
-/// A shader as <see cref="IShaderCompiler.CompileAsync(string, string, GpuStage, GpuShaderFormat, CancellationToken)"/>
-/// made it: bytecode in a GPU's format, which reads every resource through the heap (Shaders/Include/Heap.hlsli) and
-/// takes one constant block per draw or dispatch.
+/// A shader as <see cref="IShaderCompiler.CompileAsync"/> made it: bytecode in a GPU's format, which reads every
+/// resource through the heap (Shaders/Core/Heap.slang) and takes one constant block per draw or dispatch.
 /// </summary>
 public sealed record GpuShader
 {

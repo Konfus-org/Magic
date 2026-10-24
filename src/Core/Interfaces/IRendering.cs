@@ -39,7 +39,7 @@ public interface IRendering
     RenderEffects<IWeatherEffect> Weather { get; }
 
     /// <summary>
-    /// The frame's failure codes, a word each, which a pass that raises one (Shaders/Include/Failure.hlsli) lists among
+    /// The frame's failure codes, a word each, which a pass that raises one (Shaders/Core/Failure.slang) lists among
     /// its writes, and which the renderer says on the failure banner.
     /// </summary>
     GpuBuffer Failures { get; }
@@ -97,15 +97,18 @@ public interface IRendering
     SkyLight CaptureSky(RenderView seenFrom);
 
     /// <summary>
-    /// Draws the sky into <paramref name="target"/> where <paramref name="depth"/> has nothing.
+    /// Draws the sky into <paramref name="target"/> where <paramref name="depth"/> has nothing. A compute pass writes
+    /// <paramref name="target"/>, so it needs <see cref="GpuTextureUsage.ComputeWrite"/>.
     /// </summary>
     void DrawSky(RenderView view, GpuTexture depth, GpuTexture target);
 
     /// <summary>
-    /// A compute pass of <paramref name="shader"/>, its constants <paramref name="constants"/>, of
-    /// <paramref name="groups"/>, which reads and writes what it says.
+    /// A compute pass of <paramref name="shader"/>'s entry point drawn for <paramref name="view"/>, its constants the
+    /// pass header (Shaders/Core/Pass.slang), then <paramref name="constants"/>, of <paramref name="groups"/>, which
+    /// reads and writes what it says.
     /// </summary>
     void Dispatch<T>(
+        RenderView view,
         Handle<Shader> shader,
         in T constants,
         GpuGroups groups,
@@ -114,10 +117,12 @@ public interface IRendering
         where T : unmanaged;
 
     /// <summary>
-    /// A compute pass of <paramref name="shader"/> whose groups the GPU reads from <paramref name="arguments"/> at
-    /// <paramref name="offset"/>, three <c>uint</c>s an earlier pass wrote.
+    /// A compute pass of <paramref name="shader"/>'s entry point drawn for <paramref name="view"/>, as the dispatch
+    /// above, whose groups the GPU reads from <paramref name="arguments"/> at <paramref name="offset"/>, three
+    /// <c>uint</c>s an earlier pass wrote.
     /// </summary>
     void Dispatch<T>(
+        RenderView view,
         Handle<Shader> shader,
         in T constants,
         GpuBuffer arguments,
@@ -128,11 +133,24 @@ public interface IRendering
 
     /// <summary>
     /// <paramref name="image"/> run through <paramref name="shader"/> into a texture like it, a thread a pixel in
-    /// groups of 8 by 8: its constants Shaders/Include/Effect.hlsli's <c>EffectImages</c>, then
-    /// <paramref name="values"/>.
+    /// groups of 8 by 8: its constants the pass header, Shaders/Core/Post.slang's <c>PostImages</c>, then
+    /// <paramref name="values"/>. For an effect that reads a pixel's neighbours; one that changes each pixel by itself is
+    /// an <see cref="IPixelEffect"/>.
     /// </summary>
     GpuTexture Effect<T>(RenderView view, Handle<Shader> shader, GpuTexture image, in T values)
         where T : unmanaged;
+
+    /// <summary>
+    /// <paramref name="image"/> run through <paramref name="effects"/> in order into a texture like it, as one pass
+    /// while their values fit its constants, and the image after them.
+    /// </summary>
+    GpuTexture ApplyPixelEffects(RenderView view, GpuTexture image, ReadOnlySpan<IPixelEffect> effects);
+
+    /// <summary>
+    /// <paramref name="image"/> run through the world's post effects in order (<see cref="PostEffects"/>), each run of
+    /// pixel effects as one pass (<see cref="ApplyPixelEffects"/>), and the image after them.
+    /// </summary>
+    GpuTexture ApplyPostEffects(RenderView view, GpuTexture image);
 
     /// <summary>
     /// Shows <paramref name="image"/> as <paramref name="view"/>'s finished image, scaled into its part of its target

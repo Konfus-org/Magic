@@ -57,7 +57,7 @@ public readonly record struct GpuRenderPass : IDisposable
 
     /// <summary>
     /// The pipeline's one constant block, which both its stages see, copied now: at most 128 bytes, laid out as the
-    /// shaders' <c>CONSTANTS</c> struct is (Shaders/Include/Heap.hlsli), for the draws after it.
+    /// shaders' uniform entry point parameters are, one after another, for the draws after it.
     /// </summary>
     public GpuRenderPass Constants<T>(in T constants)
         where T : unmanaged

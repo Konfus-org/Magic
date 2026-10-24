@@ -4,7 +4,7 @@
     "gems": [
         "SdlPlatform",
         "VulkanGpu",
-        "DxcShaderCompiler",
+        "SlangShaderCompiler",
         "ConsoleCommands",
         "ArchEcs",
         "Scripting",

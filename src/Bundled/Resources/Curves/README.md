@@ -6,9 +6,6 @@ each a value at a place, in order. The `Curve` type documents the format, and th
 - Between two keys, the value changes in a straight line. Before the first key and after the last, it holds that
   key's value.
 - A material or an effect can take a curve. The weather's fog takes one for how it thins with height.
-- Shaders read a curve through [Include/Curve.hlsli](../Shaders/Include/Curve.hlsli). Code reads one with Core's
-  `CurveExtensions`.
-- On the GPU, a curve is sampled at a fixed number of evenly spaced points between its first and last keys. Detail
-  finer than that is smoothed out.
+- Code reads one with Core's `CurveExtensions`.
 
 A curve param left out uses `Default.curve`, which is 1 everywhere.

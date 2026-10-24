@@ -6,32 +6,24 @@ using Magic.Services;
 namespace Magic.Interfaces;
 
 /// <summary>
-/// HLSL to the bytecode a GPU takes, provided by a compiler gem. Safe from any thread. It keeps what it compiled in the
-/// cache (<see cref="Caches"/>), so a shader compiles once rather than on every run; the caller keeps the shaders it
-/// uses.
+/// Shaders to the bytecode a GPU takes, provided by a compiler gem. A shader is a Slang module, a <see cref="Shader"/>
+/// asset, which imports others by their paths under <c>Shaders/</c> (<c>import Core.Heap;</c> is
+/// <c>Shaders/Core/Heap.slang</c>), from any root; the compiler loads them (<see cref="Assets"/>). Safe from any
+/// thread. It keeps what it compiled in the cache (<see cref="Caches"/>), so a shader compiles once rather than on
+/// every run; the caller keeps the shaders it uses.
 /// </summary>
 public interface IShaderCompiler
 {
     /// <summary>
-    /// <paramref name="hlsl"/>, entry point <c>main</c>, compiled for <paramref name="stage"/> into
-    /// <paramref name="format"/> on a worker, with its constant block's size; failures carry the compiler's text,
-    /// naming <paramref name="name"/>. Each <c>#include "path"</c> is the <see cref="Shader"/> asset at
-    /// <c>Shaders/path</c>, which the compiler loads (<see cref="Assets"/>). <c>STAGE_VERTEX</c>,
-    /// <c>STAGE_FRAGMENT</c> or <c>STAGE_COMPUTE</c> is defined in front of it. Every resource it reads is the heap's
-    /// (Shaders/Include/Heap.hlsli): one declared anywhere else fails. HLSL 2021, Shader Model 6.0 with wave
-    /// intrinsics, warnings as errors.
+    /// <paramref name="entry"/> compiled into <paramref name="format"/> on a worker, with its stage, its constant
+    /// block's size and a compute stage's group size; failures carry the compiler's text. Every resource it reads is
+    /// the heap's (Shaders/Core/Heap.slang): one declared anywhere else fails. Warnings are errors.
     /// </summary>
-    Task<Result<GpuShader>> CompileAsync(
-        string hlsl,
-        string name,
-        GpuStage stage,
-        GpuShaderFormat format,
-        CancellationToken cancel);
+    Task<Result<GpuShader>> CompileAsync(ShaderEntry entry, GpuShaderFormat format, CancellationToken cancel);
 
     /// <summary>
-    /// The <see cref="Shader"/> asset at <paramref name="path"/> compiled as
-    /// <see cref="CompileAsync(string, string, GpuStage, GpuShaderFormat, CancellationToken)"/> compiles its text,
-    /// named by its path; why not, when no asset is there or it does not load.
+    /// What the struct <paramref name="type"/> is, such as a surface's or a sky's: the contract it implements and its
+    /// fields, laid out as a buffer holds it; why not when its module does not compile or declares no such struct.
     /// </summary>
-    Task<Result<GpuShader>> CompileAsync(string path, GpuStage stage, GpuShaderFormat format, CancellationToken cancel);
+    Task<Result<ShaderStruct>> ReflectStructAsync(ShaderType type, CancellationToken cancel);
 }

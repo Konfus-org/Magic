@@ -78,6 +78,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     private readonly Passes _passes;
     private readonly SkyPasses _sky;
     private readonly WorldPasses _worldPasses;
+    private readonly PostPasses _post;
     private readonly Preloader _preloader;
     private readonly CancellationToken _stopping;
     private readonly List<Subscription> _watching = [];
@@ -141,16 +142,18 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
         _textures = new GpuTextures(gpu, assets, caches, settings, stopping);
         _models = new GpuModels(gpu, assets, _tables, _textures, _failures, settings, stopping);
         _pipelines = new GpuPipelines(gpu, compiler, assets, _failures, stopping);
-        _materials = new GpuMaterials(assets, _tables, _textures, _pipelines, _failures, stopping);
+        _materials = new GpuMaterials(assets, compiler, _tables, _textures, _pipelines, _failures, stopping);
         _instances = new Instances(_tables, _models, _materials, _failures, assets);
         _copy = new WorldCopy(world);
         _views = new Views(gpu, window, settings);
-        _output = new Output(gpu, compiler, stopping);
+        _output = new Output(gpu, compiler, assets, _views.World, stopping);
         _pool = new FramePool(gpu);
-        _passes = new Passes(gpu, _pipelines, assets);
-        _sky = new SkyPasses(gpu, _passes, assets);
+        _passes = new Passes(gpu, _pipelines, assets, _views.World);
+        _sky = new SkyPasses(gpu, _passes, _pipelines, assets);
         _worldPasses = new WorldPasses(gpu, _passes, _pipelines, _materials, _output.Raised, assets);
+        _post = new PostPasses(gpu, _passes, _pool, assets);
         _preloader = new Preloader(_models, _materials);
+        ShaderStructs.CheckAsync(compiler, assets, stopping).FireAndForget();
 
         _watching.Add(events.Watch<AssetReloaded<Model>>(reloaded => Tell(new Change(Model: reloaded.Asset))));
         _watching.Add(events.Watch<AssetReloaded<Texture>>(reloaded => Tell(new Change(Texture: reloaded.Asset))));
@@ -249,7 +252,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
 
         Time = frame;
         _shown.Clear();
-        _passes.Sky = sky;
+        _sky.Sky = sky.Shader;
         _pipelines.BeginFrame();
         _worldPasses.BeginFrame(GetCapacity());
         _pipeline?.Record(this);
@@ -262,7 +265,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
             copy.IsHolding && copy.Stream.Frame >= SettleFrames && isComplete && !_instances.HasWaiting());
 
         _cleared.Clear();
-        if (isComplete) Show(views, copy, frame);
+        if (isComplete) Show(views, copy);
 
         // Before the first whole frame the window is black; after it, an incomplete one leaves it as it was.
         if (isComplete || !_hasShown)
@@ -316,21 +319,24 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     public void DrawSky(RenderView view, GpuTexture depth, GpuTexture target) => _sky.Draw(view, depth, target);
 
     public void Dispatch<T>(
+        RenderView view,
         Handle<Shader> shader,
         in T constants,
         GpuGroups groups,
         ReadOnlySpan<GpuResource> reads,
         ReadOnlySpan<GpuResource> writes)
-        where T : unmanaged => _passes.Dispatch(shader, constants, groups, reads, writes);
+        where T : unmanaged => _passes.Dispatch(view, new ShaderEntry(shader), constants, groups, reads, writes);
 
     public void Dispatch<T>(
+        RenderView view,
         Handle<Shader> shader,
         in T constants,
         GpuBuffer arguments,
         uint offset,
         ReadOnlySpan<GpuResource> reads,
         ReadOnlySpan<GpuResource> writes)
-        where T : unmanaged => _passes.Dispatch(shader, constants, arguments, offset, reads, writes);
+        where T : unmanaged
+        => _passes.Dispatch(view, new ShaderEntry(shader), constants, arguments, offset, reads, writes);
 
     public GpuTexture Effect<T>(RenderView view, Handle<Shader> shader, GpuTexture image, in T values)
         where T : unmanaged
@@ -342,14 +348,21 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
             (uint)size.Width,
             (uint)size.Height));
         _passes.Dispatch(
-            shader,
-            new EffectConstants<T>(view.Constants, image, output, 0, values),
+            view,
+            new ShaderEntry(shader),
+            new EffectConstants<T>(new PostImages(image, output), values),
             GpuGroups.For(size, 8),
             [image],
             [output]);
 
         return output;
     }
+
+    public GpuTexture ApplyPixelEffects(RenderView view, GpuTexture image, ReadOnlySpan<IPixelEffect> effects)
+        => _post.ApplyPixelEffects(view, image, effects);
+
+    public GpuTexture ApplyPostEffects(RenderView view, GpuTexture image)
+        => _post.ApplyPostEffects(this, view, image, PostEffects);
 
     public void Output(RenderView view, GpuTexture image) => _shown.Add((view, image));
 
@@ -420,22 +433,21 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     }
 
     /// <summary>
-    /// What the views' constants name the world by this frame: the tables' buffers, which change as they grow, and
-    /// the rest.
+    /// What the world's constants name this frame: the tables' buffers, which change as they grow, and the rest.
     /// </summary>
     private WorldIds GetWorldIds(int skyRow) => new(
-        _tables.Instances.Buffer.Id,
-        _tables.Models.Buffer.Id,
-        _tables.Levels.Buffer.Id,
-        _tables.Clusters.Buffer.Id,
-        _tables.Cards.Buffer.Id,
-        _tables.Materials.Buffer.Id,
-        _tables.MaterialBins.Buffer.Id,
-        _models.Geometry.Id,
-        _textures.Sampler.Id,
-        _output.Raised.Id,
+        _tables.Instances.Buffer,
+        _tables.Models.Buffer,
+        _tables.Levels.Buffer,
+        _tables.Clusters.Buffer,
+        _tables.Cards.Buffer,
+        _tables.Materials.Buffer,
+        _tables.MaterialBins.Buffer,
+        _models.Geometry,
+        _textures.Sampler,
+        _output.Raised,
         (uint)skyRow,
-        _sky.Sh.Id);
+        _sky.Sh);
 
     /// <summary>
     /// How much of the world each view's culling buffers hold, from the settings and what the world has.
@@ -455,7 +467,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     /// Shows each view's finished image in its target, or, while the world is readied out of sight, the image kept as
     /// it loaded in the window; and keeps the window's image while a domain loads in place of the world.
     /// </summary>
-    private void Show(List<View> views, Renderables copy, in Frame frame)
+    private void Show(List<View> views, Renderables copy)
     {
         foreach ((RenderView rendered, GpuTexture image) in _shown)
         {
@@ -463,7 +475,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
 
             if (copy.IsHolding && view.Target.IsWindow)
             {
-                DrawKept(view, frame);
+                DrawKept(view);
 
                 continue;
             }
@@ -471,7 +483,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
             // Kept before it is drawn, so the image is left as a shader reads it.
             if (copy.IsLoading && view.Target.IsWindow) _output.Keep(image);
 
-            Draw(view.Target, image, frame);
+            Draw(view.Target, image);
         }
     }
 
@@ -479,15 +491,15 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     /// The window while the world is readied out of sight: the image kept as it loaded, in place of the view, which is
     /// drawn but not shown; black when none was kept.
     /// </summary>
-    private void DrawKept(View view, in Frame frame)
+    private void DrawKept(View view)
     {
         if (_output.Kept == GpuTexture.None) return;
 
-        Draw(view.Target, _output.Kept, frame);
+        Draw(view.Target, _output.Kept);
     }
 
-    private void Draw(ViewTarget target, GpuTexture image, in Frame frame)
-        => _output.Draw(target, image, !_settings.IsUpscaled, _cleared.Add(target.Texture), frame);
+    private void Draw(ViewTarget target, GpuTexture image)
+        => _output.Draw(target, image, !_settings.IsUpscaled, _cleared.Add(target.Texture));
 
     /// <summary>
     /// Clears the window to black when no view drew into it this frame, so it never shows what its image held before.
@@ -647,17 +659,11 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     }
 
     /// <summary>
-    /// A post effect's constants, as <see cref="IRendering.Effect"/> says: Shaders/Include/Effect.hlsli's
-    /// <c>EffectImages</c>, member for member, the view's constants, the image and the texture written and a word of
-    /// padding, then the effect's values.
+    /// A post effect's constants after its header, as <see cref="IRendering.Effect"/> says: the image and the texture
+    /// written, then the effect's values.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct EffectConstants<T>(
-        GpuBuffer View,
-        GpuTexture Image,
-        GpuTexture Output,
-        uint Padding,
-        T Values)
+    private readonly record struct EffectConstants<T>(PostImages Images, T Values)
         where T : unmanaged;
 
     /// <summary>

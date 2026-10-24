@@ -1,6 +1,6 @@
 # Code Standards
 
-Rules for all C#, HLSL and build configuration. Every warning is a build error. `.editorconfig` holds the style rules
+Rules for all C#, Slang and build configuration. Every warning is a build error. `.editorconfig` holds the style rules
 and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring existing code up to them as you touch it.
 
 ## Policies
@@ -232,15 +232,37 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 
 ## Shaders
 
-- HLSL 2021 only, Shader Model 6.0 with wave intrinsics, warnings as errors. The gem that provides `IShaderCompiler`
-  compiles shaders and loads their `#include`s from the assets.
-- Read every resource through the heap with the macros in `Include/Heap.hlsli`; never bind one by register.
-  `Include/Bindings.hlsli`'s header lists the conventions.
+- Slang 2026, warnings as errors. One module a file, which starts with its path as its name (`module "Core/Heap";`).
+  The gem that provides `IShaderCompiler` compiles shaders and loads their imports from the assets.
+- Read every resource through the heap's references in `Core/Heap.slang`; never declare one.
+- Name a pass for its job, as a verb and what it acts on (`CullClusters`, `ShadeLighting`), in its feature's module.
+  Its constants are uniform parameters: the pass header, then one struct.
+- Names follow [Naming](#naming), read as `value.Member(arguments)` or `Function(arguments)`:
+  - A function that returns a value starts with `Get` (`GetLuminance`); `Load` or `Sample` when it reads memory, `To`
+    for a conversion, `Encode` or `Decode` for a packing, `Create` for a struct it builds. What a contract does is
+    `Evaluate`, `Shade` or `Apply`. `Pow2`, `Pow5`, `Max3` and `WaveAllocate` read as the intrinsics they sit beside.
+  - A bool starts with `Is`, `Has` or `Can`: a function's (`IsHidden`), and a field's or property's in camel case
+    (`isMirrored`).
+  - A contract is `I` and a noun (`ISurface`), and what it is handed the noun and `Inputs` (`SurfaceInputs`). A struct
+    C# shares ends in `Constants`, or starts with `Gpu` for a table's row. A heap reference ends in `Ref`, what a stage
+    hands the next in `Varyings`, the targets a draw writes in `Targets`.
+  - A set of codes is an `enum` (`FailureCode`, `ShadingModel`).
+- Put what a struct does on it, as extension methods and properties (`instance.ToCameraRelative(position)`), so a
+  struct C# shares keeps only its fields. Return a struct rather than `out` parameters.
+- A struct that C# reads or writes holds 32-bit scalars, their vectors, row-major matrices, heap references and such
+  structs alone, so a sequential C# struct lays it out the same. Mark its C# twin `[ShaderStruct]`, which the renderer
+  checks against it as it starts.
+- A contract between shaders is an interface (`ISurface`, `ISky`, `ILight`, `IPixelEffect`), and a pass that works
+  with any is generic over it.
+- Work that adds up what every group of a dispatch did runs in its last group (`IsLastGroup`), not in a pass of one
+  group after it.
 - Use wave intrinsics only where the result can't depend on the wave size (32 or 64), or the order is already
   arbitrary. No 16-bit types, and no runtime-indexed resource arrays but the heap's.
 - Guard a value where it can go wrong: clamp roughness with the library's helper, keep n·v above 0, normalise with
   the helper that allows zero, and use `SampleGrad` or `SampleLevel` inside a branch.
-- Few variants: a define for what changes the pipeline, a `[branch]` on a value the whole draw shares for the rest.
+- A compute pass has no implicit derivatives. Code a compute pass may run takes them as inputs, as `SurfaceInputs` and
+  `SkyInputs` hand them.
+- Few variants: a generic for what changes the pipeline, a `[branch]` on a value the whole draw shares for the rest.
 - The BRDF, the lights and their units, and the shading models live once, in the shared
   [shader library](src/Bundled/Resources/Shaders/README.md). Every renderer shades with them.
 - Write a technique from its paper and name the paper in a comment. Copy in no third-party shader code.

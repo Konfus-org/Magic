@@ -1,5 +1,5 @@
 using System.IO;
-using System.Text;
+using System.Linq;
 using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
@@ -51,28 +51,26 @@ internal readonly record struct TargetFormats(
 
 /// <summary>
 /// Every pipeline the frame draws with, each compiled on a worker the first time it is asked for and made on the render
-/// thread as <see cref="Take"/> runs, none until then: compute passes, by their shader; the sky's fullscreen passes,
-/// by their shader composed with the world's sky's, and their target's format; and the world's materials' pipelines,
-/// one for each kind of surface and what it is drawn for (<see cref="MaterialPass"/>), each the renderer's shaders for
-/// the purpose (<c>Shaders/Rendering/Materials/</c>) composed with the surface. A frame that asks for one not made yet
-/// is incomplete (<see cref="IsFrameComplete"/>). An edited shader makes every pipeline again: each keeps drawing as it
-/// was until its new one is made, then the new one takes its place. A surface that does not compile is broken
-/// (<see cref="FailureHandler.Break"/>), and its materials drawn as the failure; a pass whose shader does not compile
-/// is said on the banner and left out. Render thread, but for the compiles.
+/// thread as <see cref="Take"/> runs, none until then: compute passes, by their entry point and what it is specialized
+/// by; and the world's materials' pipelines, one for each kind of surface and what it is drawn for
+/// (<see cref="MaterialPass"/>), each the renderer's entry points for the purpose (<c>Shaders/Renderer/Materials.slang</c>)
+/// specialized with the surface's struct. A frame that asks for one not made yet is incomplete
+/// (<see cref="IsFrameComplete"/>). An edited shader makes every pipeline
+/// again: each keeps drawing as it was until its new one is made, then the new one takes its place. A surface that does
+/// not compile is broken (<see cref="FailureHandler.Break"/>), and its materials drawn as the failure; a pass whose
+/// shader does not compile is said on the banner and left out. Render thread, but for the compiles.
 /// </summary>
 internal sealed class GpuPipelines : IDisposable
 {
-    private const string FullscreenVertex = "Shaders/Passes/Fullscreen.vert.hlsl";
-    private const string PiecesVertex = "Rendering/Materials/Pieces.vert.hlsl";
-    private const string TilesVertex = "Shaders/Rendering/Materials/Tiles.vert.hlsl";
+    private const string MaterialsModule = "Shaders/Renderer/Materials.slang";
 
     private readonly IGpuDriver _gpu;
     private readonly IShaderCompiler _compiler;
     private readonly Assets _assets;
     private readonly FailureHandler _failures;
     private readonly CancellationToken _stopping;
-    private readonly Dictionary<Handle<Shader>, Entry> _compute = [];
-    private readonly Dictionary<FullscreenKey, Entry> _fullscreen = [];
+    private readonly Handle<Shader> _materialsModule;
+    private readonly Dictionary<ShaderEntry, Entry> _compute = new(ShaderEntryComparer.Instance);
     private readonly Dictionary<MaterialKey, Entry> _materials = [];
 
     /// <summary>
@@ -105,6 +103,7 @@ internal sealed class GpuPipelines : IDisposable
         _assets = assets;
         _failures = failures;
         _stopping = stopping;
+        _materialsModule = assets.Find<Shader>(MaterialsModule);
     }
 
     /// <summary>
@@ -124,11 +123,6 @@ internal sealed class GpuPipelines : IDisposable
             entry.Release(_gpu);
         }
 
-        foreach (Entry entry in _fullscreen.Values)
-        {
-            entry.Release(_gpu);
-        }
-
         foreach (Entry entry in _materials.Values)
         {
             entry.Release(_gpu);
@@ -144,7 +138,7 @@ internal sealed class GpuPipelines : IDisposable
     /// The compute pipeline of <paramref name="shader"/>; none while it compiles, its compile started the first time,
     /// or when it does not.
     /// </summary>
-    internal GpuPipeline GetCompute(Handle<Shader> shader)
+    internal GpuPipeline GetCompute(ShaderEntry shader)
     {
         if (!_compute.TryGetValue(shader, out Entry? entry))
         {
@@ -153,25 +147,6 @@ internal sealed class GpuPipelines : IDisposable
         }
 
         if (entry.IsWanted) CompileAsync(entry, shader).FireAndForget();
-
-        return Asked(entry.Pipeline);
-    }
-
-    /// <summary>
-    /// The pipeline of <paramref name="shader"/>, composed with the world's sky, <paramref name="sky"/>, drawn over a
-    /// target of <paramref name="format"/>; none while it compiles, its compile started the first time, or when it does
-    /// not.
-    /// </summary>
-    internal GpuPipeline GetFullscreen(Handle<Shader> shader, SurfaceKey sky, GpuFormat format)
-    {
-        FullscreenKey key = new(shader, sky.Shader, format);
-        if (!_fullscreen.TryGetValue(key, out Entry? entry))
-        {
-            entry = new Entry();
-            _fullscreen[key] = entry;
-        }
-
-        if (entry.IsWanted) CompileAsync(entry, key).FireAndForget();
 
         return Asked(entry.Pipeline);
     }
@@ -231,11 +206,6 @@ internal sealed class GpuPipelines : IDisposable
             entry.MarkStale();
         }
 
-        foreach (Entry entry in _fullscreen.Values)
-        {
-            entry.MarkStale();
-        }
-
         foreach (Entry entry in _materials.Values)
         {
             entry.MarkStale();
@@ -243,14 +213,6 @@ internal sealed class GpuPipelines : IDisposable
 
         _failed.Clear();
     }
-
-    private static string TemplateOf(MaterialPass pass, bool hasSurface) => pass switch
-    {
-        MaterialPass.Visibility when hasSurface => "Rendering/Materials/VisibilityClip.frag.hlsl",
-        MaterialPass.Visibility => "Rendering/Materials/Visibility.frag.hlsl",
-        MaterialPass.Resolve => "Rendering/Materials/Resolve.frag.hlsl",
-        _ => throw new ArgumentOutOfRangeException(nameof(pass), pass, "There is no such material pass."),
-    };
 
     /// <summary>
     /// A pipeline the frame asked for, which leaves the frame incomplete when it is none.
@@ -291,76 +253,29 @@ internal sealed class GpuPipelines : IDisposable
         _failed.Add($"Pass {compiled.Name} is left out: its shader does not compile");
     }
 
-    private async Task CompileAsync(Entry entry, Handle<Shader> shader)
+    private async Task CompileAsync(Entry entry, ShaderEntry shader)
     {
         entry.IsCompiling = true;
         entry.IsStale = false;
-        string path = _assets.GetPath(shader) ?? $"shader {shader.Id}";
-        string name = Path.GetFileName(path);
-        Result<GpuShader> compute = shader == Handle<Shader>.None
+        string name = shader.EntryPoint
+            ?? Path.GetFileName(_assets.GetPath(shader.Module) ?? $"shader {shader.Module.Id}");
+        Result<GpuShader> compute = shader.Module == Handle<Shader>.None
             ? Result.Failure<GpuShader>("no shader is named.")
-            : await _compiler.CompileAsync(path, GpuStage.Compute, GpuShaderFormat.Spirv, _stopping)
-                .ConfigureAwait(false);
+            : await _compiler.CompileAsync(shader, GpuShaderFormat.Spirv, _stopping).ConfigureAwait(false);
         _compiled.Writer.TryWrite(compute.Ok
             ? new Compiled(entry, name, null, compute.Value, null, null)
             : new Compiled(entry, name, null, null, compute.Error, null));
-    }
-
-    private async Task CompileAsync(Entry entry, FullscreenKey key)
-    {
-        entry.IsCompiling = true;
-        entry.IsStale = false;
-        string path = _assets.GetPath(key.Shader) ?? $"shader {key.Shader.Id}";
-        string name = Path.GetFileName(path);
-        Task<Result<GpuShader>> vertex = _compiler.CompileAsync(
-            FullscreenVertex,
-            GpuStage.Vertex,
-            GpuShaderFormat.Spirv,
-            _stopping);
-        Result<GpuShader> fragment = await _compiler.CompileAsync(
-            await ComposeSkyAsync(path, key.Sky).ConfigureAwait(false),
-            name,
-            GpuStage.Fragment,
-            GpuShaderFormat.Spirv,
-            _stopping).ConfigureAwait(false);
-        Result<GpuShader> compiledVertex = await vertex.ConfigureAwait(false);
-        GpuPipelineDescription? description = compiledVertex.Ok && fragment.Ok
-            ? new GpuPipelineDescription
-            {
-                Vertex = compiledVertex.Value,
-                Fragment = fragment.Value,
-                ColorFormats = [key.Format],
-                Cull = GpuCull.None,
-            }
-            : null;
-        string? error = description is not null ? null : compiledVertex.Ok ? fragment.Error : compiledVertex.Error;
-        _compiled.Writer.TryWrite(new Compiled(entry, name, description, null, error, null));
     }
 
     private async Task CompileAsync(Entry entry, MaterialKey key)
     {
         entry.IsCompiling = true;
         entry.IsStale = false;
-        bool hasSurface = key.Surface.Shader != Handle<Shader>.None;
-        string name = hasSurface ? _assets.GetPath(key.Surface.Shader) ?? "a surface" : "no surface";
-        Handle<Shader>? surface = hasSurface ? key.Surface.Shader : null;
-        Result<string> fragmentText = await ComposeSurfaceAsync(key, name).ConfigureAwait(false);
-        Task<Result<GpuShader>> vertex = key.Pass == MaterialPass.Resolve
-            ? _compiler.CompileAsync(TilesVertex, GpuStage.Vertex, GpuShaderFormat.Spirv, _stopping)
-            : _compiler.CompileAsync(
-                $"#define PIECES_PLACE_ONLY {(hasSurface ? 0 : 1)}\n#include \"{PiecesVertex}\"\n",
-                "Pieces.vert.hlsl",
-                GpuStage.Vertex,
-                GpuShaderFormat.Spirv,
-                _stopping);
-        Result<GpuShader> fragment = fragmentText.Ok
-            ? await _compiler.CompileAsync(
-                fragmentText.Value,
-                $"{key.Pass} with {name}",
-                GpuStage.Fragment,
-                GpuShaderFormat.Spirv,
-                _stopping).ConfigureAwait(false)
-            : Result.Failure<GpuShader>(fragmentText.Error);
+        Handle<Shader>? surface = key.Surface.Shader != Handle<Shader>.None ? key.Surface.Shader : null;
+        (ShaderEntry vertexEntry, ShaderEntry fragmentEntry) = GetMaterialEntries(key.Pass, key.Surface.Shader);
+        Task<Result<GpuShader>> vertex = _compiler.CompileAsync(vertexEntry, GpuShaderFormat.Spirv, _stopping);
+        Result<GpuShader> fragment = await _compiler.CompileAsync(fragmentEntry, GpuShaderFormat.Spirv, _stopping)
+            .ConfigureAwait(false);
         Result<GpuShader> compiledVertex = await vertex.ConfigureAwait(false);
         GpuPipelineDescription? description = compiledVertex.Ok && fragment.Ok
             ? new GpuPipelineDescription
@@ -378,62 +293,29 @@ internal sealed class GpuPipelines : IDisposable
     }
 
     /// <summary>
-    /// A material pipeline's fragment shader: what the surface and template are told of the variant, how the renderer
-    /// binds a surface (Rendering/Include/Surfaces.hlsli), the surface itself, and its template.
+    /// The entry points a material pipeline draws with: for the visibility buffer, with a surface its clipped ones,
+    /// specialized with it, and without one the pieces' places alone; for the G-buffer, the tiles and the surface.
     /// </summary>
-    private async Task<Result<string>> ComposeSurfaceAsync(MaterialKey key, string name)
+    private (ShaderEntry Vertex, ShaderEntry Fragment) GetMaterialEntries(MaterialPass pass, Handle<Shader> surface)
     {
-        string surface = string.Empty;
-        if (key.Surface.Shader != Handle<Shader>.None)
+        if (pass == MaterialPass.Resolve)
         {
-            Result<SurfaceSource> source = await SurfaceSource.ReadAsync(_assets, key.Surface.Shader, _stopping)
-                .ConfigureAwait(false);
-
-            if (!source.Ok) return Result.Failure<string>(source.Error);
-
-            surface = source.Value.Text;
+            return (
+                new ShaderEntry(_materialsModule, "DrawTiles"),
+                new ShaderEntry(_materialsModule, "ResolveSurfaces") { Types = [GetType(surface)] });
         }
 
-        StringBuilder text = new();
-        text.Append("#define SURFACE_MASKED ").Append(key.Surface.IsMasked ? 1 : 0).Append('\n')
-            .Append("#define SURFACE_DOUBLE_SIDED ").Append(key.Surface.IsDoubleSided ? 1 : 0).Append('\n')
-            .Append("#define SURFACE_FORWARD 0\n")
-            .Append("#include \"Rendering/Include/Surfaces.hlsli\"\n")
-            .Append("#line 1 \"").Append(name).Append("\"\n").Append(surface).Append('\n')
-            .Append("#include \"").Append(TemplateOf(key.Pass, key.Surface.Shader != Handle<Shader>.None))
-            .Append("\"\n");
-
-        return Result.Success(text.ToString());
+        return surface == Handle<Shader>.None
+            ? (new ShaderEntry(_materialsModule, "DrawPiecePlaces"),
+                new ShaderEntry(_materialsModule, "WriteVisibility"))
+            : (new ShaderEntry(_materialsModule, "DrawPieces"),
+                new ShaderEntry(_materialsModule, "WriteClippedVisibility") { Types = [GetType(surface)] });
     }
 
     /// <summary>
-    /// A shader that composes the sky: how the renderer binds a sky (Rendering/Include/Skies.hlsli), the world's sky
-    /// shader <paramref name="skyShader"/>, or the renderer's own fallback without one, and the shader at
-    /// <paramref name="path"/>.
+    /// The struct a surface's module declares, named like its file.
     /// </summary>
-    private async Task<string> ComposeSkyAsync(string path, Handle<Shader> skyShader)
-    {
-        string sky = string.Empty;
-        string name = "the fallback sky";
-        if (skyShader != Handle<Shader>.None)
-        {
-            Result<SurfaceSource> source = await SurfaceSource.ReadAsync(_assets, skyShader, _stopping)
-                .ConfigureAwait(false);
-            sky = source.Ok ? source.Value.Text : string.Empty;
-            name = source.Ok ? source.Value.Name : name;
-        }
-
-        string included = path.StartsWith("Shaders/", StringComparison.Ordinal) ? path[8..] : path;
-
-        return new StringBuilder()
-            .Append("#define SKY_FALLBACK ").Append(sky.Length == 0 ? 1 : 0).Append('\n')
-            .Append("#include \"Rendering/Include/Skies.hlsli\"\n")
-            .Append("#line 1 \"").Append(name).Append("\"\n").Append(sky).Append('\n')
-            .Append("#include \"").Append(included).Append("\"\n")
-            .ToString();
-    }
-
-    private readonly record struct FullscreenKey(Handle<Shader> Shader, Handle<Shader> Sky, GpuFormat Format);
+    private ShaderType GetType(Handle<Shader> module) => ShaderType.Of(module, _assets.GetPath(module) ?? string.Empty);
 
     private readonly record struct MaterialKey(MaterialPass Pass, SurfaceKey Surface, TargetFormats Formats);
 
@@ -448,6 +330,39 @@ internal sealed class GpuPipelines : IDisposable
         GpuShader? Compute,
         string? Error,
         Handle<Shader>? Surface);
+
+    /// <summary>
+    /// Shader entries as the same pipeline: the same module, entry point, types and modules beside it, the lists
+    /// compared item by item.
+    /// </summary>
+    private sealed class ShaderEntryComparer : IEqualityComparer<ShaderEntry>
+    {
+        internal static ShaderEntryComparer Instance { get; } = new();
+
+        public bool Equals(ShaderEntry x, ShaderEntry y)
+            => x.Module == y.Module
+                && string.Equals(x.EntryPoint, y.EntryPoint, StringComparison.Ordinal)
+                && x.Types.SequenceEqual(y.Types)
+                && x.Modules.SequenceEqual(y.Modules);
+
+        public int GetHashCode(ShaderEntry obj)
+        {
+            HashCode hash = default;
+            hash.Add(obj.Module);
+            hash.Add(obj.EntryPoint, StringComparer.Ordinal);
+            foreach (ShaderType type in obj.Types)
+            {
+                hash.Add(type);
+            }
+
+            foreach (Handle<Shader> module in obj.Modules)
+            {
+                hash.Add(module);
+            }
+
+            return hash.ToHashCode();
+        }
+    }
 
     /// <summary>
     /// One pipeline: the one made, none until then; whether one is compiling; and whether a shader changed since its

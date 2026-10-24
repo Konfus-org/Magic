@@ -17,7 +17,7 @@ internal readonly record struct WorldCapacity(uint Instances, uint Pieces, uint 
 /// <summary>
 /// The renderer's steps for the world (<see cref="IRendering.Cull"/>, <see cref="IRendering.DrawVisibility"/>,
 /// <see cref="IRendering.BuildDepthPyramid"/>, <see cref="IRendering.Classify"/>, <see cref="IRendering.Resolve"/>):
-/// each view culled in two phases (Rendering/Include/Culling.hlsli) into buffers of its own, kept from frame to frame
+/// each view culled in two phases (Shaders/Renderer/Culling.slang) into buffers of its own, kept from frame to frame
 /// and made again when the view's size or the world's capacity changes; what it found drawn into a visibility buffer,
 /// each raster bin with its surface's pipeline, a piece's draw indexing its 96 corners; the depth pyramid the next
 /// culling tests against; and each pixel's surface resolved over the tiles that show it. A view no frame drew is let go
@@ -35,27 +35,17 @@ internal sealed class WorldPasses : IDisposable
     private const uint DrawBytes = 20;
     private const uint DispatchBytes = 12;
 
-    // The culling passes' phases (Culling.hlsli).
+    // The culling passes' phases (Culling.slang).
     private const uint FirstPhase = 1;
     private const uint SecondPhase = 2;
-    private const uint Retest = 3;
 
-    // The culling buffers' rows: counts, the indirect arguments' rows, the distance buckets, the raster bins.
-    private const uint Counts = 8;
-    private const uint ArgsRows = 6;
+    // The culling buffers' rows: counts, the last the groups done, the distance buckets, the raster bins.
+    private const uint Counts = 9;
     private const uint Buckets = 64;
     private const uint RasterBins = GpuMaterials.RasterBinRows;
 
-    // The rows of Args each indirect pass dispatches by (Culling.hlsli).
-    private const uint ArgsClusterCull = 0;
-    private const uint ArgsPieceWrite = 1;
-    private const uint ArgsInstanceCullSecond = 2;
-    private const uint ArgsClusterRetest = 3;
-    private const uint ArgsClusterCullSecond = 4;
-    private const uint ArgsPieceWriteSecond = 5;
-
     /// <summary>
-    /// Resolve bins at most, and so rows of the resolve's draws.
+    /// Resolve bins at most, and so rows of the resolve's draws; the tile counts have one more, the groups done.
     /// </summary>
     private const uint ResolveRows = 256;
 
@@ -72,15 +62,12 @@ internal sealed class WorldPasses : IDisposable
     private readonly Dictionary<int, ViewBuffers> _views = [];
     private readonly HashSet<int> _drawn = [];
     private readonly List<int> _gone = [];
-    private readonly Handle<Shader> _cullBegin;
-    private readonly Handle<Shader> _instanceCull;
-    private readonly Handle<Shader> _cullArgs;
-    private readonly Handle<Shader> _clusterCull;
-    private readonly Handle<Shader> _binPrefix;
-    private readonly Handle<Shader> _pieceWrite;
-    private readonly Handle<Shader> _hiZ;
-    private readonly Handle<Shader> _classify;
-    private readonly Handle<Shader> _resolveArgs;
+    private readonly ShaderEntry _beginCulling;
+    private readonly ShaderEntry _cullInstances;
+    private readonly ShaderEntry _cullClusters;
+    private readonly ShaderEntry _writePieces;
+    private readonly ShaderEntry _buildDepthPyramid;
+    private readonly ShaderEntry _classifyTiles;
 
     /// <summary>
     /// Zeros as many bytes as the largest buffer made, which a new buffer is filled with, as a count kept in it starts
@@ -108,15 +95,15 @@ internal sealed class WorldPasses : IDisposable
         _pipelines = pipelines;
         _materials = materials;
         _failures = failures;
-        _cullBegin = assets.Find<Shader>("Shaders/Rendering/Clusters/CullBegin.comp.hlsl");
-        _instanceCull = assets.Find<Shader>("Shaders/Rendering/Clusters/InstanceCull.comp.hlsl");
-        _cullArgs = assets.Find<Shader>("Shaders/Rendering/Clusters/Args.comp.hlsl");
-        _clusterCull = assets.Find<Shader>("Shaders/Rendering/Clusters/ClusterCull.comp.hlsl");
-        _binPrefix = assets.Find<Shader>("Shaders/Rendering/Clusters/BinPrefix.comp.hlsl");
-        _pieceWrite = assets.Find<Shader>("Shaders/Rendering/Clusters/PieceWrite.comp.hlsl");
-        _hiZ = assets.Find<Shader>("Shaders/Rendering/Clusters/HiZ.comp.hlsl");
-        _classify = assets.Find<Shader>("Shaders/Rendering/Clusters/Classify.comp.hlsl");
-        _resolveArgs = assets.Find<Shader>("Shaders/Rendering/Clusters/ResolveArgs.comp.hlsl");
+        Handle<Shader> culling = assets.Find<Shader>("Shaders/Renderer/Culling.slang");
+        Handle<Shader> depthPyramid = assets.Find<Shader>("Shaders/Renderer/DepthPyramid.slang");
+        Handle<Shader> materialsModule = assets.Find<Shader>("Shaders/Renderer/Materials.slang");
+        _beginCulling = new ShaderEntry(culling, "BeginCulling");
+        _cullInstances = new ShaderEntry(culling, "CullInstances");
+        _cullClusters = new ShaderEntry(culling, "CullClusters");
+        _writePieces = new ShaderEntry(culling, "WritePieces");
+        _buildDepthPyramid = new ShaderEntry(depthPyramid, "BuildDepthPyramid");
+        _classifyTiles = new ShaderEntry(materialsModule, "ClassifyTiles");
     }
 
     public void Dispose()
@@ -156,58 +143,61 @@ internal sealed class WorldPasses : IDisposable
         }
     }
 
+    /// <summary>
+    /// Culls a phase: the first starts the view's culling and tests every instance, the second those the first hid;
+    /// then their clusters, the second phase's with the clusters the first hid; then the phase's pieces placed. Each
+    /// pass's last group writes the groups the next runs.
+    /// </summary>
     internal VisibleWorld Cull(RenderView view, CullPhase phase)
     {
         ViewBuffers b = GetBuffers(view);
-        if (phase == CullPhase.First)
+        bool isFirst = phase == CullPhase.First;
+        Culling c = b.ToCulling(isFirst ? FirstPhase : SecondPhase);
+        uint row = isFirst ? 0u : 1u;
+        if (isFirst)
         {
-            Culling first = b.ToCulling(view.Constants, FirstPhase);
-            _passes.Dispatch(_cullBegin, first, new GpuGroups(1), [], [b.Budget, b.Counts]);
+            _passes.Dispatch(view, _beginCulling, c, new GpuGroups(1), [], [b.Budget, b.Counts]);
             _passes.Dispatch(
-                _instanceCull,
-                first,
-                GpuGroups.For(_capacity.Instances, 64),
+                view,
+                _cullInstances,
+                c,
+                GpuGroups.For(Math.Max(_capacity.Instances, 1), 64),
                 [b.HiZ],
-                [b.Counts, b.Clusters, b.BinCounts, b.Budget, b.Jobs, b.HiddenInstances]);
-            _passes.Dispatch(_cullArgs, first, new GpuGroups(1), [], [b.Counts, b.Args]);
+                [
+                    b.Counts, b.Clusters, b.BinCounts, b.Budget, b.Jobs, b.HiddenInstances, b.InstanceArgs,
+                    b.ClusterArgs,
+                ]);
+        }
+        else
+        {
             _passes.Dispatch(
-                _clusterCull,
-                first,
-                b.Args,
-                ArgsClusterCull * DispatchBytes,
-                [b.Jobs, b.HiZ],
-                [b.Counts, b.Clusters, b.BinCounts, b.Budget, b.HiddenClusters]);
-            Place(b, first, ArgsPieceWrite);
-
-            return new VisibleWorld(phase, b.Pieces, b.BinArgs, 0);
+                view,
+                _cullInstances,
+                c,
+                b.InstanceArgs,
+                0,
+                [b.HiddenInstances, b.HiZ],
+                [b.Counts, b.Clusters, b.BinCounts, b.Budget, b.Jobs, b.ClusterArgs]);
         }
 
-        Culling second = b.ToCulling(view.Constants, SecondPhase);
         _passes.Dispatch(
-            _instanceCull,
-            second,
-            b.Args,
-            ArgsInstanceCullSecond * DispatchBytes,
-            [b.HiddenInstances, b.HiZ],
-            [b.Counts, b.Clusters, b.BinCounts, b.Budget, b.Jobs]);
-        _passes.Dispatch(_cullArgs, second, new GpuGroups(1), [b.Counts], [b.Args]);
-        _passes.Dispatch(
-            _clusterCull,
-            second,
-            b.Args,
-            ArgsClusterCullSecond * DispatchBytes,
+            view,
+            _cullClusters,
+            c,
+            b.ClusterArgs,
+            row * DispatchBytes,
             [b.Jobs, b.HiZ],
-            [b.Counts, b.Clusters, b.BinCounts, b.Budget]);
+            [b.Counts, b.Clusters, b.HiddenClusters, b.BinCounts, b.BinCursors, b.BinArgs, b.Budget, b.PieceArgs]);
         _passes.Dispatch(
-            _clusterCull,
-            second with { Phase = Retest },
-            b.Args,
-            ArgsClusterRetest * DispatchBytes,
-            [b.HiddenClusters, b.HiZ],
-            [b.Counts, b.Clusters, b.BinCounts, b.Budget]);
-        Place(b, second, ArgsPieceWriteSecond);
+            view,
+            _writePieces,
+            c,
+            b.PieceArgs,
+            row * DispatchBytes,
+            [b.Counts, b.Clusters, b.BinArgs],
+            [b.BinCursors, b.Pieces]);
 
-        return new VisibleWorld(phase, b.Pieces, b.BinArgs, RasterBins);
+        return new VisibleWorld(phase, b.Pieces, b.BinArgs, row * RasterBins);
     }
 
     /// <summary>
@@ -228,7 +218,9 @@ internal sealed class WorldPasses : IDisposable
             GpuFormat.Invalid,
             GpuFormat.Invalid,
             _gpu.GetFormat(depth));
-        MaterialConstants constants = new(view.Constants, visible.Pieces, GpuBuffer.None, GpuTexture.None);
+        PassConstants<MaterialConstants> constants = new(
+            _passes.GetHeader(view),
+            new MaterialConstants(visible.Pieces, GpuBuffer.None, GpuTexture.None));
         using GpuDebugGroup group = _gpu.Commands.DebugGroup("Visibility");
         using GpuRenderPass render = _gpu.Commands.RenderPass(
             [new GpuTextureLevel(ids)],
@@ -250,39 +242,32 @@ internal sealed class WorldPasses : IDisposable
     }
 
     /// <summary>
-    /// The depth pyramid of what the view drew so far, a level a dispatch, each from the one before.
+    /// The depth pyramid of what the view drew so far, every level in one dispatch, a group to 32 x 32 texels of its
+    /// first level.
     /// </summary>
     internal void BuildDepthPyramid(RenderView view, GpuTexture depth)
     {
         ViewBuffers b = GetBuffers(view);
-        Size size = view.Size;
-        for (uint level = 0; level < b.HiZLevels; level++)
-        {
-            size = new Size(Math.Max((size.Width + 1) / 2, 1), Math.Max((size.Height + 1) / 2, 1));
-            _passes.Dispatch(
-                _hiZ,
-                new HiZConstants(view.Constants, depth, b.HiZ, level),
-                GpuGroups.For(size, 8),
-                level == 0 ? [depth] : [],
-                [b.HiZ]);
-        }
+        Size first = new(Math.Max((view.Size.Width + 1) / 2, 1), Math.Max((view.Size.Height + 1) / 2, 1));
+        _passes.Dispatch(
+            view,
+            _buildDepthPyramid,
+            new DepthPyramidConstants(depth, b.HiZ, b.Counts, b.HiZLevels),
+            GpuGroups.For(first, 32),
+            [depth],
+            [b.HiZ, b.Counts]);
     }
 
     internal SurfaceTiles Classify(RenderView view, GpuTexture ids)
     {
         ViewBuffers b = GetBuffers(view);
         _passes.Dispatch(
-            _classify,
-            new ClassifyConstants(view.Constants, ids, b.Pieces, b.TileCounts, b.TileList),
+            view,
+            _classifyTiles,
+            new ClassifyConstants(ids, b.Pieces, b.TileCounts, b.TileList, b.ResolveArgs),
             GpuGroups.For(view.Size, 8),
             [ids, b.Pieces],
-            [b.TileCounts, b.TileList, _failures]);
-        _passes.Dispatch(
-            _resolveArgs,
-            new ResolveArgsConstants(view.Constants, b.TileCounts, b.TileList, b.ResolveArgs),
-            new GpuGroups(1),
-            [],
-            [b.TileCounts, b.ResolveArgs]);
+            [b.TileCounts, b.TileList, b.ResolveArgs, _failures]);
 
         return new SurfaceTiles(b.Pieces, b.TileList, b.ResolveArgs);
     }
@@ -299,7 +284,9 @@ internal sealed class WorldPasses : IDisposable
             _gpu.GetFormat(targets.Emissive),
             _gpu.GetFormat(targets.Velocity),
             GpuFormat.Invalid);
-        MaterialConstants constants = new(view.Constants, tiles.Pieces, tiles.Tiles, ids);
+        PassConstants<MaterialConstants> constants = new(
+            _passes.GetHeader(view),
+            new MaterialConstants(tiles.Pieces, tiles.Tiles, ids));
         using GpuDebugGroup group = _gpu.Commands.DebugGroup("Resolve");
         using GpuRenderPass render = _gpu.Commands.RenderPass(
             [
@@ -338,26 +325,6 @@ internal sealed class WorldPasses : IDisposable
     }
 
     /// <summary>
-    /// Lays a phase's pieces out by raster bin, then places them.
-    /// </summary>
-    private void Place(ViewBuffers b, Culling c, uint argsRow)
-    {
-        _passes.Dispatch(
-            _binPrefix,
-            c,
-            new GpuGroups(1),
-            [],
-            [b.BinCounts, b.BinCursors, b.BinArgs, b.Counts, b.Args]);
-        _passes.Dispatch(
-            _pieceWrite,
-            c,
-            b.Args,
-            argsRow * DispatchBytes,
-            [b.Counts, b.Clusters, b.BinArgs],
-            [b.BinCursors, b.Pieces]);
-    }
-
-    /// <summary>
     /// Draws one bin with <paramref name="surface"/>'s pipeline for <paramref name="pass"/>, its arguments at row
     /// <paramref name="row"/>; none until its pipeline is made.
     /// </summary>
@@ -366,7 +333,7 @@ internal sealed class WorldPasses : IDisposable
         MaterialPass pass,
         SurfaceKey surface,
         TargetFormats formats,
-        in MaterialConstants constants,
+        in PassConstants<MaterialConstants> constants,
         GpuBuffer arguments,
         uint row)
     {
@@ -393,7 +360,9 @@ internal sealed class WorldPasses : IDisposable
         ViewBuffers made = new(view.Size, _capacity, hiZLevels)
         {
             Counts = CreateBuffer(Counts * 4),
-            Args = CreateBuffer(ArgsRows * DispatchBytes),
+            InstanceArgs = CreateBuffer(DispatchBytes),
+            ClusterArgs = CreateBuffer(2 * DispatchBytes),
+            PieceArgs = CreateBuffer(2 * DispatchBytes),
             Budget = CreateBuffer(Buckets * 2 * 4),
             Jobs = CreateBuffer(_capacity.Jobs * 16),
             HiddenInstances = CreateBuffer(_capacity.Instances * 4),
@@ -404,7 +373,7 @@ internal sealed class WorldPasses : IDisposable
             BinArgs = CreateBuffer(2 * RasterBins * DrawBytes),
             Pieces = CreateBuffer(_capacity.Pieces * 12),
             HiZ = CreateBuffer(hiZBytes),
-            TileCounts = CreateBuffer(ResolveRows * 4),
+            TileCounts = CreateBuffer((ResolveRows + 1) * 4),
             TileList = CreateBuffer(Math.Max(_capacity.ResolveBins, 1) * tiles * 4),
             ResolveArgs = CreateBuffer(ResolveRows * DrawBytes),
         };
@@ -441,13 +410,15 @@ internal sealed class WorldPasses : IDisposable
     }
 
     /// <summary>
-    /// The culling passes' constants, the view's culling buffers and the phase, as Culling.hlsli's CullConstants.
+    /// The culling passes' constants, the view's culling buffers and the phase, as Culling.slang's CullConstants.
     /// </summary>
+    [ShaderStruct("Shaders/Renderer/Culling.slang", "CullConstants")]
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct Culling(
-        GpuBuffer View,
         GpuBuffer Counts,
-        GpuBuffer Args,
+        GpuBuffer InstanceArgs,
+        GpuBuffer ClusterArgs,
+        GpuBuffer PieceArgs,
         GpuBuffer Budget,
         GpuBuffer Jobs,
         GpuBuffer HiddenInstances,
@@ -460,27 +431,27 @@ internal sealed class WorldPasses : IDisposable
         GpuBuffer HiZ,
         uint Phase);
 
+    [ShaderStruct("Shaders/Renderer/DepthPyramid.slang", "DepthPyramidConstants")]
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct HiZConstants(GpuBuffer View, GpuTexture Depth, GpuBuffer HiZ, uint Level);
+    private readonly record struct DepthPyramidConstants(
+        GpuTexture Depth,
+        GpuBuffer HiZ,
+        GpuBuffer Counters,
+        uint Levels);
 
+    /// <summary>
+    /// What every draw of the world's surfaces is handed, both its stages, as Shaders/Renderer/Materials.slang's
+    /// <c>MaterialConstants</c>: the view's pieces, and for the resolve its tile list and the visibility buffer.
+    /// </summary>
+    [ShaderStruct("Shaders/Renderer/Materials.slang", "MaterialConstants")]
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct MaterialConstants(
-        GpuBuffer View,
-        GpuBuffer Pieces,
-        GpuBuffer Tiles,
-        GpuTexture Visibility);
+    private readonly record struct MaterialConstants(GpuBuffer Pieces, GpuBuffer Tiles, GpuTexture Visibility);
 
+    [ShaderStruct("Shaders/Renderer/Materials.slang", "ClassifyConstants")]
     [StructLayout(LayoutKind.Sequential)]
     private readonly record struct ClassifyConstants(
-        GpuBuffer View,
         GpuTexture Visibility,
         GpuBuffer Pieces,
-        GpuBuffer TileCounts,
-        GpuBuffer TileList);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct ResolveArgsConstants(
-        GpuBuffer View,
         GpuBuffer TileCounts,
         GpuBuffer TileList,
         GpuBuffer ResolveArgs);
@@ -499,7 +470,11 @@ internal sealed class WorldPasses : IDisposable
 
         internal required GpuBuffer Counts { get; init; }
 
-        internal required GpuBuffer Args { get; init; }
+        internal required GpuBuffer InstanceArgs { get; init; }
+
+        internal required GpuBuffer ClusterArgs { get; init; }
+
+        internal required GpuBuffer PieceArgs { get; init; }
 
         internal required GpuBuffer Budget { get; init; }
 
@@ -527,10 +502,11 @@ internal sealed class WorldPasses : IDisposable
 
         internal required GpuBuffer ResolveArgs { get; init; }
 
-        internal Culling ToCulling(GpuBuffer view, uint phase) => new(
-            view,
+        internal Culling ToCulling(uint phase) => new(
             Counts,
-            Args,
+            InstanceArgs,
+            ClusterArgs,
+            PieceArgs,
             Budget,
             Jobs,
             HiddenInstances,
@@ -547,8 +523,8 @@ internal sealed class WorldPasses : IDisposable
         {
             foreach (GpuBuffer buffer in (ReadOnlySpan<GpuBuffer>)
                 [
-                    Counts, Args, Budget, Jobs, HiddenInstances, Clusters, HiddenClusters, BinCounts, BinCursors,
-                    BinArgs, Pieces, HiZ, TileCounts, TileList, ResolveArgs,
+                    Counts, InstanceArgs, ClusterArgs, PieceArgs, Budget, Jobs, HiddenInstances, Clusters,
+                    HiddenClusters, BinCounts, BinCursors, BinArgs, Pieces, HiZ, TileCounts, TileList, ResolveArgs,
                 ])
             {
                 gpu.Release(buffer);

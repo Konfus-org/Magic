@@ -1,8 +1,11 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 using System.Threading.Channels;
 using Magic.Contexts.Assets;
+using Magic.Contexts.Gpu;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
+using Magic.Interfaces;
 using Magic.Services;
 
 namespace Magic.VoxelRendering;
@@ -19,18 +22,20 @@ internal readonly record struct SurfaceKey(Handle<Shader> Shader, bool IsMasked,
 internal readonly record struct DrawnMaterial(int Row, SurfaceKey Surface, MaterialType Type, bool IsSky);
 
 /// <summary>
-/// The materials resident on the GPU, as rows of the materials' table (<see cref="GpuTables.Materials"/>) a surface's
-/// generated <c>LoadMaterialParams</c> reads, packed by its surface shader's params, which are read once. A row also
-/// says how its material is drawn (<see cref="GpuTables.MaterialBins"/>): the raster bin its clusters are drawn into the
-/// visibility buffer by when they clip (a masked surface's, or a card's or a fade's of any), the resolve bin its pixels
-/// are shaded into the G-buffer by, and whether it is in yet, transparent, masked or double-sided. What is kept is what
-/// is held, as the other residents are; a material holds the textures it samples. What is broken is packed, in its own
-/// row, as the failure material for what broke. A material is drawn only once it can be drawn as it should be: its
-/// textures in, and every pipeline it is drawn with made (<see cref="GpuPipelines.IsDrawable"/>); until then its row
-/// stays as it was. A material whose params, blending or sides a game set is taken in again as one whose file changed
-/// is, from the count its params keep (<see cref="MaterialParamDictionary.Version"/>), and its instances are told only
-/// when what they work out from it changed (<see cref="Changed"/>). The default material and the failure materials are
-/// held from the start and never leave. Render thread.
+/// The materials resident on the GPU, as rows of the materials' table (<see cref="GpuTables.Materials"/>), each its
+/// surface's or sky's struct as the shader's reflection lays it out (<see cref="ShaderStruct"/>, read once), which
+/// <c>LoadMaterial</c> reads (Shaders/Renderer/World.slang): its fields the material's params by name, else their
+/// initializers, a texture none without one. A row also says how its material is drawn
+/// (<see cref="GpuTables.MaterialBins"/>): the raster bin its clusters are drawn into the visibility buffer by when
+/// they clip (a masked surface's, or a card's or a fade's of any), the resolve bin its pixels are shaded into the
+/// G-buffer by, and whether it is in yet, transparent, masked or double-sided. What is kept is what is held, as the
+/// other residents are; a material holds the textures it samples. What is broken is packed, in its own row, as the
+/// failure material for what broke. A material is drawn only once it can be drawn as it should be: its textures in, and
+/// every pipeline it is drawn with made (<see cref="GpuPipelines.IsDrawable"/>); until then its row stays as it was. A
+/// material whose params, blending or sides a game set is taken in again as one whose file changed is, from the count
+/// its params keep (<see cref="MaterialParamDictionary.Version"/>), and its instances are told only when what they work
+/// out from it changed (<see cref="Changed"/>). The default material and the failure materials are held from the start
+/// and never leave. Render thread.
 /// </summary>
 internal sealed class GpuMaterials
 {
@@ -41,7 +46,7 @@ internal sealed class GpuMaterials
 
     /// <summary>
     /// The raster bins a phase draws: the fixed ones, a surface's own from <see cref="FixedRasterBins"/>, and its cards'
-    /// <see cref="CardBinOffset"/> after its own, as Shaders/Rendering/Include/Culling.hlsli numbers them.
+    /// <see cref="CardBinOffset"/> after its own, as Shaders/Renderer/Culling.slang numbers them.
     /// </summary>
     internal const int RasterBinRows = 256;
 
@@ -66,6 +71,13 @@ internal sealed class GpuMaterials
     /// </summary>
     private const int MaxResolveBins = 256;
 
+    /// <summary>
+    /// The bytes a material's row holds (<see cref="GpuMaterial"/>), Shaders/Renderer/World.slang's
+    /// <c>MaterialBytes</c>.
+    /// </summary>
+    private const uint MaterialBytes = 128;
+
+    private readonly IShaderCompiler _compiler;
     private readonly GpuTables _tables;
     private readonly GpuTextures _textures;
     private readonly GpuPipelines _pipelines;
@@ -78,8 +90,8 @@ internal sealed class GpuMaterials
     /// <summary>
     /// Surfaces read, or that could not be, for the render thread to take in as <see cref="Take"/> starts.
     /// </summary>
-    private readonly Channel<(Handle<Shader> Surface, SurfaceSource? Source)> _surfacesRead =
-        Channel.CreateUnbounded<(Handle<Shader> Surface, SurfaceSource? Source)>(
+    private readonly Channel<(Handle<Shader> Surface, ShaderStruct? Struct)> _surfacesRead =
+        Channel.CreateUnbounded<(Handle<Shader> Surface, ShaderStruct? Struct)>(
             new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
@@ -92,11 +104,6 @@ internal sealed class GpuMaterials
     private readonly Dictionary<SurfaceKey, int> _resolveBins = [];
     private readonly RangeAllocator _rows = new();
     private readonly Handle<Material> _defaultMaterial;
-
-    /// <summary>
-    /// <see cref="GetTextureRef"/>, made once, so packing a material, as often as a game sets one, makes no closure.
-    /// </summary>
-    private readonly Func<MaterialParam, uint> _getTextureRef;
 
     /// <summary>
     /// The surfaces that broke since the materials last asked, whose materials are packed anew.
@@ -112,6 +119,7 @@ internal sealed class GpuMaterials
 
     internal GpuMaterials(
         Assets assets,
+        IShaderCompiler compiler,
         GpuTables tables,
         GpuTextures textures,
         GpuPipelines pipelines,
@@ -119,12 +127,12 @@ internal sealed class GpuMaterials
         CancellationToken stopping)
     {
         _assets = assets;
+        _compiler = compiler;
         _tables = tables;
         _textures = textures;
         _pipelines = pipelines;
         _failures = failures;
         _stopping = stopping;
-        _getTextureRef = GetTextureRef;
         _materials = new(assets, "A material does not load, so it is drawn as the failure", Task.FromResult, stopping);
         _defaultMaterial = assets.GetDefault<Material>();
         Record(_defaultMaterial);
@@ -185,9 +193,9 @@ internal sealed class GpuMaterials
     /// </summary>
     internal void Take()
     {
-        while (_surfacesRead.Reader.TryRead(out (Handle<Shader> Surface, SurfaceSource? Source) read))
+        while (_surfacesRead.Reader.TryRead(out (Handle<Shader> Surface, ShaderStruct? Struct) read))
         {
-            TakeSurface(read.Surface, read.Source);
+            TakeSurface(read.Surface, read.Struct);
         }
 
         _materials.Take(TakeMaterial);
@@ -354,15 +362,76 @@ internal sealed class GpuMaterials
     }
 
     /// <summary>
+    /// Whether a surface's or a sky's struct has a field <paramref name="name"/>.
+    /// </summary>
+    private static bool IsDeclared(ShaderStruct layout, string name)
+    {
+        foreach (ShaderField field in layout.Fields)
+        {
+            if (string.Equals(field.Name, name, StringComparison.Ordinal)) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The struct <paramref name="path"/> declares, if it is a surface or a sky, each of its fields a param, and it fits
+    /// a material's row; else why not.
+    /// </summary>
+    private static Result<ShaderStruct> CheckParams(string path, ShaderStruct layout)
+    {
+        if (layout.Contract == ShaderContract.None)
+            return Result.Failure<ShaderStruct>($"{path}'s struct implements neither ISurface nor ISky.");
+
+        foreach (ShaderField field in layout.Fields)
+        {
+            if (field.Type is null)
+            {
+                return Result.Failure<ShaderStruct>($"{path}'s {field.Name} is no param: a param is a float, int, uint "
+                    + "or bool, a vector of 2 to 4 of one, a Color or a TextureRef.");
+            }
+        }
+
+        return layout.Size <= MaterialBytes
+            ? Result.Success(layout)
+            : Result.Failure<ShaderStruct>(
+                $"{path}'s struct takes {layout.Size} bytes, more than a material's {MaterialBytes}.");
+    }
+
+    /// <summary>
+    /// A value a material gives a param, packed as its type is: a bool's x as 1 or 0; a colour's r to a; a scalar's or
+    /// a vector's x to w, as many as it has, a float as it is, an int toward zero, a uint toward zero from 0 up.
+    /// </summary>
+    private static void WriteValue(ShaderParamType type, MaterialParam value, Span<byte> destination)
+    {
+        if (type == ShaderParamType.Bool)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(destination, value.X != 0 ? 1u : 0u);
+
+            return;
+        }
+
+        // Float1 to Uint4 run in fours, floats, ints then uints, by how many components each has.
+        bool isColor = type == ShaderParamType.Color;
+        int kind = isColor ? 0 : (int)type / 4;
+        int count = isColor ? 4 : ((int)type % 4) + 1;
+        for (int i = 0; i < count; i++)
+        {
+            float number = isColor
+                ? i switch { 0 => value.R, 1 => value.G, 2 => value.B, _ => value.A }
+                : i switch { 0 => value.X, 1 => value.Y, 2 => value.Z, _ => value.W };
+            Span<byte> word = destination[(i * 4)..];
+            if (kind == 0) BinaryPrimitives.WriteSingleLittleEndian(word, number);
+            else if (kind == 1) BinaryPrimitives.WriteInt32LittleEndian(word, (int)number);
+            else BinaryPrimitives.WriteUInt32LittleEndian(word, (uint)MathF.Max(0, number));
+        }
+    }
+
+    /// <summary>
     /// Whether every pipeline a material is drawn with is made: a sky's are the sky's passes', which wait for it
     /// themselves.
     /// </summary>
     private bool IsDrawable(DrawnMaterial drawn) => drawn.IsSky || _pipelines.IsDrawable(drawn.Surface);
-
-    /// <summary>
-    /// The texture a param names as a surface names it.
-    /// </summary>
-    private uint GetTextureRef(MaterialParam param) => _textures.GetRef(param.Texture);
 
     /// <summary>
     /// Takes in again each material held whose params, blending or sides a game set since it was last read, as one
@@ -420,24 +489,28 @@ internal sealed class GpuMaterials
         }
     }
 
+    /// <summary>
+    /// Reads what a surface's or a sky's struct is from the compiler, told to the render thread, or, when it cannot be
+    /// drawn, why.
+    /// </summary>
     private async Task ReadSurfaceAsync(Handle<Shader> surface)
     {
-        Result<SurfaceSource> source = await SurfaceSource.ReadAsync(_assets, surface, _stopping).ConfigureAwait(false);
-        if (!source.Ok)
-        {
-            FailureHandler.Report(
-                "A surface cannot be drawn, so its materials are drawn as the failure",
-                source.Error);
-        }
+        string path = _assets.GetPath(surface) ?? $"shader {surface.Id}";
+        Result<ShaderStruct> read = await _compiler.ReflectStructAsync(ShaderType.Of(surface, path), _stopping)
+            .ConfigureAwait(false);
+        if (read.Ok) read = CheckParams(path, read.Value);
 
-        _surfacesRead.Writer.TryWrite((surface, source.Ok ? source.Value : null));
+        if (!read.Ok)
+            FailureHandler.Report("A surface cannot be drawn, so its materials are drawn as the failure", read.Error);
+
+        _surfacesRead.Writer.TryWrite((surface, read.Ok ? read.Value : null));
     }
 
-    private void TakeSurface(Handle<Shader> surface, SurfaceSource? source)
+    private void TakeSurface(Handle<Shader> surface, ShaderStruct? layout)
     {
         if (!_surfaces.TryGetValue(surface, out SurfaceEntry? entry)) return;
 
-        entry.Source = source;
+        entry.Struct = layout;
         entry.IsRead = true;
         foreach ((Handle<Material> handle, MaterialEntry material) in _materials.Entries)
         {
@@ -446,9 +519,9 @@ internal sealed class GpuMaterials
     }
 
     /// <summary>
-    /// Packs a material: its surface's packing of its params, or as the failure material for what broke when it, its
-    /// surface or a texture it samples is; drawn once its pipelines are made. Nothing while a texture it samples is
-    /// loading: it is packed again once the texture is in.
+    /// Packs a material: its params as its surface's struct lays them out, or as the failure material for what broke
+    /// when it, its surface or a texture it samples is; drawn once its pipelines are made. Nothing while a texture it
+    /// samples is loading: it is packed again once the texture is in.
     /// </summary>
     private void Pack(Handle<Material> handle, MaterialEntry entry)
     {
@@ -461,7 +534,7 @@ internal sealed class GpuMaterials
 
         if (!_surfaces.TryGetValue(material.Shader, out SurfaceEntry? surface) || !surface.IsRead) return;
 
-        if (surface.Source is not { } source || _failures.IsBroken(material.Shader))
+        if (surface.Struct is not { } layout || _failures.IsBroken(material.Shader))
         {
             PackAsFailure(handle, entry, FailureType.Shader, "Surface does not compile", material.IsDoubleSided);
 
@@ -478,22 +551,55 @@ internal sealed class GpuMaterials
 
         if (isLoading) return;
 
-        foreach (string unknown in source.Layout.FindUnknown(material.Params.Keys))
+        foreach (string name in material.Params.Keys)
         {
-            if (!entry.Unknown.Add(unknown)) continue;
+            if (IsDeclared(layout, name) || !entry.Unknown.Add(name)) continue;
 
             Debugging.Warn(
-                $"{_assets.GetPath(handle)} sets {unknown}, which {source.Name}'s MaterialParams does not declare.");
+                $"{_assets.GetPath(handle)} sets {name}, which {_assets.GetPath(material.Shader)}'s struct does not "
+                + "declare.");
         }
 
         GpuMaterial row = default;
-        source.Layout.Write(material.Params, _getTextureRef, MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
+        WriteParams(layout, material.Params, MemoryMarshal.AsBytes(new Span<GpuMaterial>(ref row)));
         DrawnMaterial drawn = new(
             entry.Row,
             new SurfaceKey(material.Shader, material.Type == MaterialType.Masked, material.IsDoubleSided),
             material.Type,
-            source.IsSky);
+            layout.Contract == ShaderContract.Sky);
         ShowWhenDrawable(handle, entry, new PackedMaterial(row, drawn, null));
+    }
+
+    /// <summary>
+    /// Packs each field of <paramref name="layout"/> into <paramref name="row"/>, which is zeros: the value
+    /// <paramref name="values"/> gives it by name, else its initializer; a texture's id, or none without one.
+    /// </summary>
+    private void WriteParams(
+        ShaderStruct layout,
+        IReadOnlyDictionary<string, MaterialParam> values,
+        Span<byte> row)
+    {
+        foreach (ShaderField field in layout.Fields)
+        {
+            if (field.Type is not { } type) continue;
+
+            Span<byte> destination = row[(int)field.Offset..];
+            values.TryGetValue(field.Name, out MaterialParam? value);
+            if (type == ShaderParamType.Texture)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    destination,
+                    _textures.GetRef(value?.Texture ?? Handle<Texture>.None));
+            }
+            else if (value is not null)
+            {
+                WriteValue(type, value, destination);
+            }
+            else
+            {
+                field.Default.Span.CopyTo(destination);
+            }
+        }
     }
 
     /// <summary>
@@ -706,7 +812,10 @@ internal sealed class GpuMaterials
 
     private sealed class SurfaceEntry
     {
-        internal SurfaceSource? Source { get; set; }
+        /// <summary>
+        /// What its struct is; null when it cannot be drawn.
+        /// </summary>
+        internal ShaderStruct? Struct { get; set; }
 
         internal bool IsRead { get; set; }
     }

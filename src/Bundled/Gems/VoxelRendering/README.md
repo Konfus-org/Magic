@@ -8,8 +8,9 @@ clusters and cards a cluster generator makes for each model.
   ([Rendering](../../../Core/README.md#rendering)). The settings name it. By default it is `Scripts/DefaultPipeline.cs`
   from the gem's resources. To change the frame, or light it with a shader of your own, copy that file into the
   project's assets, rename the class, change it, and name the copy in the settings.
-- **The look** comes from the world's `PostProcessing` effects, in order. The gem's `Shaders/Effects/` has the
-  shaders for `Exposure`, `Tonemap` and `Grade`. A world without effects shows the lit view as it is.
+- **The look** comes from the world's `PostProcessing` effects, in order. Effects next to each other that change each
+  pixel by itself, such as `Tonemap` and `Grade`, run as one pass. A world without effects shows the lit view as it
+  is.
 - **The weather** comes from the world's `Weather` effects: its `Wind` and `Clouds` move and shape the sky's clouds.
 - **Overlays.** The overlay script draws over the window after its views are drawn. By default it is
   `Scripts/DebugUi.cs`, the debug UI's.

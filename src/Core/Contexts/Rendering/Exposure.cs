@@ -23,8 +23,9 @@ public readonly record struct Exposure(Handle<Shader> Shader, float MinEv = 0, f
     public GpuTexture Record(IRendering rendering, RenderView view, GpuTexture image)
     {
         rendering.Dispatch(
+            view,
             Shader,
-            new MeterConstants(view.Constants, view.Exposure, MinEv, MaxEv),
+            new MeterConstants(MinEv, MaxEv),
             new GpuGroups(1),
             [],
             [view.Exposure]);
@@ -33,5 +34,5 @@ public readonly record struct Exposure(Handle<Shader> Shader, float MinEv = 0, f
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private readonly record struct MeterConstants(GpuBuffer View, GpuBuffer Exposure, float MinEv, float MaxEv);
+    private readonly record struct MeterConstants(float MinEv, float MaxEv);
 }

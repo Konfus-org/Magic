@@ -371,7 +371,8 @@ internal sealed unsafe class VulkanDevice
     /// <summary>
     /// Whether the GPU reads resources through the heap as its shaders do: arrays of them indexed by any lane, holding
     /// nothing in most slots, written while frames read other slots; storage images read and written whatever their
-    /// format; and storage written from every stage, as the heap's buffers and levels are writable in each.
+    /// format; storage written from every stage, as the heap's buffers and levels are writable in each; and buffers
+    /// laid out scalar, as C# packs the structs written into them.
     /// </summary>
     private static bool HasHeapFeatures(
         in VkPhysicalDeviceVulkan12Features features12,
@@ -385,6 +386,7 @@ internal sealed unsafe class VulkanDevice
             && features12.shaderSampledImageArrayNonUniformIndexing
             && features12.shaderStorageImageArrayNonUniformIndexing
             && features12.shaderStorageBufferArrayNonUniformIndexing
+            && features12.scalarBlockLayout
             && core.shaderStorageImageReadWithoutFormat
             && core.shaderStorageImageWriteWithoutFormat
             && core.vertexPipelineStoresAndAtomics
@@ -607,6 +609,7 @@ internal sealed unsafe class VulkanDevice
             shaderSampledImageArrayNonUniformIndexing = true,
             shaderStorageImageArrayNonUniformIndexing = true,
             shaderStorageBufferArrayNonUniformIndexing = true,
+            scalarBlockLayout = true,
         };
         VkPhysicalDeviceFeatures2 features = new()
         {

@@ -1,36 +1,58 @@
 using System.IO;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Gpu;
+using Magic.Contexts.Rendering;
 using Magic.Interfaces;
 using Magic.Services;
 
 namespace Magic.VoxelRendering;
 
 /// <summary>
-/// Records the frame's passes of one shader: a compute pass, its groups given or read from a buffer, and a fullscreen
-/// pass composed with the world's sky; each a debug group named after its shader's file, which the GPU provider
-/// times. A pass whose pipeline is not made yet is left out, which makes the frame incomplete
+/// Records the frame's compute passes for a view, of one entry point each, their groups given or read from a buffer.
+/// Each is handed its header, the frame's constants and the view's (<see cref="PassHeader"/>), ahead of its own, and is
+/// a debug group named after its entry point, or its shader's file for one with a single entry point, which the GPU
+/// provider times. A pass whose pipeline is not made yet is left out, which makes the frame incomplete
 /// (<see cref="GpuPipelines.IsFrameComplete"/>). Render thread.
 /// </summary>
-internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets assets)
+internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets assets, GpuBuffer world)
 {
     /// <summary>
-    /// Each shader's debug group's name, its file's name up to its first dot.
+    /// The most bytes of constants a draw or dispatch pushes.
+    /// </summary>
+    internal const int MaxConstantBytes = 128;
+
+    /// <summary>
+    /// Each single-entry shader's debug group's name, its file's name up to its first dot.
     /// </summary>
     private readonly Dictionary<Handle<Shader>, string> _names = [];
 
     /// <summary>
-    /// The world's sky's surface, which a fullscreen pass is composed with: this frame's.
+    /// The header of a pass drawn for <paramref name="view"/>.
     /// </summary>
-    internal SurfaceKey Sky { get; set; }
+    internal PassHeader GetHeader(RenderView view) => new(world, view.Constants);
 
     internal void Dispatch<T>(
-        Handle<Shader> shader,
+        RenderView view,
+        ShaderEntry shader,
         in T constants,
         GpuGroups groups,
         ReadOnlySpan<GpuResource> reads,
         ReadOnlySpan<GpuResource> writes)
         where T : unmanaged
+        => Dispatch(view, shader, MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)), groups, reads, writes);
+
+    /// <summary>
+    /// A compute pass whose constants after its header are <paramref name="constants"/>, as bytes.
+    /// </summary>
+    internal void Dispatch(
+        RenderView view,
+        ShaderEntry shader,
+        ReadOnlySpan<byte> constants,
+        GpuGroups groups,
+        ReadOnlySpan<GpuResource> reads,
+        ReadOnlySpan<GpuResource> writes)
     {
         GpuPipeline pipeline = pipelines.GetCompute(shader);
 
@@ -38,11 +60,16 @@ internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets asse
 
         using GpuDebugGroup group = gpu.Commands.DebugGroup(NameOf(shader));
         using GpuComputePass pass = gpu.Commands.ComputePass();
-        pass.Reads(reads).Writes(writes).Pipeline(pipeline).Constants(constants).Dispatch(groups.X, groups.Y, groups.Z);
+        pass.Reads(reads)
+            .Writes(writes)
+            .Pipeline(pipeline)
+            .Constants(WithHeader(view, constants, stackalloc byte[MaxConstantBytes]))
+            .Dispatch(groups.X, groups.Y, groups.Z);
     }
 
     internal void Dispatch<T>(
-        Handle<Shader> shader,
+        RenderView view,
+        ShaderEntry shader,
         in T constants,
         GpuBuffer arguments,
         uint offset,
@@ -56,38 +83,37 @@ internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets asse
 
         using GpuDebugGroup group = gpu.Commands.DebugGroup(NameOf(shader));
         using GpuComputePass pass = gpu.Commands.ComputePass();
-        pass.Reads(reads).Writes(writes).Pipeline(pipeline).Constants(constants).DispatchFromBuffer(arguments, offset);
+        pass.Reads(reads)
+            .Writes(writes)
+            .Pipeline(pipeline)
+            .Constants(new PassConstants<T>(GetHeader(view), constants))
+            .DispatchFromBuffer(arguments, offset);
     }
 
     /// <summary>
-    /// A render pass that draws <paramref name="shader"/>, composed with the world's sky, over the whole of
-    /// <paramref name="target"/>, its contents as <paramref name="contents"/> says, which reads what it says.
+    /// The header of a pass drawn for <paramref name="view"/> and then <paramref name="constants"/>, written into
+    /// <paramref name="into"/>.
     /// </summary>
-    internal void Fullscreen<T>(
-        Handle<Shader> shader,
-        in T constants,
-        GpuTextureLevel target,
-        GpuContents contents,
-        ReadOnlySpan<GpuResource> reads)
-        where T : unmanaged
+    private ReadOnlySpan<byte> WithHeader(RenderView view, ReadOnlySpan<byte> constants, Span<byte> into)
     {
-        GpuPipeline pipeline = pipelines.GetFullscreen(shader, Sky, gpu.GetFormat(target.Texture));
+        PassHeader header = GetHeader(view);
+        MemoryMarshal.Write(into, in header);
+        int size = Unsafe.SizeOf<PassHeader>();
+        constants.CopyTo(into[size..]);
 
-        if (pipeline == GpuPipeline.None) return;
-
-        using GpuDebugGroup group = gpu.Commands.DebugGroup(NameOf(shader));
-        using GpuRenderPass render = gpu.Commands.RenderPass([target], contents);
-        render.Reads(reads).Pipeline(pipeline).Constants(constants).Draw(3);
+        return into[..(size + constants.Length)];
     }
 
-    private string NameOf(Handle<Shader> shader)
+    private string NameOf(ShaderEntry shader)
     {
-        if (!_names.TryGetValue(shader, out string? name))
+        if (shader.EntryPoint is { } entryPoint) return entryPoint;
+
+        if (!_names.TryGetValue(shader.Module, out string? name))
         {
-            string file = Path.GetFileName(assets.GetPath(shader) ?? $"Shader {shader.Id}");
+            string file = Path.GetFileName(assets.GetPath(shader.Module) ?? $"Shader {shader.Module.Id}");
             int dot = file.IndexOf('.', StringComparison.Ordinal);
             name = dot > 0 ? file[..dot] : file;
-            _names[shader] = name;
+            _names[shader.Module] = name;
         }
 
         return name;

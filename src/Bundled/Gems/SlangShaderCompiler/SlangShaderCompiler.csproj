@@ -1,0 +1,32 @@
+<!-- A gem: everything it needs to build comes from ../Directory.Build.props. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Slang to SPIR-V, through the Slang compiler, what each shader takes read from its reflection: provides IShaderCompiler.</Description>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <!-- Slang is a COM API: sessions, modules, blobs and its reflection are pointers. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <SlangTag>v2026.20</SlangTag>
+    <SlangVersion>2026.20</SlangVersion>
+  </PropertyGroup>
+
+  <!-- Slang: the release its authors publish for the platform. Slang is a COM API, bound by hand in the gem, so only
+       the compiler's library is declared, and the one it optimises SPIR-V with, which it loads itself. -->
+  <ItemGroup Condition="'$(MagicNativeRid)' == 'win-x64'">
+    <NativeLibrary Include="slang-compiler" Url="https://github.com/shader-slang/slang/releases/download/$(SlangTag)/slang-$(SlangVersion)-windows-x86_64.zip"
+                   Sha256="e6dd32bbddf1720ebb4e679d55e9635ce792865a5bd84f3d2cd9af28647c0174" Library="bin/slang-compiler.dll"
+                   Loads="bin/slang-glslang.dll" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(MagicNativeRid)' == 'linux-x64'">
+    <NativeLibrary Include="slang-compiler" Url="https://github.com/shader-slang/slang/releases/download/$(SlangTag)/slang-$(SlangVersion)-linux-x86_64-glibc-2.28.tar.gz"
+                   Sha256="84ebd777968caceea26b21bfd014341078be6047be6c5a963a69f984f896cebd" Library="lib/libslang-compiler.so"
+                   Loads="lib/libslang-glslang-$(SlangVersion).so" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- XxHash3: what names a compiled shader in the cache, and the version of its source. -->
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+</Project>

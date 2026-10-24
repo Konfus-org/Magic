@@ -192,8 +192,9 @@ world.
 `IGpuDriver` is the GPU, one level above the graphics API. Use it on the render thread, in `Render`, to make buffers,
 textures and pipelines and record commands. A render target is a `GpuTexture`: one a gem made, or a window's. Shaders
 read every buffer, texture and sampler through the heap, by the id their handle holds, and a pass lists what it reads
-and writes. `IShaderCompiler` compiles HLSL, and `#include "path"` loads the shader asset at `Shaders/path`
-([Shaders](../Bundled/Resources/Shaders/README.md)).
+and writes. `IShaderCompiler` compiles a Slang module's entry point (`ShaderEntry`), specialized by the types it
+names, and reads how a struct is laid out, a surface's or a sky's params included (`ShaderStruct`). `import A.B` loads the shader asset at
+`Shaders/A/B.slang` ([Shaders](../Bundled/Resources/Shaders/README.md)).
 
 ## Rendering
 
@@ -210,8 +211,11 @@ copy in the settings.
 - **Effects.** `PostProcessing` and `Weather` each hold their effects in a `RenderEffects`, one of each type, in order.
   A file names each effect by its type: `{ "type": "Tonemap", "shader": { "id": 8644084645777035739 }, "bias": 0 }`.
   A script changes one with `TryGet` and `Set`, adds one with `Set` and takes one out with `Remove`.
-- **Your own post effect** is a struct that implements `IPostEffect`, with its shader as a field, and a compute
-  shader. Its `Record` passes the image through its shader with `IRendering.Effect`.
+- **Your own post effect** is a struct that implements `IPostEffect`. One that changes each pixel by itself implements
+  `IPixelEffect`: it names its shader, a Slang struct that implements `IPixelEffect` (`Shaders/Core/Post.slang`), and
+  writes that struct's values. `IRendering.ApplyPostEffects` runs the effects next to each other that do as one pass.
+  One that reads its neighbours has a compute pass whose constants are the pass header, `PostImages`, then its values,
+  and its `Record` passes the image through it with `IRendering.Effect`.
 - **Overlays.** An `IOverlayScript`, such as the debug UI's, draws over the window once the frame's views are shown,
   with its own pipelines.
 - **Reading back.** `IRendering.CaptureAsync` reads the window as shown, for screenshots. `ReadAsync` reads a texture or

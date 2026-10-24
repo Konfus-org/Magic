@@ -12,7 +12,7 @@ namespace Magic.VoxelRendering;
 
 /// <summary>
 /// The textures materials sample and cards show, each a GPU texture of its own, which a surface names by its heap id
-/// (<c>TextureRef</c>, Shaders/Include/Surface.hlsli), and the sampler they are all read through. What is kept is what
+/// (<c>TextureRef</c>, Shaders/Core/Heap.slang), and the sampler they are all read through. What is kept is what
 /// is held: <see cref="Record"/> holds a texture, starting its load the first time, and hands back its id once it is in;
 /// <see cref="Release"/> lets one hold go, and <see cref="Purge"/> lets go of whatever nothing holds any more, once a
 /// frame. Each texture loads on a worker, is resampled into the smallest square of a few sizes that holds it, with its
@@ -23,7 +23,7 @@ namespace Magic.VoxelRendering;
 internal sealed class GpuTextures : IDisposable
 {
     /// <summary>
-    /// What a surface reads as no texture: Shaders/Include/Surface.hlsli's <c>TextureNone</c>.
+    /// What a surface reads as no texture: Shaders/Core/Heap.slang's <c>TextureNone</c>.
     /// </summary>
     internal const uint None = 0xFFFFFFFFu;
 

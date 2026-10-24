@@ -17,12 +17,12 @@
     <Project Path="src/Bundled/Gems/ClusterGenerator/ClusterGenerator.csproj" />
     <Project Path="src/Bundled/Gems/ConsoleCommands/ConsoleCommands.csproj" />
     <Project Path="src/Bundled/Gems/DebugTools/DebugTools.csproj" />
-    <Project Path="src/Bundled/Gems/DxcShaderCompiler/DxcShaderCompiler.csproj" />
     <Project Path="src/Bundled/Gems/ImGuiDebugUI/ImGuiDebugUI.csproj" />
     <Project Path="src/Bundled/Gems/LogMetrics/LogMetrics.csproj" />
     <Project Path="src/Bundled/Gems/PrefabLoader/PrefabLoader.csproj" />
     <Project Path="src/Bundled/Gems/Scripting/Scripting.csproj" />
     <Project Path="src/Bundled/Gems/SdlAudioLoader/SdlAudioLoader.csproj" />
+    <Project Path="src/Bundled/Gems/SlangShaderCompiler/SlangShaderCompiler.csproj" />
     <Project Path="src/Bundled/Gems/SdlBindings/SdlBindings.csproj" />
     <Project Path="src/Bundled/Gems/SdlFontLoader/SdlFontLoader.csproj" />
     <Project Path="src/Bundled/Gems/SdlPlatform/SdlPlatform.csproj" />
