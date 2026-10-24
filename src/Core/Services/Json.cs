@@ -40,33 +40,27 @@ public static class Json
         ReadOnlySpan<byte> byteOrderMark = Encoding.UTF8.Preamble;
         if (utf8.StartsWith(byteOrderMark)) utf8 = utf8[byteOrderMark.Length..];
 
-        T? value;
         try
         {
-            value = JsonSerializer.Deserialize<T>(utf8, Options);
+            return ToResult(JsonSerializer.Deserialize<T>(utf8, Options));
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is NotSupportedException or JsonException)
         {
             return Result.Failure<T>(ex.Message);
         }
-
-        return value is null ? Result.Failure<T>("it is null.") : Result.Success(value);
     }
 
     /// <inheritdoc cref="Read{T}(ReadOnlySpan{byte})"/>
     public static Result<T> Read<T>(JsonElement json)
     {
-        T? value;
         try
         {
-            value = json.Deserialize<T>(Options);
+            return ToResult(json.Deserialize<T>(Options));
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is NotSupportedException or JsonException)
         {
             return Result.Failure<T>(ex.Message);
         }
-
-        return value is null ? Result.Failure<T>("it is null.") : Result.Success(value);
     }
 
     /// <summary>
@@ -75,17 +69,14 @@ public static class Json
     /// </summary>
     public static Result<object> Read(JsonElement json, Type type)
     {
-        object? value;
         try
         {
-            value = json.Deserialize(type, Options);
+            return ToResult(json.Deserialize(type, Options));
         }
         catch (Exception ex) when (ex is NotSupportedException or JsonException)
         {
             return Result.Failure<object>(ex.Message);
         }
-
-        return value is null ? Result.Failure<object>("it is null.") : Result.Success(value);
     }
 
     /// <summary>
@@ -148,4 +139,10 @@ public static class Json
 
         return false;
     }
+
+    /// <summary>
+    /// <paramref name="value"/>, as JSON read it, or why it is not one: JSON's <c>null</c> is no value.
+    /// </summary>
+    private static Result<T> ToResult<T>(T? value)
+        => value is null ? Result.Failure<T>("it is null.") : Result.Success(value);
 }

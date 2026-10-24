@@ -3,7 +3,6 @@ using System.Globalization;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
-using Magic.Extensions;
 using Magic.Interfaces;
 using Magic.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,9 +15,7 @@ namespace Magic.Internal;
 /// that provides what Core or a gem listed before it provides is refused, as is a name listed twice, and one that is
 /// not the version the project asks for (<see cref="Project.Gems"/>). A gem's assembly is taken in as it loads
 /// (<see cref="Assemblies"/>), so files can name its components and scripts before any gem is made, and the folder of
-/// its own assets is added to the assets (<see cref="Assets.Register"/>), which read it while the next gem loads.
-/// Magic's own scripts and the project's own code, its scripts and components, are loaded first the same way, though
-/// neither is a gem, and loaded again when they are built while the engine runs, until the loader is disposed. The
+/// its own assets is added to the assets (<see cref="Assets.Register"/>), which read it while the next gem loads. The
 /// provider makes each gem after whatever its constructor asks for, so <see cref="Load"/> returns the gems in
 /// dependency order. A constructor parameter that is an <see cref="ISettings"/> is the gem's settings object, made by
 /// <see cref="Settings"/> as the gem is. A gem that is an <see cref="ILogSink"/> is added to the log once it is made,
@@ -28,16 +25,7 @@ namespace Magic.Internal;
 /// </summary>
 internal sealed class GemLoader : IDisposable
 {
-    /// <summary>
-    /// How long a code folder must have been left alone before what was built there is loaded: a build writes the
-    /// assembly, its symbols and what it depends on one after another.
-    /// </summary>
-    private static readonly TimeSpan _settleTime = TimeSpan.FromMilliseconds(300);
-
-    private readonly IFileSystem _files;
-    private readonly Assemblies _assemblies;
-    private readonly Assets _assets;
-    private readonly List<(IGem Gem, SubscriptionList Registrations)> _created = [];
+    private readonly List<CreatedGem> _created = [];
     private readonly HashSet<Type> _tried = [];
 
     /// <summary>
@@ -50,21 +38,11 @@ internal sealed class GemLoader : IDisposable
     /// The gems whose constructors are running, so one asked for by what it needs is told it is a cycle.
     /// </summary>
     private readonly HashSet<Type> _creating = [];
-    private readonly List<GemAssembly> _gems = [];
+    private readonly List<GemAssembly> _gemAssemblies = [];
 
     /// <summary>
-    /// The code that is no gem, as far as it was there to load, to load again when it is built.
-    /// </summary>
-    private readonly List<CodeFile> _code = [];
-
-    /// <summary>
-    /// The watches on the folders <see cref="_code"/> is built in, until the loader is disposed.
-    /// </summary>
-    private readonly SubscriptionList _codeWatch = new();
-
-    /// <summary>
-    /// Loads the project's code and the gems it lists, registers the gems with <paramref name="services"/>, which
-    /// already holds what Core provides, and adds each one's own assets to <paramref name="assets"/> as it loads it.
+    /// Loads the gems the project lists, registers them with <paramref name="services"/>, which already holds what
+    /// Core provides, and adds each one's own assets to <paramref name="assets"/> as it loads it.
     /// </summary>
     internal GemLoader(
         ServiceCollection services,
@@ -73,15 +51,6 @@ internal sealed class GemLoader : IDisposable
         Assemblies assemblies,
         Assets assets)
     {
-        _files = files;
-        _assemblies = assemblies;
-        _assets = assets;
-
-        LoadCode(files.Combine(AppContext.BaseDirectory, "Resources", "Resources.dll"), "Magic's scripts");
-        LoadCode(
-            files.Combine(AppContext.BaseDirectory, "Projects", project.Name, project.Name + ".dll"),
-            $"{project.Name}'s code");
-
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
         foreach (string listing in project.Gems)
         {
@@ -127,31 +96,19 @@ internal sealed class GemLoader : IDisposable
                 services.AddSingleton(contract, provider => provider.GetRequiredService(gem.Type));
             }
 
-            _gems.Add(gem);
+            _gemAssemblies.Add(gem);
             SubscriptionList registered = new();
             registered.Add(assets.Register(gem.Resources));
-            registered.Add(_assemblies.Register(gem.Path, gem.Assembly));
+            registered.Add(assemblies.Register(gem.Path, gem.Assembly));
             _registered[gem.Type] = registered;
-        }
-
-        foreach (CodeFile code in _code)
-        {
-            _codeWatch.Add(FileSystem.Watch(_files.GetParent(code.Path), _ => ReloadCodeAsync(code).FireAndForget()));
         }
     }
 
     /// <summary>
-    /// Stops watching the code's folders, and ends what is registered for the code and for every gem, the gems that
-    /// were not made among them.
+    /// Ends what is registered for every gem, the gems that were not made among them.
     /// </summary>
     public void Dispose()
     {
-        _codeWatch.Dispose();
-        foreach (CodeFile code in _code)
-        {
-            code.Dispose();
-        }
-
         foreach (SubscriptionList registered in _registered.Values)
         {
             registered.Dispose();
@@ -163,9 +120,9 @@ internal sealed class GemLoader : IDisposable
     /// the gems, in the order they were made, each with what is registered for it, to end before it is disposed. A gem
     /// that could not be made has said why, and is left out.
     /// </summary>
-    internal List<(IGem Gem, SubscriptionList Registrations)> Load(ServiceProvider container)
+    internal List<CreatedGem> Load(ServiceProvider container)
     {
-        foreach (GemAssembly gem in _gems)
+        foreach (GemAssembly gem in _gemAssemblies)
         {
             try
             {
@@ -243,39 +200,6 @@ internal sealed class GemLoader : IDisposable
     }
 
     /// <summary>
-    /// Loads the code at <paramref name="path"/> (<see cref="GemAssembly.LoadCode"/>) and takes in its assembly, and
-    /// keeps it to load again when it is built.
-    /// </summary>
-    private void LoadCode(string path, string what)
-    {
-        if (GemAssembly.LoadCode(_files, path, what, again: false) is not { } assembly) return;
-
-        CodeFile code = new(path, what);
-        code.SwapRegistration(_assemblies.Register(path, assembly));
-        _code.Add(code);
-    }
-
-    /// <summary>
-    /// Something in <paramref name="code"/>'s folder changed: once it has settled, the last change to come loads the
-    /// code again and has the scripts made again, then the prefabs, so each names the scripts' classes as they are now.
-    /// </summary>
-    private async Task ReloadCodeAsync(CodeFile code)
-    {
-        int change = code.Note();
-        await Task.Delay(_settleTime).ConfigureAwait(false);
-
-        if (!code.IsLatest(change)
-            || GemAssembly.LoadCode(_files, code.Path, code.What, again: true) is not { } assembly)
-        {
-            return;
-        }
-
-        code.SwapRegistration(_assemblies.Register(code.Path, assembly));
-        await _assets.RecreateAsync<Script>().ConfigureAwait(false);
-        await _assets.RecreateAsync<Prefab>().ConfigureAwait(false);
-    }
-
-    /// <summary>
     /// The service provider's factory for a gem: creates it from its settings object and the services its constructor
     /// asks for, which the provider makes first, adds it to what was made, and adds it to the log if it is an
     /// <see cref="ILogSink"/>. Why it could not be made, settings that do not fit it among the reasons, is logged here,
@@ -330,7 +254,7 @@ internal sealed class GemLoader : IDisposable
         SubscriptionList registered = _registered[gem.Type];
         if (made is ILogSink sink) registered.Add(Debugging.Register(sink));
 
-        _created.Add((made, registered));
+        _created.Add(new CreatedGem(made, gem.Name, registered));
 
         string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
         Debugging.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
@@ -339,31 +263,8 @@ internal sealed class GemLoader : IDisposable
     }
 
     /// <summary>
-    /// Code that is no gem: where it is built, what to call it in the log, its assembly's registration as last loaded,
-    /// and the changes its folder has had, of which the latest loads it once it has settled.
+    /// A gem as it was made: the gem, the name the project lists it by, and what is registered for it, to end before it
+    /// is disposed.
     /// </summary>
-    private sealed class CodeFile(string path, string what) : IDisposable
-    {
-        private int _changes;
-        private Subscription _registration = Subscription.None;
-
-        internal string Path { get; } = path;
-
-        internal string What { get; } = what;
-
-        public void Dispose() => _registration.Dispose();
-
-        /// <summary>
-        /// Keeps <paramref name="registration"/>, of the code loaded again, and ends the one it takes the place of.
-        /// </summary>
-        internal void SwapRegistration(Subscription registration)
-            => Interlocked.Exchange(ref _registration, registration).Dispose();
-
-        /// <summary>
-        /// Notes one more change to its folder: which one, to ask <see cref="IsLatest"/> of after the settle.
-        /// </summary>
-        internal int Note() => Interlocked.Increment(ref _changes);
-
-        internal bool IsLatest(int change) => change == Volatile.Read(ref _changes);
-    }
+    internal readonly record struct CreatedGem(IGem Gem, string Name, SubscriptionList Registrations);
 }

@@ -141,13 +141,6 @@ public sealed class World : IDisposable
     /// </summary>
     public float TimeScale { get; set => field = Math.Max(value, 0); } = 1;
 
-    /// <summary>
-    /// The gems that take in what a domain spawns before it does, and ready one that replaces the world before it is
-    /// shown (<see cref="IPreloader"/>), set by whoever made the gems once every one is, since the world is made while
-    /// they are; none until then. One that throws as it answers is left out from then on.
-    /// </summary>
-    internal IReadOnlyList<IPreloader> Preloaders { get; set; } = [];
-
     public void Dispose() => _domains?.Dispose();
 
     /// <summary>
@@ -194,18 +187,19 @@ public sealed class World : IDisposable
 
         IEcs ecs = _ecs;
         Domains domains = _domains;
-        Taken taken = _threads.IsCurrent(EngineThread.Main)
-            ? Take(ecs, domains)
-            : await _threads.PostAsync(EngineThread.Main, () => Take(ecs, domains), cancel).ConfigureAwait(false);
-        List<EntityState> entities = await Task.Run(() => Write(taken.Entities, progress, cancel), cancel)
+        Snapshot snapshot = _threads.IsCurrent(EngineThread.Main)
+            ? TakeSnapshot(ecs, domains)
+            : await _threads.PostAsync(EngineThread.Main, () => TakeSnapshot(ecs, domains), cancel)
+                .ConfigureAwait(false);
+        List<EntityState> entities = await Task.Run(() => WriteEntities(snapshot.Entities, progress, cancel), cancel)
             .ConfigureAwait(false);
 
         return new WorldState
         {
-            Domains = taken.Domains,
+            Domains = snapshot.Domains,
             Entities = entities,
-            IsPaused = taken.IsPaused,
-            TimeScale = taken.TimeScale,
+            IsPaused = snapshot.IsPaused,
+            TimeScale = snapshot.TimeScale,
         };
     }
 
@@ -250,38 +244,7 @@ public sealed class World : IDisposable
         // The domains before the components and the scripts, as putting them back holds the world out of sight: a
         // script put back then waits until the world is shown, as one started while a domain is readied does.
         _domains.Restore(state.Domains, made);
-
-        // While the components and scripts are read, an entity in their JSON reads as the one made for its saved id.
-        EntityJsonConverter.Remap = made;
-        try
-        {
-            // Each entity's components read back as the types they name; one no code loaded declares, or whose values
-            // no longer fit it, is logged once and left out of every entity.
-            HashSet<string> failed = new(StringComparer.Ordinal);
-            List<IComponent> components = [];
-            foreach (EntityState saved in state.Entities)
-            {
-                components.Clear();
-                foreach (ComponentState entry in saved.Components)
-                {
-                    if (ReadComponent(entry, failed) is { } component) components.Add(component);
-                }
-
-                GetEcs().Set(made[saved.Id], CollectionsMarshal.AsSpan(components));
-            }
-
-            foreach (EntityState saved in state.Entities)
-            {
-                foreach (ScriptState script in saved.Scripts)
-                {
-                    _scripts?.Restore(made[saved.Id], script);
-                }
-            }
-        }
-        finally
-        {
-            EntityJsonConverter.Remap = null;
-        }
+        RestoreEntities(state.Entities, made);
 
         IsPaused = state.IsPaused;
         TimeScale = state.TimeScale;
@@ -481,10 +444,17 @@ public sealed class World : IDisposable
         where T4 : unmanaged, IComponent => GetEcs().Register(system);
 
     /// <summary>
-    /// Takes in what workers finished for the domains since the last frame. Core calls it on the main thread at the
-    /// start of each frame.
+    /// Hands the domains the gems that take in what a domain spawns before it does, and ready one that replaces the
+    /// world before it is shown (<see cref="IPreloader"/>). Whoever made the gems calls it once every one is, since the
+    /// world is made while they are.
     /// </summary>
-    internal void Pump() => _domains?.Pump();
+    internal void SetPreloaders(IReadOnlyList<IPreloader> preloaders) => _domains?.Preloaders = preloaders;
+
+    /// <summary>
+    /// Takes in what workers finished for the domains since the last frame, as frame <paramref name="frame"/> begins.
+    /// Core calls it on the main thread at the start of each frame.
+    /// </summary>
+    internal void Pump(ulong frame) => _domains?.Pump(frame);
 
     /// <summary>
     /// Opens the project's entry point in place of the world; the default domain when it does not open. Core calls it
@@ -541,12 +511,15 @@ public sealed class World : IDisposable
     /// Each of <paramref name="entities"/> as the saved world holds it, its components written as JSON, telling
     /// <paramref name="progress"/> how far it is. Any thread: it touches nothing of the world.
     /// </summary>
-    private static List<EntityState> Write(List<Saving> entities, IProgress<float>? progress, CancellationToken cancel)
+    private static List<EntityState> WriteEntities(
+        List<EntitySnapshot> entities,
+        IProgress<float>? progress,
+        CancellationToken cancel)
     {
         // Each entity's components as JSON; a type JSON cannot hold is logged once and left out of every entity.
         List<EntityState> written = new(entities.Count);
         HashSet<string> failed = new(StringComparer.Ordinal);
-        foreach (Saving entity in entities)
+        foreach (EntitySnapshot entity in entities)
         {
             cancel.ThrowIfCancellationRequested();
             List<ComponentState> components = new(entity.Components.Length);
@@ -578,9 +551,9 @@ public sealed class World : IDisposable
     /// The world as it is now, as <see cref="SaveAsync"/> takes it: the domains, every entity but the loading domain's
     /// with its components copied out and its scripts' values read, and its pause and time scale. Main thread.
     /// </summary>
-    private Taken Take(IEcs ecs, Domains domains)
+    private Snapshot TakeSnapshot(IEcs ecs, Domains domains)
     {
-        List<Saving> entities = [];
+        List<EntitySnapshot> entities = [];
         HashSet<Entity> loading = domains.GetLoadingEntities();
         List<ScriptState> scripts = [];
         foreach (EcsChunk chunk in ecs.Query())
@@ -590,12 +563,52 @@ public sealed class World : IDisposable
                 if (loading.Contains(entity)) continue;
 
                 _scripts?.Save(entity, scripts);
-                entities.Add(new Saving(entity.Id, ecs.GetComponents(entity), scripts.Count == 0 ? [] : [.. scripts]));
+                entities.Add(
+                    new EntitySnapshot(entity.Id, ecs.GetComponents(entity), scripts.Count == 0 ? [] : [.. scripts]));
                 scripts.Clear();
             }
         }
 
-        return new Taken(domains.Save(), entities, IsPaused, TimeScale);
+        return new Snapshot(domains.Save(), entities, IsPaused, TimeScale);
+    }
+
+    /// <summary>
+    /// Gives each saved entity of <paramref name="entities"/>, <paramref name="made"/> by its saved id, its components
+    /// and its scripts, put back as they were and not started (<see cref="IScripts.Restore"/>). While they are read,
+    /// an entity in their JSON reads as the one made for its saved id.
+    /// </summary>
+    private void RestoreEntities(IReadOnlyList<EntityState> entities, Dictionary<int, Entity> made)
+    {
+        EntityJsonConverter.Remap = made;
+        try
+        {
+            // Each entity's components read back as the types they name; one no code loaded declares, or whose values
+            // no longer fit it, is logged once and left out of every entity.
+            HashSet<string> failed = new(StringComparer.Ordinal);
+            List<IComponent> components = [];
+            foreach (EntityState saved in entities)
+            {
+                components.Clear();
+                foreach (ComponentState entry in saved.Components)
+                {
+                    if (ReadComponent(entry, failed) is { } component) components.Add(component);
+                }
+
+                GetEcs().Set(made[saved.Id], CollectionsMarshal.AsSpan(components));
+            }
+
+            foreach (EntityState saved in entities)
+            {
+                foreach (ScriptState script in saved.Scripts)
+                {
+                    _scripts?.Restore(made[saved.Id], script);
+                }
+            }
+        }
+        finally
+        {
+            EntityJsonConverter.Remap = null;
+        }
     }
 
     /// <summary>
@@ -632,10 +645,14 @@ public sealed class World : IDisposable
     /// An entity as <see cref="SaveAsync"/> takes it from the world: its components, each a boxed copy, and its
     /// scripts' values, which is all it needs of the world, so the JSON can be written anywhere afterwards.
     /// </summary>
-    private sealed record Saving(int Id, IComponent[] Components, ScriptState[] Scripts);
+    private sealed record EntitySnapshot(int Id, IComponent[] Components, ScriptState[] Scripts);
 
     /// <summary>
     /// The world as <see cref="SaveAsync"/> takes it on the main thread, before its entities are written as JSON.
     /// </summary>
-    private sealed record Taken(List<DomainState> Domains, List<Saving> Entities, bool IsPaused, float TimeScale);
+    private sealed record Snapshot(
+        List<DomainState> Domains,
+        List<EntitySnapshot> Entities,
+        bool IsPaused,
+        float TimeScale);
 }

@@ -48,10 +48,9 @@ internal sealed class Domains : IDisposable
     private readonly List<OpenDomain> _domains = [];
 
     /// <summary>
-    /// What workers finished for the main thread to take in at the start of a frame (<see cref="Pump"/>): a domain
-    /// read, a prefab read for a placement, or a domain whose reading failed or whose open was cancelled, which closes.
+    /// What workers finished for the main thread to take in at the start of a frame (<see cref="TakeInHandOffs"/>).
     /// </summary>
-    private readonly Channel<HandOffToMainThread> _handOffsToMainThread = Channel.CreateUnbounded<HandOffToMainThread>(
+    private readonly Channel<HandOff> _handOffs = Channel.CreateUnbounded<HandOff>(
         new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
@@ -60,6 +59,13 @@ internal sealed class Domains : IDisposable
     /// </summary>
     private readonly List<Prefab> _gatheredPrefabs = [];
     private readonly List<Prefab> _gatheredTakingIn = [];
+
+    /// <summary>
+    /// The domains whose read was in the stream the gems last saw, so their answers say whether it is in: those
+    /// opening, and the loading domain being taken in to be kept. Written whole with each stream
+    /// (<see cref="WriteDownStream"/>).
+    /// </summary>
+    private readonly List<OpenDomain> _inLastStream = [];
 
     /// <summary>
     /// The loading domain while it is shown.
@@ -74,23 +80,17 @@ internal sealed class Domains : IDisposable
     private KeptLoadingDomain? _keptLoadingDomain;
 
     /// <summary>
-    /// Domains opening in place of the world and saved worlds put back in its place (<see cref="Restore"/>), not shown
-    /// yet: the world is loading while there is one.
-    /// </summary>
-    private int _replacementsUnderWay;
-
-    /// <summary>
     /// The saved domains of a world being put back that have yet to join it, their files still loading; none while no
     /// world is being put back. It is readied once none is left and every one has arrived.
     /// </summary>
     private int? _savedDomainsToJoin;
 
     /// <summary>
-    /// Where the world is in having something take its place, and the frame it got there, -1 until the stream is next
-    /// written down (<see cref="EnterStreamState"/>).
+    /// Where the world is in having something take its place, and the frame it got there, none until the stream is
+    /// next written down (<see cref="EnterStreamState"/>).
     /// </summary>
     private StreamState _streamState;
-    private int _framesInStreamState;
+    private ulong? _streamStateSince;
 
     internal Domains(
         World world,
@@ -135,12 +135,26 @@ internal sealed class Domains : IDisposable
     internal WorldStream Stream { get; private set; } = WorldStream.None;
 
     /// <summary>
+    /// The gems that take in what a domain spawns before it does, and ready one that replaces the world before it is
+    /// shown (<see cref="IPreloader"/>), handed over once every gem is made; none until then. One that throws as it
+    /// answers is left out from then on.
+    /// </summary>
+    internal IReadOnlyList<IPreloader> Preloaders { get; set; } = [];
+
+    /// <summary>
     /// Whether the world has loaded: a domain other than the loading domain is open, every open one is there, spawned,
     /// and none is opening in place of the world, nor a saved world being put back, so what replaced it is shown.
     /// </summary>
-    internal bool IsLoaded => _replacementsUnderWay == 0
+    internal bool IsLoaded => !IsReplacingWorld
         && _domains.Exists(static open => !open.IsLoadingDomain)
         && _domains.TrueForAll(static open => open.Stage >= Stage.Spawned);
+
+    /// <summary>
+    /// Whether something is taking the world's place and not shown yet: a domain opening in place of the world, or a
+    /// saved world being put back (<see cref="Restore"/>). The world is loading while it is.
+    /// </summary>
+    private bool IsReplacingWorld => _savedDomainsToJoin is not null
+        || _domains.Exists(static open => open.IsReplacing && open.Stage != Stage.Shown);
 
     public void Dispose()
     {
@@ -182,7 +196,7 @@ internal sealed class Domains : IDisposable
 
         // Cancelled before it is done, it closes as one whose reading failed does, and the world waits for it no more.
         Result<Domain> opened;
-        await using (cancel.Register(() => _handOffsToMainThread.Writer.TryWrite(new HandOffToMainThread(open)))
+        await using (cancel.Register(() => _handOffs.Writer.TryWrite(new DomainNotComing(open)))
             .ConfigureAwait(false))
         {
             ReadAndHandOffDomainAsync(open, cancel).FireAndForget();
@@ -195,18 +209,18 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// As each frame begins, on the main thread: the world shown last frame runs from this one, what workers finished
-    /// since is taken in, the gems are asked how far they are with what the world streamed in as they last saw it, so
-    /// every domain they have taken in spawns and a world they have readied is shown, then what streams in now is
-    /// written down (<see cref="Stream"/>) and told when it changed.
+    /// As frame <paramref name="frame"/> begins, on the main thread: the world shown last frame runs from this one, what
+    /// workers finished since is taken in, the gems are asked how far they are with what the world streamed in as they
+    /// last saw it, so every domain they have taken in spawns and a world they have readied is shown, then what streams
+    /// in now is written down (<see cref="Stream"/>) and told when it changed.
     /// </summary>
-    internal void Pump()
+    internal void Pump(ulong frame)
     {
         if (_streamState == StreamState.Shown) EnterStreamState(StreamState.Loaded);
 
         TakeInHandOffs();
         AskPreloaders();
-        WriteDownStream();
+        WriteDownStream(frame);
     }
 
     /// <summary>
@@ -270,7 +284,6 @@ internal sealed class Domains : IDisposable
     /// </summary>
     internal void Restore(IReadOnlyList<DomainState> saved, Dictionary<int, Entity> made)
     {
-        _replacementsUnderWay++;
         _savedDomainsToJoin = saved.Count;
         EnterStreamState(StreamState.Readying);
 
@@ -434,7 +447,6 @@ internal sealed class Domains : IDisposable
         if (open.IsReplacing)
         {
             EmptyWorld(open.Path, keepsGlobals: true);
-            _replacementsUnderWay++;
             if (_savedDomainsToJoin is null)
             {
                 EnterStreamState(StreamState.Loading);
@@ -454,7 +466,7 @@ internal sealed class Domains : IDisposable
     private void EnterStreamState(StreamState state)
     {
         _streamState = state;
-        _framesInStreamState = -1;
+        _streamStateSince = null;
     }
 
     /// <summary>
@@ -491,11 +503,11 @@ internal sealed class Domains : IDisposable
         try
         {
             ReadDomain read = await ReadPrefabsAsync(open, cancel).ConfigureAwait(false);
-            _handOffsToMainThread.Writer.TryWrite(new HandOffToMainThread(open, Read: read));
+            _handOffs.Writer.TryWrite(new DomainRead(open, read));
         }
         catch
         {
-            _handOffsToMainThread.Writer.TryWrite(new HandOffToMainThread(open));
+            _handOffs.Writer.TryWrite(new DomainNotComing(open));
 
             throw;
         }
@@ -561,25 +573,33 @@ internal sealed class Domains : IDisposable
 
     /// <summary>
     /// Takes in what workers finished since the last frame: a domain read joins what the gems take in, unless it was
-    /// closed meanwhile; a prefab read for a placement is spawned; and a domain not coming, its reading failed or its
-    /// open cancelled before it was done, is closed.
+    /// closed meanwhile; a domain not coming, its reading failed or its open cancelled before it was done, is closed; a
+    /// prefab read for a placement is spawned; a saved domain whose file is in joins the world put back; and the
+    /// loading domain read is handed to the gems to take in and keep, unless it was let go meanwhile.
     /// </summary>
     private void TakeInHandOffs()
     {
-        while (_handOffsToMainThread.Reader.TryRead(out HandOffToMainThread handOff))
+        while (_handOffs.Reader.TryRead(out HandOff? handOff))
         {
-            OpenDomain open = handOff.OpenDomain;
-            if (handOff.PlacedPrefab is { } placed)
+            switch (handOff)
             {
-                SpawnReadPrefab(open, placed, handOff.Prefab);
-            }
-            else if (handOff.Read is { } read)
-            {
-                if (open.Stage != Stage.Closed) open.Read = read;
-            }
-            else if (!open.Opened.Task.IsCompleted)
-            {
-                Close(open);
+                case DomainRead read:
+                    if (read.Open.Stage != Stage.Closed) read.Open.Read = read.Read;
+                    break;
+                case DomainNotComing notComing:
+                    if (!notComing.Open.Opened.Task.IsCompleted) Close(notComing.Open);
+                    break;
+                case PrefabRead read:
+                    SpawnReadPrefab(read.Open, read.Placed, read.Prefab);
+                    break;
+                case SavedDomainJoined joined:
+                    JoinSavedDomain(joined);
+                    break;
+                case LoadingDomainRead read:
+                    TakeInLoadingDomain(read);
+                    break;
+                default:
+                    throw new InvalidOperationException($"{handOff} is no hand-off the domains take in.");
             }
         }
     }
@@ -595,7 +615,7 @@ internal sealed class Domains : IDisposable
         List<OpenDomain> asked = GetDomainsAsked();
         if (asked.Count > 0)
         {
-            IReadOnlyList<IPreloader> preloaders = _world.Preloaders;
+            IReadOnlyList<IPreloader> preloaders = Preloaders;
             float sum = 0;
             bool isIn = true;
             foreach (IPreloader preloader in preloaders)
@@ -619,7 +639,7 @@ internal sealed class Domains : IDisposable
         if (_domains.Exists(static open => (open.IsReplacing || open.IsRestoring) && open.Stage < Stage.Spawned))
             return;
 
-        foreach (IPreloader preloader in _world.Preloaders)
+        foreach (IPreloader preloader in Preloaders)
         {
             if (!AskPreloader(preloader, static (gem, stream) => gem.IsReady(stream), true)) return;
         }
@@ -642,27 +662,27 @@ internal sealed class Domains : IDisposable
         {
             Debugging.Error($"Gem {preloader.GetType().Name} threw as it was asked how far it is with what the world "
                 + $"streams in, so the world goes on without it: {ex}");
-            List<IPreloader> left = [.. _world.Preloaders];
+            List<IPreloader> left = [.. Preloaders];
             left.Remove(preloader);
-            _world.Preloaders = left;
+            Preloaders = left;
 
             return otherwise;
         }
     }
 
     /// <summary>
-    /// The domains the gems were asked about as they last saw the world's stream: those opening, and the loading domain
-    /// being taken in to be kept.
+    /// The domains the gems were asked about as they last saw the world's stream, and still being taken in: one taken
+    /// in, closed or let go since is not.
     /// </summary>
     private List<OpenDomain> GetDomainsAsked()
     {
         List<OpenDomain> asked = [];
-        foreach (OpenDomain open in _domains)
+        foreach (OpenDomain open in _inLastStream)
         {
-            if (open.IsInLastStream) asked.Add(open);
-        }
+            if (open.Read is null || (open.IsLoadingDomain && _keptLoadingDomain?.BeingTakenIn != open)) continue;
 
-        if (_keptLoadingDomain?.BeingTakenIn is { IsInLastStream: true } reading) asked.Add(reading);
+            asked.Add(open);
+        }
 
         return asked;
     }
@@ -676,7 +696,6 @@ internal sealed class Domains : IDisposable
         if (open.Read is not { } read) return;
 
         open.Read = null;
-        open.IsInLastStream = false;
         if (!open.IsLoadingDomain)
         {
             SpawnDomain(open, read);
@@ -821,11 +840,10 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Puts the saved domain <paramref name="saved"/> back (<see cref="Restore"/>): its file loaded, it opens around
-    /// <paramref name="kept"/>, the entities made for the ones each of its prefabs had spawned, by file, and
-    /// <paramref name="player"/>, the player's, then is read and arrives as a domain opening does. One that had
-    /// spawned nothing, <paramref name="kept"/> null, opens again from the start. Either way it has joined the world
-    /// put back once its file is in, or will not be.
+    /// Puts the saved domain <paramref name="saved"/> back (<see cref="Restore"/>): its file loaded, it is handed to
+    /// the main thread to join the world put back (<see cref="JoinSavedDomain"/>), around <paramref name="kept"/>, the
+    /// entities made for the ones each of its prefabs had spawned, by file, and <paramref name="player"/>, the
+    /// player's; or, its file not loading, handed over as not coming. On a worker.
     /// </summary>
     private async Task RestoreAsync(DomainState saved, Dictionary<Handle<Prefab>, Entity[]>? kept, Entity[]? player)
     {
@@ -833,8 +851,7 @@ internal sealed class Domains : IDisposable
         if (!file.Ok)
         {
             Debugging.Error($"{_assets.GetPath(saved.Domain) ?? "A domain"} is not restored: {file.Error}");
-            await _threads.PostAsync(EngineThread.Main, () => _savedDomainsToJoin--, _app.Quitting)
-                .ConfigureAwait(false);
+            _handOffs.Writer.TryWrite(new SavedDomainJoined(null, null, null));
 
             return;
         }
@@ -849,21 +866,25 @@ internal sealed class Domains : IDisposable
         {
             IsRestoring = true
         };
-        bool isOpening = await _threads.PostAsync(
-            EngineThread.Main,
-            () =>
-            {
-                _savedDomainsToJoin--;
+        _handOffs.Writer.TryWrite(new SavedDomainJoined(open, kept, player));
+    }
 
-                if (kept is null) return StartOpeningDomain(open) is null;
+    /// <summary>
+    /// A saved domain's file is in, or will not be (<see cref="RestoreAsync"/>): either way it has joined the world put
+    /// back. One that had spawned nothing, with nothing <see cref="SavedDomainJoined.Kept"/>, opens again from the
+    /// start; any other opens around what it had spawned (<see cref="Reopen"/>). Its prefabs are then read on a worker,
+    /// and it arrives as a domain opening does.
+    /// </summary>
+    private void JoinSavedDomain(SavedDomainJoined joined)
+    {
+        _savedDomainsToJoin--;
 
-                Reopen(open, kept, player);
+        if (joined.Open is not { } open) return;
 
-                return true;
-            },
-            _app.Quitting).ConfigureAwait(false);
+        if (joined.Kept is { } kept) Reopen(open, kept, joined.Player);
+        else if (StartOpeningDomain(open) is not null) return;
 
-        if (isOpening) await ReadAndHandOffDomainAsync(open, _app.Quitting).ConfigureAwait(false);
+        Task.Run(() => ReadAndHandOffDomainAsync(open, _app.Quitting)).FireAndForget();
     }
 
     /// <summary>
@@ -902,7 +923,6 @@ internal sealed class Domains : IDisposable
         Stage stageBefore = open.Stage;
         open.Stage = Stage.Closed;
         open.Read = null;
-        open.IsInLastStream = false;
         if (open.IsLoadingDomain) _shownLoadingDomain = null;
         else _domains.Remove(open);
 
@@ -955,9 +975,8 @@ internal sealed class Domains : IDisposable
     }
 
     /// <summary>
-    /// Reads the loading domain <paramref name="keeping"/> names, then has the main thread hand it to the gems to take
-    /// in and keep (<see cref="FinishTakingIn"/>), unless it was let go meanwhile
-    /// (<see cref="DropKeptLoadingDomain"/>). One that does not open is an error, and none is shown until its files
+    /// Reads the loading domain <paramref name="keeping"/> names, then hands it to the main thread to be taken in and
+    /// kept (<see cref="TakeInLoadingDomain"/>). One that does not open is an error, and none is shown until its files
     /// change.
     /// </summary>
     private async Task ReadAndKeepLoadingDomainAsync(KeptLoadingDomain keeping)
@@ -978,16 +997,19 @@ internal sealed class Domains : IDisposable
             isLoadingDomain: true,
             isReplacing: false);
         ReadDomain read = await ReadPrefabsAsync(reading, _app.Quitting).ConfigureAwait(false);
-        await _threads.PostAsync(
-            EngineThread.Main,
-            () =>
-            {
-                if (_keptLoadingDomain != keeping) return;
+        _handOffs.Writer.TryWrite(new LoadingDomainRead(keeping, reading, read));
+    }
 
-                reading.Read = read;
-                keeping.BeingTakenIn = reading;
-            },
-            _app.Quitting).ConfigureAwait(false);
+    /// <summary>
+    /// The loading domain was read (<see cref="ReadAndKeepLoadingDomainAsync"/>): the gems take it in to keep it
+    /// (<see cref="FinishTakingIn"/>), unless it was let go meanwhile (<see cref="DropKeptLoadingDomain"/>).
+    /// </summary>
+    private void TakeInLoadingDomain(LoadingDomainRead read)
+    {
+        if (_keptLoadingDomain != read.Keeping) return;
+
+        read.Reading.Read = read.Read;
+        read.Keeping.BeingTakenIn = read.Reading;
     }
 
     /// <summary>
@@ -1014,57 +1036,55 @@ internal sealed class Domains : IDisposable
 
     /// <summary>
     /// A domain that was replacing the world is shown, or is not coming, or the saved world put back is shown: once
-    /// none is left, the loading domain closes if it is still shown, and the world is shown from this frame, running
-    /// from the next.
+    /// nothing is replacing the world any more (<see cref="IsReplacingWorld"/>), the loading domain closes if it is
+    /// still shown, and the world is shown from this frame, running from the next.
     /// </summary>
     private void EndReplacement()
     {
-        if (--_replacementsUnderWay > 0) return;
+        if (IsReplacingWorld) return;
 
         EnterStreamState(StreamState.Shown);
         if (_shownLoadingDomain is { } loading) Close(loading);
     }
 
     /// <summary>
-    /// Writes down what streams into the world as this frame begins: where it is, from which frame, what its domains
-    /// spawn and are about to, and what of that the gems still take in, a new version of those only when they changed.
-    /// Told when its state or its lists changed. The domains taken in are the ones the gems are asked about next
-    /// frame.
+    /// Writes down what streams into the world as frame <paramref name="frame"/> begins: where it is, for how many
+    /// frames, what its domains spawn and are about to, and what of that the gems still take in, a new version of
+    /// those only when they changed. Told when its state or its lists changed. The domains taken in are the ones the
+    /// gems are asked about next frame.
     /// </summary>
-    private void WriteDownStream()
+    private void WriteDownStream(ulong frame)
     {
-        _framesInStreamState++;
+        _streamStateSince ??= frame;
+        int framesInState = (int)(frame - _streamStateSince.Value);
         _gatheredPrefabs.Clear();
         _gatheredTakingIn.Clear();
+        _inLastStream.Clear();
         foreach (OpenDomain open in _domains)
         {
-            open.IsInLastStream = open.Read is not null;
             GatherPrefabs(open);
         }
 
         if (_keptLoadingDomain?.Read is { } kept) AddPrefabsToSpawn(kept.Read, _gatheredPrefabs);
 
-        if (_keptLoadingDomain?.BeingTakenIn is { } reading)
-        {
-            reading.IsInLastStream = reading.Read is not null;
-            GatherPrefabs(reading);
-        }
+        if (_keptLoadingDomain?.BeingTakenIn is { } reading) GatherPrefabs(reading);
 
         bool isChanged = !HasSamePrefabs(_gatheredPrefabs, Stream.Prefabs)
             || !HasSamePrefabs(_gatheredTakingIn, Stream.TakingIn);
         WorldStream stream = isChanged
             ? new WorldStream(
                 _streamState,
-                _framesInStreamState,
+                framesInState,
                 [.. _gatheredPrefabs],
                 [.. _gatheredTakingIn],
                 Stream.Version + 1)
-            : Stream with { State = _streamState, Frame = _framesInStreamState };
+            : Stream with { State = _streamState, Frame = framesInState };
         if (isChanged || stream.State != Stream.State) _events.Publish(stream);
 
         Stream = stream;
 
-        // What a domain spawns, and of that, while it is read and not yet there, what is still taken in.
+        // What a domain spawns, and of that, while it is read and not yet there, what is still taken in, which the gems
+        // are then asked about.
         void GatherPrefabs(OpenDomain open)
         {
             foreach (PlacedPrefab placed in open.Prefabs.Values)
@@ -1078,6 +1098,7 @@ internal sealed class Domains : IDisposable
 
             AddPrefabsToSpawn(read, _gatheredPrefabs);
             AddPrefabsToSpawn(read, _gatheredTakingIn);
+            _inLastStream.Add(open);
         }
     }
 
@@ -1198,7 +1219,7 @@ internal sealed class Domains : IDisposable
     {
         Result<Prefab> prefab = await _assets.LoadAsync(placed.Placement.File, _app.Quitting)
             .ConfigureAwait(false);
-        _handOffsToMainThread.Writer.TryWrite(new HandOffToMainThread(open, PlacedPrefab: placed, Prefab: prefab));
+        _handOffs.Writer.TryWrite(new PrefabRead(open, placed, prefab));
     }
 
     /// <summary>
@@ -1243,15 +1264,40 @@ internal sealed class Domains : IDisposable
     private readonly record struct Placement(Handle<Prefab> File, Vector3 Corner, bool IsCell);
 
     /// <summary>
-    /// What a worker finished for <paramref name="OpenDomain"/>: what its opening <paramref name="Read"/>; or
-    /// <paramref name="PlacedPrefab"/>'s prefab read as <paramref name="Prefab"/>; or, with neither, that it is not
-    /// coming, its reading failed or its open cancelled.
+    /// What a worker finished for the main thread, taken in as a frame begins (<see cref="TakeInHandOffs"/>).
     /// </summary>
-    private readonly record struct HandOffToMainThread(
-        OpenDomain OpenDomain,
-        ReadDomain? Read = null,
-        PlacedPrefab? PlacedPrefab = null,
-        Result<Prefab> Prefab = default);
+    private abstract record HandOff;
+
+    /// <summary>
+    /// <paramref name="Open"/>'s opening read <paramref name="Read"/>, for the gems to take in.
+    /// </summary>
+    private sealed record DomainRead(OpenDomain Open, ReadDomain Read) : HandOff;
+
+    /// <summary>
+    /// <paramref name="Open"/> is not coming: its reading failed, or its open was cancelled before it was done.
+    /// </summary>
+    private sealed record DomainNotComing(OpenDomain Open) : HandOff;
+
+    /// <summary>
+    /// <paramref name="Placed"/>'s prefab, in <paramref name="Open"/>, read as <paramref name="Prefab"/>.
+    /// </summary>
+    private sealed record PrefabRead(OpenDomain Open, PlacedPrefab Placed, Result<Prefab> Prefab) : HandOff;
+
+    /// <summary>
+    /// A saved domain's file is in (<see cref="RestoreAsync"/>): it opens as <paramref name="Open"/>, around
+    /// <paramref name="Kept"/>, the entities made for each of its prefabs', and <paramref name="Player"/>, the
+    /// player's, when it had spawned anything. With no <paramref name="Open"/>, its file did not load, and it will not.
+    /// </summary>
+    private sealed record SavedDomainJoined(
+        OpenDomain? Open,
+        Dictionary<Handle<Prefab>, Entity[]>? Kept,
+        Entity[]? Player) : HandOff;
+
+    /// <summary>
+    /// The loading domain <paramref name="Keeping"/> names, read as <paramref name="Reading"/>, which read
+    /// <paramref name="Read"/>, for the gems to take in and keep.
+    /// </summary>
+    private sealed record LoadingDomainRead(KeptLoadingDomain Keeping, OpenDomain Reading, ReadDomain Read) : HandOff;
 
     /// <summary>
     /// What a domain's opening read: each of its prefabs, by placement, its player, and the models they draw, held
@@ -1339,11 +1385,6 @@ internal sealed class Domains : IDisposable
         /// What its opening read, while the gems take it in; none before it is read, and once it is there.
         /// </summary>
         internal ReadDomain? Read { get; set; }
-
-        /// <summary>
-        /// Its read was in the stream the gems last saw, so their answers say whether it is in.
-        /// </summary>
-        internal bool IsInLastStream { get; set; }
 
         /// <summary>
         /// How far it has got, from opening to shown, or closed.

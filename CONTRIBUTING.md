@@ -14,8 +14,8 @@
 - Every check must pass before a merge: the build, the tests, the docs' links and the security analysis
   ([CI](.github/workflows/README.md)). Merging to `main` publishes a release.
 - A reviewer checks that the change follows the Code Standards, is the smallest change that does the job, fixes
-  every copy of the code it fixes, adds nothing without a caller, edits nothing the build generates, commits no
-  secret, and leaves what it touched cleaner, with the cleanup kept apart from the fix.
+  every copy of the code it fixes, adds no private or internal code without a caller, edits nothing the build
+  generates, commits no secret, and leaves what it touched cleaner, with the cleanup kept apart from the fix.
 
 ## AI-assisted work
 

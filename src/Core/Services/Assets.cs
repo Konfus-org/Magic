@@ -76,11 +76,6 @@ public sealed class Assets : IDisposable
         new UnboundedChannelOptions { SingleReader = true });
 
     /// <summary>
-    /// Done once every root added has first been indexed (<see cref="IndexAsync"/>).
-    /// </summary>
-    private readonly TaskCompletionSource _indexed = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    /// <summary>
     /// The default and failure assets found missing, by path, each said once.
     /// </summary>
     private readonly ConcurrentDictionary<string, bool> _reportedMissing = new(StringComparer.Ordinal);
@@ -113,6 +108,13 @@ public sealed class Assets : IDisposable
     private Index _index = new();
 
     /// <summary>
+    /// What the gems provide, where each type's loader and post-processor are found: handed over as the roots are first
+    /// indexed (<see cref="IndexAsync"/>), once the service provider is built, as the assets are made before the gems
+    /// load so that each one's folder is added as it does. Nothing loads before then.
+    /// </summary>
+    private IServiceProvider? _services;
+
+    /// <summary>
     /// Held while the roots, the slots, or what assets are made from, change.
     /// </summary>
     private readonly Lock _lock = new();
@@ -129,19 +131,10 @@ public sealed class Assets : IDisposable
         _project = files.Combine(app.Folder, "Assets");
         _engine = GemAssembly.GetResources(files, typeof(Assets).Assembly);
 
-        WatchAsync().FireAndForget();
-
         // The first roots are the assets' own for the whole run, so they are added with nothing to end them.
         AddRoot(_project);
         AddRoot(_engine);
     }
-
-    /// <summary>
-    /// What the gems provide, where each type's loader and post-processor are found: set by whoever builds the service
-    /// provider, once it is built, as the assets are made before the gems load so that each one's folder is added as it
-    /// does. Nothing loads before it is set.
-    /// </summary>
-    internal IServiceProvider? Services { get; set; }
 
     /// <summary>
     /// Stops watching the roots: the engine's to call, at the end of the run.
@@ -176,7 +169,7 @@ public sealed class Assets : IDisposable
     /// it is missing.
     /// </summary>
     public Handle<T> GetDefault<T>()
-        where T : IAsset<T> => Get<T>(typeof(T).Name + "s", DefaultName, "default");
+        where T : IAsset<T> => FindEngineAsset<T>(typeof(T).Name + "s", DefaultName, "default");
 
     /// <summary>
     /// What is drawn in a broken <typeparamref name="T"/>'s place when <paramref name="type"/> broke: the asset named
@@ -185,7 +178,8 @@ public sealed class Assets : IDisposable
     /// draws a failure as have one. None, and an error logged once, when it is missing.
     /// </summary>
     public Handle<T> GetFailure<T>(FailureType type)
-        where T : IAsset<T> => Get<T>($"{typeof(T).Name}s/{FailuresFolder}", type.ToString(), $"{type} failure");
+        where T : IAsset<T>
+            => FindEngineAsset<T>($"{typeof(T).Name}s/{FailuresFolder}", type.ToString(), $"{type} failure");
 
     /// <summary>
     /// The paths of the assets directly in <paramref name="folder"/>, as <see cref="Find{T}"/> takes them: a domain's
@@ -252,7 +246,7 @@ public sealed class Assets : IDisposable
         {
             // Loaded as another asset is made, it is recorded as what that one is made from, and refused when it is
             // that one or is made from it, as each would wait for the other for ever.
-            if (beingCreated != 0 && !HasRecorded(beingCreated, new AssetRef(typeof(T), asset.Id)))
+            if (beingCreated != 0 && !TryRecordSource(beingCreated, new AssetRef(typeof(T), asset.Id)))
             {
                 return new(Result.Failure<T>(
                     $"{GetName(asset.Id)} is made from itself: something it loads as it is made loads it."));
@@ -368,18 +362,20 @@ public sealed class Assets : IDisposable
         => AddRoot(folder) is { } root ? new Subscription(() => Unregister(root)) : Subscription.None;
 
     /// <summary>
-    /// Indexes every root added, once each has been read: what the engine waits for once the gems have loaded and
-    /// before any is made, as the settings and the gems find assets as they are made. What the watches saw meanwhile
-    /// is taken in after.
+    /// Indexes every root added, once each has been read, and from then reads files with what
+    /// <paramref name="services"/> provides: what the engine calls once the gems have loaded and the service provider
+    /// is built, and waits for before any gem is made, as the settings and the gems find assets as they are made. What
+    /// the watches saw meanwhile is taken in after.
     /// </summary>
-    internal async Task IndexAsync()
+    internal async Task IndexAsync(IServiceProvider services)
     {
+        _services = services;
         Root[] roots = _roots;
         List<Indexed>[] reads = await Task.WhenAll(Array.ConvertAll(roots, root => root.FirstRead))
             .ConfigureAwait(false);
-        _index = Merge(roots, reads, _engine, _project);
-        _indexed.TrySetResult();
+        _index = CreateIndex(roots, reads, _engine, _project);
         Debugging.Info($"Indexed {_index.ById.Count} assets under {roots.Length} folders.");
+        Task.Run(WatchAsync).FireAndForget();
     }
 
     /// <summary>
@@ -410,7 +406,7 @@ public sealed class Assets : IDisposable
     /// <paramref name="changed"/>, and every asset made from one of them, or from one of those, and so on out, as
     /// <paramref name="createdFrom"/> says.
     /// </summary>
-    private static HashSet<ulong> AddCreatedFrom(HashSet<ulong> changed, Dictionary<ulong, List<AssetRef>> createdFrom)
+    private static HashSet<ulong> WithDependents(HashSet<ulong> changed, Dictionary<ulong, List<AssetRef>> createdFrom)
     {
         // Pass after pass, each adding what is made from one found already, until a pass adds nothing.
         HashSet<ulong> found = [.. changed];
@@ -429,6 +425,37 @@ public sealed class Assets : IDisposable
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// What differs between <paramref name="before"/> and <paramref name="now"/>, the index made again once the watches
+    /// saw <paramref name="touched"/>: the assets whose file is gone; those to make again, the gone among them, and
+    /// those now read from another file or whose file the watches saw; and whether files came, went, moved or were
+    /// written.
+    /// </summary>
+    private static IndexChanges FindChanges(Index before, Index now, HashSet<string> touched)
+    {
+        HashSet<ulong> changed = [];
+        HashSet<ulong> gone = [];
+        foreach (Indexed old in before.ById.Values)
+        {
+            if (now.ById.ContainsKey(old.Id)) continue;
+
+            gone.Add(old.Id);
+            changed.Add(old.Id);
+        }
+
+        bool areFilesChanged = gone.Count > 0;
+        foreach (Indexed file in now.ById.Values)
+        {
+            before.ById.TryGetValue(file.Id, out Indexed? old);
+            bool isWritten = !string.Equals(old?.File, file.File, StringComparison.Ordinal)
+                || touched.Contains(file.Path);
+            areFilesChanged |= isWritten || !string.Equals(old?.Path, file.Path, StringComparison.OrdinalIgnoreCase);
+            if (isWritten) changed.Add(file.Id);
+        }
+
+        return new IndexChanges(changed, gone, areFilesChanged);
     }
 
     /// <summary>
@@ -489,7 +516,7 @@ public sealed class Assets : IDisposable
     /// with an id another has already is an error and gives no asset, unless it is at that file's path under a later
     /// root, which the first then overrides.
     /// </summary>
-    private static Index Merge(Root[] roots, List<Indexed>[] reads, string engine, string project)
+    private static Index CreateIndex(Root[] roots, List<Indexed>[] reads, string engine, string project)
     {
         Index index = new();
         for (int i = 0; i < roots.Length; i++)
@@ -596,7 +623,7 @@ public sealed class Assets : IDisposable
     /// extensions, tried in order, or in its own folder of that name for an asset that is a folder;
     /// <paramref name="what"/> says which kind of named asset it is when it is missing, which is said once.
     /// </summary>
-    private Handle<T> Get<T>(string folder, string name, string what)
+    private Handle<T> FindEngineAsset<T>(string folder, string name, string what)
         where T : IAsset<T>
     {
         foreach (string extension in T.Extensions)
@@ -619,8 +646,8 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Takes in what the watches see, once every root has first been indexed, a batch at a time, once they have seen
-    /// nothing for <see cref="_settleTime"/>, until the run ends.
+    /// Takes in what the watches see, from when every root has first been indexed (<see cref="IndexAsync"/>), a batch
+    /// at a time, once they have seen nothing for <see cref="_settleTime"/>, until the run ends.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -628,7 +655,6 @@ public sealed class Assets : IDisposable
         Justification = "Whatever goes wrong taking in one batch is logged, and the next is still taken in.")]
     private async Task WatchAsync()
     {
-        await _indexed.Task.WaitAsync(_quitting).ConfigureAwait(false);
         ChannelReader<string> changes = _changes.Reader;
         while (await changes.WaitToReadAsync(_quitting).ConfigureAwait(false))
         {
@@ -707,38 +733,19 @@ public sealed class Assets : IDisposable
     {
         Index before = _index;
         Root[] roots = _roots;
-        Index now = Merge(roots, Array.ConvertAll(roots, root => ReadRoot(_files, root.Folder)), _engine, _project);
+        Index now = CreateIndex(
+            roots,
+            Array.ConvertAll(roots, root => ReadRoot(_files, root.Folder)),
+            _engine,
+            _project);
         _index = now;
-
-        // An asset whose file is gone is let go below, and whatever was made from it is made again.
-        bool filesChanged = false;
-        HashSet<ulong> changed = [];
-        HashSet<ulong> gone = [];
-        foreach (Indexed old in before.ById.Values)
-        {
-            if (!now.ById.ContainsKey(old.Id))
-            {
-                gone.Add(old.Id);
-                changed.Add(old.Id);
-                filesChanged = true;
-            }
-        }
-
-        // An asset now read from another file, or whose file the watches saw, is made again.
-        foreach (Indexed file in now.ById.Values)
-        {
-            before.ById.TryGetValue(file.Id, out Indexed? old);
-            bool written = !string.Equals(old?.File, file.File, StringComparison.Ordinal)
-                || touched.Contains(file.Path);
-            filesChanged |= written || !string.Equals(old?.Path, file.Path, StringComparison.OrdinalIgnoreCase);
-            if (written) changed.Add(file.Id);
-        }
+        IndexChanges changes = FindChanges(before, now, touched);
 
         List<Task> recreating = [];
         lock (_lock)
         {
-            HashSet<ulong> toRecreate = AddCreatedFrom(changed, _createdFrom);
-            foreach (ulong id in gone)
+            HashSet<ulong> toRecreate = WithDependents(changes.Changed, _createdFrom);
+            foreach (ulong id in changes.Gone)
             {
                 _slots.Remove(id);
                 _createdFrom.Remove(id);
@@ -753,7 +760,7 @@ public sealed class Assets : IDisposable
         }
 
         await Task.WhenAll(recreating).ConfigureAwait(false);
-        if (filesChanged) _events.Publish(new AssetsChanged());
+        if (changes.AreFilesChanged) _events.Publish(new AssetsChanged());
     }
 
     /// <summary>
@@ -786,9 +793,10 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// Reads and creates asset <paramref name="id"/> (<see cref="ReadAsync{T}"/>) once <paramref name="before"/>, the
-    /// load that was on its way, is done, recording what it loads meanwhile as what it is made from, and takes in what
-    /// it created: held weakly, and told, as <see cref="AssetReloaded{T}"/> when it is created again after a change
+    /// Reads and creates asset <paramref name="id"/> (<see cref="ReadAsync{T}"/>), timed by the asset type, once
+    /// <paramref name="before"/>, the load that was on its way, is done, recording what it loads meanwhile as what it
+    /// is made from, and takes in what it created: held weakly, and told, as <see cref="AssetReloaded{T}"/> when it is
+    /// created again after a change
     /// (<paramref name="isRecreation"/>) and had loaded before, else as <see cref="AssetLoaded{T}"/>, the first time or
     /// again once what loaded was let go. One that fails while what loaded before is still held hands that out, as it
     /// stays in use; else the failure is kept until its file changes. Creation number <paramref name="creation"/> of
@@ -812,7 +820,11 @@ public sealed class Assets : IDisposable
 
         // Whatever loads on this flow from here, as it is read, is recorded as what it is made from.
         _assetBeingCreated.Value = id;
+        long startTimestamp = _loadDuration.Start();
         Result<T> made = await ReadAsync<T>(id).ConfigureAwait(false);
+        _loadDuration.RecordSince(
+            startTimestamp,
+            new KeyValuePair<string, object?>(Metrics.AssetTypeTag, typeof(T).Name));
         bool isReload;
         T? kept = default;
         lock (_lock)
@@ -841,38 +853,23 @@ public sealed class Assets : IDisposable
     }
 
     /// <summary>
-    /// <see cref="ReadAndProcessAsync{T}"/>, timed by the asset type.
-    /// </summary>
-    private async Task<Result<T>> ReadAsync<T>(ulong id)
-        where T : IAsset<T>
-    {
-        long startTimestamp = _loadDuration.Start();
-        Result<T> read = await ReadAndProcessAsync<T>(id).ConfigureAwait(false);
-        _loadDuration.RecordSince(
-            startTimestamp,
-            new KeyValuePair<string, object?>(Metrics.AssetTypeTag, typeof(T).Name));
-
-        return read;
-    }
-
-    /// <summary>
     /// The asset <paramref name="id"/> as a <typeparamref name="T"/>, read and made from its file
     /// (<see cref="ReadFileAsync{T}"/>), then given its handle. Then the type's post-processor, when a gem provides
     /// one, works on it, and what it returns is given the handle too. The post-processor is asked for on every load, as
     /// the loader is; a type whose gem was not made, which Core has said why, loads without it. Nothing loads before
-    /// <see cref="Services"/> is set, as what reads a file is not known until then.
+    /// the service provider is handed over (<see cref="IndexAsync"/>), as what reads a file is not known until then.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "A loader that throws on a file fails that file, "
             + "as content that does not load; the engine goes on.")]
-    private async Task<Result<T>> ReadAndProcessAsync<T>(ulong id)
+    private async Task<Result<T>> ReadAsync<T>(ulong id)
         where T : IAsset<T>
     {
         if (!_index.ById.TryGetValue(id, out Indexed? indexed)) return Result.Failure<T>($"No asset has the id {id}.");
 
-        if (Services is not { } services)
+        if (_services is not { } services)
             return Result.Failure<T>($"{indexed.Path} was asked for before the gems were, so nothing can read it yet.");
 
         if (!IsOf<T>(indexed.Path))
@@ -958,7 +955,7 @@ public sealed class Assets : IDisposable
     /// <paramref name="source"/> is <paramref name="beingCreated"/> or is made from it, so waiting for it would wait
     /// for ever. Under <see cref="_lock"/>.
     /// </summary>
-    private bool HasRecorded(ulong beingCreated, AssetRef source)
+    private bool TryRecordSource(ulong beingCreated, AssetRef source)
     {
         if (!_createdFrom.TryGetValue(beingCreated, out List<AssetRef>? sources))
         {
@@ -976,6 +973,12 @@ public sealed class Assets : IDisposable
     /// </summary>
     private string GetName(ulong id)
         => _index.ById.TryGetValue(id, out Indexed? found) ? found.Path : id.ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// What differs between two indexes of the roots (<see cref="FindChanges"/>): the assets to make again, those whose
+    /// file is gone, and whether files came, went, moved or were written.
+    /// </summary>
+    private sealed record IndexChanges(HashSet<ulong> Changed, HashSet<ulong> Gone, bool AreFilesChanged);
 
     /// <summary>
     /// What is under the roots: every asset by its id, by its path, the paths in each folder, and the engine's own

@@ -50,7 +50,6 @@ public sealed class Engine
         Metrics.HookDuration,
         "How long one gem's hook took, tagged with the gem's name and the phase.",
         Metrics.FrameBuckets);
-    private static readonly string[] _phases = Enum.GetNames<Phase>();
 
     /// <summary>
     /// How long the main thread waits between two idles while the app is paused, unless work is handed to it first:
@@ -64,21 +63,9 @@ public sealed class Engine
     private readonly LoopGem[] _gems;
 
     /// <summary>
-    /// For each phase, the gems that implement its hook, in the order the phase runs them.
+    /// For each hook, the gems that implement it, in the order it runs them.
     /// </summary>
-    private readonly LoopGem[][] _gemsByPhase;
-
-    /// <summary>
-    /// The gems that implement Stop, in reverse order: every one of them, a gem that left the loop included, since
-    /// what it owns of the main thread's still ends.
-    /// </summary>
-    private readonly LoopGem[] _stops;
-
-    /// <summary>
-    /// The gems that implement Idle, in the order they were made: the main thread idles them in this order, the render
-    /// thread in reverse.
-    /// </summary>
-    private readonly LoopGem[] _idles;
+    private readonly LoopGem[][] _gemsByHook;
 
     private readonly World _world;
     private readonly App _app;
@@ -100,28 +87,10 @@ public sealed class Engine
     /// <summary>
     /// The frame handed to the render thread, written before it is handed over.
     /// </summary>
-    private Frame _rendering;
-
-    /// <summary>
-    /// The time the fixed steps have reached on the world's clock. Main thread.
-    /// </summary>
-    private double _fixedSec;
-
-    /// <summary>
-    /// Both clocks (<see cref="Frame.RealSec"/>, <see cref="Frame.WorldSec"/>) as of the last frame started, from
-    /// where the run before left them when this one goes on from it, else 0: what a run started again goes on from.
-    /// Main thread.
-    /// </summary>
-    private Clocks _clocks;
-
-    /// <summary>
-    /// What to run again with once the threads have ended, when the app restarts: the command line with every setting
-    /// as it is now, the world being saved, and the clocks. Written on the main thread before it ends.
-    /// </summary>
-    private (Args Args, Task<WorldState> Saving, Clocks Clocks)? _restart;
+    private Frame _frameToRender;
 
     private Engine(
-        List<(IGem Gem, SubscriptionList Registrations)> gems,
+        List<GemLoader.CreatedGem> gems,
         World world,
         App app,
         Threads threads,
@@ -129,24 +98,24 @@ public sealed class Engine
         Settings settings,
         CoreSettings core,
         Args args,
-        Clocks clocks,
         ManualResetEventSlim rendered)
     {
         _gems = new LoopGem[gems.Count];
         for (int i = 0; i < gems.Count; i++)
         {
-            Type type = gems[i].Gem.GetType();
-            _gems[i] = new LoopGem(gems[i].Gem, type.Assembly.GetName().Name ?? type.Name, gems[i].Registrations);
+            _gems[i] = new LoopGem(gems[i].Gem, gems[i].Name, gems[i].Registrations);
         }
 
-        _gemsByPhase = new LoopGem[_phases.Length][];
-        for (int phase = 0; phase < _phases.Length; phase++)
+        // Render, the render thread's idle and Stop run in reverse, so a gem finishes what the gems that take it drew,
+        // and ends after them.
+        Hook[] hooks = Enum.GetValues<Hook>();
+        _gemsByHook = new LoopGem[hooks.Length][];
+        foreach (Hook hook in hooks)
         {
-            _gemsByPhase[phase] = GetGemsImplementing(_gems, _phases[phase], isReversed: phase == (int)Phase.Render);
+            bool isReversed = hook is Hook.Render or Hook.RenderIdle or Hook.Stop;
+            _gemsByHook[(int)hook] = GetGemsImplementing(_gems, GetMethodName(hook), isReversed);
         }
 
-        _stops = GetGemsImplementing(_gems, nameof(IGem.Stop), isReversed: true);
-        _idles = GetGemsImplementing(_gems, nameof(IGem.Idle), isReversed: false);
         _world = world;
         _app = app;
         _threads = threads;
@@ -157,8 +126,6 @@ public sealed class Engine
         _rendered = rendered;
         _renderFrame = RenderFrame;
         _renderIdle = IdleRenderThread;
-        _fixedSec = clocks.WorldSec;
-        _clocks = clocks;
     }
 
     /// <summary>
@@ -194,20 +161,19 @@ public sealed class Engine
         string folder = files.GetParent(found.Value);
 
         // A run that restarts runs again at once, with the command line, the world and the clocks it ended with.
-        (Args Args, WorldState? State, Clocks Clocks)? next = (args, null, default);
-        while (next is { } run)
+        RunStart? next = new RunStart(args, null, default);
+        while (next is { } start)
         {
-            next = RunOnce(files, project, folder, run.Args, run.State, run.Clocks);
+            next = RunOnce(files, project, folder, start);
         }
 
         return true;
     }
 
     /// <summary>
-    /// Runs <paramref name="project"/>, in <paramref name="folder"/>, once, until the run ends, going on from
-    /// <paramref name="state"/>, the world as the run before left it, and <paramref name="clocks"/>, its clocks, when
-    /// there is one: what to run it again with at once when the run restarts (<see cref="App.Restart"/>), the command
-    /// line with every setting as it is now, the world as it is and its clocks, else null.
+    /// Runs <paramref name="project"/>, in <paramref name="folder"/>, once, until the run ends, from
+    /// <paramref name="start"/>: what to run it again with at once when the run restarts (<see cref="App.Restart"/>),
+    /// the command line with every setting as it is now, the world as it is and its clocks, else null.
     /// </summary>
     [SuppressMessage(
         "Usage",
@@ -215,14 +181,9 @@ public sealed class Engine
         Justification = "The assets' index is waited for before the run's threads start, and the saved world once "
             + "they have both ended; the index is read on workers, and the world's main-thread part ran before the "
             + "threads ended and the rest is written on a worker, so neither wait needs a thread it holds up.")]
-    private static (Args Args, WorldState? State, Clocks Clocks)? RunOnce(
-        FileSystem files,
-        Project project,
-        string folder,
-        Args args,
-        WorldState? state,
-        Clocks clocks)
+    private static RunStart? RunOnce(FileSystem files, Project project, string folder, RunStart start)
     {
+        Args args = start.Args;
         using App app = new(project, folder);
         using Threads threads = new(app);
 
@@ -251,33 +212,37 @@ public sealed class Engine
             args,
             assemblies,
             assets);
+
+        // The project's code is taken in before the gems, so files can name its components and scripts too.
+        using CodeReloader code = new(files, project, assemblies, assets);
         using GemLoader loader = new(services, files, project, assemblies, assets);
 
         // Not disposed: the gems are ended below one at a time, so one that throws cannot stop the rest ending.
         ServiceProvider container = services.BuildServiceProvider();
-        assets.Services = container;
 
         // The settings and the gems find assets as they are made, so every folder is indexed first: each has been read
-        // on a worker since it was added, as the gems loaded.
-        assets.IndexAsync().GetAwaiter().GetResult();
+        // on a worker since it was added, as the gems loaded. From then on the assets read files with what the gems
+        // provide.
+        assets.IndexAsync(container).GetAwaiter().GetResult();
         Settings settings = container.GetRequiredService<Settings>();
         CoreSettings core = CreateCoreSettings(settings);
-        List<(IGem Gem, SubscriptionList Registrations)> gems = loader.Load(container);
+        List<GemLoader.CreatedGem> gems = loader.Load(container);
         World world = container.GetRequiredService<World>();
         List<IPreloader> preloaders = [];
-        foreach ((IGem gem, _) in gems)
+        foreach (GemLoader.CreatedGem created in gems)
         {
-            if (gem is IPreloader preloader) preloaders.Add(preloader);
+            if (created.Gem is IPreloader preloader) preloaders.Add(preloader);
         }
 
-        world.Preloaders = preloaders;
+        world.SetPreloaders(preloaders);
 
         using ManualResetEventSlim rendered = new(initialState: true);
-        Engine engine = new(gems, world, app, threads, events, settings, core, args, clocks, rendered);
-        (Args Args, Task<WorldState> Saving, Clocks Clocks)? next = engine.RunThreads(state);
+        Engine engine = new(gems, world, app, threads, events, settings, core, args, rendered);
 
         // Both engine threads have ended, so waiting here holds up no work of theirs.
-        return next is { } restart ? (restart.Args, restart.Saving.GetAwaiter().GetResult(), restart.Clocks) : null;
+        return engine.RunThreads(start.State, start.Clocks) is { } restart
+            ? new RunStart(restart.Args, restart.Saving.GetAwaiter().GetResult(), restart.Clocks)
+            : null;
     }
 
     /// <summary>
@@ -370,37 +335,60 @@ public sealed class Engine
     }
 
     /// <summary>
-    /// Calls <paramref name="gem"/>'s hook for <paramref name="phase"/>.
+    /// Calls <paramref name="gem"/>'s <paramref name="hook"/>; Idle and Stop take no frame.
     /// </summary>
-    private static void CallHook(IGem gem, Phase phase, in Frame frame)
+    private static void CallHook(IGem gem, Hook hook, in Frame frame)
     {
-        switch (phase)
+        switch (hook)
         {
-            case Phase.Update:
+            case Hook.Update:
                 gem.Update(frame);
                 break;
-            case Phase.FixedUpdate:
+            case Hook.FixedUpdate:
                 gem.FixedUpdate(frame);
                 break;
-            case Phase.LateUpdate:
+            case Hook.LateUpdate:
                 gem.LateUpdate(frame);
                 break;
-            case Phase.Sync:
+            case Hook.Sync:
                 gem.Sync(frame);
                 break;
-            case Phase.Render:
+            case Hook.Render:
                 gem.Render(frame);
                 break;
+            case Hook.MainIdle:
+                gem.Idle(EngineThread.Main);
+                break;
+            case Hook.RenderIdle:
+                gem.Idle(EngineThread.Render);
+                break;
+            case Hook.Stop:
+                gem.Stop();
+                break;
             default:
-                throw new ArgumentOutOfRangeException(nameof(phase), phase, "There is no such phase.");
+                throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook.");
         }
     }
 
     /// <summary>
+    /// The name of <see cref="IGem"/>'s method <paramref name="hook"/> calls, which its time is tagged with.
+    /// </summary>
+    private static string GetMethodName(Hook hook) => hook switch
+    {
+        Hook.Update => nameof(IGem.Update),
+        Hook.FixedUpdate => nameof(IGem.FixedUpdate),
+        Hook.LateUpdate => nameof(IGem.LateUpdate),
+        Hook.Sync => nameof(IGem.Sync),
+        Hook.Render => nameof(IGem.Render),
+        Hook.MainIdle or Hook.RenderIdle => nameof(IGem.Idle),
+        Hook.Stop => nameof(IGem.Stop),
+        _ => throw new ArgumentOutOfRangeException(nameof(hook), hook, "There is no such hook."),
+    };
+
+    /// <summary>
     /// Those of <paramref name="gems"/> that implement the hook named <paramref name="hook"/>, in the order the gems
-    /// were made, or the reverse when <paramref name="isReversed"/>: Render and Stop, so a gem finishes what the gems
-    /// that take it drew, and ends after them. A hook a gem leaves to <see cref="IGem"/>'s own does nothing, so it is
-    /// never called, nor timed.
+    /// were made, or the reverse when <paramref name="isReversed"/>. A hook a gem leaves to <see cref="IGem"/>'s own
+    /// does nothing, so it is never called, nor timed.
     /// </summary>
     private static LoopGem[] GetGemsImplementing(LoopGem[] gems, string hook, bool isReversed)
     {
@@ -430,9 +418,11 @@ public sealed class Engine
     /// thread, until the main thread hands it its end; then ends the gems here. What to run again with when the app
     /// restarts, else null.
     /// </summary>
-    private (Args Args, Task<WorldState> Saving, Clocks Clocks)? RunThreads(WorldState? state)
+    private Restart? RunThreads(WorldState? state, Clocks clocks)
     {
-        Thread main = new(() => RunMain(state)) { Name = "Main" };
+        // Written by the main thread before it ends, and read once it has.
+        Restart? restart = null;
+        Thread main = new(() => restart = RunMain(state, clocks)) { Name = "Main" };
         main.Start();
         _threads.RunUntilEnded(EngineThread.Render);
         EndGems();
@@ -441,14 +431,15 @@ public sealed class Engine
         // Only now: while the gems dispose, the main thread's is still nobody else's.
         _threads.Release(EngineThread.Main);
 
-        return _restart;
+        return restart;
     }
 
     /// <summary>
-    /// The main thread: opens the world, runs the frames until the app quits, saves the world when it restarts, and
-    /// stops the gems; then runs what it was left, takes no more, and hands the render thread its end.
+    /// The main thread: opens the world, runs the frames from <paramref name="clocks"/> until the app quits, saves the
+    /// world when it restarts, and stops the gems; then runs what it was left, takes no more, and hands the render
+    /// thread its end. What to run again with when the app restarts, else null.
     /// </summary>
-    private void RunMain(WorldState? state)
+    private Restart? RunMain(WorldState? state, Clocks clocks)
     {
         _threads.Claim(EngineThread.Main);
         try
@@ -460,18 +451,21 @@ public sealed class Engine
             else if (_args.IsBaking) _world.BakeAsync().FireAndForget();
             else _world.OpenEntryPointAsync().FireAndForget();
 
-            RunFrames();
+            Clocks ended = RunFrames(clocks);
 
             // Once the last frame is done: the save takes the world here and now, before what the ending run has
             // handed this thread, a cancelled open closing its domain among it, and before the gems end the world's
             // scripts. The JSON is then written on a worker from what was taken, so it may outlast the gems. Quitting
             // is cancelled already, as the run is ending, so the save runs on no token.
-            if (_app.IsRestarting)
-                _restart = (_settings.GetRestartArgs(), _world.SaveAsync(null, CancellationToken.None), _clocks);
+            Restart? restart = _app.IsRestarting
+                ? new Restart(_settings.GetRestartArgs(), _world.SaveAsync(null, CancellationToken.None), ended)
+                : null;
 
             // Each gem ends what it owns of this thread's, the scripts among it, after the save took them and before
             // the gems are disposed on the render thread.
-            StopGems();
+            RunHook(Hook.Stop, default);
+
+            return restart;
         }
         finally
         {
@@ -484,15 +478,19 @@ public sealed class Engine
     }
 
     /// <summary>
-    /// Runs frames until the app quits, the frame limit is reached or the time limit is, then waits for the last to be
-    /// rendered; while the app is paused, holds them (<see cref="HoldFrames"/>). The time limit counts from the real
-    /// clock the run went on from, the time the app was paused included, so a run left paused still ends. On the main
-    /// thread.
+    /// Runs frames from <paramref name="clocks"/>, both clocks as the run before left them or 0, until the app quits,
+    /// the frame limit is reached or the time limit is, then waits for the last to be rendered; while the app is
+    /// paused, holds them (<see cref="HoldFrames"/>). The time limit counts from the real clock the run went on from,
+    /// the time the app was paused included, so a run left paused still ends. Both clocks as of the last frame started,
+    /// which a run started again goes on from. On the main thread.
     /// </summary>
-    private void RunFrames()
+    private Clocks RunFrames(Clocks clocks)
     {
         long startTimestamp = Stopwatch.GetTimestamp();
-        double limitSec = _args.TimeLimit.TotalSeconds - _clocks.RealSec;
+        double limitSec = _args.TimeLimit.TotalSeconds - clocks.RealSec;
+
+        // The time the fixed steps have reached on the world's clock.
+        double fixedSec = clocks.WorldSec;
 
         // Seconds since the start as of the last frame started, or as a hold ended, which the next frame's real time is
         // measured from, so the time the app was paused is left out of it.
@@ -529,62 +527,31 @@ public sealed class Engine
             if (index > 0 && !isHeld) _frameDuration.Record(realDeltaSec);
 
             previousSec = nowSec;
-            Frame frame = StartFrame(index, realDeltaSec);
+            Frame frame = CreateFrame(index, realDeltaSec, clocks);
+            clocks = new Clocks(frame.RealSec, frame.WorldSec);
             Debugging.Frame = index;
 
             _threads.Drain(EngineThread.Main);
-            _world.Pump();
+            _world.Pump(index);
             _events.Deliver();
 
-            RunPhase(Phase.Update, frame);
-            RunFixedSteps(frame, fixedStepSec);
-            RunPhase(Phase.LateUpdate, frame);
+            RunHook(Hook.Update, frame);
+            fixedSec = RunFixedSteps(frame, fixedSec, fixedStepSec);
+            RunHook(Hook.LateUpdate, frame);
             WaitForRender();
 
             // The render thread is done with the frame before, so both hold still: the settings changed since are
             // copied in, then the gems swap what Render reads.
             _settings.ApplyChanges();
-            RunPhase(Phase.Sync, frame);
+            RunHook(Hook.Sync, frame);
 
-            _rendering = frame;
-            _rendered.Reset();
-            if (!_threads.TryPost(EngineThread.Render, _renderFrame))
-                Debugging.Warn("A frame was handed to the render thread after the run ended; it is dropped.");
+            _frameToRender = frame;
+            HandToRenderThread(_renderFrame);
         }
 
         WaitForRender();
-    }
 
-    /// <summary>
-    /// Runs Stop on every gem that implements it, in reverse order, each timed while something listens; a gem that
-    /// throws is logged, and the rest still stop. On the main thread, once the last frame is done and the world is
-    /// saved.
-    /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws as it stops, it is logged and the rest still stop.")]
-    private void StopGems()
-    {
-        foreach (LoopGem loopGem in _stops)
-        {
-            long startTimestamp = _hookDuration.Start();
-            try
-            {
-                loopGem.Gem.Stop();
-            }
-            catch (Exception ex)
-            {
-                Debugging.Error($"Gem {loopGem.Name} threw in Stop: {ex}");
-
-                continue;
-            }
-
-            _hookDuration.RecordSince(
-                startTimestamp,
-                new(Metrics.GemNameTag, loopGem.Name),
-                new(Metrics.FramePhaseTag, nameof(IGem.Stop)));
-        }
+        return clocks;
     }
 
     /// <summary>
@@ -622,7 +589,7 @@ public sealed class Engine
             }
             catch (Exception ex)
             {
-                Debugging.Error($"Gem {gem.GetType().Name} threw while disposing: {ex}");
+                Debugging.Error($"Gem {_gems[i].Name} threw while disposing: {ex}");
             }
         }
     }
@@ -643,55 +610,72 @@ public sealed class Engine
 
             _threads.Wait(EngineThread.Main, _idlePeriod);
             _threads.Drain(EngineThread.Main);
-            RunIdle(EngineThread.Main);
+            RunHook(Hook.MainIdle, default);
 
             // One idle at a time on the render thread, after the frame before, so a main thread woken often by work it
             // is handed hands the render thread no backlog.
             _rendered.Wait();
-            _rendered.Reset();
-            if (!_threads.TryPost(EngineThread.Render, _renderIdle)) _rendered.Set();
+            HandToRenderThread(_renderIdle);
         }
 
         return false;
     }
 
     /// <summary>
-    /// The frame <paramref name="index"/>: the real clock moved on by <paramref name="realDeltaSec"/>, and the world's by as
-    /// much, scaled (<see cref="World.TimeScale"/>), or not at all while the world is paused (<see cref="World.IsPaused"/>).
-    /// While a domain loads in place of the world, the world's clock runs as the real one, unpaused, as the gems ready the
-    /// new one on the frames' fixed steps.
+    /// The frame <paramref name="index"/>, after <paramref name="clocks"/>: the real clock moved on by
+    /// <paramref name="realDeltaSec"/>, and the world's by as much, scaled (<see cref="World.TimeScale"/>), or not at
+    /// all while the world is paused (<see cref="World.IsPaused"/>). While a domain loads in place of the world, the
+    /// world's clock runs as the real one, unpaused, as the gems ready the new one on the frames' fixed steps.
     /// </summary>
-    private Frame StartFrame(ulong index, double realDeltaSec)
+    private Frame CreateFrame(ulong index, double realDeltaSec, Clocks clocks)
     {
         bool isLoading = _world.IsLoading;
         bool isPaused = _world.IsPaused && !isLoading;
         float scale = isLoading ? 1 : _world.TimeScale;
         double worldDeltaSec = isPaused ? 0 : realDeltaSec * scale;
-        _clocks = new Clocks(_clocks.RealSec + realDeltaSec, _clocks.WorldSec + worldDeltaSec);
 
-        return new Frame(index, (float)worldDeltaSec, _clocks.WorldSec, (float)realDeltaSec, _clocks.RealSec, isPaused);
+        return new Frame(
+            index,
+            (float)worldDeltaSec,
+            clocks.WorldSec + worldDeltaSec,
+            (float)realDeltaSec,
+            clocks.RealSec + realDeltaSec,
+            isPaused);
     }
 
     /// <summary>
-    /// Runs FixedUpdate for every <paramref name="fixedStepSec"/> up to <paramref name="frame"/>'s time on the world's
-    /// clock, each given the step and the time it reaches. Past <see cref="CoreSettings.MaxFixedSteps"/>, the steps
-    /// left are dropped. No cap can save a step that takes longer than the time it simulates: the loop then runs the
-    /// cap's worth every frame and the world falls behind real time, and the step is what must be fixed.
+    /// Runs FixedUpdate for every <paramref name="fixedStepSec"/> from <paramref name="fixedSec"/>, the time the fixed
+    /// steps have reached on the world's clock, up to <paramref name="frame"/>'s, each given the step and the time it
+    /// reaches; the time they reach now. Past <see cref="CoreSettings.MaxFixedSteps"/>, the steps left are dropped. No
+    /// cap can save a step that takes longer than the time it simulates: the loop then runs the cap's worth every frame
+    /// and the world falls behind real time, and the step is what must be fixed.
     /// </summary>
-    private void RunFixedSteps(in Frame frame, double fixedStepSec)
+    private double RunFixedSteps(in Frame frame, double fixedSec, double fixedStepSec)
     {
-        for (int step = 0; _fixedSec + fixedStepSec <= frame.WorldSec; step++)
+        for (int step = 0; fixedSec + fixedStepSec <= frame.WorldSec; step++)
         {
-            if (step == _core.MaxFixedSteps)
-            {
-                _fixedSec = frame.WorldSec;
+            if (step == _core.MaxFixedSteps) return frame.WorldSec;
 
-                break;
-            }
-
-            _fixedSec += fixedStepSec;
-            RunPhase(Phase.FixedUpdate, frame with { WorldDeltaSec = (float)fixedStepSec, WorldSec = _fixedSec });
+            fixedSec += fixedStepSec;
+            RunHook(Hook.FixedUpdate, frame with { WorldDeltaSec = (float)fixedStepSec, WorldSec = fixedSec });
         }
+
+        return fixedSec;
+    }
+
+    /// <summary>
+    /// Hands <paramref name="work"/>, a frame or an idle, to the render thread, which sets <see cref="_rendered"/> once
+    /// it is done. When the render thread takes no more, as the run ends, the work is dropped, and nothing is left
+    /// waiting for it.
+    /// </summary>
+    private void HandToRenderThread(Action work)
+    {
+        _rendered.Reset();
+
+        if (_threads.TryPost(EngineThread.Render, work)) return;
+
+        _rendered.Set();
+        Debugging.Warn("Work was handed to the render thread after the run ended; it is dropped.");
     }
 
     /// <summary>
@@ -701,7 +685,7 @@ public sealed class Engine
     {
         try
         {
-            RunPhase(Phase.Render, _rendering);
+            RunHook(Hook.Render, _frameToRender);
         }
         finally
         {
@@ -716,7 +700,7 @@ public sealed class Engine
     {
         try
         {
-            RunIdle(EngineThread.Render);
+            RunHook(Hook.RenderIdle, default);
         }
         finally
         {
@@ -732,28 +716,30 @@ public sealed class Engine
     }
 
     /// <summary>
-    /// Calls the hook for <paramref name="phase"/> on every gem that implements it and is still in the loop, timing
-    /// each while something listens. A gem that throws is logged and leaves the frame loop for good, on both threads;
-    /// the frame goes on without it.
+    /// Calls <paramref name="hook"/> on every gem that implements it and is still in the loop, timing each while
+    /// something listens. A gem that throws is logged and leaves the frame loop for good, on both threads; the frame
+    /// goes on without it. Stop runs on a gem that left the loop too, since what it owns of the main thread's still
+    /// ends.
     /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the engine goes on.")]
-    private void RunPhase(Phase phase, in Frame frame)
+    private void RunHook(Hook hook, in Frame frame)
     {
-        foreach (LoopGem loopGem in _gemsByPhase[(int)phase])
+        string name = GetMethodName(hook);
+        foreach (LoopGem loopGem in _gemsByHook[(int)hook])
         {
-            if (loopGem.HasLeft) continue;
+            if (loopGem.HasLeft && hook != Hook.Stop) continue;
 
             long startTimestamp = _hookDuration.Start();
             try
             {
-                CallHook(loopGem.Gem, phase, frame);
+                CallHook(loopGem.Gem, hook, frame);
             }
             catch (Exception ex)
             {
-                Debugging.Error($"Gem {loopGem.Name} threw in {_phases[(int)phase]} and left the frame loop: {ex}");
+                Debugging.Error($"Gem {loopGem.Name} threw in {name} and left the frame loop: {ex}");
                 loopGem.HasLeft = true;
 
                 continue;
@@ -763,52 +749,42 @@ public sealed class Engine
             _hookDuration.RecordSince(
                 startTimestamp,
                 new(Metrics.GemNameTag, loopGem.Name),
-                new(Metrics.FramePhaseTag, _phases[(int)phase]));
+                new(Metrics.FramePhaseTag, name));
         }
     }
 
     /// <summary>
-    /// Idles every gem that implements Idle and is still in the loop, on <paramref name="thread"/>, as
-    /// <see cref="RunPhase"/> runs a phase: in the order the gems were made on the main thread, in reverse on the render
-    /// thread.
+    /// A gem hook the loop runs over the gems that implement it: the frame's phases, in <see cref="Phase"/>'s order,
+    /// Idle on each thread while the app is paused, and Stop once the last frame is done.
     /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the engine goes on.")]
-    private void RunIdle(EngineThread thread)
+    private enum Hook
     {
-        bool isReversed = thread == EngineThread.Render;
-        for (int turn = 0; turn < _idles.Length; turn++)
-        {
-            LoopGem loopGem = _idles[isReversed ? _idles.Length - 1 - turn : turn];
-
-            if (loopGem.HasLeft) continue;
-
-            long startTimestamp = _hookDuration.Start();
-            try
-            {
-                loopGem.Gem.Idle(thread);
-            }
-            catch (Exception ex)
-            {
-                Debugging.Error($"Gem {loopGem.Name} threw in Idle and left the frame loop: {ex}");
-                loopGem.HasLeft = true;
-
-                continue;
-            }
-
-            _hookDuration.RecordSince(
-                startTimestamp,
-                new(Metrics.GemNameTag, loopGem.Name),
-                new(Metrics.FramePhaseTag, nameof(IGem.Idle)));
-        }
+        Update,
+        FixedUpdate,
+        LateUpdate,
+        Sync,
+        Render,
+        MainIdle,
+        RenderIdle,
+        Stop,
     }
 
     /// <summary>
     /// Both clocks a frame tells (<see cref="Frame"/>), in seconds: the real one and the world's.
     /// </summary>
     private readonly record struct Clocks(double RealSec, double WorldSec);
+
+    /// <summary>
+    /// What a run starts from: its command line, the world as the run before left it, else null, and both clocks, 0
+    /// for the first run.
+    /// </summary>
+    private readonly record struct RunStart(Args Args, WorldState? State, Clocks Clocks);
+
+    /// <summary>
+    /// What to run again with once the threads have ended, when the app restarts: the command line with every setting
+    /// as it is now, the world being saved, and both clocks as the last frame left them.
+    /// </summary>
+    private readonly record struct Restart(Args Args, Task<WorldState> Saving, Clocks Clocks);
 
     /// <summary>
     /// A gem in the frame loop, by the name the project lists it as, which its assembly is named for, what is

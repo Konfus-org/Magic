@@ -93,8 +93,8 @@ assumptions and decisions a reviewer would question as you make them.
 - **Leave it cleaner than you found it.**
   - **Where:** only in the members and files the task already changes, and what they directly call.
   - **What:** what these docs already forbid: a misleading name, a stale comment or one that restates its line, a
-    block whose purpose isn't obvious and has no comment, a dead member, a `!`, a nested `if` a guard clause flattens,
-    a duplicate, a docstring the change made wrong.
+    block whose purpose isn't obvious and has no comment, a dead private or internal member, a `!`, a nested `if` a
+    guard clause flattens, a duplicate, a docstring the change made wrong.
   - **How:** never a change in behaviour. The summary says which hunks are the fix and which are cleanup.
   - **When to stop:** a cleanup that grows past a few lines, reaches files the task doesn't touch, or needs a design
     decision becomes its own proposed task. Never touch another agent's in-flight work.
@@ -122,7 +122,8 @@ assumptions and decisions a reviewer would question as you make them.
 ## Design Rules
 
 - **Simplest robust solution.** Prefer removing code to adding it. Match the surrounding style. No abstraction
-  before a second real use, and no member without a caller.
+  before a second real use. A private or internal member needs a caller; public API a gem or game could use stays
+  without one.
 - **Project conventions first, then .NET's** (the Framework Design Guidelines).
 - **One responsibility each.** Split interfaces by what their user needs. Gems depend on Core's interfaces, never on
   each other.

@@ -3,11 +3,8 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using System.Xml;
-using System.Xml.Linq;
 using Magic.Attributes;
 using Magic.Contexts.Assets;
 using Magic.Contexts.CmdLine;
@@ -15,6 +12,7 @@ using Magic.Contexts.Settings;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
 using Magic.Interfaces;
+using Magic.Internal;
 
 namespace Magic.Services;
 
@@ -70,12 +68,6 @@ public sealed class Settings : IDisposable
     /// </summary>
     private readonly Dictionary<ISettings, ISettings> _changes = new(ReferenceEqualityComparer.Instance);
 
-    /// <summary>
-    /// Every member's summary in each assembly's documentation file, by the id the file gives it, read the first time
-    /// one of the assembly's settings is made (<see cref="GetSummary"/>).
-    /// </summary>
-    private readonly Dictionary<Assembly, Dictionary<string, string>> _summaries = [];
-
     private Layers _layers;
 
     /// <summary>
@@ -89,13 +81,13 @@ public sealed class Settings : IDisposable
         _args = args;
         _app = app;
         _files = files;
-        _default = assets.Find<Preset>(GetPath(DefaultPreset));
+        _default = assets.Find<Preset>(ToPresetPath(DefaultPreset));
         _commandLine = ParseCommandLine(app.Project, args.Settings);
 
-        Handle<Preset> applied = args.Preset.Length == 0 ? _default : assets.Find<Preset>(GetPath(args.Preset));
+        Handle<Preset> applied = args.Preset.Length == 0 ? _default : assets.Find<Preset>(ToPresetPath(args.Preset));
         if (applied == Handle<Preset>.None)
         {
-            Debugging.Error($"There is no preset {args.Preset}: no asset is {GetPath(args.Preset)}, "
+            Debugging.Error($"There is no preset {args.Preset}: no asset is {ToPresetPath(args.Preset)}, "
                 + "so only the default is applied.");
             applied = _default;
         }
@@ -103,10 +95,10 @@ public sealed class Settings : IDisposable
         JsonObject defaults = ReadPresetNow(_default);
         _layers = new Layers(defaults, applied == _default ? defaults : ReadPresetNow(applied), []);
         Preset = applied;
-        Debugging.Info($"Preset {GetName(applied)}");
-        _reloads = events.Watch<AssetReloaded<Preset>>(Reloaded);
+        Debugging.Info($"Preset {GetPresetPath(applied)}");
+        _reloads = events.Watch<AssetReloaded<Preset>>(PresetReloaded);
 
-        static string GetPath(string preset) => $"{PresetFolder}/{preset}{Contexts.Assets.Preset.Extensions[0]}";
+        static string ToPresetPath(string preset) => $"{PresetFolder}/{preset}{Contexts.Assets.Preset.Extensions[0]}";
     }
 
     /// <summary>
@@ -240,12 +232,12 @@ public sealed class Settings : IDisposable
         {
             Result recreated = Recreate(_layers with { Preset = read.Value, Live = [] });
 
-            if (!recreated.Ok) return Result.Failure($"Preset {GetName(preset)} {recreated.Error}");
+            if (!recreated.Ok) return Result.Failure($"Preset {GetPresetPath(preset)} {recreated.Error}");
 
             Preset = preset;
         }
 
-        Debugging.Info($"Preset {GetName(preset)}");
+        Debugging.Info($"Preset {GetPresetPath(preset)}");
 
         return Result.Success();
     }
@@ -286,12 +278,13 @@ public sealed class Settings : IDisposable
             if (!values.Ok) return Result.Failure<ISettings?>($"its settings are not valid: {values.Error}");
 
             _gems.Add(gem, values.Value);
-            foreach (PropertyInfo property in GetSettings(type))
+            Dictionary<string, string> summaries = DocComments.Read(_files, type.Assembly);
+            foreach (PropertyInfo property in GetSettingProperties(type))
             {
                 // Its own attributes first, then its class's, so one on the class marks every setting in it.
                 Setting setting = new(
-                    GetName(property),
-                    GetSummary(property),
+                    GetKeyName(property),
+                    DocComments.GetSummary(summaries, property),
                     gem,
                     property.PropertyType,
                     null,
@@ -351,7 +344,7 @@ public sealed class Settings : IDisposable
                 lines.Add($"{key}={value?.ToJsonString() ?? "null"}");
             }
 
-            string preset = Preset == _default ? string.Empty : Path.GetFileNameWithoutExtension(GetName(Preset));
+            string preset = Preset == _default ? string.Empty : Path.GetFileNameWithoutExtension(GetPresetPath(Preset));
 
             return new Args
             {
@@ -387,7 +380,7 @@ public sealed class Settings : IDisposable
     /// <summary>
     /// The settings a class of settings holds: its public properties that can be both read and set.
     /// </summary>
-    private static IEnumerable<PropertyInfo> GetSettings(Type type)
+    private static IEnumerable<PropertyInfo> GetSettingProperties(Type type)
     {
         return type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(property => property.CanRead && property.CanWrite);
@@ -396,7 +389,7 @@ public sealed class Settings : IDisposable
     /// <summary>
     /// A setting's name in its key and a preset: its property's name in Core's JSON dialect.
     /// </summary>
-    private static string GetName(PropertyInfo property)
+    private static string GetKeyName(PropertyInfo property)
         => Json.Options.PropertyNamingPolicy?.ConvertName(property.Name) ?? property.Name;
 
     /// <summary>
@@ -478,7 +471,7 @@ public sealed class Settings : IDisposable
     /// <summary>
     /// <paramref name="preset"/>'s settings, the asset's own object, or why one of its keys is not <c>Gem.path</c>.
     /// </summary>
-    private static Result<JsonObject> GetSettings(Preset preset, string name)
+    private static Result<JsonObject> TryReadPreset(Preset preset, string name)
     {
         foreach ((string key, _) in preset.Settings)
         {
@@ -489,48 +482,13 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
-    /// The text of <paramref name="node"/>, onto <paramref name="text"/>: a reference is the last part of what it
-    /// names, and a reference to a parameter is its name.
-    /// </summary>
-    private static void AppendText(StringBuilder text, XNode node)
-    {
-        if (node is XText run)
-        {
-            text.Append(run.Value);
-
-            return;
-        }
-
-        if (node is not XElement element) return;
-
-        if (element.Attribute("cref") is { } cref)
-        {
-            text.Append(cref.Value[(cref.Value.LastIndexOf('.') + 1)..]);
-
-            return;
-        }
-
-        if (element.Attribute("name") is { } name && element.IsEmpty)
-        {
-            text.Append(name.Value);
-
-            return;
-        }
-
-        foreach (XNode child in element.Nodes())
-        {
-            AppendText(text, child);
-        }
-    }
-
-    /// <summary>
     /// Takes in the default or the applied preset as its file now says, keeping what was set while running. One that no
     /// longer fits is an error, and the settings stay as they were. Main thread.
     /// </summary>
-    private void Reloaded(AssetReloaded<Preset> reloaded)
+    private void PresetReloaded(AssetReloaded<Preset> reloaded)
     {
         Handle<Preset> preset = reloaded.Asset.Handle;
-        Result<JsonObject> read = GetSettings(reloaded.Asset, GetName(preset));
+        Result<JsonObject> read = TryReadPreset(reloaded.Asset, GetPresetPath(preset));
         lock (_lock)
         {
             if (preset != _default && preset != Preset) return;
@@ -550,13 +508,13 @@ public sealed class Settings : IDisposable
             if (!recreated.Ok)
             {
                 Debugging.Error(
-                    $"Preset {GetName(preset)} was changed, but {recreated.Error}; the settings stay as they were.");
+                    $"Preset {GetPresetPath(preset)} was changed, but {recreated.Error}; the settings stay as they were.");
 
                 return;
             }
         }
 
-        Debugging.Info($"Preset {GetName(preset)} applied again, as its file changed");
+        Debugging.Info($"Preset {GetPresetPath(preset)} applied again, as its file changed");
     }
 
     /// <summary>
@@ -666,74 +624,12 @@ public sealed class Settings : IDisposable
         Result<Preset> loaded = await _assets.LoadAsync(preset, cancel).ConfigureAwait(false);
 
         return loaded.Ok
-            ? GetSettings(loaded.Value, GetName(preset))
-            : Result.Failure<JsonObject>($"Preset {GetName(preset)} could not be read: {loaded.Error}");
+            ? TryReadPreset(loaded.Value, GetPresetPath(preset))
+            : Result.Failure<JsonObject>($"Preset {GetPresetPath(preset)} could not be read: {loaded.Error}");
     }
 
-    private string GetName(Handle<Preset> preset)
+    private string GetPresetPath(Handle<Preset> preset)
         => _assets.GetPath(preset) ?? preset.Id.ToString(CultureInfo.InvariantCulture);
-
-    /// <summary>
-    /// <paramref name="property"/>'s summary as plain text, as its doc comment says it: the build writes every
-    /// assembly's comments into a documentation file beside it, so a settings UI shows a setting's summary and nothing
-    /// repeats the comment. Empty when it has none, or its assembly has no such file. Under the lock.
-    /// </summary>
-    private string GetSummary(PropertyInfo property)
-    {
-        Type declaring = property.DeclaringType
-            ?? throw new ArgumentException($"{property.Name} belongs to no type.", nameof(property));
-        if (!_summaries.TryGetValue(declaring.Assembly, out Dictionary<string, string>? summaries))
-        {
-            summaries = ReadSummaries(declaring.Assembly);
-            _summaries[declaring.Assembly] = summaries;
-        }
-
-        // The id the documentation file gives a property: P:, its type's full name with a dot for the + before a
-        // nested type, then its name.
-        return summaries.GetValueOrDefault($"P:{declaring.FullName?.Replace('+', '.')}.{property.Name}")
-            ?? string.Empty;
-    }
-
-    /// <summary>
-    /// Every member's summary in <paramref name="assembly"/>'s documentation file, by the id the file gives it.
-    /// </summary>
-    private Dictionary<string, string> ReadSummaries(Assembly assembly)
-    {
-        Dictionary<string, string> summaries = new(StringComparer.Ordinal);
-        string path = Path.ChangeExtension(assembly.Location, ".xml");
-
-        if (!_files.FileExists(path)) return summaries;
-
-        Result<byte[]> bytes = _files.Read(path);
-
-        if (!bytes.Ok) return summaries;
-
-        // What is trimmed is the byte order mark a file may start with, which does not show here.
-        XDocument document;
-        try
-        {
-            document = XDocument.Parse(Encoding.UTF8.GetString(bytes.Value).TrimStart('﻿'));
-        }
-        catch (XmlException)
-        {
-            return summaries;
-        }
-
-        // Each member's summary as plain text, every run of white space one space, as the file wraps and indents it.
-        StringBuilder text = new();
-        foreach (XElement member in document.Descendants("member"))
-        {
-            if (member.Attribute("name") is not { } id || member.Element("summary") is not { } summary) continue;
-
-            text.Clear();
-            AppendText(text, summary);
-            summaries[id.Value] = string.Join(
-                ' ',
-                text.ToString().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        }
-
-        return summaries;
-    }
 
     /// <summary>
     /// What the gems' settings are made from, but the command line's, which never changes: the default preset's

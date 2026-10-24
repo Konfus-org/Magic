@@ -60,7 +60,7 @@ internal readonly record struct GemAssembly(
     internal static Result<GemAssembly> Load(IFileSystem files, string name)
     {
         string path = files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
-        Result<Assembly> loaded = LoadAssembly(files, path, $"Gem {name}", isCode: false, again: false);
+        Result<Assembly> loaded = LoadAssembly(files, path, $"Gem {name}", isCode: false, isReload: false);
 
         if (!loaded.Ok) return Result.Failure<GemAssembly>(loaded.Error);
 
@@ -130,33 +130,6 @@ internal readonly record struct GemAssembly(
     }
 
     /// <summary>
-    /// The code that is no gem, scripts and the components they use, built as the assembly at
-    /// <paramref name="path"/>: the project's own, the <c>.cs</c> files under its <c>Assets/</c>, which the csproj
-    /// beside its <c>.magic</c> file compiles into Projects/Name/Name.dll beside Magic, Name being the project's; and
-    /// Magic's, the <c>.cs</c> files among the bundled resources, compiled into Resources/Resources.dll beside it. Each
-    /// loads into a context of its own, as a gem does, though it provides nothing and takes no settings. Null when
-    /// <paramref name="what"/> is not built, as a project needs no code, and when it cannot be loaded, which is logged.
-    /// Loaded <paramref name="again"/>, as it is built now, it goes into a new context beside the last, which stays for
-    /// whatever holds its types, and one gone by then is an error.
-    /// </summary>
-    internal static Assembly? LoadCode(IFileSystem files, string path, string what, bool again)
-    {
-        if (!again && !files.FileExists(path)) return null;
-
-        Result<Assembly> loaded = LoadAssembly(files, path, what, isCode: true, again);
-        if (!loaded.Ok)
-        {
-            Debugging.Error(loaded.Error);
-
-            return null;
-        }
-
-        Debugging.Info(again ? $"Loaded {what} again" : $"Loaded {what}");
-
-        return loaded.Value;
-    }
-
-    /// <summary>
     /// Where the part built as <paramref name="assembly"/> keeps its own assets: the folder its build recorded as
     /// <see cref="ResourcesKey"/>, its source <c>Resources/</c>, which every build but a release records; else
     /// <c>Resources/</c> beside it, where a release copies them.
@@ -165,32 +138,22 @@ internal readonly record struct GemAssembly(
         => GetMetadata(assembly, ResourcesKey) ?? files.Combine(files.GetParent(assembly.Location), "Resources");
 
     /// <summary>
-    /// What <paramref name="assembly"/>'s build recorded as <paramref name="key"/>; null when nothing, or nothing but
-    /// an empty string, was.
-    /// </summary>
-    private static string? GetMetadata(Assembly assembly, string key)
-    {
-        foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
-        {
-            if (string.Equals(metadata.Key, key, StringComparison.Ordinal) && metadata.Value is { Length: > 0 } value)
-                return value;
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// The assembly at <paramref name="path"/>, loaded into a context of its own the first time it is asked for, or
-    /// once more when asked <paramref name="again"/>, beside the context before. Code (<paramref name="isCode"/>) is
-    /// read into memory and loaded from there, so a build can write the file while it is loaded; a gem is loaded from
-    /// its file, so its assembly knows where it is, which its native libraries are found by. Why not when there is no
-    /// such file or it is not one .NET can load, naming <paramref name="what"/> it is.
+    /// once more as a reload (<paramref name="isReload"/>), beside the context before. Code (<paramref name="isCode"/>)
+    /// is read into memory and loaded from there, so a build can write the file while it is loaded; a gem is loaded
+    /// from its file, so its assembly knows where it is, which its native libraries are found by. Why not when there is
+    /// no such file or it is not one .NET can load, naming <paramref name="what"/> it is.
     /// </summary>
-    private static Result<Assembly> LoadAssembly(IFileSystem files, string path, string what, bool isCode, bool again)
+    internal static Result<Assembly> LoadAssembly(
+        IFileSystem files,
+        string path,
+        string what,
+        bool isCode,
+        bool isReload)
     {
         lock (_loading)
         {
-            if (!again && _loaded.TryGetValue(path, out Assembly? loaded)) return Result.Success(loaded);
+            if (!isReload && _loaded.TryGetValue(path, out Assembly? loaded)) return Result.Success(loaded);
 
             if (!files.FileExists(path)) return Result.Failure<Assembly>($"{what} was not found: there is no {path}.");
 
@@ -207,6 +170,21 @@ internal readonly record struct GemAssembly(
                 return Result.Failure<Assembly>($"{what} could not be loaded from {path}: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// What <paramref name="assembly"/>'s build recorded as <paramref name="key"/>; null when nothing, or nothing but
+    /// an empty string, was.
+    /// </summary>
+    private static string? GetMetadata(Assembly assembly, string key)
+    {
+        foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
+        {
+            if (string.Equals(metadata.Key, key, StringComparison.Ordinal) && metadata.Value is { Length: > 0 } value)
+                return value;
+        }
+
+        return null;
     }
 
     /// <summary>

@@ -54,7 +54,7 @@ public sealed class Threads : IDisposable
     /// </summary>
     public bool IsCurrent(EngineThread thread)
     {
-        int owner = Queue(thread).Owner;
+        int owner = GetQueue(thread).Owner;
 
         return owner == 0 || owner == Environment.CurrentManagedThreadId;
     }
@@ -87,7 +87,7 @@ public sealed class Threads : IDisposable
         if (cancel.IsCancellationRequested) return Task.FromCanceled<T>(cancel);
 
         TaskCompletionSource<T> done = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        bool queued = Queue(thread).TryEnqueue(() =>
+        bool queued = GetQueue(thread).TryEnqueue(() =>
         {
             if (cancel.IsCancellationRequested)
             {
@@ -160,44 +160,44 @@ public sealed class Threads : IDisposable
     /// task and not timed as work: for the engine's own hand-offs, such as a frame's Render, whose parts are timed
     /// themselves. False once the thread has ended, and the work is dropped.
     /// </summary>
-    internal bool TryPost(EngineThread thread, Action work) => Queue(thread).TryEnqueue(work, isTimed: false);
+    internal bool TryPost(EngineThread thread, Action work) => GetQueue(thread).TryEnqueue(work, isTimed: false);
 
     /// <summary>
     /// Runs what <paramref name="thread"/> was handed so far. On that thread: the main thread drains its work at the
     /// start of each frame.
     /// </summary>
-    internal void Drain(EngineThread thread) => Queue(thread).RunPending();
+    internal void Drain(EngineThread thread) => GetQueue(thread).RunPending();
 
     /// <summary>
     /// Blocks until work is handed to <paramref name="thread"/> or <paramref name="timeout"/> passes. On that thread: the
     /// main thread waits so while the app is paused, and wakes for what it is handed.
     /// </summary>
-    internal void Wait(EngineThread thread, TimeSpan timeout) => Queue(thread).Wait(timeout);
+    internal void Wait(EngineThread thread, TimeSpan timeout) => GetQueue(thread).Wait(timeout);
 
     /// <summary>
     /// Makes the calling thread <paramref name="thread"/> (<see cref="IsCurrent"/>), until <see cref="Release"/>.
     /// </summary>
-    internal void Claim(EngineThread thread) => Queue(thread).Owner = Environment.CurrentManagedThreadId;
+    internal void Claim(EngineThread thread) => GetQueue(thread).Owner = Environment.CurrentManagedThreadId;
 
     /// <summary>
     /// Makes <paramref name="thread"/>'s work nobody's again, as it is before the thread starts: once it has ended,
     /// for the shutdown that runs alone on the render thread.
     /// </summary>
-    internal void Release(EngineThread thread) => Queue(thread).Owner = 0;
+    internal void Release(EngineThread thread) => GetQueue(thread).Owner = 0;
 
     /// <summary>
     /// Runs <paramref name="thread"/>'s work on the calling thread as it is handed, until <see cref="End"/> and the
     /// last of it has run.
     /// </summary>
-    internal void RunUntilEnded(EngineThread thread) => Queue(thread).RunUntilEnded();
+    internal void RunUntilEnded(EngineThread thread) => GetQueue(thread).RunUntilEnded();
 
     /// <summary>
     /// <paramref name="thread"/> takes no more work, and runs what it was left; anything handed to it after is
     /// dropped.
     /// </summary>
-    internal void End(EngineThread thread) => Queue(thread).End();
+    internal void End(EngineThread thread) => GetQueue(thread).End();
 
-    private WorkQueue Queue(EngineThread thread)
+    private WorkQueue GetQueue(EngineThread thread)
     {
         return thread switch
         {

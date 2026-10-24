@@ -8,7 +8,8 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 - Make the smallest, simplest change that works. No abstraction before a second real use, no guessing at edge cases.
 - Use a known pattern only for the problem it solves, and name it in a comment (a double-buffered snapshot, a pool).
 - Reuse what exists. When two places do the same thing, one method does it. No helper with a single caller.
-- Delete stale code instead of commenting it out. No unused member, parameter or overload.
+- Delete stale code instead of commenting it out. No unused private or internal member, parameter or overload. Public
+  API stays without a caller when a gem or game could use it.
 - Leave the code you touch cleaner, without changing behaviour, and keep the cleanup apart from the fix.
 - Follow these rules, then .NET's Framework Design Guidelines. Use one word for one thing across the code base.
 - Use current C# and .NET. Follow `.editorconfig` ([Format.ps1](tools/README.md#formatps1)).
@@ -196,6 +197,7 @@ and `BannedSymbols.txt` the banned APIs. New code follows every rule; bring exis
 
 - A name reads well as `Class.Member(arguments)`: `Assets.Find<Texture>(path)`, `App.Quit(reason)`. If it
   doesn't (`Process()`, `_scratch`), name the object: what is processed, what is held.
+- A per-frame hook or an entry point that runs something keeps a general verb: `Run`, `Start`, `Post`.
 - Put the action first and its subject second, as English does (`ReadDomain`, `ShowDomain`). Name what a member acts
   on, even at some length: read the name as if it had no summary.
 - `Get` never fails; it may return null when the thing has none (`Assets.GetPath` of a handle with no file). `Is`,
