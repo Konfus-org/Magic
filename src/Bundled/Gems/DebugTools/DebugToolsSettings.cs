@@ -5,7 +5,7 @@ namespace Magic.DebugTools;
 
 /// <summary>
 /// What the debug windows show. Set in the project's <c>Presets/Default.preset</c>, by another preset, or with
-/// <c>--set DebugTools.frameRate=false</c>.
+/// <c>--set DebugTools.isFrameRateShown=false</c>.
 /// </summary>
 [Category("Debug")]
 internal sealed class DebugToolsSettings : ISettings

@@ -24,7 +24,6 @@ internal sealed class DebugUi : IOverlayScript, IDisposable
     private readonly IGpuDriver _gpu;
     private readonly DrawLists _lists;
     private readonly Dictionary<uint, (GpuTexture Texture, int Width, int Height, uint Version)> _textures = [];
-    private readonly List<uint> _gone = [];
     private readonly Dictionary<GpuFormat, GpuPipeline> _pipelines = [];
     private GpuSampler _sampler;
     private GpuBuffer _vertexBuffer;
@@ -122,7 +121,7 @@ internal sealed class DebugUi : IOverlayScript, IDisposable
     /// </summary>
     private void Follow()
     {
-        foreach ((uint id, TextureChange texture) in _lists.Known)
+        foreach ((uint id, ImGuiTexture texture) in _lists.Textures)
         {
             _textures.TryGetValue(id, out (GpuTexture Texture, int Width, int Height, uint Version) known);
 
@@ -142,18 +141,12 @@ internal sealed class DebugUi : IOverlayScript, IDisposable
             _textures[id] = (known.Texture, texture.Width, texture.Height, texture.Version);
         }
 
-        _gone.Clear();
+        // Taken out as the walk goes, which a dictionary's enumerator allows.
         foreach ((uint id, (GpuTexture Texture, int Width, int Height, uint Version) texture) in _textures)
         {
-            if (!_lists.Known.ContainsKey(id))
-            {
-                _gpu.Release(texture.Texture);
-                _gone.Add(id);
-            }
-        }
+            if (_lists.Textures.ContainsKey(id)) continue;
 
-        foreach (uint id in _gone)
-        {
+            _gpu.Release(texture.Texture);
             _textures.Remove(id);
         }
     }

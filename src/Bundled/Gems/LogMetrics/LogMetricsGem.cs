@@ -1,9 +1,12 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using System.Text;
 using Magic.Contexts.Frames;
+using Magic.Contexts.Settings;
+using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Telemetry;
 using Magic.Interfaces;
 using Magic.Services;
@@ -18,12 +21,14 @@ namespace Magic.LogMetrics;
 /// <para>
 /// Measurements are added up on the thread that records them, the main or render thread for Core's, without allocating
 /// after a series' first, so listening is cheap in the frame loop; the lines are formatted in <see cref="Update"/>, on
-/// the main thread, once per interval.
+/// the main thread, once per interval. A change to the settings while running starts or stops listening, or starts it
+/// over under the meters they now name.
 /// </para>
 /// </summary>
 internal sealed class LogMetricsGem : IGem, IDisposable
 {
     private readonly LogMetricsSettings _settings;
+    private readonly Subscription _settingsChanges;
     private readonly Lock _lock = new();
     private readonly List<Measured> _measured = [];
     private readonly SlowestFrame _slowest = new();
@@ -39,12 +44,13 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     /// </summary>
     private long _windowStartTimestamp;
 
-    public LogMetricsGem(LogMetricsSettings settings)
+    public LogMetricsGem(LogMetricsSettings settings, Events events)
     {
         _settings = settings;
+        _settingsChanges = events.Watch<SettingsChanged>(FollowSettings);
         if (!settings.IsEnabled)
         {
-            Debugging.Verbose("Metrics are not logged; --set LogMetrics.enabled=true turns them on.");
+            Debugging.Verbose("Metrics are not logged; --set LogMetrics.isEnabled=true turns them on.");
         }
         else if (settings.IntervalSec <= 0)
         {
@@ -52,20 +58,36 @@ internal sealed class LogMetricsGem : IGem, IDisposable
                 + "metrics are not logged.");
         }
 
-        Follow();
+        if (IsWanted(settings)) Start();
     }
 
-    public void Dispose() => Stop();
+    public void Dispose()
+    {
+        _settingsChanges.Dispose();
+        Stop();
+    }
 
     public void Update(in Frame frame)
     {
         _slowest.Current = frame.Index;
-        Follow();
 
         if (_listener is null || Stopwatch.GetElapsedTime(_windowStartTimestamp).TotalSeconds < _settings.IntervalSec)
             return;
 
         Report();
+    }
+
+    /// <summary>
+    /// Reports what was measured since the last report, then stops listening and forgets the instruments: as the run
+    /// ends, on the main thread once the last frame is done, or when the settings turn logging off.
+    /// </summary>
+    public void Stop()
+    {
+        if (_listener is null) return;
+
+        Report();
+        _listener.Dispose();
+        _listener = null;
     }
 
     /// <summary>
@@ -91,33 +113,25 @@ internal sealed class LogMetricsGem : IGem, IDisposable
     };
 
     /// <summary>
-    /// Listens as the settings say: starts when they turn logging on, stops when they turn it off, and starts over
-    /// when the meters listened to change, so a change while running takes from the next interval.
+    /// Whether <paramref name="settings"/> ask for metrics to be logged.
     /// </summary>
-    private void Follow()
-    {
-        bool isWanted = _settings.IsEnabled && _settings.IntervalSec > 0;
-        if (_listener is not null && (!isWanted || !HasSameMeters())) Stop();
-
-        if (isWanted && _listener is null) Start();
-    }
+    private static bool IsWanted(LogMetricsSettings settings) => settings.IsEnabled && settings.IntervalSec > 0;
 
     /// <summary>
-    /// Whether the settings' meters are still the ones listened to, by contents: a settings change hands the gem a new
-    /// list even when nothing in it changed.
+    /// Listens as the settings now say: starts when they turn logging on, stops when they turn it off, and starts over
+    /// when the meters listened to change, so a change while running takes from the next interval.
     /// </summary>
-    private bool HasSameMeters()
+    private void FollowSettings(SettingsChanged changed)
     {
-        IReadOnlyList<string> meters = _settings.Meters;
+        if (changed is not { Before: LogMetricsSettings before, After: LogMetricsSettings after }) return;
 
-        if (meters.Count != _meters.Count) return false;
-
-        for (int i = 0; i < meters.Count; i++)
+        if (_listener is not null
+            && (!IsWanted(after) || !before.Meters.SequenceEqual(after.Meters, StringComparer.Ordinal)))
         {
-            if (!string.Equals(meters[i], _meters[i], StringComparison.Ordinal)) return false;
+            Stop();
         }
 
-        return true;
+        if (IsWanted(after) && _listener is null) Start();
     }
 
     private void Start()
@@ -134,18 +148,6 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         _listener = listener;
         _windowStartTimestamp = Stopwatch.GetTimestamp();
         listener.Start();
-    }
-
-    /// <summary>
-    /// Reports what was measured since the last report, then stops listening and forgets the instruments.
-    /// </summary>
-    private void Stop()
-    {
-        if (_listener is null) return;
-
-        Report();
-        _listener.Dispose();
-        _listener = null;
     }
 
     /// <summary>
@@ -473,21 +475,15 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         private const int HooksShown = 3;
 
         private readonly Lock _lock = new();
-        private readonly List<Hook> _hooks = [];
-        private readonly List<Hook> _slowestHooks = [];
-        private int _count;
-        private double _sumSec;
-        private ulong _index;
-        private double _slowestSec;
-        private TimeSpan _paused;
 
         /// <summary>
-        /// How long each engine thread spent on work handed to it, in the frame being timed and in the slowest.
+        /// The frame being timed and the slowest since the last report, a double buffer: a frame that ends slower than
+        /// the slowest swaps places with it, and whichever is then the frame being timed starts over.
         /// </summary>
-        private double _mainWorkSec;
-        private double _renderWorkSec;
-        private double _slowestMainWorkSec;
-        private double _slowestRenderWorkSec;
+        private FrameTimes _timing = new();
+        private FrameTimes _slowest = new();
+        private int _count;
+        private double _sumSec;
 
         /// <summary>
         /// How long the garbage collector had paused the process for when the last frame ended.
@@ -507,7 +503,7 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             Hook hook = new(FindTag(tags, Metrics.GemNameTag), FindTag(tags, Metrics.FramePhaseTag), tookSec);
             lock (_lock)
             {
-                _hooks.Add(hook);
+                _timing.Hooks.Add(hook);
             }
         }
 
@@ -519,37 +515,29 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             bool isRender = FindTag(tags, Metrics.ThreadNameTag) is "render";
             lock (_lock)
             {
-                if (isRender) _renderWorkSec += workSec;
-                else _mainWorkSec += workSec;
+                if (isRender) _timing.RenderWorkSec += workSec;
+                else _timing.MainWorkSec += workSec;
             }
         }
 
         /// <summary>
-        /// Ends the frame being timed, which took <paramref name="frameSec"/>, keeping its hooks and handed work when
-        /// it is the slowest yet.
+        /// Ends the frame being timed, which took <paramref name="frameSec"/>, keeping it as the slowest when it is the
+        /// slowest yet.
         /// </summary>
         internal void Ended(double frameSec)
         {
             TimeSpan paused = GC.GetTotalPauseDuration();
             lock (_lock)
             {
-                if (_count == 0 || frameSec > _slowestSec)
-                {
-                    _index = Current;
-                    _slowestSec = frameSec;
-                    _paused = paused - _pausedBefore;
-                    _slowestHooks.Clear();
-                    _slowestHooks.AddRange(_hooks);
-                    _slowestMainWorkSec = _mainWorkSec;
-                    _slowestRenderWorkSec = _renderWorkSec;
-                }
+                _timing.Index = Current;
+                _timing.Sec = frameSec;
+                _timing.Paused = paused - _pausedBefore;
+                if (_count == 0 || frameSec > _slowest.Sec) (_slowest, _timing) = (_timing, _slowest);
 
+                _timing.Clear();
                 _pausedBefore = paused;
                 _sumSec += frameSec;
                 _count++;
-                _hooks.Clear();
-                _mainWorkSec = 0;
-                _renderWorkSec = 0;
             }
         }
 
@@ -562,16 +550,17 @@ internal sealed class LogMetricsGem : IGem, IDisposable
             {
                 if (_count == 0) return;
 
-                _slowestHooks.Sort(static (first, second) => second.TookSec.CompareTo(first.TookSec));
+                FrameTimes slowest = _slowest;
+                slowest.Hooks.Sort(static (first, second) => second.TookSec.CompareTo(first.TookSec));
                 StringBuilder text = new();
                 text.Append(
                     CultureInfo.InvariantCulture,
-                    $"Slowest frame f{_index} took "
-                        + $"{FormatAmount(_slowestSec, "s")}, {_slowestSec * _count / _sumSec:0.#}x the mean:");
+                    $"Slowest frame f{slowest.Index} took "
+                        + $"{FormatAmount(slowest.Sec, "s")}, {slowest.Sec * _count / _sumSec:0.#}x the mean:");
                 double hookedSec = 0;
-                for (int i = 0; i < _slowestHooks.Count; i++)
+                for (int i = 0; i < slowest.Hooks.Count; i++)
                 {
-                    Hook hook = _slowestHooks[i];
+                    Hook hook = slowest.Hooks[i];
                     // A render-thread hook ran beside the main thread's frame rather than inside it.
                     if (hook.Phase is not nameof(Phase.Render)) hookedSec += hook.TookSec;
 
@@ -583,17 +572,17 @@ internal sealed class LogMetricsGem : IGem, IDisposable
                     }
                 }
 
-                text.Append(" outside the main thread's hooks ").Append(FormatAmount(_slowestSec - hookedSec, "s"));
-                if (_slowestMainWorkSec > 0)
+                text.Append(" outside the main thread's hooks ").Append(FormatAmount(slowest.Sec - hookedSec, "s"));
+                if (slowest.MainWorkSec > 0)
                 {
                     text.Append(", of it work handed to the main thread ")
-                        .Append(FormatAmount(_slowestMainWorkSec, "s"));
+                        .Append(FormatAmount(slowest.MainWorkSec, "s"));
                 }
 
-                if (_slowestRenderWorkSec > 0)
-                    text.Append("; work handed to the render thread ").Append(FormatAmount(_slowestRenderWorkSec, "s"));
+                if (slowest.RenderWorkSec > 0)
+                    text.Append("; work handed to the render thread ").Append(FormatAmount(slowest.RenderWorkSec, "s"));
 
-                text.Append("; GC paused ").Append(FormatAmount(_paused.TotalSeconds, "s"));
+                text.Append("; GC paused ").Append(FormatAmount(slowest.Paused.TotalSeconds, "s"));
                 Debugging.Info(text.ToString());
                 _count = 0;
                 _sumSec = 0;
@@ -614,5 +603,34 @@ internal sealed class LogMetricsGem : IGem, IDisposable
         /// One gem hook's time, named by the tags Core records it with.
         /// </summary>
         private readonly record struct Hook(object? Gem, object? Phase, double TookSec);
+
+        /// <summary>
+        /// One frame's times: which it is, how long it took, how long the garbage collector paused it, its hooks, and
+        /// how long each engine thread spent on work handed to it.
+        /// </summary>
+        private sealed class FrameTimes
+        {
+            internal ulong Index { get; set; }
+
+            internal double Sec { get; set; }
+
+            internal TimeSpan Paused { get; set; }
+
+            internal List<Hook> Hooks { get; } = [];
+
+            internal double MainWorkSec { get; set; }
+
+            internal double RenderWorkSec { get; set; }
+
+            /// <summary>
+            /// Starts over, to time the next frame.
+            /// </summary>
+            internal void Clear()
+            {
+                Hooks.Clear();
+                MainWorkSec = 0;
+                RenderWorkSec = 0;
+            }
+        }
     }
 }

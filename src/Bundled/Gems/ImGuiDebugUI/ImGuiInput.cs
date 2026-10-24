@@ -11,7 +11,7 @@ namespace Magic.ImGuiDebugUI;
 /// </summary>
 internal static unsafe class ImGuiInput
 {
-    private static readonly (Control Control, int Key)[] _keys = Keys();
+    private static readonly (Control Control, int Key)[] _keys = CreateKeys();
 
     internal static void Feed(ImGuiIO_t* io, IInput input, TextArena text)
     {
@@ -49,7 +49,7 @@ internal static unsafe class ImGuiInput
         if (wheelX != 0 || wheelY != 0) ImGuiIO_AddMouseWheelEvent(io, -wheelX, wheelY);
 
         // Only while a field has the keyboard: the key that opens a window must not be typed into the field it opens.
-        if (io->WantTextInput && input.Text.Length > 0) ImGuiIO_AddInputCharactersUTF8(io, text.Of(input.Text));
+        if (io->WantTextInput && input.Text.Length > 0) ImGuiIO_AddInputCharactersUTF8(io, text.Add(input.Text));
     }
 
     /// <summary>
@@ -72,7 +72,7 @@ internal static unsafe class ImGuiInput
     /// <summary>
     /// Each keyboard control beside the ImGui key it is: the runs both number alike, then the rest one by one.
     /// </summary>
-    private static (Control Control, int Key)[] Keys()
+    private static (Control Control, int Key)[] CreateKeys()
     {
         List<(Control Control, int Key)> keys =
         [

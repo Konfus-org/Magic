@@ -22,6 +22,7 @@ internal sealed class DebugToolsGem(
     Settings gemSettings,
     Assets assets,
     App app,
+    Events events,
     ICommands? commands = null,
     IInput? input = null,
     IWindow? window = null) : IGem, ILogSink, IDisposable
@@ -33,7 +34,8 @@ internal sealed class DebugToolsGem(
     private readonly TelemetryWindow _telemetry = new(
         new ToolWindow("Telemetry", Control.KeyF3, ui, input, window),
         ui,
-        settings);
+        settings,
+        events);
     private readonly SettingsWindow _settings = new(
         new ToolWindow("Settings", Control.KeyF4, ui, input, window),
         ui,
@@ -43,10 +45,10 @@ internal sealed class DebugToolsGem(
         app.Quitting);
 
     /// <summary>
-    /// The frames and seconds since the frame rate was last worked out, and what it read.
+    /// The frame the frame rate was last worked out at, which the next is worked out from, none while it is not shown;
+    /// and what it read.
     /// </summary>
-    private int _frames;
-    private double _countedSec;
+    private Frame? _countedFrom;
     private string _frameRate = string.Empty;
 
     public void Dispose()
@@ -71,17 +73,23 @@ internal sealed class DebugToolsGem(
     /// </summary>
     private void ShowFrameRate(in Frame frame)
     {
-        if (!settings.IsFrameRateShown) return;
+        if (!settings.IsFrameRateShown)
+        {
+            _countedFrom = null;
 
-        _frames++;
-        _countedSec += frame.RealDeltaSec;
-        if (_countedSec >= 0.5)
+            return;
+        }
+
+        // Counted from the frame it was last worked out at, or, shown anew, from now.
+        _countedFrom ??= frame;
+        double sec = frame.RealSec - _countedFrom.Value.RealSec;
+        ulong frames = frame.Index - _countedFrom.Value.Index;
+        if (sec >= 0.5)
         {
             _frameRate = string.Create(
                 CultureInfo.InvariantCulture,
-                $"{_frames / _countedSec:0} fps  {_countedSec * 1000 / _frames:0.00} ms");
-            _frames = 0;
-            _countedSec = 0;
+                $"{frames / sec:0} fps  {sec * 1000 / frames:0.00} ms");
+            _countedFrom = frame;
         }
 
         if (_frameRate.Length > 0) ui.Text(_frameRate);

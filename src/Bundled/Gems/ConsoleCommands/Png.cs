@@ -24,7 +24,7 @@ internal static class Png
         BinaryPrimitives.WriteInt32BigEndian(header[4..], image.Height);
         header[8] = 8;
         header[9] = 6;
-        Chunk(png, "IHDR"u8, header);
+        WriteChunk(png, "IHDR"u8, header);
 
         // Each row led by its filter type, 0 for none, and all of them deflated as one stream.
         using MemoryStream rows = new();
@@ -39,8 +39,8 @@ internal static class Png
             }
         }
 
-        Chunk(png, "IDAT"u8, rows.GetBuffer().AsSpan(0, (int)rows.Length));
-        Chunk(png, "IEND"u8, []);
+        WriteChunk(png, "IDAT"u8, rows.GetBuffer().AsSpan(0, (int)rows.Length));
+        WriteChunk(png, "IEND"u8, []);
 
         return png.ToArray();
     }
@@ -48,7 +48,7 @@ internal static class Png
     /// <summary>
     /// A chunk: its length, its type, its data, and the CRC of its type and data.
     /// </summary>
-    private static void Chunk(MemoryStream png, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
+    private static void WriteChunk(MemoryStream png, ReadOnlySpan<byte> type, ReadOnlySpan<byte> data)
     {
         Span<byte> word = stackalloc byte[4];
         BinaryPrimitives.WriteInt32BigEndian(word, data.Length);

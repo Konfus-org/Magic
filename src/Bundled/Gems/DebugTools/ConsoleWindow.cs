@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Linq;
+using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Logging;
 using Magic.Contexts.Subscriptions;
@@ -12,8 +13,9 @@ namespace Magic.DebugTools;
 /// The console: a filter, then the newest <see cref="ShownLines"/> of the log's last <see cref="KeptLines"/> lines
 /// that contain it, each with its time and in its level's colour, in a scrolling view, and under them a line to type a
 /// command on, run as if it were typed at the terminal (<see cref="ICommands.Run"/>). Its own command, <c>clear</c>,
-/// empties the view; Copy gives every kept line. The log's lines arrive on the log's thread (<see cref="Add"/>), so
-/// they are locked.
+/// empties the view; Copy gives every kept line. The log's lines arrive on the log's thread (<see cref="Add"/>) and
+/// are handed over through a channel, taken in at the start of each Update, open or not, so the kept lines are the
+/// main thread's alone.
 /// </summary>
 internal sealed class ConsoleWindow : IDisposable
 {
@@ -33,18 +35,34 @@ internal sealed class ConsoleWindow : IDisposable
     private readonly IDebugUI _ui;
     private readonly ICommands? _commands;
     private readonly Subscription? _clearing;
-    private readonly Lock _lock = new();
+
+    /// <summary>
+    /// The log's lines on their way from the log's thread; the oldest are dropped past what is kept, as they would be
+    /// once taken in.
+    /// </summary>
+    private readonly Channel<Line> _arrived = Channel.CreateBounded<Line>(
+        new BoundedChannelOptions(KeptLines) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
+
+    /// <summary>
+    /// The lines kept, the newest last. Main thread.
+    /// </summary>
     private readonly Queue<Line> _lines = new();
 
     /// <summary>
-    /// The lines drawn, the newest that contain the filter, gathered again when a line came or the filter changed.
+    /// The lines drawn, the newest that contain the filter, gathered again when the kept lines or the filter changed.
     /// </summary>
     private readonly List<Line> _shown = [];
 
     private string _typed = string.Empty;
     private string _filter = string.Empty;
+
+    /// <summary>
+    /// What <see cref="_shown"/> was gathered from: the filter, and the change of the kept lines it saw, each change
+    /// counted in <see cref="_change"/>.
+    /// </summary>
     private string _shownFilter = string.Empty;
-    private bool _isChanged;
+    private int _shownChange = -1;
+    private int _change;
 
     internal ConsoleWindow(ToolWindow window, IDebugUI ui, ICommands? commands)
     {
@@ -64,20 +82,13 @@ internal sealed class ConsoleWindow : IDisposable
         string shown = line.Level >= LogLevel.Warn
             ? string.Create(CultureInfo.InvariantCulture, $"{line.Time:HH:mm:ss.fff} {line.Level}: {line.Message}")
             : string.Create(CultureInfo.InvariantCulture, $"{line.Time:HH:mm:ss.fff} {line.Message}");
-        lock (_lock)
-        {
-            _lines.Enqueue(new Line(shown, line.Level));
-            while (_lines.Count > KeptLines)
-            {
-                _lines.Dequeue();
-            }
-
-            _isChanged = true;
-        }
+        _arrived.Writer.TryWrite(new Line(shown, line.Level));
     }
 
     internal void Update()
     {
+        TakeArrived();
+
         if (!_window.Begin(out bool copy)) return;
 
         _ui.Input("##filter", ref _filter, hint: "Filter");
@@ -112,51 +123,62 @@ internal sealed class ConsoleWindow : IDisposable
     }
 
     /// <summary>
+    /// Takes in the lines logged since the last time, the oldest let go past what is kept.
+    /// </summary>
+    private void TakeArrived()
+    {
+        if (!_arrived.Reader.TryPeek(out _)) return;
+
+        while (_arrived.Reader.TryRead(out Line line))
+        {
+            _lines.Enqueue(line);
+        }
+
+        while (_lines.Count > KeptLines)
+        {
+            _lines.Dequeue();
+        }
+
+        _change++;
+    }
+
+    /// <summary>
     /// The lines drawn: the newest <see cref="ShownLines"/> that contain the filter, in any case, gathered again only
-    /// when a line came or the filter changed since.
+    /// when the kept lines or the filter changed since.
     /// </summary>
     private List<Line> GetShown()
     {
-        lock (_lock)
+        if (_shownChange == _change && string.Equals(_filter, _shownFilter, StringComparison.Ordinal)) return _shown;
+
+        _shownChange = _change;
+        _shownFilter = _filter;
+        _shown.Clear();
+        foreach (Line line in _lines)
         {
-            if (!_isChanged && string.Equals(_filter, _shownFilter, StringComparison.Ordinal)) return _shown;
-
-            _isChanged = false;
-            _shownFilter = _filter;
-            _shown.Clear();
-            foreach (Line line in _lines)
-            {
-                if (_filter.Length == 0 || line.Text.Contains(_filter, StringComparison.OrdinalIgnoreCase))
-                    _shown.Add(line);
-            }
-
-            if (_shown.Count > ShownLines) _shown.RemoveRange(0, _shown.Count - ShownLines);
-
-            return _shown;
+            if (_filter.Length == 0 || line.Text.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+                _shown.Add(line);
         }
+
+        if (_shown.Count > ShownLines) _shown.RemoveRange(0, _shown.Count - ShownLines);
+
+        return _shown;
     }
 
     /// <summary>
     /// Every kept line as one text, each ended, whatever the filter.
     /// </summary>
     private string GetAllText()
-    {
-        lock (_lock)
-        {
-            return _lines.Count == 0 ? string.Empty : string.Join('\n', _lines.Select(line => line.Text)) + '\n';
-        }
-    }
+        => _lines.Count == 0 ? string.Empty : string.Join('\n', _lines.Select(line => line.Text)) + '\n';
 
     /// <summary>
-    /// <c>clear</c>: empties the view; the log keeps its lines.
+    /// <c>clear</c>: empties the view, every line logged before it taken in first; the log keeps its lines. Main
+    /// thread, where commands run.
     /// </summary>
     private void Clear()
     {
-        lock (_lock)
-        {
-            _lines.Clear();
-            _isChanged = true;
-        }
+        TakeArrived();
+        _lines.Clear();
+        _change++;
     }
 
     /// <summary>

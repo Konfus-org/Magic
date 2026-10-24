@@ -1,4 +1,5 @@
 using Magic.Interfaces;
+using Magic.Services;
 
 namespace Magic.DebugTools;
 
@@ -9,7 +10,8 @@ namespace Magic.DebugTools;
 /// description shown while the mouse rests on its rows. It listens only while it is open, so nothing is measured for
 /// it otherwise; Copy gives every tab.
 /// </summary>
-internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugToolsSettings settings) : IDisposable
+internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugToolsSettings settings, Events events)
+    : IDisposable
 {
     /// <summary>
     /// A header is folded the first time it has more rows than this, so one long table, such as the GPU's time per
@@ -19,7 +21,7 @@ internal sealed class TelemetryWindow(ToolWindow window, IDebugUI ui, DebugTools
 
     private static readonly string[] _columns = ["Name", "Value", "Per second", "Max"];
 
-    private readonly Telemetry _telemetry = new(settings);
+    private readonly Telemetry _telemetry = new(settings, events);
 
     /// <summary>
     /// The headers folded for having too many rows: each is folded once, then opens and closes as it is clicked.

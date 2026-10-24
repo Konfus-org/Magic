@@ -5,7 +5,7 @@ namespace Magic.LogMetrics;
 
 /// <summary>
 /// What LogMetrics logs and how often. Set in the project's <c>Presets/Default.preset</c>, by another preset, or with
-/// <c>--set LogMetrics.enabled=true</c>.
+/// <c>--set LogMetrics.isEnabled=true</c>.
 /// </summary>
 [Category("Debug")]
 internal sealed class LogMetricsSettings : ISettings

@@ -129,10 +129,14 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     private readonly List<Vector3> _cameras = [];
 
     /// <summary>
-    /// The members of scripts that could not be saved or put back, as <c>Class.member</c>, each warned about once.
-    /// Main thread.
+    /// What a script is saved as, and put back from.
     /// </summary>
-    private readonly HashSet<string> _unkept = new(StringComparer.Ordinal);
+    private readonly ScriptValues _values;
+
+    /// <summary>
+    /// Whether a script that could not be started is of an entity that is gone, made once.
+    /// </summary>
+    private readonly Predicate<(Entity Entity, Handle<Script> Script)> _isOfGoneEntity;
 
     /// <summary>
     /// What streams into the world, as last told (<see cref="WorldStream"/>), heard as each frame begins: this gem is
@@ -153,6 +157,8 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         _assets = assets;
         _assemblies = assemblies;
         _services = services;
+        _values = new ScriptValues(services);
+        _isOfGoneEntity = failed => !_ecs.IsAlive(failed.Entity);
         _watching.Add(events.Watch<AssetReloaded<Script>>(reloaded => Restart(reloaded.Asset)));
         _watching.Add(events.Watch<WorldStream>(FollowStream));
     }
@@ -214,7 +220,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         foreach (Handle<Script> handle in scripts)
         {
             if (_attached.TryGetValue((entity, handle), out Attached? attached))
-                into.Add(new ScriptState(handle, GetState(attached.Instance)));
+                into.Add(new ScriptState(handle, _values.GetState(attached.Instance)));
         }
     }
 
@@ -230,11 +236,11 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         Result<Script> script = known ?? Find(handle);
         if (script.Ok)
         {
-            Keep(entity, script.Value, Put(entity, script.Value, state));
+            Keep(entity, script.Value, CreateFromState(entity, script.Value, state));
         }
         else
         {
-            Debugging.Error($"Script {GetName(handle)} is left off entity {entity.Id}: {script.Error}");
+            Debugging.Error($"Script {GetPath(handle)} is left off entity {entity.Id}: {script.Error}");
             _failed.Add((entity, handle));
         }
     }
@@ -280,7 +286,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             if (!fetched.Loaded.Ok)
             {
                 Debugging.Error(
-                    $"Script {GetName(fetched.Handle)} is left off the entities naming it: {fetched.Loaded.Error}");
+                    $"Script {GetPath(fetched.Handle)} is left off the entities naming it: {fetched.Loaded.Error}");
             }
         }
 
@@ -376,67 +382,6 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         => ex is TargetInvocationException { InnerException: { } inner } ? inner : ex;
 
     /// <summary>
-    /// <paramref name="type"/>'s public property with a getter and a setter that a file names <paramref name="key"/>,
-    /// in Core's dialect: one of its values. Null when it has none.
-    /// </summary>
-    private static PropertyInfo? FindValue(Type type, string key)
-    {
-        foreach (PropertyInfo property in GetValues(type))
-        {
-            if (string.Equals(GetName(property), key, StringComparison.Ordinal)) return property;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// <paramref name="type"/>'s public properties with a getter and a setter: its values, which a prefab sets.
-    /// </summary>
-    private static List<PropertyInfo> GetValues(Type type)
-    {
-        List<PropertyInfo> values = [];
-        foreach (PropertyInfo property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-        {
-            if (property.GetMethod is { IsPublic: true } && property.SetMethod is { IsPublic: true }
-                && property.GetIndexParameters().Length == 0)
-            {
-                values.Add(property);
-            }
-        }
-
-        return values;
-    }
-
-    /// <summary>
-    /// <paramref name="type"/>'s field saved as <paramref name="name"/> (<see cref="GetName(FieldInfo)"/>): its own of
-    /// that name, else the one the compiler made for a property or a primary constructor parameter of it. Null when
-    /// it has none.
-    /// </summary>
-    private static FieldInfo? FindField(Type type, string name)
-    {
-        const BindingFlags Any = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-
-        return type.GetField(name, Any)
-            ?? type.GetField($"<{name}>k__BackingField", Any) ?? type.GetField($"<{name}>P", Any);
-    }
-
-    /// <summary>
-    /// A value's name as a file gives it, in Core's dialect.
-    /// </summary>
-    private static string GetName(PropertyInfo property) => JsonNamingPolicy.CamelCase.ConvertName(property.Name);
-
-    /// <summary>
-    /// A field's name as it is saved: its own, or for one the compiler made, the name of the property or primary
-    /// constructor parameter it is for, which is between the angle brackets.
-    /// </summary>
-    private static string GetName(FieldInfo field)
-    {
-        int end = field.Name.IndexOf('>', StringComparison.Ordinal);
-
-        return field.Name.StartsWith('<') && end > 1 ? field.Name[1..end] : field.Name;
-    }
-
-    /// <summary>
     /// <paramref name="frame"/> as <paramref name="attached"/> is called with it: its deltas the time on each clock since
     /// the frame it was last called in, so a behaviour called less often, far from the player, moves as far; the frame's
     /// own before its first call.
@@ -519,7 +464,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// <summary>
     /// A script asset's path, for messages; its id when no asset has it.
     /// </summary>
-    private string GetName(Handle<Script> script)
+    private string GetPath(Handle<Script> script)
         => _assets.GetPath(script) ?? script.Id.ToString(CultureInfo.InvariantCulture);
 
     /// <summary>
@@ -548,17 +493,6 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         if (path is null) return Result.Failure<Script>("no asset has its id.");
 
         return TryGetClass(path, handle);
-    }
-
-    /// <summary>
-    /// Whether a field of <paramref name="type"/> is no data of the script's own: a service its constructor was handed,
-    /// or something made rather than kept, a delegate, a task or a disposable, which a copy put back makes again.
-    /// </summary>
-    private bool IsHanded(Type type)
-    {
-        return typeof(Delegate).IsAssignableFrom(type) || typeof(Task).IsAssignableFrom(type)
-            || typeof(IDisposable).IsAssignableFrom(type)
-            || (!type.IsValueType && _services.GetService(type) is not null);
     }
 
     /// <summary>
@@ -619,11 +553,14 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
             Keep(entity, script, Start(entity, script, values));
         }
 
-        // Values given for an entity that is gone are dropped; those for a script held back above stay for its start.
+        // Values given for an entity that is gone are dropped, and so are the scripts that failed on one; values for a
+        // script held back above stay for its start.
         foreach ((Entity Entity, Handle<Script> Script) waiting in _pending.Keys)
         {
             if (!_ecs.IsAlive(waiting.Entity)) _pending.Remove(waiting);
         }
+
+        _failed.RemoveWhere(_isOfGoneEntity);
     }
 
     /// <summary>
@@ -731,7 +668,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         // Held while the world loads, unless its class is impatient and the new domain is not yet being readied.
         bool isHeld = _stream.IsHeld || (_stream.State == StreamState.Loading && !IsImpatient(type));
 
-        return Schedule(entity, script.Handle, values, made.Value, isHeld);
+        return CreateAttached(entity, script.Handle, values, made.Value, isHeld);
     }
 
     /// <summary>
@@ -741,39 +678,16 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// or that no longer fits, is warned about once and left. Why not, when it cannot be made. Its values among what
     /// was saved are what a copy started again on a build is given.
     /// </summary>
-    private Result<Attached> Put(Entity entity, Script script, ScriptState state)
+    private Result<Attached> CreateFromState(Entity entity, Script script, ScriptState state)
     {
-        Type type = script.Type;
-        Result<IScript> made = CreateScript(type, entity);
+        Result<IScript> made = CreateScript(script.Type, entity);
 
         if (!made.Ok) return Result.Failure<Attached>(made.Error);
 
-        Dictionary<string, object?> values = new(StringComparer.Ordinal);
-        foreach ((string name, JsonElement json) in state.Values)
-        {
-            if (FindValue(type, name) is { } property)
-            {
-                if (TryRead(type, name, json, property.PropertyType, out object? value))
-                {
-                    property.SetValue(made.Value, value);
-                    values[property.Name] = value;
-                }
-            }
-            else if (FindField(type, name) is { } field)
-            {
-                if (TryRead(type, name, json, field.FieldType, out object? value)) field.SetValue(made.Value, value);
-            }
-            else
-            {
-                WarnOnce(
-                    type,
-                    name,
-                    $"Script {type.Name}'s saved {name} is not put back, as its class no longer has it.");
-            }
-        }
+        Dictionary<string, object?> values = _values.Restore(made.Value, state);
 
         // A world put back is readied from the call that puts it back, before that is told: its scripts wait with it.
-        return Schedule(entity, script.Handle, values, made.Value, isHeld: true);
+        return CreateAttached(entity, script.Handle, values, made.Value, isHeld: true);
     }
 
     /// <summary>
@@ -785,7 +699,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
         "Reliability",
         "CA2000:Dispose objects before losing scope",
         Justification = "The script owns its systems, which end with it; when it is not added, they end as it fails.")]
-    private Result<Attached> Schedule(
+    private Result<Attached> CreateAttached(
         Entity entity,
         Handle<Script> script,
         IReadOnlyDictionary<string, object?> values,
@@ -823,92 +737,6 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
             return Result.Failure<Attached>($"it threw as it started: {Unwrap(ex)}");
         }
-    }
-
-    /// <summary>
-    /// <paramref name="script"/> as it is now, as JSON by name, for <see cref="Save"/>: its values
-    /// (<see cref="GetValues"/>) as a file names them, and its other fields by name, but those that are no data of its
-    /// own (<see cref="IsHanded"/>) and those JSON cannot hold, warned about once.
-    /// </summary>
-    private Dictionary<string, JsonElement> GetState(IScript script)
-    {
-        Type type = script.GetType();
-        Dictionary<string, JsonElement> values = new(StringComparer.Ordinal);
-        HashSet<string> backing = new(StringComparer.Ordinal);
-
-        // Its values first, each one's backing field noted so the fields below do not save it twice.
-        foreach (PropertyInfo property in GetValues(type))
-        {
-            backing.Add($"<{property.Name}>k__BackingField");
-            Write(values, type, GetName(property), property.PropertyType, property.GetValue(script));
-        }
-
-        foreach (FieldInfo field in type.GetFields(
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
-        {
-            if (!backing.Contains(field.Name) && !IsHanded(field.FieldType))
-                Write(values, type, GetName(field), field.FieldType, field.GetValue(script));
-        }
-
-        return values;
-    }
-
-    /// <summary>
-    /// Writes <paramref name="value"/>, a <paramref name="type"/>'s member <paramref name="name"/> of
-    /// <paramref name="valueType"/>, into <paramref name="values"/> as JSON; a value JSON cannot hold is warned about
-    /// once and left out.
-    /// </summary>
-    private void Write(Dictionary<string, JsonElement> values, Type type, string name, Type valueType, object? value)
-    {
-        Result<JsonElement> json = Json.Write(value, valueType);
-        if (json.Ok)
-        {
-            values[name] = json.Value;
-        }
-        else
-        {
-            WarnOnce(
-                type,
-                name,
-                $"Script {type.Name}'s {name} is not saved, so a copy put back starts over without it: {json.Error}");
-        }
-    }
-
-    /// <summary>
-    /// Reads <paramref name="json"/>, a saved value of <paramref name="type"/>'s member <paramref name="name"/>, as
-    /// <paramref name="valueType"/>; false, warned about once, when it no longer fits.
-    /// </summary>
-    private bool TryRead(Type type, string name, JsonElement json, Type valueType, out object? value)
-    {
-        if (json.ValueKind == JsonValueKind.Null)
-        {
-            // A reference the script had none of: what it is put back as.
-            value = null;
-
-            return true;
-        }
-
-        Result<object> read = Json.Read(json, valueType);
-        if (read.Ok)
-        {
-            value = read.Value;
-
-            return true;
-        }
-
-        WarnOnce(type, name, $"Script {type.Name}'s saved {name} is not put back, as it no longer fits: {read.Error}");
-        value = null;
-
-        return false;
-    }
-
-    /// <summary>
-    /// Warns <paramref name="message"/> once for <paramref name="type"/>'s member <paramref name="name"/>, which could
-    /// not be saved or put back, so a world saved or put back again says it no more.
-    /// </summary>
-    private void WarnOnce(Type type, string name, string message)
-    {
-        if (_unkept.Add($"{type.Name}.{name}")) Debugging.Warn(message);
     }
 
     /// <summary>
@@ -982,7 +810,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
     /// <summary>
     /// Calls the hook for <paramref name="phase"/> of each behaviour that runs this frame (<see cref="IsRunning"/>), in
-    /// the order they were made (<see cref="TryCall"/>). A script whose entity is gone ends first; a behaviour that
+    /// the order they were made (<see cref="CallIfDue"/>). A script whose entity is gone ends first; a behaviour that
     /// throws is logged and ends, and the others go on.
     /// </summary>
     [SuppressMessage(
@@ -1007,7 +835,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
 
             try
             {
-                if (TryCall(attached, behavior, phase, frame)) calls++;
+                if (CallIfDue(attached, behavior, phase, frame)) calls++;
             }
             catch (Exception ex)
             {
@@ -1028,7 +856,7 @@ internal sealed class ScriptingGem : IGem, IScripts, IAssetLoader<Script>, IPrel
     /// the behaviour is due, decided in Update (<see cref="IsDue"/>), with the time since its last call as the deltas
     /// (<see cref="GetCallFrame"/>), LateUpdate, the last of the two, then marking it called. Whether it ran.
     /// </summary>
-    private bool TryCall(Attached attached, IBehavior behavior, Phase phase, in Frame frame)
+    private bool CallIfDue(Attached attached, IBehavior behavior, Phase phase, in Frame frame)
     {
         if (phase == Phase.FixedUpdate)
         {

@@ -84,7 +84,7 @@ internal sealed class SettingsWindow : IDisposable
             RunGet));
         _commands.Add(commands.Register(
             "set",
-            "Changes a setting while running, until the next preset: set DebugTools.frameRate=false.",
+            "Changes a setting while running, until the next preset: set DebugTools.isFrameRateShown=false.",
             RunSet));
         _commands.Add(commands.Register(
             "preset",
@@ -112,18 +112,14 @@ internal sealed class SettingsWindow : IDisposable
         else if (_filter.Length > 0)
         {
             DrawRows(all);
-            if (copy) _window.Copy(GetLines(setting => Matches(setting, ToWords(setting.Name))));
+            if (copy) _window.Copy(GetLines(GetShown(all)));
         }
         else
         {
             _ui.Tabs("##gems", ref _tab, _tabs);
             _tab = Math.Clamp(_tab, 0, _tabs.Length - 1);
             DrawRows(all, _tabs[_tab]);
-            if (copy)
-            {
-                string tab = _tabs[_tab];
-                _window.Copy(GetLines(setting => string.Equals(PlaceOf(setting).Tab, tab, StringComparison.Ordinal)));
-            }
+            if (copy) _window.Copy(GetLines(GetShown(all, _tabs[_tab])));
         }
 
         _window.End();
@@ -167,7 +163,7 @@ internal sealed class SettingsWindow : IDisposable
     /// header in the tab, the category past the slash, <c>Shadows</c>; its gem's name stands in for whichever the
     /// category does not say.
     /// </summary>
-    private static (string Tab, string Header) PlaceOf(Setting setting)
+    private static (string Tab, string Header) GetPlace(Setting setting)
     {
         string? category = setting.Attributes.OfType<CategoryAttribute>().FirstOrDefault()?.Category;
         int slash = category?.IndexOf('/', StringComparison.Ordinal) ?? -1;
@@ -206,14 +202,43 @@ internal sealed class SettingsWindow : IDisposable
     }
 
     /// <summary>
-    /// Whether the filter finds <paramref name="setting"/>: in its name in words, <paramref name="label"/>, its key or
-    /// its description, in any case.
+    /// <paramref name="settings"/> as <c>Gem.setting=value</c> lines.
     /// </summary>
-    private bool Matches(Setting setting, string label)
+    private static string GetLines(IEnumerable<Setting> settings)
     {
-        return label.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+        StringBuilder text = new();
+        foreach (Setting setting in settings)
+        {
+            text.Append(setting.Key).Append('=')
+                .Append(JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options))
+                .Append('\n');
+        }
+
+        return text.ToString();
+    }
+
+    /// <summary>
+    /// Whether <paramref name="row"/>, of <paramref name="setting"/>, shows: in <paramref name="tab"/>, or, without a
+    /// tab, when the filter finds it in its name in words, its key or its description, in any case.
+    /// </summary>
+    private bool IsShown(Row row, Setting setting, string? tab)
+    {
+        if (tab is not null) return string.Equals(row.Tab, tab, StringComparison.Ordinal);
+
+        return row.Label.Contains(_filter, StringComparison.OrdinalIgnoreCase)
             || setting.Key.Contains(_filter, StringComparison.OrdinalIgnoreCase)
             || setting.Description.Contains(_filter, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The settings of the rows that show, in their order (<see cref="IsShown"/>).
+    /// </summary>
+    private IEnumerable<Setting> GetShown(IReadOnlyList<Setting> all, string? tab = null)
+    {
+        foreach (Row row in _rows)
+        {
+            if (IsShown(row, all[row.Index], tab)) yield return all[row.Index];
+        }
     }
 
     /// <summary>
@@ -230,8 +255,7 @@ internal sealed class SettingsWindow : IDisposable
         {
             Setting setting = all[row.Index];
 
-            if (tab is null ? !Matches(setting, row.Label) : !string.Equals(row.Tab, tab, StringComparison.Ordinal))
-                continue;
+            if (!IsShown(row, setting, tab)) continue;
 
             string under = tab is null ? row.Heading : row.Header;
             if (hasHeaders && !string.Equals(under, header, StringComparison.Ordinal))
@@ -245,25 +269,6 @@ internal sealed class SettingsWindow : IDisposable
             DrawRow(row, setting);
             _ui.Tooltip(row.Tip);
         }
-    }
-
-    /// <summary>
-    /// The settings <paramref name="includes"/> as <c>Gem.setting=value</c> lines.
-    /// </summary>
-    private string GetLines(Predicate<Setting> includes)
-    {
-        StringBuilder text = new();
-        foreach (Setting setting in _settings.All)
-        {
-            if (includes(setting))
-            {
-                text.Append(setting.Key).Append('=')
-                    .Append(JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options))
-                    .Append('\n');
-            }
-        }
-
-        return text.ToString();
     }
 
     /// <summary>
@@ -282,7 +287,7 @@ internal sealed class SettingsWindow : IDisposable
         for (int i = 0; i < all.Count; i++)
         {
             Setting setting = all[i];
-            (string tab, string header) = PlaceOf(setting);
+            (string tab, string header) = GetPlace(setting);
             RangeAttribute? range = setting.Attributes.OfType<RangeAttribute>().FirstOrDefault();
             bool restarts = setting.Attributes.OfType<RequireRestartAttribute>().Any();
             string label = ToWords(setting.Name);
@@ -377,24 +382,19 @@ internal sealed class SettingsWindow : IDisposable
     /// </summary>
     private void DrawText(Row row, Setting setting)
     {
-        if (!Equals(setting.Value, row.Value) || row.Shown is null)
-        {
-            string shown = setting.Value as string
-                ?? JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options);
-            if (row.Draft is null || string.Equals(row.Draft, row.Shown, StringComparison.Ordinal)) row.Draft = shown;
-
-            row.Value = setting.Value;
-            row.Shown = shown;
-        }
-
-        string draft = row.Draft ?? string.Empty;
-        bool isEntered = _ui.Input(row.Id, ref draft);
-        row.Draft = draft;
+        // The value as text, made again only when the value changed; an edit not yet entered shows in its place.
+        string shown = row.Shown is { } kept && Equals(setting.Value, row.Value)
+            ? kept
+            : setting.Value as string ?? JsonSerializer.Serialize(setting.Value, setting.Type, Json.Options);
+        row.Value = setting.Value;
+        row.Shown = shown;
+        string text = row.Draft ?? shown;
+        bool isEntered = _ui.Input(row.Id, ref text);
+        row.Draft = string.Equals(text, shown, StringComparison.Ordinal) ? null : text;
 
         if (!isEntered) return;
 
-        Change(setting, setting.Type == typeof(string) ? draft : ParseValue(draft));
-        row.Shown = null;
+        Change(setting, setting.Type == typeof(string) ? text : ParseValue(text));
         row.Draft = null;
     }
 
@@ -405,18 +405,6 @@ internal sealed class SettingsWindow : IDisposable
     {
         Result set = _settings.TrySet(setting.Key, value);
         if (!set.Ok) Debugging.Warn(set.Error);
-    }
-
-    /// <summary>
-    /// Sets the setting <c>Gem.setting=value</c> names, the value JSON, or a string when it is not; why not is a
-    /// warning.
-    /// </summary>
-    private bool TrySetLine(string line)
-    {
-        Result set = _settings.TrySet(line);
-        if (!set.Ok) Debugging.Warn(set.Error);
-
-        return set.Ok;
     }
 
     /// <summary>
@@ -435,7 +423,8 @@ internal sealed class SettingsWindow : IDisposable
     private void RunGet(ReadOnlySpan<string> words)
     {
         string gem = words.Length == 1 ? words[0] : string.Empty;
-        string lines = GetLines(setting => string.Equals(setting.Owner, gem, StringComparison.OrdinalIgnoreCase));
+        string lines = GetLines(
+            _settings.All.Where(setting => string.Equals(setting.Owner, gem, StringComparison.OrdinalIgnoreCase)));
         if (lines.Length == 0)
         {
             string gems = string.Join(
@@ -456,12 +445,14 @@ internal sealed class SettingsWindow : IDisposable
     {
         if (words.Length != 1)
         {
-            Debugging.Warn("set takes one Gem.setting=value, the value JSON: set DebugTools.frameRate=false.");
+            Debugging.Warn("set takes one Gem.setting=value, the value JSON: set DebugTools.isFrameRateShown=false.");
 
             return;
         }
 
-        if (TrySetLine(words[0])) Debugging.Info($"Setting {words[0]}");
+        Result set = _settings.TrySet(words[0]);
+        if (set.Ok) Debugging.Info($"Setting {words[0]}");
+        else Debugging.Warn(set.Error);
     }
 
     /// <summary>
@@ -530,7 +521,7 @@ internal sealed class SettingsWindow : IDisposable
         internal string? Shown { get; set; }
 
         /// <summary>
-        /// What is in a text field, typed or shown.
+        /// What is typed in a text field and not yet entered; none while it shows the value.
         /// </summary>
         internal string? Draft { get; set; }
     }

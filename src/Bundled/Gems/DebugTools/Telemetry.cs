@@ -1,9 +1,13 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
+using System.Linq;
 using System.Numerics;
 using System.Text;
 using System.Text.Json;
+using Magic.Contexts.Settings;
+using Magic.Contexts.Subscriptions;
+using Magic.Services;
 
 namespace Magic.DebugTools;
 
@@ -59,13 +63,15 @@ internal readonly record struct TelemetryLine(
 /// are shown as milliseconds, bytes as megabytes, and a count's unit, such as <c>{collection}</c>, not at all, as the
 /// name says what is counted.
 /// <para>
-/// It listens only between <see cref="Listen"/> on and off. Measurements are added up on the thread that records
-/// them, without allocating after a series' first, so listening is cheap in the frame loop; the lines are made on the
-/// main thread, once a second.
+/// It listens only between <see cref="Listen"/> on and off, and listens again when the settings' tabs change while it
+/// does. Measurements are added up on the thread that records them, without allocating after a series' first, so
+/// listening is cheap in the frame loop; the lines are made on the main thread, once a second.
 /// </para>
 /// </summary>
-internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
+internal sealed class Telemetry : IDisposable
 {
+    private readonly DebugToolsSettings _settings;
+    private readonly Subscription _tabsChanges;
     private readonly Lock _lock = new();
 
     /// <summary>
@@ -79,14 +85,21 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     private MeterListener? _listener;
 
     /// <summary>
-    /// The tabs listened under, so a change to them while running listens again.
+    /// The tabs as they were when listening started, which a meter published since is placed under.
     /// </summary>
-    private IReadOnlyDictionary<string, string> _tabsListened = settings.Tabs;
+    private IReadOnlyDictionary<string, string> _tabsListened;
 
     /// <summary>
     /// When the second being summed up began.
     /// </summary>
     private long _secondStartTimestamp;
+
+    internal Telemetry(DebugToolsSettings settings, Events events)
+    {
+        _settings = settings;
+        _tabsListened = settings.Tabs;
+        _tabsChanges = events.Watch<SettingsChanged>(ListenAgainOnTabs);
+    }
 
     /// <summary>
     /// The last second's lines, in the order they show.
@@ -100,6 +113,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
 
     public void Dispose()
     {
+        _tabsChanges.Dispose();
         _listener?.Dispose();
         _listener = null;
     }
@@ -121,7 +135,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
             return;
         }
 
-        _tabsListened = settings.Tabs;
+        _tabsListened = _settings.Tabs;
         _listener = new MeterListener { InstrumentPublished = Publish, MeasurementsCompleted = Complete };
         _listener.SetMeasurementEventCallback<byte>(Add);
         _listener.SetMeasurementEventCallback<short>(Add);
@@ -140,13 +154,6 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// </summary>
     internal void Refresh()
     {
-        // A change to the settings' tabs hands a new list, and listening starts again under it.
-        if (_listener is not null && !ReferenceEquals(_tabsListened, settings.Tabs))
-        {
-            Listen(false);
-            Listen(true);
-        }
-
         double windowSec = Stopwatch.GetElapsedTime(_secondStartTimestamp).TotalSeconds;
 
         if (_listener is not { } listener || windowSec < 1) return;
@@ -245,6 +252,21 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     }
 
     /// <summary>
+    /// The settings' tabs changed while listening: listening starts again under them, so every meter is placed as
+    /// they now say. Main thread, as the frame begins.
+    /// </summary>
+    private void ListenAgainOnTabs(SettingsChanged changed)
+    {
+        if (_listener is null || changed is not { Before: DebugToolsSettings before, After: DebugToolsSettings after })
+            return;
+
+        if (before.Tabs.SequenceEqual(after.Tabs)) return;
+
+        Listen(false);
+        Listen(true);
+    }
+
+    /// <summary>
     /// Listens to a new instrument when its meter is under one of the settings' tabs, as they are when listening
     /// starts.
     /// </summary>
@@ -259,7 +281,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
                 Measured measured = new(instrument, order, tab, prefix);
                 lock (_lock)
                 {
-                    _measured.Insert(PlaceOf(measured), measured);
+                    _measured.Insert(FindPlace(measured), measured);
                 }
 
                 listener.EnableMeasurementEvents(instrument, measured);
@@ -275,7 +297,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
     /// Where <paramref name="added"/> goes among the instruments listened to, to keep their order: after the last of
     /// its meter and area, else after the last of its meter, else before the first whose tab the settings list later.
     /// </summary>
-    private int PlaceOf(Measured added)
+    private int FindPlace(Measured added)
     {
         int meterEnd = -1;
         int listedLater = _measured.Count;
@@ -354,7 +376,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         /// are under, its meter's name past the tab's prefix and then its area, or the area alone for the meter the
         /// prefix names.
         /// </summary>
-        private readonly (string Area, string Name, string Header) _parts = PartsOf(instrument, prefix);
+        private readonly (string Area, string Name, string Header) _parts = SplitName(instrument, prefix);
 
         internal string Tab => tab;
 
@@ -425,7 +447,7 @@ internal sealed class Telemetry(DebugToolsSettings settings) : IDisposable
         /// rest, or the area again when there is none. The header is the meter past the tab's <paramref name="prefix"/>
         /// and the area, or the area alone for the meter the prefix names.
         /// </summary>
-        private static (string Area, string Name, string Header) PartsOf(Instrument instrument, string prefix)
+        private static (string Area, string Name, string Header) SplitName(Instrument instrument, string prefix)
         {
             string meter = instrument.Meter.Name;
             string name = instrument.Name;

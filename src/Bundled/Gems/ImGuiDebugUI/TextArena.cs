@@ -29,7 +29,7 @@ internal sealed unsafe class TextArena : IDisposable
     /// <summary>
     /// The text as a C string, good until <see cref="Reset"/>.
     /// </summary>
-    internal byte* Of(string text)
+    internal byte* Add(string text)
     {
         // Room for the most bytes the text could take, and its NUL. When what is left of the block is too little, it
         // goes into the next, which is made, or made again larger, when it is too small for the text.

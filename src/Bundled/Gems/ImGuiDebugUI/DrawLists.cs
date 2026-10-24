@@ -15,7 +15,7 @@ internal readonly record struct DrawCall(uint Texture, Rectangle Clip, uint Indi
 /// A texture ImGui has: its RGBA8 <see cref="Pixels"/> whole, and their <see cref="Version"/>, which goes up each time
 /// ImGui changes them.
 /// </summary>
-internal readonly record struct TextureChange(int Width, int Height, byte[] Pixels, uint Version);
+internal readonly record struct ImGuiTexture(int Width, int Height, byte[] Pixels, uint Version);
 
 /// <summary>
 /// One frame of ImGui's drawing, copied at Sync while both threads hold still, for the render thread to draw a frame
@@ -46,7 +46,7 @@ internal sealed unsafe class DrawLists
     /// Every texture ImGui has, by its number, as it last was, each with the version of its pixels, which goes up as
     /// ImGui changes them: what draws them uploads those whose version it has not, and lets go of those gone.
     /// </summary>
-    internal Dictionary<uint, TextureChange> Known { get; } = [];
+    internal Dictionary<uint, ImGuiTexture> Textures { get; } = [];
 
     /// <summary>
     /// Copies the frame ImGui just ended, for a window of <paramref name="width"/> by <paramref name="height"/> pixels,
@@ -133,7 +133,7 @@ internal sealed unsafe class DrawLists
     }
 
     /// <summary>
-    /// ImGui asks its renderer to make, update and let go of its textures: each ask goes into <see cref="Known"/>, with
+    /// ImGui asks its renderer to make, update and let go of its textures: each ask goes into <see cref="Textures"/>, with
     /// the pixels copied, and is answered at once, with a number of the gem's own for a new one.
     /// </summary>
     private void CopyTextures(ImDrawData_t* data)
@@ -147,7 +147,7 @@ internal sealed unsafe class DrawLists
 
             if (texture->Status is ImTextureStatus_WantCreate or ImTextureStatus_WantUpdates)
             {
-                Known[(uint)texture->TexID] = new TextureChange(
+                Textures[(uint)texture->TexID] = new ImGuiTexture(
                     texture->Width,
                     texture->Height,
                     ToRgba(texture),
@@ -156,7 +156,7 @@ internal sealed unsafe class DrawLists
             }
             else if (texture->Status == ImTextureStatus_WantDestroy && texture->UnusedFrames > 0)
             {
-                Known.Remove((uint)texture->TexID);
+                Textures.Remove((uint)texture->TexID);
                 ImTextureData_SetTexID(texture, 0);
                 ImTextureData_SetStatus(texture, ImTextureStatus_Destroyed);
             }

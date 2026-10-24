@@ -3,8 +3,10 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Unicode;
+using System.Threading.Channels;
 using Magic.Contexts.Assets;
 using Magic.Contexts.Frames;
+using Magic.Contexts.Settings;
 using Magic.Contexts.Subscriptions;
 using Magic.Contexts.Utils;
 using Magic.Extensions;
@@ -90,8 +92,8 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private readonly TextArena _text = new();
     private readonly CameraViews _views;
     private readonly Subscription _viewing;
-    private readonly List<ShownReport> _world = [];
-    private readonly List<ShownReport> _lines = [];
+    private readonly List<ShownReport> _worldTexts = [];
+    private readonly List<ShownReport> _screenLines = [];
 
     /// <summary>
     /// The one-line field's text as the NUL-terminated UTF-8 ImGui edits.
@@ -139,18 +141,16 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private GCHandle _pasted;
 
     /// <summary>
-    /// The font the settings last named, so a change while running loads the new one.
+    /// Fonts loaded on workers, each with the font the settings named when it was asked for, for the main thread to
+    /// take in as Update starts.
     /// </summary>
-    private Handle<Font> _fontAsked;
+    private readonly Channel<(Handle<Font> Asked, Font Font)> _arrivedFonts =
+        Channel.CreateUnbounded<(Handle<Font> Asked, Font Font)>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Subscription _settingsChanges;
 
     private FontSource? _font;
-
-    /// <summary>
-    /// A font loaded for the settings, for the main thread to take in as Update starts; null for none.
-    /// </summary>
-    private Font? _arrivedFont;
     private int _depth;
-    private int _windowsDrawn;
+    private bool _isWindowDrawn;
     private bool _isInFrame;
     private bool _hasLoggedUnended;
     private volatile bool _isShowing;
@@ -167,6 +167,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         IWindow window,
         App app,
         World world,
+        Events events,
         IInput? input = null)
     {
         _settings = settings;
@@ -174,7 +175,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _input = input;
         _assets = assets;
         _stopping = app.Quitting;
-        _fontAsked = settings.Font;
+        _settingsChanges = events.Watch<SettingsChanged>(LoadFontOnChange);
 
         // ImGui writes no ini file, and is told the renderer takes the textures it makes and changes, and draws by
         // vertex offset; it takes the engine's look, at the settings' size.
@@ -198,7 +199,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         _views = new CameraViews(window);
         _viewing = world.Register(_views);
         _isShowing = IsAlwaysShowing && window.Width > 0;
-        LoadFontAsync().FireAndForget();
+        LoadFontAsync(settings.Font).FireAndForget();
     }
 
     public bool IsEnabled => _isShowing;
@@ -211,6 +212,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
     public unsafe void Dispose()
     {
+        _settingsChanges.Dispose();
         _viewing.Dispose();
         ImGui_DestroyContext(_context);
         _font?.Dispose();
@@ -224,17 +226,15 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     public unsafe void Update(in Frame frame)
     {
-        if (Interlocked.Exchange(ref _arrivedFont, null) is { } arrived)
+        // A font loaded for what the settings name now takes the place of the one before; one loaded for a font they
+        // named before comes too late, and goes.
+        while (_arrivedFonts.Reader.TryRead(out (Handle<Font> Asked, Font Font) arrived))
         {
+            if (arrived.Asked != _settings.Font) continue;
+
             _font?.Remove();
             _font?.Dispose();
-            _font = new FontSource(arrived, _settings.FontSize);
-        }
-
-        if (_settings.Font != _fontAsked)
-        {
-            _fontAsked = _settings.Font;
-            LoadFontAsync().FireAndForget();
+            _font = new FontSource(arrived.Font, _settings.FontSize);
         }
 
         _text.Reset();
@@ -248,7 +248,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ImGui_GetStyle()->FontSizeBase = _settings.FontSize;
         ImGui_NewFrame();
         _isInFrame = true;
-        _windowsDrawn = 0;
+        _isWindowDrawn = false;
     }
 
     /// <summary>
@@ -269,10 +269,10 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         // What is reported shows while a debug window is drawn, or always in a Debug build, and never with no window to
         // see it in; it is taken either way, so what has had its time goes.
-        _isShowing = _window.Width > 0 && (IsAlwaysShowing || _windowsDrawn > 0);
-        _world.Clear();
-        _lines.Clear();
-        _reports.Take(GetNowSec(), _world, _lines);
+        _isShowing = _window.Width > 0 && (IsAlwaysShowing || _isWindowDrawn);
+        _worldTexts.Clear();
+        _screenLines.Clear();
+        _reports.Take(GetNowSec(), _worldTexts, _screenLines);
 
         if (!_isShowing) return;
 
@@ -317,19 +317,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0)
     {
-        if (!_reports.Add(
-            text,
-            ReportKind.Alarm,
-            _warning,
-            position,
-            tooltip,
-            staySec ?? _settings.ReportSec,
-            GetNowSec()))
-        {
-            return;
-        }
-
-        Debugging.Warn(text, member, file, line);
+        if (AddAlarm(text, _warning, position, staySec, tooltip)) Debugging.Warn(text, member, file, line);
     }
 
     public void Error(
@@ -341,19 +329,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         [CallerFilePath] string file = "",
         [CallerLineNumber] int line = 0)
     {
-        if (!_reports.Add(
-            text,
-            ReportKind.Alarm,
-            _error,
-            position,
-            tooltip,
-            staySec ?? _settings.ReportSec,
-            GetNowSec()))
-        {
-            return;
-        }
-
-        Debugging.Error(text, member, file, line);
+        if (AddAlarm(text, _error, position, staySec, tooltip)) Debugging.Error(text, member, file, line);
     }
 
     public unsafe void Begin(string title, bool scrollable = false) => Begin(title, null, scrollable);
@@ -398,13 +374,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ThrowIfOutsideFrame();
         if (color is not { } tint)
         {
-            ImGui_TextUnformatted(_text.Of(text));
+            ImGui_TextUnformatted(_text.Add(text));
 
             return;
         }
 
         ImGui_PushStyleColor((int)ImGuiCol_Text, PackColor(tint));
-        ImGui_TextUnformatted(_text.Of(text));
+        ImGui_TextUnformatted(_text.Add(text));
         ImGui_PopStyleColor();
     }
 
@@ -412,7 +388,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     {
         ThrowIfOutsideFrame();
 
-        return ImGui_Button(_text.Of(label));
+        return ImGui_Button(_text.Add(label));
     }
 
     public unsafe bool Input(string label, ref string text, string? hint = null, bool focus = false)
@@ -432,7 +408,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
                 ? ImGui_InputText(id, buffer, InputBytes, (int)ImGuiInputTextFlags_EnterReturnsTrue)
                 : ImGui_InputTextWithHint(
                     id,
-                    _text.Of(hint),
+                    _text.Add(hint),
                     buffer,
                     InputBytes,
                     (int)ImGuiInputTextFlags_EnterReturnsTrue);
@@ -521,7 +497,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         if (!ImGui_BeginCombo(
             id,
-            _text.Of(index >= 0 && index < options.Length ? options[index] : string.Empty),
+            _text.Add(index >= 0 && index < options.Length ? options[index] : string.Empty),
             (int)ImGuiComboFlags_None))
         {
             return false;
@@ -530,7 +506,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         int chosen = index;
         for (int i = 0; i < options.Length; i++)
         {
-            if (ImGui_SelectableEx(_text.Of(options[i]), i == index, (int)ImGuiSelectableFlags_None, default))
+            if (ImGui_SelectableEx(_text.Add(options[i]), i == index, (int)ImGuiSelectableFlags_None, default))
             {
                 chosen = i;
             }
@@ -548,7 +524,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     public unsafe bool Tabs(string label, ref int index, ReadOnlySpan<string> options)
     {
         ThrowIfOutsideFrame();
-        byte* title = _text.Of(label);
+        byte* title = _text.Add(label);
         uint id = ImGui_GetID(title);
 
         if (!ImGui_BeginTabBar(title, (int)ImGuiTabBarFlags_None)) return false;
@@ -562,7 +538,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
                 ? ImGuiTabItemFlags_SetSelected
                 : ImGuiTabItemFlags_None;
 
-            if (!ImGui_BeginTabItem(_text.Of(options[i]), null, (int)flags)) continue;
+            if (!ImGui_BeginTabItem(_text.Add(options[i]), null, (int)flags)) continue;
 
             chosen = i;
             ImGui_EndTabItem();
@@ -583,7 +559,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ThrowIfOutsideFrame();
         if (folds) ImGui_SetNextItemOpen(false, (int)ImGuiCond_Always);
 
-        return ImGui_CollapsingHeader(_text.Of(label), (int)ImGuiTreeNodeFlags_DefaultOpen);
+        return ImGui_CollapsingHeader(_text.Add(label), (int)ImGuiTreeNodeFlags_DefaultOpen);
     }
 
     public unsafe void Table(string label, ReadOnlySpan<string> columns)
@@ -591,7 +567,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ThrowIfOutsideFrame();
         _tableColumns = columns.Length;
         _isTableShown = ImGui_BeginTable(
-            _text.Of(label),
+            _text.Add(label),
             columns.Length,
             (int)(ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg));
 
@@ -599,7 +575,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         foreach (string column in columns)
         {
-            ImGui_TableSetupColumn(_text.Of(column), (int)ImGuiTableColumnFlags_None);
+            ImGui_TableSetupColumn(_text.Add(column), (int)ImGuiTableColumnFlags_None);
         }
 
         ImGui_TableHeadersRow();
@@ -615,7 +591,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         for (int i = 1; i < cells.Length && i < _tableColumns; i++)
         {
             ImGui_TableSetColumnIndex(i);
-            ImGui_TextUnformatted(_text.Of(cells[i]));
+            ImGui_TextUnformatted(_text.Add(cells[i]));
         }
 
         // The first cell last, spanning the row, so the row is the item a tooltip after it rests on. Rows may start
@@ -625,7 +601,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         ImGui_TableSetColumnIndex(0);
         ImGui_PushIDInt(ImGui_TableGetRowIndex());
         ImGui_SelectableEx(
-            _text.Of(cells[0]),
+            _text.Add(cells[0]),
             false,
             (int)(ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_Disabled),
             default);
@@ -659,7 +635,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         if (!ImGui_BeginPopup(menu, (int)ImGuiWindowFlags_None)) return false;
 
-        bool isClicked = ImGui_MenuItem(_text.Of(label));
+        bool isClicked = ImGui_MenuItem(_text.Add(label));
         ImGui_EndPopup();
 
         return isClicked;
@@ -733,13 +709,13 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         if (field.Shown.Length > 0)
         {
             ImGui_AlignTextToFramePadding();
-            ImGui_TextUnformatted(_text.Of(field.Shown));
+            ImGui_TextUnformatted(_text.Add(field.Shown));
             ImGui_SameLine();
         }
 
         ImGui_SetNextItemWidth(Stretch);
 
-        return _text.Of(field.Id);
+        return _text.Add(field.Id);
     }
 
     /// <summary>
@@ -748,7 +724,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     private unsafe void WriteTooltip(string text)
     {
         ImGui_PushTextWrapPos(ImGui_GetFontSize() * 30f);
-        ImGui_TextUnformatted(_text.Of(text));
+        ImGui_TextUnformatted(_text.Add(text));
         ImGui_PopTextWrapPos();
         ImGui_EndTooltip();
     }
@@ -768,7 +744,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
         level.IsScrollable = scrollable;
         if (depth == 0)
         {
-            _windowsDrawn++;
+            _isWindowDrawn = true;
 
             // Each new window a step down and right of the last, so none opens on top of another. Sizes go by the font,
             // which says how big the UI is.
@@ -784,7 +760,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
                 ImGui_SetNextWindowSize((new Vector2(32, 18) * _settings.FontSize).Im, (int)ImGuiCond_FirstUseEver);
 
             ImGui_Begin(
-                _text.Of(title),
+                _text.Add(title),
                 visible,
                 scrollable ? (int)ImGuiWindowFlags_None : (int)ImGuiWindowFlags_AlwaysAutoResize);
 
@@ -793,7 +769,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
 
         // As tall as the parent's room less what followed this view last frame: all of it, the first time. The view's
         // id is the one ImGui gives it, from the title and the window it is in.
-        byte* name = _text.Of(title);
+        byte* name = _text.Add(title);
         level.Id = ImGui_GetID(name);
         float reserved = _reserved.GetValueOrDefault(level.Id);
         ImGuiWindowFlags_ flags = scrollable
@@ -821,17 +797,17 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private unsafe void DrawWorld()
     {
-        if (_world.Count == 0 || _views.Views.Count == 0) return;
+        if (_worldTexts.Count == 0 || _views.Views.Count == 0) return;
 
         ImDrawList_t* under = ImGui_GetBackgroundDrawList();
         bool canHover = !ImGui_IsWindowHovered((int)ImGuiHoveredFlags_AnyWindow);
-        foreach (ShownReport report in _world)
+        foreach (ShownReport report in _worldTexts)
         {
             foreach (CameraView view in _views.Views)
             {
                 if (!view.TryProject(report.Position, _settings.TextDistance, out Vector2 center)) continue;
 
-                byte* label = _text.Of(report.Label);
+                byte* label = _text.Add(report.Label);
                 Vector2 size = ImGui_CalcTextSize(label).Vector;
                 Vector2 corner = center - (size * 0.5f);
                 Vector2 min = corner - _platePadding;
@@ -853,17 +829,17 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     /// </summary>
     private unsafe void DrawLines()
     {
-        if (_lines.Count == 0) return;
+        if (_screenLines.Count == 0) return;
 
         ImDrawList_t* under = ImGui_GetBackgroundDrawList();
         bool canHover = !ImGui_IsWindowHovered((int)ImGuiHoveredFlags_AnyWindow);
         float lineHeight = ImGui_GetTextLineHeightWithSpacing();
         int fitting = Math.Max(1, (int)((_window.Height - (2 * _linesMargin.Y)) / lineHeight));
         Vector2 at = _linesMargin;
-        for (int i = Math.Max(0, _lines.Count - fitting); i < _lines.Count; i++)
+        for (int i = Math.Max(0, _screenLines.Count - fitting); i < _screenLines.Count; i++)
         {
-            ShownReport line = _lines[i];
-            byte* label = _text.Of(line.Label);
+            ShownReport line = _screenLines[i];
+            byte* label = _text.Add(line.Label);
             Vector2 size = ImGui_CalcTextSize(label).Vector;
             ImDrawList_AddRectFilledEx(
                 under,
@@ -884,13 +860,32 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
     }
 
     /// <summary>
-    /// Loads the settings' font on a worker, then has the main thread make it ImGui's between two frames, in place of
-    /// the one before. Until the first loads, or when it does not load, ImGui writes in its own font, or in the one
-    /// before.
+    /// An alarm, a warning or an error, reported in <paramref name="color"/> for <paramref name="staySec"/>, the
+    /// settings' time by default; whether it is not shown already, so it is logged.
     /// </summary>
-    private async Task LoadFontAsync()
+    private bool AddAlarm(string text, Color color, Vector3? position, float? staySec, string? tooltip)
+        => _reports.Add(text, ReportKind.Alarm, color, position, tooltip, staySec ?? _settings.ReportSec, GetNowSec());
+
+    /// <summary>
+    /// The settings name another font: it is loaded.
+    /// </summary>
+    private void LoadFontOnChange(SettingsChanged changed)
     {
-        Handle<Font> handle = _settings.Font == Handle<Font>.None ? _assets.GetDefault<Font>() : _settings.Font;
+        if (changed is { Before: ImGuiDebugUISettings before, After: ImGuiDebugUISettings after }
+            && before.Font != after.Font)
+        {
+            LoadFontAsync(after.Font).FireAndForget();
+        }
+    }
+
+    /// <summary>
+    /// Loads <paramref name="asked"/>, the font the settings name, or the default for none, on a worker, then hands it
+    /// to the main thread to make ImGui's between two frames, in place of the one before. Until the first loads, or
+    /// when it does not load, ImGui writes in its own font, or in the one before.
+    /// </summary>
+    private async Task LoadFontAsync(Handle<Font> asked)
+    {
+        Handle<Font> handle = asked == Handle<Font>.None ? _assets.GetDefault<Font>() : asked;
         Result<Font> font = await _assets.LoadAsync(handle, _stopping).ConfigureAwait(false);
         if (!font.Ok)
         {
@@ -899,7 +894,7 @@ internal sealed class ImGuiDebugUIGem : IGem, IDebugUI, IDisposable
             return;
         }
 
-        Volatile.Write(ref _arrivedFont, font.Value);
+        _arrivedFonts.Writer.TryWrite((asked, font.Value));
     }
 
     /// <summary>
