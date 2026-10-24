@@ -61,35 +61,21 @@ public struct Tags : IComponent, IEquatable<Tags>
         return hash;
     }
 
-    public readonly bool Has(Tag tag)
-    {
-        if (!tag.IsValid) return false;
-
-        foreach (Tag held in this)
-        {
-            if (held == tag) return true;
-        }
-
-        return false;
-    }
+    public readonly bool Has(Tag tag) => tag.IsValid && ((ReadOnlySpan<Tag>)this).Contains(tag);
 
     /// <summary>
     /// Adds <paramref name="tag"/>; false when it is none, there already, or there is no room for it.
     /// </summary>
     public bool Add(Tag tag)
     {
-        if (!tag.IsValid || Has(tag)) return false;
+        // A slot holding none is free.
+        Span<Tag> tags = this;
+        int free = tags.IndexOf(default(Tag));
 
-        for (int i = 0; i < Capacity; i++)
-        {
-            if (!this[i].IsValid)
-            {
-                this[i] = tag;
+        if (!tag.IsValid || Has(tag) || free < 0) return false;
 
-                return true;
-            }
-        }
+        tags[free] = tag;
 
-        return false;
+        return true;
     }
 }

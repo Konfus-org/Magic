@@ -64,35 +64,21 @@ public struct Scripts : IComponent, IEquatable<Scripts>
     }
 
     public readonly bool Has(Handle<Script> script)
-    {
-        if (script == Handle<Script>.None) return false;
-
-        foreach (Handle<Script> held in this)
-        {
-            if (held == script) return true;
-        }
-
-        return false;
-    }
+        => script != Handle<Script>.None && ((ReadOnlySpan<Handle<Script>>)this).Contains(script);
 
     /// <summary>
     /// Adds <paramref name="script"/>; false when it is none, there already, or there is no room for it.
     /// </summary>
     public bool Add(Handle<Script> script)
     {
-        if (script == Handle<Script>.None || Has(script)) return false;
+        Span<Handle<Script>> scripts = this;
+        int free = scripts.IndexOf(Handle<Script>.None);
 
-        for (int i = 0; i < Capacity; i++)
-        {
-            if (this[i] == Handle<Script>.None)
-            {
-                this[i] = script;
+        if (script == Handle<Script>.None || Has(script) || free < 0) return false;
 
-                return true;
-            }
-        }
+        scripts[free] = script;
 
-        return false;
+        return true;
     }
 
     /// <summary>
@@ -100,18 +86,13 @@ public struct Scripts : IComponent, IEquatable<Scripts>
     /// </summary>
     public bool Remove(Handle<Script> script)
     {
-        if (script == Handle<Script>.None) return false;
+        Span<Handle<Script>> scripts = this;
+        int at = scripts.IndexOf(script);
 
-        for (int i = 0; i < Capacity; i++)
-        {
-            if (this[i] == script)
-            {
-                this[i] = Handle<Script>.None;
+        if (script == Handle<Script>.None || at < 0) return false;
 
-                return true;
-            }
-        }
+        scripts[at] = Handle<Script>.None;
 
-        return false;
+        return true;
     }
 }

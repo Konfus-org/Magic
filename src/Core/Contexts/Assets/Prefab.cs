@@ -48,7 +48,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
     /// Where its first part tagged <paramref name="tag"/> is, a part before the parts under it, in the prefab's own
     /// space; null when no part is.
     /// </summary>
-    public Transform? FindWith(Tag tag) => PlaceIn(Parts, new Transform(), tag);
+    public Transform? FindPlaceOf(Tag tag) => FindPlaceIn(Parts, new Transform(), tag);
 
     private static void Create(
         World world,
@@ -70,7 +70,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
         }
     }
 
-    private static Transform? PlaceIn(IReadOnlyList<PrefabPart> parts, Transform parent, Tag tag)
+    private static Transform? FindPlaceIn(IReadOnlyList<PrefabPart> parts, Transform parent, Tag tag)
     {
         foreach (PrefabPart part in parts)
         {
@@ -80,7 +80,7 @@ public sealed class Prefab : IAsset<Prefab>, ISpawnable
                 if (component is Tags tags && tags.Has(tag)) return placed;
             }
 
-            if (PlaceIn(part.Children, placed, tag) is { } under) return under;
+            if (FindPlaceIn(part.Children, placed, tag) is { } under) return under;
         }
 
         return null;

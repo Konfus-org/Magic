@@ -8,7 +8,7 @@ namespace Magic.Tests.Contexts.Assets;
 public sealed class PrefabTests
 {
     [Fact]
-    public void FindWith_finds_a_tagged_top_part()
+    public void FindPlaceOf_finds_a_tagged_top_part()
     {
         Tag spawn = Tag.Of("spawn");
         Prefab prefab = new()
@@ -16,13 +16,13 @@ public sealed class PrefabTests
             Parts = [new PrefabPart { Components = [At(1, 2, 3), Tagged(spawn)] }],
         };
 
-        Transform? place = prefab.FindWith(spawn);
+        Transform? place = prefab.FindPlaceOf(spawn);
 
         Assert.Equal(new Vector3(1, 2, 3), place?.Position);
     }
 
     [Fact]
-    public void FindWith_places_a_tagged_child_under_its_parent()
+    public void FindPlaceOf_places_a_tagged_child_under_its_parent()
     {
         Tag spawn = Tag.Of("spawn");
         Prefab prefab = new()
@@ -37,13 +37,13 @@ public sealed class PrefabTests
             ],
         };
 
-        Transform? place = prefab.FindWith(spawn);
+        Transform? place = prefab.FindPlaceOf(spawn);
 
         Assert.Equal(new Vector3(11, 0, 0), place?.Position);
     }
 
     [Fact]
-    public void FindWith_takes_a_part_before_the_parts_under_it()
+    public void FindPlaceOf_takes_a_part_before_the_parts_under_it()
     {
         Tag spawn = Tag.Of("spawn");
         Prefab prefab = new()
@@ -58,13 +58,13 @@ public sealed class PrefabTests
             ],
         };
 
-        Transform? place = prefab.FindWith(spawn);
+        Transform? place = prefab.FindPlaceOf(spawn);
 
         Assert.Equal(new Vector3(10, 0, 0), place?.Position);
     }
 
     [Fact]
-    public void FindWith_puts_a_tagged_part_without_a_transform_where_its_parent_is()
+    public void FindPlaceOf_puts_a_tagged_part_without_a_transform_where_its_parent_is()
     {
         Tag spawn = Tag.Of("spawn");
         Prefab prefab = new()
@@ -79,20 +79,20 @@ public sealed class PrefabTests
             ],
         };
 
-        Transform? place = prefab.FindWith(spawn);
+        Transform? place = prefab.FindPlaceOf(spawn);
 
         Assert.Equal(new Vector3(10, 0, 0), place?.Position);
     }
 
     [Fact]
-    public void FindWith_is_null_with_no_part_tagged()
+    public void FindPlaceOf_is_null_with_no_part_tagged()
     {
         Prefab prefab = new()
         {
             Parts = [new PrefabPart { Components = [At(1, 2, 3), Tagged(Tag.Of("door"))] }],
         };
 
-        Transform? place = prefab.FindWith(Tag.Of("spawn"));
+        Transform? place = prefab.FindPlaceOf(Tag.Of("spawn"));
 
         Assert.Null(place);
     }

@@ -11,7 +11,7 @@ namespace Magic.Interfaces;
 /// <para>
 /// Its constructor parameters are what it needs: Core's services (<see cref="IFileSystem"/>, <see cref="App"/>,
 /// <see cref="Threads"/>, <see cref="Events"/>, <see cref="Args"/>, <see cref="Settings"/>, and
-/// <see cref="IServiceProvider"/> to find a service by its type as it runs) or interfaces other gems implement. Every
+/// <see cref="IServiceProvider"/> only to make objects as it runs) or interfaces other gems implement. Every
 /// other interface the class implements is what it provides to the gems made after it, an <see cref="IAssetLoader{T}"/>
 /// as any other, but <see cref="ILogSink"/>, which Core adds to the log instead, and <see cref="IPreloader"/>, which
 /// Core gives the world. Core makes gems in that dependency order and disposes those that are <see cref="IDisposable"/>

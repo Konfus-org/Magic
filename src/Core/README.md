@@ -97,6 +97,10 @@ and lists every setting for a UI, such as the settings window (F4). Mark a setti
 `[RequireRestart]`; changing it restarts the run. `[Category("Tab/Header")]` groups a setting in a settings UI, and
 `[Range]` limits a number.
 
+A change made while running reaches the gem's settings object between frames. Then `Events` sends a
+`SettingsChanged` holding the gem's settings before and after the change. A gem that acts on a change watches for it
+and compares the setting it follows in the two.
+
 ## The log
 
 `Debugging` is the log. Call it from any thread: `Verbose` (shown only with `--verbose`), `Info`, `Warn`, `Error`

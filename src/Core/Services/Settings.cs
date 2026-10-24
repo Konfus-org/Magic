@@ -27,7 +27,8 @@ namespace Magic.Services;
 /// <para>
 /// A change is checked at once, and copied into the objects the gems hold at the frame's sync point, after the main
 /// thread has waited for the render thread and before Sync, so a gem reads its settings on either engine thread and
-/// never sees one change halfway. A setting a gem reads only as it starts is marked
+/// never sees one change halfway. Only a value that differs is copied, and each gem whose settings changed is told on
+/// <see cref="Events"/> (<see cref="SettingsChanged"/>). A setting a gem reads only as it starts is marked
 /// <see cref="RequireRestartAttribute"/>: changed, the run ends and starts again at once with every setting as it is
 /// (<see cref="GetRestartArgs"/>). The default and the applied preset are applied again when their files change. Any
 /// thread.
@@ -44,6 +45,7 @@ public sealed class Settings : IDisposable
     private readonly Handle<Preset> _default;
     private readonly JsonObject _commandLine;
     private readonly App _app;
+    private readonly Events _events;
     private readonly Subscription _reloads;
 
     /// <summary>
@@ -80,6 +82,7 @@ public sealed class Settings : IDisposable
         _assets = assets;
         _args = args;
         _app = app;
+        _events = events;
         _files = files;
         _default = assets.Find<Preset>(ToPresetPath(DefaultPreset));
         _commandLine = ParseCommandLine(app.Project, args.Settings);
@@ -297,9 +300,9 @@ public sealed class Settings : IDisposable
     }
 
     /// <summary>
-    /// Copies every change since the last time into the objects the gems hold, and when one changes a setting marked
-    /// <see cref="RequireRestartAttribute"/> to a value it did not hold, ends the run to start it again. Main thread,
-    /// at the frame's sync point.
+    /// Copies every change since the last time into the objects the gems hold, and tells each gem whose settings
+    /// changed (<see cref="SettingsChanged"/>); when one changes a setting marked <see cref="RequireRestartAttribute"/>,
+    /// ends the run to start it again. Main thread, at the frame's sync point.
     /// </summary>
     internal void ApplyChanges()
     {
@@ -308,20 +311,29 @@ public sealed class Settings : IDisposable
         {
             if (_changes.Count == 0) return;
 
-            // Each setting of a changed gem is copied into the object the gem holds; the first that asks for a restart
-            // and now holds another value is why the run restarts.
+            // Each setting of a changed gem whose value differs is copied into the object the gem holds, which is first
+            // copied as it was, to tell; one that is the same is left, so whatever the gem holds of it stays the same
+            // object. The first that asks for a restart is why the run restarts.
+            Dictionary<ISettings, ISettings> before = new(ReferenceEqualityComparer.Instance);
             foreach ((Setting setting, PropertyInfo property, ISettings held) in _all)
             {
-                if (!_changes.TryGetValue(held, out ISettings? changed)) continue;
+                if (!_changes.TryGetValue(held, out ISettings? next)) continue;
 
-                object? value = property.GetValue(changed);
-                if (restart is null && setting.Attributes.OfType<RequireRestartAttribute>().Any()
-                    && !Equals(property.GetValue(held), value))
-                {
+                object? value = property.GetValue(next);
+
+                if (IsSame(property.GetValue(held), value, property.PropertyType)) continue;
+
+                before.TryAdd(held, Copy(held));
+                if (restart is null && setting.Attributes.OfType<RequireRestartAttribute>().Any())
                     restart = $"{setting.Key} changed";
-                }
 
                 property.SetValue(held, value);
+            }
+
+            // Told next frame, so a gem's watcher reads them as copied in.
+            foreach ((ISettings held, ISettings was) in before)
+            {
+                _events.Publish(new SettingsChanged(was, _changes[held]));
             }
 
             _changes.Clear();
@@ -346,16 +358,31 @@ public sealed class Settings : IDisposable
 
             string preset = Preset == _default ? string.Empty : Path.GetFileNameWithoutExtension(GetPresetPath(Preset));
 
-            return new Args
-            {
-                ProjectPath = _args.ProjectPath,
-                FrameLimit = _args.FrameLimit,
-                TimeLimit = _args.TimeLimit,
-                IsHeadless = _args.IsHeadless,
-                Settings = lines,
-                Preset = preset
-            };
+            return _args with { Settings = lines, Preset = preset };
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="held"/> and <paramref name="next"/>, values of a setting of <paramref name="type"/>, are
+    /// the same: equal, or written alike as JSON, as two lists or maps with the same entries are.
+    /// </summary>
+    private static bool IsSame(object? held, object? next, Type type)
+    {
+        return Equals(held, next)
+            || JsonNode.DeepEquals(
+                JsonSerializer.SerializeToNode(held, type, Json.Options),
+                JsonSerializer.SerializeToNode(next, type, Json.Options));
+    }
+
+    /// <summary>
+    /// A copy of <paramref name="settings"/> as they are now, through JSON, as they were read.
+    /// </summary>
+    private static ISettings Copy(ISettings settings)
+    {
+        Type type = settings.GetType();
+
+        return JsonSerializer.SerializeToNode(settings, type, Json.Options).Deserialize(type, Json.Options) as ISettings
+            ?? throw new InvalidOperationException($"{type.Name} does not read back as it is written.");
     }
 
     /// <summary>

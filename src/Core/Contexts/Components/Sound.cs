@@ -43,7 +43,7 @@ public enum SoundSpace : byte
 /// Plays an <see cref="Assets.Audio"/>: in the world at its entity's <see cref="Transform"/>, heard from the player's
 /// camera, fading with distance and muffled and echoed by what is solid around it, or everywhere alike, for music and
 /// ambience. A zero reads as its default, so <c>{ "audio": { "id": 800 } }</c> in a file plays the sound once, at full
-/// volume, in the world, heard at full volume within a metre and not at all past 25; <c>"loop": true</c> plays it
+/// volume, in the world, heard at full volume within a metre and not at all past 25; <c>"isLooping": true</c> plays it
 /// without end, and <c>"space": "everywhere"</c> plays it as music is. The gem that plays sounds writes back how far in
 /// it is (<see cref="TimeSec"/>) and when a sound that does not loop has ended (<see cref="Playback"/>), and follows
 /// what a script writes: <see cref="Playback"/> to play, pause or stop it, <see cref="TimeSec"/> to seek, and every
@@ -54,18 +54,45 @@ public record struct Sound : IComponent
     /// <summary>
     /// What it plays; none plays nothing.
     /// </summary>
-    public Handle<Audio> Audio { get; set; }
+    public Handle<Audio> Audio;
 
     /// <summary>
     /// Whether it plays: playing by default, so a sound placed in the world is heard as it spawns. Set to playing again
     /// after it stopped, it plays from <see cref="TimeSec"/>, which stopping put back to the start.
     /// </summary>
-    public Playback Playback { get; set; }
+    public Playback Playback;
 
     /// <summary>
     /// It starts again from the start each time it ends, never stopping of itself.
     /// </summary>
-    public bool IsLooping { get; set; }
+    public bool IsLooping;
+
+    /// <summary>
+    /// Where it is heard from: the world, at its entity, or everywhere alike.
+    /// </summary>
+    public SoundSpace Space;
+
+    /// <summary>
+    /// How much it is heard only ahead of it, along its entity's +Z: 0 every way alike, 1 ahead alone, as a
+    /// loudspeaker or a voice is, from 0.3 or so.
+    /// </summary>
+    public float Focus;
+
+    /// <summary>
+    /// What is solid between it and the listener does not muffle it, which costs nothing to trace: for a sound meant
+    /// to be heard whatever is in the way.
+    /// </summary>
+    public bool IsUnoccluded;
+
+    /// <summary>
+    /// It does not echo off what is around it, which costs nothing to trace.
+    /// </summary>
+    public bool IsDry;
+
+    /// <summary>
+    /// Seconds into it, at its own pitch, as it was last heard. Set it to play from there.
+    /// </summary>
+    public float TimeSec;
 
     /// <summary>
     /// How loud, from just above 0 to 1 and beyond; silence is <see cref="Playback.Paused"/>.
@@ -87,11 +114,6 @@ public record struct Sound : IComponent
     }
 
     /// <summary>
-    /// Where it is heard from: the world, at its entity, or everywhere alike.
-    /// </summary>
-    public SoundSpace Space { get; set; }
-
-    /// <summary>
     /// Metres within which it is heard at full volume, fading with distance past it.
     /// </summary>
     public float Near
@@ -108,26 +130,4 @@ public record struct Sound : IComponent
         readonly get => field == 0 ? 25 : field;
         set;
     }
-
-    /// <summary>
-    /// How much it is heard only ahead of it, along its entity's +Z: 0 every way alike, 1 ahead alone, as a
-    /// loudspeaker or a voice is, from 0.3 or so.
-    /// </summary>
-    public float Focus { get; set; }
-
-    /// <summary>
-    /// What is solid between it and the listener does not muffle it, which costs nothing to trace: for a sound meant
-    /// to be heard whatever is in the way.
-    /// </summary>
-    public bool IsUnoccluded { get; set; }
-
-    /// <summary>
-    /// It does not echo off what is around it, which costs nothing to trace.
-    /// </summary>
-    public bool IsDry { get; set; }
-
-    /// <summary>
-    /// Seconds into it, at its own pitch, as it was last heard. Set it to play from there.
-    /// </summary>
-    public float TimeSec { get; set; }
 }

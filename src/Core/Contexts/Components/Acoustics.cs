@@ -46,5 +46,5 @@ public enum AcousticMaterial : byte
 /// </summary>
 public record struct Acoustics : IComponent
 {
-    public AcousticMaterial Material { get; set; }
+    public AcousticMaterial Material;
 }

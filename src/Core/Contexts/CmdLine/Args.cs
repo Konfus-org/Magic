@@ -4,7 +4,7 @@ namespace Magic.Contexts.CmdLine;
 /// What to run and how: the command line's options, as plain data. A gem can ask for it in its constructor, as
 /// a platform gem does to open no window when <see cref="IsHeadless"/>.
 /// </summary>
-public sealed class Args
+public sealed record Args
 {
     /// <summary>
     /// The project: its .magic file, or the folder holding it.

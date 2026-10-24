@@ -51,15 +51,7 @@ public struct Contacts : IComponent, IEquatable<Contacts>
     /// <summary>
     /// Whether both hold the same entries in the same slots.
     /// </summary>
-    public readonly bool Equals(Contacts other)
-    {
-        for (int i = 0; i < Capacity; i++)
-        {
-            if (this[i] != other[i]) return false;
-        }
-
-        return true;
-    }
+    public readonly bool Equals(Contacts other) => ((ReadOnlySpan<Contact>)this).SequenceEqual(other);
 
     public override readonly bool Equals(object? obj) => obj is Contacts other && Equals(other);
 
