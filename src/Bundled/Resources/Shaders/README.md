@@ -24,8 +24,8 @@ Each kind of thing a renderer draws with is a contract in the library. To add on
 | --- | --- |
 | A surface | A module whose struct, named like its file, implements `ISurface` (`Core/Surface`). Its fields are the params a material gives values for, each with its default as its initializer. See [Materials](../Materials/README.md#writing-a-surface). |
 | A sky | The same, implementing `ISky` (`Core/Sky`). |
-| A kind of light | A struct implementing `ILight` (`Lighting/Lights`), a table of them in `WorldLights` and its C# twin, and a loop over them in `ShadeLights`. |
-| A kind of shadow | A struct implementing `IShadowing` (`Lighting/Lights`), which the lighting pass hands `ShadeLights`. |
+| A kind of light | A struct implementing `ILight` (`Lighting/Lights`), which the renderer's lighting pass shades with `ShadeLight`. |
+| A kind of shadow | A struct implementing `IShadowing` (`Lighting/Lights`), which the lighting pass hands `ShadeLights` and `ShadeLight`. It gets each light's sample, which says how far and how wide the light is. |
 | A weather value | A field in `WeatherConstants` (`Core/Weather`) and its C# twin, which the renderer fills from its weather effect. |
 | A frame value | A field in `FrameConstants` (`Core/Pass`) and the renderer's twin. `pass.clocks` reads it in any pass. |
 | A post effect | For one that changes each pixel by itself, a module whose struct, named like its file, implements `IPixelEffect` (`Core/Post`), its fields its values, and a C# `IPixelEffect` that names its shader and writes its values. For one that reads its neighbours, a compute pass taking `PostImages` and its values, run with `IRendering.Effect`. |
@@ -59,7 +59,8 @@ each against its contract.
 The modules under `Lighting/` work out the light a surface sends toward the camera, in nits: from the world's lights
 (`Lights`), and from the sky all around (`SkyLight`). The renderer then multiplies by exposure.
 
-- **Units:** directional lights in lux, the sky in nits. Emissive light is already pre-exposed.
+- **Units:** directional lights in lux, point and spot lights in candela, the sky in nits. A light's colour has a
+  luminance of 1, so its strength alone says how bright it is. Emissive light is already pre-exposed.
 - **Shading models:** metallic-roughness, clear coat, cloth and subsurface, picked per pixel by the surface's
   `ShadingModel`.
 - **Specular anti-aliasing:** the renderer widens a surface's roughness by how far its normal turns across the pixel.

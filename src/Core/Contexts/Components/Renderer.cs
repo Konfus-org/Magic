@@ -17,6 +17,12 @@ public record struct Renderer : IComponent
     public Handle<Model> Model;
 
     public MaterialSlots Materials;
+
+    /// <summary>
+    /// It casts no shadow and hides nothing from the light around it, as a lamp's shade around its own light: it is
+    /// drawn, but light passes through it.
+    /// </summary>
+    public bool IsShadowless;
 }
 
 /// <summary>

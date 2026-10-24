@@ -5,7 +5,7 @@ namespace Magic.Contexts.Components;
 
 /// <summary>
 /// Light from a small sphere at its entity's position, shining every way. A zero reads as its default, so
-/// <c>new PointLight()</c>, or <c>{}</c> in a file, is a white 800 lumen bulb, 5 cm across, reaching 10 m.
+/// <c>new PointLight()</c>, or <c>{}</c> in a file, is a white 800 lumen bulb, 5 cm across.
 /// </summary>
 public record struct PointLight : IComponent
 {
@@ -26,11 +26,11 @@ public record struct PointLight : IComponent
 
     /// <summary>
     /// Metres it reaches: its light fades to nothing there, so whatever draws it can leave it out of everything
-    /// farther.
+    /// farther. By default where its light falls below <see cref="SpotLight.FaintestLux"/>, 57 m for the default bulb.
     /// </summary>
     public float Range
     {
-        readonly get => field == 0 ? 10 : field;
+        readonly get => field == 0 ? SpotLight.GetReach(Intensity) : field;
         set;
     }
 

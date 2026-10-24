@@ -154,6 +154,22 @@ public extension GpuCluster
     {
         return LoadPackedVertex(vertices + corner * 5u, step);
     }
+
+    // A corner's position alone, in its model's space: the vertex's first two words.
+    public float3 LoadPosition(uint corner)
+    {
+        uint2 packed = World.geometry.Load<uint2>((vertices + corner * 5u) * 4u);
+        int x = ToSigned20(packed.x & 0xFFFFFu);
+        int y = ToSigned20((packed.x >> 20) | ((packed.y & 0xFFu) << 12));
+        int z = ToSigned20((packed.y >> 8) & 0xFFFFFu);
+        return float3(x, y, z) * step;
+    }
+
+    // Its level among its model's, 0 the finest.
+    public property uint level
+    {
+        get { return (counts >> 20) & 31u; }
+    }
 }
 
 public extension GpuInstance

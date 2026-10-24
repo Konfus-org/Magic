@@ -4,10 +4,10 @@ using Magic.Interfaces;
 namespace Magic.VoxelRendering;
 
 /// <summary>
-/// Every table of the world the GPU reads, in one place: the instances, the models and their levels, clusters and
-/// cards, the materials and how each is drawn. Each part writes the rows that are its own; once a frame, before
-/// anything records, every row set since is sent (<see cref="Upload"/>). A view's constants name each by its buffer,
-/// which changes as a table grows. Render thread.
+/// Every table of the world the GPU reads, in one place: the instances, the point and spot lights, the models and their
+/// levels, clusters and cards, the materials and how each is drawn. Each part writes the rows that are its own; once a
+/// frame, before anything records, every row set since is sent (<see cref="Upload"/>). A view's constants name each by
+/// its buffer, which changes as a table grows. Render thread.
 /// </summary>
 internal sealed class GpuTables : IDisposable
 {
@@ -18,19 +18,25 @@ internal sealed class GpuTables : IDisposable
     internal GpuTables(IGpuDriver gpu)
     {
         Instances = new GpuTable<GpuInstance>(gpu, Usage, 1024);
+        LocalLights = new GpuTable<GpuLocalLight>(gpu, Usage, 256);
         Models = new GpuTable<GpuModel>(gpu, Usage, 256);
         Levels = new GpuTable<GpuLevel>(gpu, Usage, 1024);
         Clusters = new GpuTable<GpuCluster>(gpu, Usage, 4096);
         Cards = new GpuTable<GpuCard>(gpu, Usage, 256);
         Materials = new GpuTable<GpuMaterial>(gpu, Usage, 64);
         MaterialBins = new GpuTable<uint>(gpu, Usage, 64);
-        _all = [Instances, Models, Levels, Clusters, Cards, Materials, MaterialBins];
+        _all = [Instances, LocalLights, Models, Levels, Clusters, Cards, Materials, MaterialBins];
     }
 
     /// <summary>
     /// An instance a row, at its entity's slot (<see cref="VoxelRendering.Instances"/>).
     /// </summary>
     internal GpuTable<GpuInstance> Instances { get; }
+
+    /// <summary>
+    /// A point or spot light a row, at its entity's slot (<see cref="VoxelRendering.LocalLights"/>).
+    /// </summary>
+    internal GpuTable<GpuLocalLight> LocalLights { get; }
 
     internal GpuTable<GpuModel> Models { get; }
 

@@ -18,6 +18,11 @@ clusters and cards a cluster generator makes for each model.
   failure material. A pass whose shader fails is left out, and a banner across the view says why.
 - **Loading.** Nothing is drawn until it can be drawn properly, and what had to wait fades in. A domain appears whole in
   its first frame. A frame shows only once every pass's shader is compiled.
+- **Lighting.** The world is lit by its directional lights, its point and spot lights and its sky. The world is also
+  kept as voxels around the player's camera, finest near it, and changed only where something moved. Each light's
+  shadow is a cone traced through the voxels toward it, as wide as the light looks, so shadows soften with distance from
+  what casts them. The sky's light is hidden where the voxels say the world hides it. The voxels' size and levels, and
+  the most lights a view lights by, are settings.
 - **Pausing.** While the world is paused, its animated materials and its sky stand still, and they follow its time
   scale. Fades and failures go on. A surface or sky animates by its inputs' `frame.worldSec`, and by `frame.realSec`
   for what goes on while the world is paused.
@@ -25,5 +30,5 @@ clusters and cards a cluster generator makes for each model.
 Its settings, such as the render scale, are on `VoxelRenderingSettings` and show in the settings window (F4).
 Textures are compressed to BC7 the first time they load, and kept in the cache.
 
-- It lights the world by its directional lights and its sky, without shadows. Point and spot lights give no light.
-- Transparent surfaces are not drawn.
+- Light does not bounce yet: what the lights and the sky do not reach directly is dark.
+- Transparent surfaces are not drawn, and cast no shadow.

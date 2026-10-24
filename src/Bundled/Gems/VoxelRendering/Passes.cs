@@ -10,10 +10,10 @@ using Magic.Services;
 namespace Magic.VoxelRendering;
 
 /// <summary>
-/// Records the frame's compute passes for a view, of one entry point each, their groups given or read from a buffer.
-/// Each is handed its header, the frame's constants and the view's (<see cref="PassHeader"/>), ahead of its own, and is
-/// a debug group named after its entry point, or its shader's file for one with a single entry point, which the GPU
-/// provider times. A pass whose pipeline is not made yet is left out, which makes the frame incomplete
+/// Records the frame's compute passes, for a view or for the whole frame, of one entry point each, their groups given
+/// or read from a buffer. Each is handed its header, the frame's constants and the view's, none for a pass of the whole
+/// frame (<see cref="PassHeader"/>), ahead of its own, and is a debug group named after its entry point, or its
+/// shader's file for one with a single entry point, which the GPU provider times. A pass whose pipeline is not made yet is left out, which makes the frame incomplete
 /// (<see cref="GpuPipelines.IsFrameComplete"/>). Render thread.
 /// </summary>
 internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets assets, GpuBuffer world)
@@ -33,6 +33,11 @@ internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets asse
     /// </summary>
     internal PassHeader GetHeader(RenderView view) => new(world, view.Constants);
 
+    /// <summary>
+    /// The header of a pass of the whole frame, drawn for no view: its passes read no view's constants.
+    /// </summary>
+    internal PassHeader GetFrameHeader() => new(world, GpuBuffer.None);
+
     internal void Dispatch<T>(
         RenderView view,
         ShaderEntry shader,
@@ -41,13 +46,23 @@ internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets asse
         ReadOnlySpan<GpuResource> reads,
         ReadOnlySpan<GpuResource> writes)
         where T : unmanaged
-        => Dispatch(view, shader, MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)), groups, reads, writes);
+        => Dispatch(GetHeader(view), shader, constants, groups, reads, writes);
+
+    internal void Dispatch<T>(
+        in PassHeader header,
+        ShaderEntry shader,
+        in T constants,
+        GpuGroups groups,
+        ReadOnlySpan<GpuResource> reads,
+        ReadOnlySpan<GpuResource> writes)
+        where T : unmanaged
+        => Dispatch(header, shader, MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in constants)), groups, reads, writes);
 
     /// <summary>
     /// A compute pass whose constants after its header are <paramref name="constants"/>, as bytes.
     /// </summary>
     internal void Dispatch(
-        RenderView view,
+        in PassHeader header,
         ShaderEntry shader,
         ReadOnlySpan<byte> constants,
         GpuGroups groups,
@@ -63,12 +78,23 @@ internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets asse
         pass.Reads(reads)
             .Writes(writes)
             .Pipeline(pipeline)
-            .Constants(WithHeader(view, constants, stackalloc byte[MaxConstantBytes]))
+            .Constants(WithHeader(header, constants, stackalloc byte[MaxConstantBytes]))
             .Dispatch(groups.X, groups.Y, groups.Z);
     }
 
     internal void Dispatch<T>(
         RenderView view,
+        ShaderEntry shader,
+        in T constants,
+        GpuBuffer arguments,
+        uint offset,
+        ReadOnlySpan<GpuResource> reads,
+        ReadOnlySpan<GpuResource> writes)
+        where T : unmanaged
+        => Dispatch(GetHeader(view), shader, constants, arguments, offset, reads, writes);
+
+    internal void Dispatch<T>(
+        in PassHeader header,
         ShaderEntry shader,
         in T constants,
         GpuBuffer arguments,
@@ -86,17 +112,15 @@ internal sealed class Passes(IGpuDriver gpu, GpuPipelines pipelines, Assets asse
         pass.Reads(reads)
             .Writes(writes)
             .Pipeline(pipeline)
-            .Constants(new PassConstants<T>(GetHeader(view), constants))
+            .Constants(new PassConstants<T>(header, constants))
             .DispatchFromBuffer(arguments, offset);
     }
 
     /// <summary>
-    /// The header of a pass drawn for <paramref name="view"/> and then <paramref name="constants"/>, written into
-    /// <paramref name="into"/>.
+    /// <paramref name="header"/> and then <paramref name="constants"/>, written into <paramref name="into"/>.
     /// </summary>
-    private ReadOnlySpan<byte> WithHeader(RenderView view, ReadOnlySpan<byte> constants, Span<byte> into)
+    private static ReadOnlySpan<byte> WithHeader(in PassHeader header, ReadOnlySpan<byte> constants, Span<byte> into)
     {
-        PassHeader header = GetHeader(view);
         MemoryMarshal.Write(into, in header);
         int size = Unsafe.SizeOf<PassHeader>();
         constants.CopyTo(into[size..]);

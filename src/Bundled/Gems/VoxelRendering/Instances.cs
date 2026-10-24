@@ -263,7 +263,8 @@ internal sealed class Instances(
             Row2 = new Vector4(linear.M13, linear.M23, linear.M33, position.Z),
             MaxScale = MathF.Max(scale.X, MathF.Max(scale.Y, scale.Z)),
             Flags = (uint)((isMirrored ? GpuInstanceFlags.Mirrored : GpuInstanceFlags.None)
-                | (hasWaited ? GpuInstanceFlags.FadeIn : GpuInstanceFlags.None)),
+                | (hasWaited ? GpuInstanceFlags.FadeIn : GpuInstanceFlags.None)
+                | (entry.Renderer.IsShadowless ? GpuInstanceFlags.Shadowless : GpuInstanceFlags.None)),
             FadeStartSec = hasWaited ? look.ReadyAtSec : entry.FadeStartSec,
         };
 

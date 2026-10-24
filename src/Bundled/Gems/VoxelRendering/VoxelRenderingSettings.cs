@@ -88,4 +88,28 @@ internal sealed class VoxelRenderingSettings : ISettings
     /// </summary>
     [Category("Render/Budgets")]
     public int PieceCapacity { get; set; } = 1 << 20;
+
+    /// <summary>
+    /// Metres a voxel of the finest level is a side. The voxels, which shadows and occlusion are traced through, are
+    /// levels of 128 a side about the player's camera, each level's twice the last's: smaller is sharper near the camera
+    /// and reaches less far.
+    /// </summary>
+    [Category("Render/Voxels")]
+    [Range(0.01, 4)]
+    public float VoxelSize { get; set; } = 0.0625f;
+
+    /// <summary>
+    /// Levels of voxels, 1 to 8: each reaches twice as far as the one before.
+    /// </summary>
+    [Category("Render/Voxels")]
+    [Range(1, 8)]
+    public int VoxelLevels { get; set; } = 8;
+
+    /// <summary>
+    /// Point and spot lights a view lights by at most, up to 4096, which sizes what each view holds of them. Past it,
+    /// the lights found after are left out.
+    /// </summary>
+    [Category("Render/Budgets")]
+    [Range(32, 4096)]
+    public int LightCapacity { get; set; } = 4096;
 }

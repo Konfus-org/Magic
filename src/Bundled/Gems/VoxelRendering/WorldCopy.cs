@@ -18,6 +18,19 @@ namespace Magic.VoxelRendering;
 internal readonly record struct InstanceCopy(Transform Transform, Renderer Renderer);
 
 /// <summary>
+/// A point or spot light: where it is, its intensity in candela times its colour, how far it reaches, its radius, and
+/// for a spot, the cosines of its cone's outer and inner angles, which a point light's are -1 and -1.
+/// </summary>
+internal readonly record struct LocalLightCopy(
+    Transform Transform,
+    Vector3 Intensity,
+    float Range,
+    float Radius,
+    float CosOuter,
+    float CosInner,
+    bool IsShadowless);
+
+/// <summary>
 /// A camera, with the entity it is on, which names its view from one frame to the next.
 /// </summary>
 internal readonly record struct CameraCopy(Entity Entity, Transform Transform, Camera Camera);
@@ -50,15 +63,16 @@ internal readonly record struct KeyLightCopy(
 /// reading (<see cref="Renderables"/>), while the render thread may still be drawing the frame before; the two are
 /// swapped in Sync, when both threads hold still, and Render reads <see cref="Front"/> while the main thread is busy
 /// with the next frame, which writes only the other. One system reads what the world has one of, or a few, and starts
-/// the copy (<see cref="ReadWorld"/>); the instances, of which there are many, are copied by a system on the ECS's
-/// threads after it, kept at their entity's slot, and only what changed is passed on (<see cref="Delta{T}"/>), so a
-/// frame costs the render thread what moved, not what there is: the copy itself is a comparison per entity, on every
-/// thread, counted once per chunk.
+/// the copy (<see cref="ReadWorld"/>); the instances and the point and spot lights, of which there are many, are copied
+/// by systems on the ECS's threads after it, kept at their entity's slot, and only what changed is passed on
+/// (<see cref="Delta{T}"/>), so a frame costs the render thread what moved, not what there is: the copy itself is a
+/// comparison per entity, on every thread, counted once per chunk.
 /// </summary>
 internal sealed class WorldCopy : IDisposable
 {
     private readonly List<Subscription> _systems = [];
     private readonly Slots<InstanceCopy> _instances;
+    private readonly Slots<LocalLightCopy> _lights;
 
     /// <summary>
     /// The copy LateUpdate writes. Main thread, and the ECS's threads under it.
@@ -68,10 +82,13 @@ internal sealed class WorldCopy : IDisposable
     internal WorldCopy(World world)
     {
         _instances = new Slots<InstanceCopy>(_back.Instances);
+        _lights = new Slots<LocalLightCopy>(_back.Lights);
 
         // In this order: the ECS runs a phase's systems in the order they were added, and the first starts the copy.
         _systems.Add(world.Register(new ReadWorld(this, world)));
         _systems.Add(world.Register(new InstanceCopier(_instances)));
+        _systems.Add(world.Register(new PointLightCopier(_lights)));
+        _systems.Add(world.Register(new SpotLightCopier(_lights)));
     }
 
     /// <summary>
@@ -90,7 +107,11 @@ internal sealed class WorldCopy : IDisposable
     /// <summary>
     /// Ends a frame's copy, after the systems ran: takes in what outgrew the slots and finds what is gone. LateUpdate.
     /// </summary>
-    internal void Finish() => _instances.Finish();
+    internal void Finish()
+    {
+        _instances.Finish();
+        _lights.Finish();
+    }
 
     /// <summary>
     /// Hands the copy just finished to Render, and takes the one Render is done with to write next. Sync, when neither
@@ -98,8 +119,17 @@ internal sealed class WorldCopy : IDisposable
     /// </summary>
     internal void Swap() => (Front, _back) = (_back, Front);
 
+    /// <summary>
+    /// A light's strength times its colour, the colour scaled to a luminance of 1, so the strength alone says how bright
+    /// it is whatever its colour.
+    /// </summary>
     private static Vector3 GetIntensity(Color color, float intensity)
-        => new Vector3(color.R, color.G, color.B) * intensity;
+    {
+        Vector3 linear = new(color.R, color.G, color.B);
+        float luminance = Vector3.Dot(linear, new Vector3(0.2126f, 0.7152f, 0.0722f));
+
+        return luminance > 0 ? linear * (intensity / luminance) : Vector3.Zero;
+    }
 
     /// <summary>
     /// Starts a frame's copy, before the copiers run: the copy Render read two frames ago is written over.
@@ -108,6 +138,7 @@ internal sealed class WorldCopy : IDisposable
     {
         _back.Clear();
         _instances.Begin(_back.Instances);
+        _lights.Begin(_back.Lights);
 
         return _back;
     }
@@ -334,16 +365,80 @@ internal sealed class WorldCopy : IDisposable
             instances.Count(tally);
         }
     }
+
+    /// <summary>
+    /// The point lights, into the slots the spot lights share: an entity has one or the other.
+    /// </summary>
+    [Unpausable]
+    private sealed class PointLightCopier(Slots<LocalLightCopy> lights) : IParallelSystem<Transform, PointLight>
+    {
+        public Phase Phase => Phase.LateUpdate;
+
+        public void Run(in Frame frame, EcsChunk<Transform, PointLight> chunk)
+        {
+            (ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<PointLight> found) = chunk;
+            Slots<LocalLightCopy>.Tally tally = default;
+            for (int i = 0; i < entities.Length; i++)
+            {
+                PointLight light = found[i];
+                LocalLightCopy copy = new(
+                    transforms[i],
+                    GetIntensity(light.Color, light.Intensity),
+                    light.Range,
+                    light.Radius,
+                    -1,
+                    -1,
+                    light.IsShadowless);
+                lights.Take(entities[i], copy, ref tally);
+            }
+
+            lights.Count(tally);
+        }
+    }
+
+    [Unpausable]
+    private sealed class SpotLightCopier(Slots<LocalLightCopy> lights) : IParallelSystem<Transform, SpotLight>
+    {
+        public Phase Phase => Phase.LateUpdate;
+
+        public void Run(in Frame frame, EcsChunk<Transform, SpotLight> chunk)
+        {
+            (ReadOnlySpan<Entity> entities, Span<Transform> transforms, Span<SpotLight> found) = chunk;
+            Slots<LocalLightCopy>.Tally tally = default;
+            for (int i = 0; i < entities.Length; i++)
+            {
+                SpotLight light = found[i];
+                float outer = Math.Clamp(light.OuterAngle, 0, 90) * (MathF.PI / 180);
+                float inner = Math.Clamp(light.InnerAngle, 0, light.OuterAngle) * (MathF.PI / 180);
+                LocalLightCopy copy = new(
+                    transforms[i],
+                    GetIntensity(light.Color, light.Intensity),
+                    light.Range,
+                    light.Radius,
+                    MathF.Cos(outer),
+                    MathF.Cos(inner),
+                    light.IsShadowless);
+                lights.Take(entities[i], copy, ref tally);
+            }
+
+            lights.Count(tally);
+        }
+    }
 }
 
 /// <summary>
-/// The world as one frame's Render reads it: what changed among the instances since the copy before, and the cameras,
-/// player, directional lights, sky, weather and look as they were. There are two, written and read in turn
-/// (<see cref="WorldCopy"/>).
+/// The world as one frame's Render reads it: what changed among the instances and the point and spot lights since the
+/// copy before, and the cameras, player, directional lights, sky, weather and look as they were. There are two, written
+/// and read in turn (<see cref="WorldCopy"/>).
 /// </summary>
 internal sealed class Renderables
 {
     internal Delta<InstanceCopy> Instances { get; } = new();
+
+    /// <summary>
+    /// What changed among the point and spot lights since the copy before.
+    /// </summary>
+    internal Delta<LocalLightCopy> Lights { get; } = new();
 
     internal List<CameraCopy> Cameras { get; } = [];
 
@@ -417,6 +512,7 @@ internal sealed class Renderables
     internal void Clear()
     {
         Instances.Clear();
+        Lights.Clear();
         Cameras.Clear();
         Player = null;
         Sun = null;

@@ -23,6 +23,11 @@ internal enum GpuInstanceFlags : uint
     /// It dissolves into view from <see cref="GpuInstance.FadeStartSec"/>.
     /// </summary>
     FadeIn = 2,
+
+    /// <summary>
+    /// It casts no shadow (<see cref="Contexts.Components.Renderer.IsShadowless"/>): the voxels leave it out.
+    /// </summary>
+    Shadowless = 4,
 }
 
 /// <summary>
@@ -66,6 +71,7 @@ internal struct WorldConstants
     /// The world's tables (<see cref="GpuTables"/>) and the clusters' geometry.
     /// </summary>
     internal GpuBuffer Instances;
+    internal GpuBuffer LocalLights;
     internal GpuBuffer Models;
     internal GpuBuffer Levels;
     internal GpuBuffer Clusters;
@@ -266,6 +272,60 @@ internal struct WeatherConstants
     internal Vector3 CloudColor;
     internal float Density;
     internal Vector3 CloudShadow;
+}
+
+/// <summary>
+/// A point or spot light in the lights' table, at its entity's slot, Shaders/Lighting/Lights.slang's <c>LocalLight</c>:
+/// its centre in the world, which the shaders take camera-relative, the metres it reaches, its intensity in candela
+/// times its colour, its radius, a spot's axis and the scale and offset of its cone's fade (a point light's 0 and 1),
+/// and its <see cref="GpuLocalLightFlags"/>. A slot with no light reaches nowhere.
+/// </summary>
+[ShaderStruct("Shaders/Lighting/Lights.slang", "LocalLight")]
+[StructLayout(LayoutKind.Sequential)]
+internal struct GpuLocalLight
+{
+    internal Vector3 Position;
+    internal float Range;
+    internal Vector3 Intensity;
+    internal float Radius;
+    internal Vector3 Forward;
+    internal float SpotScale;
+    internal float SpotOffset;
+    internal uint Flags;
+}
+
+/// <summary>
+/// One level of the voxels' clipmap, Shaders/Renderer/Voxels.slang's <c>GpuVoxelLevel</c>: its window's lowest corner
+/// in voxels of the world, a whole number of bricks, the metres a voxel is, where the corner was the frame before, and
+/// its flags.
+/// </summary>
+[ShaderStruct("Shaders/Renderer/Voxels.slang", "GpuVoxelLevel")]
+[StructLayout(LayoutKind.Sequential)]
+internal struct GpuVoxelLevel
+{
+    /// <summary>
+    /// The flag of a level put in place anew, every brick of which is voxelized.
+    /// </summary>
+    internal const uint Reset = 1;
+
+    internal Vector3 Origin;
+    internal float VoxelSize;
+    internal Vector3 LastOrigin;
+    internal uint Flags;
+}
+
+/// <summary>
+/// What a <see cref="GpuLocalLight"/> carries besides its light.
+/// </summary>
+[Flags]
+internal enum GpuLocalLightFlags : uint
+{
+    None = 0,
+
+    /// <summary>
+    /// Its light reaches through everything.
+    /// </summary>
+    Shadowless = 1,
 }
 
 /// <summary>

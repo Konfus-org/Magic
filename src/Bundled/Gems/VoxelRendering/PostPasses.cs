@@ -107,7 +107,7 @@ internal sealed class PostPasses(IGpuDriver gpu, Passes passes, FramePool pool, 
         MemoryMarshal.Write(constants, in images);
         values.CopyTo(constants[Unsafe.SizeOf<PostImages>()..]);
         passes.Dispatch(
-            view,
+            passes.GetHeader(view),
             GetEntry(run),
             constants[..(Unsafe.SizeOf<PostImages>() + values.Length)],
             GpuGroups.For(size, 8),

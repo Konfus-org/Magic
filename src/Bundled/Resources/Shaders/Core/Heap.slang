@@ -22,9 +22,11 @@ static const uint HeapTextures = 8192u;
 [[vk::binding(0, 0)]] RWByteAddressBuffer heapBuffers[];
 [[vk::binding(1, 0)]] Texture2D heapTextures[];
 [[vk::binding(3, 0)]] TextureCube heapCubes[];
+[[vk::binding(4, 0)]] Texture3D heapVolumes[];
 [[vk::binding(5, 0)]] Texture2D<uint> heapUintTextures[];
 [[vk::binding(6, 0)]] [[vk::image_format("unknown")]] RWTexture2D<float4> heapLevels[];
 [[vk::binding(7, 0)]] [[vk::image_format("unknown")]] RWTexture2DArray<float4> heapArrayLevels[];
+[[vk::binding(8, 0)]] [[vk::image_format("unknown")]] RWTexture3D<float4> heapVolumeLevels[];
 [[vk::binding(10, 0)]] SamplerState heapSamplers[];
 
 // A buffer of bytes, read and written at byte offsets: what holds words of more than one kind, as counts and the
@@ -107,6 +109,22 @@ public extension ArrayRef<uint>
     {
         uint before;
         heapBuffers[NonUniformResourceIndex(id)].InterlockedExchange(index * 4u, value, before);
+    }
+
+    // Keeps the least, the most, or the bits of both, of the row at index and value, in one step no other lane splits.
+    public void InterlockedMin(uint index, uint value)
+    {
+        heapBuffers[NonUniformResourceIndex(id)].InterlockedMin(index * 4u, value);
+    }
+
+    public void InterlockedMax(uint index, uint value)
+    {
+        heapBuffers[NonUniformResourceIndex(id)].InterlockedMax(index * 4u, value);
+    }
+
+    public void InterlockedOr(uint index, uint value)
+    {
+        heapBuffers[NonUniformResourceIndex(id)].InterlockedOr(index * 4u, value);
     }
 }
 
@@ -266,5 +284,44 @@ public struct FacesRef
             heapArrayLevels[NonUniformResourceIndex(index)].GetDimensions(width, height, layers);
             return uint2(width, height);
         }
+    }
+}
+
+// A 3D texture of floats, every level: sampled at a point, and each level written (GetLevel) by the pass it is laid out
+// for.
+public struct VolumeRef
+{
+    public uint id;
+
+    public float4 SampleLevel(SamplerRef sampler, float3 uvw, float level)
+    {
+        return Volume().SampleLevel(heapSamplers[NonUniformResourceIndex(sampler.id)], uvw, level);
+    }
+
+    public float4 Load(int3 texel, int level)
+    {
+        return Volume().Load(int4(texel, level));
+    }
+
+    public VolumeLevelRef GetLevel(uint level)
+    {
+        return { min(id, HeapTextures - 1u) * LevelsPerTexture + level };
+    }
+
+    Texture3D Volume()
+    {
+        return heapVolumes[NonUniformResourceIndex(min(id, HeapTextures - 1u))];
+    }
+}
+
+// One level of a 3D texture of floats, read and written texel by texel.
+public struct VolumeLevelRef
+{
+    uint index;
+
+    public __subscript(uint3 texel) -> float4
+    {
+        get { return heapVolumeLevels[NonUniformResourceIndex(index)][texel]; }
+        [nonmutating] set { heapVolumeLevels[NonUniformResourceIndex(index)][texel] = newValue; }
     }
 }

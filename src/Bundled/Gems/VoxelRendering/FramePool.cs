@@ -20,11 +20,6 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
     private readonly Dictionary<uint, Kept<GpuBuffer>> _buffers = [];
     private readonly Dictionary<GpuSamplerDescription, GpuSampler> _samplers = [];
 
-    /// <summary>
-    /// Zeros as many bytes as the largest buffer made, which a new buffer is filled with.
-    /// </summary>
-    private byte[] _zeros = [];
-
     public void Dispose()
     {
         foreach (Kept<GpuTexture> kept in _textures.Values)
@@ -60,7 +55,7 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
     internal GpuBuffer Buffer(uint bytes)
     {
         Kept<GpuBuffer> kept = GetKept(_buffers, bytes);
-        if (kept.Taken == kept.Created.Count) kept.Created.Add(CreateBuffer(bytes));
+        if (kept.Taken == kept.Created.Count) kept.Created.Add(gpu.CreateZeroedBuffer(BufferUsage, bytes));
 
         return kept.Created[kept.Taken++];
     }
@@ -113,17 +108,6 @@ internal sealed class FramePool(IGpuDriver gpu) : IDisposable
         }
 
         return found;
-    }
-
-    private GpuBuffer CreateBuffer(uint bytes)
-    {
-        uint size = Math.Max(bytes, 4);
-        GpuBuffer buffer = gpu.CreateBuffer(BufferUsage, size);
-        if (_zeros.Length < size) _zeros = new byte[size];
-
-        gpu.Upload(buffer, 0, _zeros.AsSpan(0, (int)size));
-
-        return buffer;
     }
 
     /// <summary>

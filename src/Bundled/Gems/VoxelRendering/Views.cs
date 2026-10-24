@@ -28,6 +28,7 @@ internal readonly record struct ViewFrame(
 /// </summary>
 internal readonly record struct WorldIds(
     GpuBuffer Instances,
+    GpuBuffer LocalLights,
     GpuBuffer Models,
     GpuBuffer Levels,
     GpuBuffer Clusters,
@@ -163,6 +164,7 @@ internal sealed class Views : IDisposable
             Clocks = new FrameConstants(frame.Frame),
             Lights = GetLights(copy),
             Instances = ids.Instances,
+            LocalLights = ids.LocalLights,
             Models = ids.Models,
             Levels = ids.Levels,
             Clusters = ids.Clusters,

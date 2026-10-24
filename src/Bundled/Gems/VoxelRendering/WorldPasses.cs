@@ -70,12 +70,6 @@ internal sealed class WorldPasses : IDisposable
     private readonly ShaderEntry _classifyTiles;
 
     /// <summary>
-    /// Zeros as many bytes as the largest buffer made, which a new buffer is filled with, as a count kept in it starts
-    /// from none.
-    /// </summary>
-    private byte[] _zeros = [];
-
-    /// <summary>
     /// A piece's 96 corners, 0 to 95, which every draw of the world's materials indexes.
     /// </summary>
     private GpuBuffer _indices;
@@ -382,16 +376,7 @@ internal sealed class WorldPasses : IDisposable
         return made;
     }
 
-    private GpuBuffer CreateBuffer(uint bytes)
-    {
-        uint size = Math.Max(bytes, 4);
-        GpuBuffer buffer = _gpu.CreateBuffer(Usage, size);
-        if (_zeros.Length < size) _zeros = new byte[size];
-
-        _gpu.Upload(buffer, 0, _zeros.AsSpan(0, (int)size));
-
-        return buffer;
-    }
+    private GpuBuffer CreateBuffer(uint bytes) => _gpu.CreateZeroedBuffer(Usage, bytes);
 
     private GpuBuffer GetIndices()
     {

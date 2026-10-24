@@ -208,8 +208,10 @@ frame with `IRendering`, the renderer's steps and its own passes in order. The r
 change the frame, copy the renderer's own script into the project's assets, rename the class, change it, and name the
 copy in the settings.
 
-- **Steps.** Culling, the visibility draw, the depth pyramid, resolving surfaces and the sky are the renderer's. The
-  script picks their order and the textures they draw into.
+- **Steps.** Culling, the visibility draw, the depth pyramid, resolving surfaces, the sky, the world's voxels and each
+  view's point and spot lights are the renderer's. The script picks their order and the textures they draw into.
+- **Shadows.** Every light casts shadows but one marked `IsShadowless`. A `Renderer` marked `IsShadowless` casts none,
+  as a lamp's shade around its own light should not.
 - **Resources.** A texture or buffer the script asks for is this frame's alone. What lasts from frame to frame, such
   as each view's exposure and depth pyramid, is the renderer's.
 - **Effects.** `PostProcessing` and `Weather` each hold their effects in a `RenderEffects`, one of each type, in order.

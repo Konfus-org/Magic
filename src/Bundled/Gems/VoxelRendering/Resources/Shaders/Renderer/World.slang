@@ -14,9 +14,10 @@ __exported import Core.Pass;
 __exported import Core.Sky;
 __exported import Lighting.Lights;
 
-// An instance's flags.
+// An instance's flags, the renderer's GpuInstanceFlags.
 static const uint InstanceMirrored = 1u;
 static const uint InstanceFadeIn = 2u;
+static const uint InstanceShadowless = 4u;
 
 // An instance, by its entity's slot: the rows of transpose(world) (xyz its turn and scale, w its position), and the
 // last frame's the same way; its largest scale, its model's row, when its fade started (real seconds) and its eight
@@ -136,6 +137,7 @@ public struct WorldConstants
 
     // The world's tables.
     ArrayRef<GpuInstance> instances;
+    ArrayRef<LocalLight> localLights; // its point and spot lights, by entity slot; a slot with none reaches nowhere
     ArrayRef<GpuModel> models;
     ArrayRef<GpuLevel> levels;
     ArrayRef<GpuCluster> clusters;
@@ -164,6 +166,13 @@ public void BeginPass(PassHeader pass)
 {
     World = pass.frame.Load<WorldConstants>(0u);
     View = pass.view.Load<ViewConstants>(0u);
+}
+
+// Loads the world alone, for a pass of the whole frame, drawn for no view, which reads no View: the first thing such a
+// pass does.
+public void BeginFramePass(PassHeader pass)
+{
+    World = pass.frame.Load<WorldConstants>(0u);
 }
 
 public extension WorldConstants
@@ -234,6 +243,19 @@ public extension GpuInstance
     public property bool isFadingIn
     {
         get { return (flags & InstanceFadeIn) != 0u; }
+    }
+
+    // It casts no shadow: light passes through it (Core's Renderer.IsShadowless).
+    public property bool isShadowless
+    {
+        get { return (flags & InstanceShadowless) != 0u; }
+    }
+
+    // Where a point of its model is in the world.
+    public float3 ToWorld(float3 position)
+    {
+        float3 turned = float3(dot(row0.xyz, position), dot(row1.xyz, position), dot(row2.xyz, position));
+        return turned + float3(row0.w, row1.w, row2.w);
     }
 
     // Where a point of its model is relative to the camera, and was relative to the last frame's.

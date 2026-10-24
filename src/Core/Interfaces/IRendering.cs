@@ -103,6 +103,18 @@ public interface IRendering
     void DrawSky(RenderView view, GpuTexture depth, GpuTexture target);
 
     /// <summary>
+    /// The world as voxels around the player's camera, brought up to date where it changed since the last frame: once a
+    /// frame, before the views that trace it.
+    /// </summary>
+    VoxelScene VoxelizeScene();
+
+    /// <summary>
+    /// The point and spot lights <paramref name="view"/> sees, sorted by depth and binned by depth slice and tile, which
+    /// a pixel walks to find the lights that reach it.
+    /// </summary>
+    LightList CullLights(RenderView view);
+
+    /// <summary>
     /// A compute pass of <paramref name="shader"/>'s entry point drawn for <paramref name="view"/>, its constants the
     /// pass header (Shaders/Core/Pass.slang), then <paramref name="constants"/>, of <paramref name="groups"/>, which
     /// reads and writes what it says.

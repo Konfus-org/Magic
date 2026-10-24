@@ -72,12 +72,15 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     private readonly GpuMaterials _materials;
     private readonly FailureHandler _failures;
     private readonly Instances _instances;
+    private readonly LocalLights _lights;
     private readonly Views _views;
     private readonly Output _output;
     private readonly FramePool _pool;
     private readonly Passes _passes;
     private readonly SkyPasses _sky;
     private readonly WorldPasses _worldPasses;
+    private readonly LightPasses _lightPasses;
+    private readonly VoxelPasses _voxels;
     private readonly PostPasses _post;
     private readonly Preloader _preloader;
     private readonly CancellationToken _stopping;
@@ -115,6 +118,11 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     /// </summary>
     private bool _hasShown;
 
+    /// <summary>
+    /// Where the player's camera is this frame, else the main camera's, which the voxels are centred on. Render thread.
+    /// </summary>
+    private Vector3 _player;
+
     public VoxelRenderingGem(
         IGpuDriver gpu,
         IShaderCompiler compiler,
@@ -144,6 +152,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
         _pipelines = new GpuPipelines(gpu, compiler, assets, _failures, stopping);
         _materials = new GpuMaterials(assets, compiler, _tables, _textures, _pipelines, _failures, stopping);
         _instances = new Instances(_tables, _models, _materials, _failures, assets);
+        _lights = new LocalLights(_tables);
         _copy = new WorldCopy(world);
         _views = new Views(gpu, window, settings);
         _output = new Output(gpu, compiler, assets, _views.World, stopping);
@@ -151,6 +160,8 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
         _passes = new Passes(gpu, _pipelines, assets, _views.World);
         _sky = new SkyPasses(gpu, _passes, _pipelines, assets);
         _worldPasses = new WorldPasses(gpu, _passes, _pipelines, _materials, _output.Raised, assets);
+        _lightPasses = new LightPasses(gpu, _passes, assets);
+        _voxels = new VoxelPasses(gpu, _passes, _pipelines, settings, assets);
         _post = new PostPasses(gpu, _passes, _pool, assets);
         _preloader = new Preloader(_models, _materials);
         ShaderStructs.CheckAsync(compiler, assets, stopping).FireAndForget();
@@ -191,6 +202,8 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
         (_overlay as IDisposable)?.Dispose();
         _copy.Dispose();
         _worldPasses.Dispose();
+        _lightPasses.Dispose();
+        _voxels.Dispose();
         _sky.Dispose();
         _pool.Dispose();
         _output.Dispose();
@@ -237,7 +250,8 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
 
         CameraCopy? main = GetMainCamera(copy);
         Vector3? player = copy.Player ?? main?.Transform.Position;
-        KeepResident(copy, player ?? default, frame);
+        _player = player ?? default;
+        KeepResident(copy, _player, frame);
         (SurfaceKey sky, int skyRow) = _materials.GetSky(copy.Sky);
         _failures.Say(_pipelines.Failed);
         List<View> views = _views.Prepare(new ViewFrame(copy, frame, player, GetWorldIds(skyRow)));
@@ -255,10 +269,12 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
         _sky.Sky = sky.Shader;
         _pipelines.BeginFrame();
         _worldPasses.BeginFrame(GetCapacity());
+        _lightPasses.BeginFrame(_settings.LightCapacity, _tables.LocalLights.Capacity);
         _pipeline?.Record(this);
         bool isComplete = _pipeline is not null && _pipelines.IsFrameComplete;
         _pool.EndFrame();
         _worldPasses.EndFrame();
+        _lightPasses.EndFrame();
         _preloader.Answer(
             copy.Stream,
             isComplete,
@@ -317,6 +333,11 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     public SkyLight CaptureSky(RenderView seenFrom) => _sky.Capture(seenFrom);
 
     public void DrawSky(RenderView view, GpuTexture depth, GpuTexture target) => _sky.Draw(view, depth, target);
+
+    public VoxelScene VoxelizeScene()
+        => _voxels.Voxelize(_player, _tables.Instances.Capacity, _copy.Front.Stream.IsEmptied);
+
+    public LightList CullLights(RenderView view) => _lightPasses.Cull(view);
 
     public void Dispatch<T>(
         RenderView view,
@@ -422,6 +443,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     private void KeepResident(Renderables copy, Vector3 player, in Frame frame)
     {
         _instances.Update(copy, (float)frame.RealSec, player, copy.IsHolding);
+        _lights.Update(copy);
         _failures.Label(_instances);
         _materials.Purge();
         _models.Purge();
@@ -437,6 +459,7 @@ internal sealed class VoxelRenderingGem : IGem, IPreloader, IRendering, ICache<B
     /// </summary>
     private WorldIds GetWorldIds(int skyRow) => new(
         _tables.Instances.Buffer,
+        _tables.LocalLights.Buffer,
         _tables.Models.Buffer,
         _tables.Levels.Buffer,
         _tables.Clusters.Buffer,

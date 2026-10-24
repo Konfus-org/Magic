@@ -5,10 +5,16 @@ namespace Magic.Contexts.Components;
 
 /// <summary>
 /// Light from a small sphere at its entity's position, shining in a cone along its +Z. A zero reads as its default, so
-/// <c>new SpotLight()</c>, or <c>{}</c> in a file, is a white 800 lumen spot, 60 degrees across, reaching 10 m.
+/// <c>new SpotLight()</c>, or <c>{}</c> in a file, is a white 800 lumen spot, 60 degrees across.
 /// </summary>
 public record struct SpotLight : IComponent
 {
+    /// <summary>
+    /// The illuminance, in lux, below which a point or spot light's light counts as gone, where its default range ends:
+    /// about a full moon's.
+    /// </summary>
+    public const float FaintestLux = 0.02f;
+
     public Color Color
     {
         readonly get => field == default ? new Color(1, 1, 1) : field;
@@ -26,11 +32,11 @@ public record struct SpotLight : IComponent
 
     /// <summary>
     /// Metres it reaches: its light fades to nothing there, so whatever draws it can leave it out of everything
-    /// farther.
+    /// farther. By default where its light falls below <see cref="FaintestLux"/>, 113 m for the default spot.
     /// </summary>
     public float Range
     {
-        readonly get => field == 0 ? 10 : field;
+        readonly get => field == 0 ? GetReach(Intensity) : field;
         set;
     }
 
@@ -67,4 +73,10 @@ public record struct SpotLight : IComponent
     /// whose shadows would not show, is best drawn so.
     /// </summary>
     public bool IsShadowless { get; set; }
+
+    /// <summary>
+    /// Metres from a light of <paramref name="intensity"/> candela at which its light falls to
+    /// <see cref="FaintestLux"/>.
+    /// </summary>
+    public static float GetReach(float intensity) => MathF.Sqrt(Math.Max(intensity, 0) / FaintestLux);
 }
