@@ -1,0 +1,32 @@
+# Every link in the documentation resolves: files, their headings and the web. The docs change with the code and
+# link each other heavily, so a moved file or renamed heading fails here instead of going quietly stale.
+name: Docs
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  links:
+    name: Docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # 429 is a site rate-limiting the checker, not a broken link; the token keeps github.com from doing so.
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --include-fragments --timeout 20 --max-retries 2 --accept '200..=299,429' './**/*.md'
+          fail: true
+          token: ${{ secrets.GITHUB_TOKEN }}

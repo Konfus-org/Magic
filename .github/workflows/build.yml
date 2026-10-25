@@ -1,0 +1,127 @@
+# The build on every OS Magic targets, in Release: tools/Scripts/Validate.ps1's Build step, which makes every warning but a
+# TODO's an error, then the headless samples on what it built. Every job packages Magic's folder, so a build is there
+# to download from any run, and a push to main publishes the packages as one GitHub release once every build passed:
+# what ships is what was checked, built once. The weekly run keeps main's native-library caches alive, which every
+# branch falls back to.
+name: Build
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push supersedes a run, except on main, where a release in progress is never cut short.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    # A push to dev or main is one result, so the first OS to fail ends the others; a pull request's author wants
+    # every OS's verdict, and the weekly and manual runs are there to finish.
+    strategy:
+      fail-fast: ${{ github.event_name == 'push' }}
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup
+        uses: ./.github/actions/setup
+
+      # Core's VersionPrefix with this run's number as the patch, so every build is newer than the last and no one
+      # bumps a number by hand. MSBuild reads Version from the environment; a project with a Version of its own, as a
+      # gem has, keeps it.
+      - name: Name the version
+        id: version
+        shell: pwsh
+        run: |
+          $prefix = dotnet msbuild src/Core/Core.csproj -getProperty:VersionPrefix
+          $version = "$prefix.${{ github.run_number }}"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "Version=$version" >> $env:GITHUB_ENV
+
+      # The build bakes the samples' caches beside them in Build/bin/Release/Projects/Samples, and the headless run
+      # opens them there, so it runs on what ships and reads the bundle the package carries.
+      - name: Build and run headless
+        shell: pwsh
+        run: ./tools/Scripts/Validate.ps1 -Configuration Release -Only Build,Headless -Project Build/bin/Release/Projects/Samples
+
+      # Magic's folder without what the build and the run left in it; a project's baked Cache/ inside it ships. tar
+      # keeps the executable bit that a zip would lose, so Linux and macOS get a tarball.
+      - name: Package
+        shell: pwsh
+        run: |
+          $platform = "${{ runner.os }}-${{ runner.arch }}".ToLowerInvariant()
+          $name = "Magic-$env:Version-$platform"
+          $excluded = 'Tests', 'Tools', 'Logs', 'Screenshots'
+          if ($IsWindows) {
+            Get-ChildItem Build/bin/Release -Exclude $excluded | Compress-Archive -DestinationPath "$name.zip"
+          } else {
+            $options = $excluded | ForEach-Object { "--exclude=./$_" }
+            tar --create --gzip --file "$name.tar.gz" --directory Build/bin/Release @options .
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: Magic-${{ matrix.os }}
+          path: Magic-*
+          if-no-files-found: error
+          retention-days: 7
+
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-natives
+        with:
+          key: ${{ steps.setup.outputs.natives-key }}
+          hit: ${{ steps.setup.outputs.natives-hit }}
+
+  publish:
+    name: Publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # The notes need the history back to the previous release's tag. The checkout comes first, as it empties the
+      # folder.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: Magic-*
+          merge-multiple: true
+          path: release
+
+      # The commits since the previous release, grouped by type as cliff.toml lays them out; GitHub's own notes, with
+      # the link that compares the releases, follow them.
+      - name: Write the notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --unreleased
+        env:
+          OUTPUT: notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: >
+          gh release create "v$VERSION" --target "${{ github.sha }}" --title "Magic $VERSION"
+          --notes-file notes.md --generate-notes release/*

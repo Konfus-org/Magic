@@ -1,0 +1,48 @@
+# The tests, on Linux in Release: tools/Scripts/Validate.ps1's Test step, which needs no display or GPU. The headless sample run
+# is the Build workflow's, on every OS; the Screenshot step needs a display, so it stays on developer machines. The logs
+# are kept when a run fails.
+name: Test
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: setup
+        uses: ./.github/actions/setup
+
+      - name: Build and test
+        shell: pwsh
+        run: ./tools/Scripts/Validate.ps1 -Configuration Release -Only Build,Test
+
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: logs
+          path: |
+            Build/bin/Release/Logs
+            Build/TestOutput
+          if-no-files-found: ignore
+
+      - if: ${{ !cancelled() }}
+        uses: ./.github/actions/save-natives
+        with:
+          key: ${{ steps.setup.outputs.natives-key }}
+          hit: ${{ steps.setup.outputs.natives-hit }}

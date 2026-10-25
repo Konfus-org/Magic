@@ -1,0 +1,27 @@
+# The notes of a GitHub release: the commits since the previous release, grouped by their type
+# (.github/workflows/README.md, Releases). A group's name starts with a hidden number that orders the groups.
+[changelog]
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim }}
+{% for commit in commits %}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}{{ commit.message | split(pat="\n") | first | trim }}
+{%- endfor %}
+{% endfor %}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+commit_parsers = [
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Bug fixes" },
+    { message = "^refactor", group = "<!-- 2 -->Refactoring" },
+    { message = "^docs", group = "<!-- 3 -->Documentation" },
+    { message = "^test", group = "<!-- 4 -->Tests" },
+    { message = "^build", group = "<!-- 5 -->Build" },
+    { message = "^ci", group = "<!-- 6 -->CI" },
+    { message = ".*", group = "<!-- 7 -->Other" },
+]
+tag_pattern = "v[0-9].*"

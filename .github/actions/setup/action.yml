@@ -1,0 +1,91 @@
+# What a job needs before it builds Magic: the SDK global.json names, Python where the shader compiler is built from
+# source, SDL's build dependencies on Linux, Ninja where the OS does not bring it, a Vulkan driver (software where the
+# runner has no GPU, MoltenVK over Metal on macOS), and the two caches. The native libraries' cache is only restored here: the job saves it with save-natives as its last step, so a cold native build
+# survives a failure later in the job. README.md beside the workflows explains the whole.
+name: Set up Magic's build
+description: Installs what a build needs and restores the NuGet and native-library caches.
+
+outputs:
+  natives-key:
+    description: The cache key the native libraries are saved under after the build.
+    value: ${{ steps.natives.outputs.cache-primary-key }}
+  natives-hit:
+    description: Whether the native libraries were restored under exactly that key, so there is nothing to save.
+    value: ${{ steps.natives.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-dotnet@v6
+      with:
+        global-json-file: global.json
+
+    # The shader compiler comes prebuilt on Windows and Linux; on macOS it is built from source, and its build runs
+    # Python.
+    - uses: actions/setup-python@v7
+      if: runner.os == 'macOS'
+      with:
+        python-version: "3.x"
+
+    # The Linux runner has no GPU, and the headless samples still render: Mesa's software Vulkan driver (lavapipe)
+    # is the device they open.
+    - name: Install SDL's build dependencies, Ninja and a software Vulkan driver
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends ninja-build mesa-vulkan-drivers \
+          libasound2-dev libpulse-dev libpipewire-0.3-dev libudev-dev libdbus-1-dev \
+          libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev \
+          libxkbcommon-dev libwayland-dev libdecor-0-dev \
+          libegl1-mesa-dev libgl1-mesa-dev libgles2-mesa-dev libdrm-dev libgbm-dev
+
+    # The Windows runner has no GPU and no Vulkan loader either: the Vulkan runtime, and Mesa's lavapipe registered as
+    # its driver, are the device the headless samples open.
+    - name: Install the Vulkan runtime and a software Vulkan driver
+      if: runner.os == 'Windows'
+      uses: jakoch/install-vulkan-sdk-action@v1.7.0
+      with:
+        install_runtime_only: true
+        install_lavapipe: true
+        cache: true
+
+    # macOS has no Vulkan of its own: the loader and MoltenVK, which runs Vulkan over Metal, come from Homebrew. A
+    # library opened by name is looked for in Homebrew's lib folder only once the fallback path names it.
+    - name: Install Ninja, the Vulkan loader and MoltenVK
+      if: runner.os == 'macOS'
+      shell: bash
+      run: |
+        brew install ninja vulkan-loader molten-vk
+        echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib:/usr/local/lib:/usr/lib" >> "$GITHUB_ENV"
+
+    # A runner has no user to keep the machine usable for, so the native builds take every core. The native libraries
+    # and the packages sit in the workspace so a cache can name them. The Linux runner has no display, and the GPU
+    # opens only with the platform library's video subsystem up: its offscreen driver starts without one, and finds
+    # Vulkan through a headless surface.
+    - name: Set the build's environment
+      shell: pwsh
+      run: |
+        "MagicNativeCores=$([Environment]::ProcessorCount)" >> $env:GITHUB_ENV
+        "MagicNativeLibs=${{ github.workspace }}/Build/NativeLibs/" >> $env:GITHUB_ENV
+        "NUGET_PACKAGES=${{ github.workspace }}/.nuget/packages" >> $env:GITHUB_ENV
+        "DOTNET_NOLOGO=1" >> $env:GITHUB_ENV
+        "DOTNET_CLI_TELEMETRY_OPTOUT=1" >> $env:GITHUB_ENV
+        if ($IsLinux) { "SDL_VIDEO_DRIVER=offscreen" >> $env:GITHUB_ENV }
+
+    # Every package version is in Directory.Packages.props, so that and the SDK are what the packages depend on.
+    - uses: actions/cache@v6
+      with:
+        path: ${{ github.workspace }}/.nuget/packages
+        key: nuget-${{ runner.os }}-${{ hashFiles('Directory.Packages.props', 'global.json') }}
+        restore-keys: nuget-${{ runner.os }}-
+
+    # Keyed on what declares the libraries, the gems' projects, and on the build that reads them. A cache from an older
+    # key still serves: each library's ready marker tells the build which libraries match, and it builds the ones that
+    # changed alone.
+    - id: natives
+      uses: actions/cache/restore@v6
+      with:
+        path: Build/NativeLibs
+        key: natives-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src/Bundled/Gems/*/*.csproj', 'Directory.Build.targets') }}
+        restore-keys: natives-${{ runner.os }}-${{ runner.arch }}-

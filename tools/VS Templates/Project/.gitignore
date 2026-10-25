@@ -1,0 +1,4 @@
+# The build's intermediate files; the code itself builds into Magic's folder.
+obj/
+# Tools' own state.
+.vs/

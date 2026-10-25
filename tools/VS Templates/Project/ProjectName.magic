@@ -1,0 +1,22 @@
+{
+    "name": "ProjectName",
+    "firstDomain": { "id": 1111111111 },
+    "gems": [
+        "SdlPlatform",
+        "VulkanGpu",
+        "SlangShaderCompiler",
+        "ConsoleCommands",
+        "ArchEcs",
+        "Scripting",
+        "Box3DPhysics",
+        "SdlTextureLoader",
+        "SdlFontLoader",
+        "AssimpModelLoader",
+        "ClusterGenerator",
+        "PrefabLoader",
+        "ImGuiDebugUI",
+        "DebugTools",
+        "RealtimeGIRendering",
+        "LogMetrics"
+    ]
+}

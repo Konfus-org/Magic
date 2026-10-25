@@ -1,0 +1,31 @@
+# Pull requests into dev for package and action updates, one per ecosystem per week. The build fails the restore on
+# any package advisory, so an update that fixes one arrives as a pull request the same checks then validate. Their
+# subjects start with build(deps) and ci(deps), as the Commits check asks (AGENTS.md, Commits).
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: dev
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      nuget:
+        patterns: ['*']
+
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/setup
+      - /.github/actions/save-natives
+    schedule:
+      interval: weekly
+    target-branch: dev
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ['*']

@@ -1,0 +1,53 @@
+#!/bin/sh
+# Starts the commit's subject with type(scope): the type from the branch's name, which the staged files override or
+# fill in, and the scope from the areas those files are in, each gem by name (AGENTS.md, Commits). A subject that
+# already starts with one, or marks a fixup, is left as it is. Git runs it once core.hooksPath names this folder. It
+# never refuses a commit; commit-msg refuses one whose subject still lacks the prefix.
+message=$1
+case $2 in merge|squash) exit 0 ;; esac
+first=$(head -n 1 "$message")
+case $first in fixup!*|squash!*|amend!*) exit 0 ;; esac
+printf '%s\n' "$first" | grep -Eq '^(feat|fix|refactor|docs|test|build|ci)(\([A-Za-z0-9][A-Za-z0-9:, -]*\))?!?: ' && exit 0
+
+# What the commit changes against its parent; on an amend, the whole commit's files; on the first commit, every file.
+base=HEAD
+[ "$2" = commit ] && [ "$3" = HEAD ] && base='HEAD^'
+files=$(git -c core.quotepath=off diff --cached --name-only "$base" 2>/dev/null ||
+    git -c core.quotepath=off diff --cached --name-only)
+
+# Whether every staged path, or any, matches a pattern.
+every() { [ -n "$files" ] && ! printf '%s\n' "$files" | grep -Evq "$1"; }
+any() { printf '%s\n' "$files" | grep -Eq "$1"; }
+
+branch=$(git symbolic-ref --short -q HEAD)
+case $branch in
+    feature/*) type=feat ;;
+    feat/*|fix/*|refactor/*|docs/*|test/*|build/*|ci/*) type=${branch%%/*} ;;
+    *) type= ;;
+esac
+if every '\.md$'; then
+    type=docs
+elif [ -z "$type" ]; then
+    if every '^\.github/'; then type=ci
+    elif every '\.(csproj|props|targets|slnx)$|(^|/)(global\.json|nuget\.config)$'; then type=build
+    elif every '^tests/'; then type=test
+    fi
+fi
+if [ -z "$type" ]; then
+    echo "prepare-commit-msg: '${branch:-detached HEAD}' gives no type: write type(scope): at the subject's start." >&2
+    exit 0
+fi
+
+scope=
+any '^src/Core/' && scope=', core'
+gems=$(printf '%s\n' "$files" | sed -n 's#^src/Bundled/Gems/\([^/]*\)/.*#\1#p' | sort -u | paste -sd, -)
+[ -n "$gems" ] && scope="$scope, gem:$gems"
+for area in 'src/Bundled/Resources/ resources' 'samples/ samples' 'tests/ tests' 'tools/ tools'; do
+    set -- $area
+    any "^$1" && scope="$scope, $2"
+done
+scope=${scope#, }
+[ -n "$scope" ] && scope="($scope)"
+
+{ printf '%s%s: ' "$type" "$scope"; cat "$message"; } > "$message.tmp" && mv "$message.tmp" "$message"
+exit 0

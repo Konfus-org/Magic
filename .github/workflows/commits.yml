@@ -1,0 +1,46 @@
+# Every commit's subject starts with type(scope): (AGENTS.md, Commits). The repository's hook writes it where the
+# commit is made; this checks what reached GitHub, every subject of a push or pull request, and names each one
+# without it.
+name: Commits
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commits-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  subjects:
+    name: Commit subjects
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # A pull request's commits run from its base to its head, never through the merge commit GitHub makes to test
+      # it. A push's run from the commit before it while that commit is still in the history; after a force push or
+      # on a new branch it isn't, so the commits since main are checked, and on main itself the one pushed.
+      - name: Check every subject
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -n "$BASE" ]; then range="$BASE..$HEAD_SHA"
+          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE" 2>/dev/null; then range="$BEFORE..HEAD"
+          elif [ -n "$(git rev-list origin/main..HEAD)" ]; then range="origin/main..HEAD"
+          else range="HEAD^..HEAD"; fi
+          pattern='^[0-9a-f]+ (feat|fix|refactor|docs|test|build|ci)(\([A-Za-z0-9][A-Za-z0-9:, -]*\))?!?: [^ ]'
+          echo "Checking $(git rev-list --no-merges --count "$range") commits in $range."
+          bad=$(git log --no-merges --format='%h %s' "$range" | grep -Ev "$pattern" || true)
+          [ -z "$bad" ] || { printf '%s\n' "$bad" | cut -c1-160 | sed 's/^/::error::no type(scope) prefix: /'; exit 1; }
