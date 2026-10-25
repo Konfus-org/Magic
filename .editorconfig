@@ -1,0 +1,511 @@
+# Code style and analyzer rules. The build enforces them (EnforceCodeStyleInBuild) and treats every warning but a TODO
+# comment's (MA0026, Directory.Build.props) as an error, so "warning" below means "the build fails". What a build cannot
+# check (IDE0001, and a file's charset and final newline) only tools/Format.ps1 holds, on the files a change touches,
+# and git makes every line ending LF (.gitattributes). tools/Format.ps1 applies the fixes these settings describe. Every
+# code-quality rule is on (AnalysisMode All); the few that are off say why.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+max_line_length = 120
+
+[*.{csproj,props,targets,slnx,xml,config}]
+indent_size = 2
+
+[*.md]
+trim_trailing_whitespace = true
+
+[*.cs]
+
+# Files and usings
+csharp_style_namespace_declarations = file_scoped
+dotnet_diagnostic.IDE0161.severity = warning
+csharp_using_directive_placement = outside_namespace
+dotnet_diagnostic.IDE0065.severity = warning
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+dotnet_diagnostic.IDE0005.severity = warning
+
+# Formatting (IDE0055 enforces every csharp_new_line, csharp_indent and csharp_space option)
+dotnet_diagnostic.IDE0055.severity = warning
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+csharp_indent_block_contents = true
+csharp_indent_braces = false
+csharp_indent_case_contents = true
+csharp_indent_case_contents_when_block = false
+csharp_indent_switch_labels = true
+csharp_indent_labels = one_less_than_current
+csharp_space_after_cast = false
+csharp_space_after_keywords_in_control_flow_statements = true
+csharp_space_between_parentheses = false
+csharp_space_before_colon_in_inheritance_clause = true
+csharp_space_after_colon_in_inheritance_clause = true
+csharp_space_around_binary_operators = before_and_after
+csharp_space_between_method_declaration_parameter_list_parentheses = false
+csharp_space_between_method_declaration_empty_parameter_list_parentheses = false
+csharp_space_between_method_declaration_name_and_open_parenthesis = false
+csharp_space_between_method_call_parameter_list_parentheses = false
+csharp_space_between_method_call_empty_parameter_list_parentheses = false
+csharp_space_between_method_call_name_and_opening_parenthesis = false
+csharp_space_after_comma = true
+csharp_space_before_comma = false
+csharp_space_after_dot = false
+csharp_space_before_dot = false
+csharp_space_after_semicolon_in_for_statement = true
+csharp_space_before_semicolon_in_for_statement = false
+csharp_space_around_declaration_statements = false
+csharp_space_before_open_square_brackets = false
+csharp_space_between_empty_square_brackets = false
+csharp_space_between_square_brackets = false
+csharp_preserve_single_line_statements = true
+csharp_preserve_single_line_blocks = true
+dotnet_style_operator_placement_when_wrapping = beginning_of_line
+
+# Line length: a line of code longer than max_line_length fails the build (RCS0056), and tools/Format.ps1 wraps it.
+# Roslynator reads its own key rather than max_line_length, so both say the same. Its wrap puts operators, ?: and =>
+# at the start of the line and = at the end, as the rest of the code does, and the build holds the first three there.
+# Comments and string literals it neither checks nor wraps.
+roslynator_max_line_length = 120
+dotnet_diagnostic.RCS0056.severity = warning
+roslynator_binary_operator_new_line = before
+dotnet_diagnostic.RCS0027.severity = warning
+roslynator_conditional_operator_new_line = before
+dotnet_diagnostic.RCS0028.severity = warning
+roslynator_arrow_token_new_line = before
+dotnet_diagnostic.RCS0032.severity = warning
+roslynator_equals_token_new_line = after
+# A list of arguments or parameters that spans lines has every item on a line of its own, the first on the line after
+# the opening parenthesis, as the wrap leaves one, so a list reads the same wrapped by hand or by the tool.
+dotnet_diagnostic.RCS0053.severity = warning
+
+# Layout: the order of a type's members (CODESTANDARDS Type layout) and of the usings, which StyleCop's ordering rules
+# check. They are the only StyleCop rules on: the others repeat the rules here or contradict them. The member order,
+# which tools/Format.ps1 puts right: by kind (SA1201), with nested types last, as types in a file are ordered; then by
+# access (SA1202); constants first (SA1203); static before instance (SA1204).
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.DocumentationRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.LayoutRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.MaintainabilityRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.NamingRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.ReadabilityRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.SpacingRules.severity = none
+dotnet_analyzer_diagnostic.category-StyleCop.CSharp.OrderingRules.severity = warning
+stylecop.ordering.memberKindOrder = field, constructor, destructor, event, property, indexer, extension, conversionOperator, operator, method, delegate, enum, interface, struct, class
+stylecop.ordering.usingDirectivesPlacement = outsideNamespace
+dotnet_diagnostic.SA1201.severity = warning
+dotnet_diagnostic.SA1202.severity = warning
+dotnet_diagnostic.SA1203.severity = warning
+dotnet_diagnostic.SA1204.severity = warning
+# Repeats IDE0036.
+dotnet_diagnostic.SA1206.severity = none
+# Fields are grouped by what they are for, with the comment that says so, which readonly ones first would split; and
+# moving a static field can change what its initializer reads.
+dotnet_diagnostic.SA1214.severity = none
+
+# Blank lines: one between members and between the steps of a method, never two. The one before a way out of a block
+# (return, continue, break, throw) is CODESTANDARDS Methods' rule, which no option can ask for.
+dotnet_style_allow_multiple_blank_lines_experimental = false
+dotnet_diagnostic.IDE2000.severity = warning
+csharp_style_allow_embedded_statements_on_same_line_experimental = true
+dotnet_diagnostic.IDE2001.severity = warning
+csharp_style_allow_blank_lines_between_consecutive_braces_experimental = false
+dotnet_diagnostic.IDE2002.severity = warning
+dotnet_style_allow_statement_immediately_after_block_experimental = false
+dotnet_diagnostic.IDE2003.severity = warning
+csharp_style_allow_blank_line_after_colon_in_constructor_initializer_experimental = false
+dotnet_diagnostic.IDE2004.severity = warning
+csharp_style_allow_blank_line_after_token_in_conditional_expression_experimental = false
+dotnet_diagnostic.IDE2005.severity = warning
+csharp_style_allow_blank_line_after_token_in_arrow_expression_clause_experimental = false
+dotnet_diagnostic.IDE2006.severity = warning
+
+# An if or an else whose body is one statement has no braces, and a body or header that spans lines always has them.
+# Where the body goes (on its header's line when that fits, on the next when not), the braces on the branches beside
+# a braced one and the braces on every loop are CODESTANDARDS Methods' rules, which no option can ask for.
+csharp_prefer_braces = when_multiline
+dotnet_diagnostic.IDE0011.severity = warning
+
+# Types are written out, so code reads without hovering; new() and [] when the type is already on the line
+csharp_style_var_for_built_in_types = false
+csharp_style_var_when_type_is_apparent = false
+csharp_style_var_elsewhere = false
+dotnet_diagnostic.IDE0008.severity = warning
+csharp_style_implicit_object_creation_when_type_is_apparent = true
+dotnet_diagnostic.IDE0090.severity = warning
+dotnet_style_collection_initializer = true
+dotnet_style_prefer_collection_expression = when_types_loosely_match
+dotnet_diagnostic.IDE0028.severity = warning
+dotnet_diagnostic.IDE0300.severity = warning
+dotnet_diagnostic.IDE0301.severity = warning
+dotnet_diagnostic.IDE0302.severity = warning
+dotnet_diagnostic.IDE0303.severity = warning
+dotnet_diagnostic.IDE0304.severity = warning
+dotnet_diagnostic.IDE0305.severity = warning
+dotnet_style_predefined_type_for_locals_parameters_members = true
+dotnet_style_predefined_type_for_member_access = true
+dotnet_diagnostic.IDE0049.severity = warning
+
+# Members
+dotnet_style_require_accessibility_modifiers = for_non_interface_members
+dotnet_diagnostic.IDE0040.severity = warning
+csharp_preferred_modifier_order = public, private, protected, internal, file, static, extern, new, virtual, abstract, sealed, override, readonly, unsafe, required, volatile, async
+dotnet_diagnostic.IDE0036.severity = warning
+dotnet_style_qualification_for_field = false
+dotnet_style_qualification_for_property = false
+dotnet_style_qualification_for_method = false
+dotnet_style_qualification_for_event = false
+dotnet_diagnostic.IDE0003.severity = warning
+dotnet_diagnostic.IDE0009.severity = warning
+dotnet_style_readonly_field = true
+dotnet_diagnostic.IDE0044.severity = warning
+csharp_style_prefer_readonly_struct = true
+dotnet_diagnostic.IDE0250.severity = warning
+csharp_style_prefer_readonly_struct_member = true
+dotnet_diagnostic.IDE0251.severity = warning
+dotnet_diagnostic.IDE0064.severity = warning
+csharp_style_prefer_primary_constructors = true
+dotnet_diagnostic.IDE0290.severity = warning
+dotnet_style_prefer_auto_properties = true
+dotnet_diagnostic.IDE0032.severity = warning
+# A member that only returns or does one thing says it with =>: a property, indexer or accessor always, and a method,
+# local function or operator whose body is one statement on one line
+csharp_style_expression_bodied_methods = when_on_single_line
+dotnet_diagnostic.IDE0022.severity = warning
+csharp_style_expression_bodied_local_functions = when_on_single_line
+dotnet_diagnostic.IDE0061.severity = warning
+csharp_style_expression_bodied_operators = when_on_single_line
+dotnet_diagnostic.IDE0023.severity = warning
+dotnet_diagnostic.IDE0024.severity = warning
+csharp_style_expression_bodied_properties = true
+dotnet_diagnostic.IDE0025.severity = warning
+csharp_style_expression_bodied_indexers = true
+dotnet_diagnostic.IDE0026.severity = warning
+csharp_style_expression_bodied_accessors = true
+dotnet_diagnostic.IDE0027.severity = warning
+
+# Dead, redundant and unused code
+dotnet_diagnostic.IDE0001.severity = warning
+dotnet_diagnostic.IDE0002.severity = warning
+dotnet_diagnostic.IDE0004.severity = warning
+dotnet_diagnostic.IDE0035.severity = warning
+dotnet_diagnostic.IDE0051.severity = warning
+dotnet_diagnostic.IDE0052.severity = warning
+csharp_style_unused_value_assignment_preference = discard_variable
+dotnet_diagnostic.IDE0059.severity = warning
+dotnet_code_quality_unused_parameters = all
+dotnet_diagnostic.IDE0060.severity = warning
+dotnet_diagnostic.IDE0080.severity = warning
+dotnet_diagnostic.IDE0100.severity = warning
+dotnet_diagnostic.IDE0110.severity = warning
+dotnet_diagnostic.IDE0240.severity = warning
+dotnet_diagnostic.IDE0241.severity = warning
+dotnet_diagnostic.IDE0076.severity = warning
+dotnet_diagnostic.IDE0077.severity = warning
+dotnet_remove_unnecessary_suppression_exclusions = none
+dotnet_diagnostic.IDE0079.severity = warning
+
+# Mistakes the compiler lets through: missing enum cases, bad format strings, hidden casts, unclear precedence
+dotnet_diagnostic.IDE0010.severity = warning
+dotnet_diagnostic.IDE0072.severity = warning
+dotnet_diagnostic.IDE0043.severity = warning
+dotnet_style_prefer_foreach_explicit_cast_in_source = when_strongly_typed
+dotnet_diagnostic.IDE0220.severity = warning
+dotnet_style_parentheses_in_arithmetic_binary_operators = always_for_clarity
+dotnet_style_parentheses_in_relational_binary_operators = always_for_clarity
+dotnet_style_parentheses_in_other_binary_operators = always_for_clarity
+dotnet_style_parentheses_in_other_operators = never_if_unnecessary
+dotnet_diagnostic.IDE0047.severity = warning
+dotnet_diagnostic.IDE0048.severity = warning
+
+# Allocation and capture: no hidden closures, using declarations instead of nested blocks
+csharp_prefer_static_local_function = true
+dotnet_diagnostic.IDE0062.severity = warning
+csharp_prefer_static_anonymous_function = true
+dotnet_diagnostic.IDE0320.severity = warning
+csharp_style_prefer_method_group_conversion = true
+dotnet_diagnostic.IDE0200.severity = warning
+csharp_prefer_simple_using_statement = true
+dotnet_diagnostic.IDE0063.severity = warning
+csharp_style_prefer_system_threading_lock = true
+dotnet_diagnostic.IDE0330.severity = warning
+
+# Simpler expressions
+csharp_style_pattern_matching_over_as_with_null_check = true
+dotnet_diagnostic.IDE0019.severity = warning
+csharp_style_pattern_matching_over_is_with_cast_check = true
+dotnet_diagnostic.IDE0020.severity = warning
+dotnet_diagnostic.IDE0038.severity = warning
+csharp_style_prefer_not_pattern = true
+dotnet_diagnostic.IDE0083.severity = warning
+csharp_style_prefer_pattern_matching = true
+dotnet_diagnostic.IDE0078.severity = warning
+csharp_style_prefer_null_check_over_type_check = true
+dotnet_diagnostic.IDE0150.severity = warning
+dotnet_style_coalesce_expression = true
+dotnet_diagnostic.IDE0029.severity = warning
+dotnet_diagnostic.IDE0030.severity = warning
+dotnet_diagnostic.IDE0270.severity = warning
+dotnet_style_null_propagation = true
+dotnet_diagnostic.IDE0031.severity = warning
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true
+dotnet_diagnostic.IDE0041.severity = warning
+csharp_style_conditional_delegate_call = true
+dotnet_diagnostic.IDE1005.severity = warning
+csharp_style_inlined_variable_declaration = true
+dotnet_diagnostic.IDE0018.severity = warning
+dotnet_style_object_initializer = true
+dotnet_diagnostic.IDE0017.severity = warning
+csharp_prefer_simple_default_expression = true
+dotnet_diagnostic.IDE0034.severity = warning
+dotnet_style_prefer_simplified_interpolation = true
+dotnet_diagnostic.IDE0071.severity = warning
+dotnet_style_prefer_simplified_boolean_expressions = true
+dotnet_diagnostic.IDE0075.severity = warning
+dotnet_style_prefer_compound_assignment = true
+dotnet_diagnostic.IDE0054.severity = warning
+dotnet_diagnostic.IDE0074.severity = warning
+csharp_style_prefer_local_over_anonymous_function = true
+dotnet_diagnostic.IDE0039.severity = warning
+dotnet_diagnostic.IDE0082.severity = warning
+dotnet_diagnostic.IDE0280.severity = warning
+
+# Naming: PascalCase types, members and constants, IPascalCase interfaces, TPascalCase type parameters,
+# _camelCase private fields, camelCase locals and parameters
+dotnet_diagnostic.IDE1006.severity = warning
+
+dotnet_naming_rule.interfaces.symbols = interfaces
+dotnet_naming_rule.interfaces.style = i_pascal_case
+dotnet_naming_rule.interfaces.severity = warning
+dotnet_naming_symbols.interfaces.applicable_kinds = interface
+dotnet_naming_style.i_pascal_case.required_prefix = I
+dotnet_naming_style.i_pascal_case.capitalization = pascal_case
+
+dotnet_naming_rule.type_parameters.symbols = type_parameters
+dotnet_naming_rule.type_parameters.style = t_pascal_case
+dotnet_naming_rule.type_parameters.severity = warning
+dotnet_naming_symbols.type_parameters.applicable_kinds = type_parameter
+dotnet_naming_style.t_pascal_case.required_prefix = T
+dotnet_naming_style.t_pascal_case.capitalization = pascal_case
+
+dotnet_naming_rule.private_constants.symbols = private_constants
+dotnet_naming_rule.private_constants.style = pascal_case
+dotnet_naming_rule.private_constants.severity = warning
+dotnet_naming_symbols.private_constants.applicable_kinds = field
+dotnet_naming_symbols.private_constants.applicable_accessibilities = private
+dotnet_naming_symbols.private_constants.required_modifiers = const
+
+dotnet_naming_rule.private_fields.symbols = private_fields
+dotnet_naming_rule.private_fields.style = underscore_camel_case
+dotnet_naming_rule.private_fields.severity = warning
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel_case.required_prefix = _
+dotnet_naming_style.underscore_camel_case.capitalization = camel_case
+
+dotnet_naming_rule.local_constants.symbols = local_constants
+dotnet_naming_rule.local_constants.style = pascal_case
+dotnet_naming_rule.local_constants.severity = warning
+dotnet_naming_symbols.local_constants.applicable_kinds = local
+dotnet_naming_symbols.local_constants.required_modifiers = const
+
+dotnet_naming_rule.locals_and_parameters.symbols = locals_and_parameters
+dotnet_naming_rule.locals_and_parameters.style = camel_case
+dotnet_naming_rule.locals_and_parameters.severity = warning
+dotnet_naming_symbols.locals_and_parameters.applicable_kinds = parameter, local
+dotnet_naming_style.camel_case.capitalization = camel_case
+
+dotnet_naming_rule.everything_else.symbols = everything_else
+dotnet_naming_rule.everything_else.style = pascal_case
+dotnet_naming_rule.everything_else.severity = warning
+dotnet_naming_symbols.everything_else.applicable_kinds = namespace, class, struct, enum, delegate, event, method, property, field, local_function
+dotnet_naming_style.pascal_case.capitalization = pascal_case
+
+# Async: ConfigureAwait(false) on every await, every task observed, no async void, no blocking waits,
+# Async suffix on everything that returns a task
+dotnet_diagnostic.CA2007.severity = warning
+dotnet_diagnostic.VSTHRD002.severity = warning
+dotnet_diagnostic.VSTHRD100.severity = warning
+dotnet_diagnostic.VSTHRD101.severity = warning
+dotnet_diagnostic.VSTHRD103.severity = warning
+dotnet_diagnostic.VSTHRD110.severity = warning
+dotnet_diagnostic.VSTHRD200.severity = warning
+# Repeats CA2007.
+dotnet_diagnostic.VSTHRD111.severity = none
+# Guards JoinableTaskFactory code, which Magic has none of.
+dotnet_diagnostic.VSTHRD003.severity = none
+
+# Null: the null-forgiving ! is not allowed (CODESTANDARDS Null)
+dotnet_diagnostic.NX0001.severity = warning
+dotnet_diagnostic.NX0002.severity = warning
+dotnet_diagnostic.NX0003.severity = warning
+
+# Banned APIs (BannedSymbols.txt): what the standards say to use instead
+dotnet_diagnostic.RS0030.severity = warning
+
+# Roslynator's rules, on as every code-quality rule is: the category turns on those on by default, and a line each the
+# ones off by default. The few that are off are with the others below, each saying why. The options hold its style
+# rules to what the rules above already ask: summaries on their own lines, types written out, access always stated,
+# every await configured.
+dotnet_analyzer_diagnostic.category-Roslynator.severity = warning
+dotnet_diagnostic.RCS1013.severity = warning
+dotnet_diagnostic.RCS1014.severity = warning
+dotnet_diagnostic.RCS1016.severity = warning
+dotnet_diagnostic.RCS1018.severity = warning
+dotnet_diagnostic.RCS1046.severity = warning
+dotnet_diagnostic.RCS1050.severity = warning
+dotnet_diagnostic.RCS1051.severity = warning
+dotnet_diagnostic.RCS1052.severity = warning
+dotnet_diagnostic.RCS1078.severity = warning
+dotnet_diagnostic.RCS1079.severity = warning
+dotnet_diagnostic.RCS1080.severity = warning
+dotnet_diagnostic.RCS1081.severity = warning
+dotnet_diagnostic.RCS1090.severity = warning
+dotnet_diagnostic.RCS1094.severity = warning
+dotnet_diagnostic.RCS1096.severity = warning
+dotnet_diagnostic.RCS1162.severity = warning
+dotnet_diagnostic.RCS1174.severity = warning
+dotnet_diagnostic.RCS1198.severity = warning
+dotnet_diagnostic.RCS1207.severity = warning
+dotnet_diagnostic.RCS1208.severity = warning
+dotnet_diagnostic.RCS1248.severity = warning
+dotnet_diagnostic.RCS1250.severity = warning
+dotnet_diagnostic.RCS1252.severity = warning
+dotnet_diagnostic.RCS1253.severity = warning
+dotnet_diagnostic.RCS1255.severity = warning
+dotnet_diagnostic.RCS1260.severity = warning
+dotnet_diagnostic.RCS1264.severity = warning
+roslynator_doc_comment_summary_style = multi_line
+roslynator_use_var = never
+roslynator_accessibility_modifiers = explicit
+roslynator_configure_await = true
+
+# Code-quality rules that are off
+# Magic is used from C#: CLS compliance and other languages' keywords (End, Stop, Error) do not matter.
+dotnet_diagnostic.CA1014.severity = none
+dotnet_diagnostic.CA1716.severity = none
+# Nullable reference types check arguments for null at compile time.
+dotnet_diagnostic.CA1062.severity = none
+# Engine text is not localized.
+dotnet_diagnostic.CA1303.severity = none
+# XML docs go on types and non-obvious members, not every public one (CODESTANDARDS Comments).
+dotnet_diagnostic.CS1591.severity = none
+# Repeat CA2007 and VSTHRD110.
+dotnet_diagnostic.MA0004.severity = none
+dotnet_diagnostic.MA0134.severity = none
+# Big methods are fine when they read in order.
+dotnet_diagnostic.MA0051.severity = none
+# Contradicts CA1859, which asks for concrete types where they are faster.
+dotnet_diagnostic.MA0016.severity = none
+# A file can hold small types that belong with its main one (CODESTANDARDS Files).
+dotnet_diagnostic.MA0048.severity = none
+# Enum values in blocks or ranges are not flags; CA2217 still checks the enums that say they are.
+dotnet_diagnostic.CA1027.severity = none
+# An enum can be stored in a smaller type, to pack the data it is in.
+dotnet_diagnostic.CA1028.severity = none
+# Its list of namespaces to avoid is .NET Framework's, most of which .NET 10 does not have.
+dotnet_diagnostic.CA1724.severity = none
+# Structs keep the default layout; [StructLayout] is for where layout is the point (interop, GPU structs).
+dotnet_diagnostic.MA0008.severity = none
+# Data structs keep their public fields (CODESTANDARDS State), so an ECS component's can be written through a span.
+dotnet_code_quality.CA1051.exclude_structs = true
+# An if or an else with one short statement is one line without braces, and loops and a multi-line body always have
+# braces (CODESTANDARDS Methods): adding braces everywhere breaks the first, removing them the second. Braces in a case
+# are there to scope its locals, and none are asked of one with several statements.
+dotnet_diagnostic.RCS1002.severity = none
+dotnet_diagnostic.RCS1004.severity = none
+dotnet_diagnostic.RCS1007.severity = none
+dotnet_diagnostic.RCS1031.severity = none
+dotnet_diagnostic.RCS1111.severity = none
+# Stacked fixed statements share one block, as stacked usings do.
+dotnet_diagnostic.RCS1001.severity = none
+# Docs go on types and non-obvious members and say why (CODESTANDARDS Comments), as for CS1591; a comment over a group
+# of fields is one comment, not the first field's doc.
+dotnet_diagnostic.RCS1139.severity = none
+dotnet_diagnostic.RCS1140.severity = none
+dotnet_diagnostic.RCS1141.severity = none
+dotnet_diagnostic.RCS1142.severity = none
+dotnet_diagnostic.RCS1181.severity = none
+# A file can hold small types that belong with its main one (CODESTANDARDS Files), as for MA0048.
+dotnet_diagnostic.RCS1060.severity = none
+# An alias settles a name clash.
+dotnet_diagnostic.RCS1056.severity = none
+# Enums are read from files by name; one stored as a number says its values.
+dotnet_diagnostic.RCS1161.severity = none
+# [DebuggerDisplay] goes where a type debugs badly, not on every public one.
+dotnet_diagnostic.RCS1223.severity = none
+# Repeats IDE0036, in another order.
+dotnet_diagnostic.RCS1019.severity = none
+# A switch lists every enum member (IDE0010, IDE0072), which these would take out.
+dotnet_diagnostic.RCS1069.severity = none
+dotnet_diagnostic.RCS1070.severity = none
+# A local that names a value is kept for its name.
+dotnet_diagnostic.RCS1124.severity = none
+# A parameter's ref kind is chosen where it is measured (CODESTANDARDS Performance), and the ECS reads components by
+# in, a field at a time, without a copy.
+dotnet_diagnostic.RCS1231.severity = none
+dotnet_diagnostic.RCS1242.severity = none
+# Take the element field of an [InlineArray] struct for unused or unwritten; IDE0044 and IDE0051 cover the rest.
+dotnet_diagnostic.RCS1169.severity = none
+dotnet_diagnostic.RCS1213.severity = none
+# Takes a parameter a delegate's signature requires for unused; IDE0060 covers the rest.
+dotnet_diagnostic.RCS1163.severity = none
+# A static member of a generic type may use the type parameter in its body alone, such as its size.
+dotnet_diagnostic.RCS1158.severity = none
+# A native library's bit-flag enums come from its headers, without [Flags].
+dotnet_diagnostic.RCS1130.severity = none
+# Prose repeats a word on purpose ("taken in in place").
+dotnet_diagnostic.RCS1243.severity = none
+# An inline example too long for one line spans lines.
+dotnet_diagnostic.RCS1247.severity = none
+# A formula from a paper keeps the paper's form.
+dotnet_diagnostic.RCS1268.severity = none
+
+[src/Core/**.cs]
+# Core is an executable whose public types are the API gems compile against.
+dotnet_diagnostic.CA1515.severity = none
+
+[src/**/*Extensions.cs]
+# Extension blocks (CODESTANDARDS Extensions) compile to a nested type, which CA1034 takes for a nested public type.
+dotnet_diagnostic.CA1034.severity = none
+
+[src/Core/Internal/FileSystem.cs]
+# The one place that touches the disk and knows what a separator is.
+dotnet_diagnostic.RS0030.severity = none
+
+[src/Core/Services/Debugging.cs]
+# Debugging is what writes to the terminal, and it writes crash files itself.
+dotnet_diagnostic.RS0030.severity = none
+
+[{src/Bundled/Gems,src/Bundled/Resources,samples/Assets}/**.cs]
+# Core makes gems, and the scripting gem scripts, Magic's and a project's, by reflection, so the compiler never sees one
+# made.
+dotnet_diagnostic.CA1812.severity = none
+# A gem's components and file types have their fields set from files, by reflection, so the compiler never sees them
+# set; a gem is flat (CODESTANDARDS Folders), so they have no folder of their own to scope this to.
+dotnet_diagnostic.CS0649.severity = none
+
+[src/Bundled/Gems/ConsoleCommands/ConsoleCommandsGem.cs]
+# ConsoleCommands reads the terminal.
+dotnet_diagnostic.RS0030.severity = none
+
+[tests/**.cs]
+# A test is named as the sentence it checks (tests/README.md), underscores and all.
+dotnet_diagnostic.IDE1006.severity = none
+dotnet_diagnostic.CA1707.severity = none
+# xunit finds only public test classes.
+dotnet_diagnostic.CA1515.severity = none
+# xunit runs a test on its own context (CODESTANDARDS Async).
+dotnet_diagnostic.CA2007.severity = none
+dotnet_diagnostic.VSTHRD200.severity = none
+# What a test hands to the type it tests, that type owns: a subscription added to a list is the list's to end.
+dotnet_code_quality.dispose_ownership_transfer_at_method_call = true

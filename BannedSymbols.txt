@@ -1,0 +1,27 @@
+T:System.IO.File;Disk access goes through IFileSystem
+T:System.IO.Directory;Disk access goes through IFileSystem
+T:System.IO.FileInfo;Disk access goes through IFileSystem
+T:System.IO.DirectoryInfo;Disk access goes through IFileSystem
+T:System.IO.FileStream;Disk access goes through IFileSystem
+M:System.IO.Path.Combine(System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Combine(System.String,System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Combine(System.String,System.String,System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Combine(System.String[]);Build paths with IFileSystem.Combine
+M:System.IO.Path.Combine(System.ReadOnlySpan{System.String});Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.String,System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.String,System.String,System.String,System.String);Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.String[]);Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.ReadOnlySpan{System.String});Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char});Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char});Build paths with IFileSystem.Combine
+M:System.IO.Path.Join(System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char},System.ReadOnlySpan{System.Char});Build paths with IFileSystem.Combine
+M:System.IO.Path.GetDirectoryName(System.String);Take paths apart with IFileSystem.Parent
+M:System.IO.Path.GetDirectoryName(System.ReadOnlySpan{System.Char});Take paths apart with IFileSystem.Parent
+F:System.IO.Path.DirectorySeparatorChar;Never write a separator: build paths with IFileSystem.Combine
+F:System.IO.Path.AltDirectorySeparatorChar;Never write a separator: build paths with IFileSystem.Combine
+P:System.Environment.NewLine;Text is written with '\n' on every OS
+T:System.Console;Write through Debugging (Info, Warn, Error), so every line is ordered and counted
+T:System.Diagnostics.Debug;Log and assert through Debugging, which is on in every build
+T:System.Diagnostics.Trace;Write through Debugging (Info, Warn, Error), so every line is ordered and counted
+T:System.Collections.Concurrent.BlockingCollection`1;Hand work between threads with System.Threading.Channels

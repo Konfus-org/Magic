@@ -1,0 +1,105 @@
+<Project>
+  <!-- Every project. The build is strict: every compiler, analyzer, MSBuild and NuGet warning but a TODO comment's
+       (MA0026) is an error, and the analyzer rules are in .editorconfig. -->
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <Configurations>Debug;Optimize;Release</Configurations>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <Features>strict</Features>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>
+    <!-- On the compiler's list and on MSBuild's, which promotes the compiler's warnings too. -->
+    <WarningsNotAsErrors>MA0026</WarningsNotAsErrors>
+    <MSBuildWarningsNotAsErrors>MA0026</MSBuildWarningsNotAsErrors>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <AnalysisMode>All</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <!-- Also what lets the build report unused usings (IDE0005). -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- A package with a known vulnerability, direct or transitive, fails the restore. -->
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>low</NuGetAuditLevel>
+  </PropertyGroup>
+
+  <!-- Output. Build/bin/<Configuration>/ is Magic's folder, and where it loads the rest from: the bundled gems from
+       Gems/<Name>/, the bundled scripts from Resources/, a project's code from Projects/<Name>/; tests and the build's
+       tools, which never ship, go under Tests/<Name>/ and Tools/<Name>/. A project is placed by where its source is,
+       here rather than in its own folder, because MSBuild fixes the intermediate folder before any project file or
+       nearer Directory.Build.props is read. Build/obj/<Configuration>/ mirrors it: a project's intermediate files are
+       where its output is. -->
+  <PropertyGroup>
+    <MagicSource>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').Replace('\', '/'))/</MagicSource>
+    <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Gems/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Resources/'))">Resources/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('samples/'))">Projects/$(MSBuildProjectName)/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('tests/'))">Tests/$(MSBuildProjectName)/</MagicOutput>
+    <MagicOutput Condition="$(MagicSource.StartsWith('tools/'))">Tools/$(MSBuildProjectName)/</MagicOutput>
+    <MagicBin>$(MSBuildThisFileDirectory)Build/bin/$(Configuration)/</MagicBin>
+    <OutputPath>$(MagicBin)$(MagicOutput)</OutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)Build/obj/$(Configuration)/$(MagicOutput)</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <!-- Assets: a part's own are its Resources/ folder (MagicResources). A release copies them beside its assembly, their
+       READMEs and any project file left behind; any other build copies nothing and records the folder in the assembly
+       (Magic.Resources), so assets are read where they are written, and an edit reaches a running engine without a
+       build. -->
+  <PropertyGroup>
+    <MagicResources>$(MSBuildProjectDirectory)/Resources</MagicResources>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Content Include="$(MagicResources)/**" Exclude="$(MagicResources)/**/*.md;$(MagicResources)/**/*.csproj" LinkBase="Resources" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' != 'Release'">
+    <AssemblyMetadata Include="Magic.Resources" Value="$([System.IO.Path]::GetFullPath('$(MagicResources)'))" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <!-- Integer overflow throws while developing instead of wrapping silently; wrap on purpose with unchecked. -->
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Optimize'">
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebugType>none</DebugType>
+    <!-- Source paths compiled in, such as the file each log line names, start at the repository rather than the
+         folders of the machine that built it. Other configurations keep full paths, so debuggers find the sources. -->
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
+  </PropertyGroup>
+
+  <!-- Global usings, listed rather than implied. No System.Linq (no LINQ in the frame loop) and no System.IO (disk
+       access goes through IFileSystem): a file that needs either says so. -->
+  <ItemGroup>
+    <Using Include="System" />
+    <Using Include="System.Collections.Generic" />
+    <Using Include="System.Threading" />
+    <Using Include="System.Threading.Tasks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" Visible="false" />
+  </ItemGroup>
+
+  <!-- A namespace matches its folder: the project's RootNamespace, then each folder below the project (CODESTANDARDS
+       Folders). Checked here rather than by IDE0130, which goes quiet when the checkout's path holds a # or ;: the
+       analyzers read the project's folder from a file in which either starts a comment. Code compiled from outside
+       the project, such as the bundled scripts, is not checked. -->
+  <Target Name="CheckNamespaces" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_OwnCode Include="@(Compile)" Condition="$([System.String]::Copy('%(FullPath)').StartsWith('$(ProjectDir)'))"
+                Folder="$([MSBuild]::MakeRelative('$(ProjectDir)', '%(RootDir)%(Directory)'))" />
+      <_OwnCode Namespace="$([System.String]::Copy('$(RootNamespace).%(Folder)').Replace('\', '.').Replace('/', '.').TrimEnd('.'))" />
+    </ItemGroup>
+    <Error Condition="'%(_OwnCode.FullPath)' != '' and !$([System.IO.File]::ReadAllText('%(_OwnCode.FullPath)').Contains('namespace %(_OwnCode.Namespace);'))"
+           ContinueOnError="ErrorAndContinue" File="%(_OwnCode.FullPath)"
+           Text="Its namespace must be %(_OwnCode.Namespace), its folder's." />
+  </Target>
+</Project>

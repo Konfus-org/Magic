@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Magic: the host executable, and the library every gem compiles against. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Magic</AssemblyName>
+    <RootNamespace>Magic</RootNamespace>
+  </PropertyGroup>
+</Project>
