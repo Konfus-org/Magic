@@ -159,8 +159,7 @@ internal static class Program
         // TODO(KONFUS): Project.Open(projectPath);
         Log.Info("Successfully opened project.");
 
-        bool headless = cmds.GetValue<bool>("--headless");
-        Run(cts, cmdLineOptions, headless);
+        Run(cts, cmdLineOptions, cmds.GetValue<bool>("--headless"));
 
         Log.Flush();
 

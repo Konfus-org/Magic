@@ -183,7 +183,7 @@ public static class Log
 
         // Log always writes to console
         if (level >= LoggingLevel.Error)
-            _ = Console.Error.WriteLineAsync(lineStruct.ToString()).ConfigureAwait(false);
+            Console.Error.WriteLine(lineStruct.ToString());
         else
             Console.WriteLine(lineStruct.ToString());
     }
