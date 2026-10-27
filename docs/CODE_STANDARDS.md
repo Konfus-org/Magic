@@ -190,7 +190,8 @@ are the one exception.
 
 CSharpier decides layout, every line break, indent and blank line, from `.editorconfig`'s `[*]` block: the editor's
 extension prints a file on save, `tools/Scripts/Format.ps1` the files a change touches
-([Format.ps1](../tools/README.md#formatps1)), and the build refuses a file it would change. The rules below that no
+([Format.ps1](../tools/README.md#formatps1)), a local build what is left, and `Validate.ps1` refuses a file it would
+change. The rules below that no
 built-in rule checks are [tools/Analyzers](../tools/Analyzers/Magic.Analyzers/README.md).
 
 ### Type layout

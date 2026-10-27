@@ -22,9 +22,10 @@
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>high</NuGetAuditLevel>
-    <!-- CSharpier decides layout (.editorconfig's [*] block): the editor's extension or tools/Scripts/Format.ps1 formats a
-         file on save, and the build refuses one they would change rather than formatting it. -->
-    <CSharpier_Check>true</CSharpier_Check>
+    <!-- CSharpier decides layout (.editorconfig's [*] block): the editor's extension formats a file on save, and a local
+         build formats what is left. tools/Scripts/Validate.ps1, which CI runs, checks instead and refuses a file
+         CSharpier would change. -->
+    <CSharpier_Check>false</CSharpier_Check>
     <CSharpier_LogLevel>Warning</CSharpier_LogLevel>
   </PropertyGroup>
 

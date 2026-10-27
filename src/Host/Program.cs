@@ -61,84 +61,94 @@ internal static class Program
         // An exception nothing caught, on any thread, crashes, leaving a crash file.
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Assert.Now($"Unhandled exception: {e.ExceptionObject}");
 
+        // Kills application
         using CancellationTokenSource cts = new();
 
         // Setup commands
-        RootCommand cmds = new("Sample command-line app")
+        RootCommand cmdLineOptions = new("Sample command-line app")
         {
             Options =
             {
-                new Option<string>("--project", "-p") { Description = "Path to the project file" },
-                new Option<bool>("--headless", "-H") { Description = "Run without a GUI (headless mode)" },
-                new Option<string>("--verbosity", "-v")
+                new Option<string>("--project")
+                {
+                    Description = "Opens a project at the given path",
+                    Action = new Command(_ =>
+                    {
+                        cts.Cancel();
+                        // TODO(KONFUS): Project.Open
+                    }),
+                },
+                new Option<bool>("--headless")
+                {
+                    Description = "Run without a GUI (headless mode)",
+                    Action = new Command(cmds =>
+                    {
+                        cts.Cancel();
+                        bool headless = cmds.GetValue<bool>("--headless");
+                        Run(cts, (RootCommand)cmds.RootCommandResult.Command, headless);
+                    }),
+                },
+                new Option<string>("--verbosity")
                 {
                     Description = "Verbosity level (quiet, minimal, normal, detailed, diagnostic)",
-                    Action = new OptionAction(
-                        (result) =>
+                    Action = new Command(cmds =>
+                    {
+                        Log.Verbosity = cmds.GetValue<string>("--verbosity") switch
                         {
-                            Log.Verbosity = result.GetValue<string>("--verbosity") switch
-                            {
-                                "quiet" => Log.VerbosityLevel.Quiet,
-                                "minimal" => Log.VerbosityLevel.Minimal,
-                                "normal" => Log.VerbosityLevel.Normal,
-                                "detailed" => Log.VerbosityLevel.Detailed,
-                                "diagnostic" => Log.VerbosityLevel.Diagnostic,
-                                _ => Log.VerbosityLevel.Normal,
-                            };
-                        }
-                    ),
+                            "quiet" => Log.VerbosityLevel.Quiet,
+                            "minimal" => Log.VerbosityLevel.Minimal,
+                            "normal" => Log.VerbosityLevel.Normal,
+                            "detailed" => Log.VerbosityLevel.Detailed,
+                            "diagnostic" => Log.VerbosityLevel.Diagnostic,
+                            _ => Log.VerbosityLevel.Normal,
+                        };
+                    }),
                 },
-                new Option<bool>("--exit", "-e")
+                new Option<bool>("--exit")
                 {
                     Description = "Tell app to close",
-                    Action = new OptionAction(
-                        (result) =>
-                        {
-                            Log.Info("Exiting with code 0.");
-                            cts.Cancel();
-                        }
-                    ),
+                    Action = new Command(_ =>
+                    {
+                        Log.Info("Exiting with code 0.");
+                        cts.Cancel();
+                    }),
                 },
-                new Option<bool>("--exit-now", "-E")
+                new Option<bool>("--exit-now")
                 {
                     Description = "Tell app to close immediately",
-                    Action = new OptionAction(
-                        (result) =>
-                        {
-                            Log.Info("Exiting immediately with code 0.");
-                            Environment.Exit(0);
-                        }
-                    ),
+                    Action = new Command(_ =>
+                    {
+                        Log.Info("Exiting immediately with code 0.");
+                        Environment.Exit(0);
+                    }),
                 },
                 new Option<bool>("--fail-on-error")
                 {
                     Description = "Exit with code 2 if any errors were logged",
-                    Action = new OptionAction(
-                        (result) =>
-                        {
-                            if (Log.ErrorCount <= 0)
-                                return;
+                    Action = new Command(_ =>
+                    {
+                        if (Log.ErrorCount <= 0)
+                            return;
 
-                            Log.Critical($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
-                            Environment.Exit(2);
-                        }
-                    ),
+                        Log.Critical($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
+                        Environment.Exit(2);
+                    }),
                 },
             },
         };
 
         // Parse the command-line arguments
-        var result = cmds.Parse(args);
+        var cmds = cmdLineOptions.Parse(args);
         Log.Info($"Command line args: {string.Join(", ", args)}");
-        if (result.Errors.Count > 0)
+        if (cmds.Errors.Count > 0)
         {
-            string errors = string.Join("; ", result.Errors.Select(e => e.Message));
+            string errors = string.Join("; ", cmds.Errors.Select(e => e.Message));
             Log.Error($"Failed to parse command-line arguments: {errors}");
             return 1;
         }
 
         // Extract data from give args
-        string? projectPath = result.GetValue<string>("--project");
+        string? projectPath = cmds.GetValue<string>("--project");
         if (string.IsNullOrEmpty(projectPath))
         {
             Log.Error("No project path specified. Use --project <path> to specify a project.");
@@ -149,20 +159,25 @@ internal static class Program
         // TODO(KONFUS): Project.Open(projectPath);
         Log.Info("Successfully opened project.");
 
-        bool headless = result.GetValue<bool>("--headless");
+        bool headless = cmds.GetValue<bool>("--headless");
+        Run(cts, cmdLineOptions, headless);
+
+        Log.Flush();
+
+        return 0;
+    }
+
+    private static void Run(CancellationTokenSource cts, RootCommand cmdLineOptions, bool headless)
+    {
         if (headless)
         {
             Log.Info("Running in headless mode.");
-            Cli.Run(cts, cmds);
+            Cli.Run(cts, cmdLineOptions);
         }
         else
         {
             Log.Info("Running in GUI mode.");
             // TODO(KONFUS): Gui.Run(cts, cmds);
         }
-
-        Log.Flush();
-
-        return 0;
     }
 }

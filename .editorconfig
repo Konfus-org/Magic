@@ -30,6 +30,9 @@ dotnet_diagnostic.IDE0161.severity = warning
 csharp_using_directive_placement = outside_namespace
 dotnet_diagnostic.IDE0065.severity = warning
 dotnet_diagnostic.IDE0005.severity = warning
+# The editor sorts usings as CSharpier does, System first, so its sort never fails the build's format check.
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
 
 # An if or an else whose body is one statement has no braces, and a body that spans lines always has them
 # (CODESTANDARDS Methods), checked in review: IDE0011 is off, since its when_multiline also asks braces of an else

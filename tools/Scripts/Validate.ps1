@@ -105,7 +105,7 @@ function Invoke-Screenshot {
 }
 
 $steps = @(
-    @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration -tl:off } }
+    @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration -tl:off -p:CSharpier_Check=true } }
     @{ Name = 'Test'; Run = { dotnet test $solution --configuration $Configuration --no-build } }
     @{ Name = 'Headless'; Run = { Invoke-Headless } }
     @{ Name = 'Screenshot'; Run = { Invoke-Screenshot } }

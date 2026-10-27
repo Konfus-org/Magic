@@ -1,4 +1,7 @@
 # Magic.State
 
-We store any state structs that are global or generally useful for the magic engine here.
-This should remain relatively small as Magic should be mostly stateless and work as more of a series of pipelines instead of using state spaghetti.
+Small value types the other projects share. Magic keeps little state, so this project stays small.
+
+- Work that can fail on content or the machine returns a `Result` or `Result<T>` with the reason. A thrown exception
+  is a bug.
+- `Result<T>.Value` is set once `Ok` is true, and the compiler knows it.

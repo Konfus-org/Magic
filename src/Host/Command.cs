@@ -6,7 +6,7 @@ namespace Magic.Host;
 /// <summary>
 /// An option's effect as a lambda. Non-terminating, so the command's own action still runs after it.
 /// </summary>
-internal sealed class OptionAction(Action<ParseResult> run) : SynchronousCommandLineAction
+internal sealed class Command(Action<ParseResult> run) : SynchronousCommandLineAction
 {
     public override int Invoke(ParseResult parseResult)
     {

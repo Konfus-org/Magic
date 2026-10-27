@@ -11,7 +11,7 @@ internal static class Cli
         "RS0030:Do not use banned APIs",
         Justification = "Must read console for CLI"
     )]
-    public static void Run(CancellationTokenSource cts, RootCommand cmds)
+    public static void Run(CancellationTokenSource cts, RootCommand cmdLineOptions)
     {
         Channel<string> cli = Channel.CreateUnbounded<string>(new() { SingleReader = true, SingleWriter = true });
         Thread reader = new(() =>
@@ -26,11 +26,15 @@ internal static class Cli
         };
         reader.Start();
 
+        Log.Info("Welcome to the magic CLI, type 'help' for options.");
+
         for (int frameIndex = 0; !cts.Token.IsCancellationRequested; frameIndex++)
         {
             while (cli.Reader.TryRead(out string? line))
             {
-                ParseResult command = cmds.Parse(line);
+                if (line.Length > 1 && line[0] != '-' && line[1] != '-')
+                    line = "--" + line; // Append -- for commands for user
+                ParseResult command = cmdLineOptions.Parse(line);
                 if (command.Errors.Count > 0)
                 {
                     Log.Error($"Failed to parse command: {command.Errors}");

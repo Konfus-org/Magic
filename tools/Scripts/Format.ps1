@@ -41,8 +41,9 @@ $solution = Join-Path $root 'Magic.slnx'
 $common = @('--verbosity', 'normal')
 $csharpierPaths = @('.')
 if (-not $All) {
-    $changed = @(git -C $root -c core.quotepath=off diff --name-only --diff-filter=d HEAD)
-    $new = @(git -C $root -c core.quotepath=off ls-files --others --exclude-standard)
+    # No line-ending warnings: Windows PowerShell stops on any stderr line.
+    $changed = @(git -C $root -c core.quotepath=off -c core.safecrlf=false diff --name-only --diff-filter=d HEAD)
+    $new = @(git -C $root -c core.quotepath=off -c core.safecrlf=false ls-files --others --exclude-standard)
     $files = @(($changed + $new) | Where-Object { $_ -match '\.(cs|csproj|props|targets)$' } | Sort-Object -Unique)
     if ($files.Count -eq 0) {
         Write-Output 'No file has changed: nothing to format.'
@@ -66,10 +67,13 @@ $passes = @(
 # The included paths are relative to the repository, as git gave them.
 Push-Location $root
 try {
+    # A pass fails by its exit code. Its stderr, such as dotnet format's workspace warnings, is printed as output,
+    # since Windows PowerShell would otherwise stop on its first line.
+    $ErrorActionPreference = 'Continue'
     foreach ($pass in $passes) {
         if ($pass.Name -ne 'CSharpier' -and -not $All -and $csFiles.Count -eq 0) { continue }
         Write-Output "==> $($pass.Name)"
-        & $pass.Run
+        & $pass.Run 2>&1 | ForEach-Object { "$_" }
         if ($LASTEXITCODE -ne 0) {
             Write-Output "FAILED: $($pass.Name) exited $LASTEXITCODE"
             exit $LASTEXITCODE

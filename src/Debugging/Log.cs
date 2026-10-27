@@ -29,7 +29,7 @@ public static class Log
                 value;
             Write(LoggingLevel.Info, $"Verbosity set to {value}", nameof(Verbosity), string.Empty, 0);
         }
-    }
+    } = VerbosityLevel.Normal;
 
     /// <summary>
     /// How many errors have been logged; under --fail-on-error any at all make the exit code 2.
@@ -163,6 +163,11 @@ public static class Log
     private static Line CreateLine(LoggingLevel level, string message, string member, string file, int line) =>
         new(DateTime.Now, level, message, Environment.CurrentManagedThreadId, file, line, member);
 
+    [SuppressMessage(
+        "ApiDesign",
+        "RS0030:Do not use banned APIs",
+        Justification = "We always write to the console as our default log sink."
+    )]
     private static void Write(LoggingLevel level, string message, string member, string file, int line)
     {
         Line lineStruct = CreateLine(level, message, member, file, line);
@@ -175,6 +180,12 @@ public static class Log
         }
         else
             WriteSinks(lineStruct);
+
+        // Log always writes to console
+        if (level >= LoggingLevel.Error)
+            _ = Console.Error.WriteLineAsync(lineStruct.ToString()).ConfigureAwait(false);
+        else
+            Console.WriteLine(lineStruct.ToString());
     }
 
     /// <summary>
