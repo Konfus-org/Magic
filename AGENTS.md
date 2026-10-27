@@ -7,8 +7,8 @@ code and docs follow.
 
 The scripts run under `pwsh` and Windows PowerShell ([Tools](tools/README.md)).
 
-- **Format:** `tools/Scripts/Format.ps1` formats the C# a change touches. You don't need to run it yourself; the
-  next command does.
+- **Format:** `tools/Scripts/Format.ps1` formats the files a change touches, CSharpier for the layout. You don't need
+  to run it yourself; the next command does.
 - **Task complete:** `tools/Scripts/AgentTaskComplete.ps1 -Change <level>` formats, runs the steps of
   `tools/Scripts/Validate.ps1` the level needs and stamps the validated state. Run it when a task is done, and again
   after any later edit or rebase. A state already stamped at that level returns at once.
@@ -28,8 +28,7 @@ unsure:
 | `Code`    | Anything that runs differently but draws the same, refactors and renames included | The build, the tests, every sample domain headless                   |
 | `Visual`  | Anything that can change what is drawn                                            | The build, the tests, a screenshot of every sample domain to look at |
 
-A hook in `.claude/settings.json` refuses an agent's `git commit` and `git merge` unless
-`tools/Scripts/AgentTaskComplete.ps1` stamped that exact state.
+Commit or merge only once `tools/Scripts/AgentTaskComplete.ps1` has stamped that exact state.
 
 To run one step of Validate on its own:
 
@@ -42,9 +41,8 @@ tools/Scripts/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
 
 `--fail-on-error` exits with `2` if anything was logged as an error.
 
-- The build must have no errors, and no warnings but a TODO comment's (MA0026). Fix a warning at its cause. If a
-  warning doesn't apply, say so in your summary instead of suppressing it.
-- When the formatter wraps a line badly, reshape it by hand.
+- The build must have no errors, and no warnings but unused or unreachable code's (`Directory.Build.props`). Fix a
+  warning at its cause. If a warning doesn't apply, say so in your summary instead of suppressing it.
 
 ## Before You Edit
 

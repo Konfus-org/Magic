@@ -3,35 +3,34 @@
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
   </PropertyGroup>
-
   <ItemGroup>
     <PackageVersion Include="Arch" Version="2.1.0" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
     <PackageVersion Include="OpenTelemetry" Version="1.20.1" />
-    <PackageVersion Include="System.CommandLine" Version="2.0.12" />
-    <PackageVersion Include="System.IO.Hashing" Version="10.0.12" />
+    <PackageVersion Include="System.CommandLine" Version="2.0.14" />
+    <PackageVersion Include="System.IO.Hashing" Version="10.0.14" />
     <PackageVersion Include="Vortice.Vulkan" Version="3.3.0" />
   </ItemGroup>
-
   <!-- Microsoft's bindings generator: a native tool per runtime, which a project declaring a native library downloads
        and runs (Directory.Build.targets) rather than references, so its version is a property. -->
   <PropertyGroup>
     <ClangSharpPInvokeGeneratorVersion>21.1.8.4</ClangSharpPInvokeGeneratorVersion>
   </PropertyGroup>
-
+  <!-- The analyzer project (tools/Analyzers), compiled against a Roslyn no newer than the SDK's or Visual Studio's, which
+       load it. -->
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.6.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
+  </ItemGroup>
   <!-- Tests (tests/README.md). -->
   <ItemGroup>
     <PackageVersion Include="xunit.v3" Version="4.0.2" />
   </ItemGroup>
-
-  <!-- Analyzers every project runs; their rules are configured in .editorconfig. -->
+  <!-- Analyzers every project runs; their rules are configured in .editorconfig. CSharpier's package makes the build
+       refuse a file the formatter would change (Directory.Build.props). -->
   <ItemGroup>
-    <GlobalPackageReference Include="Meziantou.Analyzer" Version="3.0.294" />
     <GlobalPackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" Version="5.6.0" />
-    <GlobalPackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.7.23" />
-    <GlobalPackageReference Include="Nullable.Extended.Analyzer" Version="1.16.6891" />
-    <GlobalPackageReference Include="Roslynator.Analyzers" Version="5.0.1" />
-    <GlobalPackageReference Include="Roslynator.Formatting.Analyzers" Version="5.0.1" />
-    <GlobalPackageReference Include="StyleCop.Analyzers" Version="1.3.149-beta" />
+    <GlobalPackageReference Include="Microsoft.VisualStudio.Threading.Analyzers" Version="18.12.1" />
+    <GlobalPackageReference Include="CSharpier.MSBuild" Version="1.3.0" />
   </ItemGroup>
 </Project>

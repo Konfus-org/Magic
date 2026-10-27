@@ -1,6 +1,7 @@
 <Project>
-  <!-- Every project. The build is strict: every compiler, analyzer, MSBuild and NuGet warning but a TODO comment's
-       (MA0026) is an error, and the analyzer rules are in .editorconfig. -->
+  <!-- Every project. The build is strict: every compiler, analyzer, MSBuild and NuGet warning is an error, but code in
+       flight's: an unused member, value, parameter, field or class, and unreachable code, stay warnings. The analyzer
+       rules are in .editorconfig, and the house rules are tools/Analyzers. -->
   <PropertyGroup>
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
     <Configurations>Debug;Optimize;Release</Configurations>
@@ -10,25 +11,29 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <MSBuildTreatWarningsAsErrors>true</MSBuildTreatWarningsAsErrors>
     <!-- On the compiler's list and on MSBuild's, which promotes the compiler's warnings too. -->
-    <WarningsNotAsErrors>MA0026</WarningsNotAsErrors>
-    <MSBuildWarningsNotAsErrors>MA0026</MSBuildWarningsNotAsErrors>
+    <WarningsNotAsErrors>IDE0051;IDE0052;IDE0059;IDE0060;IDE0035;CA1812;CA1823;CS0168;CS0219;CS8321;CS0162</WarningsNotAsErrors>
+    <MSBuildWarningsNotAsErrors>IDE0051;IDE0052;IDE0059;IDE0060;IDE0035;CA1812;CA1823;CS0168;CS0219;CS8321;CS0162</MSBuildWarningsNotAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
     <AnalysisMode>All</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <!-- Also what lets the build report unused usings (IDE0005). -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <!-- A package with a known vulnerability, direct or transitive, fails the restore. -->
+    <!-- A package with a high or critical vulnerability, direct or transitive, fails the restore. -->
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
-    <NuGetAuditLevel>low</NuGetAuditLevel>
+    <NuGetAuditLevel>high</NuGetAuditLevel>
+    <!-- CSharpier decides layout (.editorconfig's [*] block): the editor's extension or tools/Scripts/Format.ps1 formats a
+         file on save, and the build refuses one they would change rather than formatting it. -->
+    <CSharpier_Check>true</CSharpier_Check>
+    <CSharpier_LogLevel>Warning</CSharpier_LogLevel>
   </PropertyGroup>
 
   <!-- Output. Build/bin/<Configuration>/ is Magic's folder, and where it loads the rest from: the bundled gems from
        Gems/<Name>/, the bundled scripts from Resources/, a project's code from Projects/<Name>/; tests and the build's
        tools, which never ship, go under Tests/<Name>/ and Tools/<Name>/. A project is placed by where its source is,
        here rather than in its own folder, because MSBuild fixes the intermediate folder before any project file or
-       nearer Directory.Build.props is read. Build/obj/<Configuration>/ mirrors it: a project's intermediate files are
-       where its output is. -->
+       nearer Directory.Build.props is read. A project's intermediate files are its own, in
+       Build/obj/<Configuration>/<Name>/, so projects that share an output folder never share them. -->
   <PropertyGroup>
     <MagicSource>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').Replace('\', '/'))/</MagicSource>
     <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Gems/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
@@ -38,7 +43,7 @@
     <MagicOutput Condition="$(MagicSource.StartsWith('tools/'))">Tools/$(MSBuildProjectName)/</MagicOutput>
     <MagicBin>$(MSBuildThisFileDirectory)Build/bin/$(Configuration)/</MagicBin>
     <OutputPath>$(MagicBin)$(MagicOutput)</OutputPath>
-    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)Build/obj/$(Configuration)/$(MagicOutput)</BaseIntermediateOutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)Build/obj/$(Configuration)/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <IntermediateOutputPath>$(BaseIntermediateOutputPath)</IntermediateOutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
   </PropertyGroup>
@@ -52,7 +57,12 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(Configuration)' == 'Release'">
-    <Content Include="$(MagicResources)/**" Exclude="$(MagicResources)/**/*.md;$(MagicResources)/**/*.csproj" LinkBase="Resources" CopyToOutputDirectory="PreserveNewest" />
+    <Content
+      Include="$(MagicResources)/**"
+      Exclude="$(MagicResources)/**/*.md;$(MagicResources)/**/*.csproj"
+      LinkBase="Resources"
+      CopyToOutputDirectory="PreserveNewest"
+    />
   </ItemGroup>
 
   <ItemGroup Condition="'$(Configuration)' != 'Release'">
@@ -88,18 +98,12 @@
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)BannedSymbols.txt" Visible="false" />
   </ItemGroup>
 
-  <!-- A namespace matches its folder: the project's RootNamespace, then each folder below the project (CODESTANDARDS
-       Folders). Checked here rather than by IDE0130, which goes quiet when the checkout's path holds a # or ;: the
-       analyzers read the project's folder from a file in which either starts a comment. Code compiled from outside
-       the project, such as the bundled scripts, is not checked. -->
-  <Target Name="CheckNamespaces" BeforeTargets="CoreCompile">
-    <ItemGroup>
-      <_OwnCode Include="@(Compile)" Condition="$([System.String]::Copy('%(FullPath)').StartsWith('$(ProjectDir)'))"
-                Folder="$([MSBuild]::MakeRelative('$(ProjectDir)', '%(RootDir)%(Directory)'))" />
-      <_OwnCode Namespace="$([System.String]::Copy('$(RootNamespace).%(Folder)').Replace('\', '.').Replace('/', '.').TrimEnd('.'))" />
-    </ItemGroup>
-    <Error Condition="'%(_OwnCode.FullPath)' != '' and !$([System.IO.File]::ReadAllText('%(_OwnCode.FullPath)').Contains('namespace %(_OwnCode.Namespace);'))"
-           ContinueOnError="ErrorAndContinue" File="%(_OwnCode.FullPath)"
-           Text="Its namespace must be %(_OwnCode.Namespace), its folder's." />
-  </Target>
+  <!-- The house rules (tools/Analyzers) run in every other project, as an analyzer rather than a reference. -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'Magic.Analyzers'">
+    <ProjectReference
+      Include="$(MSBuildThisFileDirectory)tools/Analyzers/Magic.Analyzers/Magic.Analyzers.csproj"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false"
+    />
+  </ItemGroup>
 </Project>

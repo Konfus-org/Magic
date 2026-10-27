@@ -1,6 +1,6 @@
 <Solution>
-  <Folder Name="/src/" />
-  <Folder Name="/src/Host/">
-    <Project Path="src/Host/Magic.Host.csproj" />
-  </Folder>
+  <Project Path="src/Debugging/Magic.Debugging.csproj" />
+  <Project Path="src/Host/Magic.Host.csproj" />
+  <Project Path="src/State/Magic.State.csproj" />
+  <Project Path="tools/Analyzers/Magic.Analyzers/Magic.Analyzers.csproj" />
 </Solution>

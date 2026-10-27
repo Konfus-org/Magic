@@ -30,9 +30,6 @@ Cache/
 !.github/
 !.githooks/
 !.template.config/
-!.claude/
-.claude/*
-!.claude/settings.json
 
 # IDE
 *.user

@@ -132,7 +132,7 @@ are the one exception.
   with `when`.
 - A log line says what happened and to what, once. Anything that repeats every frame is `Debugging.Verbose` or a metric.
 - `Debugging.Assert` is for impossible state and ends the process with a crash file.
-- No null-forgiving `!`; it and every nullable warning fail the build. Don't make what is always there nullable: pass it
+- No null-forgiving `!` (MG0002); it and every nullable warning fail the build. Don't make what is always there nullable: pass it
   in, make it `required`, or group the optional parts into one object.
 - Handle a missing value where you read it, with a guard clause, `is not { } value`, `??` or a `throw` saying what's
   missing. `[MemberNotNullWhen]` and `[MaybeNullWhen]` tell the compiler what a check proves.
@@ -188,8 +188,16 @@ are the one exception.
 
 ## Style
 
-`tools/Scripts/Format.ps1` and `.editorconfig` decide member order, spacing and line wrapping
-([Format.ps1](../tools/README.md#formatps1)). When the formatter wraps a line badly, reshape it by hand.
+CSharpier decides layout, every line break, indent and blank line, from `.editorconfig`'s `[*]` block: the editor's
+extension prints a file on save, `tools/Scripts/Format.ps1` the files a change touches
+([Format.ps1](../tools/README.md#formatps1)), and the build refuses a file it would change. The rules below that no
+built-in rule checks are [tools/Analyzers](../tools/Analyzers/Magic.Analyzers/README.md).
+
+### Type layout
+
+- A type's members go by kind, fields first and nested types last; within a kind public before private; constants
+  before other fields; static before instance; `Dispose` before the other methods. MG0001 checks it and
+  `Format.ps1` puts members there; the exact kind order is its code.
 
 ### Methods
 
@@ -199,11 +207,11 @@ are the one exception.
   method that is one big `switch` stays whole.
 - Nothing nests three deep: use a guard clause, an early `continue`, or a method named for the step.
 - Two values: `?:`. More: a switch expression or early returns. Never a `?:` inside a `?:`.
-- A one-statement body on one line uses `=>`. A primary constructor only keeps its parameters; one that does work is
-  explicit.
-- One-statement `if` and `else` bodies have no braces. Longer bodies, wrapped conditions and every loop do, and if one
-  branch needs braces, all do. A blank line goes before `return`, `continue`, `break` or `throw` unless it opens its
-  block.
+- A one-statement body uses `=>`, which ends its line when the body wraps. A primary constructor only keeps its
+  parameters; one that does work is explicit.
+- One-statement `if` and `else` bodies have no braces and go on the line below. Longer bodies, wrapped conditions
+  and every loop have braces; each branch decides for itself. A blank line goes before `return`, `continue`, `break`
+  or `throw` unless it opens its block.
 
 ### Naming
 

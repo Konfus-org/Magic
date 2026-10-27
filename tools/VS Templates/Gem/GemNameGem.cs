@@ -19,7 +19,8 @@ internal sealed class GemNameGem(GemNameSettings settings) : IGem
 
     public void Update(in Frame frame)
     {
-        if (frame.WorldSec - _saidSec < settings.IntervalSec) return;
+        if (frame.WorldSec - _saidSec < settings.IntervalSec)
+            return;
 
         _saidSec = frame.WorldSec;
         Debugging.Info($"GemName is running, at frame {frame.Index}.");

@@ -8,9 +8,9 @@
     <!-- Shown beside the gem as Magic starts it. -->
     <Description>What GemName does for a project.</Description>
     <Version>1.0.0</Version>
-<!--#if (authors != "") -->
+    <!--#if (authors != "") -->
     <Authors>GemAuthors</Authors>
-<!--#endif -->
+    <!--#endif -->
   </PropertyGroup>
 
   <Import Project="$(MagicDir)/Sdk/Gem.props" />

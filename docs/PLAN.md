@@ -2,7 +2,7 @@
 
 Oct 24, 2026 · @Jeremy
 
-## Before you start
+## ~~Before you start~~
 
 Rebuild Magic beside this checkout as a thinner, more functional engine: the same gems-and-contracts shape, but each frame is data handed down a pipeline, state lives in four named places, and every long operation is an `Async` method that takes progress and a cancellation token. The original, [Slop-Magic](https://github.com/Konfus-org/Slop-Magic), is the reference for what each part must do, not for how; the links in each step point into it on its `dev` branch.
 
@@ -26,15 +26,15 @@ Read the top row left to right and the bottom row right to left: that is the ord
 - Keep the original's public names where the samples and resources touch them: component and asset type names, settings keys, file formats, the console commands. Inside Core and inside a gem, the names are yours.
 - Paths are relative to this repository's root. Commands are PowerShell. Links pin to commit `fb0cceed` on [Konfus-org/Magic](https://github.com/Konfus-org/Slop-Magic/tree/dev).
 
-| Part            | What you build                                                   | Where the reference is                                                                                                                                                                                     |
-| --------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0               | The repository, `main`, the first push                           | this repository's root files                                                                                                                                                                               |
-| Rules           | The frame pipeline, the state map, the async convention          | [`src/Core/README.md`](https://github.com/Konfus-org/Slop-Magic/blob/dev/src/Core/README.md)                                                                               |
-| 1, steps 1 to 5 | The host, the frame pipeline, the services, the world, the proof | [`src/Core`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Core)                                                                                                   |
-| 2               | The 18 gems, one at a time                                       | [`src/Bundled/Gems`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems)                                                                                   |
+| Part            | What you build                                                   | Where the reference is                                                                                                                     |
+| --------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0               | The repository, `main`, the first push                           | this repository's root files                                                                                                               |
+| Rules           | The frame pipeline, the state map, the async convention          | [`src/Core/README.md`](https://github.com/Konfus-org/Slop-Magic/blob/dev/src/Core/README.md)                                               |
+| 1, steps 1 to 5 | The host, the frame pipeline, the services, the world, the proof | [`src/Core`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Core)                                                                   |
+| 2               | The 18 gems, one at a time                                       | [`src/Bundled/Gems`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems)                                                   |
 | 3               | The sample project, the tools and CI                             | [`samples`](https://github.com/Konfus-org/Slop-Magic/tree/dev/samples), [`tools`](https://github.com/Konfus-org/Slop-Magic/tree/dev/tools) |
 
-## Part 0: the repository, main and the first push
+## ~~Part 0: the repository, main and the first push~~
 
 By the end of this part a new repository is on GitHub with a `main` branch holding an empty solution and a `dev` branch to work on, all from the command line. Every block below is one thing to type; the nugget under it is why.
 
@@ -360,8 +360,8 @@ Two rules from the loader decide the order. A gem is made after every interface 
 
 ### Stage A: a headless world
 
-| Gem                                                                                                                                     | Provides                                         | Takes                                                                  | Original             | Native or NuGet      |
-| --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------- | -------------------- | -------------------- |
+| Gem                                                                                                     | Provides                                         | Takes                                                                  | Original             | Native or NuGet      |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------- | -------------------- | -------------------- |
 | [`ArchEcs`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/ArchEcs)                 | `IEcs`                                           | `Threads`                                                              | 733 lines, 1 file    | Arch 2.1.0           |
 | [`PrefabLoader`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/PrefabLoader)       | `IAssetLoader<Prefab>`                           | `Assets`, `Assemblies`                                                 | 302 lines, 2 files   | none                 |
 | [`Scripting`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/Scripting)             | `IScripts`, `IAssetLoader<Script>`, `IPreloader` | settings, `IEcs`, `Assets`, `Assemblies`, `Events`, `IServiceProvider` | 1,204 lines, 3 files | none                 |
@@ -386,8 +386,8 @@ Exit 0 with that line in the log, and this run becomes Validate's headless step:
 
 ### Stage B: a window and a lit frame
 
-| Gem                                                                                                                                             | Provides                                                | Takes                                                                                                                                    | Original                                    | Native or NuGet                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------ |
+| Gem                                                                                                             | Provides                                                | Takes                                                                                                                                    | Original                                    | Native or NuGet                                  |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------ |
 | [`SdlBindings`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/SdlBindings)                 | nothing, a shared library project                       | nothing                                                                                                                                  | generated code only                         | SDL3 3.4.18, SDL3\_image, SDL3\_ttf, SDL3\_mixer |
 | [`SdlPlatform`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/SdlPlatform)                 | `IWindow`, `IInput`                                     | settings, `Args`, `App`, `Assets`, `Events`                                                                                              | 1,080 lines, 3 files                        | SdlBindings                                      |
 | [`SdlTextureLoader`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/SdlTextureLoader)       | `IAssetLoader<Texture>`                                 | nothing                                                                                                                                  | 195 lines, 2 files                          | SdlBindings                                      |
@@ -428,8 +428,8 @@ _Checkpoint:_ the project template's `Main` domain, a sky, a camera, a sun and a
 
 ### Stage C: physics, sound and the debug UI
 
-| Gem                                                                                                                                   | Provides                 | Takes                                                                                            | Original                          | Native or NuGet                         |
-| ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------ | --------------------------------- | --------------------------------------- |
+| Gem                                                                                                   | Provides                 | Takes                                                                                            | Original                          | Native or NuGet                         |
+| ----------------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------ | --------------------------------- | --------------------------------------- |
 | [`Box3DPhysics`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/Box3DPhysics)     | `IPhysics`, `IPreloader` | `World`, `Assets`, `Threads`, settings                                                           | 1,437 lines, 3 files              | box3d 0.1.0                             |
 | [`SdlAudioLoader`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/SdlAudioLoader) | `IAssetLoader<Audio>`    | nothing                                                                                          | 159 lines, 1 file                 | SdlBindings                             |
 | [`SteamAudio`](https://github.com/Konfus-org/Slop-Magic/tree/dev/src/Bundled/Gems/SteamAudio)         | `IPreloader`             | `World`, `Assets`, `Threads`, `Args`, settings                                                   | 3,318 lines, 9 files              | phonon 4.8.1 prebuilt, SdlBindings      |

@@ -1,8 +1,7 @@
 <#
 .SYNOPSIS
 What an agent runs on completing a task: tools/Scripts/Format.ps1 on the change, the steps of tools/Scripts/Validate.ps1 that what the
-change can affect needs, then a stamp of the exact state it validated, without which the project's hook refuses the
-agent's git commit and git merge.
+change can affect needs, then a stamp of the exact state it validated, which a git commit or git merge needs.
 
 .DESCRIPTION
 -Change says what the change can affect, and so what must run to show it works (AGENTS.md, Finish). Docs is a change
@@ -22,8 +21,8 @@ nothing ends at once. The script ends with the screenshots' paths, one of each d
 also points git at the repository's hooks (.githooks) when the clone has no hooks path, so every commit's subject gets
 its type and scope.
 
-With -Hook it is that hook instead: the project's .claude/settings.json runs it before a Bash command that commits or
-merges, with the hook's input as JSON on stdin. A git commit passes when the checkout's state has a stamp, and a
+With -Hook it is a guard instead, for a tool hook that runs it before a command that commits or merges, with the
+hook's input as JSON on stdin. A git commit passes when the checkout's state has a stamp, and a
 git merge when the merged branch's last commit does, so an edit after the run, or a rebase onto new work, needs a new
 run. It exits 2 with the reason on stderr to refuse, which the agent is shown, and 0 to let the command run; any other
 command, or one it cannot place in a checkout, passes. Runs under pwsh and Windows PowerShell, from any directory.
