@@ -59,7 +59,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $env:MSBUILDDISABLENODEREUSE = '1'
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$solution = Join-Path $root 'Magic.slnx'
+$solution = Join-Path (Join-Path $root 'src') 'Magic.slnx'
 $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 $screenshots = @()
@@ -105,7 +105,7 @@ function Invoke-Screenshot {
 }
 
 $steps = @(
-    @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration -tl:off } }
+    @{ Name = 'Build'; Run = { dotnet build $solution --configuration $Configuration -tl:off -p:CSharpier_Check=true } }
     @{ Name = 'Test'; Run = { dotnet test $solution --configuration $Configuration --no-build } }
     @{ Name = 'Headless'; Run = { Invoke-Headless } }
     @{ Name = 'Screenshot'; Run = { Invoke-Screenshot } }

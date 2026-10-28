@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+  </ItemGroup>
+</Project>
