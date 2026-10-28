@@ -9,9 +9,10 @@ change being made is formatted and no other code is touched; -All formats every 
 passes, in this order: the member-order fix (tools/Analyzers, MG0001) through dotnet format, so members move before
 anything else is measured; the code-style fixes through dotnet format, except the few that need a person's judgment,
 which the build still reports; and CSharpier, which decides every line break, indent and blank line from
-.editorconfig's [*] block and is what the build checks (Directory.Build.props). The first two read the code as the
-last build left it and build nothing. tools/Scripts/AgentTaskComplete.ps1 runs this first, so an agent's change is
-formatted before it is validated. Runs from any current directory.
+.editorconfig's [*] block and is what the build checks (Directory.Build.props). CSharpier is the local dotnet tool
+.config/dotnet-tools.json pins, restored before its pass. The first two read the code as the last build left it and
+build nothing. tools/Scripts/AgentTaskComplete.ps1 runs this first, so an agent's change is formatted before it is
+validated. Runs from any current directory.
 
 .PARAMETER All
 Formats every file in the repository rather than the changed ones.
@@ -61,7 +62,13 @@ $judged = 'IDE0010', 'IDE0072', 'IDE0035', 'IDE0051', 'IDE0052', 'IDE0059', 'IDE
 $passes = @(
     @{ Name = 'Order'; Run = { dotnet format analyzers $solution --diagnostics MG0001 @common } }
     @{ Name = 'Style'; Run = { dotnet format style $solution --no-restore --exclude-diagnostics $judged @common } }
-    @{ Name = 'CSharpier'; Run = { dotnet csharpier format @csharpierPaths } }
+    @{
+        Name = 'CSharpier'
+        Run = {
+            dotnet tool restore
+            if ($LASTEXITCODE -eq 0) { dotnet csharpier format @csharpierPaths }
+        }
+    }
 )
 
 # The included paths are relative to the repository, as git gave them.

@@ -26,7 +26,9 @@ Cache/
 # Dot files (.gitignore, .editorconfig, .gitattributes) are not folders, so they stay tracked.
 # The project's own agent settings and git hooks are source: the settings' hook enforces validation
 # (tools/Scripts/AgentTaskComplete.ps1) and the git hooks write and check each commit's subject (.githooks).
+# So are the dotnet tools the scripts run (.config/dotnet-tools.json).
 .*/
+!.config/
 !.github/
 !.githooks/
 !.template.config/
