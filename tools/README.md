@@ -41,9 +41,10 @@ and a state already stamped returns at once. It also points git at the repositor
 
 ## Templates
 
-`VS Templates/` holds the `dotnet new` template for a Core module, and `InstallTemplates.ps1` installs it.
+`VS Templates/` holds the `dotnet new` templates for a Core module and a sample project, and `InstallTemplates.ps1`
+installs them. Run it once, and again after a template changes.
 
-To add a Core module, run `InstallTemplates.ps1` once, then:
+To add a Core module:
 
 - **Visual Studio:** right-click the `Core` solution folder, choose Add > New Project > Magic Core Module and give it
   the bare name (`Assets`, not `Magic.Assets`). Its location starts at `src`, the solution's folder.
@@ -52,3 +53,13 @@ To add a Core module, run `InstallTemplates.ps1` once, then:
 
 Either makes `src/Assets/Magic.Assets.csproj` and adds it to the solution's `Core` folder. Its settings come from
 `Directory.Build.props`, so the project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).
+
+To add a sample project:
+
+- **Visual Studio:** right-click the `Samples` solution folder, choose Add > New Project > Magic Project, give it a
+  name and set its location to the repository's `samples` folder.
+- **Command line:** `Magic new project Foo -o samples/Foo` from the repository's root, then
+  `dotnet sln src/Magic.slnx add samples/Foo/Samples.Foo.csproj --solution-folder Samples`.
+
+Either makes `samples/Foo/Foo.magic`, listing no gems, and `Samples.Foo.csproj`, whose Run builds Magic and opens the
+project ([Samples](../samples/README.md)).

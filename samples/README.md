@@ -10,3 +10,6 @@ dotnet run --project samples/HelloWorld
 ```
 
 Type `exit` to end the run.
+
+Make another with the project template: `Magic new project <Name> -o samples/<Name>`
+([Templates](../tools/README.md#templates)).
