@@ -110,7 +110,7 @@ Add the SDK's version to `Directory.Packages.props`, in order:
     <PackageVersion Include="ModelContextProtocol.Core" Version="2.2.0" />
 ```
 
-In `Magic.slnx`, add the project to the `/Gems/` folder, in order:
+In `src/Magic.slnx`, add the project to the `/Gems/` folder, in order:
 
 ```xml
     <Project Path="src/Bundled/Gems/LogMetrics/LogMetrics.csproj" />
@@ -790,7 +790,7 @@ installed template.
 ### Checkpoint
 
 ```powershell
-dotnet build Magic.slnx
+dotnet build src/Magic.slnx
 dotnet run --project samples
 ```
 
@@ -1082,7 +1082,7 @@ public sealed class Engine : IAsyncDisposable
 
         string executable = FindMagic();
         if (!File.Exists(executable))
-            throw new EngineException($"Magic is not at {executable}. Build Magic.slnx, or set MagicDir to a Magic folder.");
+            throw new EngineException($"Magic is not at {executable}. Build src/Magic.slnx, or set MagicDir to a Magic folder.");
 
         int port = FindFreePort();
         ProcessStartInfo start = new(executable)
@@ -1215,15 +1215,16 @@ public sealed class Engine : IAsyncDisposable
     }
 
     /// <summary>
-    /// Magic's executable: the Debug build of the repository Wizard was built in, found by walking up to its
-    /// Magic.slnx, or else the one in the Magic folder MagicDir names, as tools/VS Templates/InstallTemplates.ps1 sets it.
+    /// Magic's executable: the Debug build of the repository Wizard was built in, found by walking up to the folder
+    /// holding src/Magic.slnx, or else the one in the Magic folder MagicDir names, as
+    /// tools/VS Templates/InstallTemplates.ps1 sets it.
     /// </summary>
     private static string FindMagic()
     {
         string name = OperatingSystem.IsWindows() ? "Magic.exe" : "Magic";
         for (DirectoryInfo? folder = new(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
         {
-            if (File.Exists(Path.Combine(folder.FullName, "Magic.slnx")))
+            if (File.Exists(Path.Combine(folder.FullName, "src", "Magic.slnx")))
                 return Path.Combine(folder.FullName, "Build", "bin", "Debug", name);
         }
 
@@ -1254,7 +1255,7 @@ public sealed class EngineException(string message) : Exception(message);
 ```
 
 Play starts Magic with `--set Mcp.port=<free port>`, and the engine's log shows in Wizard's terminal. Inside this
-repository Wizard runs the Debug build next to `Magic.slnx`; elsewhere it runs the Magic in the folder `MagicDir` names.
+repository Wizard runs the repository's Debug build; elsewhere it runs the Magic in the folder `MagicDir` names.
 
 ### 3.6 App.razor and imports
 
@@ -2776,7 +2777,7 @@ Wizard is its own solution, outside the engine's build and code rules. It builds
 
 ## Building and running
 
-You need the .NET 10 SDK and Node. Build the engine first with `dotnet build Magic.slnx` at the repository root.
+You need the .NET 10 SDK and Node. Build the engine first with `dotnet build src/Magic.slnx` at the repository root.
 
 ```powershell
 dotnet build Wizard.slnx
@@ -2829,7 +2830,7 @@ Then delete this tutorial.
 | `CS0104: 'IComponent' is an ambiguous reference` or `'Result' is an ambiguous reference` in `McpGem.cs` | Add back the missing `using … = …;` alias at the top of the file. |
 | The engine logs an error for `--set Mcp.port`, and Wizard says the MCP server never answered | Add `"Mcp"` to the project's `.magic` file (1.6). |
 | `MCP clients cannot reach the engine on port N: …` | Another program holds the port, often an engine you started on 47800. Close it or pick another port. |
-| Wizard: "Magic is not at …" | Build the engine (`dotnet build Magic.slnx`), or set `MagicDir` outside the repository. |
+| Wizard: "Magic is not at …" | Build the engine (`dotnet build src/Magic.slnx`), or set `MagicDir` outside the repository. |
 | Wizard: "Magic exited with code 1 before its MCP server answered" | Check the project's path. The engine's log in Wizard's terminal says what failed. |
 | Wizard's build fails with `CA2007` or other engine rules, or restores the engine's analyzers | Add the missing file from 3.1: `.editorconfig` for the rules, `Directory.Packages.props` for the analyzers. |
 | `Build/obj/Debug/Tools/Wizard/` appeared | Delete it. It came from scaffolding before 3.1's files existed. |

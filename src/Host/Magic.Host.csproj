@@ -1,8 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- Magic: the host executable, and the library every gem compiles against. -->
+  <!-- Magic: the host executable. -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>Magic</AssemblyName>
-    <RootNamespace>Magic</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" PrivateAssets="all" />
+    <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+  </ItemGroup>
 </Project>
