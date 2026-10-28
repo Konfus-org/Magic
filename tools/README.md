@@ -24,7 +24,7 @@ CSharpier. A local build formats too, and `Validate.ps1` checks.
 
 Runs the checks a change must pass, in order, and stops at the first failure:
 
-1. **Build:** builds `Magic.slnx`. Every warning is an error, and so is a file CSharpier would change.
+1. **Build:** builds `src/Magic.slnx`. Every warning is an error, and so is a file CSharpier would change.
 2. **Test:** runs the tests against that build.
 3. **Headless:** runs the sample project without a window under `--fail-on-error`.
 4. **Screenshot:** runs `Screenshot.ps1` on the sample project. Needs a display and a GPU.
@@ -47,10 +47,10 @@ and a state already stamped returns at once. It also points git at the repositor
 
 To add a Core module, run `InstallTemplates.ps1` once, then:
 
-- **Visual Studio:** right-click the `Core` solution folder, choose Add > New Project > Magic Core Module, give it
-  the bare name (`Assets`, not `Magic.Assets`) and set its location to `src`.
+- **Visual Studio:** right-click the `Core` solution folder, choose Add > New Project > Magic Core Module and give it
+  the bare name (`Assets`, not `Magic.Assets`). Its location starts at `src`, the solution's folder.
 - **Command line:** `dotnet new magic-core -n Assets -o src/Assets`, then
-  `dotnet sln Magic.slnx add src/Assets/Magic.Assets.csproj --solution-folder Core`.
+  `dotnet sln src/Magic.slnx add src/Assets/Magic.Assets.csproj --solution-folder Core`.
 
 Either makes `src/Assets/Magic.Assets.csproj` and its README. Its settings come from `Directory.Build.props`, so the
 project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).

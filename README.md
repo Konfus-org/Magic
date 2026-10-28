@@ -11,7 +11,7 @@ where it is going. Today it is the `Magic` program, its log and asserts, and the
 ## Building and running
 
 ```powershell
-dotnet build Magic.slnx
+dotnet build src/Magic.slnx
 dotnet run --project src/Host -- --project <path> --headless
 ```
 

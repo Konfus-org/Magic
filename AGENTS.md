@@ -33,8 +33,8 @@ Commit or merge only once `tools/Scripts/AgentTaskComplete.ps1` has stamped that
 To run one step of Validate on its own:
 
 ```powershell
-dotnet build Magic.slnx
-dotnet test Magic.slnx
+dotnet build src/Magic.slnx
+dotnet test src/Magic.slnx
 'wait loaded', 'open Domains/Audio/Audio.domain', 'quit' | Magic --project samples --seconds 1200 --fail-on-error --headless
 tools/Scripts/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
 ```

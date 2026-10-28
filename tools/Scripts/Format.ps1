@@ -36,7 +36,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $env:MSBUILDDISABLENODEREUSE = '1'
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$solution = Join-Path $root 'Magic.slnx'
+$solution = Join-Path (Join-Path $root 'src') 'Magic.slnx'
 
 # dotnet format takes the C# files to touch; CSharpier takes every changed file it formats, or the repository.
 $common = @('--verbosity', 'normal')

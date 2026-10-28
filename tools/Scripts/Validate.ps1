@@ -59,7 +59,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 $env:MSBUILDDISABLENODEREUSE = '1'
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$solution = Join-Path $root 'Magic.slnx'
+$solution = Join-Path (Join-Path $root 'src') 'Magic.slnx'
 $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Configuration) 'Magic'
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 $screenshots = @()
