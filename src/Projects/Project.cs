@@ -1,11 +1,15 @@
-using System.Collections.ObjectModel;
+using System.Collections.Immutable;
 using Magic.Files;
 using Magic.Serialization;
 using Magic.State;
 
 namespace Magic.Projects;
 
-public readonly record struct Project(string Name, ReadOnlyCollection<string> Gems);
+public readonly record struct Project
+{
+    public required string Name { get; init; }
+    public required ImmutableArray<string> Gems { get; init; }
+}
 
 public static class ProjectExtensions
 {
