@@ -208,7 +208,7 @@ The five checks at the end of this step are the five arrows in this picture.
 
 **What it must do.**
 
-- Parse nine options and answer `--help`, `--version` and ~~a bad argument~~ itself: `--project` (a `.magic` file or the folder holding exactly one), `--frames`, `--seconds` (a ceiling, above 0), ~~`--headless`~~, `--set Gem.setting=value` repeatable, `--preset name`, `--fail-on-error`, `--bake`, `--verbose`.
+- Parse nine options and answer ~~a bad argument~~ itself: `--project` (a `.magic` file or the folder holding exactly one), `--frames`, `--seconds` (a ceiling, above 0), ~~`--headless`~~, `--set Gem.setting=value` repeatable, `--preset name`, `--fail-on-error`, `--bake`, `--verbose`.
 - Find and ~~read the project as JSON in one strict dialect: camelCase keys matched exactly, snake\_case enums, comments and trailing commas allowed, an unknown key or a null where none is allowed refused with a reason, a byte order mark skipped~~.
 - Log from any thread without ever waiting on the terminal, ~~with `Verbose`, `Info`, `Warn`, `Error` and `Critical`; count errors for the exit code~~; on `Critical` or ~~a failed `Assert` write `Logs/<time>.crash` beside the executable with the unprinted lines and the stack, print its path, break an attached debugger and end the process~~.
 - Exit 0 clean, ~~1 for bad arguments or a project that will not open~~, 2 when `--fail-on-error` and anything was logged as an error.
