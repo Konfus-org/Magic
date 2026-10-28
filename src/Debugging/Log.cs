@@ -10,13 +10,18 @@ namespace Magic.Debugging;
 /// </summary>
 public static class Log
 {
-    private const int StartupQueueSize = 10_000;
+    private const int HistorySize = 10_000;
+
+    /// <summary>
+    /// Guards the sinks and the history, so a sink is given each line once, in order, and never two at a time.
+    /// </summary>
+    private static readonly Lock _lock = new();
     private static readonly List<ILogSink> _sinks = [];
 
     /// <summary>
-    /// The lines printed before any sink was added, for the first one; null from then on.
+    /// The last lines logged, which every sink added is given first.
     /// </summary>
-    private static Queue<Line>? _queuedLinesToLog = new();
+    private static readonly Queue<Line> _history = new();
     private static int _errorCount;
 
     public static VerbosityLevel Verbosity
@@ -117,17 +122,20 @@ public static class Log
     )]
     public static void Flush()
     {
-        for (int i = _sinks.Count - 1; i >= 0; i--)
+        lock (_lock)
         {
-            try
+            for (int i = _sinks.Count - 1; i >= 0; i--)
             {
-                _sinks[i].Flush();
-            }
-            catch (Exception ex)
-            {
-                ILogSink sink = _sinks[i];
-                _sinks.RemoveAt(i);
-                Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+                try
+                {
+                    _sinks[i].Flush();
+                }
+                catch (Exception ex)
+                {
+                    ILogSink sink = _sinks[i];
+                    _sinks.RemoveAt(i);
+                    Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+                }
             }
         }
     }
@@ -135,30 +143,40 @@ public static class Log
     /// <summary>
     /// Sends every line logged from now on to <paramref name="sink"/> too, until the subscription is disposed, which
     /// waits until the sink has been given every line logged before, so it can be closed straight after; never
-    /// disposed from inside the sink's own <see cref="ILogSink.Write"/>. The first sink added gets the lines logged
-    /// before it first.
+    /// disposed from inside the sink's own <see cref="ILogSink.Write"/>. Every sink added is given the last lines
+    /// logged first.
     /// </summary>
     internal static Subscription Register(ILogSink sink)
     {
-        _sinks.Add(sink);
-
-        // If we had any lines queued before there was a sink, give them to the first one now and drop the queue.
-        if (_queuedLinesToLog is { } queue)
+        lock (_lock)
         {
-            _queuedLinesToLog = null;
-            foreach (Line line in queue)
-                WriteSinks(line);
+            _sinks.Add(sink);
+
+            // A copy, since a sink that throws logs an error, which adds to the history.
+            foreach (Line line in _history.ToArray())
+            {
+                if (!Write(line, sink))
+                    break;
+            }
         }
 
         return new Subscription(() => Unregister(sink));
     }
 
     /// <summary>
-    /// The lines logged before any sink was added, which no sink has printed; empty once one has.
+    /// The last lines logged, oldest first.
     /// </summary>
-    internal static IReadOnlyCollection<Line> GetUnprinted() => _queuedLinesToLog ?? (IReadOnlyCollection<Line>)[];
+    internal static Line[] GetHistory()
+    {
+        lock (_lock)
+            return [.. _history];
+    }
 
-    private static void Unregister(ILogSink sink) => _sinks.Remove(sink);
+    private static void Unregister(ILogSink sink)
+    {
+        lock (_lock)
+            _sinks.Remove(sink);
+    }
 
     private static Line CreateLine(LoggingLevel level, string message, string member, string file, int line) =>
         new(DateTime.Now, level, message, Environment.CurrentManagedThreadId, file, line, member);
@@ -171,15 +189,13 @@ public static class Log
     private static void Write(LoggingLevel level, string message, string member, string file, int line)
     {
         Line lineStruct = CreateLine(level, message, member, file, line);
-        // If there is a queue, we are before the first sink was added: queue the line and drop the oldest if full.
-        if (_queuedLinesToLog is { } queue)
+        lock (_lock)
         {
-            if (queue.Count == StartupQueueSize)
-                queue.Dequeue();
-            queue.Enqueue(lineStruct);
-        }
-        else
+            if (_history.Count == HistorySize)
+                _history.Dequeue();
+            _history.Enqueue(lineStruct);
             WriteSinks(lineStruct);
+        }
 
         // Log always writes to console
         string text = lineStruct.ToString();
@@ -192,24 +208,32 @@ public static class Log
     /// <summary>
     /// Gives <paramref name="line"/> to every sink. A sink that throws is logged and dropped; the log goes on.
     /// </summary>
+    private static void WriteSinks(in Line line)
+    {
+        foreach (var sink in _sinks.ToArray())
+        {
+            Write(line, sink);
+        }
+    }
+
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a sink throws, it is logged and the sink is dropped; the log goes on."
     )]
-    private static void WriteSinks(in Line line)
+    private static bool Write(Line line, ILogSink sink)
     {
-        foreach (var sink in _sinks.ToArray())
+        try
         {
-            try
-            {
-                sink.Write(line);
-            }
-            catch (Exception ex)
-            {
-                Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
-                _sinks.Remove(sink);
-            }
+            sink.Write(line);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Removed before the error is logged, so the sink isn't given the line about itself.
+            _sinks.Remove(sink);
+            Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+            return false;
         }
     }
 
