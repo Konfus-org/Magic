@@ -12,5 +12,17 @@
     "language": "C#",
     "type": "project"
   },
-  "primaryOutputs": [ { "path": "Magic.ModuleName.csproj" } ]
+  "symbols": {
+    "HostIdentifier": { "type": "bind", "binding": "HostIdentifier" }
+  },
+  "primaryOutputs": [ { "path": "Magic.ModuleName.csproj" } ],
+  "postActions": [
+    {
+      "condition": "(HostIdentifier == \"dotnetcli\")",
+      "description": "Adds the module to the solution's Core folder, as Visual Studio does when it makes one.",
+      "manualInstructions": [ { "text": "Add the module to src/Magic.slnx, in its Core folder." } ],
+      "actionId": "D396686C-DE0E-4DE6-906D-291CD29FC5DE",
+      "args": { "solutionFolder": "Core" }
+    }
+  ]
 }

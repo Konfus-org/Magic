@@ -3,7 +3,7 @@
   <PropertyGroup>
     <RunCommand>$(MagicBin)Magic</RunCommand>
     <RunCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicBin)Magic.exe</RunCommand>
-    <RunArguments>--project "$(MSBuildProjectDirectory)/HelloWorld.magic" --headless true</RunArguments>
+    <RunArguments>open "$(MSBuildProjectDirectory)/HelloWorld.magic" --headless true</RunArguments>
     <RunWorkingDirectory>$(MSBuildThisFileDirectory)../../</RunWorkingDirectory>
   </PropertyGroup>
   <ItemGroup>

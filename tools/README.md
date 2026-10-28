@@ -47,8 +47,8 @@ To add a Core module, run `InstallTemplates.ps1` once, then:
 
 - **Visual Studio:** right-click the `Core` solution folder, choose Add > New Project > Magic Core Module and give it
   the bare name (`Assets`, not `Magic.Assets`). Its location starts at `src`, the solution's folder.
-- **Command line:** `dotnet new magic-core -n Assets -o src/Assets`, then
-  `dotnet sln src/Magic.slnx add src/Assets/Magic.Assets.csproj --solution-folder Core`.
+- **Command line:** `Magic new core Assets -o src/Assets` from the repository's root, which runs
+  `dotnet new magic-core -n Assets -o src/Assets`.
 
-Either makes `src/Assets/Magic.Assets.csproj` and its README. Its settings come from `Directory.Build.props`, so the
-project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).
+Either makes `src/Assets/Magic.Assets.csproj` and adds it to the solution's `Core` folder. Its settings come from
+`Directory.Build.props`, so the project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).

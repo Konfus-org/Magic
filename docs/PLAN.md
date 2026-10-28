@@ -200,7 +200,7 @@ A loading screen is only this picture drawn for every call at once, which is why
 
 ## Part 1, step 1: the empty engine
 
-The first checkpoint is `Magic --project Hello --headless --frames 1 --fail-on-error` exiting 0 on a project that lists no gems, and 1 with a clear line when the project is missing or broken. About 1,000 lines.
+The first checkpoint is `Magic open Hello --headless --frames 1 --fail-on-error` exiting 0 on a project that lists no gems, and 1 with a clear line when the project is missing or broken. About 1,000 lines.
 
 ![the host's start · four steps, three doors out, one crash exit](images/06-host-start.png)
 
@@ -208,7 +208,7 @@ The five checks at the end of this step are the five arrows in this picture.
 
 **What it must do.**
 
-- Parse nine options and answer ~~a bad argument~~ itself: `--project` (a `.magic` file or the folder holding exactly one), `--frames`, `--seconds` (a ceiling, above 0), ~~`--headless`~~, `--set Gem.setting=value` repeatable, `--preset name`, `--fail-on-error`, `--bake`, `--verbose`.
+- Parse the `open` command and eight options and answer ~~a bad argument~~ itself: `open <project>` (a `.magic` file or the folder holding exactly one), `--frames`, `--seconds` (a ceiling, above 0), ~~`--headless`~~, `--set Gem.setting=value` repeatable, `--preset name`, `--fail-on-error`, `--bake`, `--verbose`.
 - Find and ~~read the project as JSON in one strict dialect: camelCase keys matched exactly, snake\_case enums, comments and trailing commas allowed, an unknown key or a null where none is allowed refused with a reason, a byte order mark skipped~~.
 - Log from any thread without ever waiting on the terminal, ~~with `Verbose`, `Info`, `Warn`, `Error` and `Critical`; count errors for the exit code~~; on `Critical` or ~~a failed `Assert` write `Logs/<time>.crash` beside the executable with the unprinted lines and the stack, print its path, break an attached debugger and end the process~~.
 - Exit 0 clean, ~~1 for bad arguments or a project that will not open~~, 2 when `--fail-on-error` and anything was logged as an error.
@@ -224,11 +224,11 @@ The five checks at the end of this step are the five arrows in this picture.
 ```
 
 ```powershell
-dotnet run --project src/Launcher -- --project Hello --headless --frames 1 --fail-on-error; $LASTEXITCODE
+dotnet run --project src/Launcher -- open Hello --headless --frames 1 --fail-on-error; $LASTEXITCODE
 ```
 
 1. One `Info` line, `Running Hello from <folder>`, and exit code 0.
-2. `--project Nowhere` logs `There is no project at Nowhere` as an `Error` and exits 1.
+2. `open Nowhere` logs `There is no project at Nowhere` as an `Error` and exits 1.
 3. A second `.magic` in the folder exits 1 with `must hold exactly one .magic file; it holds 2`.
 4. A misspelt key, say `"gemz"`, exits 1 with `is not a valid project`.
 5. A `Debugging.Critical("boom")` anywhere writes `Logs/<time>.crash` beside Magic, prints its path and ends the process. Remove it again.
@@ -345,7 +345,7 @@ dotnet test src/Magic.slnx
 **The checks gem.** What the unit tests cannot reach is the real threads and the real disk, so `tests/CoreChecks/` holds a project listing one gem, `Checks`, that lives only in your repository. Each failed check is a `Debugging.Error` with expected and seen, so `--fail-on-error` makes it exit 2. It checks the thread names a constructor, `Step` and `Render` run on; that `PostAsync` to the render thread runs there and its task ends, cancelled when cancelled first; that a message published from `Render` is in the next frame's input; that `TrySet` reaches the next frame's settings snapshot and a restart-marked key restarts; that `LoadAsync` on a real file lands in the snapshot, that saving the file brings a new version within a second, and that a broken file keeps the old value with one `Error`; and that `Verbose` prints only under `--verbose`.
 
 ```powershell
-dotnet run --project src/Launcher -- --project tests/CoreChecks --headless --seconds 5 --fail-on-error; $LASTEXITCODE
+dotnet run --project src/Launcher -- open tests/CoreChecks --headless --seconds 5 --fail-on-error; $LASTEXITCODE
 ```
 
 **Keep it as a tool.** ~~Write the first [`tools/Validate.ps1`](https://github.com/Konfus-org/Slop-Magic/blob/dev/tools/Validate.ps1) now: build, test,~~ the checks run, ~~stopping at the first failure and printing `PASSED` or `FAILED`~~. From here every gem's checkpoint joins it, so the proof of the whole engine stays one command.
@@ -377,7 +377,7 @@ Two rules from the loader decide the order. A gem is made after every interface 
 **ConsoleCommands.** _Core first:_ [`ICommands`](https://github.com/Konfus-org/Slop-Magic/blob/dev/src/Core/Interfaces/ICommands.cs). _What:_ lines from the terminal, `help`, `quit`, `wait N` frames or `wait 7.5s` or `wait loaded`, `open <asset path>`, `screenshot`, `pause`, `resume`, `step`, `timescale`; `quit` logs `quit typed in the terminal`, the line Validate looks for. _Shape:_ a reader thread publishes a `LineTyped` message per line; `Step` dispatches the frame's lines over a registry held in its state record, waits included. _Reference:_ [`ConsoleCommandsGem.cs`](https://github.com/Konfus-org/Slop-Magic/blob/dev/src/Bundled/Gems/ConsoleCommands/ConsoleCommandsGem.cs). _Checkpoint:_
 
 ```powershell
-'wait loaded', 'open Domains/Second/Second.domain', 'quit' | dotnet run --project src/Core -- --project Hello --headless --seconds 60 --fail-on-error; $LASTEXITCODE
+'wait loaded', 'open Domains/Second/Second.domain', 'quit' | dotnet run --project src/Core -- open Hello --headless --seconds 60 --fail-on-error; $LASTEXITCODE
 ```
 
 Exit 0 with that line in the log, and this run becomes Validate's headless step: every domain of the project but the first and the loading one, opened in turn.

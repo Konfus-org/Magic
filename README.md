@@ -12,17 +12,20 @@ where it is going. Today it is the `Magic` program, its log and asserts, and the
 
 ```powershell
 dotnet build src/Magic.slnx
-dotnet run --project src/Launcher -- --project <path> --headless
+dotnet run --project src/Launcher -- open <path> --headless
 dotnet run --project samples/HelloWorld
 ```
 
-Options after `--` go to Magic; they are declared in [`Cli.cs`](src/CommandLine/Cli.cs). With
-`--headless`, each line typed into the terminal runs as the same options, with or without the leading `--`, and `help`
-lists them. A typed `project <path>` or `headless false` restarts the run. The build output goes to
+What follows `--` goes to Magic, whose commands are declared in [`Cli.cs`](src/CommandLine/Cli.cs); `--help` lists
+them. With `--headless`, each line typed into the terminal runs the same commands, and an option may leave out its
+leading `--`. A typed `open <path>` or `headless false` restarts the run. The build output goes to
 `Build/bin/<Configuration>/`.
 
-- Exit codes: `0` clean, `1` bad arguments or a project that won't open, `2` at the first error logged under
-  `--fail-on-error`.
+`Magic new <template> <name>` makes `<name>` with `dotnet new magic-<template>`, passing on any option Magic doesn't
+know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Templates/InstallTemplates.ps1`.
+
+- Exit codes: `0` clean, `1` a bad command line, a command that failed or a project that won't open, `2` at the first
+  error logged under `--fail-on-error`.
 - A crash writes `Logs/<time>.crash` next to Magic.
 
 ## Folders

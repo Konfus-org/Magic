@@ -17,7 +17,7 @@ internal static class Terminal
     /// <summary>
     /// Takes the next line typed into the terminal, if one is waiting.
     /// </summary>
-    public static bool TryReadLine([MaybeNullWhen(false)] out string line) => _lines.TryRead(out line);
+    public static bool Pump([MaybeNullWhen(false)] out string line) => _lines.TryRead(out line);
 
     [SuppressMessage("ApiDesign", "RS0030:Do not use banned APIs", Justification = "Must read console for CLI")]
     private static ChannelReader<string> StartReadingLines()
@@ -35,7 +35,7 @@ internal static class Terminal
             Name = "CLI Reader",
         };
         reader.Start();
-        Log.Info("Welcome to the magic CLI, type 'help' for options.");
+        Log.Info("Welcome to the magic CLI, type 'help' for commands.");
 
         return lines.Reader;
     }

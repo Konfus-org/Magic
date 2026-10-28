@@ -24,25 +24,24 @@ internal static class Program
     }
 
     /// <summary>
-    /// Runs the project the commands ask for, pumping the terminal for more, until they ask to exit. Exits 0 clean, 1
-    /// for a bad command line or a project that won't open, and 2 at the first error under --fail-on-error.
+    /// Runs what the commands ask for, a job like new or --version, or a project, pumping the terminal for more until
+    /// they ask to exit. Exits 0 clean; 1 for a bad command line, a job that failed or a project that won't open; and 2
+    /// at the first error under --fail-on-error.
     /// </summary>
     private static int Run(string[] commandLine)
     {
-        Log.Info($"Command line args: {string.Join(", ", commandLine)}");
         App app = new();
         Result ran = Cli.Run(app, commandLine);
+        Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
         if (!ran.Ok)
         {
-            Log.Critical($"Failed to parse command-line arguments: {ran.Error}");
+            Log.Critical($"Couldn't run the command line: {ran.Error}");
             return 1;
         }
 
-        if (app.ProjectPath.Length == 0)
-        {
-            Log.Critical("No project to run: give one with --project <path>.");
-            return 1;
-        }
+        // A job, like new or --version, is done once it ran, and failed if it logged an error.
+        if (app.IsExiting)
+            return Log.ErrorCount == 0 ? 0 : 1;
 
         IFileSystem fileSystem = new FileSystem();
 

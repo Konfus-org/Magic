@@ -64,7 +64,7 @@ $screenshots = @()
 function Invoke-Headless {
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $magic
-    $info.Arguments = "--project `"$projectPath`" --headless true --fail-on-error"
+    $info.Arguments = "open `"$projectPath`" --headless true --fail-on-error"
     $info.UseShellExecute = $false
     $info.RedirectStandardInput = $true
     $process = [System.Diagnostics.Process]::Start($info)

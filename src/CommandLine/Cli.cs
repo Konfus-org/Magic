@@ -13,21 +13,42 @@ namespace Magic.CommandLine;
 public static class Cli
 {
     /// <summary>
-    /// Runs the commands Magic was launched with, or says why they didn't parse.
+    /// Runs the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
+    /// command does its job and leaves the app exiting.
     /// </summary>
-    public static Result Run(App app, string[] commandLine) => Invoke(CreateCommands(app).Parse(commandLine));
+    public static Result Run(App app, string[] commandLine)
+    {
+        RootCommand commands = CreateCommands(app);
+        ParseResult parsed = commands.Parse(commandLine);
+        if (parsed.Errors.Count == 0 && parsed.Action == commands.Action)
+            return Result.Failure(
+                "it has no command; open a project with 'Magic open <project>', or see 'Magic --help'."
+            );
+
+        Result ran = Invoke(parsed);
+        if (app.ProjectPath.Length == 0)
+            app.Exit();
+
+        return ran;
+    }
 
     /// <summary>
-    /// Runs one line of commands, which may leave out the leading --, or says why the line didn't parse.
+    /// Runs one typed line, or says why it didn't run. A line that doesn't start with a command is options, which may
+    /// leave out the leading --, or the - of a one-letter option.
     /// </summary>
     public static Result Run(App app, string line)
     {
         if (string.IsNullOrWhiteSpace(line))
             return Result.Success();
 
-        string command = line.StartsWith('-') ? line : "--" + line;
+        RootCommand commands = CreateCommands(app);
+        string firstWord = line.Split(' ', 2)[0];
+        if (line.StartsWith('-') || commands.Subcommands.Any(command => command.Name == firstWord))
+            return Invoke(commands.Parse(line));
 
-        return Invoke(CreateCommands(app).Parse(command));
+        string dashes = line.Length == 1 ? "-" : "--";
+
+        return Invoke(commands.Parse(dashes + line));
     }
 
     /// <summary>
@@ -36,62 +57,88 @@ public static class Cli
     /// </summary>
     public static void Pump(App app)
     {
-        while (app.IsRunning && Terminal.TryReadLine(out string? line))
+        while (app.IsRunning && Terminal.Pump(out string? line))
         {
             Result ran = Run(app, line);
             if (!ran.Ok)
-                Log.Error($"Failed to parse command '{line}': {ran.Error}");
+                Log.Error($"Couldn't run '{line}': {ran.Error}");
         }
     }
 
     /// <summary>
-    /// The commands, as options whose actions change <paramref name="app"/>; only --verbosity and --exit-now act at
-    /// once.
+    /// The commands: verbs that act on <paramref name="app"/> or do a job of their own, and options that set how it
+    /// runs, given before or after the verb.
     /// </summary>
     private static RootCommand CreateCommands(App app)
     {
-        RootCommand commands = new("Runs a Magic project.")
+        RootCommand commands = new("Runs Magic projects and makes new ones.")
         {
-            Options =
+            Subcommands =
             {
-                new Option<string>("--project")
+                new Command("open", "Opens the project at the given path and runs it, ending the run of any other")
                 {
-                    Description = "Opens a project at the given path",
-                    Action = new Command(cmds => app.ProjectPath = cmds.GetRequiredValue<string>("--project")),
+                    Arguments = { new Argument<string>("project") { Description = "The .magic file to run" } },
+                    Action = new CliCommand(cmds => app.ProjectPath = cmds.GetRequiredValue<string>("project")),
                 },
-                new Option<bool>("--headless")
+                new Command("new", "Makes a project, gem or module from Magic's dotnet new templates")
                 {
-                    Description = "Run without a GUI (headless mode)",
-                    Action = new Command(cmds => app.IsHeadless = cmds.GetValue<bool>("--headless")),
-                },
-                new Option<Log.VerbosityLevel>("--verbosity")
-                {
-                    Description = "How much the log prints",
-                    Action = new Command(cmds => Log.Verbosity = cmds.GetValue<Log.VerbosityLevel>("--verbosity")),
-                },
-                new Option<bool>("--exit")
-                {
-                    Description = "Tell app to close",
-                    Action = new Command(_ =>
+                    Arguments =
                     {
-                        Log.Info("Exiting.");
-                        app.Exit();
+                        new Argument<string>("template") { Description = "Which template: X in dotnet new magic-X" },
+                        new Argument<string>("name") { Description = "What to call it" },
+                    },
+
+                    // Options Magic doesn't know, like -o or --force, go to dotnet new.
+                    TreatUnmatchedTokensAsErrors = false,
+                    Action = new CliCommand(cmds =>
+                    {
+                        string name = cmds.GetRequiredValue<string>("name");
+                        string template = $"magic-{cmds.GetRequiredValue<string>("template")}";
+                        Result created = Processes.Run(
+                            "dotnet",
+                            ["new", template, "--name", name, .. cmds.UnmatchedTokens]
+                        );
+                        if (!created.Ok)
+                            Log.Error($"Couldn't make {name} from {template}: {created.Error}");
                     }),
                 },
-                new Option<bool>("--exit-now")
+                new Command("exit", "Ends the run and exits")
                 {
-                    Description = "Tell app to close immediately",
-                    Action = new Command(_ =>
+                    Options = { new Option<bool>("--now") { Description = "Exit at once, without ending the run" } },
+                    Action = new CliCommand(cmds =>
                     {
+                        if (!cmds.GetValue<bool>("--now"))
+                        {
+                            Log.Info("Exiting.");
+                            app.Exit();
+                            return;
+                        }
+
                         Log.Info("Exiting immediately with code 0.");
                         Log.Flush();
                         Environment.Exit(0);
                     }),
                 },
+            },
+            Options =
+            {
+                new Option<bool>("--headless")
+                {
+                    Description = "Run without a GUI (headless mode)",
+                    Recursive = true,
+                    Action = new CliCommand(cmds => app.IsHeadless = cmds.GetValue<bool>("--headless")),
+                },
+                new Option<Log.VerbosityLevel>("--verbosity", "-v")
+                {
+                    Description = "How much the log prints",
+                    Recursive = true,
+                    Action = new CliCommand(cmds => Log.Verbosity = cmds.GetValue<Log.VerbosityLevel>("--verbosity")),
+                },
                 new Option<bool>("--fail-on-error")
                 {
                     Description = "Exit with code 2 as soon as an error is logged",
-                    Action = new Command(cmds => app.FailOnError = cmds.GetValue<bool>("--fail-on-error")),
+                    Recursive = true,
+                    Action = new CliCommand(cmds => app.FailOnError = cmds.GetValue<bool>("--fail-on-error")),
                 },
             },
         };

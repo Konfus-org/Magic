@@ -7,12 +7,12 @@
       "Command": "Test Headless",
       "Items": [
         {
-          "Id": "6a4f8ca0-b4c0-4fef-ade3-159fc4eeb3ee",
-          "Command": "--headless True"
+          "Id": "030b1eb6-8aa3-49b2-bfd6-a505165a202d",
+          "Command": "open samples/HelloWorld/HelloWorld.magic"
         },
         {
-          "Id": "030b1eb6-8aa3-49b2-bfd6-a505165a202d",
-          "Command": "--project samples/HelloWorld/HelloWorld.magic"
+          "Id": "6a4f8ca0-b4c0-4fef-ade3-159fc4eeb3ee",
+          "Command": "--headless True"
         }
       ]
     }
