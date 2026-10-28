@@ -7,9 +7,6 @@ Each script is one PowerShell file that runs under both `pwsh` and Windows Power
 lacks (`&&`, `?:`, `??`). A script runs from any folder and exits `0` when it passes. Its help comment lists its
 switches: `Get-Help ./tools/Scripts/Validate.ps1 -Full`.
 
-There is no sample project yet. Until there is, only the Build and Test steps work: run
-`Validate.ps1 -Only Build,Test`, and `AgentTaskComplete.ps1` at the `Docs` level.
-
 ## Format.ps1
 
 Formats the `.cs`, `.csproj`, `.props` and `.targets` files that differ from the last commit, new files included.
@@ -26,7 +23,8 @@ Runs the checks a change must pass, in order, and stops at the first failure:
 
 1. **Build:** builds `src/Magic.slnx`. Every warning is an error, and so is a file CSharpier would change.
 2. **Test:** runs the tests against that build.
-3. **Headless:** runs the sample project without a window under `--fail-on-error`.
+3. **Headless:** runs the sample project without a window under `--fail-on-error`, types `exit` into it and passes
+   when it exits `0`. A run still going after `-Seconds` is killed and fails.
 4. **Screenshot:** runs `Screenshot.ps1` on the sample project. Needs a display and a GPU.
 
 `-Only` runs some steps, and `-Project` runs another project.

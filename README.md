@@ -13,6 +13,7 @@ where it is going. Today it is the `Magic` program, its log and asserts, and the
 ```powershell
 dotnet build src/Magic.slnx
 dotnet run --project src/Launcher -- --project <path> --headless
+dotnet run --project samples/HelloWorld
 ```
 
 Options after `--` go to Magic; they are declared in [`Cli.cs`](src/CommandLine/Cli.cs). With
@@ -31,6 +32,7 @@ src/Launcher/    the Magic program
 src/Debugging/   the log, asserts and crashes
 src/Extensions/  extension members every project can use
 src/State/       small value types the other projects share
+samples/         the sample projects, which show and test Magic
 tools/           the scripts and the analyzers; nothing here ships
 docs/            the plan, how to contribute and the code standards
 Build/           build output, not in git

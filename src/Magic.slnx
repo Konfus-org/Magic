@@ -18,6 +18,13 @@
     <File Path="../docs/CONTRIBUTING.md" />
     <File Path="../docs/PLAN.md" />
   </Folder>
+  <Folder Name="/Samples/">
+    <File Path="../samples/README.md" />
+  </Folder>
+  <Folder Name="/Samples/HelloWorld/">
+    <File Path="../samples/HelloWorld/HelloWorld.magic" />
+    <Project Path="../samples/HelloWorld/Samples.HelloWorld.csproj" />
+  </Folder>
   <Folder Name="/Tools/">
     <File Path="../tools/README.md" />
   </Folder>

@@ -12,7 +12,7 @@
         },
         {
           "Id": "030b1eb6-8aa3-49b2-bfd6-a505165a202d",
-          "Command": "--project TODOPROJECT"
+          "Command": "--project samples/HelloWorld/HelloWorld.magic"
         }
       ]
     }

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The sample's own code, beside its .magic file. Its Run is Magic opening the sample headless. -->
+  <PropertyGroup>
+    <RunCommand>$(MagicBin)Magic</RunCommand>
+    <RunCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicBin)Magic.exe</RunCommand>
+    <RunArguments>--project "$(MSBuildProjectDirectory)/HelloWorld.magic" --headless true</RunArguments>
+    <RunWorkingDirectory>$(MSBuildThisFileDirectory)../../</RunWorkingDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Built before the sample so its Run has a Magic to start; nothing of it is referenced or copied. -->
+    <ProjectReference
+      Include="../../src/Launcher/Magic.Launcher.csproj"
+      ReferenceOutputAssembly="false"
+      Private="false"
+      SkipGetTargetFrameworkProperties="true"
+    />
+  </ItemGroup>
+</Project>

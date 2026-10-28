@@ -2,7 +2,8 @@
   "profiles": {
     "Magic.Launcher": {
       "commandName": "Project",
-      "commandLineArgs": "--headless True --project TODOPROJECT"
+      "commandLineArgs": "--headless True --project samples/HelloWorld/HelloWorld.magic",
+      "workingDirectory": "$(ProjectDir)../.."
     }
   }
 }

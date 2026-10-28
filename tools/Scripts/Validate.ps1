@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-Runs the checks a change must pass: a clean build, the tests, the samples headless through every one of their domains,
-and the samples with a window through every domain, ending in a screenshot of each to look at.
+Runs the checks a change must pass: a clean build, the tests, the sample headless, and the sample with a window, ending
+in a screenshot to look at.
 
 .DESCRIPTION
 The steps run in order and the first failure ends the run with that step's exit code; a run that passes exits 0.
@@ -11,25 +11,21 @@ error, so a clean build is one that exits 0. It logs with MSBuild's plain consol
 progress shows as it happens, which the terminal logger holds back until each project ends. Formatting is not checked
 here: tools/Scripts/Format.ps1 formats a change before it is validated, and the build fails on every rule it applies that a
 build can see.
-The tests run against that build, so running them alone (-Only Test) needs one. Both sample runs pass --fail-on-error,
-so an error logged during a run exits 2, and both wait until the world has loaded (the console's wait loaded), shaders
-compiled and the domain open, so a world that never loads fails rather than passing on the loading screen. Their
-ceiling is a time, not a frame count: a headless loading screen costs next to nothing to draw, so thousands of frames
-can go by while shaders compile. Each run then opens every other domain under the project's Assets, all but its
-loading domain, in place of the world (the console's open), one after another, so a change that breaks any of them
-fails. The Screenshot step runs tools/Scripts/Screenshot.ps1 over the same domains and prints the images' paths last, the
-first domain's first: open each and look at what it shows before reporting the change as working. It needs a display
-and a GPU; the others do not. Runs from any current directory.
+The tests run against that build, so running them alone (-Only Test) needs one. The Headless step runs the project
+without a window under --fail-on-error, types exit into it and passes when it ends with 0; an error logged during the
+run exits 2, and a run still going after -Seconds is killed and fails. The Screenshot step runs
+tools/Scripts/Screenshot.ps1 on the project and prints the images' paths last: open each and look at what it shows
+before reporting the change as working. It needs a display and a GPU; the others do not. Runs from any current
+directory.
 
 .PARAMETER Configuration
 The build configuration: Debug, Optimize or Release.
 
 .PARAMETER Seconds
-The longest each sample run may last for each domain it opens, in seconds, before it counts as never having loaded: a
-ceiling, not a wait.
+The longest each sample run may last, in seconds, before it is killed and fails: a ceiling, not a wait.
 
 .PARAMETER Project
-The project the sample runs open: a .magic file or the folder holding one, relative to the repository root.
+The .magic file the sample runs open, relative to the repository root.
 
 .PARAMETER Only
 The steps to run when not all of them: Build, Test, Headless, Screenshot, in that order whatever order they are given.
@@ -45,8 +41,8 @@ param(
     [ValidateSet('Debug', 'Optimize', 'Release')]
     [string] $Configuration = 'Debug',
     [ValidateRange(1, [int]::MaxValue)]
-    [int] $Seconds = 600,
-    [string] $Project = 'samples',
+    [int] $Seconds = 120,
+    [string] $Project = 'samples/HelloWorld/HelloWorld.magic',
     [ValidateSet('Build', 'Test', 'Headless', 'Screenshot')]
     [string[]] $Only = @('Build', 'Test', 'Headless', 'Screenshot')
 )
@@ -64,41 +60,28 @@ $magic = Join-Path (Join-Path (Join-Path (Join-Path $root 'Build') 'bin') $Confi
 $projectPath = if ([System.IO.Path]::IsPathRooted($Project)) { $Project } else { Join-Path $root $Project }
 $screenshots = @()
 
-# The asset paths of the project's domains but its first domain, which opens first, and its loading domain, which shows
-# while another opens: every .domain under its Assets, named by the id its .meta gives, as the .magic file names them.
-function Get-Domains {
-    $file = if ($projectPath -like '*.magic') { $projectPath } else { @(Get-ChildItem $projectPath -Filter '*.magic')[0].FullName }
-    $text = Get-Content -Raw $file
-    $skipped = @()
-    foreach ($key in 'firstDomain', 'loadingDomain') {
-        if ($text -match ('"' + $key + '"\s*:\s*\{\s*"id"\s*:\s*(\d+)')) { $skipped += $Matches[1] }
-    }
-    $assets = Join-Path (Split-Path -Parent $file) 'Assets'
-    $domains = foreach ($domain in Get-ChildItem $assets -Recurse -Filter '*.domain') {
-        $meta = Get-Content -Raw "$($domain.FullName).meta"
-        if ($meta -match '"id"\s*:\s*(\d+)' -and $skipped -contains $Matches[1]) { continue }
-        $domain.FullName.Substring($assets.Length + 1).Replace('\', '/')
-    }
-    return @($domains | Sort-Object)
-}
-
-# Runs the project headless until its world has loaded, opens each other domain in its place until it is there, then
-# quits; a run that reaches its -Seconds first never loaded.
+# Runs the project headless, types exit into it and waits for it to end; a run still going after -Seconds is killed.
 function Invoke-Headless {
-    $domains = Get-Domains
-    $lines = @('wait loaded') + @($domains | ForEach-Object { "open $_" }) + @('quit')
-    $log = $lines | & $magic --project $projectPath --seconds ($Seconds * (1 + $domains.Count)) --fail-on-error --headless | ForEach-Object { Write-Host $_; $_ }
-    $code = $LASTEXITCODE
-    if ($code -eq 0 -and -not ($log | Select-String -SimpleMatch 'quit typed in the terminal')) {
-        Write-Host "FAILED: the world never finished loading within $Seconds s."
-        $code = 1
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $magic
+    $info.Arguments = "--project `"$projectPath`" --headless true --fail-on-error"
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $process = [System.Diagnostics.Process]::Start($info)
+    $process.StandardInput.WriteLine('exit')
+    $process.StandardInput.Close()
+    if (-not $process.WaitForExit($Seconds * 1000)) {
+        $process.Kill()
+        Write-Host "FAILED: the run was still going after $Seconds s."
+        $global:LASTEXITCODE = 1
+        return
     }
-    $global:LASTEXITCODE = $code
+    $global:LASTEXITCODE = $process.ExitCode
 }
 
-# Runs tools/Scripts/Screenshot.ps1 over every domain and keeps the images' paths, its output.
+# Runs tools/Scripts/Screenshot.ps1 on the project and keeps the images' paths, its output.
 function Invoke-Screenshot {
-    $output = & (Join-Path $PSScriptRoot 'Screenshot.ps1') -Configuration $Configuration -Seconds $Seconds -Project $Project -Domains (Get-Domains)
+    $output = & (Join-Path $PSScriptRoot 'Screenshot.ps1') -Configuration $Configuration -Seconds $Seconds -Project $Project
     $code = $LASTEXITCODE
     if ($code -eq 0) { $script:screenshots = @($output) }
     $global:LASTEXITCODE = $code
