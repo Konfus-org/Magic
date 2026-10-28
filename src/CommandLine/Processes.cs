@@ -1,6 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
-using Magic.State;
+using Magic.Utils;
 
 namespace Magic.CommandLine;
 

@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
-    <ProjectReference Include="../State/Magic.State.csproj" />
+    <ProjectReference Include="../Utils/Magic.Utils.csproj" />
   </ItemGroup>
 </Project>

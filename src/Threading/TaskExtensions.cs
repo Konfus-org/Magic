@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using Magic.Debugging;
 
-namespace Magic.Extensions;
+namespace Magic.Threading;
 
 public static class TaskExtensions
 {

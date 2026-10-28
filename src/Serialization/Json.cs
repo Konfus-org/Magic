@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Magic.State;
+using Magic.Utils;
 
 namespace Magic.Serialization;
 

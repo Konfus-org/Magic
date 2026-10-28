@@ -2,7 +2,7 @@ using System.CommandLine;
 using System.Linq;
 using Magic.Debugging;
 using Magic.Host;
-using Magic.State;
+using Magic.Utils;
 
 namespace Magic.CommandLine;
 
@@ -71,7 +71,7 @@ public static class Cli
     /// </summary>
     private static RootCommand CreateCommands(App app)
     {
-        RootCommand commands = new("Runs Magic projects and makes new ones.")
+        RootCommand commands = new("Magic CLI.\nAllows interaction with the Magic game engine from the command line.")
         {
             Subcommands =
             {
@@ -138,7 +138,7 @@ public static class Cli
                 {
                     Description = "Exit with code 2 as soon as an error is logged",
                     Recursive = true,
-                    Action = new CliCommand(cmds => app.FailOnError = cmds.GetValue<bool>("--fail-on-error")),
+                    Action = new CliCommand(cmds => app.ShouldExitOnError = cmds.GetValue<bool>("--fail-on-error")),
                 },
             },
         };

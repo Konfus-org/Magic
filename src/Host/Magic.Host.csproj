@@ -1,1 +1,7 @@
-<Project Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Files/Magic.Files.csproj" />
+    <ProjectReference Include="../Serialization/Magic.Serialization.csproj" />
+    <ProjectReference Include="../Utils/Magic.Utils.csproj" />
+  </ItemGroup>
+</Project>

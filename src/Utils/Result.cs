@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 
-namespace Magic.State;
+namespace Magic.Utils;
 
 /// <summary>
 /// The outcome of work that can fail on content or the machine and has nothing to give back (writing, deleting): done,

@@ -1,6 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
-using Magic.State;
+using Magic.Utils;
 
 namespace Magic.Files;
 

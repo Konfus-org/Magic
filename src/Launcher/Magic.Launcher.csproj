@@ -8,6 +8,5 @@
     <ProjectReference Include="../CommandLine/Magic.CommandLine.csproj" />
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
     <ProjectReference Include="../Host/Magic.Host.csproj" />
-    <ProjectReference Include="../Projects/Magic.Projects.csproj" />
   </ItemGroup>
 </Project>

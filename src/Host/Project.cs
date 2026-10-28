@@ -1,9 +1,9 @@
 using System.Collections.Immutable;
 using Magic.Files;
 using Magic.Serialization;
-using Magic.State;
+using Magic.Utils;
 
-namespace Magic.Projects;
+namespace Magic.Host;
 
 public readonly record struct Project
 {

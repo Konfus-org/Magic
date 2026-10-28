@@ -4,6 +4,6 @@
     <PackageReference Include="System.CommandLine" PrivateAssets="compile;contentfiles;analyzers;build" />
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
     <ProjectReference Include="../Host/Magic.Host.csproj" />
-    <ProjectReference Include="../State/Magic.State.csproj" />
+    <ProjectReference Include="../Utils/Magic.Utils.csproj" />
   </ItemGroup>
 </Project>

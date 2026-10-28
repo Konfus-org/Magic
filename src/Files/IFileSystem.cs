@@ -1,4 +1,4 @@
-using Magic.State;
+using Magic.Utils;
 
 namespace Magic.Files;
 

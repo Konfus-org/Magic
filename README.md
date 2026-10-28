@@ -32,9 +32,10 @@ know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Temp
 
 ```
 src/Launcher/    the Magic program
+src/Host/        the app, the project and the gem contract
 src/Debugging/   the log, asserts and crashes
-src/Extensions/  extension members every project can use
-src/State/       small value types the other projects share
+src/Threading/   helpers for tasks and threads
+src/Utils/       small value types and helpers the other projects share
 samples/         the sample projects, which show and test Magic
 tools/           the scripts and the analyzers; nothing here ships
 docs/            the plan, how to contribute and the code standards

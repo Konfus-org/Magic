@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.CompilerServices;
-using Magic.State;
+using Magic.Utils;
 
 namespace Magic.Debugging;
 

@@ -42,7 +42,7 @@ public sealed class App
     /// <summary>
     /// Whether the process exits with 2 as soon as an error is logged.
     /// </summary>
-    public bool FailOnError { get; set; }
+    public bool ShouldExitOnError { get; set; }
 
     /// <summary>
     /// Whether the current run goes on: <see cref="Start"/> begins it; <see cref="Exit"/>, or a new project or mode,

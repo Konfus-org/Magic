@@ -3,12 +3,11 @@ using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Host;
-using Magic.Projects;
-using Magic.State;
+using Magic.Utils;
 
 namespace Magic.Launcher;
 
-internal static class Program
+internal static class Launcher
 {
     private static int Main(string[] commandLine)
     {
@@ -85,7 +84,7 @@ internal static class Program
         while (app.IsRunning)
         {
             Cli.Pump(app);
-            if (app.FailOnError && Log.ErrorCount > 0)
+            if (app.ShouldExitOnError && Log.ErrorCount > 0)
                 return Result.Failure($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
         }
 
