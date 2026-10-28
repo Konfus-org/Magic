@@ -22,6 +22,9 @@
     <NuGetAudit>true</NuGetAudit>
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>high</NuGetAuditLevel>
+    <!-- Visual Studio writes no Properties/launchSettings.json into a project that has none: only the Host runs, and it
+         keeps its own. -->
+    <NoDefaultLaunchSettingsFile>true</NoDefaultLaunchSettingsFile>
     <!-- CSharpier decides layout (.editorconfig's [*] block): the editor's extension formats a file on save, and a local
          build formats what is left. tools/Scripts/Validate.ps1, which CI runs, checks instead and refuses a file
          CSharpier would change. -->

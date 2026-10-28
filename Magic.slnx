@@ -35,31 +35,4 @@
     <File Path="tools/VS Templates/Core/Magic.ModuleName.csproj" />
     <File Path="tools/VS Templates/Core/README.md" />
   </Folder>
-  <Folder Name="/Tools/VS Templates/Gem/">
-    <File Path="tools/VS Templates/Gem/.template.config/icon.png" />
-    <File Path="tools/VS Templates/Gem/.template.config/ide.host.json" />
-    <File Path="tools/VS Templates/Gem/.template.config/template.json" />
-    <File Path="tools/VS Templates/Gem/GemName.csproj" />
-    <File Path="tools/VS Templates/Gem/GemNameGem.cs" />
-    <File Path="tools/VS Templates/Gem/GemNameSettings.cs" />
-    <File Path="tools/VS Templates/Gem/README.md" />
-  </Folder>
-  <Folder Name="/Tools/VS Templates/Project/">
-    <File Path="tools/VS Templates/Project/.gitignore" />
-    <File Path="tools/VS Templates/Project/.template.config/icon.png" />
-    <File Path="tools/VS Templates/Project/.template.config/ide.host.json" />
-    <File Path="tools/VS Templates/Project/.template.config/template.json" />
-    <File Path="tools/VS Templates/Project/ProjectName.csproj" />
-    <File Path="tools/VS Templates/Project/ProjectName.magic" />
-  </Folder>
-  <Folder Name="/Tools/VS Templates/Project/Assets/Domains/Main/">
-    <File Path="tools/VS Templates/Project/Assets/Domains/Main/Main.domain" />
-    <File Path="tools/VS Templates/Project/Assets/Domains/Main/Main.domain.meta" />
-    <File Path="tools/VS Templates/Project/Assets/Domains/Main/globals.prefab" />
-    <File Path="tools/VS Templates/Project/Assets/Domains/Main/globals.prefab.meta" />
-  </Folder>
-  <Folder Name="/Tools/VS Templates/Project/Assets/Scripts/">
-    <File Path="tools/VS Templates/Project/Assets/Scripts/Spin.cs" />
-    <File Path="tools/VS Templates/Project/Assets/Scripts/Spin.cs.meta" />
-  </Folder>
 </Solution>

@@ -43,8 +43,7 @@ and a state already stamped returns at once. It also points git at the repositor
 
 ## Templates
 
-`VS Templates/` holds the `dotnet new` templates for a Core module, a gem and a project, and `InstallTemplates.ps1`
-installs them. Magic doesn't load gems or projects yet.
+`VS Templates/` holds the `dotnet new` template for a Core module, and `InstallTemplates.ps1` installs it.
 
 To add a Core module, run `InstallTemplates.ps1` once, then:
 
