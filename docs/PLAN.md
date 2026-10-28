@@ -224,7 +224,7 @@ The five checks at the end of this step are the five arrows in this picture.
 ```
 
 ```powershell
-dotnet run --project src/Host -- --project Hello --headless --frames 1 --fail-on-error; $LASTEXITCODE
+dotnet run --project src/Launcher -- --project Hello --headless --frames 1 --fail-on-error; $LASTEXITCODE
 ```
 
 1. One `Info` line, `Running Hello from <folder>`, and exit code 0.
@@ -345,7 +345,7 @@ dotnet test src/Magic.slnx
 **The checks gem.** What the unit tests cannot reach is the real threads and the real disk, so `tests/CoreChecks/` holds a project listing one gem, `Checks`, that lives only in your repository. Each failed check is a `Debugging.Error` with expected and seen, so `--fail-on-error` makes it exit 2. It checks the thread names a constructor, `Step` and `Render` run on; that `PostAsync` to the render thread runs there and its task ends, cancelled when cancelled first; that a message published from `Render` is in the next frame's input; that `TrySet` reaches the next frame's settings snapshot and a restart-marked key restarts; that `LoadAsync` on a real file lands in the snapshot, that saving the file brings a new version within a second, and that a broken file keeps the old value with one `Error`; and that `Verbose` prints only under `--verbose`.
 
 ```powershell
-dotnet run --project src/Host -- --project tests/CoreChecks --headless --seconds 5 --fail-on-error; $LASTEXITCODE
+dotnet run --project src/Launcher -- --project tests/CoreChecks --headless --seconds 5 --fail-on-error; $LASTEXITCODE
 ```
 
 **Keep it as a tool.** ~~Write the first [`tools/Validate.ps1`](https://github.com/Konfus-org/Slop-Magic/blob/dev/tools/Validate.ps1) now: build, test,~~ the checks run, ~~stopping at the first failure and printing `PASSED` or `FAILED`~~. From here every gem's checkpoint joins it, so the proof of the whole engine stays one command.

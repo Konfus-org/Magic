@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Magic: the executable that loads and launches a project. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Magic</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CommandLine/Magic.CommandLine.csproj" />
+    <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+    <ProjectReference Include="../Host/Magic.Host.csproj" />
+    <ProjectReference Include="../Projects/Magic.Projects.csproj" />
+  </ItemGroup>
+</Project>

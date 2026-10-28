@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <!-- Its dll still reaches Magic, but no project that references this one can compile against it. -->
+    <PackageReference Include="System.CommandLine" PrivateAssets="compile;contentfiles;analyzers;build" />
+    <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+    <ProjectReference Include="../Host/Magic.Host.csproj" />
+    <ProjectReference Include="../State/Magic.State.csproj" />
+  </ItemGroup>
+</Project>

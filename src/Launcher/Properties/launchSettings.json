@@ -1,6 +1,6 @@
 {
   "profiles": {
-    "Magic.Host": {
+    "Magic.Launcher": {
       "commandName": "Project",
       "commandLineArgs": "--headless True --project TODOPROJECT"
     }
