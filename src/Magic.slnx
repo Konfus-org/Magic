@@ -3,7 +3,10 @@
     <File Path="../README.md" />
     <Project Path="Debugging/Magic.Debugging.csproj" />
     <Project Path="Extensions/Magic.Extensions.csproj" />
+    <Project Path="Files/Magic.Files.csproj" Id="dd604984-bd65-4521-840f-f207ddcec01d" />
     <Project Path="Host/Magic.Host.csproj" />
+    <Project Path="Projects/Magic.Projects.csproj" />
+    <Project Path="Serialization/Magic.Serialization.csproj" />
     <Project Path="State/Magic.State.csproj" />
   </Folder>
   <Folder Name="/Docs/">

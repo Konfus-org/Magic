@@ -3,6 +3,8 @@ using System.Data;
 using System.Linq;
 using System.Runtime;
 using Magic.Debugging;
+using Magic.Files;
+using Magic.Projects;
 
 namespace Magic.Host;
 
@@ -61,8 +63,11 @@ internal static class Program
         // An exception nothing caught, on any thread, crashes, leaving a crash file.
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Assert.Now($"Unhandled exception: {e.ExceptionObject}");
 
-        // Kills application
-        using CancellationTokenSource cts = new();
+        using CancellationTokenSource cts = new(); // Kills app when cancelled
+        IFileSystem fileSystem = new FileSystem();
+
+        Project? project = null;
+        bool isHeadless = false;
 
         // Setup commands
         RootCommand cmdLineOptions = new("Sample command-line app")
@@ -72,10 +77,29 @@ internal static class Program
                 new Option<string>("--project")
                 {
                     Description = "Opens a project at the given path",
-                    Action = new Command(_ =>
+                    Action = new Command(cmds =>
                     {
-                        cts.Cancel();
-                        // TODO(KONFUS): Project.Open
+                        cts.Cancel(); // close current run
+
+                        // Restart with new project
+                        {
+                            string? projectPath = cmds.GetValue<string>("--project");
+                            if (string.IsNullOrEmpty(projectPath))
+                            {
+                                Log.Warn("Failed to change projects, path was null.");
+                                return;
+                            }
+
+                            var loadProjectResult = Project.Load(projectPath, fileSystem);
+                            if (!loadProjectResult.Ok)
+                            {
+                                Log.Warn(loadProjectResult.Error);
+                                return;
+                            }
+
+                            project = loadProjectResult.Value;
+                            Run(cts, (RootCommand)cmds.RootCommandResult.Command, loadProjectResult.Value, isHeadless);
+                        }
                     }),
                 },
                 new Option<bool>("--headless")
@@ -83,9 +107,24 @@ internal static class Program
                     Description = "Run without a GUI (headless mode)",
                     Action = new Command(cmds =>
                     {
-                        cts.Cancel();
-                        bool headless = cmds.GetValue<bool>("--headless");
-                        Run(cts, (RootCommand)cmds.RootCommandResult.Command, headless);
+                        cts.Cancel(); // Close current run
+
+                        var headless = cmds.GetValue<bool>("--headless");
+                        if (headless == isHeadless)
+                            return; // No change
+
+                        // Restart headless or not headless (whatever the change was)
+                        {
+                            if (project is null)
+                            {
+                                Log.Warn(
+                                    "Failed to update to headless, no project is active please set one using '--project'."
+                                );
+                                return;
+                            }
+
+                            Run(cts, (RootCommand)cmds.RootCommandResult.Command, project.Value, isHeadless);
+                        }
                     }),
                 },
                 new Option<string>("--verbosity")
@@ -138,37 +177,47 @@ internal static class Program
         };
 
         // Parse the command-line arguments
-        var cmds = cmdLineOptions.Parse(args);
-        Log.Info($"Command line args: {string.Join(", ", args)}");
-        if (cmds.Errors.Count > 0)
         {
-            string errors = string.Join("; ", cmds.Errors.Select(e => e.Message));
-            Log.Error($"Failed to parse command-line arguments: {errors}");
-            return 1;
+            var cmds = cmdLineOptions.Parse(args);
+            Log.Info($"Command line args: {string.Join(", ", args)}");
+            if (cmds.Errors.Count > 0)
+            {
+                string errors = string.Join("; ", cmds.Errors.Select(e => e.Message));
+                Log.Critical($"Failed to parse command-line arguments: {errors}");
+                return 1;
+            }
+
+            // Extract data from give args
+            string? projectPath = cmds.GetValue<string>("--project");
+            if (string.IsNullOrEmpty(projectPath))
+            {
+                Log.Critical("No project path specified. Use --project <path> to specify a project.");
+                return 1;
+            }
+
+            Log.Info($"Opening: {projectPath}");
+            var loadProjectResult = Project.Load(projectPath, fileSystem);
+            if (!loadProjectResult.Ok)
+            {
+                Log.Critical(loadProjectResult.Error);
+                return 1;
+            }
+
+            project = loadProjectResult.Value;
+            Log.Info("Successfully opened project.");
+
+            isHeadless = cmds.GetValue<bool>("--headless");
         }
 
-        // Extract data from give args
-        string? projectPath = cmds.GetValue<string>("--project");
-        if (string.IsNullOrEmpty(projectPath))
-        {
-            Log.Error("No project path specified. Use --project <path> to specify a project.");
-            return 1;
-        }
-
-        Log.Info($"Opening: {projectPath}");
-        // TODO(KONFUS): Project.Open(projectPath);
-        Log.Info("Successfully opened project.");
-
-        Run(cts, cmdLineOptions, cmds.GetValue<bool>("--headless"));
-
+        Run(cts, cmdLineOptions, project.Value, isHeadless);
         Log.Flush();
 
         return 0;
     }
 
-    private static void Run(CancellationTokenSource cts, RootCommand cmdLineOptions, bool headless)
+    private static void Run(CancellationTokenSource cts, RootCommand cmdLineOptions, Project project, bool isHeadless)
     {
-        if (headless)
+        if (isHeadless)
         {
             Log.Info("Running in headless mode.");
             Cli.Run(cts, cmdLineOptions);

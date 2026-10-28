@@ -182,10 +182,11 @@ public static class Log
             WriteSinks(lineStruct);
 
         // Log always writes to console
+        string text = lineStruct.ToString();
         if (level >= LoggingLevel.Error)
-            Console.Error.WriteLine(lineStruct.ToString());
+            Console.Error.WriteLine(Console.IsErrorRedirected ? text : Colorize(level, text));
         else
-            Console.WriteLine(lineStruct.ToString());
+            Console.WriteLine(Console.IsOutputRedirected ? text : Colorize(level, text));
     }
 
     /// <summary>
@@ -198,20 +199,30 @@ public static class Log
     )]
     private static void WriteSinks(in Line line)
     {
-        for (int i = 0; i < _sinks.Count; i++)
+        foreach (var sink in _sinks.ToArray())
         {
             try
             {
-                _sinks[i].Write(line);
+                sink.Write(line);
             }
             catch (Exception ex)
             {
-                Error($"Log sink {_sinks[i].GetType().Name} threw and was removed: {ex}");
-                _sinks.RemoveAt(i);
-                i--;
+                Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+                _sinks.Remove(sink);
             }
         }
     }
+
+    private static string Colorize(LoggingLevel level, string text) =>
+        level switch
+        {
+            LoggingLevel.Verbose => $"\e[90m{text}\e[0m", // gray
+            LoggingLevel.Info => text, // default
+            LoggingLevel.Warn => $"\e[33m{text}\e[0m", // yellow
+            LoggingLevel.Error => $"\e[31m{text}\e[0m", // red
+            LoggingLevel.Critical => $"\e[1;97;41m{text}\e[0m", // bold white on red
+            _ => text,
+        };
 
     public enum VerbosityLevel
     {
@@ -244,9 +255,4 @@ public static class Log
         public override string ToString() =>
             $"[{Timestamp:HH:mm:ss.fff}] [{Level}] [thread {ThreadId}] {Message} ({Path.GetFileName(CallerFile)}:{CallerFileLineNumber} in {CallerMemberName})";
     }
-
-    /// <summary>
-    /// A line in the log, or a change to the sinks list.
-    /// </summary>
-    private readonly record struct Entry(Line Line, Action? Change);
 }

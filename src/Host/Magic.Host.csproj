@@ -7,5 +7,6 @@
   <ItemGroup>
     <PackageReference Include="System.CommandLine" PrivateAssets="all" />
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+    <ProjectReference Include="../Projects/Magic.Projects.csproj" />
   </ItemGroup>
 </Project>
