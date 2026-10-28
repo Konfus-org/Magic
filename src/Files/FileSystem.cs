@@ -62,7 +62,7 @@ public sealed class FileSystem : IFileSystem
         }
         catch (Exception ex) when (IsRefusal(ex))
         {
-            return Result.Failure<T>(ex.Message);
+            return Result.Failure(ex.Message);
         }
     }
 

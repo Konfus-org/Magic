@@ -19,13 +19,13 @@ public static class ProjectExtensions
         {
             var byteReadResult = fileSystem.ReadAllBytes(projectPath);
             if (!byteReadResult.Ok)
-                return Result.Failure<Project>(
+                return Result.Failure(
                     $"Failed to load the project file from {projectPath}. Ex: {byteReadResult.Error}"
                 );
 
             var jsonReadResult = Json.Read<Project>(byteReadResult.Value);
             if (!jsonReadResult.Ok)
-                return Result.Failure<Project>(
+                return Result.Failure(
                     $"Failed to load the project file from {projectPath}. Ex: {jsonReadResult.Error}"
                 );
 

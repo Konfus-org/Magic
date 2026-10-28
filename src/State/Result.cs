@@ -4,7 +4,8 @@ namespace Magic.State;
 
 /// <summary>
 /// The outcome of work that can fail on content or the machine and has nothing to give back (writing, deleting): done,
-/// or why not. It also makes <see cref="Result{T}"/> values, the type taken from the value.
+/// or why not. It also makes <see cref="Result{T}"/> values: <see cref="Success{T}(T)"/> takes the type from the
+/// value, and <see cref="Failure(string)"/> becomes whichever result the method returns.
 /// </summary>
 public readonly record struct Result
 {
@@ -21,13 +22,13 @@ public readonly record struct Result
     /// </summary>
     public string Error { get; }
 
-    public static Result Success() => new(true, string.Empty);
+    public static implicit operator Result(Failure failure) => new(false, failure.Error);
 
-    public static Result Failure(string error) => new(false, error);
+    public static Result Success() => new(true, string.Empty);
 
     public static Result<T> Success<T>(T value) => new(true, value, string.Empty);
 
-    public static Result<T> Failure<T>(string error) => new(false, default, error);
+    public static Failure Failure(string error) => new(error);
 }
 
 /// <summary>
@@ -52,4 +53,15 @@ public readonly record struct Result<T>
     /// Why it failed, written for the log; empty on success.
     /// </summary>
     public string Error { get; }
+
+    public static implicit operator Result(Result<T> result) =>
+        result.Ok ? Result.Success() : Result.Failure(result.Error);
+
+    public static implicit operator Result<T>(Failure failure) => new(false, default, failure.Error);
 }
+
+/// <summary>
+/// Why work failed, before it is a result. It becomes a <see cref="Result"/> or any <see cref="Result{T}"/>, so
+/// returning one needs no type argument.
+/// </summary>
+public readonly record struct Failure(string Error);

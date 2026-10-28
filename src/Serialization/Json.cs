@@ -36,7 +36,7 @@ public static class Json
         }
         catch (Exception ex) when (ex is NotSupportedException or JsonException)
         {
-            return Result.Failure<T>(ex.Message);
+            return Result.Failure(ex.Message);
         }
     }
 
@@ -49,7 +49,7 @@ public static class Json
         }
         catch (Exception ex) when (ex is NotSupportedException or JsonException)
         {
-            return Result.Failure<T>(ex.Message);
+            return Result.Failure(ex.Message);
         }
     }
 
@@ -64,7 +64,7 @@ public static class Json
         }
         catch (Exception ex) when (ex is NotSupportedException or JsonException)
         {
-            return Result.Failure<object>(ex.Message);
+            return Result.Failure(ex.Message);
         }
     }
 
@@ -81,7 +81,7 @@ public static class Json
         catch (Exception ex)
             when (ex is ArgumentException or InvalidOperationException or NotSupportedException or JsonException)
         {
-            return Result.Failure<JsonElement>(ex.Message);
+            return Result.Failure(ex.Message);
         }
     }
 
@@ -108,5 +108,5 @@ public static class Json
     /// <paramref name="value"/>, as JSON read it, or why it is not one: JSON's <c>null</c> is no value.
     /// </summary>
     private static Result<T> ToResult<T>(T? value) =>
-        value is null ? Result.Failure<T>("it is null.") : Result.Success(value);
+        value is null ? Result.Failure("it is null.") : Result.Success(value);
 }
