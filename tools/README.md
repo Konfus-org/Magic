@@ -43,5 +43,15 @@ and a state already stamped returns at once. It also points git at the repositor
 
 ## Templates
 
-`VS Templates/` holds the `dotnet new` templates for a gem and a project, and `InstallTemplates.ps1` installs them.
-Magic doesn't load gems or projects yet.
+`VS Templates/` holds the `dotnet new` templates for a Core module, a gem and a project, and `InstallTemplates.ps1`
+installs them. Magic doesn't load gems or projects yet.
+
+To add a Core module, run `InstallTemplates.ps1` once, then:
+
+- **Visual Studio:** right-click the `Core` solution folder, choose Add > New Project > Magic Core Module, give it
+  the bare name (`Assets`, not `Magic.Assets`) and set its location to `src`.
+- **Command line:** `dotnet new magic-core -n Assets -o src/Assets`, then
+  `dotnet sln Magic.slnx add src/Assets/Magic.Assets.csproj --solution-folder Core`.
+
+Either makes `src/Assets/Magic.Assets.csproj` and its README. Its settings come from `Directory.Build.props`, so the
+project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).

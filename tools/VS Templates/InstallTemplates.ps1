@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-Installs the templates for a Magic gem and a Magic project, and records which Magic they build for.
+Installs the templates for a Magic Core module, gem and project, and records which Magic gems and projects build for.
 
 .DESCRIPTION
 Installs the templates under tools/VS Templates, or updates them, for dotnet new and the IDEs that list its templates,
-Visual Studio's New Project among them: magic-gem and magic-project. A gem or project made from them builds for the
-Magic folder the MagicDir environment variable names (src/Core/Sdk/README.md), which this sets to this repository's
-Build/bin/<Configuration>/ for the current user. Windows keeps a user's environment variables; Linux and macOS have no
-such store, so there it prints the line for the shell's profile instead. A running IDE or shell keeps the environment
-it started with, so restart it. Runs from any current directory.
+Visual Studio's New Project among them: magic-core, magic-gem and magic-project. A gem or project made from them builds
+for the Magic folder the MagicDir environment variable names (src/Core/Sdk/README.md), which this sets to this
+repository's Build/bin/<Configuration>/ for the current user. Windows keeps a user's environment variables; Linux and
+macOS have no such store, so there it prints the line for the shell's profile instead. A running IDE or shell keeps the
+environment it started with, so restart it. Runs from any current directory.
 
 .PARAMETER Configuration
 The build of Magic the gems and projects build for: Debug, Optimize or Release.
