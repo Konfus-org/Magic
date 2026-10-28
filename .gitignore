@@ -36,3 +36,5 @@ Cache/
 # IDE
 *.user
 *.suo
+# Launch profiles Visual Studio writes into a runnable project. The Launcher's is tracked: its F5 opens the sample.
+**/Properties/launchSettings.json
