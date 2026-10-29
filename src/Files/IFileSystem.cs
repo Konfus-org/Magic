@@ -42,13 +42,19 @@ public interface IFileSystem
     /// </summary>
     Task<Result> WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancel);
 
-    /// <summary>Deletes the file at <paramref name="path"/>; nothing happens when there is none.</summary>
+    /// <summary>
+    /// Deletes the file or empty folder at <paramref name="path"/>; nothing happens when there is none.
+    /// </summary>
     Result Delete(string path);
 
-    Result Copy(string sourceFile, string destinationFile);
+    /// <summary>
+    /// Deletes the file or folder at <paramref name="path"/>; nothing happens when there is none.
+    /// <paramref name="recursive"/> applies only to a folder: it also deletes everything inside it, without which a
+    /// folder that isn't empty is refused.
+    /// </summary>
+    Result Delete(string path, bool recursive);
 
-    /// <summary>Recursively delete a directory and everything under it.</summary>
-    Result DeleteDirectory(string path);
+    Result Copy(string sourceFile, string destinationFile);
 
     /// <summary>Watch a directory tree for changes to files matching <paramref name="filter"/>.</summary>
     Result<IFileWatcher> Watch(string path, string filter = "*.*");

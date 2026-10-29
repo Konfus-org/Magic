@@ -81,12 +81,19 @@ public sealed class FileSystem : IFileSystem
         }
     }
 
-    public Result Delete(string path) => Run(() => File.Delete(path));
+    public Result Delete(string path) => Delete(path, recursive: false);
+
+    public Result Delete(string path, bool recursive) =>
+        Run(() =>
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive);
+            else
+                File.Delete(path);
+        });
 
     public Result Copy(string sourceFile, string destinationFile) =>
         Run(() => File.Copy(sourceFile, destinationFile, overwrite: true));
-
-    public Result DeleteDirectory(string path) => Run(() => Directory.Delete(path, recursive: true));
 
     public Result<IFileWatcher> Watch(string path, string filter) =>
         Run<IFileWatcher>(() => new FileWatcher(path, filter));
