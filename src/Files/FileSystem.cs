@@ -14,6 +14,10 @@ namespace Magic.Files;
 )]
 public sealed class FileSystem : IFileSystem
 {
+    public string Combine(params ReadOnlySpan<string> parts) => Path.Combine(parts);
+
+    public string GetParent(string path) => Path.GetDirectoryName(path) ?? string.Empty;
+
     public bool FileExists(string path) => File.Exists(path);
 
     public bool DirectoryExists(string path) => Directory.Exists(path);
@@ -37,11 +41,47 @@ public sealed class FileSystem : IFileSystem
 
     public Result<string[]> ReadLines(string path) => Run(() => File.ReadAllLines(path));
 
-    public Result<string> ReadAllText(string path) => Run(() => File.ReadAllText(path));
+    public Task<Result<string[]>> ReadLinesAsync(string path, CancellationToken cancel) =>
+        RunAsync(() => File.ReadAllLinesAsync(path, cancel));
 
-    public Result<byte[]> ReadAllBytes(string path) => Run(() => File.ReadAllBytes(path));
+    public Result<string> ReadText(string path) => Run(() => File.ReadAllText(path));
+
+    public Task<Result<string>> ReadTextAsync(string path, CancellationToken cancel) =>
+        RunAsync(() => File.ReadAllTextAsync(path, cancel));
+
+    public Result<byte[]> ReadBytes(string path) => Run(() => File.ReadAllBytes(path));
+
+    public Task<Result<byte[]>> ReadBytesAsync(string path, CancellationToken cancel) =>
+        RunAsync(() => File.ReadAllBytesAsync(path, cancel));
 
     public Result Write(string path, string contents) => Run(() => File.WriteAllText(path, contents));
+
+    public async Task<Result> WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancel)
+    {
+        string temporary = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            if (Path.GetDirectoryName(path) is { Length: > 0 } folder)
+                Directory.CreateDirectory(folder);
+
+            await File.WriteAllBytesAsync(temporary, bytes, cancel).ConfigureAwait(false);
+            File.Move(temporary, path, overwrite: true);
+
+            return Result.Success();
+        }
+        catch (Exception ex) when (IsRefusal(ex))
+        {
+            return Result.Failure(ex.Message);
+        }
+        finally
+        {
+            // Left behind only when the write failed or was cancelled.
+            if (File.Exists(temporary))
+                File.Delete(temporary);
+        }
+    }
+
+    public Result Delete(string path) => Run(() => File.Delete(path));
 
     public Result Copy(string sourceFile, string destinationFile) =>
         Run(() => File.Copy(sourceFile, destinationFile, overwrite: true));
@@ -73,6 +113,19 @@ public sealed class FileSystem : IFileSystem
         {
             work();
             return Result.Success();
+        }
+        catch (Exception ex) when (IsRefusal(ex))
+        {
+            return Result.Failure(ex.Message);
+        }
+    }
+
+    /// <inheritdoc cref="Run{T}(Func{T})"/>
+    private static async Task<Result<T>> RunAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Result.Success(await work().ConfigureAwait(false));
         }
         catch (Exception ex) when (IsRefusal(ex))
         {

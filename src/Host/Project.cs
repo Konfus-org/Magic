@@ -17,7 +17,7 @@ public static class ProjectExtensions
     {
         public static Result<Project> Load(string projectPath, IFileSystem fileSystem)
         {
-            var byteReadResult = fileSystem.ReadAllBytes(projectPath);
+            var byteReadResult = fileSystem.ReadBytes(projectPath);
             if (!byteReadResult.Ok)
                 return Result.Failure(
                     $"Failed to load the project file from {projectPath}. Ex: {byteReadResult.Error}"

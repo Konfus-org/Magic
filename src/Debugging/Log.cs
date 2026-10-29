@@ -146,7 +146,7 @@ public static class Log
     /// disposed from inside the sink's own <see cref="ILogSink.Write"/>. Every sink added is given the last lines
     /// logged first.
     /// </summary>
-    internal static Subscription Register(ILogSink sink)
+    public static Subscription Register(ILogSink sink)
     {
         lock (_lock)
         {

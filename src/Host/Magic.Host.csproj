@@ -1,5 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
     <ProjectReference Include="../Files/Magic.Files.csproj" />
     <ProjectReference Include="../Serialization/Magic.Serialization.csproj" />
     <ProjectReference Include="../Utils/Magic.Utils.csproj" />
