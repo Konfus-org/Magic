@@ -35,7 +35,7 @@ To run one step of Validate on its own:
 ```powershell
 dotnet build src/Magic.slnx
 dotnet test src/Magic.slnx
-'wait loaded', 'open Domains/Audio/Audio.domain', 'quit' | Magic --project samples --seconds 1200 --fail-on-error --headless
+'wait loaded', 'open Domains/Audio/Audio.domain', 'quit' | Magic open samples --seconds 1200 --fail-on-error --headless
 tools/Scripts/Screenshot.ps1 -Domains 'Domains/Audio/Audio.domain'
 ```
 

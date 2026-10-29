@@ -76,7 +76,7 @@ foreach ($domain in $Domains) {
     $lines += @("open $domain", "wait $Settle", 'screenshot')
 }
 $lines += @('wait 60', 'quit')
-$log = $lines | & $magic --project $projectPath --seconds ($Seconds * (1 + $Domains.Count)) --fail-on-error | ForEach-Object { Write-Host $_; $_ }
+$log = $lines | & $magic open $projectPath --seconds ($Seconds * (1 + $Domains.Count)) --fail-on-error | ForEach-Object { Write-Host $_; $_ }
 $code = $LASTEXITCODE
 
 # A line reads "12:34:56.789 Info     f1234 t1 Screenshot: <path> (File.cs:60 Member)".

@@ -1,8 +1,0 @@
-{
-  "profiles": {
-    "Magic.Host": {
-      "commandName": "Project",
-      "commandLineArgs": "--headless True --project TODOPROJECT"
-    }
-  }
-}

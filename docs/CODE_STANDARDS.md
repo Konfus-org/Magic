@@ -82,7 +82,7 @@ are the one exception.
   `IsCompleted`.
 - A gem reads its settings from the frame's snapshot, so changes reach it between frames. Mark a setting it reads only
   at start `[RequireRestart]`.
-- A gem gets the command line and project file from Core's `Args` and `App`, never by reading them itself.
+- A gem gets the command line and project file from Core's `App`, never by reading them itself.
 - `Stop` frees what the gem started, once none of its work still runs on a worker.
 - A gem's csproj states its `Description`, `Version` and `Authors`. Nothing else does.
 - Gems depend on Core's interfaces, never on each other.
@@ -192,7 +192,7 @@ CSharpier decides layout, every line break, indent and blank line, from `.editor
 extension prints a file on save, `tools/Scripts/Format.ps1` the files a change touches
 ([Format.ps1](../tools/README.md#formatps1)), a local build what is left, and `Validate.ps1` refuses a file it would
 change. The rules below that no
-built-in rule checks are [tools/Analyzers](../tools/Analyzers/Magic.Analyzers/README.md).
+built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
 
 ### Type layout
 

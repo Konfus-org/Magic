@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.CompilerServices;
-using Magic.State;
+using Magic.Utils;
 
 namespace Magic.Debugging;
 
@@ -10,13 +10,18 @@ namespace Magic.Debugging;
 /// </summary>
 public static class Log
 {
-    private const int StartupQueueSize = 10_000;
+    private const int HistorySize = 10_000;
+
+    /// <summary>
+    /// Guards the sinks and the history, so a sink is given each line once, in order, and never two at a time.
+    /// </summary>
+    private static readonly Lock _lock = new();
     private static readonly List<ILogSink> _sinks = [];
 
     /// <summary>
-    /// The lines printed before any sink was added, for the first one; null from then on.
+    /// The last lines logged, which every sink added is given first.
     /// </summary>
-    private static Queue<Line>? _queuedLinesToLog = new();
+    private static readonly Queue<Line> _history = new();
     private static int _errorCount;
 
     public static VerbosityLevel Verbosity
@@ -117,17 +122,20 @@ public static class Log
     )]
     public static void Flush()
     {
-        for (int i = _sinks.Count - 1; i >= 0; i--)
+        lock (_lock)
         {
-            try
+            for (int i = _sinks.Count - 1; i >= 0; i--)
             {
-                _sinks[i].Flush();
-            }
-            catch (Exception ex)
-            {
-                ILogSink sink = _sinks[i];
-                _sinks.RemoveAt(i);
-                Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+                try
+                {
+                    _sinks[i].Flush();
+                }
+                catch (Exception ex)
+                {
+                    ILogSink sink = _sinks[i];
+                    _sinks.RemoveAt(i);
+                    Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+                }
             }
         }
     }
@@ -135,30 +143,40 @@ public static class Log
     /// <summary>
     /// Sends every line logged from now on to <paramref name="sink"/> too, until the subscription is disposed, which
     /// waits until the sink has been given every line logged before, so it can be closed straight after; never
-    /// disposed from inside the sink's own <see cref="ILogSink.Write"/>. The first sink added gets the lines logged
-    /// before it first.
+    /// disposed from inside the sink's own <see cref="ILogSink.Write"/>. Every sink added is given the last lines
+    /// logged first.
     /// </summary>
     internal static Subscription Register(ILogSink sink)
     {
-        _sinks.Add(sink);
-
-        // If we had any lines queued before there was a sink, give them to the first one now and drop the queue.
-        if (_queuedLinesToLog is { } queue)
+        lock (_lock)
         {
-            _queuedLinesToLog = null;
-            foreach (Line line in queue)
-                WriteSinks(line);
+            _sinks.Add(sink);
+
+            // A copy, since a sink that throws logs an error, which adds to the history.
+            foreach (Line line in _history.ToArray())
+            {
+                if (!Write(line, sink))
+                    break;
+            }
         }
 
         return new Subscription(() => Unregister(sink));
     }
 
     /// <summary>
-    /// The lines logged before any sink was added, which no sink has printed; empty once one has.
+    /// The last lines logged, oldest first.
     /// </summary>
-    internal static IReadOnlyCollection<Line> GetUnprinted() => _queuedLinesToLog ?? (IReadOnlyCollection<Line>)[];
+    internal static Line[] GetHistory()
+    {
+        lock (_lock)
+            return [.. _history];
+    }
 
-    private static void Unregister(ILogSink sink) => _sinks.Remove(sink);
+    private static void Unregister(ILogSink sink)
+    {
+        lock (_lock)
+            _sinks.Remove(sink);
+    }
 
     private static Line CreateLine(LoggingLevel level, string message, string member, string file, int line) =>
         new(DateTime.Now, level, message, Environment.CurrentManagedThreadId, file, line, member);
@@ -171,47 +189,64 @@ public static class Log
     private static void Write(LoggingLevel level, string message, string member, string file, int line)
     {
         Line lineStruct = CreateLine(level, message, member, file, line);
-        // If there is a queue, we are before the first sink was added: queue the line and drop the oldest if full.
-        if (_queuedLinesToLog is { } queue)
+        lock (_lock)
         {
-            if (queue.Count == StartupQueueSize)
-                queue.Dequeue();
-            queue.Enqueue(lineStruct);
-        }
-        else
+            if (_history.Count == HistorySize)
+                _history.Dequeue();
+            _history.Enqueue(lineStruct);
             WriteSinks(lineStruct);
+        }
 
         // Log always writes to console
+        string text = lineStruct.ToString();
         if (level >= LoggingLevel.Error)
-            Console.Error.WriteLine(lineStruct.ToString());
+            Console.Error.WriteLine(Console.IsErrorRedirected ? text : Colorize(level, text));
         else
-            Console.WriteLine(lineStruct.ToString());
+            Console.WriteLine(Console.IsOutputRedirected ? text : Colorize(level, text));
     }
 
     /// <summary>
     /// Gives <paramref name="line"/> to every sink. A sink that throws is logged and dropped; the log goes on.
     /// </summary>
+    private static void WriteSinks(in Line line)
+    {
+        foreach (var sink in _sinks.ToArray())
+        {
+            Write(line, sink);
+        }
+    }
+
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a sink throws, it is logged and the sink is dropped; the log goes on."
     )]
-    private static void WriteSinks(in Line line)
+    private static bool Write(Line line, ILogSink sink)
     {
-        for (int i = 0; i < _sinks.Count; i++)
+        try
         {
-            try
-            {
-                _sinks[i].Write(line);
-            }
-            catch (Exception ex)
-            {
-                Error($"Log sink {_sinks[i].GetType().Name} threw and was removed: {ex}");
-                _sinks.RemoveAt(i);
-                i--;
-            }
+            sink.Write(line);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // Removed before the error is logged, so the sink isn't given the line about itself.
+            _sinks.Remove(sink);
+            Error($"Log sink {sink.GetType().Name} threw and was removed: {ex}");
+            return false;
         }
     }
+
+    private static string Colorize(LoggingLevel level, string text) =>
+        level switch
+        {
+            LoggingLevel.Verbose => $"\e[90m{text}\e[0m", // gray
+            LoggingLevel.Info => text, // default
+            LoggingLevel.Warn => $"\e[33m{text}\e[0m", // yellow
+            LoggingLevel.Error => $"\e[31m{text}\e[0m", // red
+            LoggingLevel.Critical => $"\e[1;97;41m{text}\e[0m", // bold white on red
+            _ => text,
+        };
 
     public enum VerbosityLevel
     {
@@ -244,9 +279,4 @@ public static class Log
         public override string ToString() =>
             $"[{Timestamp:HH:mm:ss.fff}] [{Level}] [thread {ThreadId}] {Message} ({Path.GetFileName(CallerFile)}:{CallerFileLineNumber} in {CallerMemberName})";
     }
-
-    /// <summary>
-    /// A line in the log, or a change to the sinks list.
-    /// </summary>
-    private readonly record struct Entry(Line Line, Action? Change);
 }
