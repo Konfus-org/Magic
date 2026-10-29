@@ -12,11 +12,11 @@ where it is going. Today it is the `Magic` program, its log and asserts, and the
 
 ```powershell
 dotnet build src/Magic.slnx
-dotnet run --project src/Launcher -- open <path> --headless
+dotnet run --project src/Core/Launcher -- open <path> --headless
 dotnet run --project samples/HelloWorld
 ```
 
-What follows `--` goes to Magic, whose commands are declared in [`Cli.cs`](src/CommandLine/Cli.cs); `--help` lists
+What follows `--` goes to Magic, whose commands are declared in [`Cli.cs`](src/Core/CommandLine/Cli.cs); `--help` lists
 them. With `--headless`, each line typed into the terminal runs the same commands, and an option may leave out its
 leading `--`. A typed `open <path>` or `headless false` restarts the run. The build output goes to
 `Build/bin/<Configuration>/`.
@@ -31,12 +31,8 @@ know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Temp
 ## Folders
 
 ```
-src/Launcher/    the Magic program
-src/Host/        the app and the project
-src/GemAPI/      the gem contract, and loading the gems a project lists
-src/Debugging/   the log, asserts and crashes
-src/Threading/   helpers for tasks and threads
-src/Utils/       small value types and helpers the other projects share
+src/Core/        the engine: the Magic program and everything it is built from
+src/Gems/        the gems that come with Magic, each built to Gems/<Name>/ beside it
 samples/         the sample projects, which show and test Magic
 tools/           the scripts and the analyzers; nothing here ships
 docs/            the plan, how to contribute and the code standards

@@ -4,7 +4,7 @@
   "classifications": [ "Magic", "Gem" ],
   "identity": "Magic.Templates.Gem",
   "name": "Magic Gem",
-  "description": "A gem: a plugin a project lists by name. Make it at src/Bundled/Gems/<Name>.",
+  "description": "A gem: a plugin a project lists by name. Make it at src/Gems/<Name>.",
   "shortName": "magic-gem",
   "sourceName": "GemName",
   "preferNameDirectory": true,

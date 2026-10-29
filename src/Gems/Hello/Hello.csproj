@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- A gem: Magic loads it from Gems/Hello/Hello.dll when a project lists Hello. -->
+  <PropertyGroup>
+    <!-- Shown beside the gem as Magic starts it. -->
+    <Description>What Hello does for a project.</Description>
+    <Version>1.0.0</Version>
+    <!-- Only what is referenced below is built against, so nothing of Magic's comes along by another reference. -->
+    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="Magic.Author" Value="$(Authors)" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Built against, never copied: the gem uses the Magic it runs in, so it shares its IGem and its log. -->
+    <ProjectReference Include="$(MagicRoot)src/Core/GemAPI/Magic.GemAPI.csproj" Private="false" />
+    <ProjectReference Include="$(MagicRoot)src/Core/Debugging/Magic.Debugging.csproj" Private="false" />
+  </ItemGroup>
+</Project>

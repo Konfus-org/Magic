@@ -1,15 +1,18 @@
 <Solution>
   <Folder Name="/Core/">
     <File Path="../README.md" />
-    <Project Path="CommandLine/Magic.CommandLine.csproj" />
-    <Project Path="Debugging/Magic.Debugging.csproj" />
-    <Project Path="Files/Magic.Files.csproj" Id="dd604984-bd65-4521-840f-f207ddcec01d" />
-    <Project Path="GemAPI/Magic.GemAPI.csproj" />
-    <Project Path="Host/Magic.Host.csproj" />
-    <Project Path="Launcher/Magic.Launcher.csproj" />
-    <Project Path="Serialization/Magic.Serialization.csproj" />
-    <Project Path="Threading/Magic.Threading.csproj" />
-    <Project Path="Utils/Magic.Utils.csproj" />
+    <Project Path="Core/CommandLine/Magic.CommandLine.csproj" />
+    <Project Path="Core/Debugging/Magic.Debugging.csproj" />
+    <Project Path="Core/Files/Magic.Files.csproj" Id="dd604984-bd65-4521-840f-f207ddcec01d" />
+    <Project Path="Core/GemAPI/Magic.GemAPI.csproj" />
+    <Project Path="Core/Host/Magic.Host.csproj" />
+    <Project Path="Core/Launcher/Magic.Launcher.csproj" />
+    <Project Path="Core/Serialization/Magic.Serialization.csproj" />
+    <Project Path="Core/Threading/Magic.Threading.csproj" />
+    <Project Path="Core/Utils/Magic.Utils.csproj" />
+  </Folder>
+  <Folder Name="/Gems/">
+    <Project Path="Gems/Hello/Hello.csproj" />
   </Folder>
   <Folder Name="/Docs/">
     <File Path="../AGENTS.md" />

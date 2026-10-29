@@ -38,7 +38,7 @@ FrameInput ──▶ gem A ──▶ gem B ──▶ gem C ──▶ FrameOutput
   across the code base.
 - Managed dependencies come from NuGet. A package with a known vulnerability, direct or transitive, fails the restore.
 - Native libraries are built from source or downloaded as their author publishes them
-  ([Native libraries](../src/Bundled/Gems/README.md#native-libraries)). No third-party wrapper, package, binary or
+  ([Native libraries](../src/Gems/README.md#native-libraries)). No third-party wrapper, package, binary or
   copied code. Hand-write a binding only where the generator can't, and say so in the gem's README. Vulkan is the
   exception: its API comes from the Vortice.Vulkan package over the system's Vulkan loader.
 - No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
@@ -165,7 +165,7 @@ are the one exception.
 - A folder exists only once it holds something. Split a big one into a subfolder per area, never named like a type in
   it.
 - A gem is flat: every file at its root, in `Magic.<Gem>`. Its `Resources/` holds the assets and scripts only it uses.
-- Built-in assets every project can use go in `src/Bundled/Resources/`.
+- Built-in assets every project can use go in `src/Resources/`.
 - Name a file for its main type. Small types that belong with it may share the file.
 - Extension members go in `extension(T x) { }` blocks in an `XExtensions` class. Related types share one class.
 
@@ -274,7 +274,7 @@ built-in rule checks are [tools/Analyzers](../tools/Analyzers/README.md).
   `SkyInputs` do.
 - Few variants: a generic for what changes the pipeline, a `[branch]` on a draw-wide value for the rest.
 - The BRDF, lights and their units, and the shading models live once in the shared
-  [shader library](../src/Bundled/Resources/Shaders/README.md). Every renderer shades with them.
+  [shader library](../src/Resources/Shaders/README.md). Every renderer shades with them.
 - Write a technique from its paper and name the paper in a comment. No third-party shader code.
 
 ## Cross platform

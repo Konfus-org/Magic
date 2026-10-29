@@ -40,9 +40,9 @@ fi
 
 scope=
 any '^src/Core/' && scope=', core'
-gems=$(printf '%s\n' "$files" | sed -n 's#^src/Bundled/Gems/\([^/]*\)/.*#\1#p' | sort -u | paste -sd, -)
+gems=$(printf '%s\n' "$files" | sed -n 's#^src/Gems/\([^/]*\)/.*#\1#p' | sort -u | paste -sd, -)
 [ -n "$gems" ] && scope="$scope, gem:$gems"
-for area in 'src/Bundled/Resources/ resources' 'samples/ samples' 'tests/ tests' 'tools/ tools'; do
+for area in 'src/Resources/ resources' 'samples/ samples' 'tests/ tests' 'tools/ tools'; do
     set -- $area
     any "^$1" && scope="$scope, $2"
 done

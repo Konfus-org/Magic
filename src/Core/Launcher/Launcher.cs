@@ -2,8 +2,10 @@ using System.Runtime;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
+using Magic.GemAPI;
 using Magic.Host;
 using Magic.Utils;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Magic.Launcher;
 
@@ -30,11 +32,11 @@ internal static class Launcher
     private static int Run(string[] commandLine)
     {
         App app = new();
-        Result ran = Cli.Run(app, commandLine);
+        Result cmdLineRunResults = Cli.Run(app, commandLine);
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
-        if (!ran.Ok)
+        if (!cmdLineRunResults.Ok)
         {
-            Log.Critical($"Couldn't run the command line: {ran.Error}");
+            Log.Critical($"Couldn't run the command line: {cmdLineRunResults.Error}");
             return 1;
         }
 
@@ -54,7 +56,15 @@ internal static class Launcher
                 return 1;
             }
 
+            IReadOnlyList<LoadedGem> gems = GemLoader.Load(new ServiceCollection(), fileSystem, project.Value);
             Result ended = RunProject(app, project.Value);
+
+            // Last made, first ended, so no gem outlives one it was made after.
+            for (int i = gems.Count - 1; i >= 0; i--)
+            {
+                gems[i].Dispose();
+            }
+
             if (!ended.Ok)
             {
                 Log.Critical(ended.Error);
