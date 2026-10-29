@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime;
 using Magic.CommandLine;
 using Magic.Debugging;
@@ -11,6 +13,24 @@ namespace Magic.Launcher;
 
 internal static class Launcher
 {
+    /// <summary>
+    /// How far apart frames are due while nothing else sets the pace: 60 a second, on average.
+    /// </summary>
+    private const double FrameSec = 1.0 / 60;
+
+    private const double FixedStepSec = 1.0 / 60;
+
+    /// <summary>
+    /// The most fixed steps a frame runs; time owed past them is dropped, so a slow frame doesn't make the next slower.
+    /// </summary>
+    private const int MaxFixedSteps = 4;
+
+    private static readonly Hook _step = static (IGem gem, in Frame frame) => gem.Step(in frame);
+
+    private static readonly Hook _fixedStep = static (IGem gem, in Frame frame) => gem.FixedStep(in frame);
+
+    private static readonly Hook _render = static (IGem gem, in Frame frame) => gem.Render(in frame);
+
     private static int Main(string[] commandLine)
     {
         GCSettings.LatencyMode = GCLatencyMode.LowLatency;
@@ -56,12 +76,17 @@ internal static class Launcher
                 return 1;
             }
 
+            if (project.Value.Gems.Length > 0)
+                Log.Info($"Loading {string.Join(", ", project.Value.Gems)}.");
+
             IReadOnlyList<LoadedGem> gems = GemLoader.Load(new ServiceCollection(), fileSystem, project.Value);
-            Result ended = RunProject(app, project.Value);
+            Result ended = RunProject(app, project.Value, gems);
+            Log.Info($"Closing {project.Value.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
 
             // Last made, first ended, so no gem outlives one it was made after.
             for (int i = gems.Count - 1; i >= 0; i--)
             {
+                Log.Info($"Unloading {gems[i].Name}.");
                 gems[i].Dispose();
             }
 
@@ -76,10 +101,10 @@ internal static class Launcher
     }
 
     /// <summary>
-    /// Runs one project, pumping the terminal, until the commands ask to exit or for another project or mode. Fails at
-    /// the first error under --fail-on-error.
+    /// Runs one project's frames until the commands ask to exit or for another project or mode, taking any lines typed
+    /// into the terminal between frames. Fails at the first error under --fail-on-error.
     /// </summary>
-    private static Result RunProject(App app, Project project)
+    private static Result RunProject(App app, Project project, IReadOnlyList<LoadedGem> gems)
     {
         Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
         app.Start();
@@ -91,13 +116,107 @@ internal static class Launcher
             return Result.Success();
         }
 
-        while (app.IsRunning)
+        // The gems still running: one that throws in a hook leaves.
+        List<LoadedGem> running = [.. gems];
+        Stopwatch clock = Stopwatch.StartNew();
+        double lastSec = 0;
+        double fixedSec = 0;
+        double fixedOwedSec = 0;
+        double nextFrameSec = 0;
+        for (uint index = 0; ; index++)
         {
             Cli.Pump(app);
             if (app.ShouldExitOnError && Log.ErrorCount > 0)
                 return Result.Failure($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
-        }
 
-        return Result.Success();
+            if (!app.IsRunning)
+                return Result.Success();
+
+            double nowSec = clock.Elapsed.TotalSeconds;
+            Frame frame = new()
+            {
+                Index = index,
+                AppSec = nowSec,
+                AppDeltaSec = nowSec - lastSec,
+                SimSec = nowSec,
+                SimDeltaSec = nowSec - lastSec,
+            };
+            lastSec = nowSec;
+            RunHook(running, frame, _step, "Step", isReversed: false);
+
+            // Fixed steps catch the simulation up with the frame, a step at a time, at most MaxFixedSteps of them.
+            fixedOwedSec += frame.AppDeltaSec;
+            for (int steps = 0; steps < MaxFixedSteps && fixedOwedSec >= FixedStepSec; steps++)
+            {
+                fixedSec += FixedStepSec;
+                fixedOwedSec -= FixedStepSec;
+                RunHook(
+                    running,
+                    frame with
+                    {
+                        SimSec = fixedSec,
+                        SimDeltaSec = FixedStepSec,
+                    },
+                    _fixedStep,
+                    "FixedStep",
+                    isReversed: false
+                );
+            }
+
+            if (fixedOwedSec >= FixedStepSec)
+                fixedOwedSec = 0;
+
+            RunHook(running, frame, _render, "Render", isReversed: true);
+
+            // Nothing sets the pace yet, so the loop sleeps until the next frame is due rather than spin. Due times
+            // are fixed steps of FrameSec, so a sleep the OS rounds up to its timer's tick is made up by the next one;
+            // a frame late by more than a frame starts the count again rather than run frames back to back.
+            nextFrameSec += FrameSec;
+            double leftSec = nextFrameSec - clock.Elapsed.TotalSeconds;
+            if (leftSec > 0)
+                Thread.Sleep(TimeSpan.FromSeconds(leftSec));
+            else if (leftSec < -FrameSec)
+                nextFrameSec = clock.Elapsed.TotalSeconds;
+        }
     }
+
+    /// <summary>
+    /// Runs <paramref name="hook"/> on each of <paramref name="running"/>, last made first when
+    /// <paramref name="isReversed"/>. A gem that throws is logged and taken out, and the others go on.
+    /// </summary>
+    private static void RunHook(List<LoadedGem> running, in Frame frame, Hook hook, string hookName, bool isReversed)
+    {
+        // n counts the gems left to run, so taking one out never skips the next, in either order.
+        for (int n = running.Count - 1; n >= 0; n--)
+        {
+            int i = isReversed ? n : running.Count - 1 - n;
+            if (!TryRunHook(running[i], frame, hook, hookName))
+                running.RemoveAt(i);
+        }
+    }
+
+    /// <summary>
+    /// Runs <paramref name="hook"/> on <paramref name="gem"/>; whether it ran without throwing, which is logged when
+    /// it threw.
+    /// </summary>
+    [SuppressMessage(
+        "Design",
+        "CA1031:Do not catch general exception types",
+        Justification = "Whatever a gem's hook throws, it is logged and the gem leaves the loop; the others go on."
+    )]
+    private static bool TryRunHook(LoadedGem gem, in Frame frame, Hook hook, string hookName)
+    {
+        try
+        {
+            hook(gem.Gem, frame);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Gem {gem.Name} threw in {hookName} and stops running: {ex}");
+            return false;
+        }
+    }
+
+    private delegate void Hook(IGem gem, in Frame frame);
 }

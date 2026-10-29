@@ -1,30 +1,31 @@
 namespace Magic.GemAPI;
 
+/// <summary>
+/// One frame's clocks, handed to every gem's hooks.
+/// </summary>
 public readonly record struct Frame
 {
-    public uint Index { get; }
+    public required uint Index { get; init; }
 
     /// <summary>
-    /// The time the app has been running, does not pause when 'paused'.
-    /// Used for things that should still update when the simulation is paused.
+    /// Seconds since the run started. Keeps counting while paused, for what still updates then.
     /// </summary>
-    public ulong AppSecsRunning { get; }
+    public required double AppSec { get; init; }
 
     /// <summary>
-    /// The 'real' delta, does not pause when 'paused'.
-    /// Used for things that should still update when the simulation is paused.
+    /// Seconds since the last frame. Keeps counting while paused.
     /// </summary>
-    public uint AppMsDeltaTime { get; }
+    public required double AppDeltaSec { get; init; }
 
     /// <summary>
-    /// The time the sim has been running. Respects pause.
+    /// Seconds the simulation has run. Stops while paused.
     /// </summary>
-    public ulong SimSecsRunning { get; }
+    public required double SimSec { get; init; }
 
     /// <summary>
-    /// The time delta since the last frame. Respects pause.
+    /// Seconds the simulation moved since the last frame, or the last fixed step in a fixed step. Zero while paused.
     /// </summary>
-    public uint SimMsDeltaTime { get; }
+    public required double SimDeltaSec { get; init; }
 
-    public bool IsPaused { get; }
+    public bool IsPaused { get; init; }
 }
