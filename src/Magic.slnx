@@ -4,6 +4,7 @@
     <Project Path="CommandLine/Magic.CommandLine.csproj" />
     <Project Path="Debugging/Magic.Debugging.csproj" />
     <Project Path="Files/Magic.Files.csproj" Id="dd604984-bd65-4521-840f-f207ddcec01d" />
+    <Project Path="GemAPI/Magic.GemAPI.csproj" />
     <Project Path="Host/Magic.Host.csproj" />
     <Project Path="Launcher/Magic.Launcher.csproj" />
     <Project Path="Serialization/Magic.Serialization.csproj" />

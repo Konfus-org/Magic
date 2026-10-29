@@ -4,10 +4,11 @@ using System.IO;
 using System.Reflection;
 using Magic.Debugging;
 using Magic.Files;
+using Magic.Host;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Magic.Host;
+namespace Magic.GemAPI;
 
 /// <summary>
 /// Loads the gems a project lists and makes them, each after the gems its constructor asks for. A gem that can't be
@@ -17,24 +18,22 @@ public static class GemLoader
 {
     /// <summary>
     /// Loads the gems <paramref name="project"/> lists, registers each with <paramref name="services"/>, which already
-    /// holds what the host provides, and makes them: the gems made, in dependency order. Each gem loads into a collectible
-    /// context of its own, which the caller unloads once it has disposed the gem
-    /// (<c>AssemblyLoadContext.GetLoadContext(gem.GetType().Assembly)?.Unload()</c>). A gem that is an
-    /// <see cref="ILogSink"/> is the caller's to add to the log.
+    /// holds what the host provides, and makes them: the gems made, in dependency order. End them in reverse by
+    /// disposing each <see cref="LoadedGem"/>, which also frees the gem's assemblies.
     /// </summary>
-    public static IReadOnlyList<IGem> Load(ServiceCollection services, IFileSystem files, Project project)
+    public static IReadOnlyList<LoadedGem> Load(ServiceCollection services, IFileSystem files, Project project)
     {
         // The gems made, in the order their constructors finished, which is dependency order; those tried, so a failed
         // one isn't made twice; and those being made, so one asked for again is a cycle, on which the provider hangs.
-        List<IGem> created = [];
+        List<LoadedGem> created = [];
         HashSet<Type> tried = [];
         HashSet<Type> creating = [];
-        List<LoadedGem> gems = Register(services, files, project, Create);
+        List<GemInfo> gems = Register(services, files, project, Create);
 
         // Never disposed, since its singletons are the gems, which the caller owns; dropped when this returns, so it
         // keeps no gem from unloading.
         ServiceProvider provider = services.BuildServiceProvider();
-        foreach (LoadedGem gem in gems)
+        foreach (GemInfo gem in gems)
         {
             try
             {
@@ -48,14 +47,14 @@ public static class GemLoader
 
         return created;
 
-        IGem Create(IServiceProvider scope, LoadedGem gem) => CreateGem(scope, gem, created, tried, creating);
+        IGem Create(IServiceProvider scope, GemInfo gem) => CreateGem(scope, gem, created, tried, creating);
     }
 
     /// <summary>
     /// The gem <paramref name="name"/> from <c>Gems/&lt;name&gt;/&lt;name&gt;.dll</c> beside Magic, or why it can't be
     /// made: it must hold one <see cref="IGem"/> class with one public constructor.
     /// </summary>
-    private static Result<LoadedGem> LoadGem(IFileSystem files, string name)
+    private static Result<GemInfo> LoadGem(IFileSystem files, string name)
     {
         string path = files.Combine(AppContext.BaseDirectory, "Gems", name, name + ".dll");
         Result<Assembly> loaded = LoadAssembly(files, path, name);
@@ -90,7 +89,7 @@ public static class GemLoader
         string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
 
-        return Result.Success(new LoadedGem(name, author, description, version, gem, provides));
+        return Result.Success(new GemInfo(name, author, description, version, gem, provides));
     }
 
     /// <summary>
@@ -173,7 +172,7 @@ public static class GemLoader
     /// Why <paramref name="gem"/> is refused when <paramref name="services"/> already provides an interface it does;
     /// null when none.
     /// </summary>
-    private static string? FindClash(ServiceCollection services, LoadedGem gem)
+    private static string? FindClash(ServiceCollection services, GemInfo gem)
     {
         foreach (Type contract in gem.Provides)
         {
@@ -207,14 +206,14 @@ public static class GemLoader
     /// and every interface it provides, made by <paramref name="create"/>. A name listed twice, the wrong version, or
     /// an interface already provided is refused.
     /// </summary>
-    private static List<LoadedGem> Register(
+    private static List<GemInfo> Register(
         ServiceCollection services,
         IFileSystem files,
         Project project,
-        Func<IServiceProvider, LoadedGem, IGem> create
+        Func<IServiceProvider, GemInfo, IGem> create
     )
     {
-        List<LoadedGem> registered = [];
+        List<GemInfo> registered = [];
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
         foreach (string listing in project.Gems)
         {
@@ -228,14 +227,14 @@ public static class GemLoader
                 continue;
             }
 
-            Result<LoadedGem> loaded = LoadGem(files, name);
+            Result<GemInfo> loaded = LoadGem(files, name);
             if (!loaded.Ok)
             {
                 Log.Error(loaded.Error);
                 continue;
             }
 
-            LoadedGem gem = loaded.Value;
+            GemInfo gem = loaded.Value;
             if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
             {
                 Log.Error($"Gem {name} is {gem.Version.ToString(3)}, but {project.Name} asks for {wanted}.");
@@ -261,7 +260,8 @@ public static class GemLoader
     }
 
     /// <summary>
-    /// The provider's factory for <paramref name="gem"/>, which adds it to <paramref name="created"/>. Why it couldn't
+    /// The provider's factory for <paramref name="gem"/>, which adds it to <paramref name="created"/>, on the log when
+    /// it is a sink. Why it couldn't
     /// be made is logged here, once; the gems that need it are told only that it wasn't.
     /// </summary>
     [SuppressMessage(
@@ -271,8 +271,8 @@ public static class GemLoader
     )]
     private static IGem CreateGem(
         IServiceProvider services,
-        LoadedGem gem,
-        List<IGem> created,
+        GemInfo gem,
+        List<LoadedGem> created,
         HashSet<Type> tried,
         HashSet<Type> creating
     )
@@ -302,7 +302,11 @@ public static class GemLoader
             creating.Remove(gem.Type);
         }
 
-        created.Add(made);
+        LoadedGem loaded = new(made, gem.Name, gem.Version, gem.Author, gem.Description);
+        if (made is ILogSink sink)
+            loaded.Subscriptions.Add(Log.Register(sink));
+
+        created.Add(loaded);
 
         string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
         Log.Info($"Gem {gem.Name} {gem.Version.ToString(3)} by {gem.Author} started{what}");
@@ -319,7 +323,7 @@ public static class GemLoader
     /// <param name="Version">Its version; 1.0.0 when its project says nothing.</param>
     /// <param name="Type">Its one <see cref="IGem"/> class.</param>
     /// <param name="Provides">The interfaces it provides to other gems.</param>
-    private readonly record struct LoadedGem(
+    private readonly record struct GemInfo(
         string Name,
         string Author,
         string Description,

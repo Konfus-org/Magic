@@ -32,7 +32,8 @@ know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Temp
 
 ```
 src/Launcher/    the Magic program
-src/Host/        the app, the project and the gem contract
+src/Host/        the app and the project
+src/GemAPI/      the gem contract, and loading the gems a project lists
 src/Debugging/   the log, asserts and crashes
 src/Threading/   helpers for tasks and threads
 src/Utils/       small value types and helpers the other projects share

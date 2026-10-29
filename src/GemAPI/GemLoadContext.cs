@@ -6,17 +6,16 @@ using Magic.Debugging;
 using Magic.Files;
 using Magic.Utils;
 
-namespace Magic.Host;
+namespace Magic.GemAPI;
 
 /// <summary>
 /// Where one gem's assemblies load: the gem and its NuGet and native dependencies, from its folder. Magic and the
 /// framework come from the host, so every gem shares one <see cref="IGem"/>, and two gems can carry different versions
 /// of one package. A native library is found through the gem's dependency file, else under its
-/// <c>runtimes/&lt;rid&gt;/native/</c>. It is collectible: once <see cref="AssemblyLoadContext.Unload"/> is called and
-/// nothing refers to the gem's types any more, its assemblies are freed.
+/// <c>runtimes/&lt;rid&gt;/native/</c>. It is collectible: it unloads once nothing refers to the gem's types, or
+/// once <see cref="AssemblyLoadContext.Unload"/> is called, and its assemblies are freed after that.
 /// </summary>
-internal sealed class GemLoadContext(string gemPath, IFileSystem files)
-    : AssemblyLoadContext(Path.GetFileNameWithoutExtension(gemPath), isCollectible: true)
+internal sealed class GemLoadContext : AssemblyLoadContext
 {
     /// <summary>
     /// Native libraries by name, loaded once for every gem and never freed: two copies would each keep their own state,
@@ -25,7 +24,20 @@ internal sealed class GemLoadContext(string gemPath, IFileSystem files)
     private static readonly Dictionary<string, nint> _natives = new(StringComparer.Ordinal);
     private static readonly Lock _loadingNative = new();
 
-    private readonly AssemblyDependencyResolver _resolver = new(gemPath);
+    private readonly string _gemPath;
+    private readonly IFileSystem _files;
+    private readonly AssemblyDependencyResolver _resolver;
+
+    internal GemLoadContext(string gemPath, IFileSystem files)
+        : base(Path.GetFileNameWithoutExtension(gemPath), isCollectible: true)
+    {
+        _gemPath = gemPath;
+        _files = files;
+        _resolver = new AssemblyDependencyResolver(gemPath);
+
+        // A static method, so the handler keeps no reference to the gem.
+        Unloading += LogUnloaded;
+    }
 
     protected override Assembly? Load(AssemblyName assemblyName) =>
         _resolver.ResolveAssemblyToPath(assemblyName) is { } path ? LoadFromAssemblyPath(path) : null;
@@ -49,22 +61,24 @@ internal sealed class GemLoadContext(string gemPath, IFileSystem files)
         }
     }
 
+    private static void LogUnloaded(AssemblyLoadContext context) => Log.Info($"Gem {context.Name} unloaded.");
+
     /// <summary>
     /// The file under the gem's <c>runtimes/&lt;rid&gt;/native/</c> named like the library, with or without Unix's
     /// <c>lib</c> prefix; null when there is none.
     /// </summary>
     private string? FindCarried(string name)
     {
-        string folder = files.Combine(
-            files.GetParent(gemPath),
+        string folder = _files.Combine(
+            _files.GetParent(_gemPath),
             "runtimes",
             RuntimeInformation.RuntimeIdentifier,
             "native"
         );
-        if (!files.DirectoryExists(folder))
+        if (!_files.DirectoryExists(folder))
             return null;
 
-        Result<string[]> found = files.EnumerateFiles(folder, "*", recursive: false);
+        Result<string[]> found = _files.EnumerateFiles(folder, "*", recursive: false);
         if (!found.Ok)
             return null;
 

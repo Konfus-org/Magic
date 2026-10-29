@@ -1,4 +1,4 @@
-namespace Magic.Host;
+namespace Magic.GemAPI;
 
 public readonly record struct Frame
 {
