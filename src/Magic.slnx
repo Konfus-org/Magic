@@ -43,7 +43,12 @@
     <File Path="../tools/VS Templates/Core/.template.config/icon.png" />
     <File Path="../tools/VS Templates/Core/.template.config/ide.host.json" />
     <File Path="../tools/VS Templates/Core/.template.config/template.json" />
-    <File Path="../tools/VS Templates/Core/Magic.ModuleName.csproj" />
-    <File Path="../tools/VS Templates/Core/README.md" />
+    <Project Path="../tools/VS Templates/Core/Magic.ModuleName.csproj" />
+  </Folder>
+  <Folder Name="/Tools/VS Templates/Project/">
+    <File Path="../tools/VS Templates/Project/.template.config/icon.png" />
+    <File Path="../tools/VS Templates/Project/.template.config/ide.host.json" />
+    <File Path="../tools/VS Templates/Project/.template.config/template.json" />
+    <Project Path="../tools/VS Templates/Project/Samples.ProjectName.csproj" />
   </Folder>
 </Solution>

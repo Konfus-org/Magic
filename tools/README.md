@@ -42,7 +42,8 @@ and a state already stamped returns at once. It also points git at the repositor
 ## Templates
 
 `VS Templates/` holds the `dotnet new` templates for a Core module and a sample project, and `InstallTemplates.ps1`
-installs them. Run it once, and again after a template changes.
+installs them. Run it once, and again after a template changes. Each template is a project in the solution's
+`Tools/VS Templates` folder and builds where it is, so a template that no longer compiles fails the build.
 
 To add a Core module:
 

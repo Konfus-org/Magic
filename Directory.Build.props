@@ -34,8 +34,10 @@
        tools, which never ship, go under Tests/<Name>/ and Tools/<Name>/. A project is placed by where its source is,
        here rather than in its own folder, because MSBuild fixes the intermediate folder before any project file or
        nearer Directory.Build.props is read. A project's intermediate files are its own, in
-       Build/obj/<Configuration>/<Name>/, so projects that share an output folder never share them. -->
+       Build/obj/<Configuration>/<Name>/, so projects that share an output folder never share them. MagicRoot is the
+       repository's root, for a path that must hold wherever a project sits, as a template's does. -->
   <PropertyGroup>
+    <MagicRoot>$(MSBuildThisFileDirectory)</MagicRoot>
     <MagicSource>$([MSBuild]::MakeRelative('$(MSBuildThisFileDirectory)', '$(MSBuildProjectDirectory)').Replace('\', '/'))/</MagicSource>
     <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Gems/'))">Gems/$(MSBuildProjectName)/</MagicOutput>
     <MagicOutput Condition="$(MagicSource.StartsWith('src/Bundled/Resources/'))">Resources/</MagicOutput>

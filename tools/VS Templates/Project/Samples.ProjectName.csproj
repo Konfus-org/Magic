@@ -4,12 +4,12 @@
     <RunCommand>$(MagicBin)Magic</RunCommand>
     <RunCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(MagicBin)Magic.exe</RunCommand>
     <RunArguments>open "$(MSBuildProjectDirectory)/ProjectName.magic" --headless true</RunArguments>
-    <RunWorkingDirectory>$(MSBuildThisFileDirectory)../../</RunWorkingDirectory>
+    <RunWorkingDirectory>$(MagicRoot)</RunWorkingDirectory>
   </PropertyGroup>
   <ItemGroup>
     <!-- Built before the project so its Run has a Magic to start; nothing of it is referenced or copied. -->
     <ProjectReference
-      Include="../../src/Launcher/Magic.Launcher.csproj"
+      Include="$(MagicRoot)src/Launcher/Magic.Launcher.csproj"
       ReferenceOutputAssembly="false"
       Private="false"
       SkipGetTargetFrameworkProperties="true"
