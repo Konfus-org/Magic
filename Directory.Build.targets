@@ -1,0 +1,8 @@
+<Project>
+  <!-- Every project, after Visual Studio's design-time targets add their capabilities. A project with nothing to run,
+       such as a class library, has no launch profiles, so Visual Studio writes no Properties/launchSettings.json into
+       it. -->
+  <ItemGroup Condition="'$(RunCommand)' == ''">
+    <ProjectCapability Remove="LaunchProfiles" />
+  </ItemGroup>
+</Project>

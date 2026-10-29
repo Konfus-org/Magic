@@ -7,9 +7,6 @@ Each script is one PowerShell file that runs under both `pwsh` and Windows Power
 lacks (`&&`, `?:`, `??`). A script runs from any folder and exits `0` when it passes. Its help comment lists its
 switches: `Get-Help ./tools/Scripts/Validate.ps1 -Full`.
 
-There is no sample project yet. Until there is, only the Build and Test steps work: run
-`Validate.ps1 -Only Build,Test`, and `AgentTaskComplete.ps1` at the `Docs` level.
-
 ## Format.ps1
 
 Formats the `.cs`, `.csproj`, `.props` and `.targets` files that differ from the last commit, new files included.
@@ -26,7 +23,8 @@ Runs the checks a change must pass, in order, and stops at the first failure:
 
 1. **Build:** builds `src/Magic.slnx`. Every warning is an error, and so is a file CSharpier would change.
 2. **Test:** runs the tests against that build.
-3. **Headless:** runs the sample project without a window under `--fail-on-error`.
+3. **Headless:** runs the sample project without a window under `--fail-on-error`, types `exit` into it and passes
+   when it exits `0`. A run still going after `-Seconds` is killed and fails.
 4. **Screenshot:** runs `Screenshot.ps1` on the sample project. Needs a display and a GPU.
 
 `-Only` runs some steps, and `-Project` runs another project.
@@ -43,14 +41,26 @@ and a state already stamped returns at once. It also points git at the repositor
 
 ## Templates
 
-`VS Templates/` holds the `dotnet new` template for a Core module, and `InstallTemplates.ps1` installs it.
+`VS Templates/` holds the `dotnet new` templates for a Core module and a sample project, and `InstallTemplates.ps1`
+installs them. Run it once, and again after a template changes. Each template is a project in the solution's
+`Tools/VS Templates` folder and builds where it is, so a template that no longer compiles fails the build.
 
-To add a Core module, run `InstallTemplates.ps1` once, then:
+To add a Core module:
 
 - **Visual Studio:** right-click the `Core` solution folder, choose Add > New Project > Magic Core Module and give it
   the bare name (`Assets`, not `Magic.Assets`). Its location starts at `src`, the solution's folder.
-- **Command line:** `dotnet new magic-core -n Assets -o src/Assets`, then
-  `dotnet sln src/Magic.slnx add src/Assets/Magic.Assets.csproj --solution-folder Core`.
+- **Command line:** `Magic new core Assets -o src/Assets` from the repository's root, which runs
+  `dotnet new magic-core -n Assets -o src/Assets`.
 
-Either makes `src/Assets/Magic.Assets.csproj` and its README. Its settings come from `Directory.Build.props`, so the
-project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).
+Either makes `src/Assets/Magic.Assets.csproj` and adds it to the solution's `Core` folder. Its settings come from
+`Directory.Build.props`, so the project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).
+
+To add a sample project:
+
+- **Visual Studio:** right-click the `Samples` solution folder, choose Add > New Project > Magic Project, give it a
+  name and set its location to the repository's `samples` folder.
+- **Command line:** `Magic new project Foo -o samples/Foo` from the repository's root, then
+  `dotnet sln src/Magic.slnx add samples/Foo/Samples.Foo.csproj --solution-folder Samples`.
+
+Either makes `samples/Foo/Foo.magic`, listing no gems, and `Samples.Foo.csproj`, whose Run builds Magic and opens the
+project ([Samples](../samples/README.md)).

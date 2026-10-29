@@ -51,12 +51,12 @@ internal static class Crash
             .Append(")\n")
             .Append(new StackTrace(1, true).ToString());
 
-        IReadOnlyCollection<Log.Line> unprinted = Log.GetUnprinted();
-        if (unprinted.Count > 0)
+        Log.Line[] history = Log.GetHistory();
+        if (history.Length > 0)
         {
-            text.Append("\nLines no sink printed:\n");
-            foreach (Log.Line queued in unprinted)
-                text.Append(queued.ToString()).Append('\n');
+            text.Append("\nLast lines logged:\n");
+            foreach (Log.Line logged in history)
+                text.Append(logged.ToString()).Append('\n');
         }
 
         string crashFile = WriteCrashFile(time, text.ToString().ReplaceLineEndings("\n"));

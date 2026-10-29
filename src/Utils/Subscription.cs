@@ -1,4 +1,4 @@
-namespace Magic.State;
+namespace Magic.Utils;
 
 public readonly record struct Subscription(Action Unregister) : IDisposable
 {
