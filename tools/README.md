@@ -41,7 +41,7 @@ and a state already stamped returns at once. It also points git at the repositor
 
 ## Templates
 
-`VS Templates/` holds the `dotnet new` templates for a Core module and a sample project, and `InstallTemplates.ps1`
+`VS Templates/` holds the `dotnet new` templates for a Core module, a gem and a sample project, and `InstallTemplates.ps1`
 installs them. Run it once, and again after a template changes. Each template is a project in the solution's
 `Tools/VS Templates` folder and builds where it is, so a template that no longer compiles fails the build.
 
@@ -54,6 +54,16 @@ To add a Core module:
 
 Either makes `src/Assets/Magic.Assets.csproj` and adds it to the solution's `Core` folder. Its settings come from
 `Directory.Build.props`, so the project file lists only its references. Add those, and the folder's line in the [README](../README.md#folders).
+
+To add a gem:
+
+- **Visual Studio:** right-click the solution, choose Add > New Project > Magic Gem, give it a name and set its
+  location to `src/Bundled/Gems`.
+- **Command line:** `Magic new gem Foo -o src/Bundled/Gems/Foo` from the repository's root, which runs
+  `dotnet new magic-gem -n Foo -o src/Bundled/Gems/Foo` and adds it to the solution's `Gems` folder.
+
+Either makes `src/Bundled/Gems/Foo/Foo.csproj` and `FooGem.cs`. It builds to `Gems/Foo/` beside Magic, and a project
+runs it by listing `Foo` in its `.magic` file. Its csproj states its `Description`, `Version` and `Authors`.
 
 To add a sample project:
 
