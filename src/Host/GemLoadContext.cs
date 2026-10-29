@@ -12,24 +12,20 @@ namespace Magic.Host;
 /// Where one gem's assemblies load: the gem and its NuGet and native dependencies, from its folder. Magic and the
 /// framework come from the host, so every gem shares one <see cref="IGem"/>, and two gems can carry different versions
 /// of one package. A native library is found through the gem's dependency file, else under its
-/// <c>runtimes/&lt;rid&gt;/native/</c>.
+/// <c>runtimes/&lt;rid&gt;/native/</c>. It is collectible: once <see cref="AssemblyLoadContext.Unload"/> is called and
+/// nothing refers to the gem's types any more, its assemblies are freed.
 /// </summary>
 internal sealed class GemLoadContext(string gemPath, IFileSystem files)
-    : AssemblyLoadContext(Path.GetFileNameWithoutExtension(gemPath))
+    : AssemblyLoadContext(Path.GetFileNameWithoutExtension(gemPath), isCollectible: true)
 {
     /// <summary>
-    /// Native libraries by name, loaded once for every gem: two copies would each keep their own state, so a window one
-    /// opened would mean nothing to the other.
+    /// Native libraries by name, loaded once for every gem and never freed: two copies would each keep their own state,
+    /// so a window one opened would mean nothing to the other.
     /// </summary>
     private static readonly Dictionary<string, nint> _natives = new(StringComparer.Ordinal);
     private static readonly Lock _loadingNative = new();
 
     private readonly AssemblyDependencyResolver _resolver = new(gemPath);
-
-    /// <summary>
-    /// The gem's assembly this context was made for.
-    /// </summary>
-    public string GemPath => gemPath;
 
     protected override Assembly? Load(AssemblyName assemblyName) =>
         _resolver.ResolveAssemblyToPath(assemblyName) is { } path ? LoadFromAssemblyPath(path) : null;
