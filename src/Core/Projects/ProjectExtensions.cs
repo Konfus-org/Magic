@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using Magic.Assets;
+using Magic.Assets.Pipeline;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;

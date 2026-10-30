@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using Magic.Debugging;
 using Magic.Utils;
 
-namespace Magic.Assets;
+namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// What happened that the asset manager takes in: handed to <see cref="AssetPipeline.Pump"/> one at a time.

@@ -8,7 +8,7 @@ using Magic.Files;
 using Magic.Serialization;
 using Magic.Utils;
 
-namespace Magic.Assets;
+namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// What is under the asset directories at one moment: every file with a <c>.meta</c> sidecar, by its id, its path and

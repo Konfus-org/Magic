@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Magic.Assets;
+namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// The values of an asset type's <see cref="AssetMetaAttribute"/> properties for one file: each as its <c>.meta</c>

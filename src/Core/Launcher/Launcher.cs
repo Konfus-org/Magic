@@ -1,5 +1,5 @@
 using System.Runtime;
-using Magic.Assets;
+using Magic.Assets.Pipeline;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.GemAPI;

@@ -1,4 +1,4 @@
-namespace Magic.Assets;
+namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// An asset's file as its <see cref="IAssetLoader{T}"/> is handed it.

@@ -1,3 +1,5 @@
+using Magic.Assets.Pipeline;
+
 namespace Magic.Assets;
 
 /// <summary>

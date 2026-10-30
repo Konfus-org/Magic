@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using Magic.Utils;
 
-namespace Magic.Assets;
+namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// Reads the files of one asset type: an importer, turning a file format on disk into what the engine works with. A

@@ -11,7 +11,7 @@ using Magic.Serialization;
 using Magic.Threading;
 using Magic.Utils;
 
-namespace Magic.Assets;
+namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// The assets: what the files under the asset directories describe, the project's <c>Assets/</c> folder, then Magic's

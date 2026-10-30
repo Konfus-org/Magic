@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Magic.Assets.Pipeline;
 
 namespace Magic.Assets;
 

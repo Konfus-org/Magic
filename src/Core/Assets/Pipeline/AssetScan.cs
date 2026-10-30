@@ -3,7 +3,7 @@ using System.Collections.Immutable;
 using System.Reflection;
 using System.Text.Json.Nodes;
 
-namespace Magic.Assets;
+namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// Finds what an asset depends on without loading anything else: the ids of the <see cref="Handle{T}"/>s it holds,

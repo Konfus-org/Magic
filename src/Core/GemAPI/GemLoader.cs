@@ -4,7 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using Magic.Assets;
+using Magic.Assets.Pipeline;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Utils;

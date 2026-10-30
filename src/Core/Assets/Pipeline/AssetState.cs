@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using Magic.Utils;
 
-namespace Magic.Assets;
+namespace Magic.Assets.Pipeline;
 
 /// <summary>
 /// Where an asset is in being loaded.
