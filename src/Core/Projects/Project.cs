@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+
 namespace Magic.Projects;
 
 public readonly record struct Project

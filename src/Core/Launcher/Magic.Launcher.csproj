@@ -7,9 +7,11 @@
     <VersionPrefix>0.1</VersionPrefix>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../Assets/Magic.Assets.csproj" />
     <ProjectReference Include="../CommandLine/Magic.CommandLine.csproj" />
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
     <ProjectReference Include="../GemAPI/Magic.GemAPI.csproj" />
     <ProjectReference Include="../Host/Magic.Host.csproj" />
+    <ProjectReference Include="../Projects/Magic.Projects.csproj" />
   </ItemGroup>
 </Project>

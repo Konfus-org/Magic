@@ -141,17 +141,15 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 ### Assets
 
-- An asset type is a sealed class implementing `IAsset<T>` of itself. It holds what its users read, not file details,
-  and states its file extensions as a static. Only Core's `Assets` sets its handle.
+- An asset type holds what its users read: plain data, properties only, no JSON attributes, no file details, no I/O.
+  Separate code reads it.
 - An asset type gems share is Core's. One only a gem reads is that gem's.
-- JSON assets implement `IJsonAsset<T>` and text ones `ITextAsset<T>`. Other formats need a gem's `IAssetLoader<T>`
-  returning a `Result`. The `.meta` file holds the import settings.
-- A type read from a file is plain data: properties only, no JSON attributes, no I/O. Separate code reads it.
+- Reading a file format is its loader's one job; anything else known about an asset is found by Core.
+- An import setting is a property of the asset type, declared as one, never a settings type beside it.
 - A key the file must have is `required { get; init; }`. One with a default is `{ get; set; }`, the default as its
   initializer and nowhere else. What code sets, not the file, has no public setter.
-- Read and write all JSON with [Core's](../src/Core/README.md#assets) one dialect. No per-type options.
-- Every asset type has a default asset, `<Type>s/Default.<ext>` (`<Type>s/Default/Default.<ext>` for a folder asset).
-  An asset setting is a path, empty for that default.
+- Read and write all JSON with Core's one dialect. No per-type options.
+- Every asset type has a default asset, found by convention, never by a path in code or settings.
 - Refer to an asset by its typed handle, never a path, except in code that starts from a name.
 - A "nothing" value is a static `None` on its type. An implementation's own fallback lives once in it, never on a Core
   type.

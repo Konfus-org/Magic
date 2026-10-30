@@ -1,10 +1,12 @@
 using System.Runtime;
+using Magic.Assets;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.GemAPI;
 using Magic.Projects;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Magic.Launcher;
 
@@ -59,8 +61,24 @@ internal static class Launcher
                 return 1;
             }
 
-            IReadOnlyList<LoadedGem> gems = GemLoader.Load(services, fileSystem, project.Value.Gems);
-            Result ended = project.Value.Run(app, gems);
+            // A run's gems and assets are its own, so a restart makes them again; the host's services carry over.
+            using AssetManager assets = new(
+                fileSystem,
+                fileSystem.Combine(fileSystem.GetParent(app.ProjectPath), "Assets")
+            );
+            ServiceCollection runServices = [];
+            foreach (ServiceDescriptor service in services)
+            {
+                runServices.Add(service);
+            }
+
+            runServices.AddSingleton(assets);
+            IReadOnlyList<LoadedGem> gems = GemLoader.Load(runServices, fileSystem, project.Value.Gems, assets);
+
+            // Loads the constructors asked for start now, rather than with the first frame.
+            assets.EnableAssetLoading();
+            assets.Pump();
+            Result ended = project.Value.Run(app, gems, assets);
             GemLoader.Unload(gems);
 
             if (!ended.Ok)

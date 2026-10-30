@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using Magic.Assets;
 using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
@@ -33,14 +34,15 @@ public static class ProjectExtensions
 
         /// <summary>
         /// Runs one project's frames until the commands ask to exit or for another project or mode, taking any lines typed
-        /// into the terminal between frames. Fails at the first error under --fail-on-error.
+        /// into the terminal and pumping <paramref name="assets"/> between frames. Fails at the first error under
+        /// --fail-on-error.
         /// </summary>
         [SuppressMessage(
             "Design",
             "CA1031:Do not catch general exception types",
             Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the others go on."
         )]
-        public Result Run(App app, IReadOnlyList<LoadedGem> gems)
+        public Result Run(App app, IReadOnlyList<LoadedGem> gems, AssetManager assets)
         {
             const double FrameSec = 1.0 / 60;
             const double FixedStepSec = 1.0 / 60;
@@ -68,6 +70,7 @@ public static class ProjectExtensions
             for (uint index = 0; app.IsRunning; index++)
             {
                 Cli.Pump(app);
+                assets.Pump();
 
                 if (app.ShouldExitOnError && Log.ErrorCount > 0)
                     return Result.Failure($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");

@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using Magic.Assets;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.Utils;
@@ -19,14 +20,17 @@ namespace Magic.GemAPI;
 public static class GemLoader
 {
     /// <summary>
-    /// Loads the <paramref name="gemsToLoad"/>, registers each with <paramref name="services"/>, which
-    /// already holds what the host provides, and makes them: the gems made, in dependency order. End them in reverse by
-    /// disposing each <see cref="LoadedGem"/>, which also frees the gem's assemblies.
+    /// Loads the <paramref name="gemsToLoad"/>, registers each with <paramref name="services"/>, which already holds what
+    /// the host provides, adds each one's <c>Resources/</c> and asset types to <paramref name="assets"/> and indexes
+    /// them, and makes them: the gems made, in dependency order. A gem that reads an asset type reads it for
+    /// <paramref name="assets"/> from when it is made. End them with <see cref="Unload"/>, which also frees the gems'
+    /// assemblies.
     /// </summary>
     public static IReadOnlyList<LoadedGem> Load(
         ServiceCollection services,
         IFileSystem files,
-        ImmutableArray<string> gemsToLoad
+        ImmutableArray<string> gemsToLoad,
+        AssetManager assets
     )
     {
         if (gemsToLoad.Any())
@@ -41,8 +45,17 @@ public static class GemLoader
             services,
             files,
             gemsToLoad,
-            (scope, gem) => CreateGem(scope, gem, created, tried, creating)
+            (scope, gem) => CreateGem(scope, gem, assets, created, tried, creating)
         );
+
+        // Every asset directory is indexed before any gem is made, so a constructor can find assets.
+        foreach (GemInfo gem in gems)
+        {
+            assets.AddAssetDirectory(gem.Resources);
+            assets.AddAssetTypes(gem.Type.Assembly);
+        }
+
+        assets.Index();
 
         // Never disposed, since its singletons are the gems, which the caller owns; dropped when this returns, so it
         // keeps no gem from unloading.
@@ -99,19 +112,28 @@ public static class GemLoader
         if (constructors != 1)
             return Result.Failure($"Gem {name}: {gem.Name} must have one public constructor; it has {constructors}.");
 
-        // What the host takes itself isn't provided, so any number of gems can be sinks.
+        // What the host takes itself isn't provided, so any number of gems can be sinks, and the assets say which gem
+        // reads a type.
         List<Type> provides = [];
         foreach (Type contract in gem.GetInterfaces())
         {
-            if (contract != typeof(IGem) && contract != typeof(IDisposable) && contract != typeof(ILogSink))
+            bool isLoader = contract.IsGenericType && contract.GetGenericTypeDefinition() == typeof(IAssetLoader<>);
+            if (
+                !isLoader
+                && contract != typeof(IGem)
+                && contract != typeof(IDisposable)
+                && contract != typeof(ILogSink)
+            )
                 provides.Add(contract);
         }
 
-        string author = GetMetadata(assembly, "Magic.Author") ?? name;
+        string author = assembly.GetMetadata("Magic.Author") ?? name;
         string description = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description ?? string.Empty;
         Version version = assembly.GetName().Version ?? new Version(1, 0, 0);
 
-        return Result.Success(new GemInfo(name, author, description, version, gem, provides));
+        string resources = AssetManager.GetResources(files, assembly, files.GetParent(path));
+
+        return Result.Success(new GemInfo(name, author, description, version, gem, provides, resources));
     }
 
     /// <summary>
@@ -152,21 +174,6 @@ public static class GemLoader
 
             return loaded;
         }
-    }
-
-    /// <summary>
-    /// What <paramref name="assembly"/>'s build recorded as <paramref name="key"/>; null when nothing, or an empty
-    /// string, was.
-    /// </summary>
-    private static string? GetMetadata(Assembly assembly, string key)
-    {
-        foreach (AssemblyMetadataAttribute metadata in assembly.GetCustomAttributes<AssemblyMetadataAttribute>())
-        {
-            if (string.Equals(metadata.Key, key, StringComparison.Ordinal) && metadata.Value is { Length: > 0 } value)
-                return value;
-        }
-
-        return null;
     }
 
     /// <summary>
@@ -259,7 +266,7 @@ public static class GemLoader
             GemInfo gem = loaded.Value;
             if (wanted.Length > 0 && !IsVersion(gem.Version, wanted))
             {
-                Log.Error($"Gem {name} is {gem.Version.ToString(3)}, but {project.Name} asks for {wanted}.");
+                Log.Error($"Gem {name} is {gem.Version.ToString(3)}, but the project asks for {wanted}.");
                 continue;
             }
 
@@ -283,8 +290,8 @@ public static class GemLoader
 
     /// <summary>
     /// The provider's factory for <paramref name="gem"/>, which adds it to <paramref name="created"/>, on the log when
-    /// it is a sink. Why it couldn't
-    /// be made is logged here, once; the gems that need it are told only that it wasn't.
+    /// it is a sink, and reading for <paramref name="assets"/> the types it reads. Why it couldn't be made is logged
+    /// here, once; the gems that need it are told only that it wasn't.
     /// </summary>
     [SuppressMessage(
         "Design",
@@ -294,6 +301,7 @@ public static class GemLoader
     private static IGem CreateGem(
         IServiceProvider services,
         GemInfo gem,
+        AssetManager assets,
         List<LoadedGem> created,
         HashSet<Type> tried,
         HashSet<Type> creating
@@ -328,6 +336,8 @@ public static class GemLoader
         if (made is ILogSink sink)
             loaded.Subscriptions.Add(Log.Register(sink));
 
+        loaded.Subscriptions.Add(assets.AddLoader(made));
+
         created.Add(loaded);
 
         string what = gem.Description.Length > 0 ? $": {gem.Description}" : string.Empty;
@@ -345,12 +355,14 @@ public static class GemLoader
     /// <param name="Version">Its version; 1.0.0 when its project says nothing.</param>
     /// <param name="Type">Its one <see cref="IGem"/> class.</param>
     /// <param name="Provides">The interfaces it provides to other gems.</param>
+    /// <param name="Resources">The folder of its own assets.</param>
     private readonly record struct GemInfo(
         string Name,
         string Author,
         string Description,
         Version Version,
         Type Type,
-        List<Type> Provides
+        List<Type> Provides,
+        string Resources
     );
 }

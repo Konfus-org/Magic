@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The assets: what the files under the asset roots describe, the types gems share, and what reads them. -->
+  <PropertyGroup>
+    <!-- The engine's own assets, every project's: Resources/ beside Magic in a release, else read where they are. -->
+    <MagicResources>$(MagicRoot)src/Resources</MagicResources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.IO.Hashing" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
+    <ProjectReference Include="../Files/Magic.Files.csproj" />
+    <ProjectReference Include="../Serialization/Magic.Serialization.csproj" />
+    <ProjectReference Include="../Threading/Magic.Threading.csproj" />
+    <ProjectReference Include="../Utils/Magic.Utils.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The host's plumbing: the roots, the index, the loaders and the start. -->
+    <InternalsVisibleTo Include="Magic.GemAPI" />
+    <InternalsVisibleTo Include="Magic" />
+    <InternalsVisibleTo Include="Magic.Projects" />
+  </ItemGroup>
+</Project>

@@ -5,6 +5,7 @@
   <ItemGroup>
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
     <ProjectReference Include="../Files/Magic.Files.csproj" />
+    <ProjectReference Include="../Assets/Magic.Assets.csproj" />
     <ProjectReference Include="../Host/Magic.Host.csproj" />
     <ProjectReference Include="../Utils/Magic.Utils.csproj" />
   </ItemGroup>
