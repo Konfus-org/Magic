@@ -11,7 +11,6 @@
     <ProjectReference Include="../CommandLine/Magic.CommandLine.csproj" />
     <ProjectReference Include="../Debugging/Magic.Debugging.csproj" />
     <ProjectReference Include="../GemAPI/Magic.GemAPI.csproj" />
-    <ProjectReference Include="../Host/Magic.Host.csproj" />
-    <ProjectReference Include="../Projects/Magic.Projects.csproj" />
+    <ProjectReference Include="../Runtime/Magic.Runtime.csproj" />
   </ItemGroup>
 </Project>

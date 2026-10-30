@@ -49,7 +49,7 @@ internal sealed record AssetAdded(ulong Id, Type Type, AssetReader Read, object 
 internal sealed record BuiltInAssetMissing(string Key, string Message) : AssetInput;
 
 /// <summary>
-/// Every gem is made, so each type's loader is there, and asset loads may run.
+/// The first pump came, once every gem is made, so each type's loader is there, and asset loads may run.
 /// </summary>
 internal sealed record AssetLoadingEnabled : AssetInput;
 

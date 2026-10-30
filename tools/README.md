@@ -11,9 +11,12 @@ switches: `Get-Help ./tools/Scripts/Validate.ps1 -Full`.
 
 Formats the `.cs`, `.csproj`, `.props` and `.targets` files that differ from the last commit, new files included.
 `-All` formats every file. It orders each type's members, applies the code style, then lays the code out with
-CSharpier. A local build formats too, and `Validate.ps1` checks.
+CSharpier. A local build formats too, and `Validate.ps1` checks. Last, it builds the solution and removes each project
+or package reference nothing compiled uses, which the build otherwise refuses.
 
 - Fixes that would delete, invent or rename code are left to you. The build still reports them.
+- A reference needed by something other than the code, such as a package that only adds build steps, says
+  `TreatAsUsed="true"`, and is kept.
 - After it moves statics, check that no static initializer reads a static declared below it, which would still be
   unset.
 

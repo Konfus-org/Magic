@@ -21,8 +21,8 @@ namespace Magic.Assets.Pipeline;
 /// every OS. Any thread.
 /// <para>
 /// Every asset directory is indexed before the first gem is made, so finding an asset works in a constructor; a load
-/// asked for before the last gem is made waits until it is, as the gem that reads its type may be made after the one
-/// asking.
+/// asked for before the first <see cref="Pump"/>, which comes once every gem is made, waits for it, as the gem that
+/// reads its type may be made after the one asking.
 /// </para>
 /// <para>
 /// A file is read by the <see cref="IAssetLoader{T}"/> a gem provides for its type, else by Core itself for a type
@@ -101,17 +101,15 @@ public sealed class AssetManager : IDisposable
     private AssetState _state = AssetState.Empty;
 
     /// <summary>
-    /// Assets under <paramref name="root"/>, the project's own <c>Assets/</c>, then Magic's built-in <c>Resources/</c>;
-    /// the gems' are added as they load (<see cref="AddAssetDirectory"/>).
+    /// Assets under the directories added (<see cref="AddAssetDirectory"/>), the project's own <c>Assets/</c> then each
+    /// gem's <c>Resources/</c>, and last Magic's built-in <c>Resources/</c>.
     /// </summary>
-    internal AssetManager(IFileSystem files, string root)
+    internal AssetManager(IFileSystem files)
     {
         _files = files;
         _stopped = _stopping.Token;
         _builtIn = GetResources(files, typeof(AssetManager).Assembly, AppContext.BaseDirectory);
         AddAssetTypes(typeof(AssetManager).Assembly);
-        AddAssetDirectory(root);
-        AddAssetDirectory(_builtIn);
     }
 
     /// <summary>
@@ -379,8 +377,8 @@ public sealed class AssetManager : IDisposable
 
     /// <summary>
     /// Adds <paramref name="directory"/> to the asset directories, after those added before it, which win a path it
-    /// shares with them: a gem's own <c>Resources/</c>, as the gem loads. One that does not exist, or is added already,
-    /// is left out. Only before they are indexed.
+    /// shares with them: the project's own <c>Assets/</c>, then each gem's <c>Resources/</c> as the gem loads. One that
+    /// does not exist, or is added already, is left out. Only before they are indexed.
     /// </summary>
     internal void AddAssetDirectory(string directory)
     {
@@ -398,11 +396,13 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Indexes every asset directory, which finding an asset waits for, and from then watches them. Called once, before
-    /// any gem is made.
+    /// Indexes every asset directory, Magic's built-in <c>Resources/</c> last, which finding an asset waits for, and
+    /// from then watches them. Called once, before any gem is made.
     /// </summary>
     internal void Index()
     {
+        AddAssetDirectory(_builtIn);
+
         // Watched before they are read, so nothing written meanwhile is missed.
         foreach (string directory in _state.Directories)
         {
@@ -486,18 +486,16 @@ public sealed class AssetManager : IDisposable
     }
 
     /// <summary>
-    /// Lets asset loads run, those asked for so far and every one after, from the next <see cref="Pump"/>: the host's
-    /// to call once every gem is made, so each type's loader is there.
-    /// </summary>
-    internal void EnableAssetLoading() => Post(new AssetLoadingEnabled());
-
-    /// <summary>
     /// Takes in what happened since the last pump, through <see cref="AssetPipeline.Pump"/>, publishes the state it
     /// gives and does what it asks: starts reads on workers and gives waiting callers their assets. The host's to call
-    /// once a frame, before the gems', on its thread.
+    /// once a frame, before the gems', on its thread, the first time once every gem is made, so each type's loader is
+    /// there: that is when asset loads start.
     /// </summary>
     internal void Pump()
     {
+        if (!_state.IsLoadingEnabled)
+            Post(new AssetLoadingEnabled());
+
         while (_inputs.Reader.TryRead(out AssetInput? input))
         {
             (AssetState state, ImmutableArray<AssetAction> actions) = AssetPipeline.Pump(_state, input);

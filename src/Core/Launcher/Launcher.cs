@@ -2,11 +2,11 @@ using System.Runtime;
 using Magic.Assets.Pipeline;
 using Magic.CommandLine;
 using Magic.Debugging;
+using Magic.Files;
 using Magic.GemAPI;
-using Magic.Projects;
+using Magic.Runtime;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Magic.Launcher;
 
@@ -34,60 +34,40 @@ internal static class Launcher
     {
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
 
-        var services = new ServiceCollection();
-        var coreServices = services.RegisterMagicServices();
-        var app = coreServices.App;
-        var fileSystem = coreServices.FileSystem;
-
-        // Run initial cmds given on startup
-        Result cmdLineRunResults = Cli.Run(app, commandLine);
-        if (!cmdLineRunResults.Ok)
+        // One pass per run, all new for it: a typed command that asks for another project or mode ends the run, and the
+        // next starts anew from the command line and the commands like it.
+        while (true)
         {
-            Log.Critical($"Couldn't run the command line: {cmdLineRunResults.Error}");
-            return 1;
-        }
-
-        // A job, like new or --version, is done once it ran, and failed if it logged an error.
-        if (app.IsExiting)
-            return Log.ErrorCount == 0 ? 0 : 1;
-
-        // One pass per run: a command asking for another project or mode ends the run, and the next pass runs that.
-        while (!app.IsExiting)
-        {
-            Result<Project> project = Project.Load(app.ProjectPath, fileSystem);
-            if (!project.Ok)
+            ServiceCollection services = [];
+            (App app, IFileSystem files, AssetManager assets) = services.RegisterMagicServices();
+            using (assets)
             {
-                Log.Critical(project.Error);
-                return 1;
-            }
+                Result ran = Cli.Run(app, files, commandLine);
+                if (!ran.Ok)
+                {
+                    Log.Critical($"Couldn't run the command line: {ran.Error}");
+                    return 1;
+                }
 
-            // A run's gems and assets are its own, so a restart makes them again; the host's services carry over.
-            using AssetManager assets = new(
-                fileSystem,
-                fileSystem.Combine(fileSystem.GetParent(app.ProjectPath), "Assets")
-            );
-            ServiceCollection runServices = [];
-            foreach (ServiceDescriptor service in services)
-            {
-                runServices.Add(service);
-            }
+                // A job, like new or --version, is done once it ran, and failed if it logged an error, as a project
+                // that won't open does.
+                if (app.IsExiting || app.Project is not { } project)
+                    return Log.ErrorCount == 0 ? 0 : 1;
 
-            runServices.AddSingleton(assets);
-            IReadOnlyList<LoadedGem> gems = GemLoader.Load(runServices, fileSystem, project.Value.Gems, assets);
+                assets.AddAssetDirectory(files.Combine(files.GetParent(project.Path), "Assets"));
+                IReadOnlyList<LoadedGem> gems = GemLoader.Load(services, files, project.Gems, assets);
 
-            // Loads the constructors asked for start now, rather than with the first frame.
-            assets.EnableAssetLoading();
-            assets.Pump();
-            Result ended = project.Value.Run(app, gems, assets);
-            GemLoader.Unload(gems);
+                Result ended = project.Run(app, gems, assets, () => Cli.Pump(app, files));
+                GemLoader.Unload(gems);
+                if (!ended.Ok)
+                {
+                    Log.Critical(ended.Error);
+                    return 2;
+                }
 
-            if (!ended.Ok)
-            {
-                Log.Critical(ended.Error);
-                return 2;
+                if (app.IsExiting)
+                    return 0;
             }
         }
-
-        return 0;
     }
 }

@@ -1,15 +1,13 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Magic.Assets.Pipeline;
-using Magic.CommandLine;
 using Magic.Debugging;
 using Magic.Files;
 using Magic.GemAPI;
-using Magic.Host;
 using Magic.Serialization;
 using Magic.Utils;
 
-namespace Magic.Projects;
+namespace Magic.Runtime;
 
 public static class ProjectExtensions
 {
@@ -29,20 +27,47 @@ public static class ProjectExtensions
                     $"Failed to load the project file from {projectPath}. Ex: {jsonReadResult.Error}"
                 );
 
-            return jsonReadResult;
+            return Result.Success(jsonReadResult.Value with { Path = projectPath });
         }
 
         /// <summary>
         /// Runs one project's frames until the commands ask to exit or for another project or mode, taking any lines typed
-        /// into the terminal and pumping <paramref name="assets"/> between frames. Fails at the first error under
-        /// --fail-on-error.
+        /// into the terminal through <paramref name="pumpCommands"/> and pumping <paramref name="assets"/> between frames.
+        /// The gem that provides <see cref="IWindow"/> is the app's <see cref="App.Window"/> for the run. Fails at the
+        /// first error under --fail-on-error.
+        /// </summary>
+        public Result Run(App app, IReadOnlyList<LoadedGem> gems, AssetManager assets, Action pumpCommands)
+        {
+            // The window is the gem that provides one, for this run alone; none when headless.
+            app.Window = null;
+            foreach (LoadedGem gem in gems)
+            {
+                if (gem.Gem is not IWindow window)
+                    continue;
+
+                app.Window = window;
+                break;
+            }
+
+            try
+            {
+                return project.RunFrames(app, gems, assets, pumpCommands);
+            }
+            finally
+            {
+                app.Window = null;
+            }
+        }
+
+        /// <summary>
+        /// The frames of <see cref="Run"/>, until the run ends.
         /// </summary>
         [SuppressMessage(
             "Design",
             "CA1031:Do not catch general exception types",
             Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the others go on."
         )]
-        public Result Run(App app, IReadOnlyList<LoadedGem> gems, AssetManager assets)
+        private Result RunFrames(App app, IReadOnlyList<LoadedGem> gems, AssetManager assets, Action pumpCommands)
         {
             const double FrameSec = 1.0 / 60;
             const double FixedStepSec = 1.0 / 60;
@@ -69,7 +94,7 @@ public static class ProjectExtensions
             double nextFrameSec = 0;
             for (uint index = 0; app.IsRunning; index++)
             {
-                Cli.Pump(app);
+                pumpCommands();
                 assets.Pump();
 
                 if (app.ShouldExitOnError && Log.ErrorCount > 0)

@@ -18,6 +18,6 @@
     <!-- The host's plumbing: the roots, the index, the loaders and the start. -->
     <InternalsVisibleTo Include="Magic.GemAPI" />
     <InternalsVisibleTo Include="Magic" />
-    <InternalsVisibleTo Include="Magic.Projects" />
+    <InternalsVisibleTo Include="Magic.Runtime" />
   </ItemGroup>
 </Project>

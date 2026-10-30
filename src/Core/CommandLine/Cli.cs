@@ -1,7 +1,8 @@
 using System.CommandLine;
 using System.Linq;
 using Magic.Debugging;
-using Magic.Host;
+using Magic.Files;
+using Magic.Runtime;
 using Magic.Utils;
 
 namespace Magic.CommandLine;
@@ -13,12 +14,18 @@ namespace Magic.CommandLine;
 public static class Cli
 {
     /// <summary>
-    /// Runs the commands Magic was launched with, or says why they didn't run. Only open runs a project; any other
-    /// command does its job and leaves the app exiting.
+    /// The typed lines that ended earlier runs without exiting, such as <c>open Other.magic</c>, in order: each run
+    /// starts anew from the command line and then these.
     /// </summary>
-    public static Result Run(App app, string[] commandLine)
+    private static readonly List<string> _restarts = [];
+
+    /// <summary>
+    /// Runs the commands Magic was launched with, then the typed lines that ended earlier runs, or says why the
+    /// commands didn't run. Only open runs a project; any other command does its job and leaves the app exiting.
+    /// </summary>
+    public static Result Run(App app, IFileSystem files, string[] commandLine)
     {
-        RootCommand commands = CreateCommands(app);
+        RootCommand commands = CreateCommands(app, files);
         ParseResult parsed = commands.Parse(commandLine);
         if (parsed.Errors.Count == 0 && parsed.Action == commands.Action)
             return Result.Failure(
@@ -26,7 +33,12 @@ public static class Cli
             );
 
         Result ran = Invoke(parsed);
-        if (app.ProjectPath.Length == 0)
+        foreach (string line in _restarts)
+        {
+            Run(app, files, line);
+        }
+
+        if (app.Project is null)
             app.Exit();
 
         return ran;
@@ -36,12 +48,12 @@ public static class Cli
     /// Runs one typed line, or says why it didn't run. A line that doesn't start with a command is options, which may
     /// leave out the leading --, or the - of a one-letter option.
     /// </summary>
-    public static Result Run(App app, string line)
+    public static Result Run(App app, IFileSystem files, string line)
     {
         if (string.IsNullOrWhiteSpace(line))
             return Result.Success();
 
-        RootCommand commands = CreateCommands(app);
+        RootCommand commands = CreateCommands(app, files);
         string firstWord = line.Split(' ', 2)[0];
         if (line.StartsWith('-') || commands.Subcommands.Any(command => command.Name == firstWord))
             return Invoke(commands.Parse(line));
@@ -53,15 +65,18 @@ public static class Cli
 
     /// <summary>
     /// Runs the lines typed into the terminal since the last pump. Stops after a line that ends the run, so the caller
-    /// acts on it before the lines after it run.
+    /// acts on it before the lines after it run; one that ends it without exiting is kept, for the runs after it.
     /// </summary>
-    public static void Pump(App app)
+    public static void Pump(App app, IFileSystem files)
     {
         while (app.IsRunning && Terminal.Pump(out string? line))
         {
-            Result ran = Run(app, line);
+            Result ran = Run(app, files, line);
             if (!ran.Ok)
                 Log.Error($"Couldn't run '{line}': {ran.Error}");
+
+            if (!app.IsRunning && !app.IsExiting)
+                _restarts.Add(line);
         }
     }
 
@@ -69,7 +84,7 @@ public static class Cli
     /// The commands: verbs that act on <paramref name="app"/> or do a job of their own, and options that set how it
     /// runs, given before or after the verb.
     /// </summary>
-    private static RootCommand CreateCommands(App app)
+    private static RootCommand CreateCommands(App app, IFileSystem files)
     {
         RootCommand commands = new("Magic CLI.\nAllows interaction with the Magic game engine from the command line.")
         {
@@ -78,7 +93,7 @@ public static class Cli
                 new Command("open", "Opens the project at the given path and runs it, ending the run of any other")
                 {
                     Arguments = { new Argument<string>("project") { Description = "The .magic file to run" } },
-                    Action = new CliCommand(cmds => app.ProjectPath = cmds.GetRequiredValue<string>("project")),
+                    Action = new CliCommand(cmds => Open(app, files, cmds.GetRequiredValue<string>("project"))),
                 },
                 new Command("new", "Makes a project, gem or module from Magic's dotnet new templates")
                 {
@@ -147,6 +162,22 @@ public static class Cli
         commands.SetAction(_ => { });
 
         return commands;
+    }
+
+    /// <summary>
+    /// Reads the project at <paramref name="path"/> and has <paramref name="app"/> run it; one that won't read is
+    /// logged as an error, and whatever runs goes on.
+    /// </summary>
+    private static void Open(App app, IFileSystem files, string path)
+    {
+        Result<Project> project = Project.Load(path, files);
+        if (!project.Ok)
+        {
+            Log.Error(project.Error);
+            return;
+        }
+
+        app.Project = project.Value;
     }
 
     private static Result Invoke(ParseResult parsed)

@@ -1,8 +1,7 @@
 using Magic.Assets;
 using Magic.Assets.Types;
 
-namespace Magic.Host;
-
+namespace Magic.Runtime;
 
 /// <summary>
 /// The window the game draws into, which a platform gem opens on the render thread, where the OS keeps it. Its title,

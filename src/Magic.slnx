@@ -6,9 +6,8 @@
     <Project Path="Core/Debugging/Magic.Debugging.csproj" />
     <Project Path="Core/Files/Magic.Files.csproj" Id="dd604984-bd65-4521-840f-f207ddcec01d" />
     <Project Path="Core/GemAPI/Magic.GemAPI.csproj" />
-    <Project Path="Core/Host/Magic.Host.csproj" />
     <Project Path="Core/Launcher/Magic.Launcher.csproj" />
-    <Project Path="Core/Projects/Magic.Projects.csproj" />
+    <Project Path="Core/Runtime/Magic.Runtime.csproj" />
     <Project Path="Core/Serialization/Magic.Serialization.csproj" />
     <Project Path="Core/Threading/Magic.Threading.csproj" />
     <Project Path="Core/Utils/Magic.Utils.csproj" />

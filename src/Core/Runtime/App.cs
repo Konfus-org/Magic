@@ -1,4 +1,4 @@
-namespace Magic.Host;
+namespace Magic.Runtime;
 
 /// <summary>
 /// The run: which project it runs and how, and whether it goes on. Commands change it, at launch and while it runs;
@@ -7,21 +7,26 @@ namespace Magic.Host;
 public sealed class App
 {
     /// <summary>
-    /// The .magic file to run; empty until a project is given. Changing it ends the run, and the launcher runs the
-    /// new project next.
+    /// The project to run, as read from its <c>.magic</c> file; none until one is opened. Opening another ends the run,
+    /// and the launcher runs the new project next; opening the same file again changes nothing.
     /// </summary>
-    public string ProjectPath
+    public Project? Project
     {
         get;
         set
         {
-            if (value == field)
+            if (value?.Path == field?.Path)
                 return;
 
             field = value;
             IsRunning = false;
         }
-    } = "";
+    }
+
+    /// <summary>
+    /// The window the run draws into: the gem's that provides one, for as long as the run lasts; none when headless.
+    /// </summary>
+    public IWindow? Window { get; internal set; }
 
     /// <summary>
     /// Whether the run has no window. Changing it ends the run, and the launcher runs it again in the new mode.

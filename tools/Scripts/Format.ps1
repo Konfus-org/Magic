@@ -11,8 +11,9 @@ anything else is measured; the code-style fixes through dotnet format, except th
 which the build still reports; and CSharpier, which decides every line break, indent and blank line from
 .editorconfig's [*] block and is what the build checks (Directory.Build.props). CSharpier is the local dotnet tool
 .config/dotnet-tools.json pins, restored before its pass. The first two read the code as the last build left it and
-build nothing. tools/Scripts/AgentTaskComplete.ps1 runs this first, so an agent's change is formatted before it is
-validated. Runs from any current directory.
+build nothing. A fourth pass builds the solution and removes each project or package reference ReferenceTrimmer says
+nothing uses (Directory.Packages.props) from its project file. tools/Scripts/AgentTaskComplete.ps1 runs this first, so
+an agent's change is formatted before it is validated. Runs from any current directory.
 
 .PARAMETER All
 Formats every file in the repository rather than the changed ones.
@@ -69,6 +70,41 @@ $passes = @(
             if ($LASTEXITCODE -eq 0) { dotnet csharpier format @csharpierPaths }
         }
     }
+    @{
+        Name = 'References'
+        Run = {
+            # Built with every warning a warning, so each project builds and reports what it doesn't use, ReferenceTrimmer's
+            # RT0002 (a project) and RT0003 (a package); whatever else fails is the build's to report, not this pass's.
+            $found = @(
+                dotnet build $solution -tl:off -nologo -v:q -p:TreatWarningsAsErrors=false `
+                    -p:MSBuildTreatWarningsAsErrors=false 2>&1 |
+                    ForEach-Object { "$_" } |
+                    Select-String -Pattern 'RT000[23]: (ProjectReference|PackageReference) (\S+) can be removed \[(.+?\.csproj)' |
+                    ForEach-Object { $_.Matches[0] } |
+                    Sort-Object { $_.Value } -Unique
+            )
+            foreach ($match in $found) {
+                $kind = $match.Groups[1].Value
+                $reference = $match.Groups[2].Value
+                $project = $match.Groups[3].Value
+                # A project is named by its file, however its path is written ($(MagicRoot)...); a package by its id.
+                $named = if ($kind -eq 'ProjectReference') {
+                    '[^"]*[\\/]' + [regex]::Escape((Split-Path -Leaf $reference))
+                } else {
+                    [regex]::Escape($reference)
+                }
+                $element = '(?ms)^[ \t]*<' + $kind + '\s+Include="' + $named + '"[^>]*?/>[ \t]*\r?\n'
+                $text = [IO.File]::ReadAllText($project)
+                $trimmed = [regex]::Replace($text, $element, '')
+                if ($trimmed -ne $text) {
+                    [IO.File]::WriteAllText($project, $trimmed, (New-Object Text.UTF8Encoding $false))
+                    Write-Output "Removed $kind $reference from $project."
+                }
+            }
+
+            $global:LASTEXITCODE = 0
+        }
+    }
 )
 
 # The included paths are relative to the repository, as git gave them.
@@ -78,7 +114,7 @@ try {
     # since Windows PowerShell would otherwise stop on its first line.
     $ErrorActionPreference = 'Continue'
     foreach ($pass in $passes) {
-        if ($pass.Name -ne 'CSharpier' -and -not $All -and $csFiles.Count -eq 0) { continue }
+        if ($pass.Name -in 'Order', 'Style' -and -not $All -and $csFiles.Count -eq 0) { continue }
         Write-Output "==> $($pass.Name)"
         & $pass.Run 2>&1 | ForEach-Object { "$_" }
         if ($LASTEXITCODE -ne 0) {
