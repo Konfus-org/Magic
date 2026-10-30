@@ -25,12 +25,6 @@ internal static class Launcher
     /// </summary>
     private const int MaxFixedSteps = 4;
 
-    private static readonly Hook _step = static (IGem gem, in Frame frame) => gem.Step(in frame);
-
-    private static readonly Hook _fixedStep = static (IGem gem, in Frame frame) => gem.FixedStep(in frame);
-
-    private static readonly Hook _render = static (IGem gem, in Frame frame) => gem.Render(in frame);
-
     private static int Main(string[] commandLine)
     {
         GCSettings.LatencyMode = GCLatencyMode.LowLatency;
@@ -142,7 +136,7 @@ internal static class Launcher
                 SimDeltaSec = nowSec - lastSec,
             };
             lastSec = nowSec;
-            RunHook(running, frame, _step, "Step", isReversed: false);
+            RunHook(running, frame, static (gem, frame) => gem.Step(in frame), isReversed: false);
 
             // Fixed steps catch the simulation up with the frame, a step at a time, at most MaxFixedSteps of them.
             fixedOwedSec += frame.AppDeltaSec;
@@ -157,8 +151,7 @@ internal static class Launcher
                         SimSec = fixedSec,
                         SimDeltaSec = FixedStepSec,
                     },
-                    _fixedStep,
-                    "FixedStep",
+                    static (gem, frame) => gem.FixedStep(in frame),
                     isReversed: false
                 );
             }
@@ -166,7 +159,7 @@ internal static class Launcher
             if (fixedOwedSec >= FixedStepSec)
                 fixedOwedSec = 0;
 
-            RunHook(running, frame, _render, "Render", isReversed: true);
+            RunHook(running, frame, static (gem, frame) => gem.Render(in frame), isReversed: true);
 
             // Nothing sets the pace yet, so the loop sleeps until the next frame is due rather than spin. Due times
             // are fixed steps of FrameSec, so a sleep the OS rounds up to its timer's tick is made up by the next one;
@@ -184,39 +177,27 @@ internal static class Launcher
     /// Runs <paramref name="hook"/> on each of <paramref name="running"/>, last made first when
     /// <paramref name="isReversed"/>. A gem that throws is logged and taken out, and the others go on.
     /// </summary>
-    private static void RunHook(List<LoadedGem> running, in Frame frame, Hook hook, string hookName, bool isReversed)
-    {
-        // n counts the gems left to run, so taking one out never skips the next, in either order.
-        for (int n = running.Count - 1; n >= 0; n--)
-        {
-            int i = isReversed ? n : running.Count - 1 - n;
-            if (!TryRunHook(running[i], frame, hook, hookName))
-                running.RemoveAt(i);
-        }
-    }
-
-    /// <summary>
-    /// Runs <paramref name="hook"/> on <paramref name="gem"/>; whether it ran without throwing, which is logged when
-    /// it threw.
-    /// </summary>
     [SuppressMessage(
         "Design",
         "CA1031:Do not catch general exception types",
         Justification = "Whatever a gem's hook throws, it is logged and the gem leaves the loop; the others go on."
     )]
-    private static bool TryRunHook(LoadedGem gem, in Frame frame, Hook hook, string hookName)
+    private static void RunHook(List<LoadedGem> running, Frame frame, Action<IGem, Frame> hook, bool isReversed)
     {
-        try
+        // n counts the gems left to run, so taking one out never skips the next, in either order.
+        for (int n = running.Count - 1; n >= 0; n--)
         {
-            hook(gem.Gem, frame);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Log.Error($"Gem {gem.Name} threw in {hookName} and stops running: {ex}");
-            return false;
+            int i = isReversed ? n : running.Count - 1 - n;
+            try
+            {
+                hook(running[i].Gem, frame);
+            }
+            catch (Exception ex)
+            {
+                // The exception's stack names the hook it was thrown in.
+                Log.Error($"Gem {running[i].Name} threw and stops running: {ex}");
+                running.RemoveAt(i);
+            }
         }
     }
-
-    private delegate void Hook(IGem gem, in Frame frame);
 }
