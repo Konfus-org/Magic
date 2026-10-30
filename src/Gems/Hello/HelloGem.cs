@@ -15,7 +15,7 @@ namespace Hello;
 )]
 internal sealed class HelloGem : IGem
 {
-    public void Step(in Frame frame)
+    public void Tick(in Frame frame)
     {
         if (frame.Index % 60 == 0)
             Log.Info($"Hello is running, at frame {frame.Index}.");

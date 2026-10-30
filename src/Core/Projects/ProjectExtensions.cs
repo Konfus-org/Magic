@@ -116,7 +116,7 @@ public static class ProjectExtensions
                     LoadedGem gem = running[i];
                     try
                     {
-                        gem.Gem.Step(in frame);
+                        gem.Gem.Tick(in frame);
                         for (int step = 1; step <= fixedSteps; step++)
                         {
                             Frame fixedFrame = frame with
@@ -124,7 +124,7 @@ public static class ProjectExtensions
                                 SimSec = fixedSec + (step * FixedStepSec),
                                 SimDeltaSec = FixedStepSec,
                             };
-                            gem.Gem.FixedStep(in fixedFrame);
+                            gem.Gem.DeterministicTick(in fixedFrame);
                         }
 
                         gem.Gem.Render(in frame);

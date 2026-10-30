@@ -23,7 +23,11 @@ public static class GemLoader
     /// already holds what the host provides, and makes them: the gems made, in dependency order. End them in reverse by
     /// disposing each <see cref="LoadedGem"/>, which also frees the gem's assemblies.
     /// </summary>
-    public static IReadOnlyList<LoadedGem> Load(ServiceCollection services, IFileSystem files, ImmutableArray<string> gemsToLoad)
+    public static IReadOnlyList<LoadedGem> Load(
+        ServiceCollection services,
+        IFileSystem files,
+        ImmutableArray<string> gemsToLoad
+    )
     {
         if (gemsToLoad.Any())
             Log.Info($"Loading {string.Join(", ", gemsToLoad)}.");
@@ -33,7 +37,12 @@ public static class GemLoader
         List<LoadedGem> created = [];
         HashSet<Type> tried = [];
         HashSet<Type> creating = [];
-        List<GemInfo> gems = Register(services, files, gemsToLoad, (scope, gem) => CreateGem(scope, gem, created, tried, creating));
+        List<GemInfo> gems = Register(
+            services,
+            files,
+            gemsToLoad,
+            (scope, gem) => CreateGem(scope, gem, created, tried, creating)
+        );
 
         // Never disposed, since its singletons are the gems, which the caller owns; dropped when this returns, so it
         // keeps no gem from unloading.

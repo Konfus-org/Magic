@@ -15,7 +15,7 @@ namespace GemName;
 )]
 internal sealed class GemNameGem : IGem
 {
-    public void Step(in Frame frame)
+    public void Tick(in Frame frame)
     {
         if (frame.Index % 60 == 0)
             Log.Info($"GemName is running, at frame {frame.Index}.");
