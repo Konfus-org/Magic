@@ -1,6 +1,6 @@
 # Magic
 
-Magic is a plugin-driven game engine written in C#. It is being rewritten by hand; [the plan](docs/PLAN.md) says
+Magic is a plugin-driven game engine written in C#. It is being actively developed, [the plan](docs/PLAN.md) says
 where it is going. Today it is the `Magic` program, its log and asserts, and the build rules.
 
 ## Requirements
@@ -31,8 +31,9 @@ know, such as `-o <folder>`. Install Magic's templates first with `tools/VS Temp
 ## Folders
 
 ```
+src/             all source code for the engine goes in here
 src/Core/        the engine: the Magic program and everything it is built from
-src/Gems/        the gems that come with Magic, each built to Gems/<Name>/ beside it
+src/Gems/        the plugins that come with Magic, each built to Gems/<Name>/ beside it
 samples/         the sample projects, which show and test Magic
 tools/           the scripts and the analyzers; nothing here ships
 docs/            the plan, how to contribute and the code standards

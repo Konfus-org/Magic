@@ -1,11 +1,8 @@
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime;
 using Magic.CommandLine;
 using Magic.Debugging;
-using Magic.Files;
 using Magic.GemAPI;
-using Magic.Host;
+using Magic.Projects;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,18 +10,6 @@ namespace Magic.Launcher;
 
 internal static class Launcher
 {
-    /// <summary>
-    /// How far apart frames are due while nothing else sets the pace: 60 a second, on average.
-    /// </summary>
-    private const double FrameSec = 1.0 / 60;
-
-    private const double FixedStepSec = 1.0 / 60;
-
-    /// <summary>
-    /// The most fixed steps a frame runs; time owed past them is dropped, so a slow frame doesn't make the next slower.
-    /// </summary>
-    private const int MaxFixedSteps = 4;
-
     private static int Main(string[] commandLine)
     {
         GCSettings.LatencyMode = GCLatencyMode.LowLatency;
@@ -45,9 +30,15 @@ internal static class Launcher
     /// </summary>
     private static int Run(string[] commandLine)
     {
-        App app = new();
-        Result cmdLineRunResults = Cli.Run(app, commandLine);
         Log.Verbose($"Command line args: {string.Join(", ", commandLine)}");
+
+        var services = new ServiceCollection();
+        var coreServices = services.RegisterMagicServices();
+        var app = coreServices.App;
+        var fileSystem = coreServices.FileSystem;
+
+        // Run initial cmds given on startup
+        Result cmdLineRunResults = Cli.Run(app, commandLine);
         if (!cmdLineRunResults.Ok)
         {
             Log.Critical($"Couldn't run the command line: {cmdLineRunResults.Error}");
@@ -57,8 +48,6 @@ internal static class Launcher
         // A job, like new or --version, is done once it ran, and failed if it logged an error.
         if (app.IsExiting)
             return Log.ErrorCount == 0 ? 0 : 1;
-
-        IFileSystem fileSystem = new FileSystem();
 
         // One pass per run: a command asking for another project or mode ends the run, and the next pass runs that.
         while (!app.IsExiting)
@@ -70,19 +59,9 @@ internal static class Launcher
                 return 1;
             }
 
-            if (project.Value.Gems.Length > 0)
-                Log.Info($"Loading {string.Join(", ", project.Value.Gems)}.");
-
-            IReadOnlyList<LoadedGem> gems = GemLoader.Load(new ServiceCollection(), fileSystem, project.Value);
-            Result ended = RunProject(app, project.Value, gems);
-            Log.Info($"Closing {project.Value.Name} and {(app.IsExiting ? "exiting" : "restarting")}.");
-
-            // Last made, first ended, so no gem outlives one it was made after.
-            for (int i = gems.Count - 1; i >= 0; i--)
-            {
-                Log.Info($"Unloading {gems[i].Name}.");
-                gems[i].Dispose();
-            }
+            IReadOnlyList<LoadedGem> gems = GemLoader.Load(services, fileSystem, project.Value.Gems);
+            Result ended = project.Value.Run(app, gems);
+            GemLoader.Unload(gems);
 
             if (!ended.Ok)
             {
@@ -92,102 +71,5 @@ internal static class Launcher
         }
 
         return 0;
-    }
-
-    /// <summary>
-    /// Runs one project's frames until the commands ask to exit or for another project or mode, taking any lines typed
-    /// into the terminal between frames. Fails at the first error under --fail-on-error.
-    /// </summary>
-    [SuppressMessage(
-        "Design",
-        "CA1031:Do not catch general exception types",
-        Justification = "Whatever a gem throws, it is logged and the gem leaves the loop; the others go on."
-    )]
-    private static Result RunProject(App app, Project project, IReadOnlyList<LoadedGem> gems)
-    {
-        Log.Info($"Running {project.Name} in {(app.IsHeadless ? "headless" : "GUI")} mode.");
-        app.Start();
-
-        // TODO(KONFUS): pump the GUI like the terminal; until there is one, a run with a window exits at once.
-        if (!app.IsHeadless)
-        {
-            app.Exit();
-            return Result.Success();
-        }
-
-        // The gems still running: one that throws leaves.
-        List<LoadedGem> running = [.. gems];
-        Stopwatch clock = Stopwatch.StartNew();
-        double lastSec = 0;
-        double fixedSec = 0;
-        double fixedOwedSec = 0;
-        double nextFrameSec = 0;
-        for (uint index = 0; ; index++)
-        {
-            Cli.Pump(app);
-
-            if (app.ShouldExitOnError && Log.ErrorCount > 0)
-                return Result.Failure($"Exiting with code 2 due to logged errors. Error count: {Log.ErrorCount}");
-
-            if (!app.IsRunning)
-                return Result.Success();
-
-            double nowSec = clock.Elapsed.TotalSeconds;
-            Frame frame = new()
-            {
-                Index = index,
-                AppSec = nowSec,
-                AppDeltaSec = nowSec - lastSec,
-                SimSec = nowSec,
-                SimDeltaSec = nowSec - lastSec,
-            };
-            lastSec = nowSec;
-
-            // Fixed steps catch the simulation up with the frame, a step at a time, at most MaxFixedSteps of them.
-            fixedOwedSec += frame.AppDeltaSec;
-            int fixedSteps = Math.Min((int)(fixedOwedSec / FixedStepSec), MaxFixedSteps);
-            fixedOwedSec -= fixedSteps * FixedStepSec;
-            if (fixedOwedSec >= FixedStepSec)
-                fixedOwedSec = 0;
-
-            // Each gem in the order made runs its whole frame; one that throws is logged and leaves.
-            for (int i = 0; i < running.Count; i++)
-            {
-                LoadedGem gem = running[i];
-                try
-                {
-                    gem.Gem.Step(in frame);
-                    for (int step = 1; step <= fixedSteps; step++)
-                    {
-                        Frame fixedFrame = frame with
-                        {
-                            SimSec = fixedSec + (step * FixedStepSec),
-                            SimDeltaSec = FixedStepSec,
-                        };
-                        gem.Gem.FixedStep(in fixedFrame);
-                    }
-
-                    gem.Gem.Render(in frame);
-                }
-                catch (Exception ex)
-                {
-                    Log.Error($"Gem {gem.Name} threw and stops running: {ex}");
-                    running.RemoveAt(i);
-                    i--;
-                }
-            }
-
-            fixedSec += fixedSteps * FixedStepSec;
-
-            // Nothing sets the pace yet, so the loop sleeps until the next frame is due rather than spin. Due times
-            // are fixed steps of FrameSec, so a sleep the OS rounds up to its timer's tick is made up by the next one;
-            // a frame late by more than a frame starts the count again rather than run frames back to back.
-            nextFrameSec += FrameSec;
-            double leftSec = nextFrameSec - clock.Elapsed.TotalSeconds;
-            if (leftSec > 0)
-                Thread.Sleep(TimeSpan.FromSeconds(leftSec));
-            else if (leftSec < -FrameSec)
-                nextFrameSec = clock.Elapsed.TotalSeconds;
-        }
     }
 }

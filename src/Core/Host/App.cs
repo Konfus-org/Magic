@@ -45,6 +45,12 @@ public sealed class App
     public bool ShouldExitOnError { get; set; }
 
     /// <summary>
+    /// Pauses the application, simulation systems will not be run until this is set back to true.
+    /// Should not be used for a gameplay pause.
+    /// </summary>
+    public bool IsPaused { get; set; }
+
+    /// <summary>
     /// Whether the current run goes on: <see cref="Start"/> begins it; <see cref="Exit"/>, or a new project or mode,
     /// ends it.
     /// </summary>

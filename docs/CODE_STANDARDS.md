@@ -10,8 +10,7 @@ Write the engine as data flowing through functions, not objects calling each oth
 
 - **Pipelines, not webs.** Data moves A → B → C. Each step takes values and returns values, and the whole flow reads
   top to bottom in one place. No events firing into handlers that fire more events.
-- **Stateless by default.** A function takes what it needs and returns a result. State lives in [four places](#state);
-  everything else lasts one call or one frame.
+- **Stateless by default.** A function takes what it needs and returns a result.
 - **Functions over objects.** Records, plain data and static functions. No class hierarchies, virtual methods or
   objects that guard their own fields.
 - **Async for anything slow.** Work that can take longer than a frame is an `Async` method with progress and
@@ -20,12 +19,6 @@ Write the engine as data flowing through functions, not objects calling each oth
   happens, flatten it.
 - **Small.** Make the smallest change that works. No abstraction before a second real use, and no guessing at edge
   cases.
-
-```text
-FrameInput ──▶ gem A ──▶ gem B ──▶ gem C ──▶ FrameOutput ──▶ render thread
-                 ▲▼         ▲▼         ▲▼
-              state A    state B    state C      kept by Core, handed back each frame
-```
 
 ## Ground rules
 
@@ -39,36 +32,13 @@ FrameInput ──▶ gem A ──▶ gem B ──▶ gem C ──▶ FrameOutput
 - Managed dependencies come from NuGet. A package with a known vulnerability, direct or transitive, fails the restore.
 - Native libraries are built from source or downloaded as their author publishes them
   ([Native libraries](../src/Gems/README.md#native-libraries)). No third-party wrapper, package, binary or
-  copied code. Hand-write a binding only where the generator can't, and say so in the gem's README. Vulkan is the
-  exception: its API comes from the Vortice.Vulkan package over the system's Vulkan loader.
+  copied code. Hand-write a binding only where the generator can't, and say so in the gem's README.
 - No keys, tokens or passwords in code, configuration or workflows. CI reads its own from the repository's secrets.
 - Everything runs on every platform Magic targets ([Cross platform](#cross-platform)).
 
-## State
-
-State lives in four places:
-
-1. The ECS's components, written through queries in `Step` and `FixedStep`. A gem never caches them.
-2. A gem's state records, one per thread. Core keeps them and hands them back each call, and the gem returns the next
-   one.
-3. Core's snapshots of assets and settings, read from `FrameInput`.
-4. Caches on disk, keyed by what made them.
-
-Nothing else holds a field that changes between frames. The log is the one static. Scripts keep their own fields; they
-are the one exception.
-
-- A state record holds immutable collections (`ImmutableArray`, `FrozenDictionary`) and changes through `with`. No
-  `List<T>` or other mutable collection inside one.
-- Anything with stages (loading, streaming, opening a domain) is a pure `Step(state, inputs)` that returns the next
-  state and the actions to run, plus a thin shell that runs the actions and feeds their results back next frame.
-- Public and internal data are `PascalCase` properties: `{ get; init; }` for a value set once, `=>` for one derived
-  from other data. Interop structs, GPU structs and ECS components keep public fields.
-- A private field is `_camelCase` and holds only what the constructor was handed, or what a shell needs to run (a
-  channel, a native handle).
-
 ## Gems and the frame
 
-- A gem is an `internal sealed` class implementing `IGem<TState, TRenderState>` and the Core interfaces it provides.
+- A gem is an `internal sealed` class implementing `IGem` and the Core interfaces it provides.
 - Its constructor takes everything it depends on, settings included. Nothing asks a container for a service later;
   only code that builds objects from constructors takes `IServiceProvider`.
 - `Step` and `FixedStep` run on the main thread: the state and `FrameInput` go in, the next state and a `GemOutput`

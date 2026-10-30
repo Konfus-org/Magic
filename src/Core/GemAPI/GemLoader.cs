@@ -1,10 +1,11 @@
+using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using Magic.Debugging;
 using Magic.Files;
-using Magic.Host;
 using Magic.Utils;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,26 +14,30 @@ namespace Magic.GemAPI;
 /// <summary>
 /// Loads the gems a project lists and makes them, each after the gems its constructor asks for. A gem that can't be
 /// loaded or made is logged, and the others go on without it.
+/// Also provides an API to unload gems.
 /// </summary>
 public static class GemLoader
 {
     /// <summary>
-    /// Loads the gems <paramref name="project"/> lists, registers each with <paramref name="services"/>, which already
-    /// holds what the host provides, and makes them: the gems made, in dependency order. End them in reverse by
+    /// Loads the <paramref name="gemsToLoad"/>, registers each with <paramref name="services"/>, which
+    /// already holds what the host provides, and makes them: the gems made, in dependency order. End them in reverse by
     /// disposing each <see cref="LoadedGem"/>, which also frees the gem's assemblies.
     /// </summary>
-    public static IReadOnlyList<LoadedGem> Load(ServiceCollection services, IFileSystem files, Project project)
+    public static IReadOnlyList<LoadedGem> Load(ServiceCollection services, IFileSystem files, ImmutableArray<string> gemsToLoad)
     {
+        if (gemsToLoad.Any())
+            Log.Info($"Loading {string.Join(", ", gemsToLoad)}.");
+
         // The gems made, in the order their constructors finished, which is dependency order; those tried, so a failed
         // one isn't made twice; and those being made, so one asked for again is a cycle, on which the provider hangs.
         List<LoadedGem> created = [];
         HashSet<Type> tried = [];
         HashSet<Type> creating = [];
-        List<GemInfo> gems = Register(services, files, project, Create);
+        List<GemInfo> gems = Register(services, files, gemsToLoad, (scope, gem) => CreateGem(scope, gem, created, tried, creating));
 
         // Never disposed, since its singletons are the gems, which the caller owns; dropped when this returns, so it
         // keeps no gem from unloading.
-        ServiceProvider provider = services.BuildServiceProvider();
+        IServiceProvider provider = services.BuildServiceProvider();
         foreach (GemInfo gem in gems)
         {
             try
@@ -46,8 +51,16 @@ public static class GemLoader
         }
 
         return created;
+    }
 
-        IGem Create(IServiceProvider scope, GemInfo gem) => CreateGem(scope, gem, created, tried, creating);
+    public static void Unload(IReadOnlyList<LoadedGem> gems)
+    {
+        // Last made, first ended, so no gem outlives one it was made after.
+        for (int i = gems.Count - 1; i >= 0; i--)
+        {
+            Log.Info($"Unloading {gems[i].Name}.");
+            gems[i].Dispose();
+        }
     }
 
     /// <summary>
@@ -202,20 +215,20 @@ public static class GemLoader
     }
 
     /// <summary>
-    /// Loads the gems <paramref name="project"/> lists and registers each with <paramref name="services"/> as its class
+    /// Loads the gems and registers each with <paramref name="services"/> as its class
     /// and every interface it provides, made by <paramref name="create"/>. A name listed twice, the wrong version, or
     /// an interface already provided is refused.
     /// </summary>
     private static List<GemInfo> Register(
         ServiceCollection services,
         IFileSystem files,
-        Project project,
+        ImmutableArray<string> gems,
         Func<IServiceProvider, GemInfo, IGem> create
     )
     {
         List<GemInfo> registered = [];
         HashSet<string> listed = new(StringComparer.OrdinalIgnoreCase);
-        foreach (string listing in project.Gems)
+        foreach (string listing in gems)
         {
             // A gem is listed by its name, then @ and the version it must be where that matters.
             int at = listing.IndexOf('@', StringComparison.Ordinal);
@@ -223,7 +236,7 @@ public static class GemLoader
             string wanted = at < 0 ? string.Empty : listing[(at + 1)..];
             if (!listed.Add(name))
             {
-                Log.Error($"Gem {name} is listed twice in {project.Name}; it is made once.");
+                Log.Error($"Gem {name} is listed twice; it is made once.");
                 continue;
             }
 
