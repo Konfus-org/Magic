@@ -3,6 +3,8 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>Magic</AssemblyName>
+    <!-- Magic's version; CI adds the run's number as the patch. -->
+    <VersionPrefix>0.1</VersionPrefix>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CommandLine/Magic.CommandLine.csproj" />
